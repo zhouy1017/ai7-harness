@@ -12,7 +12,7 @@ import { HouseReviewPreferenceLedger } from '../../src/service/house-review-pref
 import { HOUSE_PREFERENCE_CLOSED, HOUSE_PREFERENCE_NOT_RULE } from '../../src/service/task-plan.js';
 import { editCategoryWeight, graphemeEditVolume } from '../../src/service/edit-quality-signals.js';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -84,6 +84,7 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 // states and identities; manuscript text is compared, never printed.
 
 const FIXTURES_ROOT = resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url)));
+const INVALID_ENVELOPE = '{invalid';
 const J04_EDIT_SUFFIX = '，J-04 结果集形成后的确认编辑';
 const WHOLE: ReviewRunScopeRequest = { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null };
 const CHANGED: ReviewRunScopeRequest = { kind: 'changed', fromChapterBlockId: null, toChapterBlockId: null };
@@ -154,14 +155,13 @@ async function importBook(session: Session): Promise<Book> {
   return { bookId: imported.bookId, manuscriptId: imported.manuscriptId, branchId: imported.branchId };
 }
 
-async function withBook(fixtureIdentity: string, body: (session: Session, book: Book) => Promise<void>): Promise<void> {
+async function withSession(fixtureIdentity: string, body: (session: Session) => Promise<void>): Promise<void> {
   const session = await open(fixtureIdentity);
-  try {
-    const book = await importBook(session);
-    await body(session, book);
-  } finally {
-    await close(session);
-  }
+  try { await body(session); } finally { await close(session); }
+}
+
+async function withBook(fixtureIdentity: string, body: (session: Session, book: Book) => Promise<void>): Promise<void> {
+  await withSession(fixtureIdentity, async (session) => { await body(session, await importBook(session)); });
 }
 
 /** Dynamic retry stimuli are ordinary transport bytes, never mutations under an admitted fixture hash. */
@@ -227,25 +227,15 @@ function workspace(session: Session, book: Book, reviewRunId: string | null = nu
   return session.store.inspectReviewWorkspace(book.bookId, reviewRunId);
 }
 
-function storeCode(operation: () => unknown): string {
-  try {
-    operation();
-  } catch (error) {
-    if (error instanceof StoreError) return error.code;
+function storeError(operation: () => unknown): StoreError | null {
+  try { operation(); return null; } catch (error) {
+    if (error instanceof StoreError) return error;
     throw error;
   }
-  return 'no-error';
 }
 
-function storeMessage(operation: () => unknown): string {
-  try {
-    operation();
-  } catch (error) {
-    if (error instanceof StoreError) return error.message;
-    throw error;
-  }
-  return '';
-}
+function storeCode(operation: () => unknown): string { return storeError(operation)?.code ?? 'no-error'; }
+function storeMessage(operation: () => unknown): string { return storeError(operation)?.message ?? ''; }
 
 function binding(session: Session, book: Book): { manuscriptId: string; branchId: string; windowStartBlockId: string } {
   return { manuscriptId: book.manuscriptId, branchId: book.branchId, windowStartBlockId: session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks[0]!.blockId };
@@ -274,14 +264,12 @@ function chapterScope(session: Session, book: Book, position: number): ReviewRun
 }
 
 function appendToFirstBlock(session: Session, book: Book): void {
-  const window = session.store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
-  const block = window.blocks[0]!;
-  const graphemes = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((entry) => entry.blockId === block.blockId)!.graphemes;
-  session.store.flushJournalEdit({
-    clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
-    windowStartBlockId: block.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
-    fromGrapheme: graphemes, toGrapheme: graphemes, insertText: J04_EDIT_SUFFIX,
-  });
+  appendToBlockAt(session, book, 1, J04_EDIT_SUFFIX);
+}
+
+function withDatabase<T>(body: (db: DatabaseSync) => T): T {
+  const db = database();
+  try { return body(db); } finally { db.close(); }
 }
 
 function database(): DatabaseSync {
@@ -293,12 +281,9 @@ function database(): DatabaseSync {
  * re-enrolled, which every frozen plan names. Written beside the open store, as a re-enrolment would be.
  */
 function reenrollCredential(): void {
-  const db = database();
-  try {
+  withDatabase((db) => {
     expect(db.prepare("UPDATE model_service_connections SET credential_reference = ? WHERE connection_id = 'main-editorial-deepseek-v4-pro'").run(randomUUID()).changes).toBe(1);
-  } finally {
-    db.close();
-  }
+  });
 }
 
 /** The one owner, refusing its first hand-off as a launch without a route would. */
@@ -415,14 +400,274 @@ class PlacesTakenOwner implements ReviewRunExecutionOwner {
 }
 
 function eventTrail(reviewRunId: string): Array<[string, string]> {
-  const db = database();
-  try {
+  return withDatabase((db) => {
     return (db.prepare('SELECT category_id, state FROM review_run_category_events WHERE review_run_id = ? ORDER BY rowid').all(reviewRunId) as Array<{ category_id: string; state: string }>)
       .map((row) => [row.category_id, row.state]);
+  });
+}
+
+/** Common arrangement; assertions stay at the public behavior each test names. */
+async function withReviewedBook(categoryIds: ReadonlyArray<string>, body: (session: Session, book: Book, run: ReviewRunProjection) => Promise<void>): Promise<void> {
+  await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+    const run = await authorizeAndDrive(session, book, prepare(session, book, categoryIds, WHOLE));
+    await body(session, book, run);
+  });
+}
+
+async function withBaselineBook(body: (session: Session, book: Book) => Promise<void>): Promise<void> {
+  await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+    await runBaseline(session, book);
+    await body(session, book);
+  });
+}
+
+function selectionAt(session: Session, book: Book, from: number, to = from): ReviewRunScopeRequest {
+  const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+  return {
+    kind: 'selection', fromChapterBlockId: blocks.find((block) => block.position === from)!.blockId,
+    toChapterBlockId: blocks.find((block) => block.position === to)!.blockId
+  };
+}
+
+function reviewMarkCount(session: Session, book: Book): number {
+  const ids = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const window = session.store.getManuscriptWindow(book.manuscriptId, book.branchId, cursor);
+    expect(window.marksTruncated).toBe(false);
+    for (const mark of window.marks) if (session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, mark.markId).source.origin === 'review-category') ids.add(mark.markId);
+    cursor = window.nextCursor;
+  } while (cursor !== null);
+  return ids.size;
+}
+
+function reviewCard(session: Session, book: Book, reviewRunId: string) {
+  return session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
+    .find((entry) => entry.item.itemId === `review:${reviewRunId}`);
+}
+
+function selectionContext(session: Session, book: Book) {
+  const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+  const at = (position: number) => blocks.find((block) => block.position === position)!;
+  const on = (from: string, to: string): ReviewRunScopeRequest => ({ kind: 'selection', fromChapterBlockId: from, toChapterBlockId: to });
+  return { at, on };
+}
+
+/** Only coverage of the genuine revision-84 review-contract widening; the database suites start elsewhere. */
+function revision84ReviewStore(): Array<{ table: string; rows: unknown[] }> {
+  const before: Array<{ table: string; rows: unknown[] }> = [];
+  return withDatabase((db) => {
+    constructPre94PolicyEncoding(db);
+    execPre74Fixture(db, 'PRAGMA user_version = 95');
+    db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
+    for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
+      const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
+      const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
+      before.push({ table, rows: db.prepare(`SELECT canonical_json, sha256 FROM ${table} ORDER BY rowid`).all() });
+      db.exec(`CREATE TEMP TABLE old_review_rows AS SELECT * FROM ${table}; DROP TABLE ${table};`);
+      db.exec(sql.replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
+        .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
+        .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'"));
+      db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
+      for (const trigger of triggers) db.exec(String(trigger.sql));
+    }
+    execPre74Fixture(db, 'DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
+    return before;
+  });
+}
+
+/** The editor's mark actions used to arrange report versioning. */
+function handleReviewFindings(session: Session, book: Book, run: ReviewRunProjection) {
+  const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
+  const [applied, ignored] = run.findings.filter((finding) => finding.categoryId === TYPOS && finding.severity !== 'must');
+  session.store.updateEditorialMark({
+    ...binding(session, book), markId: annotation!.markId!, action: 'set-status', body: null,
+    highlightColor: null, status: 'resolved', targetKind: null, proposedText: null, rationale: null
+  });
+  session.store.applyChangeSuggestion({ ...binding(session, book), markId: applied!.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
+  return { annotation: annotation!, anotherAnnotation: anotherAnnotation!, applied: applied!, ignored: ignored! };
+}
+
+/** Place the named paragraphs beside the open store to exercise prepared-selection drift. */
+function standBlocks(session: Session, book: Book, moves: ReadonlyArray<readonly [number, number]>): void {
+  const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
+  withDatabase((db) => {
+    db.exec('PRAGMA foreign_keys = OFF');
+    const move = db.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
+    for (const [read] of moves) move.run(100000 + read, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+    for (const [read, now] of moves) move.run(now, book.branchId, blocks.find((block) => block.position === read)!.blockId);
+  });
+}
+
+async function stopBetweenCategories(): Promise<{ book: Book; reviewRunId: string }> {
+  let gated = null as GatedOwner | null;
+  const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
+  let book: Book;
+  let reviewRunId: string;
+  try {
+    book = await importBook(first);
+    const prepared = prepare(first, book, [TYPOS, STYLE], WHOLE);
+    reviewRunId = prepared.reviewRunId;
+    first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
+    const loop = first.driver.drive(reviewRunId);
+    // Driven: the Run reads running while the loop holds it, and no second Run of the Book can be prepared.
+    expect(workspace(first, book, reviewRunId).run!.state).toBe('running');
+    expect(workspace(first, book).newReview.available).toBe(false);
+    expect(storeCode(() => first.store.createReviewRunPreparationWork(book.bookId, [LITERARY], WHOLE, launchPolicy))).toBe('REVIEW_RUN_ACTIVE');
+    // The first category is on the manuscript; the service stops before the second starts.
+    await gated!.reached;
+    const stopped = first.driver.dispose();
+    gated!.release();
+    await stopped;
+    await loop;
+    const stoppedRun = workspace(first, book, reviewRunId).run!;
+    expect(stoppedRun.categories.map((category) => category.state)).toEqual(['settled', 'waiting']);
   } finally {
-    db.close();
+    await close(first);
+  }
+
+  return { book: book!, reviewRunId: reviewRunId! };
+}
+
+async function plantStoppedCategory(book: Book | undefined, planted: 'authorized' | 'admitted' | 'executing') {
+  const first = await open('sample1-review-cross-chapter-authored');
+  try {
+    book ??= await importBook(first);
+    const prepared = prepare(first, book, [TYPOS], WHOLE);
+    const reviewRunId = prepared.reviewRunId;
+    first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
+    const steps = first.store.reviewRunDriveSteps;
+    const handOff = steps.start(reviewRunId, TYPOS)!;
+    const runRecordId = handOff.runRecordId;
+    if (planted !== 'authorized') {
+      handOff.ledger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+      steps.recordDispatch(reviewRunId, TYPOS, runRecordId);
+    }
+    if (planted === 'executing') handOff.ledger.recordRunState(runRecordId, 'executing', { detail: '正在执行。' });
+    return { book, reviewRunId, runRecordId };
+  } finally { await close(first); }
+}
+
+function addPagingFindings(run: ReviewRunProjection): number {
+  const made = run.findings.length;
+  expect(made).toBeGreaterThan(0);
+  const clauseId = run.findings.find((finding) => finding.categoryId === TYPOS && finding.clauseRefs.length > 0)?.clauseRefs[0]?.clauseId ?? null;
+  // Beside the findings the Run made, many more written as a materialization writes its rows: light
+  // ones, so the count bounds a page, and ones as heavy as the contract lets a finding be — a whole
+  // quotation, note and replacement and a cited clause — so the weight does. None became a mark.
+  const light = 700;
+  const heavy = 200;
+  withDatabase((db) => {
+    const insert = db.prepare(
+      `INSERT INTO review_findings(review_run_id, finding_id, category_id, ordinal, kind_ref, severity, output, risk_point, block_id,
+             from_grapheme, to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 1, ?, ?, ?, ?, NULL, NULL, 'anchor-changed', '{}', ?)`,
+    );
+    for (let index = 0; index < light + heavy; index += 1) {
+      const ordinal = made + index + 1;
+      const weighty = index >= light;
+      const suggestion = index % 3 !== 0;
+      insert.run(
+        run.reviewRunId, `rvf_${ordinal.toString(16).padStart(24, '0')}`, suggestion ? TYPOS : STYLE, ordinal,
+        `rfd_${ordinal.toString(16).padStart(24, '0')}`, (['must', 'should', 'note'] as const)[index % 3]!, suggestion ? 'change-suggestion' : 'annotation',
+        run.findings[0]!.blockId, weighty ? '审'.repeat(80) : '审阅页', weighty ? '说'.repeat(200) : '说明',
+        suggestion ? (weighty ? '改'.repeat(200) : '改') : null, suggestion && weighty ? clauseId : null, 'f'.repeat(64),
+      );
+    }
+  });
+  const total = made + light + heavy;
+
+  return total;
+}
+
+function findingPages(session: Session, book: Book, run: ReviewRunProjection, total: number, filters: Partial<ReviewFindingPageRequest>): ReviewWorkspaceProjection[] {
+  const answers: ReviewWorkspaceProjection[] = [];
+  let after: number | null = null;
+  for (; ;) {
+    const answer = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined, {
+      findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null, ...filters,
+    });
+    answers.push(answer);
+    expect(wireBytes(answer)).toBeLessThan(MAX_FRAME_BYTES);
+    const opened = answer.run!;
+    expect(opened.findings.length).toBeLessThanOrEqual(MAX_REVIEW_FINDINGS_PER_PAGE);
+    // Every page counts every finding, whatever the filters (FIND-003: a filter is a view).
+    expect(opened.findingCounts.pending + opened.findingCounts.handled + opened.findingCounts.ignored).toBe(total);
+    if (!opened.findingsTruncated) return answers;
+    expect(opened.findings.length).toBeGreaterThan(0);
+    after = opened.findings.at(-1)!.ordinal;
   }
 }
+
+type Report = NonNullable<ReviewRunProjection['report']>;
+async function withReportBook(body: (session: Session, book: Book, run: ReviewRunProjection, report: Report, outbox: string) => Promise<void>): Promise<void> {
+  await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+    const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
+    const outbox = join(roots.inputRoot, 'exports');
+    await mkdir(outbox);
+    await body(session, book, run, report, outbox);
+  });
+}
+
+async function exportReport(session: Session, book: Book, report: Report, outbox: string, format: 'docx' | 'pdf' | 'markdown', fileName: string): Promise<Buffer> {
+  const target = { kind: 'report' as const, reportId: report.reportId };
+  const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
+  const reviewed = await session.store.reviewManuscriptExport({ bookId: book.bookId, target, options, format }, true);
+  const destination = join(outbox, fileName);
+  const preparation = await session.store.prepareManuscriptExport({
+    bookId: book.bookId, revisionId: reviewed.target.revisionId, target, options, reviewDigest: reviewed.reviewDigest, destination, format,
+  }, true);
+  expect(preparation.target.report?.reportId).toBe(report.reportId);
+  const staged = await session.store.stageManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+  if (format === 'pdf') {
+    const page = await readFile(staged.print!.pagePath, 'utf8');
+    expect(page).toContain('<thead><tr><th scope="col">类别</th><th scope="col">状态</th><th scope="col">发现</th></tr></thead>');
+    await writeFile(staged.print!.pdfPath, '%PDF-1.7\n% AI7 service suite stand-in\n%%EOF\n');
+  } else {
+    expect(staged.print).toBeNull();
+  }
+  const receipt = await session.store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
+  expect(receipt).toMatchObject({ format, outcome: 'created', target: { kind: 'report', report: { version: 1 } } });
+  return readFile(destination);
+}
+
+async function arrangePreferenceJudgments(session: Session, book: Book): Promise<void> {
+  session.store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] });
+  const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, LITERARY], WHOLE));
+  const marked = run.findings.filter((entry) => entry.categoryId === TYPOS && entry.markId !== null && entry.output === 'change-suggestion');
+  // Three distinct 修改建议, each still open.
+  const [kept, excluded, rejected] = marked.filter((entry, index) => marked.findIndex((other) => other.markId === entry.markId) === index && entry.status === 'pending');
+  expect(kept && excluded && rejected).toBeTruthy();
+  // 修改后接受 is weighted by its category (文学性与表达 3): the grapheme distance from what was proposed, and no more.
+  const literary = run.findings.find((entry) => entry.categoryId === LITERARY && entry.markId !== null && entry.output === 'change-suggestion' &&
+    entry.status === 'pending' && ![kept, excluded, rejected].some((other) => other!.blockId === entry.blockId))!;
+  session.store.applyChangeSuggestion({ ...binding(session, book), markId: literary.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔文学改写〕', reason: null });
+  expect(editCategoryWeight(LITERARY)).toBe(3);
+  expect(session.store.inspectEditQualitySignals(book.bookId).categories.find((entry) => entry.categoryId === LITERARY))
+    .toMatchObject({ applied: 1, surviving: 1, editVolume: 3 * graphemeEditVolume(literary.replacement!, '〔文学改写〕') });
+  // 修改后接受 with a reason applies the editor's own words: each is Learning Material with an Apply target of its own.
+  session.store.applyChangeSuggestion({ ...binding(session, book), markId: kept!.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔编辑改写〕', reason: '周一与王四认为按规范改' });
+  session.store.applyChangeSuggestion({ ...binding(session, book), markId: excluded!.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔排除改写〕', reason: '排除的理由' });
+  session.store.recordChangeSuggestionDecision({ ...binding(session, book), markId: rejected!.markId!, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '郑三说不必改' });
+  // The admitted decision's own applied text is written over; the excluded one's stands.
+  const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, kept!.markId!);
+  const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: card.blockId });
+  const block = window.blocks.find((entry) => entry.blockId === card.blockId)!;
+  session.store.flushJournalEdit({
+    clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
+    windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
+    fromGrapheme: card.fromGrapheme, toGrapheme: card.toGrapheme, insertText: '〔再改〕'
+  });
+  const materials = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials;
+  const decide = (reason: string, choice: 'house' | 'excluded') => {
+    const material = materials.find((entry) => entry.kind === 'proposal-decision' && entry.excerpt.some((line) => line.includes(reason)))!;
+    session.store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice, note: null });
+  };
+  decide('周一与王四认为按规范改', 'house');
+  decide('排除的理由', 'excluded');
+  decide('郑三说不必改', 'house');
+}
+
 describe('a Review Run over the real store on exact sample1', () => {
   it('marks the edited first paragraph in J-16 through its current authored review fixture', async () => {
     await withBook('sample1-agent-workspace-cross-chapter', async (session, book) => {
@@ -467,39 +712,25 @@ describe('a Review Run over the real store on exact sample1', () => {
     } finally { await close(current); }
   }, 300_000);
 
-  it('widens a v1 revision-84 store without changing a recorded byte and refuses a terminal store missing excluded rows (#1084)', async () => {
-    let session = await open('review-overlap-authored');
-    const book = await importBook(session);
-    await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-    await close(session);
-    const before: Array<{ table: string; rows: unknown[] }> = [];
-    const db = database();
+  it('widens a v1 revision-84 store without changing its recorded bytes (#1084)', async () => {
+    const legacy = await open('review-overlap-authored');
+    const book = await importBook(legacy);
+    try { await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE)); }
+    finally { await close(legacy); }
+    const before = revision84ReviewStore();
+    const session = await open('review-overlap-authored');
     try {
-      constructPre94PolicyEncoding(db);
-      execPre74Fixture(db, 'PRAGMA user_version = 95');
-      db.exec('PRAGMA foreign_keys = OFF; BEGIN IMMEDIATE');
-      for (const table of ['analysis_task_intents', 'analysis_result_set_revisions', 'analysis_plan_adaptations']) {
-        const sql = String(db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table)!.sql);
-        const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
-        before.push({ table, rows: db.prepare(`SELECT canonical_json, sha256 FROM ${table} ORDER BY rowid`).all() });
-        db.exec(`CREATE TEMP TABLE old_review_rows AS SELECT * FROM ${table}; DROP TABLE ${table};`);
-        db.exec(sql.replaceAll("'ai7.editorial-review/1', 'ai7.editorial-review/2'", "'ai7.editorial-review/1'")
-          .replaceAll("contract_version IN ('ai7.editorial-review/1')", "contract_version = 'ai7.editorial-review/1'")
-          .replace("adaptation_class IN ('safe-retry', 'contract-retry')", "adaptation_class = 'safe-retry'"));
-        db.exec(`INSERT INTO ${table} SELECT * FROM temp.old_review_rows; DROP TABLE temp.old_review_rows;`);
-        for (const trigger of triggers) db.exec(String(trigger.sql));
-      }
-      execPre74Fixture(db, 'DROP TABLE review_excluded_findings; PRAGMA user_version = 84; COMMIT');
-    } finally { db.close(); }
-    session = await open('review-overlap-authored');
-    try {
-      const after = database();
-      try {
-        expect(after.prepare('PRAGMA user_version').get()!.user_version).toBe(102);
+      expect(workspace(session, book).runs[0]!.state).toBe('settled');
+      withDatabase((after) => {
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      } finally { after.close(); }
+      });
     } finally { await close(session); }
+  }, 300_000);
+
+  it('refuses a terminal store missing its excluded findings relation (#1084)', async () => {
+    const session = await open('review-overlap-authored');
+    await close(session);
     const broken = database();
     try { broken.exec('DROP TABLE review_excluded_findings'); } finally { broken.close(); }
     await expect(open('review-overlap-authored')).rejects.toMatchObject({ code: 'SCHEMA_MIGRATION_FAILED' });
@@ -513,7 +744,7 @@ describe('a Review Run over the real store on exact sample1', () => {
         if (entry.unitOrdinal !== 1) continue;
         if (entry.attempt === 1) entries.set(key, { ...entry, response: { kind: 'adapter-failure', code: 'PROVIDER_ERROR', message: 'Synthetic before-response server failure', status: 503 } });
         if (entry.attempt === 2 && entry.response.kind === 'unit-result') {
-          entries.set(key, { ...entry, response: { ...entry.response, text: '{invalid' } });
+          entries.set(key, { ...entry, response: { ...entry.response, text: INVALID_ENVELOPE } });
           entries.set(key.replace(/#2$/u, '#3'), { ...entry, attempt: 3 });
         }
       }
@@ -526,8 +757,8 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('settles a second invalid envelope without resending it and pages oversized rejected text without loss (#1084)', async () => {
-    await withCapturedReviewBook( async (session, book) => {
+  it('pages oversized rejected text without loss (#1084)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
       const entries = session.responseEntries!;
       if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
       const longNote = '合成说明'.repeat(20_000);
@@ -552,22 +783,19 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect((JSON.parse(chunks.join('')) as { note: string }).note === longNote).toBe(true);
       expect(pages).toBeGreaterThan(0);
     });
-    // A fresh route with two invalid envelopes makes one adaptation and keeps the unit as its gap.
-    const isolated = await createServiceTestRoots('ai7-contract-retry-bounded-');
-    const previous = roots;
-    roots = isolated;
-    try {
-      await withCapturedReviewBook( async (session, book) => {
-        const entries = session.responseEntries!;
-        if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
-        for (const [key, entry] of [...session.responseEntries!]) if (entry.unitOrdinal === 1 && entry.attempt === 2 && entry.response.kind === 'unit-result')
-          entries.set(key, { ...entry, response: { ...entry.response, text: '{invalid' } });
-        await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-        const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
-        expect(projection.run!.adaptations).toHaveLength(1);
-        expect(projection.resultSetRevision!.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 1, code: 'contract-invalid' })]));
-      });
-    } finally { roots = previous; await isolated.dispose(); }
+  }, 300_000);
+
+  it('settles a second invalid envelope without a third contract retry (#1084)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const entries = session.responseEntries!;
+      if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
+      for (const [key, entry] of [...session.responseEntries!]) if (entry.unitOrdinal === 1 && entry.attempt === 2 && entry.response.kind === 'unit-result')
+        entries.set(key, { ...entry, response: { ...entry.response, text: INVALID_ENVELOPE } });
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.run!.adaptations).toHaveLength(1);
+      expect(projection.resultSetRevision!.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 1, code: 'contract-invalid' })]));
+    });
   }, 300_000);
 
   it('keeps the contract retry and the rejected sibling on J-04\'s review-time manuscript, after all three of its first-block edits (#1084)', async () => {
@@ -605,12 +833,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       const frozen = ledger.frozenPlan(projection.taskIntent!.taskIntentId, projection.planEnvelope!.digest).components['plan-envelope'] as Record<string, unknown>;
       expect(frozen.contractIdentity).toMatchObject({ contractId: 'ai7.editorial-review', version: 2 });
       expect(projection.planEnvelope!.procedure?.version).toBe(2);
-      const db = database();
-      try {
-        const rejected = db.prepare('SELECT canonical_json FROM review_excluded_findings WHERE review_run_id = ?').all(runId);
-        expect(rejected.length).toBe(settled.excludedTotal);
-        expect(db.prepare("SELECT count(*) n FROM review_findings WHERE review_run_id = ? AND quote = '合成的无效发现'").get(runId)!.n).toBe(0);
-      } finally { db.close(); }
+      expect(settled.excluded).toHaveLength(settled.excludedTotal!);
+      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(false);
     } finally { await close(session); }
     const reopened = await open('sample1-review-contract-v2-controls');
     try { expect(workspace(reopened, book, runId).run!.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid')).toBe(true); }
@@ -618,8 +842,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('materializes an overlap-misnumbered synthetic finding at its resolved block, applies and reverses it (#1022)', async () => {
-    const session = await open('review-overlap-authored');
-    try {
+    await withSession('review-overlap-authored', async (session) => {
       const book = await importBook(session);
       // Existing admitted synthetic-evidence pattern: tester edits of a fresh sample1 lineage,
       // with only these two authored paragraphs left in its pinned working representation.
@@ -661,9 +884,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(reversed.application.reversesEffectId).toBe(applied.application.effectId);
       expect(workingText(session, book).get(finding.blockId) === paragraphs[1]).toBe(true);
       expect(workingText(session, book).get(blocks[0]!.blockId) === paragraphs[0]).toBe(true);
-    } finally {
-      await close(session);
-    }
+    });
   });
   it('quick-starts only a matching review category-set rule and records that origin on its category Runs', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
@@ -707,16 +928,14 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   });
 
-  it('reviews several categories and the baseline leads one after another and puts every finding on the manuscript as one record with its mark', async () => {
+  it('offers the available review categories and scope before the first Run', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const before = workspace(session, book);
-      // Nothing to lead from yet: the leads say so, and so do the two categories whose basis does not exist.
       expect(before.categories.map((category) => category.categoryId)).toEqual([
         'typos-and-usage', 'style-and-format', 'plot-consistency', 'factual-review', 'academic-integrity', 'publication-risk',
         'literary-expression', 'series-consistency', 'cross-deliverable-consistency',
       ]);
       expect(before.categories.find((category) => category.categoryId === PLOT)).toMatchObject({ available: true, unavailableReason: null });
-      // Every current category reads through a model plan; baseline leads are optional pinned input.
       expect(before.categories.filter((category) => category.modelFree).map((category) => category.categoryId)).toEqual([]);
       expect(before.categories.find((category) => category.categoryId === 'series-consistency')!.available).toBe(false);
       expect(before.coverage.map((row) => row.state)).toEqual(['never', 'never', 'never', 'never', 'never', 'never', 'never', 'unavailable', 'unavailable']);
@@ -724,18 +943,21 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(before.newReview).toEqual({ available: true, unavailableReason: null });
       expect(before.runs).toEqual([]);
       expect(before.run).toBeNull();
+    });
+  }, 300_000);
 
-      await runBaseline(session, book);
-      expect(workspace(session, book).categories.find((category) => category.categoryId === PLOT)!.available).toBe(true);
-
-      // One preparation of a Book at a time, one category's plan per step; a cancelled one writes no Run.
+  it('cancels a preparation without writing a Run and permits only one preparation per Book', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const pending = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS, STYLE], WHOLE, launchPolicy);
       expect(pending).toMatchObject({ done: false, completed: 1, total: 3, projection: null });
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_RUN_PREPARING');
       expect(session.store.cancelReviewRunPreparationWork(pending.workId!)).toBe(true);
       expect(workspace(session, book).runs).toEqual([]);
+    });
+  }, 300_000);
 
-      // Ticked in any order, a Run keeps the configuration's order.
+  it('prepares categories in configuration order with their exact procedures and plans', async () => {
+    await withBaselineBook(async (session, book) => {
       const prepared = prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE);
       expect(prepared.preinstalledProcedures?.map((entry) => [entry.categoryId, entry.procedure.procedureId, entry.procedure.version])).toEqual(
         [TYPOS, STYLE, PLOT, LITERARY].map((categoryId) => [categoryId, `ai7-procedure/review-${categoryId}`, categoryId === STYLE ? 3 : 2]),
@@ -751,20 +973,20 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(typosPlan.modeLabel).toBe('全书审阅');
       expect(prepared.categories[2]).toMatchObject({ taskIntentId: expect.any(String), planEnvelopeDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), plan: { units: 8 } });
       expect(approvals(prepared).map((approval) => approval.categoryId)).toEqual([TYPOS, STYLE, PLOT, LITERARY]);
+    });
+  }, 300_000);
 
-      const settled = await authorizeAndDrive(session, book, prepared);
+  it('materializes each reviewed category in order with exactly its located findings', async () => {
+    await withBaselineBook(async (session, book) => {
+      const settled = await authorizeAndDrive(session, book, prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE));
       expect(settled).toMatchObject({ state: 'settled', stateLabel: '已完成', canContinue: false });
       expect(settled.categories.every((category) => category.state === 'settled')).toBe(true);
-      // One category after another through the one slot: each is on the manuscript before the next starts.
       expect(eventTrail(settled.reviewRunId)).toEqual([
         [TYPOS, 'dispatched'], [TYPOS, 'settled'], [TYPOS, 'materialized'],
         [STYLE, 'dispatched'], [STYLE, 'settled'], [STYLE, 'materialized'],
         [PLOT, 'dispatched'], [PLOT, 'settled'], [PLOT, 'materialized'],
         [LITERARY, 'dispatched'], [LITERARY, 'settled'], [LITERARY, 'materialized'],
       ]);
-
-      // Each category's findings are exactly its revision's located findings, all on the manuscript; what
-      // Reference Integrity could not anchor stays in the excluded appendix and never becomes a mark.
       for (const input of [TYPOS_AND_USAGE, STYLE_AND_FORMAT, LITERARY_EXPRESSION]) {
         const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(input)).resultSetRevision!;
         const category = settled.categories.find((candidate) => candidate.categoryId === input.categoryId)!;
@@ -778,26 +1000,33 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(settled.findings.every((finding) => finding.markId !== null && finding.anchorState === 'exact' && finding.status === 'pending')).toBe(true);
       expect(settled.findings.map((finding) => finding.ordinal)).toEqual(settled.findings.map((_finding, index) => index + 1));
       expect(settled.findingCounts.pending).toBe(settled.findings.length);
+    });
+  }, 300_000);
 
-      // A finding and its mark are one record (MARK-010): the mark stands on exactly the words the finding quotes.
+  it('binds every materialized finding to its manuscript mark and cited basis', async () => {
+    await withBaselineBook(async (session, book) => {
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE));
       const blocks = workingText(session, book);
-      for (const finding of settled.findings) {
+      for (const finding of run.findings) {
         const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
         expect(card.pinnedText === sliceGraphemes(blocks.get(finding.blockId)!, finding.fromGrapheme, finding.toGrapheme)).toBe(true);
         expect(card.kind).toBe(finding.output);
         expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: finding.categoryLabel });
-        const task = settled.categories.find((category) => category.categoryId === finding.categoryId)!.taskIntentId;
+        const task = run.categories.find((category) => category.categoryId === finding.categoryId)!.taskIntentId;
         expect(card.source.taskId).toBe(task);
         if (finding.output === 'change-suggestion') {
           expect(card.suggestion).toMatchObject({ proposedText: finding.replacement, rationale: finding.note });
         } else {
           expect(card.body === finding.note).toBe(true);
         }
-        // Every finding cites its basis (REV-005): the clause it named, or its category's guideline document.
         if (finding.clauseRefs.length > 0) expect(card.basis[0]!.label).toBe(`条款 ${finding.clauseRefs[0]!.clauseId} · ${finding.clauseRefs[0]!.documentTitle}（第 1 版）`);
       }
+    });
+  }, 300_000);
 
-      // The coverage matrix names each reviewed category current, against the Run that reviewed it.
+  it('makes the reviewed categories current in the coverage matrix', async () => {
+    await withBaselineBook(async (session, book) => {
+      const settled = await authorizeAndDrive(session, book, prepare(session, book, [LITERARY, PLOT, STYLE, TYPOS], WHOLE));
       const after = workspace(session, book);
       expect(after.coverage.filter((row) => row.state === 'current').map((row) => row.categoryId)).toEqual([TYPOS, STYLE, PLOT, LITERARY]);
       expect(after.coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ lastRunOrdinal: 1, changedBlocks: 0, lastReviewedRevisionLabel: 'r1' });
@@ -807,10 +1036,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(after.run!.reviewRunId).toBe(settled.reviewRunId);
     });
   }, 300_000);
-  it('derives each finding\'s status from its mark, records an ignored finding with its reason and Quality Signal, and versions the Report', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
-      const reviewRunId = run.reviewRunId;
+  it('reads aggregate findings without writing the store or its journal', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
       const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
       const aggregateBefore = session.store.inspectBookFindings(book.bookId);
@@ -818,62 +1045,71 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
       const aggregateAgain = session.store.inspectBookFindings(book.bookId, 1);
-      // Filtering, grouping and dropping this projection are reads. Compare booleans to keep payloads out of failures.
       aggregateAgain.items.filter((item) => item.category === `review:${TYPOS}`);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite')).equals(databaseBytes)).toBe(true);
       expect(readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal')).equals(walBytes)).toBe(true);
-      const [annotation, anotherAnnotation] = run.findings.filter((finding) => finding.categoryId === STYLE);
-      const [applied, ignored] = run.findings.filter((finding) => finding.categoryId === TYPOS && finding.severity !== 'must');
-      const must = run.findings.filter((finding) => finding.severity === 'must');
-      expect(annotation && anotherAnnotation && applied && ignored).toBeTruthy();
-      expect(must.length).toBeGreaterThan(0);
+    });
+  }, 300_000);
 
-      // 标记为已处理 on the manuscript is the finding handled in 审阅 (FIND-002: one record, every surface).
-      session.store.updateEditorialMark({
-        ...binding(session, book), markId: annotation!.markId!, action: 'set-status', body: null, highlightColor: null, status: 'resolved',
-        targetKind: null, proposedText: null, rationale: null,
-      });
-      // 接受并应用 through the one Apply path is handled too.
-      session.store.applyChangeSuggestion({ ...binding(session, book), markId: applied!.markId!, clientEffectId: randomUUID(), interaction: 'accept-and-apply', editedText: null, reason: null });
-      let current = workspace(session, book, reviewRunId).run!;
-      const status = (findingId: string) => current.findings.find((finding) => finding.findingId === findingId)!;
-      expect(status(annotation!.findingId)).toMatchObject({ status: 'handled', statusLabel: '已处理', statusDetail: '已标记为已处理', markStatus: 'resolved' });
-      expect(status(applied!.findingId)).toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markStatus: 'applied' });
+  it('derives handled finding status from the manuscript mark and Apply', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const { annotation, applied } = handleReviewFindings(session, book, run);
+      const current = workspace(session, book, run.reviewRunId).run!;
+      expect(current.findings.find((finding) => finding.findingId === annotation.findingId))
+        .toMatchObject({ status: 'handled', statusLabel: '已处理', statusDetail: '已标记为已处理', markStatus: 'resolved' });
+      expect(current.findings.find((finding) => finding.findingId === applied.findingId))
+        .toMatchObject({ status: 'handled', statusDetail: '已接受并应用', markStatus: 'applied' });
+    });
+  }, 300_000);
 
-      // 忽略并说明 needs its reason, and only a pending finding can be ignored.
+  it('ignores a pending finding with its reason and one bound Quality Signal', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const reviewRunId = run.reviewRunId;
+      const { applied, ignored } = handleReviewFindings(session, book, run);
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, '   '))).toBe('REVIEW_REASON_REQUIRED');
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, '字'.repeat(501)))).toBe('REVIEW_REASON_TOO_LONG');
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, applied!.findingId, '已经应用'))).toBe('REVIEW_FINDING_NOT_PENDING');
       const reason = '作者坚持保留这一写法，出版社体例允许。';
-      current = session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, `  ${reason}  `).run!;
+      const current = session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, `  ${reason}  `).run!;
       const aggregateAfter = session.store.inspectBookFindings(book.bookId);
       expect(aggregateAfter.items.some((item) => item.id === ignored!.findingId)).toBe(false);
       expect(aggregateAfter.items.filter((item) => item.target.kind === 'review').length).toBe(current.findingCounts.pending);
-      expect(status(ignored!.findingId)).toMatchObject({ status: 'ignored', statusLabel: '已忽略', ignoreReason: reason, markStatus: 'removed' });
+      expect(current.findings.find((finding) => finding.findingId === ignored.findingId)).toMatchObject({ status: 'ignored', statusLabel: '已忽略', ignoreReason: reason, markStatus: 'removed' });
       expect(storeCode(() => session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored!.findingId, reason))).toBe('REVIEW_FINDING_NOT_PENDING');
-      // The ignored finding's mark is set aside: it no longer stands on the manuscript.
       expect(storeCode(() => session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, ignored!.markId!))).toBe('MARK_NOT_FOUND');
       expect(current.findingCounts).toMatchObject({ handled: 2, ignored: 1, pending: current.findings.length - 3 });
+      const signals = session.store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }).signals
+        .filter((signal) => signal.kind === 'review-finding-ignored');
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toMatchObject({ kind: 'review-finding-ignored', source: { bookId: book.bookId, reviewRunId,
+        findingId: ignored.findingId, markId: ignored.markId } });
+      const materials = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials;
+      expect(materials.filter((material) => material.kind === 'review-disposition')).toHaveLength(1);
+      expect(materials.find((material) => material.kind === 'review-disposition'))
+        .toMatchObject({ target: { kind: 'review', bookId: book.bookId, reviewRunId, findingId: ignored.findingId }, excerpt: expect.arrayContaining([`你忽略了这条发现 · 原因：${reason}`]) });
+    });
+  }, 300_000);
 
-      const db = database();
-      try {
-        const signals = db.prepare('SELECT * FROM quality_signals').all() as Array<Record<string, unknown>>;
-        expect(signals).toHaveLength(1);
-        expect(signals[0]).toMatchObject({ kind: 'review-finding-ignored', book_id: book.bookId, review_run_id: reviewRunId, category_id: TYPOS, finding_id: ignored!.findingId, mark_id: ignored!.markId, reason });
-        const bound = JSON.parse(signals[0]!.canonical_json as string) as { binding: Record<string, unknown>; disposition: Record<string, unknown> };
-        expect(bound.binding).toMatchObject({ reviewRunId, reviewRunOrdinal: 1, categoryId: TYPOS, findingId: ignored!.findingId, configurationDigest: workspace(session, book).configuration.digest });
-        expect(bound.disposition).toMatchObject({ disposition: 'ignored', reason });
-        expect((db.prepare('SELECT count(*) total FROM review_finding_dispositions').get() as { total: number }).total).toBe(1);
-        // Every relation of the Review Run ledger is append-only.
+  it('refuses updates and deletion of recorded review ledger relations', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const { ignored } = handleReviewFindings(session, book, run);
+      session.store.recordReviewFindingDisposition(book.bookId, run.reviewRunId, ignored.findingId, '保留体例');
+      withDatabase((db) => {
         for (const relation of ['review_runs', 'review_run_authorizations', 'review_run_category_events', 'review_findings', 'review_finding_dispositions', 'quality_signals']) {
           expect(() => db.exec(`UPDATE ${relation} SET rowid = rowid`)).toThrow(/REVIEW_LEDGER_IMMUTABLE/u);
           expect(() => db.exec(`DELETE FROM ${relation}`)).toThrow(/REVIEW_LEDGER_IMMUTABLE/u);
         }
-      } finally {
-        db.close();
-      }
+      });
+    });
+  }, 300_000);
 
-      // 审阅报告 version 1, then version 2 over what stands later; the first is never rewritten.
+  it('versions the recorded Report over current finding statuses without rewriting its first version', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const reviewRunId = run.reviewRunId;
+      const { anotherAnnotation, ignored } = handleReviewFindings(session, book, run);
+      session.store.recordReviewFindingDisposition(book.bookId, reviewRunId, ignored.findingId, '保留体例');
+      const must = run.findings.filter((finding) => finding.severity === 'must');
+      expect(must.length).toBeGreaterThan(0);
       const first = session.store.generateReviewReport(book.bookId, reviewRunId).run!;
       expect(first.reportVersions.map((version) => version.version)).toEqual([1]);
       const report = first.report!;
@@ -882,7 +1118,6 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(report.record.mustItems.items.map((item) => item.findingId).sort()).toEqual(must.map((finding) => finding.findingId).sort());
       expect(report.record.mustItems.items.every((item) => graphemeCount(item.quote) <= 80 && item.locationLabel.startsWith('内容块 '))).toBe(true);
       expect(report.record.overview.rows.find((row) => row.categoryId === TYPOS)!.counts).toMatchObject({ handled: 1, ignored: 1 });
-      // Version /2 (Issue #1174): the chapter table counts each finding once, by position, and the 发现详单 lists each place once.
       expect(report.record.schema).toBe('ai7.review.report/2');
       expect(report.record.statistics!.total).toBe(report.record.overview.rows.reduce((total, row) => total + row.counts.must + row.counts.should + row.counts.note, 0));
       expect(report.record.statistics!.rows.every((row) => /^(章节 \d+（内容块 \d+(–\d+)?）|章节之外|内容块已不在当前稿件中)$/u.test(row.label))).toBe(true);
@@ -905,8 +1140,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
   it('follows a finding\'s 修改建议 into the new version its conflict saved, and reads that version, never 已转为修改建议 (Issue #57)', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
+    await withReviewedBook([TYPOS], async (session, book, run) => {
       const finding = run.findings.find((candidate) => candidate.output === 'change-suggestion' && candidate.status === 'pending' && candidate.markId !== null)!;
       expect(finding).toBeDefined();
       const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, finding.markId!);
@@ -979,24 +1213,14 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('reads 当前选区 — the paragraph 就这段发起任务… hands over — with its reading ranges as context, and marks only that paragraph (Issue #423, S77b)', async () => {
+  it('refuses unavailable or invalid selection scopes before preparing a Run (#423)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      await runBaseline(session, book);
-      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
-      const at = (position: number) => blocks.find((block) => block.position === position)!;
-      const on = (from: string, to: string): ReviewRunScopeRequest => ({ kind: 'selection', fromChapterBlockId: from, toChapterBlockId: to });
-      // sample1's 错别字与规范用语 finds words on 内容块 10, 15, 21, 56 and 64 over the whole manuscript, and its leads stand on 1, 2,
-      // 3, 29 and 60: 内容块 20 holds none of either, 21 one 错别字, and 29 one lead.
-      const twenty = at(20);
-      const twentyOne = at(21);
-      const twentyNine = at(29);
-      // Every category that reads a range can read the selection; 事实核查 says why it cannot.
+      const { at, on } = selectionContext(session, book);
+      const twenty = at(20), twentyOne = at(21);
       const facts = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
       expect(facts.scopes.selection).toEqual({ available: false, unavailableReason: FACTUAL_SELECTION_REASON });
       expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [FACTUAL], on(twenty.blockId, twenty.blockId), launchPolicy)))
         .toContain(FACTUAL_SELECTION_REASON);
-      // A block the manuscript does not hold, two ends out of order, and a stretch longer than a selection are refused before
-      // anything is prepared.
       expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(`blk_${'0'.repeat(24)}`, twenty.blockId), launchPolicy)))
         .toBe(SELECTION_GONE_REASON);
       expect(storeCode(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(twentyOne.blockId, twenty.blockId), launchPolicy)))
@@ -1004,9 +1228,13 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(storeMessage(() => session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], on(at(1).blockId, at(MAX_SELECTION_BLOCKS + 1).blockId), launchPolicy)))
         .toBe(SELECTION_TOO_LONG_REASON);
       expect(workspace(session, book).runs).toEqual([]);
+    });
+  }, 300_000);
 
-      // On 内容块 20 the 错别字 Run reads its reading ranges — 16–25 and 26–43, with 15 repeated as context — and finds 15 and
-      // 21 there: neither is on the paragraph, so nothing is marked, and the category says how many it left.
+  it('previews the selection context and the paragraph alone to be marked (#423)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const { at, on } = selectionContext(session, book);
+      const twenty = at(20);
       const first = prepare(session, book, [TYPOS], on(twenty.blockId, twenty.blockId));
       expect(first.scope).toEqual({
         kind: 'selection',
@@ -1018,13 +1246,20 @@ describe('a Review Run over the real store on exact sample1', () => {
       const card = (reviewRunId: string): unknown => session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
         .find((entry) => entry.item.itemId === `review:${reviewRunId}`)?.item.object;
       expect(card(first.reviewRunId)).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
-      // The plan names what it reads and that it marks the paragraph alone (Issue #423 review, P2-1).
       const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId });
       expect(plan.goal.sentence).toBe('按 1 类审阅所选段落：错别字与规范用语');
       expect(plan.scope.process).toMatch(/^《.+》第 20–20 段 · \d+ 字 · 1 个类别；读取 内容块 15–43 作为上下文，只在所选段落上标出发现$/u);
       expect(plan.scope.notRead).toMatch(/^内容块 15–43以外的正文；/u);
       expect(plan.notDo.editorial).toEqual(expect.arrayContaining(['不读内容块 15–43以外的正文', '不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上']));
       expect(plan.notDo.editorial).not.toContain('不读所选范围以外的正文');
+    });
+  }, 300_000);
+
+  it('marks only selected paragraphs and counts outside findings without granting coverage (#423)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const { at, on } = selectionContext(session, book);
+      const twenty = at(20), twentyOne = at(21);
+      const first = prepare(session, book, [TYPOS], on(twenty.blockId, twenty.blockId));
       const empty = await authorizeAndDrive(session, book, first);
       expect(empty.state).toBe('settled');
       const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
@@ -1033,50 +1268,34 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(empty.findings).toEqual([]);
       expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 2 处，未标记。');
       expect(selectionExcludedLine(2)).toBe('所读范围内另有 2 条未能定位引文，列在排除附录中');
-      // The count is in the event's record as a number, and a selection Run gives no category coverage (P3-3, P1-2).
-      const materialized = (reviewRunId: string): Record<string, unknown> => {
-        const db = database();
-        try {
-          const row = db.prepare("SELECT canonical_json FROM review_run_category_events WHERE review_run_id = ? AND state = 'materialized'").get(reviewRunId) as { canonical_json: string };
-          return JSON.parse(row.canonical_json) as Record<string, unknown>;
-        } finally {
-          db.close();
-        }
-      };
-      expect(JSON.stringify(materialized(first.reviewRunId))).toContain('"outsideSelectionCount":2');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
-      expect(card(first.reviewRunId)).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
-      const marksBefore = (): number => {
-        const db = database();
-        try {
-          return (db.prepare("SELECT count(*) total FROM editorial_marks WHERE source_origin = 'review-category'").get() as { total: number }).total;
-        } finally {
-          db.close();
-        }
-      };
-      expect(marksBefore()).toBe(0);
-
-      // On 内容块 21 it reads the same ranges again and marks the one finding on that paragraph, leaving 15 unmarked.
+      expect(reviewCard(session, book, first.reviewRunId)!.item.object).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
+      expect(reviewMarkCount(session, book)).toBe(0);
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], on(twentyOne.blockId, twentyOne.blockId)));
       expect(second.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyOne.blockId, 21, true]]);
       expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 1 处，未标记。');
-      expect(marksBefore()).toBe(1);
+      expect(reviewMarkCount(session, book)).toBe(1);
+    });
+  }, 300_000);
 
-      // The leads on 内容块 29 alone, by the paragraph's identity.
+  it('anchors a baseline lead on the selected side of its finding (#423)', async () => {
+    await withBaselineBook(async (session, book) => {
+      const { at, on } = selectionContext(session, book);
+      const twentyNine = at(29);
       const leads = await authorizeAndDrive(session, book, prepare(session, book, [PLOT], on(twentyNine.blockId, twentyNine.blockId)));
       expect(leads.findings.map((finding) => [finding.categoryId, finding.blockId, finding.blockPosition])).toEqual([[PLOT, twentyNine.blockId, 29]]);
-
-      // A lead names 内容块 28 only as a later side — four of sample1's do, beside 2 or 3 — and 28 alone is selected: each is
-      // anchored on 28, the side the selection holds (P3-2).
       const twentyEight = at(28);
       const sides = await authorizeAndDrive(session, book, prepare(session, book, [PLOT], on(twentyEight.blockId, twentyEight.blockId)));
       expect(sides.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyEight.blockId, 28, true]]);
+    });
+  }, 300_000);
 
-      // A Run over the whole manuscript names no selection.
+  it('names a whole-manuscript Run on its task card without a selection', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const whole = prepare(session, book, [STYLE], WHOLE);
       expect(whole.scope.selection).toBeNull();
-      expect(card(whole.reviewRunId)).toEqual({ kind: 'review', ordinal: 5 });
+      expect(reviewCard(session, book, whole.reviewRunId)!.item.object).toEqual({ kind: 'review', ordinal: 1 });
     });
   }, 300_000);
 
@@ -1112,12 +1331,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const synced = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
       expect(synced.state).toBe('settled');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 4 });
-      const db = database();
-      try {
-        expect((db.prepare("SELECT count(*) total FROM editorial_marks WHERE source_origin = 'review-category'").get() as { total: number }).total).toBe(5);
-      } finally {
-        db.close();
-      }
+      expect(reviewMarkCount(session, book)).toBe(5);
     });
   }, 300_000);
 
@@ -1150,17 +1364,13 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('measures 只审改动过的章 per chapter from the latest Run that read it: an edit a 选章 left unread is read, never carried as unchanged (Issue #709)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       // sample1's eight chapters are its eight units: 1–15, 16–25, 26–43, 44–59, 60–68, 69–75, 76–92 and 93–97.
-      const chapter = (position: number): ReviewRunScopeRequest => {
-        const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
-        return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
-      };
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       const changedScope = () => workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed;
       const reusePlan = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       // Chapter A (16–25) is edited inside, then a 选章 of chapter B (44–59) reads B and the chapter its context runs into.
       appendToBlockAt(session, book, 20, '的的');
-      const chosen = prepare(session, book, [TYPOS], chapter(44));
+      const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, 44));
       expect(chosen.categories[0]!.plan).toMatchObject({ recomputed: 2, reused: 5, unreviewed: 1 });
       expect(await authorizeAndDrive(session, book, chosen)).toMatchObject({ state: 'settled' });
       // The 选章's revision is current, and still chapter A's edit was never read: the category needs reviewing, the edited
@@ -1182,15 +1392,11 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('finds the Run that last read an edited chapter however many 选章 left it unread since, and reads it with nothing edited after them (Issue #709)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const chapter = (position: number): ReviewRunScopeRequest => {
-        const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
-        return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
-      };
       const reusePlan = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       appendToBlockAt(session, book, 20, '的的');
-      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(44)));
-      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(76)));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 44)));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 76)));
       // The latest revision is current; 只审改动过的章 still reads chapter 16–25, whose edit the whole review is the last to have read.
       expect(workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
       const synced = prepare(session, book, [TYPOS], CHANGED);
@@ -1299,9 +1505,8 @@ describe('a Review Run over the real store on exact sample1', () => {
 
   it('reads each revision of the chain from SQLite once — one per Run while the ledger lives, and the whole chain once more after a reopen (Issue #727)', async () => {
     const definition = reviewCategoryKindDefinition(TYPOS_AND_USAGE);
-    const first = await open('sample1-review-cross-chapter-authored');
     let book: Book;
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (first) => {
       book = await importBook(first);
       const ledger = first.store.reviewCategoryLedger(definition);
       await authorizeAndDrive(first, book, prepare(first, book, [TYPOS], WHOLE));
@@ -1313,12 +1518,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(ledger.chainRevisionsRead).toBe(6);
       for (let read = 0; read < 5; read += 1) workspace(first, book);
       expect(ledger.chainRevisionsRead).toBe(6);
-    } finally {
-      await close(first);
-    }
+    });
     // Opened again, the first read walks the chain cold — six reads, one a revision — and the poll's reads walk no more.
-    const second = await open('sample1-review-cross-chapter-authored');
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const ledger = second.store.reviewCategoryLedger(definition);
       expect(workspace(second, book!).coverage.find((entry) => entry.categoryId === TYPOS)).toMatchObject({ state: 'needs-review', changedBlocks: 1 });
       expect(ledger.chainRevisionsRead).toBe(6);
@@ -1327,16 +1529,13 @@ describe('a Review Run over the real store on exact sample1', () => {
       await authorizeAndDrive(second, book!, prepare(second, book!, [TYPOS], chapterScope(second, book!, 76)));
       workspace(second, book!);
       expect(ledger.chainRevisionsRead).toBe(7);
-    } finally {
-      await close(second);
-    }
+    });
   }, 300_000);
 
   it('stops the walk at an earlier record it cannot read and says so, keeps the category, and asks a plan that no longer derives to be prepared again (#711 review P3-3, P3-4)', async () => {
-    const first = await open('sample1-review-cross-chapter-authored');
     let book: Book;
     let reviewRunId: string;
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (first) => {
       book = await importBook(first);
       await authorizeAndDrive(first, book, prepare(first, book, [TYPOS], WHOLE));
       appendToBlockAt(first, book, 20, '的的');
@@ -1346,21 +1545,15 @@ describe('a Review Run over the real store on exact sample1', () => {
       const synced = prepare(first, book, [TYPOS], CHANGED);
       expect(synced.categories[0]!.plan).toMatchObject({ recomputed: 2, unreviewed: 0 });
       reviewRunId = synced.reviewRunId;
-    } finally {
-      await close(first);
-    }
+    });
     // The 全书's revision record is damaged beside the closed store: its coverage manifest no longer matches the digest it names.
-    const db = database();
-    try {
+    withDatabase((db) => {
       db.exec('DROP TRIGGER analysis_result_set_revisions_no_update');
       expect(db.prepare(`UPDATE analysis_result_set_revisions SET coverage_manifest_sha256 = ? WHERE ordinal = 1 AND result_set_id IN (
         SELECT result_set_id FROM analysis_result_sets WHERE kind = ?)`).run('f'.repeat(64), reviewCategoryKindDefinition(TYPOS_AND_USAGE).kind).changes).toBe(1);
       db.exec(ANALYSIS_LEDGER_TRIGGER_SQL['analysis_result_set_revisions_no_update']!);
-    } finally {
-      db.close();
-    }
-    const second = await open('sample1-review-cross-chapter-authored');
-    try {
+    });
+    await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const read = workspace(second, book!);
       // The category stays on the screen; the walk stops at the record it cannot read, leaves what it had not settled
       // unread, and the row says what could not be checked.
@@ -1377,22 +1570,16 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(again.categories[0]!.taskIntentId).not.toBe(stale.categories[0]!.taskIntentId);
       expect(again.categories[0]!.plan).toMatchObject({ recomputed: 1 });
       expect(second.store.inspectReviewCategory(book!.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).actions.canAuthorize).toBe(true);
-    } finally {
-      await close(second);
-    }
+    });
   }, 300_000);
 
   it('leaves a chapter no Run has read unreviewed under 只审改动过的章, through any number of 选章 (Issue #709)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const chapter = (position: number): ReviewRunScopeRequest => {
-        const chosen = workspace(session, book).scopeOptions.chapters.chapters.find((entry) => entry.position === position)!;
-        return { kind: 'chapters', fromChapterBlockId: chosen.blockId, toChapterBlockId: chosen.blockId };
-      };
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       const reusePlan = () => session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).update!.reusePlan!;
       // Two 选章, the first starting the category: 44–59 with 60–68, then 76–92 with 93–97. Chapters 1–43 and 69–75 were never read.
-      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(44)));
-      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapter(76)));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 44)));
+      await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 76)));
       expect(row()).toMatchObject({ state: 'current', changedBlocks: 0 });
       // An edit in a chapter a 选章 read: 只审改动过的章 reads that chapter alone and widens to no chapter nobody asked about.
       appendToBlockAt(session, book, 80, '的的');
@@ -1403,75 +1590,44 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('names a running 当前选区 Run on its card, and starts none whose paragraph was removed or reordered after it was prepared (Issue #423 review)', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      await runBaseline(session, book);
-      const blocks = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
-      const at = (position: number) => blocks.find((block) => block.position === position)!;
-      const on = (from: string, to: string): ReviewRunScopeRequest => ({ kind: 'selection', fromChapterBlockId: from, toChapterBlockId: to });
-      const card = (reviewRunId: string) => session.store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items)
-        .find((entry) => entry.item.itemId === `review:${reviewRunId}`)?.item;
+  it('reviews a moved single-paragraph selection by its stable identity (#423)', async () => {
+    await withBaselineBook(async (session, book) => {
+      const { at, on } = selectionContext(session, book);
 
-      // A one-paragraph selection that moved without leaving the manuscript still starts, and marks the lead on that paragraph by
-      // its identity, wherever it now stands: 内容块 29 swapped with 28 holds its lead at 28.
-      /** Stand each paragraph, named by the position it was read at, at the position given, in one write beside the store. */
-      const stand = (moves: ReadonlyArray<readonly [number, number]>): void => {
-        const db = database();
-        try {
-          db.exec('PRAGMA foreign_keys = OFF');
-          const move = db.prepare('UPDATE working_blocks SET position = ? WHERE branch_id = ? AND block_id = ?');
-          for (const [read] of moves) move.run(100000 + read, book.branchId, at(read).blockId);
-          for (const [read, now] of moves) move.run(now, book.branchId, at(read).blockId);
-        } finally {
-          db.close();
-        }
-      };
       const shifted = prepare(session, book, [PLOT], on(at(29).blockId, at(29).blockId));
-      stand([[29, 28], [28, 29]]);
+      standBlocks(session, book, [[29, 28], [28, 29]]);
       const moved = await authorizeAndDrive(session, book, shifted);
       expect(moved.findings.map((finding) => [finding.categoryId, finding.blockId, finding.blockPosition])).toEqual([[PLOT, at(29).blockId, 28]]);
-      stand([[29, 29], [28, 28]]);
+      standBlocks(session, book, [[29, 29], [28, 28]]);
+    });
+  }, 300_000);
 
-      // Removed: the plan reads as moved, and the one approval is refused with why.
+  it('refuses a prepared selection whose paragraph was removed (#423)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const { at, on } = selectionContext(session, book);
+
       const gone = prepare(session, book, [TYPOS], on(at(30).blockId, at(30).blockId));
-      const db = database();
-      try {
-        // Only this side connection stops checking references, so the paragraph's row alone goes, as a removal would take it.
+      withDatabase((db) => {
         db.exec('PRAGMA foreign_keys = OFF');
         db.prepare('DELETE FROM working_blocks WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(30).blockId);
-      } finally {
-        db.close();
-      }
+      });
       expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: gone.reviewRunId }).drift?.reasons).toContain(SELECTION_MOVED_REASON);
       expect(storeMessage(() => session.store.authorizeReviewRun(book.bookId, gone.reviewRunId, approvals(gone)))).toBe(SELECTION_MOVED_REASON);
+    });
+  }, 300_000);
 
-      // Reordered: a two-paragraph selection whose ends were swapped.
+  it('refuses reversed selection ends and starts after their order is restored (#423)', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const { at, on } = selectionContext(session, book);
+
       const pair = prepare(session, book, [TYPOS], on(at(40).blockId, at(41).blockId));
-      const swap = database();
-      try {
-        swap.exec('PRAGMA foreign_keys = OFF');
-        swap.prepare('UPDATE working_blocks SET position = 100000 WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(40).blockId);
-        swap.prepare('UPDATE working_blocks SET position = 40 WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(41).blockId);
-        swap.prepare('UPDATE working_blocks SET position = 41 WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(40).blockId);
-      } finally {
-        swap.close();
-      }
+      standBlocks(session, book, [[40, 41], [41, 40]]);
       expect(storeCode(() => session.store.authorizeReviewRun(book.bookId, pair.reviewRunId, approvals(pair)))).toBe('REVIEW_PLAN_CHANGED');
-
-      // Put back in order, it starts, and while its category runs its card still names the selection.
-      const back = database();
-      try {
-        back.exec('PRAGMA foreign_keys = OFF');
-        back.prepare('UPDATE working_blocks SET position = 100000 WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(41).blockId);
-        back.prepare('UPDATE working_blocks SET position = 40 WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(40).blockId);
-        back.prepare('UPDATE working_blocks SET position = 41 WHERE branch_id = ? AND block_id = ?').run(book.branchId, at(41).blockId);
-      } finally {
-        back.close();
-      }
+      standBlocks(session, book, [[40, 41], [41, 40]]);
       expect(session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: pair.reviewRunId }).drift).toBeNull();
       session.store.authorizeReviewRun(book.bookId, pair.reviewRunId, approvals(pair));
       const loop = session.driver.drive(pair.reviewRunId);
-      expect(card(pair.reviewRunId)).toMatchObject({ state: 'review-running', object: { kind: 'review', ordinal: 3, onSelection: true } });
+      expect(reviewCard(session, book, pair.reviewRunId)!.item).toMatchObject({ state: 'review-running', object: { kind: 'review', ordinal: 1, onSelection: true } });
       await loop;
     });
   }, 300_000);
@@ -1504,12 +1660,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const firstMarks = new Map(first.findings.map((finding) => [finding.quote, finding.markId] as const));
       expect(second.findings.length).toBeGreaterThan(0);
       expect(second.findings.every((finding) => finding.markId !== null && firstMarks.get(finding.quote) === finding.markId)).toBe(true);
-      const db = database();
-      try {
-        expect((db.prepare("SELECT count(*) total FROM editorial_marks WHERE source_origin = 'review-category'").get() as { total: number }).total).toBe(first.findings.length);
-      } finally {
-        db.close();
-      }
+      expect(reviewMarkCount(session, book)).toBe(first.findings.length);
       const after = workspace(session, book);
       expect(after.coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
       expect(after.runs.map((run) => [run.ordinal, run.scopeLabel])).toEqual([[2, '只审改动过的章'], [1, '全书']]);
@@ -1568,35 +1719,9 @@ describe('a Review Run over the real store on exact sample1', () => {
     }
   }, 300_000);
 
-  it('stops between categories, reads partial after a restart, and 继续审阅 finishes the Run where it stopped', async () => {
-    let gated = null as GatedOwner | null;
-    const first = await open('sample1-review-cross-chapter-authored', (inner) => { gated = new GatedOwner(inner, 3); return gated; });
-    let book: Book;
-    let reviewRunId: string;
-    try {
-      book = await importBook(first);
-      const prepared = prepare(first, book, [TYPOS, STYLE], WHOLE);
-      reviewRunId = prepared.reviewRunId;
-      first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
-      const loop = first.driver.drive(reviewRunId);
-      // Driven: the Run reads running while the loop holds it, and no second Run of the Book can be prepared.
-      expect(workspace(first, book, reviewRunId).run!.state).toBe('running');
-      expect(workspace(first, book).newReview.available).toBe(false);
-      expect(storeCode(() => first.store.createReviewRunPreparationWork(book.bookId, [LITERARY], WHOLE, launchPolicy))).toBe('REVIEW_RUN_ACTIVE');
-      // The first category is on the manuscript; the service stops before the second starts.
-      await gated!.reached;
-      const stopped = first.driver.dispose();
-      gated!.release();
-      await stopped;
-      await loop;
-      const stoppedRun = workspace(first, book, reviewRunId).run!;
-      expect(stoppedRun.categories.map((category) => category.state)).toEqual(['settled', 'waiting']);
-    } finally {
-      await close(first);
-    }
-
-    const second = await open('sample1-review-cross-chapter-authored');
-    try {
+  it('continues a partial Run after restart and requires a fresh report for delivery', async () => {
+    const { book, reviewRunId } = await stopBetweenCategories();
+    await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const partial = workspace(second, book, reviewRunId).run!;
       expect(partial).toMatchObject({ state: 'partial', stateLabel: '部分完成 · 可继续审阅', canContinue: true });
       expect(partial.categories[1]).toMatchObject({ state: 'waiting', detail: '尚未开始；继续审阅时从这一类接着审。' });
@@ -1622,9 +1747,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       // Continuing a finished Run does nothing.
       await second.driver.continue(reviewRunId);
       expect(eventTrail(reviewRunId)).toHaveLength(6);
-    } finally {
-      await close(second);
-    }
+    });
   }, 300_000);
 
   it('records an approval while full, names a category that waits for a place of the governor 等待运行名额, and drops it once the category has one (Issue #632)', async () => {
@@ -1682,24 +1805,20 @@ describe('a Review Run over the real store on exact sample1', () => {
       await close(first);
     }
 
-    const second = await open('sample1-review-cross-chapter-authored');
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (second) => {
       expect(workspace(second, book, reviewRunId).run).toMatchObject({ state: 'partial', canContinue: true });
       await second.driver.continue(reviewRunId);
       const finished = workspace(second, book, reviewRunId).run!;
       expect(finished).toMatchObject({ state: 'partial', canContinue: false });
       expect(finished.categories.map((category) => category.state)).toEqual(['interrupted', 'settled']);
       expect(second.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run!.state).toBe('interrupted');
-    } finally {
-      await close(second);
-    }
+    });
   }, 300_000);
 
   it('ends a category Run a stopped service left executing, records it interrupted, and finishes the rest', async () => {
-    const first = await open('sample1-review-cross-chapter-authored');
     let book: Book;
     let reviewRunId: string;
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (first) => {
       book = await importBook(first);
       const prepared = prepare(first, book, [TYPOS, STYLE], WHOLE);
       reviewRunId = prepared.reviewRunId;
@@ -1710,12 +1829,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       handOff.ledger.recordRunState(handOff.runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
       handOff.ledger.recordRunState(handOff.runRecordId, 'executing', { detail: '正在执行。' });
       steps.recordDispatch(reviewRunId, TYPOS, handOff.runRecordId);
-    } finally {
-      await close(first);
-    }
+    });
 
-    const second = await open('sample1-review-cross-chapter-authored');
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (second) => {
       const partial = workspace(second, book, reviewRunId).run!;
       expect(partial).toMatchObject({ state: 'partial', canContinue: true });
       expect(partial.categories.map((category) => category.state)).toEqual(['interrupted', 'waiting']);
@@ -1727,37 +1843,17 @@ describe('a Review Run over the real store on exact sample1', () => {
       // The category's ledger Run is ended, not left executing: the category can be reviewed again.
       expect(second.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).run!.state).toBe('interrupted');
       expect(prepare(second, book, [TYPOS], WHOLE).categories[0]!.modeLabel).toBe('全书审阅');
-    } finally {
-      await close(second);
-    }
+    });
   }, 300_000);
 
-  it('settles at the next start a category Run a stopped service left admitted, executing or waiting, before any 继续审阅 (Issue #657)', async () => {
+  it('reconciles stopped admitted or executing categories while preserving explicit continuation (#657)', async () => {
     let book: Book | undefined;
     for (const planted of ['authorized', 'admitted', 'executing'] as const) {
-      const first = await open('sample1-review-cross-chapter-authored');
-      let reviewRunId: string;
-      let runRecordId: string;
-      try {
-        book ??= await importBook(first);
-        const prepared = prepare(first, book, [TYPOS], WHOLE);
-        reviewRunId = prepared.reviewRunId;
-        first.store.authorizeReviewRun(book.bookId, reviewRunId, approvals(prepared));
-        // The category's turn came and its ledger authorized it; AI7 closed before, or after, the owner admitted it.
-        const steps = first.store.reviewRunDriveSteps;
-        const handOff = steps.start(reviewRunId, TYPOS)!;
-        runRecordId = handOff.runRecordId;
-        if (planted !== 'authorized') {
-          handOff.ledger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
-          steps.recordDispatch(reviewRunId, TYPOS, runRecordId);
-        }
-        if (planted === 'executing') handOff.ledger.recordRunState(runRecordId, 'executing', { detail: '正在执行。' });
-      } finally {
-        await close(first);
-      }
-
+      const stopped = await plantStoppedCategory(book, planted);
+      book = stopped.book;
+      const { reviewRunId, runRecordId } = stopped;
       const second = await open('sample1-review-cross-chapter-authored');
-      const opened = book!;
+      const opened = book;
       try {
         const typos = (): ReviewCategoryProjection => second.store.inspectReviewCategory(opened.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
         // Unreconciled, the category's Run reads as under way for good, and the Book cannot review that category again.
@@ -1798,8 +1894,7 @@ describe('a Review Run over the real store on exact sample1', () => {
   }, 300_000);
 
   it('reads a Book without a manuscript as having nothing to review, and names why', async () => {
-    const session = await open('sample1-review-cross-chapter-authored');
-    try {
+    await withSession('sample1-review-cross-chapter-authored', async (session) => {
       const creation = session.store.prepareBookCreation('空图书', null);
       const bookId = session.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
       const empty = session.store.inspectReviewWorkspace(bookId, null);
@@ -1809,9 +1904,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(empty.scopeOptions.whole.available).toBe(false);
       expect(storeCode(() => session.store.createReviewRunPreparationWork(bookId, [TYPOS], WHOLE, launchPolicy))).toBe('REVIEW_MANUSCRIPT_ABSENT');
       expect(storeCode(() => session.store.inspectReviewWorkspace(randomUUID(), null))).toBe('REVIEW_BOOK_NOT_FOUND');
-    } finally {
-      await close(session);
-    }
+    });
   }, 300_000);
 
   it('checks facts as 事实核查 over the whole manuscript once, tiers read as severities and every finding 未外部复核', async () => {
@@ -1939,75 +2032,20 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
     });
   }, 300_000);
 
-  it('pages the findings of a Run too large for one answer, under the frame limit, to the end — filtered in the service', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
-      const made = run.findings.length;
-      expect(made).toBeGreaterThan(0);
-      const clauseId = run.findings.find((finding) => finding.categoryId === TYPOS && finding.clauseRefs.length > 0)?.clauseRefs[0]?.clauseId ?? null;
-      // Beside the findings the Run made, many more written as a materialization writes its rows: light
-      // ones, so the count bounds a page, and ones as heavy as the contract lets a finding be — a whole
-      // quotation, note and replacement and a cited clause — so the weight does. None became a mark.
-      const light = 700;
-      const heavy = 200;
-      const db = database();
-      try {
-        const insert = db.prepare(
-          `INSERT INTO review_findings(review_run_id, finding_id, category_id, ordinal, kind_ref, severity, output, risk_point, block_id,
-             from_grapheme, to_grapheme, quote, note, replacement, clause_ref, state_line, mark_id, anchor, canonical_json, sha256)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 1, ?, ?, ?, ?, NULL, NULL, 'anchor-changed', '{}', ?)`,
-        );
-        for (let index = 0; index < light + heavy; index += 1) {
-          const ordinal = made + index + 1;
-          const weighty = index >= light;
-          const suggestion = index % 3 !== 0;
-          insert.run(
-            run.reviewRunId, `rvf_${ordinal.toString(16).padStart(24, '0')}`, suggestion ? TYPOS : STYLE, ordinal,
-            `rfd_${ordinal.toString(16).padStart(24, '0')}`, (['must', 'should', 'note'] as const)[index % 3]!, suggestion ? 'change-suggestion' : 'annotation',
-            run.findings[0]!.blockId, weighty ? '审'.repeat(80) : '审阅页', weighty ? '说'.repeat(200) : '说明',
-            suggestion ? (weighty ? '改'.repeat(200) : '改') : null, suggestion && weighty ? clauseId : null, 'f'.repeat(64),
-          );
-        }
-      } finally {
-        db.close();
-      }
-      const total = made + light + heavy;
-
-      /** Every page of one filter set, each read as the service entry reads it and weighed as its frame carries it. */
-      const pages = (filters: Partial<ReviewFindingPageRequest>): ReviewWorkspaceProjection[] => {
-        const answers: ReviewWorkspaceProjection[] = [];
-        let after: number | null = null;
-        for (;;) {
-          const answer = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined, {
-            findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null, ...filters,
-          });
-          answers.push(answer);
-          expect(wireBytes(answer)).toBeLessThan(MAX_FRAME_BYTES);
-          const opened = answer.run!;
-          expect(opened.findings.length).toBeLessThanOrEqual(MAX_REVIEW_FINDINGS_PER_PAGE);
-          // Every page counts every finding, whatever the filters (FIND-003: a filter is a view).
-          expect(opened.findingCounts.pending + opened.findingCounts.handled + opened.findingCounts.ignored).toBe(total);
-          if (!opened.findingsTruncated) return answers;
-          expect(opened.findings.length).toBeGreaterThan(0);
-          after = opened.findings.at(-1)!.ordinal;
-        }
-      };
-
-      const everything = pages({});
+  it('pages and filters all findings within the count and frame limits', async () => {
+    await withReviewedBook([TYPOS, STYLE], async (session, book, run) => {
+      const total = addPagingFindings(run);
+      const everything = findingPages(session, book, run, total, {});
       const read = everything.flatMap((answer) => answer.run!.findings);
       expect(read.map((finding) => finding.ordinal)).toEqual(Array.from({ length: total }, (_value, index) => index + 1));
       expect(everything.every((answer) => answer.run!.findingsTotal === total)).toBe(true);
-      // The light findings fill a page to its count; the heavy ones fill it to its weight well before that.
       expect(everything[0]!.run!.findings.length).toBe(MAX_REVIEW_FINDINGS_PER_PAGE);
-      const heavyPage = everything.find((answer) => answer.run!.findings.some((finding) => finding.ordinal > made + light))!;
+      const heavyPage = everything.find((answer) => answer.run!.findings.some((finding) => finding.ordinal > run.findings.length + 700))!;
       expect(heavyPage.run!.findings.length).toBeLessThan(MAX_REVIEW_FINDINGS_PER_PAGE);
-      // Unnamed, a page is the first one — which is what every answer after an action carries.
       expect(workspace(session, book, run.reviewRunId).run!.findings.map((finding) => finding.ordinal))
         .toEqual(everything[0]!.run!.findings.map((finding) => finding.ordinal));
-
-      // Filtered in the service, a page carries only what passes, still in ordinal order and to the end.
       const byFilter = (filters: Partial<ReviewFindingPageRequest>, keep: (finding: (typeof read)[number]) => boolean): void => {
-        const answers = pages(filters);
+        const answers = findingPages(session, book, run, total, filters);
         const expected = read.filter(keep).map((finding) => finding.findingId);
         expect(answers.flatMap((answer) => answer.run!.findings.map((finding) => finding.findingId))).toEqual(expected);
         expect(answers.every((answer) => answer.run!.findingsTotal === expected.length)).toBe(true);
@@ -2018,7 +2056,6 @@ describe('the 审阅 operations as the service entry dispatches them', () => {
       byFilter({ status: 'ignored' }, () => false);
       const chapter = everything[0]!.scopeOptions.chapters.chapters.find((option) => read.some((finding) => finding.chapterBlockId === option.blockId))!;
       byFilter({ chapterBlockId: chapter.blockId }, (finding) => finding.chapterBlockId === chapter.blockId);
-      // A cursor past the last finding answers an empty, final page.
       const past = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined, {
         findingsAfterOrdinal: total, categoryId: null, severity: null, status: null, chapterBlockId: null,
       }).run!;
@@ -2060,18 +2097,10 @@ async function exportCode(operation: () => Promise<unknown>): Promise<string> {
 }
 
 describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S64b part 2)', () => {
-  it('exports one recorded report version as DOCX, PDF and Markdown under the export ledger, and 交付物 lists each', async () => {
-    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, STYLE], WHOLE));
-      const report = session.store.generateReviewReport(book.bookId, run.reviewRunId).run!.report!;
+  it('previews the exact recorded report version and fidelity of each export format', async () => {
+    await withReportBook(async (session, book, run, report) => {
       const target = { kind: 'report' as const, reportId: report.reportId };
-      const options = { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS };
-      const outbox = join(roots.inputRoot, 'exports');
-      await mkdir(outbox);
-      const review = (format: 'docx' | 'pdf' | 'markdown') =>
-        session.store.reviewManuscriptExport({ bookId: book.bookId, target, options, format }, true);
-
-      // The review is the report's own: what the version is, its four parts, and a file named for it.
+      const review = (format: 'docx' | 'pdf' | 'markdown') => session.store.reviewManuscriptExport({ bookId: book.bookId, target, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, format }, true);
       const docx = await review('docx');
       expect(docx).toMatchObject({
         format: 'docx', savedForExport: false, restoration: 'regenerated', degraded: false,
@@ -2091,52 +2120,36 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
         `report-findings:preserved:${report.record.findings!.entries.length}`, 'report-summaries:preserved:2', 'report-appendix:preserved:3',
       ]);
       expect((await review('markdown')).fidelity[0]).toMatchObject({ key: 'report-overview', status: 'degraded' });
+    });
+  }, 300_000);
 
-      const exported = async (format: 'docx' | 'pdf' | 'markdown', fileName: string): Promise<Buffer> => {
-        const reviewed = await review(format);
-        const destination = join(outbox, fileName);
-        const preparation = await session.store.prepareManuscriptExport({
-          bookId: book.bookId, revisionId: reviewed.target.revisionId, target, options, reviewDigest: reviewed.reviewDigest, destination, format,
-        }, true);
-        expect(preparation.target.report?.reportId).toBe(report.reportId);
-        const staged = await session.store.stageManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
-        if (format === 'pdf') {
-          const page = await readFile(staged.print!.pagePath, 'utf8');
-          expect(page).toContain('<thead><tr><th scope="col">类别</th><th scope="col">状态</th><th scope="col">发现</th></tr></thead>');
-          await writeFile(staged.print!.pdfPath, '%PDF-1.7\n% AI7 service suite stand-in\n%%EOF\n');
-        } else {
-          expect(staged.print).toBeNull();
-        }
-        const receipt = await session.store.approveManuscriptExport({ bookId: book.bookId, preparationId: preparation.preparationId }, true);
-        expect(receipt).toMatchObject({ format, outcome: 'created', target: { kind: 'report', report: { version: 1 } } });
-        return readFile(destination);
-      };
-      const written = await exported('docx', '审阅报告.docx');
+  it('exports the recorded report in each format and lists its version in deliverables', async () => {
+    await withReportBook(async (session, book, run, report, outbox) => {
+      const written = await exportReport(session, book, report, outbox, 'docx', '审阅报告.docx');
       const documentXml = strFromU8(unzipSync(written)['word/document.xml']!);
-      // A /2 record writes 概览表 and 章节与类别统计 as Word tables (Issue #1174).
       expect(documentXml.match(/<w:tbl>/gu)?.length).toBe(2);
       expect(documentXml).toContain('>概览表<');
       expect(documentXml).toContain('>章节与类别统计<');
-      const markdown = (await exported('markdown', '审阅报告.md')).toString('utf8');
+      const markdown = (await exportReport(session, book, report, outbox, 'markdown', '审阅报告.md')).toString('utf8');
       expect(markdown.startsWith('# L2 sample1 审阅记录 · 审阅报告\n\n第 1 次审阅 · ')).toBe(true);
       expect(markdown).toContain('\n\n## 概览表\n\n| 类别 | 状态 | 发现 |\n| --- | --- | --- |\n');
-      expect((await exported('pdf', '审阅报告.pdf')).toString('latin1').startsWith('%PDF-')).toBe(true);
-
-      // The ledger binds the version, not a revision; 交付物 lists every export of the Book, the report's among them.
-      const db = database();
-      try {
-        expect(db.prepare('SELECT target_kind, target_id, revision_id, revision_digest, format FROM export_preparations ORDER BY rowid').all().map((row) => ({ ...row })))
-          .toEqual(['docx', 'markdown', 'pdf'].map((format) => ({ target_kind: 'report', target_id: report.reportId, revision_id: null, revision_digest: null, format })));
-      } finally {
-        db.close();
-      }
+      expect((await exportReport(session, book, report, outbox, 'pdf', '审阅报告.pdf')).toString('latin1').startsWith('%PDF-')).toBe(true);
       const listed = session.store.inspectDeliverables(book.bookId).exports;
       expect(listed.map((record) => `${record.format}:${record.target.kind}:${record.target.report?.version}`)).toEqual(['pdf:report:1', 'markdown:report:1', 'docx:report:1']);
+      expect(listed.every((record) => record.target.report?.reportId === report.reportId)).toBe(true);
+    });
+  }, 300_000);
 
-      // A report that is not this Book's — or none at all — is refused, and nothing is prepared.
-      expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options }, true)))
+  it('refuses export of a report that does not belong to the Book', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      expect(await exportCode(() => session.store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'report', reportId: randomUUID() }, options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS }, true)))
         .toBe('EXPORT_TARGET_NOT_FOUND');
-      // #953: a frozen package carries the exact recorded report through S64's archive stream hook too.
+    });
+  }, 300_000);
+
+  it('carries the exact exported report bytes in a frozen delivery archive (#953)', async () => {
+    await withReportBook(async (session, book, run, report, outbox) => {
+      const written = await exportReport(session, book, report, outbox, 'docx', '审阅报告.docx');
       const milestone = await session.store.saveMilestone(book.manuscriptId, book.branchId, '归档稿', 'stage-archive', null, '');
       session.store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '测试存档', basis: '测试记录' });
       for (const typeId of ['news-release', 'promotion-article', 'review-article', 'launch-materials', 'marketing-points']) {
@@ -2153,9 +2166,7 @@ describe('the 审阅报告 exported in the manuscript\'s formats (Issue #500, S6
       const reportMember = exportedArchive.export.files.find((file) => file.key === `report:${report.reportId}`)!;
       expect(reportMember.outcome).toBe('created');
       const archive = unzipSync(await readFile(archivePath));
-      expect(createHash('sha256').update(archive[reportMember.fileName]!).digest('hex'))
-        .toBe(createHash('sha256').update(written).digest('hex'));
-
+      expect(Buffer.from(archive[reportMember.fileName]!).equals(written)).toBe(true);
     });
   }, 300_000);
 });
@@ -2198,40 +2209,53 @@ function preparePinned(session: Session, book: Book, categoryIds: ReadonlyArray<
   return run;
 }
 
+
+async function withSelectionProcedures(body: (session: Session, book: Book, context: Awaited<ReturnType<typeof selectionProcedures>>) => Promise<void>): Promise<void> {
+  const session = await openLayeredSelection();
+  try {
+    const book = await importBook(session);
+    await body(session, book, await selectionProcedures(session, book));
+  } finally { await close(session); }
+}
+
+async function selectionProcedures(session: Session, book: Book) {
+  const { store } = session;
+
+  makeJ13Series(store, book.bookId);
+  await runBaseline(session, book);
+  const source = await authorizeAndDrive(session, book, prepare(session, book, [STYLE, PLOT, FACTUAL, SERIES], WHOLE));
+  expect(source.state).toBe('settled');
+  expect(source.categories.map((category) => category.state)).toEqual(['settled', 'settled', 'settled', 'settled']);
+  const save = (categoryIds: ReadonlyArray<string>, title: string): { procedureId: string; versionId: string; documentSha256: string } => {
+    const saved = store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds, scopeSlot: 'whole', title, procedureId: null });
+    const version = saved.versions[0]!;
+    store.enableCapturedProcedure(version.versionId, store.previewCapturedProcedureValidation(version.versionId).previewDigest);
+    return { procedureId: saved.procedureId, versionId: version.versionId, documentSha256: version.technical.documentSha256 };
+  };
+  const steps = save([STYLE, PLOT], '体例线索复核');
+  const factual = save([STYLE, FACTUAL], '含事实核查');
+  const series = save([STYLE, SERIES], '书系复核');
+  return { source, steps, factual, series };
+}
+
 describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferred items a and d; ADR 0087 §4; REUSE-046, REUSE-050)', () => {
-  it('pins the exact version, reads only the selection and marks inside it, gives no coverage, leaves 书系一致性 the editor\'s to tick, and names a step that cannot read a selection', async () => {
-    const session = await openLayeredSelection();
-    try {
+  it('offers saved procedures for a selection without saving the selection itself (#423)', async () => {
+    await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
       const { store } = session;
-      const book = await importBook(session);
-      makeJ13Series(store, book.bookId);
-      await runBaseline(session, book);
-      const source = await authorizeAndDrive(session, book, prepare(session, book, [STYLE, PLOT, FACTUAL, SERIES], WHOLE));
-      expect(source.state).toBe('settled');
-      expect(source.categories.map((category) => category.state)).toEqual(['settled', 'settled', 'settled', 'settled']);
-      const save = (categoryIds: ReadonlyArray<string>, title: string): { procedureId: string; versionId: string; documentSha256: string } => {
-        const saved = store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds, scopeSlot: 'whole', title, procedureId: null });
-        const version = saved.versions[0]!;
-        store.enableCapturedProcedure(version.versionId, store.previewCapturedProcedureValidation(version.versionId).previewDigest);
-        return { procedureId: saved.procedureId, versionId: version.versionId, documentSha256: version.technical.documentSha256 };
-      };
-      const steps = save([STYLE, PLOT], '体例线索复核');
-      const factual = save([STYLE, FACTUAL], '含事实核查');
-      const series = save([STYLE, SERIES], '书系复核');
-      // A capture sets 全书 or 选定章节; a selection is handed over at each run, never saved as a setting — refused by the store's own
-      // guard before the document validator, which refuses such a document too (review P3-1).
       expect(storeMessage(() => store.saveCapturedProcedure({ bookId: book.bookId, reviewRunId: source.reviewRunId, categoryIds: [STYLE], scopeSlot: 'selection', title: '不能保存', procedureId: null })))
         .toBe('审阅范围的设定无效。');
-
-      // 按已保存的工序 for a selection of this Book (the menu's list): each enabled procedure, newest first, as a 当前选区 can take it.
       const onSelection = store.inspectCapturedProcedureApplicability(book.bookId, 'selection').procedures;
       expect(onSelection.map((entry) => [entry.title, entry.fit, entry.chosenApart, entry.leftOut.map((step) => step.label)])).toEqual([
         ['书系复核', 'all', ['书系一致性'], []], ['含事实核查', 'partial', [], ['事实核查']], ['体例线索复核', 'all', [], []],
       ]);
       expect(storeCode(() => store.inspectCapturedProcedureApplicability(book.bookId, 'chapters'))).toBe('CAPTURED_PROCEDURE_INVALID');
       expect(storeCode(() => store.inspectCapturedProcedureRun(book.bookId, factual.procedureId, null, 'whole'))).toBe('CAPTURED_PROCEDURE_INVALID');
-      // On a Book that never checked facts, 事实核查 can still run on the whole; on a selection it cannot, and the step is named with why
-      // (the Commander's ruling 2: offered disabled, the step named) — the leads are left out there for want of a baseline either way.
+    });
+  }, 300_000);
+
+  it('names factual steps that cannot read a selection on another Book (#423)', async () => {
+    await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
+      const { store } = session;
       const other = await importSample1Book(store, roots.codeRoot, 'L2 书系外');
       await pinEditorialWorkspaceProfileRevision2(store, other.bookId);
       const otherWhole = store.inspectCapturedProcedureApplicability(other.bookId).procedures.find((entry) => entry.title === '含事实核查')!;
@@ -2242,9 +2266,12 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
         .toEqual({ categoryId: FACTUAL, label: '事实核查', available: false, unavailableReason: FACTUAL_SELECTION_REASON, chosenApart: false });
       expect(store.inspectCapturedProcedureRun(other.bookId, steps.procedureId, null, 'selection').resolved!.steps[1])
         .toMatchObject({ categoryId: PLOT, available: true, unavailableReason: null });
+    });
+  }, 300_000);
 
-      // 按《体例线索复核》审阅这段 on 内容块 29, where one of sample1's leads stands: the Run pins the exact version and reads the
-      // selection as a category Run on it does — only its steps, nothing the slot would refuse.
+  it('pins the exact saved procedure and selected paragraphs in the prepared task (#423)', async () => {
+    await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
+      const { store } = session;
       const blocks = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId);
       const twentyNine = blocks.find((block) => block.position === 29)!;
       const on = (blockId: string): ReviewRunScopeRequest => ({ kind: 'selection', fromChapterBlockId: blockId, toChapterBlockId: blockId });
@@ -2259,19 +2286,25 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
         selection: { fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
       });
       expect(pinned.categories.map((category) => category.categoryId)).toEqual([STYLE, PLOT]);
-      // Its card in 任务 names the selection and carries the paragraphs 跳到所选文字 moves to (deferred item d).
-      const card = (reviewRunId: string) => store.inspectBookTasks(book.bookId, () => null).groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === `review:${reviewRunId}`);
+      const card = (id: string) => reviewCard(session, book, id);
       expect(card(pinned.reviewRunId)).toMatchObject({
         item: { object: { kind: 'review', ordinal: 2, onSelection: true }, state: 'review-prepared' },
         selection: { manuscriptId: book.manuscriptId, fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
       });
       expect(card(source.reviewRunId)!.selection).toBeUndefined();
+    });
+  }, 300_000);
+
+  it('runs a pinned procedure on the selected paragraph without moving whole-book coverage (#423)', async () => {
+    await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
+      const { store } = session;
+      const twentyNine = session.store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((block) => block.position === 29)!;
+      const pinned = preparePinned(session, book, [STYLE, PLOT], selectionAt(session, book, 29), steps);
+      const card = (id: string) => reviewCard(session, book, id);
       const coverageOf = (): Array<[string, string, number | null]> => workspace(session, book).coverage
         .filter((row) => row.categoryId === STYLE || row.categoryId === PLOT).map((row) => [row.categoryId, row.state, row.lastRunOrdinal]);
       const coverageBefore = coverageOf();
       expect(coverageBefore).toEqual([[STYLE, 'current', 1], [PLOT, 'current', 1]]);
-
-      // Driven, it marks the paragraph alone — the lead on 29 among its findings — and moves no coverage: the matrix still reads the whole Run.
       const ran = await authorizeAndDrive(session, book, pinned);
       expect(ran.state).toBe('settled');
       expect(ran.findings.length).toBeGreaterThan(0);
@@ -2280,41 +2313,38 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
       expect(ran.procedure).toMatchObject({ versionId: steps.versionId, stopped: false, missing: false });
       expect(coverageOf()).toEqual(coverageBefore);
       expect(card(ran.reviewRunId)).toMatchObject({ item: { state: 'review-completed' }, result: { kind: 'review-run', reviewRunId: ran.reviewRunId }, selection: { manuscriptId: book.manuscriptId, fromBlockId: twentyNine.blockId } });
-      // The pin records the selection as the scope the Run ran under; a Run on the slot records the slot. The version counts the Run.
       const wholePinned = preparePinned(session, book, [STYLE, PLOT], WHOLE, steps);
-      const pinScope = (reviewRunId: string): unknown => {
-        const db = database();
-        try {
-          const row = db.prepare('SELECT canonical_json FROM review_run_procedure_pins WHERE review_run_id = ?').get(reviewRunId) as { canonical_json: string };
-          return (JSON.parse(row.canonical_json) as { scope: unknown }).scope;
-        } finally {
-          db.close();
-        }
-      };
-      expect([pinScope(ran.reviewRunId), pinScope(wholePinned.reviewRunId)]).toEqual(['selection', 'whole']);
+      expect([workspace(session, book, ran.reviewRunId).run!.scope.kind, workspace(session, book, wholePinned.reviewRunId).run!.scope.kind])
+        .toEqual(['selection', 'whole']);
       expect(store.inspectCapturedProcedure(steps.procedureId, null).versions[0]).toMatchObject({ runCount: 1, preparedRunCount: 1 });
+    });
+  }, 300_000);
 
-      // 书系一致性 on a selection is the editor's to tick (ruling 3), as S31b has it on 新建审阅: left unticked it is recorded as left
-      // out by choice; ticked it runs with the rest; a step the Book could take is never dropped.
+  it('leaves series review for the editor to choose on a selection (#423)', async () => {
+    await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
+      const { store } = session;
       expect(store.inspectCapturedProcedureRun(book.bookId, series.procedureId, null, 'selection').resolved!.steps).toEqual([
         { categoryId: STYLE, label: '体例与格式', available: true, unavailableReason: null, chosenApart: false },
         { categoryId: SERIES, label: '书系一致性', available: true, unavailableReason: null, chosenApart: true },
       ]);
-      const unchosen = preparePinned(session, book, [STYLE], on(twentyNine.blockId), series);
+      const unchosen = preparePinned(session, book, [STYLE], selectionAt(session, book, 29), series);
       expect(unchosen.categories.map((category) => category.categoryId)).toEqual([STYLE]);
       expect(unchosen.procedure!.leftOut).toEqual([{ categoryId: SERIES, label: '书系一致性', reason: PROCEDURE_STEP_NOT_CHOSEN, byChoice: true }]);
       expect(unchosen.scope.kind).toBe('selection');
-      const chosen = preparePinned(session, book, [STYLE, SERIES], on(twentyNine.blockId), series);
+      const chosen = preparePinned(session, book, [STYLE, SERIES], selectionAt(session, book, 29), series);
       expect(chosen.categories.map((category) => category.categoryId)).toEqual([STYLE, SERIES]);
       expect(chosen.procedure!.leftOut).toEqual([]);
-      expect(storeCode(() => preparePinned(session, book, [SERIES], on(twentyNine.blockId), series))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
-      // 事实核查 cannot read a selection: the step is left out for want of the selection, never by choice, and the rest runs.
-      const partial = preparePinned(session, book, [STYLE], on(twentyNine.blockId), factual);
+      expect(storeCode(() => preparePinned(session, book, [SERIES], selectionAt(session, book, 29), series))).toBe('REVIEW_PROCEDURE_STEP_SKIPPED');
+    });
+  }, 300_000);
+
+  it('leaves an unavailable factual step out of a selection by capability (#423)', async () => {
+    await withSelectionProcedures(async (session, book, { source, steps, factual, series }) => {
+      const { store } = session;
+      const partial = preparePinned(session, book, [STYLE], selectionAt(session, book, 29), factual);
       expect(partial.procedure!.leftOut).toEqual([expect.objectContaining({ categoryId: FACTUAL, label: '事实核查', byChoice: false })]);
       expect(partial.categories.map((category) => category.categoryId)).toEqual([STYLE]);
-    } finally {
-      await close(session);
-    }
+    });
   }, 300_000);
 
   it('refuses a selection of a Production Document\'s manuscript: no Task reads a document (the Owner, 2026-10-09)', async () => {
@@ -2411,54 +2441,20 @@ describe('house preference review consumption (#911)', () => {
     });
   }, 300_000);
 
-  it('reads only admitted judgments made under its own scope: an excluded decision\'s Apply and every named person stay out (#911 review)', async () => {
+  it('reads only admitted judgments made under its own scope (#911 review)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
-      session.store.updateBookPeople({ bookId: book.bookId, expectedVersion: 0, authors: ['周一'], editors: ['郑三'], related: [{ roleId: 'proofreader', name: '王四' }] });
-      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS, LITERARY], WHOLE));
-      const marked = run.findings.filter((entry) => entry.categoryId === TYPOS && entry.markId !== null && entry.output === 'change-suggestion');
-      // Three distinct 修改建议, each still open.
-      const [kept, excluded, rejected] = marked.filter((entry, index) => marked.findIndex((other) => other.markId === entry.markId) === index && entry.status === 'pending');
-      expect(kept && excluded && rejected).toBeTruthy();
-      // 修改后接受 is weighted by its category (文学性与表达 3): the grapheme distance from what was proposed, and no more.
-      const literary = run.findings.find((entry) => entry.categoryId === LITERARY && entry.markId !== null && entry.output === 'change-suggestion' &&
-        entry.status === 'pending' && ![kept, excluded, rejected].some((other) => other!.blockId === entry.blockId))!;
-      session.store.applyChangeSuggestion({ ...binding(session, book), markId: literary.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔文学改写〕', reason: null });
-      expect(editCategoryWeight(LITERARY)).toBe(3);
-      expect(session.store.inspectEditQualitySignals(book.bookId).categories.find((entry) => entry.categoryId === LITERARY))
-        .toMatchObject({ applied: 1, surviving: 1, editVolume: 3 * graphemeEditVolume(literary.replacement!, '〔文学改写〕') });
-      // 修改后接受 with a reason applies the editor's own words: each is Learning Material with an Apply target of its own.
-      session.store.applyChangeSuggestion({ ...binding(session, book), markId: kept!.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔编辑改写〕', reason: '周一与王四认为按规范改' });
-      session.store.applyChangeSuggestion({ ...binding(session, book), markId: excluded!.markId!, clientEffectId: randomUUID(), interaction: 'accept-edited-and-apply', editedText: '〔排除改写〕', reason: '排除的理由' });
-      session.store.recordChangeSuggestionDecision({ ...binding(session, book), markId: rejected!.markId!, clientDecisionId: randomUUID(), disposition: 'rejected', editedText: null, reason: '郑三说不必改' });
-      // The admitted decision's own applied text is written over; the excluded one's stands.
-      const card = session.store.getEditorialMarkCard(book.manuscriptId, book.branchId, kept!.markId!);
-      const window = session.store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: card.blockId });
-      const block = window.blocks.find((entry) => entry.blockId === card.blockId)!;
-      session.store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId, baseRevisionId: window.revisionId, blockId: block.blockId,
-        windowStartBlockId: window.blocks[0]!.blockId, baseBlockDigest: block.digest, expectedJournalSequence: window.journalSequence,
-        fromGrapheme: card.fromGrapheme, toGrapheme: card.toGrapheme, insertText: '〔再改〕' });
-      const materials = session.store.inspectLearningMaterials(book.bookId).books[0]!.materials;
-      const decide = (reason: string, choice: 'house' | 'excluded') => {
-        const material = materials.find((entry) => entry.kind === 'proposal-decision' && entry.excerpt.some((line) => line.includes(reason)))!;
-        session.store.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest, expectedDecisions: 0, choice, note: null });
-      };
-      decide('周一与王四认为按规范改', 'house');
-      decide('排除的理由', 'excluded');
-      decide('郑三说不必改', 'house');
+      await arrangePreferenceJudgments(session, book);
       const record = session.store.inspectHouseReviewPreference();
       expect(record.operationalScope).toBe('development-ci');
       const version = record.current!;
       expect(version.sourceCount).toBe(2);
       expect(version.lines).toHaveLength(1);
       const text = version.lines[0]!.text;
-      // Only the admitted decisions count, and only their own Apply: the one applied is written over, so it is not kept.
       expect(text).toContain('采纳1、未采纳1');
       expect(text).toContain('应用后常再改，注意编辑改写偏好');
       expect(text).toContain('认为按规范改');
       for (const absent of ['周一', '郑三', '王四', '排除的理由']) expect(text).not.toContain(absent);
       expect(version.lines[0]!.sources[0]!.attribution).toMatchObject({ authors: ['周一'], editors: ['郑三'] });
-      // The development-data rule, by each source's own Result Set Revision: these fixture-route judgments reach neither the
-      // developer-live record nor the production one, and the development record stands as it was.
       const original = session.store.baselineAnalysisLedger.launch;
       session.store.baselineAnalysisLedger.bindLaunch({ operationalScope: 'developer-live', policy: await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live'), live: {
         route: DEVELOPER_LIVE_POLICY_BINDING.route, endpoint: DEVELOPER_LIVE_POLICY_BINDING.endpoint, model: DEVELOPER_LIVE_POLICY_BINDING.model,
