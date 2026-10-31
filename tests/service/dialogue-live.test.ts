@@ -11,22 +11,25 @@ import { DIALOGUE_CLOSED_CAUSE, DialogueExecutionOwner, dialogueLiveRoute, dialo
 import {
   DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL,
   DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL,
-  DIALOGUE_SCHEMA_SQL,
+  DialogueLedger,
+  dialogueExecutionBindingsShape,
   DIALOGUE_TRIGGER_SQL,
+  type StoredDialogueBinding,
 } from '../../src/service/dialogue/dialogue-ledger.js';
 import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route.js';
 import { SAMPLE1_SOURCE_DIGEST } from '../../src/service/analysis/baseline-analysis-store.js';
 import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks.js';
-import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
+import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine, type ProviderCacheEntry, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
+import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { transmitOnce } from '../../src/service/provider/live-transmission.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { MODEL_SERVICE_CONNECTION_REVISION_11_SQL } from '../../src/service/bounded-manuscript.js';
-import { ANALYSIS_LEDGER_REVISION_59_SQL, LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
+import { ANALYSIS_LEDGER_REVISION_59_SQL } from '../../src/service/task-authorization.js';
 import { READERS_REPORT_SCHEMA_SQL } from '../../src/service/readers-reports.js';
 import { CAPTURED_PROCEDURE_SCHEMA_SQL } from '../../src/service/captured-procedures.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL } from '../../src/service/evaluation-rewrites.js';
@@ -227,6 +230,15 @@ const settled = (projection: DialogueProjection): boolean => projection.attempts
 const texts = (projection: DialogueProjection, attempt = projection.attempts.length - 1): string[] =>
   projection.attempts[attempt]!.fragments.map((fragment) => fragment.text);
 
+function withDatabase<T>(read: (database: DatabaseSync) => T): T {
+  const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  try { return read(database); } finally { database.close(); }
+}
+
+function readBinding(attemptId: string): StoredDialogueBinding | null {
+  return withDatabase((database) => new DialogueLedger(database).attempt(attemptId)!.binding);
+}
+
 async function ledgerLines(): Promise<ProviderLedgerLine[]> {
   const raw = await readFile(join(cacheRoot, PROVIDER_LEDGER_FILE), 'utf8').catch(() => '');
   return raw.split('\n').filter((line) => line.length > 0).map((line) => JSON.parse(line) as ProviderLedgerLine).filter(isItemLine);
@@ -249,6 +261,30 @@ async function next(store: EditorialStore, dialogues: DialogueExecutionOwner, bo
   return waitFor(() => store.inspectDialogue(bookId, dialogueId, 0, (id) => dialogues.liveText(id)), settled, `${kind} settled`);
 }
 
+async function reimportSample1(store: EditorialStore, bookId: string): Promise<void> {
+  const replacement = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+  const work = store.createManuscriptReimportPreparationWork(replacement.draftId, replacement.draftVersion, {
+    kind: 'existing-book', bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
+  });
+  let prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
+  while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
+  let reimport = prepared.review!;
+  while (reimport.comparison.unresolvedGroups > 0) {
+    const group = store.getReimportMappingPage(reimport.draftId, reimport.draftVersion, null).items.find((item) => item.verb === null)!;
+    const resolution = store.createReimportResolutionWork(reimport.draftId, reimport.draftVersion, group.groupId, group.verbs[0]!);
+    let progress = store.advanceReimportResolutionWork(resolution.workId);
+    while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
+    reimport = progress.review!;
+  }
+  const commit = await store.createManuscriptReimportCommitWork({ draftId: reimport.draftId, expectedDraftVersion: reimport.draftVersion,
+    reviewDigest: reimport.reviewDigest, commitId: randomUUID() });
+  let committed = commit.result;
+  while (committed === null) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 5));
+    committed = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
+  }
+}
+
 function refusalCode(operation: () => unknown): string {
   try {
     operation();
@@ -257,6 +293,25 @@ function refusalCode(operation: () => unknown): string {
     throw error;
   }
   return 'no-error';
+}
+
+function retrievalResponse(turn: number, candidateId: string, args: string): Response {
+  const name = turn === 1 ? 'retrieve' : 'exact_fetch';
+  return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+    const event = (delta: unknown, finish_reason: string | null = null): void => {
+      controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`));
+    };
+    if (turn < 3) {
+      event({ tool_calls: [{ index: 0, id: `retrieval-${turn}`, type: 'function', function: { name, arguments: '' } }] });
+      for (const fragment of [...args]) event({ tool_calls: [{ index: 0, function: { arguments: fragment } }] });
+      event({}, 'tool_calls');
+    } else {
+      event({ content: `已找到相关段落。[retrieval:${candidateId}]` });
+      event({}, 'stop');
+    }
+    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } })}\n\ndata: [DONE]\n\n`));
+    controller.close();
+  } }), { headers: { 'content-type': 'text/event-stream' } });
 }
 
 describe('the admitted dialogue route, read from the selected policy', () => {
@@ -278,23 +333,8 @@ describe('the admitted dialogue route, read from the selected policy', () => {
         const result = JSON.parse(request.messages.at(-1)!.content) as Array<{ candidateId: string }>;
         candidateId = result[0]!.candidateId;
       }
-      const name = turn === 1 ? 'retrieve' : 'exact_fetch';
       const args = JSON.stringify(turn === 1 ? { query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] } : { candidateId });
-      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
-        const event = (delta: unknown, finish_reason: string | null = null): void => {
-          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`));
-        };
-        if (turn < 3) {
-          event({ tool_calls: [{ index: 0, id: `retrieval-${turn}`, type: 'function', function: { name, arguments: '' } }] });
-          for (const fragment of [...args]) event({ tool_calls: [{ index: 0, function: { arguments: fragment } }] });
-          event({}, 'tool_calls');
-        } else {
-          event({ content: `已找到相关段落。[retrieval:${candidateId}]` });
-          event({}, 'stop');
-        }
-        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } })}\n\ndata: [DONE]\n\n`));
-        controller.close();
-      } }), { headers: { 'content-type': 'text/event-stream' } });
+      return retrievalResponse(turn, candidateId, args);
     }) as unknown as typeof fetch;
     const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
@@ -323,16 +363,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     const nativeFetch = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
       calls.push({ url, headers: init.headers, body: init.body });
       const args = JSON.stringify({ query: selection.selectedText, k: 1, sourceKinds: ['manuscript'] });
-      return new Response(new ReadableStream<Uint8Array>({ start(controller) {
-        const event = (delta: unknown, finish_reason: string | null = null): void => {
-          controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [{ index: 0, delta, finish_reason }] })}\n\n`));
-        };
-        event({ tool_calls: [{ index: 0, id: 'retrieval-1', type: 'function', function: { name: 'retrieve', arguments: '' } }] });
-        for (const fragment of [...args]) event({ tool_calls: [{ index: 0, function: { arguments: fragment } }] });
-        event({}, 'tool_calls');
-        controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ model: OPENCODE_GO_MODEL, choices: [], usage: { prompt_tokens: 210, completion_tokens: 48 } })}\n\ndata: [DONE]\n\n`));
-        controller.close();
-      } }), { headers: { 'content-type': 'text/event-stream' } });
+      return retrievalResponse(1, '', args);
     }) as unknown as typeof fetch;
     const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null,
       sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY),
@@ -370,33 +401,12 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
       reviewDigest: review.reviewDigest!, commitId: randomUUID() });
     const selection = selectionOf(store, book);
-    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
     const local = new DialogueExecutionOwner({ requestGovernor, records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null });
     const { dialogueId } = await ask(store, local, book.bookId, selection);
     await local.dispose();
 
-    const replacement = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
-    const work = store.createManuscriptReimportPreparationWork(replacement.draftId, replacement.draftVersion, {
-      kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', lineage: { kind: 'unconfirmed' }, reuseSourceVersionId: null,
-    });
-    let prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
-    while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
-    let reimport = prepared.review!;
-    while (reimport.comparison.unresolvedGroups > 0) {
-      const group = store.getReimportMappingPage(reimport.draftId, reimport.draftVersion, null).items.find((item) => item.verb === null)!;
-      const resolution = store.createReimportResolutionWork(reimport.draftId, reimport.draftVersion, group.groupId, group.verbs[0]!);
-      let progress = store.advanceReimportResolutionWork(resolution.workId);
-      while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
-      reimport = progress.review!;
-    }
-    const commit = await store.createManuscriptReimportCommitWork({ draftId: reimport.draftId, expectedDraftVersion: reimport.draftVersion,
-      reviewDigest: reimport.reviewDigest, commitId: randomUUID() });
-    let committed = commit.result;
-    while (committed === null) {
-      await new Promise((resolveWait) => setTimeout(resolveWait, 5));
-      committed = (await store.advanceManuscriptReimportCommitWork(commit.workId!)).result;
-    }
+    await reimportSample1(store, book.bookId);
     const calls: StubCall[] = [];
     const live = liveOwner(store, liveRoute(stubTransport(calls, () => ANSWER)));
     try {
@@ -460,12 +470,7 @@ describe('the admitted dialogue route, read from the selected policy', () => {
     expect(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))).toBe(SAMPLE1_SOURCE_DIGEST);
     expect(refusalCode(() => liveOwner(store, unadmitted).requireReady(store.dialogueSourceDigest(book.bookId, selectionOf(store, book))))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
     expect(refusalCode(() => liveOwner(store, admitted).requireReady('0'.repeat(64)))).toBe('DIALOGUE_ROUTE_UNAVAILABLE');
-    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      expect(database.prepare('SELECT count(*) total FROM dialogue_tasks').get()).toEqual({ total: 0 });
-    } finally {
-      database.close();
-    }
+    expect(withDatabase((database) => new DialogueLedger(database).tasksOf(book.bookId))).toEqual([]);
     expect(calls).toHaveLength(0);
     expect(await ledgerLines()).toHaveLength(0);
   });
@@ -589,10 +594,10 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(body.stream).toBe(true);
       expect(body.tools).toBeUndefined();
       // Exactly the frozen contract and the one message: the selected words and the question, nothing else of the Book.
-      expect(sha256Hex(canonicalJson(body.messages))).toBe(sha256Hex(canonicalJson([
+      expect(body.messages).toEqual([
         { role: 'system', content: DIALOGUE_PROMPT_CONTRACT.systemPrompt },
         { role: 'user', content: buildDialogueMessage({ kind: 'ask', selection: selection.selectedText, question: QUESTION, kept: null }) },
-      ])));
+      ]);
       const lines = await ledgerLines();
       expect(lines).toHaveLength(1);
       expect(lines[0]).toMatchObject({ itemId: 'S17c/editorial-dialogue/1', purpose: 'editorial-dialogue', outcome: 'transmitted', status: 200, model: OPENCODE_GO_MODEL });
@@ -603,19 +608,14 @@ describe('就这段提问… on the live route (provider-free)', () => {
       expect(JSON.stringify(lines).includes(selection.selectedText)).toBe(false);
       expect(JSON.stringify(lines)).not.toContain(QUESTION);
       // The attempt is bound to the rule that admitted it, with no fixture.
-      const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-      try {
-        const binding = database.prepare('SELECT route, model, operational_scope, fixture_sha256, provider_processing_version, policy_rule_id FROM dialogue_execution_bindings').all();
-        expect(binding).toEqual([{
-          route: 'opencode-go', model: OPENCODE_GO_MODEL, operational_scope: 'developer-live', fixture_sha256: null,
-          provider_processing_version: livePolicy.providerProcessing.version, policy_rule_id: 'developer-live-public-samplebook-editorial-dialogue',
-        }]);
-      } finally {
-        database.close();
-      }
+      expect(readBinding(projection.attempts[0]!.attemptId)).toMatchObject({
+        route: 'opencode-go', model: OPENCODE_GO_MODEL, operationalScope: 'developer-live',
+        providerProcessingVersion: livePolicy.providerProcessing.version, policyRuleId: 'developer-live-public-samplebook-editorial-dialogue',
+      });
+      expect(readBinding(projection.attempts[0]!.attemptId)).not.toHaveProperty('fixtureSha256');
       // The answer has no Apply, export or publication authority: the manuscript is as it was, and nothing was applied.
       expect(projection.attempts[0]!.convertedMarkIds).toHaveLength(0);
-      expect(sha256Hex(JSON.stringify(store.inspectDialogue(book.bookId, dialogueId, 0, () => null)))).toBe(sha256Hex(JSON.stringify(projection)));
+      expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null)).toEqual(projection);
     } finally {
       await dialogues.dispose();
     }
@@ -654,8 +654,8 @@ describe('就这段提问… on the live route (provider-free)', () => {
       const again = await next(store, dialogues, book.bookId, business.dialogueId, 'regenerate');
       expect(again.attempts.map((attempt) => attempt.state)).toEqual(['completed', 'completed']);
       expect(businessCalls).toHaveLength(2);
-      expect(sha256Hex(businessCalls[1]!.body)).toBe(sha256Hex(businessCalls[0]!.body));
-      expect(sha256Hex(businessCalls[0]!.body)).toBe(sha256Hex(devCalls[0]!.body));
+      expect(businessCalls[1]!.body).toBe(businessCalls[0]!.body);
+      expect(businessCalls[0]!.body).toBe(devCalls[0]!.body);
     } finally {
       await dialogues.dispose();
     }
@@ -719,13 +719,9 @@ describe('就这段提问… on the live route (provider-free)', () => {
     const selection = selectionOf(store, book);
     // The stopped answer with kept fragments comes from the deterministic route, which can stop mid-answer; the live route
     // then goes on from exactly what it kept.
-    const { DialogueExecutionOwner: Owner } = await import('../../src/service/dialogue/dialogue-execution.js');
-    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
-    const { resolve } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
+    const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
     let streamed = 0;
-    const local = new Owner({
+    const local = new DialogueExecutionOwner({
       requestGovernor,
       records: store, fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null,
       answerHold: async (count, interrupted) => {
@@ -750,7 +746,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
       // A 继续回答 reads as what the stopped answer kept, then its own.
       expect(texts(continued, 1)).toEqual([...kept, '末句可以把语气放缓，与前文的节奏一致。']);
       const body = JSON.parse(calls[0]!.body) as { messages: Array<{ role: string; content: string }> };
-      expect(sha256Hex(body.messages.at(-1)!.content)).toBe(sha256Hex(buildDialogueMessage({ kind: 'continue', selection: selection.selectedText, question: QUESTION, kept: kept.join('') })));
+      expect(body.messages.at(-1)!.content).toBe(buildDialogueMessage({ kind: 'continue', selection: selection.selectedText, question: QUESTION, kept: kept.join('') }));
       const lines = await ledgerLines();
       expect(lines.map((line) => [line.itemId, line.outcome, line.validation?.step])).toEqual([
         ['S17c/editorial-dialogue/1', 'transmitted', 'editorial-dialogue/continue'],
@@ -779,10 +775,7 @@ describe('就这段提问… on the live route (provider-free)', () => {
 
 describe('the recorded live answer (Issue #52, S17c fixture)', () => {
   it('replays the Go capture through the real dialogue path: one ask, one 重新回答, complete fragments, no authority', async () => {
-    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
-    const { resolve } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const recorded = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue-recorded-v41');
+    const recorded = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue-recorded-v41');
     const recordedEntry = [...recorded.entries.values()][0]!;
     expect(recorded.entries.size).toBe(1);
     const capture = recordedEntry.capture as unknown as Record<string, unknown>;
@@ -810,10 +803,7 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
   });
   it('loads the streamed continuation capture under its SSE namespace with the provenance #833 recorded (Issue #833)', async () => {
     // The admitted stream fixture is the completed live 继续回答 alone; the stopped ask before it is no fixture entry.
-    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
-    const { resolve } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const recorded = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue-recorded-v41-stream');
+    const recorded = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue-recorded-v41-stream');
     expect(recorded.entries.size).toBe(1);
     const entry = [...recorded.entries.values()][0]!;
     expect(entry.capture as unknown as Record<string, unknown>).toMatchObject({
@@ -827,146 +817,115 @@ describe('the recorded live answer (Issue #52, S17c fixture)', () => {
   });
 });
 
-describe('revision 71', () => {
-  it.each([60, 70])('migrates schema %i with revision-60 bindings: every binding reads back under its own digest', async (version) => {
-    const { DialogueExecutionOwner: Owner } = await import('../../src/service/dialogue/dialogue-execution.js');
-    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
-    const { resolve } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
-    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ requestGovernor, records: predecessorLocalRecords(store), fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
-    const book = await importSample1Book(store, roots.codeRoot, '修订71');
-    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
-    local.begin(turn);
-    const before = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), settled, 'answered');
-    await local.dispose();
-    store.close();
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    let database = new DatabaseSync(path);
-    let rows: unknown[];
-    try {
-      database.exec('PRAGMA foreign_keys = OFF');
-      database.exec('BEGIN');
-      database.exec('CREATE TEMP TABLE keep AS SELECT * FROM dialogue_execution_bindings');
-      database.exec('DROP TABLE dialogue_execution_bindings');
-      database.exec(DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL);
-      database.exec(`INSERT INTO dialogue_execution_bindings(rowid, attempt_id, harness_session_id, route, model, operational_scope,
-        behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256)
-        SELECT 42, attempt_id, harness_session_id, route, model, operational_scope,
-        behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256 FROM temp.keep`);
-      rows = database.prepare('SELECT rowid, attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all();
-      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_update!);
-      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_delete!);
-      execPre74Fixture(database, `PRAGMA user_version = ${version}`);
-      database.exec('COMMIT');
-      if (version === 60) {
-        for (const schema of [EVALUATION_REWRITE_SCHEMA_SQL, CAPTURED_PROCEDURE_SCHEMA_SQL, READERS_REPORT_SCHEMA_SQL]) {
-          for (const table of Object.keys(schema).reverse()) database.exec(`DROP TABLE ${table}`);
-        }
-        downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
+/** These populated predecessor shapes are not covered by the owning suites' empty-ledger migrations. */
+async function migrateLegacyDialogue(version: 60 | 70 | 71) {
+  const fixture = await loadModelFixture(join(roots.codeRoot, 'tests', 'fixtures', 'model'), 'sample1-dialogue');
+  let store = await openStore();
+  const local = new DialogueExecutionOwner({ requestGovernor, records: predecessorLocalRecords(store), fixture,
+    sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
+  const book = await importSample1Book(store, roots.codeRoot, `修订${version}`);
+  const { dialogueId, projection } = await ask(store, local, book.bookId, selectionOf(store, book));
+  await local.dispose();
+  const attemptId = projection.attempts[0]!.attemptId;
+  const binding = readBinding(attemptId);
+  store.close();
+  const officialReference = randomUUID();
+  withDatabase((database) => {
+    database.exec('PRAGMA foreign_keys = OFF; BEGIN');
+    database.exec('CREATE TEMP TABLE keep AS SELECT * FROM dialogue_execution_bindings');
+    database.exec('DROP TABLE dialogue_execution_bindings');
+    database.exec(version === 71 ? DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL : DIALOGUE_EXECUTION_BINDINGS_REVISION_60_SQL);
+    const columns = `attempt_id, harness_session_id, route, model, operational_scope,
+      behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256${
+        version === 71 ? ', provider_processing_version, policy_rule_id' : ''}`;
+    database.exec(`INSERT INTO dialogue_execution_bindings(rowid, ${columns}) SELECT 42, ${columns} FROM temp.keep`);
+    database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_update!);
+    database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_delete!);
+    if (version === 71) {
+      database.exec('DROP TABLE model_service_connections');
+      database.exec(MODEL_SERVICE_CONNECTION_REVISION_11_SQL);
+      const stamp = '2026-10-01T00:00:00.000Z';
+      database.prepare(`INSERT INTO model_service_connections VALUES ('main-editorial-deepseek-v4-pro', 'main-editorial', '旧连接', 'deepseek-open-platform',
+        'deepseek-v4-pro', 1, 1, '[]', 'deepseek-api-key', ?, 'ready', ?, ?, ?)`).run(officialReference, stamp, stamp, stamp);
+    }
+    execPre74Fixture(database, `PRAGMA user_version = ${version}`);
+    database.exec('COMMIT');
+    if (version === 60) {
+      for (const schema of [EVALUATION_REWRITE_SCHEMA_SQL, CAPTURED_PROCEDURE_SCHEMA_SQL, READERS_REPORT_SCHEMA_SQL]) {
+        for (const table of Object.keys(schema).reverse()) database.exec(`DROP TABLE ${table}`);
       }
-    } finally {
-      database.close();
+      downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_59_SQL);
     }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    opened.push(store);
-    expect(sha256Hex(JSON.stringify(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)))).toBe(sha256Hex(JSON.stringify(before)));
-    store.close();
-    database = new DatabaseSync(path);
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      const sql = (database.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_execution_bindings'").get() as { sql: string }).sql;
-      expect(sql.replace(/\s+/gu, ' ')).toBe(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings.replace(/\s+/gu, ' '));
-      expect(database.prepare('SELECT rowid, attempt_id, canonical_json, sha256 FROM dialogue_execution_bindings ORDER BY rowid').all()).toEqual(rows);
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      expect(database.prepare('SELECT provider_processing_version, policy_rule_id FROM dialogue_execution_bindings').all())
-        .toEqual([{ provider_processing_version: null, policy_rule_id: null }]);
-      expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
-      expect(() => database.prepare('DELETE FROM dialogue_execution_bindings').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
-    } finally {
-      database.close();
-    }
+  });
+  store = await openStore();
+  return { store, book, dialogueId, projection, attemptId, binding, officialReference };
+}
+
+function expectMigratedBinding(attemptId: string, binding: StoredDialogueBinding | null): void {
+  expect(readBinding(attemptId)).toEqual(binding);
+  withDatabase((database) => {
+    expect(dialogueExecutionBindingsShape(database)).toBe('current');
+    // Row identity and SQL immutability have no public projection; retain the unique predecessor checks.
+    expect(database.prepare('SELECT rowid FROM dialogue_execution_bindings WHERE attempt_id = ?').get(attemptId)).toEqual({ rowid: 42 });
+    expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
+    expect(() => database.prepare('DELETE FROM dialogue_execution_bindings').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
+  });
+}
+
+describe('revision 71', () => {
+  it.each([60, 70] as const)('migrates schema %i with revision-60 bindings: every binding reads back under its own digest', async (version) => {
+    const { store, book, dialogueId, projection, attemptId, binding } = await migrateLegacyDialogue(version);
+    expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null)).toEqual(projection);
+    expectMigratedBinding(attemptId, binding);
   });
 });
 
 describe('revision 72 (Issue #811)', () => {
-  it('migrates a revision-71 store: dialogue bindings byte for byte, the official connection kept, and both production routes bindable', async () => {
-    const { DialogueExecutionOwner: Owner } = await import('../../src/service/dialogue/dialogue-execution.js');
-    const { loadModelFixture } = await import('../../src/service/provider/model-fixture.js');
-    const { resolve } = await import('node:path');
-    const { fileURLToPath } = await import('node:url');
-    const fixture = await loadModelFixture(resolve(fileURLToPath(new URL('../fixtures/model/', import.meta.url))), 'sample1-dialogue');
-    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const local = new Owner({ requestGovernor, records: predecessorLocalRecords(store), fixture, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live: null, answerHold: null });
-    const book = await importSample1Book(store, roots.codeRoot, '修订72');
-    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
-    local.begin(turn);
-    const before = await waitFor(() => store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null), settled, 'answered');
-    await local.dispose();
-    const officialReference = randomUUID();
-    store.close();
-    const path = join(roots.dataRoot, 'store', 'ai7.sqlite');
-    let database = new DatabaseSync(path);
-    let rows: unknown[];
-    const stamp = '2026-10-01T00:00:00.000Z';
-    try {
-      database.exec('PRAGMA foreign_keys = OFF');
-      database.exec('BEGIN');
-      // Revision 71's texts: the bindings as S17c widened them, and the one official v4-pro connection Issue #712 stored.
-      database.exec('CREATE TEMP TABLE keep AS SELECT rowid AS keep_rowid, * FROM dialogue_execution_bindings');
-      database.exec('DROP TABLE dialogue_execution_bindings');
-      database.exec(DIALOGUE_EXECUTION_BINDINGS_REVISION_71_SQL);
-      database.exec(`INSERT INTO dialogue_execution_bindings(rowid, attempt_id, harness_session_id, route, model, operational_scope,
-        behavior_composition_sha256, prompt_contract_sha256, fixture_sha256, bound_at, canonical_json, sha256, provider_processing_version, policy_rule_id)
-        SELECT keep_rowid, attempt_id, harness_session_id, route, model, operational_scope, behavior_composition_sha256, prompt_contract_sha256,
-        fixture_sha256, bound_at, canonical_json, sha256, provider_processing_version, policy_rule_id FROM temp.keep`);
-      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_update!);
-      database.exec(DIALOGUE_TRIGGER_SQL.dialogue_execution_bindings_no_delete!);
-      rows = database.prepare('SELECT rowid, * FROM dialogue_execution_bindings ORDER BY rowid').all();
-      database.exec('DROP TABLE model_service_connections');
-      database.exec(MODEL_SERVICE_CONNECTION_REVISION_11_SQL);
-      database.prepare(`INSERT INTO model_service_connections VALUES ('main-editorial-deepseek-v4-pro', 'main-editorial', '旧连接', 'deepseek-open-platform',
-        'deepseek-v4-pro', 1, 1, '[]', 'deepseek-api-key', ?, 'ready', ?, ?, ?)`).run(officialReference, stamp, stamp, stamp);
-      execPre74Fixture(database, 'PRAGMA user_version = 71');
-      database.exec('COMMIT');
-    } finally {
-      database.close();
-    }
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    opened.push(store);
-    expect(sha256Hex(JSON.stringify(store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)))).toBe(sha256Hex(JSON.stringify(before)));
-    // The official connection: its reference and state kept, the route's current model, and the route in use.
+  let migrated: Awaited<ReturnType<typeof migrateLegacyDialogue>>;
+  beforeEach(async () => { migrated = await migrateLegacyDialogue(71); });
+
+  it('keeps the revision-71 dialogue and its binding readable after migration', () => {
+    const { store, book, dialogueId, projection, attemptId, binding } = migrated;
+    expect(store.inspectDialogue(book.bookId, dialogueId, 0, () => null)).toEqual(projection);
+    expectMigratedBinding(attemptId, binding);
+  });
+
+  it('keeps the official connection selected while adding an independent Go connection', () => {
+    const { store, officialReference } = migrated;
     expect(store.getModelServiceConnection()).toMatchObject({
       connectionId: 'main-editorial-deepseek-v4-pro', connectionName: '旧连接', credentialReference: officialReference, credentialOperationState: 'ready',
       selected: true, binding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key' },
     });
-    // Both production routes are bindable now: a Go connection beside it, and a production dialogue attempt on either route.
     const go = store.saveModelServiceConnection('Go 连接', null, 'ready', 'opencode-go');
     expect(go).toMatchObject({ connectionId: 'main-editorial-opencode-go', selected: false, binding: { modelId: 'deepseek-v4.1-flash' } });
     expect(go.credentialReference).not.toBe(officialReference);
-    for (const route of ['opencode-go', 'deepseek-open-platform'] as const) {
-      const next = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
-      store.bindDialogueAttempt(next.attemptId, {
-        harnessSessionId: randomUUID(), route, model: route === 'opencode-go' ? 'deepseek-v4.1-flash' : 'deepseek-flash', operationalScope: 'ordinary-production',
-        behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: DIALOGUE_PROMPT_CONTRACT_DIGEST, providerProcessingVersion: 'v13',
-        policyRuleId: 'ordinary-production-editorial-dialogue', boundAt: new Date().toISOString(),
-      });
-    }
-    // Developer-live stays on the Go route alone.
-    const refused = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
-    expect(() => store.bindDialogueAttempt(refused.attemptId, {
+  });
+
+  it.each(['opencode-go', 'deepseek-open-platform'] as const)('binds an ordinary-production attempt on %s after migration', (route) => {
+    const { store, book } = migrated;
+    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    const binding = { harnessSessionId: randomUUID(), route, model: route === 'opencode-go' ? 'deepseek-v4.1-flash' : 'deepseek-flash',
+      operationalScope: 'ordinary-production' as const, behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      providerProcessingVersion: 'v13', policyRuleId: 'ordinary-production-editorial-dialogue', boundAt: new Date().toISOString() };
+    store.bindDialogueAttempt(turn.attemptId, binding);
+    expect(readBinding(turn.attemptId)).toEqual(binding);
+  });
+
+  it('refuses an official-route developer-live binding after migration', () => {
+    const { store, book } = migrated;
+    const turn = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+    expect(() => store.bindDialogueAttempt(turn.attemptId, {
       harnessSessionId: randomUUID(), route: 'deepseek-open-platform', model: 'deepseek-flash', operationalScope: 'developer-live',
       behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: DIALOGUE_PROMPT_CONTRACT_DIGEST, providerProcessingVersion: 'v12',
       policyRuleId: 'developer-live-public-samplebook-editorial-dialogue', boundAt: new Date().toISOString(),
     })).toThrow();
-    store.close();
-    database = new DatabaseSync(path);
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(LATEST_SCHEMA_VERSION).toBe(102);
-      // Revision 8 accepts nullable selection: two NULL rows coexist, but a second 1 or any other integer is refused.
+    expect(readBinding(turn.attemptId)).toBeNull();
+  });
+
+  it('keeps connection selection exclusive and nullable after migration', () => {
+    migrated.store.saveModelServiceConnection('Go 连接', null, 'ready', 'opencode-go');
+    // No public writer can request invalid selection integers or expose NULL versus false.
+    withDatabase((database) => {
       expect(database.prepare('SELECT selected FROM model_service_connections ORDER BY connection_id').all()).toEqual([{ selected: 1 }, { selected: null }]);
       expect(() => database.exec("UPDATE model_service_connections SET selected = 1 WHERE provider_id = 'opencode-go'")).toThrow();
       expect(() => database.exec("UPDATE model_service_connections SET selected = 0 WHERE provider_id = 'opencode-go'")).toThrow();
@@ -974,13 +933,7 @@ describe('revision 72 (Issue #811)', () => {
       database.exec('UPDATE model_service_connections SET selected = NULL');
       expect(database.prepare('SELECT count(*) total FROM model_service_connections WHERE selected IS NULL').get()?.total).toBe(2);
       database.exec('ROLLBACK');
-      const sql = (database.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_execution_bindings'").get() as { sql: string }).sql;
-      expect(sql.replace(/\s+/gu, ' ')).toBe(DIALOGUE_SCHEMA_SQL.dialogue_execution_bindings.replace(/\s+/gu, ' '));
-      expect(database.prepare('SELECT rowid, * FROM dialogue_execution_bindings ORDER BY rowid').all().slice(0, rows.length)).toEqual(rows);
-      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
-      expect(() => database.prepare('UPDATE dialogue_execution_bindings SET bound_at = bound_at').run()).toThrowError('DIALOGUE_LEDGER_IMMUTABLE');
-    } finally {
-      database.close();
-    }
+    });
+    expect(migrated.store.getModelServiceConnection()).toMatchObject({ selected: true, binding: { providerId: 'deepseek-open-platform' } });
   });
 });
