@@ -98,6 +98,21 @@ export type OrdinaryProductionAllowedBinding = (typeof ORDINARY_PRODUCTION_ALLOW
 export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.fast;
 export type OrdinaryProductionFastAllowedBinding = (typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number];
 
+/**
+ * The endpoint hosts the ordinary-production service arms before the network denial (Issue #1274): every admitted Main and
+ * Fast binding's host once, in binding order, with its port. v32 binds several models per channel, and `armHostAllowanceSet`
+ * fails closed on a duplicated host.
+ */
+export function ordinaryProductionHostAllowances(): ReadonlyArray<{ host: string; port: number }> {
+  const targets = new Map<string, { host: string; port: number }>();
+  for (const { endpoint } of [...ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ...ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS]) {
+    const url = new URL(endpoint);
+    const host = url.hostname.toLowerCase();
+    if (!targets.has(host)) targets.set(host, { host, port: url.port === '' ? 443 : Number(url.port) });
+  }
+  return [...targets.values()];
+}
+
 export const CONNECTION_TEST_KIND = 'model-connection-test' as const;
 export const CONNECTION_TEST_POLICY = {
   purpose: 'explicit-synthetic-model-connection-test', taskKind: CONNECTION_TEST_KIND,

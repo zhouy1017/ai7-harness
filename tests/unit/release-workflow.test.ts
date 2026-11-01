@@ -9,8 +9,8 @@ import { artifactName, assetNames, draftArguments, findBuild, findRelease, parse
 import { parsePackageArguments } from '../../tools/package.mjs';
 
 const repo = 'zhouy1017/ai7-harness';
-const candidate = releaseCandidate({ sha: 'a'.repeat(40), version: '0.4.0', gateRun: '123' });
-const identity = { schema: 1, softwareVersion: '0.4.0', dataVersion: 1, buildNumber: 72, sourceCommit: candidate.sha, dirty: false };
+const candidate = releaseCandidate({ sha: 'a'.repeat(40), version: '0.4.1', gateRun: '123' });
+const identity = { schema: 1, softwareVersion: '0.4.1', dataVersion: 1, buildNumber: 72, sourceCommit: candidate.sha, dirty: false };
 const identityReader = async () => identity;
 const run = { id: 123, run_attempt: 2, repository: { id: 7, full_name: repo }, head_repository: { id: 7, full_name: repo },
   path: '.github/workflows/e2e-nightly-queue.yml', event: 'workflow_dispatch', head_sha: 'b'.repeat(40),
@@ -29,7 +29,7 @@ const artifacts = ['win32'].map((platform, index) => ({ id: index + 10, name: ar
   workflow_run: { id: 123, repository_id: 7, head_repository_id: 7, head_branch: 'dev', head_sha: run.head_sha } }));
 const tagObject = 'e'.repeat(40);
 const push = { repository: { full_name: repo }, created: true, deleted: false, forced: false,
-  before: '0'.repeat(40), after: tagObject, ref: 'refs/tags/v0.4.0' };
+  before: '0'.repeat(40), after: tagObject, ref: 'refs/tags/v0.4.1' };
 
 async function fixture(root: string, platform: string) {
   await mkdir(join(root, 'config'), { recursive: true });
@@ -69,8 +69,8 @@ describe('nightly source and artifact admission', () => {
 
   it('resolves immutable source for the existing Gate independently of reserved release-version syntax', () => {
     expect(resolveNightlySource(identity, '123')).toMatchObject({ sha: candidate.sha, eligible: true });
-    expect(resolveNightlySource({ ...identity, softwareVersion: '0.4.0-beta.1+test' }, '123'))
-      .toMatchObject({ sha: candidate.sha, version: '0.4.0-beta.1+test', eligible: false });
+    expect(resolveNightlySource({ ...identity, softwareVersion: '0.4.1-beta.1+test' }, '123'))
+      .toMatchObject({ sha: candidate.sha, version: '0.4.1-beta.1+test', eligible: false });
   });
 
   it('binds packaging to the queue while keeping workflow head distinct from final dev', () => {
@@ -255,7 +255,7 @@ describe('tag timing and immutable published releases', () => {
     await expect(reconcilePublished(release, bound, identity, request)).resolves.toBe(true);
     expect(paths.some((path) => path.startsWith('actions/'))).toBe(false);
     expect(publicationNames(candidate.version)).toEqual([
-      'AI7-0.4.0-win-x64-portable.zip', 'AI7-0.4.0-win-x64-setup.exe', 'SHA256SUMS-win-x64.txt', 'provenance-win-x64.json',
+      'AI7-0.4.1-win-x64-portable.zip', 'AI7-0.4.1-win-x64-setup.exe', 'SHA256SUMS-win-x64.txt', 'provenance-win-x64.json',
     ]);
     expect(() => verifyPublicationRecord({ ...record, assets: [...assetRecords, { name: 'mac.dmg', size: 8, sha256: 'f'.repeat(64) }] }, bound, identity)).toThrow();
     expect(() => verifyPublicationRecord({ ...record, identity: { ...identity, dataVersion: 2 } }, bound, identity)).toThrow();

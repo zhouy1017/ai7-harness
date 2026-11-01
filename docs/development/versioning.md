@@ -16,18 +16,19 @@ One `x.y.z` in root `package.json` names the software everywhere — source, bui
 | 0.2.0 | integrated | Wave 21 — the core completes and procedures become editable (W21-S1–S9, PRs #1182–#1187, #1190–#1193) | `9b40a6e8fef878167c6e226948fb4320cd7d8321` ([PR #1195](https://github.com/zhouy1017/ai7-harness/pull/1195)) | none |
 | 0.3.0 | integrated | Wave 22 — desk work and derived deliverables (W22-S1–S10, PRs #1199, #1201–#1203, #1206–#1209, #1211, #1212, #1214, #1216, #1219, #1220, #1222) | `d01b5fc0fb6c95f5b793787d9ae29dcf4a95d16c` ([PR #1224](https://github.com/zhouy1017/ai7-harness/pull/1224)) | none |
 | 0.4.0 | integrated | Wave 22b — the Wave 22 follow-up: Provider Processing v32 / active set v23, the admitted channels made usable, the search 备用来源 and the F-25 / F-27 maintenance sub-wave (W22b-A1–A3, PRs #1241, #1258, #1265; F-25 #1243, #1244; F-27 #1242, #1245–#1249, #1254–#1257, #1263, #1264, #1266, #1269, #1270) | the squash commit of the Wave 22b pull request on `dev`, named in that PR's closure (this row is raised by the candidate under orca-dispatch §5) | none |
+| 0.4.1 | integrated | Hotfix between Wave 22b and Wave 23 — the ordinary-production service failed closed on the duplicated endpoint hosts of the v32 bindings ([#1274](https://github.com/zhouy1017/ai7-harness/issues/1274)); fix only, no feature | the squash commit of the hotfix pull request on `dev`, named in that PR's closure | none |
 | 1.0.0 | planned | Wave 23 — acceptance and closure (`1.0.0-rc.N` before the Owner accepts) | — | — |
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.4.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**104** at this head) and service protocol (**191**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.4.1`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**104** at this head) and service protocol (**191**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.4.0",
+  "softwareVersion": "0.4.1",
   "dataVersion": 1,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

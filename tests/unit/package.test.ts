@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 // @ts-expect-error Plain build tooling intentionally has no TypeScript declarations.
 import { builderConfiguration, copyRuntimeClosure, packagerArtifacts, plannedOutputs, selfCheckEnvironment } from '../../tools/package.mjs';
 
-const identity = { schema: 1, softwareVersion: '0.4.0', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false };
+const identity = { schema: 1, softwareVersion: '0.4.1', dataVersion: 1, buildNumber: 1234, sourceCommit: 'a'.repeat(40), dirty: false };
 
 describe('host-native offline package inputs', () => {
   it('passes only OS prerequisites to the installed-product self-check', () => {
@@ -40,9 +40,9 @@ describe('host-native offline package inputs', () => {
     expect(config.win.signAndEditExecutable).toBe(true); // Pinned resedit JS, no secondary tool acquisition.
     expect(config.win.signExecutable).toBe(false);
     expect(config.buildNumber).toBe('1234');
-    expect(config.buildVersion).toBe('0.4.0.1234');
+    expect(config.buildVersion).toBe('0.4.1.1234');
     expect(config.mac.bundleVersion).toBe('1.12.34');
-    expect(config.mac.bundleShortVersion).toBe('0.4.0');
+    expect(config.mac.bundleShortVersion).toBe('0.4.1');
     expect(config.mac.extendInfo.AI7SourceCommit).toBe(identity.sourceCommit);
     expect(() => builderConfiguration(manifest, resolve('stage'), { ...identity, dirty: true })).toThrow();
     expect(() => builderConfiguration(manifest, resolve('stage'), { ...identity, softwareVersion: '0.5.0' })).toThrow();
@@ -91,11 +91,11 @@ describe('host-native offline package inputs', () => {
       const resources = NtExecutableResource.from(NtExecutable.from(await readFile(file)));
       const info = Resource.VersionInfo.fromEntries(resources.entries)[0];
       expect(info.fixedInfo.fileVersionMS).toBe(4); // 0.4
-      expect(info.fixedInfo.fileVersionLS).toBe(1234); // 0.1234
+      expect(info.fixedInfo.fileVersionLS).toBe(66770); // 1.1234: the patch in the high word, the build number in the low
       expect(info.fixedInfo.productVersionMS).toBe(4);
-      expect(info.fixedInfo.productVersionLS).toBe(1234);
+      expect(info.fixedInfo.productVersionLS).toBe(66770);
       const strings = info.getStringValues(info.getAllLanguagesForStringValues()[0]);
-      expect(strings).toMatchObject({ FileVersion: '0.4.0.1234', ProductVersion: '0.4.0.1234', ProductName: 'AI7' });
+      expect(strings).toMatchObject({ FileVersion: '0.4.1.1234', ProductVersion: '0.4.1.1234', ProductName: 'AI7' });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
