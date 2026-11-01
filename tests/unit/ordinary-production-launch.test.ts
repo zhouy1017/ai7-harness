@@ -3,10 +3,11 @@ import { copyFile, mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
+  ordinaryProductionHostAllowances,
   resolveSourceCheckoutLaunchPolicy,
   type ConfiguredProviderBinding,
 } from '../../src/service/launch-policy.js';
@@ -101,6 +102,24 @@ describe('the ordinary-production launch form', () => {
     ]) {
       expect(() => wrapper.parseProductionLaunchArguments(args, windows), args.join(' ')).toThrowError(/AI7_PRODUCTION_LAUNCH_INVALID/u);
     }
+  });
+  it('arms each admitted endpoint host once — v32 binds several models per channel (Issue #1274)', async () => {
+    const allowances = ordinaryProductionHostAllowances();
+    const hosts = allowances.map((target) => target.host);
+    const bindings = [...ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ...ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS];
+    expect(new Set(hosts).size).toBe(hosts.length);
+    expect(hosts.length).toBeLessThan(bindings.length);
+    for (const { endpoint } of bindings) {
+      const url = new URL(endpoint);
+      expect(allowances).toContainEqual({ host: url.hostname, port: url.port === '' ? 443 : Number(url.port) });
+    }
+    // A fresh denial module accepts the set as the service arms it; the bindings' own targets, host by host, it refuses.
+    vi.resetModules();
+    const denial = await import('../../src/shared/network-denial.js');
+    expect(() => denial.armHostAllowanceSet(bindings.map(({ endpoint }) => ({ host: new URL(endpoint).hostname, port: 443 }))))
+      .toThrowError(new RegExp(denial.NETWORK_ALLOWANCE_INVALID_CODE, 'u'));
+    denial.armHostAllowanceSet(allowances);
+    expect(denial.hostAllowanceSet()).toEqual(allowances);
   });
 });
 
