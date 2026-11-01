@@ -37,8 +37,8 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../shared/protecte
 import {
   DEVELOPER_LIVE_POLICY_BINDING,
   ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
-  ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS,
   allowedProductionBindingOf,
+  ordinaryProductionHostAllowances,
   modelServiceChannels,
   resolveDeveloperLiveLaunch,
   type ConfiguredProviderBinding,
@@ -1945,10 +1945,7 @@ async function run(): Promise<void> {
   } else if (launchForm.trustedOperationalScope === 'ordinary-production') {
     // Ordinary production (Issue #811): the admitted bindings' endpoint hosts, so the editor may choose the route for their
     // next Task without restarting AI7. Which one a Run reaches is its frozen plan's, checked again by the Egress Gate.
-    armHostAllowanceSet(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.map(({ endpoint }) => {
-      const url = new URL(endpoint);
-      return { host: url.hostname, port: url.port === '' ? 443 : Number(url.port) };
-    }));
+    armHostAllowanceSet(ordinaryProductionHostAllowances());
   }
   if (launchForm.trustedOperationalScope === 'developer-live' || launchForm.trustedOperationalScope === 'ordinary-production') armPerTicketHostAdmission();
   installNodeNetworkDenial();
