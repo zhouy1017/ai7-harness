@@ -30,7 +30,7 @@ import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-
 import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
 import { ADMITTED_BASELINE_DOCX, composeRevisedDocx } from '../support/composed-fixture.js';
 import { buildSyntheticTrackedDocx } from '../support/synthetic-docx.js';
-import { MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
+import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, MAX_FRAME_BYTES } from '../../src/shared/protocol.js';
 
 // Service-integration suite (L2) for multi-format intake (ADR 0072 §1–2). It drives the real
 // `EditorialStore` on a temporary Agent Data Root without Electron. The admitted material it reads
@@ -301,7 +301,7 @@ async function writeTrackedWord(fileName: string, title: string): Promise<string
 }
 
 describe('native Word reading preparation over the real store', () => {
-  it.each(['suggestions', 'accepted-baseline'] as const)('projects and reopens source-linked endnotes with Word %s', async (mode) => {
+  it.each(['suggestions', 'accepted-baseline'] as const)('projects, reopens and exports source-linked endnotes with Word %s', async (mode) => {
     const { composeExportAdmittedDocx } = await import(new URL('../../e2e/composed-docx.mjs', import.meta.url).href);
     const path = join(roots.inputRoot, `word-endnote-${mode}.docx`);
     await composeExportAdmittedDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 30, title: 'Word 注释组合',
@@ -315,8 +315,10 @@ describe('native Word reading preparation over the real store', () => {
         { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false, 'retain',
         { mode, learnFromEdits: false, acceptedBaselineConfirmed: mode === 'accepted-baseline' });
       if (review.reviewDigest === null) throw new Error('expected combined Word/endnote preparation');
+      const commitId = randomUUID();
       const committed = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
-        reviewDigest: review.reviewDigest, commitId: randomUUID() });
+        reviewDigest: review.reviewDigest, commitId });
+      await store.acknowledgeImportCompletion(commitId);
       const window = store.getManuscriptWindow(committed.manuscriptId, committed.branchId, null);
       const note = window.blocks.find((block) => block.kind === 'note');
       expect(note?.note).toMatchObject({ part: 'endnote', ordinal: 1, referencePosition: 15 });
@@ -324,6 +326,19 @@ describe('native Word reading preparation over the real store', () => {
       store.markCleanShutdown(); store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getManuscriptWindow(committed.manuscriptId, committed.branchId, null).blocks.find((block) => block.kind === 'note')).toEqual(note);
+      const target = { kind: 'current' as const }, options = DEFAULT_MANUSCRIPT_EXPORT_OPTIONS;
+      const reviewed = await store.reviewManuscriptExport({ bookId: committed.bookId, target, options }, true);
+      const destination = join(roots.inputRoot, `word-note-export-${mode}.docx`);
+      const preparation = await store.prepareManuscriptExport({ bookId: committed.bookId, target, options, destination,
+        revisionId: reviewed.target.revisionId, reviewDigest: reviewed.reviewDigest }, true);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect((await store.approveManuscriptExport({ bookId: committed.bookId, preparationId: preparation.preparationId }, true)).outcome).toBe('created');
+      const exported: import('../../src/service/docx.js').ParsedDocxBlock[] = [];
+      await parseDocx(destination, 'word-note-export.docx', (block) => exported.push(block));
+      expect(exported.find((block) => block.kind === 'note')?.note).toEqual({ part: 'endnote', noteId: '1', ordinal: 1, referencePosition: 15 });
+      const { unzipSync } = await import('fflate');
+      expect(unzipSync(await readFile(destination))['word/endnotes.xml']).toEqual(unzipSync(await readFile(path))['word/endnotes.xml']);
     } finally { store.markCleanShutdown(); store.close(); }
   });
 

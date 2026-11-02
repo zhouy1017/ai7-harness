@@ -246,9 +246,8 @@ export function requireWordManuscriptSourceSegments(db: DatabaseSync, bookId: st
   ReturnType<typeof bindWordReadingToRevision> {
   validateWordImportChoiceRecord(choice);
   const selected = choice.mode === 'suggestions' ? 'rejected' : 'accepted';
+  requireRetention(reading.reading === selected, 'WORD_MAPPING_INVALID', 'Word 稿件对应使用了另一条阅读。');
   reading = wordReadingForDigest(reading, choice.readings[selected].digest);
-  requireRetention(reading.reading === selected && reading.readingDigest === choice.readings[selected].digest,
-    'WORD_MAPPING_INVALID', 'Word 稿件对应使用了另一条阅读。');
   const bound = bindWordReadingToRevision(db, bookId, choice.revisionId, choice.sourceVersionId, reading);
   requireRetention(db.prepare('SELECT 1 FROM manuscript_block_sources WHERE revision_id = ? LIMIT 1').get(choice.revisionId) === undefined,
     'WORD_MAPPING_INVALID', 'Word 片段对应不能同时冒充历史段落对应。');
