@@ -27,7 +27,14 @@ const check=(condition,name)=>{if(!condition)throw Error(name);report.checks.pus
 const at=(name)=>{stage=name;console.log('BETA_PACKAGE/stage/'+name);};
 const run=(file,args,env=process.env)=>{const result=spawnSync(file,args,{cwd:ROOT,env,windowsHide:true,encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});if(result.status!==0)throw Error('child-failed');return result.stdout;};
 const wait=async(predicate,name,ms=60000)=>{const end=Date.now()+ms;while(Date.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error(name);};
-const native=(exe,options)=>run('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(ROOT,'tools','beta-native-dialog.ps1'),'-Executable',exe,...options]);
+const native=(exe,options)=>{
+ const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(ROOT,'tools','beta-native-dialog.ps1'),'-Executable',exe,...options],{cwd:ROOT,windowsHide:true,encoding:'utf8',timeout:60000});
+ const ui=result.stdout?.split(/\r?\n/).find(line=>line.startsWith('BETA_NATIVE_UI:'));if(ui){report.nativeStartupUi=JSON.parse(ui.slice('BETA_NATIVE_UI:'.length));}
+ const marker=result.stdout?.match(/^BETA_NATIVE\/[A-Za-z0-9/._-]+$/m)?.[0]??'BETA_NATIVE/no-marker';
+ report.nativeCalls??=[];report.nativeCalls.push({stage,exit:result.status,marker});
+ if(result.status!==0)throw Error(marker.toLowerCase().replaceAll('_','-').replaceAll('.','-'));
+ return marker;
+};
 
 // The same CDP pipe used by the ordinary source Journeys, without any product test controls.
 async function renderer(browser){
@@ -106,20 +113,20 @@ async function removeOwnedCredentials(){
 }
 
 async function walk(executable,env,expectedChannel,expectedDataRoot,input,output){
- await configureLiveConnections(expectedDataRoot,dirname(input),expectedChannel);
  at(expectedChannel+'-launch');
  let browser;
  try{
   // Ordinary packaged argv: the pipe only; data location is still resolved by the actual channel.
   if(expectedChannel==='windows-installer'&&!existsSync(join(expectedDataRoot,'..','startup-data-location.json'))){
    at('native-first-startup-choice');
-   const initial=spawn(executable,[],{env,windowsHide:true,stdio:'ignore'});
+   const initial=spawn(executable,[],{env,windowsHide:false,stdio:'ignore'});initial.once('exit',code=>{report.firstLaunchExit=code;});
    native(executable,['-ButtonName','使用默认位置']);
    await wait(()=>existsSync(join(expectedDataRoot,'..','startup-data-location.json')),'startup-choice-persisted');
    await new Promise(r=>setTimeout(r,3000));native(executable,['-StopOwnedProcess']);
    await new Promise(r=>setTimeout(r,1000));initial.unref();
    check(true,'native-first-run-relaunch');
   }
+  await configureLiveConnections(expectedDataRoot,dirname(input),expectedChannel);
   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
   let page=await renderer(browser);
   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'product-ready');
