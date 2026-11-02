@@ -441,7 +441,7 @@ describe('schema revision 82', () => {
     const migrated = new DatabaseSync(path);
     try {
       // Synchronized with #89: revision 83 adds imported-Skill update ledgers after this revision's migration.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 104 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
       for (const table of ['analysis_result_sets', 'analysis_result_set_revisions'] as const) {
         expect((migrated.prepare(`SELECT sql FROM sqlite_schema WHERE name = '${table}'`).get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_SCHEMA_SQL[table]);
       }

@@ -62,6 +62,7 @@ describe('the connection test on the admitted channels', () => {
     expect(nativeFetch).toHaveBeenCalledTimes(1);
     target.selectFastRoleModel('google-gemini', 'account-new-model');
     target.selectModelServiceRoute('google-gemini');
-    expect(target.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('account-new-model');
+    expect(target.getConfiguredModelRoleBinding('fast-interaction')?.model).toBe('account-new-model');
+    expect(target.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('gemini-3.8-flash');
   });
 });
