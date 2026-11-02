@@ -483,8 +483,9 @@ export function requireManuscriptReimportTargetSchema(
       // the text before it.
       ...(includeModelServiceTable
         ? { model_service_connections: [MODEL_SERVICE_CONNECTION_REVISION_11_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_SCHEMA_SQL]
-          .slice([MODEL_SERVICE_ROUTES_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, Infinity]
-            .findIndex((revision) => Number(db.prepare('PRAGMA user_version').get()?.user_version) < revision)) }
+          .slice(Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION ? -1
+            : [MODEL_SERVICE_ROUTES_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, Infinity]
+              .findIndex((revision) => Number(db.prepare('PRAGMA user_version').get()?.user_version) < revision)) }
         : {}),
       ...(includeNativeArtifactTables
         ? {

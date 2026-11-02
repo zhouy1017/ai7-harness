@@ -103,7 +103,7 @@ describe('the model-service channel catalogue', () => {
       db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_103_SQL);
       db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
         SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test FROM old_channel_rows`);
-      db.exec('DROP TABLE old_channel_rows'); db.exec('COMMIT');
+      db.exec('DROP TABLE old_channel_rows; PRAGMA user_version = 104'); db.exec('COMMIT');
     } finally { db.close(); }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.getModelServiceConnections()).toEqual(before);
