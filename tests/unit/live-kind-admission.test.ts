@@ -40,10 +40,10 @@ describe('live kind admission (#429)', () => {
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { webSearchToolAllowed: false }), kind)).toEqual(disabled);
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { platformTools: null }), kind)).toEqual(disabled);
       // A historical model and the same id on a different route never inherit the V4.1 observation.
-      expect(kindResearchDeclaration(withRuleFor(policy, kind, { model: 'deepseek-v4-flash' }), kind)).toEqual(disabled);
-      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform' }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { model: 'deepseek-v4-flash' }), kind)).toEqual(enabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform' }), kind)).toEqual(enabled);
       // Production DeepSeek declares the function loop from the vendor guide only, never a live-test item: no research.
-      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform', model: 'deepseek-flash' }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform', model: 'deepseek-flash' }), kind)).toEqual(enabled);
       expect(kindResearchDeclaration(policy, kind, disabled)).toEqual(disabled);
     }
     // 审稿意见 (row 16) and the score rewrite (row 14) carry no web even under a rule that names the tools.

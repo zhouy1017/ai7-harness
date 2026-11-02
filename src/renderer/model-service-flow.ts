@@ -8,7 +8,6 @@ import {
   type ModelServiceSettingsProjection,
   type RendererApi,
 } from '../shared/protocol.js';
-import { modelServiceTestRequired } from '../shared/protocol/model-service.js';
 import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 
 /**
@@ -47,7 +46,7 @@ const DISPOSITION_WORDS: Readonly<Record<Exclude<ModelServiceModelDisposition, '
   'family-not-admitted-by-selected-policy': '所选策略未准入此协议',
   'untested:text': '文本回答尚未核验',
   'unsupported:text': '此协议不支持文本回答',
-  'not-in-runtime-model-table': '尚无已审核的运行配置',
+  'channel-not-admitted-by-selected-policy': '当前渠道尚未获准',
 };
 
 /** Why a model cannot be chosen for a role, in words with the disposition's name; `可选` when it can. */
@@ -61,7 +60,7 @@ export function modelRolesLabel(model: ModelServiceChannelModelProjection): stri
   return `主编辑角色：${modelDispositionLabel(model.main)}；快速交互角色：${model.fast === 'eligible' ? '可在高级设置中单独指定' : modelDispositionLabel(model.fast)}`;
 }
 
-const CAPABILITY_WORDS = { supported: '已核验', untested: '未核验', unsupported: '不支持' } as const;
+const CAPABILITY_WORDS = { supported: '协议支持', untested: '未核验', unsupported: '不支持' } as const;
 
 /** The declared capabilities of a model, for the one-click feedback beside its connection test. */
 export function modelCapabilityLabel(model: ModelServiceChannelModelProjection): string {
@@ -75,17 +74,10 @@ function credentialReady(projection: ModelServiceSettingsProjection, route: Mode
   return route !== null && projection.routeChoice.routes.find((option) => option.route === route)?.connection?.credentialOperationState === 'ready';
 }
 
-/** Whether a documentary channel's model still needs its own passed text test on the saved credential before it can be chosen. */
-export function modelServiceTestPending(projection: ModelServiceSettingsProjection, route: ModelServiceRouteId, modelId: string): boolean {
-  const connection = projection.routeChoice.routes.find((option) => option.route === route)?.connection ?? null;
-  const test = connection?.connectionTest ?? null;
-  return modelServiceTestRequired(route) && (test?.outcome !== 'passed' || test.modelId !== modelId || test.credentialUpdatedAt !== connection?.credentialUpdatedAt);
-}
-
 /** Every model both roles can take now, channel by channel, in the flow's order. */
 export function modelServiceChoices(projection: ModelServiceSettingsProjection): ModelServiceChoice[] {
   return projection.channels.flatMap((channel) => channel.route === null || !credentialReady(projection, channel.route) ? [] : channel.models
-    .filter((model) => bothEligible(model) && !modelServiceTestPending(projection, channel.route!, model.modelId))
+    .filter((model) => bothEligible(model))
     .map((model) => ({ route: channel.route!, channelLabel: channel.channelLabel, modelId: model.modelId, modelLabel: model.modelLabel })));
 }
 
@@ -167,8 +159,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   use.dataset['action'] = 'use-model-for-both-roles';
   const paint = (): void => {
     test.disabled = !ready || checked === null;
-    use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId) ||
-      (channel.route !== null && modelServiceTestPending(projection, channel.route, checked.modelId));
+    use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId);
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
     feedback.replaceChildren(...(checked === null ? [] : [
@@ -187,7 +178,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
     if (ready && (checked === null || inUse)) { radio.checked = true; checked = model; }
     radio.addEventListener('change', () => { checked = model; paint(); });
-    label.append(radio, ` ${model.modelLabel}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : modelServiceTestPending(projection, channel.route!, model.modelId) ? ' · 需先测试连接' : ''}`);
+    label.append(radio, ` ${model.modelLabel}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
     group.append(label);
   }
   if (offered.length === 0) group.append(el('p', 'field-note', '此渠道没有两个角色都可选的模型。'));

@@ -364,9 +364,9 @@ export function qualifiedGlobalAttemptMetadataOf(value: unknown): QualifiedGloba
   if (identity === null || (identity.providerProcessingVersion !== 'v30' && identity.providerProcessingVersion !== 'v31' && identity.providerProcessingVersion !== 'v32') || value.textProcessing !== 'qualified-original-fields' ||
       (value.policyRuleId !== 'ordinary-production-global-agent-dialogue' && (value.policyRuleId !== GLOBAL_AGENT_SCOPED_RULE_ID ||
         identity.providerProcessingVersion === 'v30')) || value.modelRole !== 'Fast Interaction Role' ||
-      typeof route !== 'string' || typeof value.model !== 'string' ||
+      typeof route !== 'string' || typeof value.model !== 'string' || value.model.length === 0 ||
       typeof value.credentialSlot !== 'string' || !ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS.some((binding) =>
-        binding.route === route && binding.model === value.model && binding.credentialSlot === value.credentialSlot) ||
+        binding.route === route && binding.credentialSlot === value.credentialSlot) ||
       typeof value.credentialReference !== 'string' || !CREDENTIAL_REFERENCE_PATTERN.test(value.credentialReference) ||
       DEVELOPMENT_CREDENTIAL_REFERENCES.has(value.credentialReference.toLowerCase()) ||
       typeof value.credentialUpdatedAt !== 'string' || value.credentialUpdatedAt.length > 30 || !Number.isFinite(Date.parse(value.credentialUpdatedAt)) ||

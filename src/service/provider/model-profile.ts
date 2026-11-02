@@ -5,27 +5,12 @@ import {
   OPENCODE_GO_ROUTE,
   type RemoteExecutionRoute,
 } from './egress-gate.js';
-import { GENERATED_MODEL_PROFILES } from './provider-profiles.generated.js';
+import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from './provider-profiles.generated.js';
 
 /**
- * What one model can be asked to do, declared rather than inferred (Issue #310).
- *
- * A route profile says how to *reach* a model — endpoint, credential slot, headers, limit reading.
- * This module says how to *speak to* one, and the two are separate because one route serves many
- * models: ADR 0067 records the `opencode-go` gateway carrying DeepSeek, GLM, Kimi, Qwen, MiniMax,
- * GPT, and Grok across three API shapes. A model profile is therefore keyed by `${route}/${model}`,
- * never by route alone.
- *
- * The rule that keeps this table from becoming a wish list: **an unverified capability is declared
- * absent.** Every value records how it was established, and a capability nobody has seen work is
- * `none`. That is exactly what went wrong before this module existed — the unit contract relied on a
- * JSON-object guarantee that was never requested of the gateway, let alone verified, and it failed
- * three of eight units on the first live Run (#307, #306).
- *
- * Adding a model is adding data — since ADR 0073 (Issue #435, S55a) a row of a provider document
- * under `config/providers/`, from which `tools/generate-provider-configuration.mjs` generates
- * `./provider-profiles.generated.ts`; no profile is written here by hand. If a new model needs a
- * change in the adapter's control flow, the missing fact belongs in the document instead.
+ * Provider documents retain optional model-specific settings and historical evidence. Runtime text,
+ * streaming and function tools inherit the route's implemented protocol, including unknown IDs (#1281).
+ * A profile supplies wire capabilities, never channel admission, account availability or transmission authority.
  */
 
 /**
@@ -138,6 +123,7 @@ export interface ModelCapabilities {
  * table, are pinned byte for byte by the adapter suite, and have never been transmitted live.
  */
 export type CapabilityEvidence =
+  | { readonly kind: 'adapter-implementation'; readonly source: string }
   | { readonly kind: 'vendor-documentation'; readonly source: string; readonly readOn: string }
   | { readonly kind: 'live-test-item'; readonly itemIds: ReadonlyArray<string>; readonly observedOn: string }
   | { readonly kind: 'frozen-request-baseline'; readonly since: string }
@@ -183,9 +169,38 @@ export const PROVIDER_MODEL_PROFILES: Readonly<Record<ModelProfileKey, ProviderM
   Object.fromEntries(GENERATED_MODEL_PROFILES.map((profile) => [profile.key, profile])),
 );
 
-/** The declared profile for one route and model, or `null` when nothing has declared that pair. */
+/** Runtime capabilities inherit the selected route's implemented protocol (#1281); evidence is not model admission. */
 export function modelProfileFor(route: RemoteExecutionRoute, model: string): ProviderModelProfile | null {
-  return PROVIDER_MODEL_PROFILES[modelProfileKey(route, model)] ?? null;
+  const family = GENERATED_ROUTE_DISPOSITIONS[route]?.family;
+  if (family === undefined || !validModelId(model)) return null;
+  const declared = PROVIDER_MODEL_PROFILES[modelProfileKey(route, model)];
+  const evidence: CapabilityEvidence = { kind: 'adapter-implementation', source: 'src/service/provider/family-dispositions.ts' };
+  const answerChannel: Record<RequestShape, AnswerChannel> = {
+    'openai-chat-completions': 'message-content-string', 'openai-responses': 'output-message-text',
+    'anthropic-messages': 'content-text-blocks', 'google-generate-content': 'candidate-parts-text',
+  };
+  const streaming = {
+    'openai-chat-completions': 'chat-completions-sse', 'openai-responses': 'responses-sse',
+    'anthropic-messages': 'messages-sse', 'google-generate-content': 'generate-content-sse',
+  } as const;
+  const unverified: CapabilityEvidence = { kind: 'unverified' };
+  return {
+    key: modelProfileKey(route, model), route, model, displayName: declared?.displayName ?? model,
+    capabilities: { reasoningControl: 'none', structuredOutput: 'none', reasoningChannel: 'none',
+      usageAttribution: 'unknown', webSearchTool: 'none', ...declared?.capabilities,
+      requestShape: family, answerChannel: answerChannel[family], toolCalling: 'function', streaming: streaming[family] },
+    evidence: { requestShape: evidence, reasoningControl: unverified, structuredOutput: unverified,
+      reasoningChannel: unverified, usageAttribution: unverified, webSearchTool: unverified, ...declared?.evidence,
+      answerChannel: declared?.capabilities.answerChannel === answerChannel[family] ? declared.evidence.answerChannel : evidence,
+      toolCalling: declared?.capabilities.toolCalling === 'function' ? declared.evidence.toolCalling : evidence,
+      streaming: declared?.capabilities.streaming === streaming[family] ? declared.evidence.streaming ?? evidence : evidence },
+    context: declared?.context ?? { tokens: null, evidence: unverified },
+  };
+}
+
+/** Provider IDs may contain paths and punctuation, but never whitespace/control characters or an empty ID. */
+export function validModelId(model: string): boolean {
+  return typeof model === 'string' && model.length > 0 && model.length <= 512 && !/[\s\p{Cc}]/u.test(model);
 }
 
 function declaredProfile(route: RemoteExecutionRoute, model: string): ProviderModelProfile {

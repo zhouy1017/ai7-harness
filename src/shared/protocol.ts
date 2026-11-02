@@ -2443,8 +2443,8 @@ export type ProviderProcessingVersion = 'v1' | 'v29' | DeveloperLiveProviderProc
 
 /** Accepted identities shared by readers and gates; these constants do not select a policy or authorize a send. */
 export const ORIGINAL_FIELDS_ACTIVE_SET_SHA256 = '4b845e924df777f440b07d53ba6e31447e0fe0b004e86efa89bf76554fb05392';
-export const CURRENT_ACTIVE_SET_SHA256 = 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab';
-export const CURRENT_PRODUCTION_POLICY_SHA256 = '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad';
+export const CURRENT_ACTIVE_SET_SHA256 = 'e69daf84caa82718af5a41a32554adf2feb9396314e88e76edb513c62cee8fc7';
+export const CURRENT_PRODUCTION_POLICY_SHA256 = '46e66ad3f3f67510c0c0d0386d0f0c4e5bd11d1f68b918bce75d532ad62c2049';
 export const DEVELOPMENT_CI_POLICY_SHA256 = 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a';
 export const ORIGINAL_FIELDS_POLICY_SHA256 = 'f12df1d43cfc9f52b999c2cc8a6e9bac419177d42210d3bbe8c5008ba8d6a59e';
 export const LOCAL_FIXTURE_POLICY_SHA256 = 'c9545a5f461a7791115c1f4664bbd731757775951f814d39c28b12c85af88c9d';
@@ -3178,7 +3178,7 @@ export interface ModelServiceUnsupportedProviderProjection {
  * and where to set one, and says nothing was sent.
  */
 export const MODEL_SERVICE_SETUP_REQUIRED_REASON =
-  '模型服务需设置：请先在 设置 › 模型服务 为 OpenCode Go（默认）或 DeepSeek 开放平台（官方）保存连接名称与凭据；这次没有发送任何内容。' as const;
+  '模型服务需设置：请先在设置 › 模型服务中配置模型凭据；这次没有发送任何内容。' as const;
 
 /** What 设置 › 模型服务 says about choosing the route (Issue #811). */
 export const MODEL_SERVICE_ROUTE_EFFECT_LABEL = '切换路线只影响之后开始的任务；已在进行的任务保持原有绑定。没有自动备用路线。' as const;

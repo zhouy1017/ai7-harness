@@ -1433,7 +1433,7 @@ export class ReviewRunStore {
         const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
         requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
         if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
-          requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry)}`);
+          requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry, input.launchPolicy)}`);
         }
         const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope,
           { ...reading.facts, factualSupplement: input.factualDecision !== undefined });
@@ -4186,7 +4186,7 @@ export class ReviewRunStore {
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
     const launch = this.#ledgers.baseline().launch;
     if (launch.live !== null && (launch.policy === undefined || liveReviewRule(launch.policy, entry) === null)) {
-      return { entry, unavailableReason: liveReviewUnavailableReason(entry), facts: none, projection: null };
+      return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
     let projection: AnalysisProjection;
     try {

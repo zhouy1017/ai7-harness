@@ -91,15 +91,6 @@ export interface FactualSearchAccounting {
  * It cannot be constructed for a binding whose rule names no platform tools — every binding under the selected Provider
  * Processing v5 — so nothing in this module is reachable until a policy revision naming them is selected (S87-f3b).
  */
-/** The sole evidence bootstrap; ordinary registration always requires declared exact-model evidence. */
-export function platformToolModelProfile(profile: ProviderModelProfile, scope: string, validation: DevelopmentValidationIntent | null): ProviderModelProfile {
-  const bootstrap = scope === 'developer-live' && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
-  if (bootstrap && profile.capabilities.toolCalling === 'function') throw Object.assign(new Error('该模型已具备工具证据；不重复引导验证。'), { code: 'PLATFORM_TOOL_EVIDENCE_ALREADY_ESTABLISHED' });
-  if (bootstrap && profile.route === 'opencode-go' && profile.model === 'deepseek-v4.1-flash') return { ...profile, capabilities: { ...profile.capabilities, toolCalling: 'function' } };
-  if (profile.capabilities.toolCalling !== 'function') throw Object.assign(new Error('当前模型尚无工具调用证据；未注册联网工具。'), { code: 'PLATFORM_TOOL_MODEL_NOT_ADMITTED' });
-  return profile;
-}
-
 /** The scoped Global Agent's two non-retrieval tools (#1171): reads and proposals only, answered inside AI7. */
 export interface GlobalAgentScopedToolOwner {
   readProcedure(procedureId: string, version: number): unknown;

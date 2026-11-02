@@ -1390,7 +1390,7 @@ async function main() {
       // Issue #1225: Zen now offers its credential entry; with no credential saved, no model it lists can be chosen.
       const shown=flow.dataset.flowChannel==='opencode-zen' && Array.from(flow.querySelectorAll('[data-model-choice]')).every((node)=>node.disabled) &&
         flow.querySelector('[data-action="enter-channel-credential"]')?.textContent==='填写凭据' && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true &&
-        items.length>0 && items.every((item)=>/（(family-not-admitted-by-selected-policy|untested:text|unsupported:text|not-in-runtime-model-table)）/.test(item.textContent) && item.querySelectorAll('input,button').length===0) &&
+        items.length===0 && flow.querySelectorAll('[data-model-choice]').length>0 &&
         ${JSON.stringify(unbound.routes)}.every((name)=>!flow.textContent.includes(name));
       flow.querySelector('[data-model-channel="opencode-go"] input').click();
       return shown && flow.dataset.flowChannel==='opencode-go' && flow.querySelector('[data-model-choice="deepseek-v4.1-flash"]')?.disabled===true;
@@ -1530,15 +1530,14 @@ async function main() {
     await click(primary, '保护并保存（OpenAI 官方）', 'openai-protected-save');
     await waitFor(primary, `document.querySelector('[data-model-route="openai-platform"] [data-credential-state="ready"]')`, 'openai-protected-save-ready');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-model-route="openai-platform"]'); return card.textContent.includes('尚未测试') && card.querySelector('input[type="password"]').value==='' && card.querySelector('[data-action="test-model-connection"]') instanceof HTMLButtonElement; })()`, 'openai-explicit-test-surface');
-    // Issue #1225: GPT-5.6 Sol and Luna are Main choices too, offered to both roles in the flow; with the credential saved and no
-    // passed test, each says 需先测试连接 and 用于主编辑与快速交互 stays off. This launch admits no live test, so the test is offered, not run.
+    // #1281: channel credentials enable all models without a per-model connection-test gate; this CI launch sends no live probe.
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); flow.querySelector('[data-model-channel="openai-platform"] input').click();
       const choices=Array.from(flow.querySelectorAll('[data-model-choice]'));
-      const shown=flow.dataset.flowChannel==='openai-platform' && JSON.stringify(choices.map((node)=>node.dataset.modelChoice))==='["gpt-5.6-sol","gpt-5.6-luna"]' &&
-        choices.every((node)=>!node.disabled&&node.closest('label').textContent.includes('需先测试连接')) &&
-        flow.querySelector('[data-action="test-flow-connection"]')?.disabled===false && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true;
+      const shown=flow.dataset.flowChannel==='openai-platform' && choices.some((node)=>node.dataset.modelChoice==='gpt-5.6-sol') && choices.some((node)=>node.dataset.modelChoice==='gpt-5.6-luna') &&
+        choices.every((node)=>!node.disabled&&!node.closest('label').textContent.includes('需先测试连接')) &&
+        flow.querySelector('[data-action="test-flow-connection"]')?.disabled===false && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===false;
       flow.querySelector('[data-model-channel="deepseek-open-platform"] input').click();
-      return shown && flow.dataset.flowChannel==='deepseek-open-platform'; })()`, 'openai-main-choice-after-test');
+      return shown && flow.dataset.flowChannel==='deepseek-open-platform'; })()`, 'openai-main-choice-without-test');
     await primary.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
       const route=settings.routeChoice.routes.find((item)=>item.route==='openai-platform');
@@ -1548,7 +1547,8 @@ async function main() {
         settings.roles.find((role)=>role.roleId==='fast-interaction').connection.fastSelected===true;
     })`), 'openai-saved-is-untested-models-independent-fast');
     requireJourney(await primary.evaluate(`window.ai7.testModelServiceConnection({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_UNAVAILABLE')`), 'connection-test-ci-scope-denied');
-    requireJourney(await primary.evaluate(`window.ai7.selectFastRoleModel({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_REQUIRED')`), 'untested-model-selection-refused');
+    requireJourney(await primary.evaluate(`window.ai7.selectFastRoleModel({route:'openai-platform',modelId:'account-new-model'}).then(()=>true,()=>false)`), 'dynamic-model-selection-without-test');
+    await primary.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     at('model-service-first-save');
 
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });

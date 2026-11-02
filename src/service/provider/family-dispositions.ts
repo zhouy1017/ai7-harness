@@ -2,14 +2,7 @@ import type { ConfiguredRouteId } from '../../shared/provider-configuration.gene
 import type { ModelCapabilities, ProviderModelProfile, RequestShape } from './model-profile.js';
 import { GENERATED_FAMILY_DISPOSITIONS } from './provider-profiles.generated.js';
 
-/**
- * Capability dispositions per protocol family and per declared model (Issue #1180, ADR 0094 §1). A family states what
- * the adapter implements for it; a model on a route of that family is `supported` for a demand only where its profile
- * declares the matching capability on recorded evidence, `untested` where the family implements it and nothing has
- * established it for that model, and `unsupported` where the family does not implement it at all. Both tables are
- * generated from the generator's family rules and the provider documents; this module reads them and refuses, by name and
- * before any ticket, credential or transport is touched, every demand that is not `supported`.
- */
+/** Adapter capabilities belong to the protocol family; historical per-model evidence does not gate execution (#1281). */
 export type Disposition = 'supported' | 'unsupported' | 'untested';
 
 /** The aspects a family states. The first three are per model as well; the rest are the family's alone. */
@@ -20,7 +13,7 @@ export type FamilyAspect =
 export type ModelAspect = Extract<FamilyAspect, 'text' | 'stream' | 'functionTools'>;
 export type FamilyDispositions = Readonly<Record<FamilyAspect, Exclude<Disposition, 'untested'>>>;
 
-/** Per route: its family, and the models each per-model aspect is supported for; every other declared model is untested. */
+/** Catalogue rows on a route inherit the protocol family capabilities. */
 export interface RouteDispositions {
   readonly family: RequestShape;
   readonly supported: Readonly<Record<ModelAspect, ReadonlyArray<string>>>;
@@ -39,16 +32,9 @@ export function streamingDeclared(model: ProviderModelProfile): boolean {
   return model.capabilities.streaming === FAMILY_STREAMING[model.capabilities.requestShape];
 }
 
-function declares(model: ProviderModelProfile, aspect: ModelAspect): boolean {
-  if (aspect === 'text') return model.capabilities.answerChannel !== 'none';
-  if (aspect === 'stream') return streamingDeclared(model);
-  return model.capabilities.toolCalling === 'function';
-}
-
 /** One model's disposition for one per-model aspect, by the family rule above. */
 export function modelDisposition(model: ProviderModelProfile, aspect: ModelAspect): Disposition {
-  if (GENERATED_FAMILY_DISPOSITIONS[model.capabilities.requestShape][aspect] === 'unsupported') return 'unsupported';
-  return declares(model, aspect) ? 'supported' : 'untested';
+  return GENERATED_FAMILY_DISPOSITIONS[model.capabilities.requestShape][aspect];
 }
 
 /** A named preflight refusal: which family, aspect and disposition kept the request from being attempted. */

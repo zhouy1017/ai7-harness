@@ -123,7 +123,7 @@ const CARRIED_PATHS = [
 const EXPECTED_PINS = {
   'development-ci': ['v1', 'docs/policies/provider-processing-policy.v1.json', 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a'],
   'fixture-recording': ['v2', 'docs/policies/provider-processing-policy.v2.json', 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc'],
-  'ordinary-production': ['v32', 'docs/policies/provider-processing-policy.v32.json', '2a217d7e2404208d1b14c26628758a3471a92566b66a124456da14b17ecc36ad'],
+  'ordinary-production': ['v32', 'docs/policies/provider-processing-policy.v32.json', '46e66ad3f3f67510c0c0d0386d0f0c4e5bd11d1f68b918bce75d532ad62c2049'],
   'developer-live': ['v24', 'docs/policies/provider-processing-policy.v24.json', '1522e203f3ead6a259f93494e25c34526a024f93a757b1c7d22568e219f4a6b6'],
 } as const;
 /** Every immutable predecessor asset keeps its exact bytes: v6, v13, v15, v17, v19 and v21 (the old ordinary-production), v11, v12, v14, v16, v18, v20 and v22 (the old developer-live), and sets v9 to v15. */
@@ -161,7 +161,7 @@ const RETAINED_PREDECESSOR_DIGESTS = {
 } as const;
 /** ADR 0079 §3 decides External Export v2; active-set v16 pins its exact bytes, unchanged since v7. */
 const EXPECTED_EXTERNAL_PIN = ['v2', 'docs/policies/external-export-policy.v2.json', '162441cc3e5d30b0cafb00a0d04ca5ab32b64c5039baafc8952a9925bd7984b6'] as const;
-const ACTIVE_SET_SHA256 = 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab';
+const ACTIVE_SET_SHA256 = 'e69daf84caa82718af5a41a32554adf2feb9396314e88e76edb513c62cee8fc7';
 
 const GO_BINDING = {
   route: 'opencode-go',
@@ -1675,7 +1675,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
   it('denies a binding the policy does not allow, a malformed one, or one with another route\'s slot, as binding-not-allowed', async () => {
     await placeValidCheckout();
     const other = [
-      { ...GO_PRODUCTION_BINDING, model: 'deepseek-v4-pro' },
+      { ...GO_PRODUCTION_BINDING, model: '' },
       { ...GO_PRODUCTION_BINDING, endpoint: 'https://example.invalid/v1/chat/completions' },
       { ...GO_PRODUCTION_BINDING, route: 'some-other-route' },
       { ...GO_PRODUCTION_BINDING, credentialSlot: 'deepseek-api-key' },
@@ -1692,7 +1692,7 @@ describe('Provider Processing v23 (ordinary-production, inherited from v19 and v
       expectZeroTransmission(projection);
     }
     const reading = verifyOrdinaryProductionPolicy(await readPolicy(V23_PATH));
-    expect(bindOrdinaryProductionRules(reading, { ...GO_PRODUCTION_BINDING, model: 'x' })).toBeNull();
+    expect(bindOrdinaryProductionRules(reading, { ...GO_PRODUCTION_BINDING, model: 'x' })?.every((rule) => rule.model === 'x')).toBe(true);
     expect(bindOrdinaryProductionRules(reading, GO_PRODUCTION_BINDING)).toEqual(productionAdmittedRules(GO_PRODUCTION_BINDING));
   });
 

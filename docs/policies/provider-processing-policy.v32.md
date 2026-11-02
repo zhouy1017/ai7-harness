@@ -16,22 +16,12 @@ These terms live in the review rule's factual-verification `research` block only
 
 A submission that was accepted, and may therefore be billed, is never resent. An in-stream or post-acceptance unknown stays unknown and is never resent. A resend repeats the same canonical query and is not a new distinct query against the per-claim budget of three (`maximumDistinctCanonicalQuerySubmissions`). This declaration supplies no consumer; the fallback and resend execution is a separate slice.
 
-## Protocol-family admission
+## Channel admission — Wave 23 / #1281
 
-The Main Editorial Role and the Fast Interaction Role admit bindings in every protocol family the adapter implements. Each binding states its route, endpoint and model id as its provider document declares them:
+The Owner's #1279 intent and #1281 revision 1 replace individual model tuples with `allowedChannels` on each role and the connection test. Each channel fixes `route`, `endpointHost`, `protocolFamily` and `credentialSlot`; the runtime resolves the exact endpoint from the route profile and checks all four fields. The allowed channels cover Go Chat Completions, DeepSeek official Chat Completions, OpenAI Responses, Claude Messages, Gemini generateContent, and Zen's Chat Completions, Responses and Messages routes.
 
-- **Claude 官方 Messages** (`anthropic-claude`, slot `anthropic-claude`): `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`.
-- **Gemini 官方 generateContent** (`google-gemini`, slot `google-gemini`): `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`. The binding endpoint is the models collection the document declares; the adapter appends `/{model}:generateContent`. The document's open questions about the shape are unchanged, and this binding is admission only.
-- **OpenCode Zen**, one `opencode-zen` slot for its three routes:
-  - chat completions: `deepseek-v4.1-flash`, `glm-5.3-flash`, `kimi-k3`, `qwen3.8-max`;
-  - Messages: `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`;
-  - Responses: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`.
-- **OpenAI Responses for Main**: `gpt-5.6-luna` and `gpt-5.6-sol`, which Fast already admitted.
+Any selected model ID on an admitted channel inherits text, streaming and function tools from the implemented adapter protocol. Unknown IDs receive a dynamic ModelProfile; optional context size, reasoning controls and structured output remain undeclared unless a model record supplies them. Static catalogue rows and historical live-test evidence do not grant or refuse runtime capabilities. Explicit text connection tests remain diagnostics, and are not required for model selection.
 
-Every rule's `providerBinding.allowedRoutes` and the connection test's `allowedBindings` widen to these bindings. A reviewed runtime configuration record inside an admitted family therefore needs no further policy version. The Difficult Escalation and Frontier roles stay as in v31. `userConfiguredBindingAuthorizesTransmission` stays `false`.
+Each Run still freezes its exact route, endpoint, model ID, credential reference and policy pin. Egress rejects a different model or route, credential release stays bound to its slot, and channel admission grants no source, Apply, export or release authority. Existing source scopes, budget ceilings and search-backend bindings remain enforced. Missing model credentials and missing search setup produce direct Chinese setup reasons; failed background factual-recheck readiness leaves its onceKey unused.
 
-Admission is not choice. The runtime model table's `policyBaseline` equals these bindings exactly, so a newly admitted model is disposed by its own evidence (`untested:text` until text evidence exists). Its `ordinaryProduction` choices are a subset that the launch verifier checks, and they are unchanged by this declaration. A model becomes choosable only with a reviewed runtime record, its credential slot and its evidence.
-
-## CI and activation
-
-Development-ci remains unchanged v1: default deny, no remote Provider allow rule, zero authorized live transmissions. This declaration and its selection supply no consumer implementation, live-call evidence or readiness claim. The exact implementation candidate still passes the existing provider-free verification ladder and guest Journeys before Owner merge.
+The canonical JSON, closed schema, selected manifest and build/launch pins are synchronized under the Owner's direct Wave 23 authority. Earlier versions retain their original bytes. These changes establish provider-free adapter behavior, not live account availability or successful live validation on an account without credentials. Live model discovery and independent Main/Fast selection remain #1282.

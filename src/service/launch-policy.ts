@@ -12,8 +12,8 @@ import {
   LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
 import { familyAdmissionRefusal, modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
-import { modelProfileFor, type ProviderModelProfile } from './provider/model-profile.js';
-import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from './provider/provider-profiles.generated.js';
+import { modelProfileFor, validModelId, type ProviderModelProfile } from './provider/model-profile.js';
+import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS, GENERATED_ROUTE_PROFILES as PROVIDER_ROUTE_PROFILES } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js'; import { SEARCH_RESPONSE_MAX_BYTES, SEARCH_SERVICE_TIMEOUT_MS } from './provider/search-service.js';
 import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
@@ -93,10 +93,10 @@ export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
  * Reviewed v26 runtime choices, default first (ADR 0095 §6). The store lists these routes and the service arms their
  * declared hosts. The verifier separately checks the immutable policy baseline; a choice is never a fallback chain.
  */
-export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.main;
-export type OrdinaryProductionAllowedBinding = (typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number];
-export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.fast;
-export type OrdinaryProductionFastAllowedBinding = (typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number];
+export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main;
+export type OrdinaryProductionAllowedBinding = Omit<(typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number], 'model'> & { readonly model: string };
+export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast;
+export type OrdinaryProductionFastAllowedBinding = Omit<(typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number], 'model'> & { readonly model: string };
 
 /**
  * The endpoint hosts the ordinary-production service arms before the network denial (Issue #1274): every admitted Main and
@@ -132,11 +132,12 @@ export const CONNECTION_TEST_POLICY = {
 export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null): OrdinaryProductionAllowedBinding | null;
 export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null, role: 'fast-interaction'): OrdinaryProductionFastAllowedBinding | null;
 export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null, role?: 'fast-interaction'): OrdinaryProductionFastAllowedBinding | null {
-  if (binding === null || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
+  if (binding === null || !validModelId(binding.model) || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
       DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase())) return null;
   const allowedBindings = role === 'fast-interaction' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS;
-  return allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
-    allowed.model === binding.model && allowed.credentialSlot === binding.credentialSlot) ?? null;
+  const channel = allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
+    allowed.credentialSlot === binding.credentialSlot);
+  return channel === undefined || modelProfileFor(channel.route, binding.model) === null ? null : { ...channel, model: binding.model };
 }
 
 /**
@@ -149,19 +150,13 @@ export function productionBindingRefusal(model: ProviderModelProfile, role: 'mai
   return familyAdmissionRefusal(model, families) ?? providerPreflight(model, { stream: false, functionTools: false });
 }
 
-/**
- * The one Settings flow's channels (ADR 0094 §1; Issue #1215): every model each channel's routes declare, with its named
- * disposition for the Main and the Fast role. A model is `eligible` only where the selected policy admits its family, its text
- * answer is supported on evidence, and the runtime model table holds its reviewed record for the role; a gateway catalogue
- * alone establishes none of these. Derived from the generated declarations and the model table alone, so it changes no
- * selection, grants no authority and reads no credential.
- */
+/** Catalogue choices inherit protocol capabilities and are eligible on admitted channels, independent of model evidence. */
 export function modelServiceChannels(): ModelServiceChannelProjection[] {
   const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
     const refused = productionBindingRefusal(model, role);
-    if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'not-in-runtime-model-table'>;
-    return CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role].some((binding) => binding.route === model.route && binding.model === model.model)
-      ? 'eligible' : 'not-in-runtime-model-table';
+    if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'channel-not-admitted-by-selected-policy'>;
+    return CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline[role].some((binding) => binding.route === model.route)
+      ? 'eligible' : 'channel-not-admitted-by-selected-policy';
   };
   return MODEL_SERVICE_CHANNELS.map((channelId) => {
     const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
@@ -169,14 +164,14 @@ export function modelServiceChannels(): ModelServiceChannelProjection[] {
       channelId,
       channelLabel: route === null ? CONFIGURED_PROVIDER_LABELS[channelId] : MODEL_SERVICE_ROUTE_BINDINGS[route].providerLabel,
       route,
-      models: GENERATED_MODEL_PROFILES.filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`)).map((model) => ({
+      models: GENERATED_MODEL_PROFILES.filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`)).map((declared) => modelProfileFor(declared.route, declared.model)!).map((model) => ({
         modelId: model.model,
         modelLabel: model.displayName,
         family: model.capabilities.requestShape,
         capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
         main: disposition(model, 'main'),
         fast: disposition(model, 'fast'),
-      })),
+      })).sort((a, b) => Number(b.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId) - Number(a.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId)),
     };
   });
 }
@@ -1600,6 +1595,16 @@ export interface OrdinaryProductionPolicyReading {
 }
 
 function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
+  if (isRecord(role) && Array.isArray(role['allowedChannels'])) {
+    return role['allowedChannels'].map((entry: unknown) => {
+      requirePolicy(isRecord(entry) && exactKeys(entry, ['route', 'endpointHost', 'protocolFamily', 'credentialSlot']));
+      const route = entry['route'] as RemoteExecutionRoute;
+      const profile = PROVIDER_ROUTE_PROFILES[route];
+      requirePolicy(profile !== undefined && entry['endpointHost'] === new URL(profile.endpoint).host &&
+        entry['credentialSlot'] === profile.credentialSlot && entry['protocolFamily'] === GENERATED_ROUTE_DISPOSITIONS[route].family);
+      return { route, endpoint: profile.endpoint, model: '*', credentialSlot: profile.credentialSlot };
+    });
+  }
   requirePolicy(isRecord(role) && Array.isArray(role['allowedBindings']) && role['allowedBindings'].length > 0);
   const bindings: AllowedRoleBinding[] = [];
   for (const entry of role['allowedBindings'] as unknown[]) {
@@ -1626,9 +1631,11 @@ function readFamilyAdmission(policy: Record<string, unknown>): true {
   const roles = policy['roleBindings'] as Record<string, unknown>;
   const main = allowedBindingsOf(roles['Main Editorial Role']), fast = allowedBindingsOf(roles['Fast Interaction Role']);
   const connectionTest = policy['connectionTest'];
-  requirePolicy(sameValue(main, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main) && sameValue(fast, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast) &&
-    bindingsWithin(ORDINARY_PRODUCTION_ALLOWED_BINDINGS, main) && bindingsWithin(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, fast) &&
-    isRecord(connectionTest) && bindingsWithin(CONNECTION_TEST_POLICY.allowedBindings, allowedBindingsOf(connectionTest)));
+  const channels = (bindings: readonly AllowedRoleBinding[]) => [...new Map(bindings.map(({ route, endpoint, credentialSlot }) =>
+    [route, { route, endpoint, credentialSlot }])).values()];
+  requirePolicy(sameValue(channels(main), channels(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main)) &&
+    sameValue(channels(fast), channels(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast)) && isRecord(connectionTest) &&
+    sameValue(channels(allowedBindingsOf(connectionTest)), channels(fast)));
   return true;
 }
 
@@ -1934,7 +1941,7 @@ function readSearchConnectionTest(block: unknown): SearchConnectionTestPolicy {
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === ({ v30: '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3',
-    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058' } as Record<string, string>)[String(policy['version'])]);
+    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '074f99e32e918d2a82676b7c6ec8d850932e88ccb6d9e6c26a7bbad805be1b52' } as Record<string, string>)[String(policy['version'])]);
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
   const admission = policy['version'] === 'v32' ? readFamilyAdmission(policy) : null;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
@@ -2187,7 +2194,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     if (selected === null) continue;
     if (!isRecord(selected) || !exactKeys(selected, ['route', 'endpoint', 'model', 'credentialSlot', 'credentialReference']) ||
         allowedProductionBindingOf(selected, 'fast-interaction') === null || !permitted.some((candidate) =>
-          candidate.route === selected.route && candidate.model === selected.model && candidate.endpoint === selected.endpoint && candidate.credentialSlot === selected.credentialSlot)) return null;
+          candidate.route === selected.route && candidate.endpoint === selected.endpoint && candidate.credentialSlot === selected.credentialSlot)) return null;
   }
   const admitted: AdmittedProviderRule[] = [];
   for (const { ruleId, reading: kind, allowedRoutes, platformTools, localTools, projection } of reading.rules) {
@@ -2340,8 +2347,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v23.schema.json', '0935a0bb8193771dd132970959931d8aee033e09abca0ca06709963cdbb951dc'],
-      ['docs/policies/provider-processing-policy.v32.schema.json', 'e2acb9cb2eaf53199d53eba4de121a5e4c32e6382e982041d6b471434dadf0dd'],
+      ['docs/policies/active-policy-set.v23.schema.json', 'e07ec97e7835be058c89ef4ffac5f09ed113c8201dc710a382a5940e37f46cda'],
+      ['docs/policies/provider-processing-policy.v32.schema.json', '6a084e2b1bcff2f1a81f8a9bed2b4220d10ecb76064336997eea08ada0a5e47c'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(

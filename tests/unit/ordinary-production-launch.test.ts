@@ -225,7 +225,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
     const reference = randomUUID();
     const outside = [
       { ...GO, endpoint: 'https://opencode.ai/zen/v1/chat/completions', credentialReference: reference },
-      { ...OFFICIAL, model: 'deepseek-v4-pro', credentialReference: reference },
+      { ...OFFICIAL, model: '', credentialReference: reference },
       { ...GO, credentialSlot: 'deepseek-api-key', credentialReference: reference },
       { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-5', credentialSlot: 'openai-platform', credentialReference: reference },
     ];

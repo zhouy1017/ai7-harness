@@ -22,8 +22,8 @@ const generator = await import('../../tools/generate-provider-configuration.mjs'
 
 describe('reviewed runtime model table', () => {
   it('supplies the existing role choices and lets reviewed in-family configuration change without policy bytes', () => {
-    expect(ORDINARY_PRODUCTION_ALLOWED_BINDINGS).toEqual(CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.main);
-    expect(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS).toEqual(CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.fast);
+    expect(ORDINARY_PRODUCTION_ALLOWED_BINDINGS).toEqual(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main);
+    expect(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS).toEqual(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast);
     const input = structuredClone(generator.readProviderDocuments());
     input.runtimeBindings.data.ordinaryProduction.main = [{ route: 'deepseek-open-platform', model: 'deepseek-v4-pro' }];
     const resolved = generator.resolveProviderConfiguration(input);

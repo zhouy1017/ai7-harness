@@ -27,7 +27,7 @@ import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAtt
 import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
 import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
 import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates, editorialMemoryGovernanceItem, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
-import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
+import { GLOBAL_AGENT_POLICY_BLOCKED, MODEL_SERVICE_SETUP_REQUIRED_REASON, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
 import { SkillAcquisitions } from './imported-skills.js';
 import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, ImportedSkillUpdateRuleProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
@@ -56,7 +56,7 @@ import type { FactualRecheckCandidate, FactualRecheckRun } from './analysis/fact
 import { searchBackend, searchBackendConfigurationDigest } from './provider/search-backends/index.js';
 import { LocalFixturePolicyCatalog, type LocalFixtureRuntimeContext } from './provider/model-fixture.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceChannelOf, modelServiceModels, modelServiceRuntimeBinding, modelServiceTestRequired, type ModelConnectionTestStatus } from '../shared/protocol.js';
+import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceChannelOf, modelServiceModels, modelServiceRuntimeBinding, validModelServiceModelId, type ModelConnectionTestStatus } from '../shared/protocol.js';
 import { MODEL_SERVICE_ROW_COLUMNS, initializeAdmittedChannelsSchema, initializeModelSelectionSchema, initializeModelServiceRoutesSchema, modelServiceRowsOutsideBindings } from './model-service-connections.js';
 import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
@@ -388,7 +388,8 @@ import {
   WRITING_MODE_GOALS,
 } from '../shared/protocol.js';
 import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
+import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule, kindLocalTools, modelAdmitsPlatformTools } from './analysis/live-kind-admission.js';
+import { platformToolsFromProjection } from './provider/search-service.js';
 import { reviewCategoryKindId } from '../shared/protocol.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
@@ -3423,13 +3424,6 @@ function initializeSearchBackendSchema(db: DatabaseSync): void {
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
 
-/** A documentary channel's model without a passed exact-model test on the current credential (Issue #1225 revision 3); never Go or DeepSeek. */
-function untestedChoice(connection: ModelServiceConnectionProjection): boolean {
-  const test = connection.connectionTest;
-  return modelServiceTestRequired(connection.binding.providerId) &&
-    (test?.outcome !== 'passed' || test.modelId !== connection.binding.modelId || test.credentialUpdatedAt !== connection.credentialUpdatedAt);
-}
-
 /** Read only the closed, generation-bound metadata retained by the protected synthetic test. */
 function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null {
   if (row.connection_test == null) return null;
@@ -3441,7 +3435,7 @@ function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null 
     value.credentialUpdatedAt === row.credential_updated_at && typeof value.testedAt === 'string' && value.testedAt.length <= 30 && Number.isFinite(Date.parse(value.testedAt)) &&
     ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(value.outcome as string) && value.verified === 'buffered-text-only' &&
     (value.code === null || (typeof value.code === 'string' && /^[A-Z0-9_]{1,100}$/u.test(value.code))) &&
-    MODEL_SERVICE_ROUTES.includes(row.provider_id as ModelServiceRouteId) && modelServiceModels(row.provider_id as ModelServiceRouteId).some((model) => model.modelId === value.modelId),
+    MODEL_SERVICE_ROUTES.includes(row.provider_id as ModelServiceRouteId) && validModelServiceModelId(value.modelId as string),
     'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   const facts = value.provenance;
   requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
@@ -9169,10 +9163,16 @@ export class EditorialStore {
     const launch = this.#baselineAnalysis.launch;
     const live = launch.live;
     const policy = selectedPolicyIdentityOf(launch.policy?.selectedPolicyIdentity);
-    const rule = liveKindRule(launch.policy, 'factual-recheck', [], 'background')?.factualRecheck;
+    const admitted = liveKindRule(launch.policy, 'factual-recheck', [], 'background');
+    const rule = admitted?.factualRecheck;
     if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
       launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || (policy?.providerProcessingVersion !== 'v31' && policy?.providerProcessingVersion !== 'v32') ||
       rule?.maximumClaims !== 1 || this.replacementFrozen()) return null;
+    const binding = this.getConfiguredModelRoleBinding('main-editorial');
+    if (binding === null || canonicalJson(binding) !== canonicalJson({ route: live.route, endpoint: live.endpoint, model: live.model,
+      credentialSlot: live.credentialSlot, credentialReference: live.credentialReference }) ||
+      admitted?.route !== live.route || admitted.model !== live.model || admitted.endpoint !== live.endpoint || admitted.credentialSlot !== live.credentialSlot ||
+      !modelAdmitsPlatformTools(live.route, live.model) || platformToolsFromProjection(admitted) === null) return null;
     const enrolledBinding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, enrollment.bookId, 'factual-recheck');
     if (enrolledBinding === null || canonicalJson({ ...enrolledBinding, runBudgetCeiling: enrollment.version.binding.runBudgetCeiling }) !== canonicalJson(enrollment.version.binding)) return null;
     const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, enrollment.bookId);
@@ -11907,8 +11907,10 @@ export class EditorialStore {
         }
         itemOffset = page.nextItemOffset;
       }
-      return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED,
-        scopedDialogueState: scopedAdmitted ? 'available' : GLOBAL_AGENT_POLICY_BLOCKED, procedures: this.#globalAgentProcedures(),
+      const blocked = operationalScope === 'ordinary-production' && this.getConfiguredModelRoleBinding('fast-interaction') === null
+        ? MODEL_SERVICE_SETUP_REQUIRED_REASON : GLOBAL_AGENT_POLICY_BLOCKED;
+      return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : blocked,
+        scopedDialogueState: scopedAdmitted ? 'available' : blocked, procedures: this.#globalAgentProcedures(),
         explanation: dialogueAdmitted ? '只使用明确勾选的已启用记忆版本，不读取稿件；治理仍须单独操作。'
           : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
         categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
@@ -12013,7 +12015,7 @@ export class EditorialStore {
     const binding = this.getConfiguredModelRoleBinding('fast-interaction');
     const connection = binding === null ? undefined : this.getModelServiceConnections().find((entry) =>
       entry.credentialOperationState === 'ready' && entry.credentialReference === binding.credentialReference &&
-      entry.binding.providerId === binding.route && entry.binding.modelId === binding.model && entry.binding.credentialSlot === binding.credentialSlot);
+      entry.binding.providerId === modelServiceChannelOf(binding.route) && entry.binding.modelId === binding.model && entry.binding.credentialSlot === binding.credentialSlot);
     requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
     const policy = resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production',
       this.getConfiguredModelRoleBinding('main-editorial'), binding);
@@ -16763,7 +16765,7 @@ export class EditorialStore {
       roleId: 'main-editorial',
       connectionName: asString(row.connection_name),
       // A connection saved before revision 72 named `deepseek-v4-pro`; the migration moved it to the route's current model.
-      binding: { ...(modelServiceModels(route).find((model) => model.modelId === asString(row.model_id)) ?? target.binding), approvedFallbackChain: [] },
+      binding: { ...(modelServiceModels(route).find((model) => model.modelId === asString(row.model_id)) ?? { ...target.binding, modelId: asString(row.model_id), modelLabel: asString(row.model_id) }), approvedFallbackChain: [] },
       credentialReference,
       credentialOperationState: state,
       createdAt: asString(row.created_at),
@@ -16822,8 +16824,8 @@ export class EditorialStore {
           `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, selected)
            VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?)`,
         ).run(target.connectionId, connectionName, target.binding.providerId, target.binding.modelId, target.binding.credentialSlot,
-          credentialReference, credentialOperationState, now, now, now, anySelected || modelServiceTestRequired(route) ? null : 1);
-        if (!modelServiceTestRequired(route) && this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE fast_selected = 1').get() === undefined) {
+          credentialReference, credentialOperationState, now, now, now, anySelected ? null : 1);
+        if (this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE fast_selected = 1').get() === undefined) {
           this.#authority.prepare('UPDATE model_service_connections SET fast_selected = 1 WHERE connection_id = ?').run(target.connectionId);
         }
       } else {
@@ -16878,7 +16880,6 @@ export class EditorialStore {
     const current = target.connectionId === undefined ? null : this.getModelServiceRouteConnection(route);
     requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
     requireStore(current !== null, 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '这条路线还没有连接；请先保存它的连接名称与凭据。');
-    requireStore(!untestedChoice(current), 'MODEL_CONNECTION_TEST_REQUIRED', '请先明确测试此模型的文本连接。');
     this.#transaction(this.#authority, () => {
       this.#authority.prepare('UPDATE model_service_connections SET selected = NULL WHERE selected = 1 AND connection_id != ?').run(target.connectionId);
       this.#authority.prepare('UPDATE model_service_connections SET selected = 1, updated_at = ? WHERE connection_id = ?')
@@ -16893,7 +16894,6 @@ export class EditorialStore {
     const chosen = connections.find((connection) => role === 'main-editorial' ? connection.selected : connection.fastSelected);
     const connection = chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready');
     if (connection === undefined || connection.credentialOperationState !== 'ready') return null;
-    if (untestedChoice(connection)) return null;
     // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
     const record = modelServiceRuntimeBinding(connection.binding.providerId, connection.binding.modelId, role === 'fast-interaction' ? 'fast' : 'main');
     if (record === undefined) return null;
@@ -16903,10 +16903,8 @@ export class EditorialStore {
 
   selectFastRoleModel(route: ModelServiceRouteId, modelId: string): void {
     const connection = this.getModelServiceRouteConnection(route);
-    requireStore(modelServiceModels(route).some((model) => model.modelId === modelId), 'MODEL_CAPABILITY_UNSUPPORTED', '此模型没有准入的缓冲文本能力。');
+    requireStore(modelServiceRuntimeBinding(route, modelId, 'fast') !== undefined, 'MODEL_CAPABILITY_UNSUPPORTED', '此模型没有准入的缓冲文本能力。');
     requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
-    requireStore(!untestedChoice({ ...connection, binding: { ...connection.binding, modelId: modelId as typeof connection.binding.modelId } }),
-      'MODEL_CONNECTION_TEST_REQUIRED', '请先明确测试此模型的文本连接。');
     this.#transaction(this.#authority, () => {
       this.#authority.prepare('UPDATE model_service_connections SET fast_selected = NULL WHERE fast_selected = 1').run();
       this.#authority.prepare('UPDATE model_service_connections SET fast_selected = 1, model_id = ?, updated_at = ? WHERE connection_id = ?')
@@ -16916,7 +16914,7 @@ export class EditorialStore {
 
   /** Retain only a closed, sanitized status for the exact credential generation tested. */
   recordModelConnectionTest(connection: ModelServiceConnectionProjection, result: ModelConnectionTestStatus): void {
-    requireStore(result.credentialUpdatedAt === connection.credentialUpdatedAt && modelServiceModels(connection.binding.providerId).some((model) => model.modelId === result.modelId) &&
+    requireStore(result.credentialUpdatedAt === connection.credentialUpdatedAt && validModelServiceModelId(result.modelId) &&
       ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(result.outcome) && result.verified === 'buffered-text-only' &&
       (result.code === null || /^[A-Z0-9_]{1,100}$/u.test(result.code)), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
     const facts = result.provenance;

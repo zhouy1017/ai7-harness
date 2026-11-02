@@ -8,8 +8,7 @@ import { admittedFastRoleRoute } from '../../src/service/dialogue/dialogue-route
 import { factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from '../../src/service/analysis/kind-definition.js';
 import { reviewCategoryEntry } from '../../src/service/review/category-configuration.js';
 import { liveReviewRule } from '../../src/service/review/live-review-admission.js';
-import { platformToolModelProfile } from '../../src/service/provider/platform-tool-session.js';
-import { OPENCODE_GO_V41_FLASH_PROFILE } from '../../src/service/provider/model-profile.js';
+import { admittedGlobalAgentScopedRoute } from '../../src/service/dialogue/global-agent-session.js';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 
@@ -67,32 +66,41 @@ describe('platform tool registration admission', () => {
     expect(liveKindAdmission(policy, { ...research, promptContractDigest: '0'.repeat(64) }, binding)).toBeNull();
   });
 
-  it('admits web-bearing review only on a model whose profile records the tool loop, under both production routes', async () => {
+  it('admits web-bearing review on every policy-admitted channel', async () => {
     expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4.1-flash')).toBe(true);
-    expect(modelAdmitsPlatformTools('deepseek-open-platform', 'deepseek-flash')).toBe(false);
-    expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4-flash')).toBe(false);
+    expect(modelAdmitsPlatformTools('deepseek-open-platform', 'deepseek-flash')).toBe(true);
+    expect(modelAdmitsPlatformTools('opencode-go', 'deepseek-v4-flash')).toBe(true);
     for (const allowed of ORDINARY_PRODUCTION_ALLOWED_BINDINGS) {
       const policy = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', { ...allowed, credentialReference: randomUUID() });
       expect(policy.providerProcessing.version).toBe('v32');
       const rule = liveKindRule(policy, 'factual-review')!;
-      // The rule names the tools on both routes; only the model with recorded evidence may be handed them.
+      // The selected rule and protocol implementation admit tools without model-specific live evidence.
       expect(rule.platformTools).not.toBeNull();
       const tools = modelAdmitsPlatformTools(allowed.route, allowed.model);
-      expect(tools).toBe(allowed.route === 'opencode-go');
+      expect(tools).toBe(true);
       for (const categoryId of ['factual-review', 'academic-integrity']) expect(liveReviewRule(policy, reviewCategoryEntry(categoryId)!) !== null).toBe(tools);
       expect(liveKindAdmission(policy, withFactualResearch(factualReviewKindDefinition()), allowed) !== null).toBe(tools);
     }
   });
 
-  it('bootstraps only the exact named developer-live item and refuses once the capability is declared', () => {
-    const profile = { ...OPENCODE_GO_V41_FLASH_PROFILE, capabilities: { ...OPENCODE_GO_V41_FLASH_PROFILE.capabilities, toolCalling: 'none' as const } };
-    const item = { family: 'policy-selection', case: 'wave6-tool-evidence-bootstrap', delta: null };
-    expect(() => platformToolModelProfile(OPENCODE_GO_V41_FLASH_PROFILE, 'developer-live', item)).toThrow(/不重复/u);
-    expect(() => platformToolModelProfile(profile, 'ordinary-production', item)).toThrow(/证据/u);
-    expect(() => platformToolModelProfile(profile, 'developer-live', { ...item, case: 'another-case' })).toThrow(/证据/u);
-    const admitted = platformToolModelProfile(profile, 'developer-live', item);
-    expect(admitted.capabilities.toolCalling).toBe('function');
-    expect(() => platformToolModelProfile(admitted, 'developer-live', item)).toThrow(/不重复/u);
-    expect(platformToolModelProfile(admitted, 'ordinary-production', null)).toBe(admitted);
+
+
+  it('makes review, writing, evaluation, local and Global tools reachable for arbitrary IDs on every admitted channel', async () => {
+    const channels = [...new Map(ORDINARY_PRODUCTION_ALLOWED_BINDINGS.map((binding) => [binding.route, binding])).values()];
+    for (const channel of channels) {
+      const binding = { ...channel, model: 'account/new-model', credentialReference: randomUUID() };
+      const policy = await resolveSourceCheckoutLaunchPolicy(root, 'ordinary-production', binding);
+      expect(policy.integrityState, channel.route).toBe('verified');
+      expect(policy.providerProcessing.admittedRules.every((rule) => rule.model === binding.model)).toBe(true);
+      for (const kind of ['writing', 'evaluation', 'factual-review', 'editorial-review/academic-integrity']) {
+        const rule = liveKindRule(policy, kind)!;
+        expect(rule.platformTools, `${channel.route} ${kind}`).not.toBeNull();
+        expect(kindLocalTools(policy, kind)?.declarations).toHaveLength(7);
+      }
+      expect(admittedFastRoleRoute(policy, 'editorial-dialogue', 'editor-selected-manuscript-excerpt')?.localTools).not.toBeNull();
+      expect(admittedGlobalAgentScopedRoute(policy)?.localTools?.declarations).toHaveLength(4);
+      for (const category of ['factual-review', 'academic-integrity']) expect(liveReviewRule(policy, reviewCategoryEntry(category)!)).not.toBeNull();
+    }
   });
+
 });

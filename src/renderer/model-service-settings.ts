@@ -1,7 +1,6 @@
 import type { ModelServiceRouteOptionProjection, ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { MODEL_CONNECTION_TEST_NOTE, mainRoleConnectionTest, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 import { modelServiceFlow } from './model-service-flow.js';
-import { modelServiceTestRequired } from '../shared/protocol/model-service.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
 import { launchPolicyIntegritySentence } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -184,8 +183,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       const ready = option.connection.credentialOperationState === 'ready';
       test.disabled = !ready;
       const updateSelection = (): void => {
-        useFast.disabled = !ready || (modelServiceTestRequired(option.route) &&
-          (testState?.outcome !== 'passed' || testState.modelId !== models.value || testState.credentialUpdatedAt !== option.connection?.credentialUpdatedAt));
+        useFast.disabled = !ready;
       };
       models.addEventListener('change', updateSelection); updateSelection();
       modelLabel.append(models); actions.append(modelLabel, test, useFast);

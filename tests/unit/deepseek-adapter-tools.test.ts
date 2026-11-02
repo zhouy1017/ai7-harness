@@ -67,15 +67,9 @@ function productionAdapter(transport: DeepSeekTransport): DeepSeekOpenAiCompatib
 }
 
 describe('request assembly with tools', () => {
-  it('refuses tools for every model that does not declare function calling, the developer-live model included', () => {
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.toolCalling).toBe('none');
-    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, payload(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL, { tools: tools() }), context))
-      .toThrowError('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE, payload(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL, { messages: LOOP }), context))
-      .toThrowError('DEEPSEEK_REQUEST_NON_TEXT_CONTENT');
-    // A shape other than chat completions spells no function tool, whatever its model declares.
-    const messagesModel = Object.values(PROVIDER_MODEL_PROFILES).find((profile) => profile.route === 'opencode-go-messages')!;
-    expect(() => assembleProviderRequest(PROVIDER_ROUTE_PROFILES['opencode-go-messages'], messagesModel, payload(messagesModel.route, messagesModel.model, { tools: tools() }), context))
+  it('refuses a synthetic profile with function capability disabled', () => {
+    const profile = { ...OPENCODE_GO_V4_FLASH_PROFILE, capabilities: { ...OPENCODE_GO_V4_FLASH_PROFILE.capabilities, toolCalling: 'none' as const } };
+    expect(() => assembleProviderRequest(OPENCODE_GO_ROUTE_PROFILE, profile, payload(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL, { tools: tools() }), context))
       .toThrowError('PROVIDER_TOOL_CALLING_UNSUPPORTED');
   });
 
@@ -113,7 +107,7 @@ describe('reading a request for tools', () => {
     });
     // To a request that offered none, and for every other model, the field is not a channel: the response reads as before.
     expect(normalizeModelResponse(DEEPSEEK_V4_PRO_PROFILE, TOOL_CALL_RESPONSE)).toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
-    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, TOOL_CALL_RESPONSE, offered)).toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, TOOL_CALL_RESPONSE, offered)).toMatchObject({ kind: 'tool-calls' });
     const answered = { choices: [{ message: { content: '{"ok":true}', tool_calls: TOOL_CALL_RESPONSE.choices[0]!.message.tool_calls } }] };
     expect(normalizeModelResponse(DEEPSEEK_V4_PRO_PROFILE, answered)).toEqual({ kind: 'answer', text: '{"ok":true}', reasoningText: null, usage: null });
     const broken = { choices: [{ message: { content: null, tool_calls: [{ id: 'c', type: 'function', function: { name: 'websearch' } }] } }] };

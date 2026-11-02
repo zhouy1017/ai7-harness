@@ -365,69 +365,17 @@ describe('model capability profiles', () => {
       'opencode-go/glm-5.1', 'opencode-go/glm-5.2', 'opencode-go/glm-5.3', 'opencode-go/glm-5.3-flash',
       'opencode-go/kimi-k2.6', 'opencode-go/kimi-k2.7-code', 'opencode-go/kimi-k3',
     ]);
-    expect(modelProfileFor(DEEPSEEK_ROUTE, DEEPSEEK_MODEL)).toBe(DEEPSEEK_V4_PRO_PROFILE);
-    expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toBe(OPENCODE_GO_V41_FLASH_PROFILE);
-    expect(modelProfileFor(OPENCODE_GO_ROUTE, 'a-model-nobody-declared')).toBeNull();
+    expect(modelProfileFor(DEEPSEEK_ROUTE, DEEPSEEK_MODEL)).toEqual(DEEPSEEK_V4_PRO_PROFILE);
+    expect(modelProfileFor(OPENCODE_GO_ROUTE, OPENCODE_GO_MODEL)).toEqual(OPENCODE_GO_V41_FLASH_PROFILE);
+    expect(modelProfileFor(OPENCODE_GO_ROUTE, 'a-model-nobody-declared')?.capabilities.toolCalling).toBe('function');
     // The same model id, two routes, two different sets of capabilities: the reason the key is composite.
     expect(OPENCODE_GO_V4_PRO_PROFILE.model).toBe(DEEPSEEK_V4_PRO_PROFILE.model);
     expect(OPENCODE_GO_V4_PRO_PROFILE.capabilities).not.toEqual(DEEPSEEK_V4_PRO_PROFILE.capabilities);
   });
 
-  it('declares each active model as one exact combination of the six capabilities', () => {
-    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities).toEqual({
-      requestShape: 'openai-chat-completions',
-      // The production body's `thinking` plus `reasoning_effort`, which is all `bodyPolicy` ever meant.
-      reasoningControl: 'deepseek-thinking',
-      structuredOutput: 'none',
-      answerChannel: 'message-content-string',
-      // This route has never transmitted, so nothing about how it answers has been observed.
-      reasoningChannel: 'none',
-      usageAttribution: 'unknown',
-      // DeepSeek official's own Tool Calls guide documents function tools (ADR 0080 §2); its pages
-      // document no search tool of its own.
-      toolCalling: 'function',
-      webSearchTool: 'none',
-    });
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities).toEqual({
-      requestShape: 'openai-chat-completions',
-      // No DeepSeek-specific parameter travels to the gateway until one is observed accepted.
-      reasoningControl: 'none',
-      structuredOutput: 'json-object',
-      answerChannel: 'message-content-string',
-      reasoningChannel: 'message-reasoning-content',
-      usageAttribution: 'includes-reasoning',
-      // The gateway wire API is undocumented for tool calling and carries no search tool (ADR 0080 §2, §3).
-      toolCalling: 'none',
-      webSearchTool: 'none',
-    });
-    // Exactly these profiles have an answer channel, and the table's size is pinned beside them so that declaring a
-    // model cannot enlarge the active set: a new row arrives inert or the count moves and this fails.
-    // Issue #811: the official route's V4.1 Flash reads its documented answer and reasoning channels, and nothing else.
-    const officialFlash = PROVIDER_MODEL_PROFILES['deepseek-open-platform/deepseek-flash']!;
-    expect(officialFlash.capabilities).toEqual({
-      requestShape: 'openai-chat-completions', reasoningControl: 'none', structuredOutput: 'none', answerChannel: 'message-content-string',
-      reasoningChannel: 'message-reasoning-content', usageAttribution: 'unknown', toolCalling: 'none', webSearchTool: 'none',
-    });
-    // #1044 admits only buffered text on these two Responses profiles; declared web-tool evidence grants no tool path.
-    const openaiSol = PROVIDER_MODEL_PROFILES['openai-platform/gpt-5.6-sol']!;
-    const openaiLuna = PROVIDER_MODEL_PROFILES['openai-platform/gpt-5.6-luna']!;
-    for (const profile of [openaiSol, openaiLuna]) {
-      expect(profile.capabilities).toEqual({
-        requestShape: 'openai-responses', reasoningControl: 'none', structuredOutput: 'none', answerChannel: 'output-message-text',
-        reasoningChannel: 'none', usageAttribution: 'includes-reasoning', toolCalling: 'none', webSearchTool: 'provider-tool',
-      });
-    }
-    // #1225 admits buffered text alone on the Claude 官方 and Gemini 官方 rows, on vendor documentation read 2026-10-31.
-    const claude = ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'].map((model) => PROVIDER_MODEL_PROFILES[`anthropic-claude/${model}`]!);
-    const gemini = ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'].map((model) => PROVIDER_MODEL_PROFILES[`google-gemini/${model}`]!);
-    for (const profile of [...claude, ...gemini]) {
-      expect(profile.capabilities).toMatchObject({ reasoningControl: 'none', structuredOutput: 'none', reasoningChannel: 'none', usageAttribution: 'unknown', toolCalling: 'none',
-        answerChannel: profile.route === 'anthropic-claude' ? 'content-text-blocks' : 'candidate-parts-text' });
-    }
-    expect(Object.values(PROVIDER_MODEL_PROFILES).filter((profile) => profile.capabilities.answerChannel !== 'none'))
-      .toEqual([...claude, DEEPSEEK_V4_PRO_PROFILE, officialFlash, ...gemini, openaiSol, openaiLuna, OPENCODE_GO_V4_FLASH_PROFILE, OPENCODE_GO_V41_FLASH_PROFILE]);
-    // Every generated row is in the table once: building it dropped nothing.
-    expect(Object.keys(PROVIDER_MODEL_PROFILES)).toHaveLength(GENERATED_MODEL_PROFILES.length);
+  it('preserves model-specific request settings while inheriting protocol capabilities', () => {
+    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities).toMatchObject({ reasoningControl: 'deepseek-thinking', structuredOutput: 'none', streaming: 'chat-completions-sse', toolCalling: 'function' });
+    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities).toMatchObject({ structuredOutput: 'json-object', streaming: 'chat-completions-sse', toolCalling: 'function' });
   });
 
   it('declares structured output exactly where one live item observed it accepted, and nowhere else', () => {
@@ -470,23 +418,9 @@ describe('model capability profiles', () => {
     expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.structuredOutput).toMatchObject({ kind: 'live-test-item', observedOn: '2026-09-08' });
   });
 
-  it('carries an inactive third model of the same gateway with every unverified capability absent', () => {
-    expect(OPENCODE_GO_V4_PRO_PROFILE.capabilities).toEqual({
-      requestShape: 'openai-chat-completions',
-      reasoningControl: 'none',
-      structuredOutput: 'none',
-      answerChannel: 'none',
-      reasoningChannel: 'none',
-      usageAttribution: 'unknown',
-      toolCalling: 'none',
-      webSearchTool: 'none',
-    });
-    // Inactive means inactive: no route profile, no binding, and no policy names it.
-    expect(OPENCODE_GO_ROUTE_PROFILE).not.toHaveProperty('model');
-    expect(OPENCODE_GO_V4_PRO_PROFILE.key).not.toBe(OPENCODE_GO_V4_FLASH_PROFILE.key);
-    // Declaring no answer channel makes it inert rather than accidentally functional.
-    expect(normalizeModelResponse(OPENCODE_GO_V4_PRO_PROFILE, { choices: [{ message: { content: '{"ok":true}' } }] }))
-      .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
+  it('inherits text and tools for a gateway model without per-model evidence', () => {
+    const profile = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3')!;
+    expect(profile.capabilities).toMatchObject({ answerChannel: 'message-content-string', toolCalling: 'function', streaming: 'chat-completions-sse', structuredOutput: 'none' });
   });
 
   it('declares every other model inert beside official, historical V4 and current V4.1 profiles, whichever path reaches it', () => {

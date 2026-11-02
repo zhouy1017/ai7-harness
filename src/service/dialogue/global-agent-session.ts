@@ -114,8 +114,8 @@ export function admittedGlobalAgentRoute(policy: LaunchPolicyProjection): Admitt
 }
 
 /**
- * The scoped rule's route (#1171): only v31's declared rule, read as it states its source and tool blocks, on a model with
- * tool-calling evidence. Its local tools are exactly the four declared names, one call at a time, under the existing caps.
+ * The scoped rule's route (#1171): only v31's declared rule, read as it states its source and tool blocks, on a channel whose protocol
+ * implements function tools. Its local tools are exactly the four declared names, one call at a time, under the existing caps.
  */
 export function admittedGlobalAgentScopedRoute(policy: LaunchPolicyProjection): AdmittedDialogueRoute | null {
   const route = admittedFastRoleRoute(policy, GLOBAL_AGENT_SCOPED_KIND, 'house-review-preference-excerpt');

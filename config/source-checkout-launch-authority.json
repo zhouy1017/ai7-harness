@@ -11,6 +11,6 @@
   "activePolicySet": {
     "version": "v23",
     "canonicalPath": "docs/policies/active-policy-set.v23.json",
-    "sha256": "fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab"
+    "sha256": "e69daf84caa82718af5a41a32554adf2feb9396314e88e76edb513c62cee8fc7"
   }
 }

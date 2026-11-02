@@ -1,5 +1,5 @@
 import { procedureStageBudget } from '../procedures/execution.js';
-import { PlatformToolSession, bindSearchFallback, platformToolModelProfile, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
+import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factual-claim-ledger.js';
 import { parseFactualClaimVerification } from './factual-claim-contract.js';
@@ -628,7 +628,16 @@ export class BaselineAnalysisExecutionOwner {
     let run: FactualRecheckRun | null = null, harness: PrimaryAgentHarnessHandle | null = null, producer: ModelRequestProducer | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, usage: UsageFacts | null = null;
     try {
-      if (await this.liveCredentialReadiness() !== 'present' || !this.#backgroundIdle || signal.aborted) return;
+      const admitted = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
+      const profile = productionModelProfile(candidate.binding.route, candidate.binding.model);
+      const backend = searchBackend(candidate.search.backendId);
+      if (admitted?.factualRecheck === undefined || platformToolsFromProjection(admitted) === null ||
+        admitted.route !== candidate.binding.route || admitted.model !== candidate.binding.model ||
+        admitted.endpoint !== candidate.binding.endpoint || admitted.credentialSlot !== candidate.binding.credentialSlot ||
+        profile.capabilities.toolCalling !== 'function' || backend.declaration.host !== candidate.search.host ||
+        await this.liveCredentialReadiness(candidate.binding) !== 'present' ||
+        await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, candidate.search.credentialReference) !== 'present' ||
+        !this.#backgroundIdle || signal.aborted) return;
       run = store.startFactualRecheck(candidate);
       const frozen = run;
       const binding = frozen.binding;
@@ -639,7 +648,6 @@ export class BaselineAnalysisExecutionOwner {
       const rule = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
       const tools = platformToolsFromProjection(rule);
       if (tools === null) throw new ExecutionAdmissionError('FACTUAL_RECHECK_POLICY_MISSING', '单条复核没有联网工具准许。');
-      const backend = searchBackend(frozen.search.backendId);
       producer = this.#deps.requestGovernor.registerProducer({ key: `factual-recheck:${frozen.runRecordId}`, kind: 'analysis-stage', lane: 'background' });
       let ticket: TransmitTicket | null = null, requestOrdinal = 0, admittedPayloadDigest: string | null = null;
       const acceptedOutputDigests = new Set<string>();
@@ -1672,7 +1680,6 @@ export class BaselineAnalysisExecutionOwner {
     // is business: every model step reaches the transport itself, and nothing reads or writes the developer cache or ledger.
     const validation = live === null || production !== null ? null : (live as DeveloperLiveRuntime).launch.validation;
     const bootstrap = production === null && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
-    if (webTools) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
     let cache: ProviderResultCache | null = null;
     if (live !== null && production === null && validation !== null) {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
