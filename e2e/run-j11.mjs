@@ -574,6 +574,7 @@ const ITEM_LEGENDS = ['文学品质与作者声音 · 满分 20', '主题、价�
 
 /** Open a Book with a manuscript from 书库 into its manuscript, then its 分析 (②A) from the 资料与记录 group, as J-16 does. */
 async function openAnalysisOf(renderer, bookId, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-open-library`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`, 120_000);
