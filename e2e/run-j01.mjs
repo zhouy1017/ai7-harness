@@ -3184,7 +3184,7 @@ async function main() {
     // pinned to a literal.
     await assertRenderer(
       renderer,
-      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑内容块`)})`,
+      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑段落`)})`,
       'text-manuscript-fidelity-clean',
     );
     await clickExactButton(renderer, '确认书名并复核', 'text-manuscript-review-action');
@@ -3280,7 +3280,7 @@ async function main() {
       );
       await assertRenderer(
         renderer,
-        `document.body.textContent.includes('${LOCAL_DOC_BLOCKS} 个可编辑内容块')`,
+        `document.body.textContent.includes('${LOCAL_DOC_BLOCKS} 个可编辑段落')`,
         'doc-manuscript-blocks',
       );
       await clickExactButton(renderer, '确认书名并复核', 'doc-manuscript-review-action');
