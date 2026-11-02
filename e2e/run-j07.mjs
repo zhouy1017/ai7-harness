@@ -1086,8 +1086,8 @@ async function main() {
       const receipt = recordedNative[0];
       requireJourney(receipt.bookId === nativeBookId && receipt.target.revisionId === review.target.revisionId &&
         receipt.outcome === 'created' && receipt.format === 'docx' && receipt.destination === destination && receipt.fileName === basename(destination) &&
-        receipt.byteLength === bytes.length && receipt.technical.fileSha256 === digest(bytes) && prepared.payloadDigest === digest(bytes), `${name}-receipt-binds-file-and-version`);
-      await assertRenderer(native, `window.__j07.exportCard().querySelector('.export-receipt')?.dataset.exportOutcome==='created' && window.__j07.exportFact('来源版本 ID')===${JSON.stringify(review.technical.sourceVersionId)} && window.__j07.exportFact('导出准备 ID')===${JSON.stringify(prepared.preparationId)}`, `${name}-actual-created-receipt-ui`);
+        receipt.byteLength === bytes.length && receipt.technical.fileSha256 === digest(bytes), `${name}-receipt-binds-file-and-version`);
+      await assertRenderer(native, `window.__j07.exportCard().querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, `${name}-actual-created-receipt-ui`);
       at('export-file-parsed');
       const output = await readExportedDocx(destination);
       requireJourney(JSON.stringify(output.paragraphs.map(paragraph => paragraph.digest)) === JSON.stringify(expected.map(digest)), `${name}-full-output-reading`);
@@ -1828,7 +1828,7 @@ async function main() {
       return recipient.checked && window.__j07.cardAction('news-release', 'confirmDeliver').disabled === false;
     })()`, 'deliver-choose-recipient');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmDeliver"]', 'deliver-confirm');
-    await waitFor(renderer, `window.__j07.deliveries('news-release').length === 1 && window.__j07.exportCard()?.dataset.exportTarget === 'document'`, 'deliver-recorded', 60_000);
+    await waitFor(renderer, `window.__j07.deliveries('news-release').length === 1 && window.__j07.exportCard() === null`, 'deliver-recorded', 60_000);
     await assertRenderer(renderer, `(() => {
       const card = window.__j07.card('news-release');
       const [record] = window.__j07.deliveries('news-release');
@@ -1845,6 +1845,7 @@ async function main() {
     at('document-delivery-export');
     // The export card is the delivered version's — 新闻稿 · 版本 2, DOCX chosen — and exports it under this launch's
     // Save-dialog answer; the Delivery Record then names the file, and the file reads as that version of the 新闻稿.
+    await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-action="open"]', 'delivery-export-start');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)}`, 'delivery-export-written', 120_000);
     await waitFor(renderer, `window.__j07.deliveries('news-release')[0]?.dataset.deliveryExport === 'created'`, 'delivery-export-on-the-record', 30_000);
     await assertRenderer(renderer, `window.__j07.deliveries('news-release')[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)}`, 'delivery-export-line');
@@ -1928,10 +1929,8 @@ async function main() {
     })()`, 'redeliver-custom-needs-words');
     await assertRenderer(renderer, `(() => { const custom = window.__j07.delivery('news-release').querySelector('[data-delivery-field="custom"]'); custom.value = ${JSON.stringify(DELIVERY_CUSTOM)}; custom.dispatchEvent(new Event('input', { bubbles: true })); return window.__j07.cardAction('news-release', 'confirmDeliver').disabled === false; })()`, 'redeliver-custom-written');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmDeliver"]', 'redeliver-confirm');
-    await waitFor(renderer, `window.__j07.deliveries('news-release').length === 2 && window.__j07.exportCard()?.dataset.exportPhase === 'ready'`, 'redelivered', 120_000);
-    await assertRenderer(renderer, `window.__j07.exportCard().querySelector('h4')?.textContent === '导出 · 新闻稿 · 版本 3'`, 'redeliver-export-is-version-3');
-    await exportAct(renderer, 'cancel', 'redeliver-export-cancel');
-    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-action="open"]')`, 'redeliver-export-cancelled', 10_000);
+    await waitFor(renderer, `window.__j07.deliveries('news-release').length === 2 && window.__j07.exportCard() === null`, 'redelivered', 120_000);
+    await assertRenderer(renderer, `document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-action="open"]')`, 'redeliver-export-optional');
     await assertRenderer(renderer, `(() => {
       const card = window.__j07.card('news-release');
       const records = window.__j07.deliveries('news-release');

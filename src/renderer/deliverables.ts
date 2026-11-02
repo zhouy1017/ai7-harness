@@ -1133,8 +1133,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   }
 
   /**
-   * 交付 (DELIV-003): one Delivery Record, then the export card of the delivered version opens beside the block, its
-   * opener the new record's 导出…; a cancelled export leaves the record standing with 暂无导出记录.
+   * 交付 records the selected version and focuses its Export action. Export begins only on that action.
    */
   async function recordDelivery(type: ProductionDocumentTypeProjection, documentNow: ProductionDocumentProjection, state: DeliveryForm): Promise<void> {
     if (destroyed || working || deliveryForm !== state || deliveryBlockers(state).length > 0) return;
@@ -1169,9 +1168,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       drawDocuments(result.documents, 'keep');
       options.setStatus(documentDeliveredLine(delivered.ordinal, delivered.recipient.label), 'success');
       const opener = documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-delivery-id="${CSS.escape(delivered.deliveryId)}"] [data-export-action="open"]`);
-      if (opener instanceof HTMLButtonElement) {
-        exporter.open({ kind: 'document', documentId: documentNow.documentId, revisionId: delivered.revisionId }, documentExportLabel(type.label, delivered.versionLabel), opener);
-      }
+      opener?.focus();
     } catch (error) {
       working = false;
       if (destroyed || documentsProjection === null) return;
