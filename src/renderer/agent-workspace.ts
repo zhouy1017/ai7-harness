@@ -1,7 +1,6 @@
 import { graphemesOf } from '../shared/mark-anchor.js';
 import {
   MAX_DIALOGUE_QUESTION_CHARACTERS,
-  MAX_DIALOGUE_SELECTION_GRAPHEMES,
   type AgentWorkspaceProjection,
   type AgentWorkspacePromotionProjection,
   type AgentWorkspaceProposalProjection,
@@ -16,14 +15,14 @@ import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
  * the AI7 shell, for the current Book only, with the exact Book name, the visible safety state the capability declaration
  * states and a 返回 to where the editor came from. Entering reads and writes nothing of the Book.
  *
- * Its one journey: pick words in one paragraph of the primary manuscript, write a 修改要求, and 提出变更集 — one dialogue
+ * Pick words in one or more paragraphs of the primary manuscript, write a 修改要求, and 提出变更集 — one structured
  * turn the service sends. The answer is listed here as proposals anchored on exact words, not marks. 提交为修改建议 makes
  * them 修改建议 the editor decides on the existing Mark Cards; 放弃这组提议 forgets them. The screen has no apply, export or
  * send of its own.
  */
 export type AgentWorkspaceApi = Pick<RendererApi,
   'inspectAgentWorkspace' | 'proposeAgentWorkspaceChangeSet' | 'promoteAgentWorkspaceProposals' | 'discardAgentWorkspaceProposals' |
-  'getBookOverview' | 'getManuscriptWindow'>;
+  'getBookOverview' | 'getManuscriptWindow' | 'getManuscriptWindowAt'>;
 
 export interface MountAgentWorkspaceOptions {
   readonly root: HTMLElement;
@@ -40,6 +39,7 @@ export interface MountAgentWorkspaceOptions {
 
 /** How often a round still being answered is read again. */
 const PROPOSING_POLL_MS = 300;
+const readingPlaces = new Map<string, { blockId: string; entryBlockId: string | null; selection: DialogueSelectionInput | null; instruction: string }>();
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -56,12 +56,19 @@ function actionButton(label: string, action: string, tone: 'primary' | 'secondar
   return node;
 }
 
-/** The selection the editor made in one paragraph, as a dialogue names exact words. */
-function selectionIn(page: ManuscriptWindowProjection, blockId: string, from: number, to: number): DialogueSelectionInput | null {
+/** The exact paragraph range or contiguous span the editor selected. */
+function selectionIn(page: ManuscriptWindowProjection, blockId: string, from: number, to: number, endBlockId = blockId): DialogueSelectionInput | null {
   const block = page.blocks.find((entry) => entry.blockId === blockId);
   if (block === undefined || page.blocks.length === 0) return null;
   const parts = graphemesOf(block.text);
-  if (from < 0 || to <= from || to > parts.length) return null;
+  const start = page.blocks.indexOf(block);
+  const end = page.blocks.findIndex((entry) => entry.blockId === endBlockId);
+  if (end < start || from < 0 || from >= parts.length) return null;
+  const blocks = page.blocks.slice(start, end + 1);
+  const last = blocks.at(-1)!;
+  if (to < 0 || to > graphemesOf(last.text).length || (start === end && to <= from)) return null;
+  const span = blocks.map((entry, index) => ({ blockId: entry.blockId, blockDigest: entry.digest,
+    fromGrapheme: index === 0 ? from : 0, toGrapheme: index === blocks.length - 1 ? to : graphemesOf(entry.text).length }));
   return {
     manuscriptId: page.manuscriptId,
     branchId: page.branchId,
@@ -71,8 +78,9 @@ function selectionIn(page: ManuscriptWindowProjection, blockId: string, from: nu
     blockId,
     baseBlockDigest: block.digest,
     fromGrapheme: from,
-    toGrapheme: to,
-    selectedText: parts.slice(from, to).join(''),
+    toGrapheme: span[0]!.toGrapheme,
+    selectedText: blocks.map((entry, index) => graphemesOf(entry.text).slice(span[index]!.fromGrapheme, span[index]!.toGrapheme).join('')).join('\n'),
+    ...(blocks.length === 1 ? {} : { span }),
   };
 }
 
@@ -86,6 +94,8 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   let page: ManuscriptWindowProjection | null = null;
   let selection: DialogueSelectionInput | null = null;
   let promoted: AgentWorkspacePromotionProjection | null = null;
+  const remembered = readingPlaces.get(bookId);
+  let entryBlockId: string | null = null;
 
   root.classList.add('agent-workspace');
   root.dataset['bookId'] = bookId;
@@ -103,7 +113,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     poll = undefined;
   };
 
-  // ---- the range: one paragraph of the primary manuscript, its words chosen in place ----------------------------------
+  // ---- the range: primary manuscript words chosen in place ------------------------------------------------------------
   const pick = el('section', 'agent-workspace-pick');
   const pages = el('div', 'agent-workspace-blocks');
   pages.setAttribute('role', 'group');
@@ -125,6 +135,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   instruction.rows = 3;
   instruction.maxLength = MAX_DIALOGUE_QUESTION_CHARACTERS;
   instruction.dataset['agentWorkspaceField'] = 'instruction';
+  instruction.value = remembered?.instruction ?? '';
   const propose = actionButton(words.propose, 'propose', 'primary', () => void runPropose());
   form.append(label, instruction, el('p', 'field-note', words.instructionNote), propose);
 
@@ -133,7 +144,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
 
   const paintSelection = (): void => {
     for (const node of pages.querySelectorAll<HTMLElement>('[data-agent-workspace-block]')) {
-      node.toggleAttribute('data-agent-workspace-chosen', selection !== null && node.dataset['agentWorkspaceBlock'] === selection.blockId);
+      node.toggleAttribute('data-agent-workspace-chosen', selection !== null && (selection.span?.some((pin) => pin.blockId === node.dataset['agentWorkspaceBlock']) ?? node.dataset['agentWorkspaceBlock'] === selection.blockId));
     }
     chosen.replaceChildren();
     if (selection === null) {
@@ -147,7 +158,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     paintControls();
   };
 
-  /** Read the editor's selection in the paragraph list: one paragraph's words, or the whole paragraph a click lands in. */
+  /** Read a contiguous selection, or the whole paragraph a click lands in. */
   const capture = (): void => {
     if (page === null) return;
     const current = window.getSelection();
@@ -161,10 +172,6 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     const start = blockOf(range.startContainer);
     const end = blockOf(range.endContainer);
     if (start === null || end === null) return;
-    if (start !== end) {
-      options.setStatus(words.selectionAcrossParagraphs, 'error');
-      return;
-    }
     const blockId = start.dataset['agentWorkspaceBlock']!;
     let from = 0;
     let to = graphemesOf(start.textContent ?? '').length;
@@ -173,21 +180,20 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       before.selectNodeContents(start);
       before.setEnd(range.startContainer, range.startOffset);
       from = graphemesOf(before.toString()).length;
-      to = from + graphemesOf(range.toString()).length;
+      const ending = document.createRange();
+      ending.selectNodeContents(end);
+      ending.setEnd(range.endContainer, range.endOffset);
+      to = graphemesOf(ending.toString()).length;
     }
-    if (to - from > MAX_DIALOGUE_SELECTION_GRAPHEMES) {
-      options.setStatus(words.selectionTooLong(MAX_DIALOGUE_SELECTION_GRAPHEMES), 'error');
-      return;
-    }
-    const picked = selectionIn(page, blockId, from, to);
-    if (picked === null || (!range.collapsed && picked.selectedText !== range.toString())) return;
+    const picked = selectionIn(page, blockId, from, to, end.dataset['agentWorkspaceBlock']!);
+    if (picked === null) return;
     selection = picked;
     paintSelection();
   };
   pages.addEventListener('mouseup', capture);
   pages.addEventListener('keyup', capture);
 
-  const loadPage = async (cursor: string | null): Promise<void> => {
+  const loadPage = async (cursor: string | null, restore = false): Promise<void> => {
     try {
       const anchor = (await api.getBookOverview({ bookId, historyCursor: null })).manuscriptAnchor;
       if (destroyed) return;
@@ -196,9 +202,15 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
         pageControls.hidden = true;
         return;
       }
-      const read = await api.getManuscriptWindow({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, cursor });
+      entryBlockId = anchor.entry?.blockId ?? null;
+      const sameEntry = remembered?.entryBlockId === entryBlockId;
+      const blockId = restore ? (sameEntry ? remembered?.blockId : undefined) ?? anchor.entry?.blockId : undefined;
+      const read = blockId === undefined
+        ? await api.getManuscriptWindow({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, cursor })
+        : await api.getManuscriptWindowAt({ manuscriptId: anchor.manuscriptId, branchId: anchor.branchId, target: { kind: 'block', blockId } });
       if (destroyed) return;
       page = read;
+      if (restore && sameEntry && remembered?.selection?.baseRevisionId === read.revisionId && remembered.selection.expectedJournalSequence === read.journalSequence) selection = remembered.selection;
       pages.dataset['agentWorkspaceRevision'] = read.revisionId;
       pages.replaceChildren(...read.blocks.map((block) => {
         const node = el(block.kind === 'paragraph' || block.kind === 'note' ? 'p' : 'h4', 'agent-workspace-block', block.text);
@@ -280,7 +292,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
 
   const paintControls = (): void => {
     const held = workspace?.proposal ?? null;
-    const open = workspace?.available === true && (held === null || held.state === 'failed');
+    const open = workspace?.available === true && held?.state !== 'proposing';
     propose.disabled = busy || !open || selection === null;
     instruction.disabled = busy || !open;
   };
@@ -298,7 +310,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     }
     if (!body.contains(pick)) {
       body.replaceChildren(el('p', 'lede', words.lede), pick, form, proposalHost);
-      void loadPage(null);
+      void loadPage(null, true);
     }
     paintProposal(projection.proposal);
     paintControls();
@@ -364,6 +376,8 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
 
   return {
     destroy: () => {
+      const blockId = selection?.blockId ?? page?.blocks[0]?.blockId;
+      if (blockId !== undefined) readingPlaces.set(bookId, { blockId, entryBlockId, selection, instruction: instruction.value });
       destroyed = true;
       stopPolling();
     },

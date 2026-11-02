@@ -1,7 +1,7 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isRecord, sha256Hex } from '../analysis/canonical.js';
 import { validModelServiceModelId, type DiscoveredModel } from '../../shared/protocol/model-service.js';
-import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from '../dialogue/global-agent-session.js';
 import { AI7_FAILURE_CODES, retryBackoffMs, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
@@ -197,9 +197,9 @@ function familyStreamEvents(response: DeepSeekTransportResponse, model: Provider
 }
 
 /** A /2 dialogue carries its one admitted question followed only by complete local function-call rounds. */
-function isRetrievalDialogue(payload: AssembledModelPayload): boolean {
+function isRetrievalDialogue(payload: AssembledModelPayload, systemPrompt: string = DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt): boolean {
   const first = payload.messages[0];
-  if (payload.system !== DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt ||
+  if (payload.system !== systemPrompt ||
     !toolSetEqualsPlatformSchemas(payload.tools ?? [], LEGACY_LOCAL_TOOL_SCHEMAS) || first?.role !== 'user' ||
     parseDialogueMessage(messageText(first) ?? '') === null) return false;
   const issued = new Set<string>();
@@ -231,7 +231,12 @@ function isStreamedDialogue(payload: AssembledModelPayload, context: ProviderReq
   const global = context.promptContractDigest === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST &&
     payload.system === GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 && message?.role === 'user' &&
     parseDialogueMessage(messageText(message) ?? '')?.globalSources !== undefined && (payload.tools ?? []).length === 0;
-  return predecessor || retrieval || global;
+  const workspace = context.promptContractDigest === AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST &&
+    payload.system === AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
+    message?.role === 'user' && parseDialogueMessage(messageText(message) ?? '') !== null && (payload.tools ?? []).length === 0;
+  const workspaceRetrieval = context.promptContractDigest === AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST &&
+    isRetrievalDialogue(payload, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt);
+  return predecessor || retrieval || global || workspace || workspaceRetrieval;
 }
 
 /**

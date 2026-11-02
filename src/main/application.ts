@@ -5421,7 +5421,8 @@ function registerRendererHandlers(
           requireAuthority();
           const route = requireCurrentBookRoute(owned);
           const routeGeneration = owned.routeGeneration;
-          const result = await service.call(operation, { bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId });
+          const result = await service.call(operation, { bookId: route.bookId, dialogueId: input.dialogueId, attemptId: input.attemptId,
+            ...(operation === 'continueDialogueAnswer' && input.question !== undefined ? { question: input.question } : {}) });
           requireCurrentRouteGeneration(owned, routeGeneration);
           return requireDialogueOfRoute(route, result);
         });

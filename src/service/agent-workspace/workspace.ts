@@ -15,18 +15,9 @@ import type {
 import { AGENT_WORKSPACE_CAPABILITIES } from './capabilities.js';
 import { readAgentWorkspaceAnswer } from './change-set.js';
 
-/**
- * The Book-bound Agent 工作区 as the service holds it (Issue #90, wave 13 slice 13a; ADR 0045 "Book-bound presentation and
- * Apply", UI ADR 0015; V2-UX-AGENT-001 to 004, APREP-001): one bounded editor journey — propose a change set over a selected
- * range — and nothing more.
- *
- * Every Book has the workspace. Looking at it writes nothing. One proposal round is one dialogue turn of the `editorial-dialogue` kind on the
- * dialogue's own owners — the selected words verified as a dialogue's are, the route the selected policy admits for the
- * dialogue, its refusals unchanged — under the workspace fragment of the dialogue contract; its dialogue Task is the one
- * record the round writes. What the answer proposes is held here, in memory, as candidates anchored inside the selection —
- * not marks. 提交为修改建议 turns the whole set into 修改建议 marks through the produced-mark path, one atomic group when there
- * are two or more; the editor then decides and applies them only through the existing Mark Cards, proposal workspace and
- * Apply, which this module never calls. 放弃 forgets the round and records nothing. A restart forgets every held round.
+/** Book-scoped change-set rounds, streamed through the dialogue execution owner but isolated from prose dialogues.
+ * Exact selections may span paragraphs. Each candidate stays inside one paragraph and becomes an independent mark only
+ * when the editor submits it; this owner never applies manuscript changes. A completed round can be refined immediately.
  */
 export type AgentWorkspaceStore = Pick<EditorialStore,
   'getBookOverview' | 'dialogueSourceDigest' | 'askAboutSelection' | 'createProducedEditorialMarks'>;
@@ -34,8 +25,6 @@ export type AgentWorkspaceDialogues = Pick<DialogueExecutionOwner, 'requireReady
 
 /** The label every workspace mark carries as its source, beside the dialogue Task of the turn it came from. */
 export const AGENT_WORKSPACE_MARK_SOURCE_LABEL = words.source;
-/** What an atomic group of a promoted change set says partial acceptance would cause. */
-export const AGENT_WORKSPACE_ATOMIC_REASON = words.atomicReason;
 /** The reason an unavailable Book cannot be opened. */
 export const AGENT_WORKSPACE_UNAVAILABLE_REASON = words.unavailable;
 /** The longest quotation a workspace mark's basis keeps, in characters. */
@@ -64,6 +53,7 @@ interface HeldRound {
   candidates: AgentWorkspaceProposalProjection['candidates'];
   dropped: AgentWorkspaceProposalProjection['dropped'];
   label: string;
+  streamedCharacters: number;
 }
 
 function roundProjection(round: HeldRound): AgentWorkspaceProposalProjection {
@@ -77,37 +67,54 @@ function roundProjection(round: HeldRound): AgentWorkspaceProposalProjection {
     dropped: round.dropped,
     label: round.label,
     startedAt: round.startedAt,
+    streamedCharacters: round.streamedCharacters,
   };
 }
 
 /** What a settled turn leaves the round, in the editor's words. */
-function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: string): Pick<HeldRound, 'state' | 'candidates' | 'dropped' | 'label'> {
+function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: string, partial = false): Pick<HeldRound, 'state' | 'candidates' | 'dropped' | 'label'> {
   if (outcome !== 'completed') {
     return {
       state: 'failed', candidates: [], dropped: [],
       label: outcome === 'stopped' ? words.stopped : words.failed,
     };
   }
-  const reading = readAgentWorkspaceAnswer(streamed, round.selection.text);
+  const reading = readAgentWorkspaceAnswer(streamed, round.selection.text, partial);
   if (reading.kind === 'withheld') return { state: 'failed', candidates: [], dropped: [], label: words.withheld(reading.reason) };
-  const candidates = reading.candidates.map((candidate) => ({
-    ordinal: candidate.ordinal,
-    anchor: {
-      blockId: round.selection.blockId,
-      fromGrapheme: round.selection.fromGrapheme + candidate.fromGrapheme,
-      toGrapheme: round.selection.fromGrapheme + candidate.toGrapheme,
-      text: candidate.anchor,
-    },
-    proposedText: candidate.proposedText,
-    rationale: candidate.rationale,
-  }));
-  const notOffered = reading.dropped.length === 0 ? '' : words.notOffered(reading.dropped.length);
+  const pins = round.selection.span ?? [{ blockId: round.selection.blockId, fromGrapheme: round.selection.fromGrapheme,
+    toGrapheme: round.selection.toGrapheme }];
+  let offset = 0;
+  const locations = pins.map((pin) => {
+    const start = offset;
+    offset += pin.toGrapheme - pin.fromGrapheme + 1;
+    return { pin, start, end: offset - 1 };
+  });
+  const dropped = [...reading.dropped];
+  const candidates = reading.candidates.flatMap((candidate) => {
+    const location = locations.find((entry) => candidate.fromGrapheme >= entry.start && candidate.toGrapheme <= entry.end);
+    if (location === undefined) {
+      dropped.push({ ordinal: candidate.ordinal, reason: '这项修改跨过段落边界，请分段提出。' });
+      return [];
+    }
+    return [{
+      ordinal: candidate.ordinal,
+      anchor: {
+        blockId: location.pin.blockId,
+        fromGrapheme: location.pin.fromGrapheme + candidate.fromGrapheme - location.start,
+        toGrapheme: location.pin.fromGrapheme + candidate.toGrapheme - location.start,
+        text: candidate.anchor,
+      },
+      proposedText: candidate.proposedText,
+      rationale: candidate.rationale,
+    }];
+  });
+  const notOffered = dropped.length === 0 ? '' : words.notOffered(dropped.length);
   const label = candidates.length > 0
     ? words.offered(candidates.length, notOffered)
-    : reading.dropped.length > 0
-      ? words.allDropped(reading.dropped.length)
+    : dropped.length > 0
+      ? words.allDropped(dropped.length)
       : words.empty;
-  return { state: 'ready', candidates, dropped: reading.dropped, label };
+  return { state: 'ready', candidates, dropped, label };
 }
 
 export class AgentWorkspace {
@@ -150,19 +157,19 @@ export class AgentWorkspace {
   /**
    * One proposal round: the selected words of the Book's primary manuscript and the editor's instruction, sent as one
    * dialogue turn under the workspace fragment. Refused before anything is recorded when the workspace does not open, the
-   * words are not the primary manuscript's, a round is already held, or the dialogue's route refuses them.
+   * words are not the primary manuscript's, a round is still generating, or the dialogue's route refuses them.
    */
   async propose(bookId: string, input: ProposeAgentWorkspaceChangeSetInput): Promise<AgentWorkspaceProjection> {
     require(input !== null && typeof input === 'object' && input.selection !== null && typeof input.selection === 'object',
       'AGENT_WORKSPACE_SELECTION_INVALID', words.invalidSelection);
     await this.#requireAvailable(bookId);
     const held = this.#rounds.get(bookId);
-    require(held === undefined || held.state === 'failed', 'AGENT_WORKSPACE_ROUND_HELD', words.held);
+    require(held?.state !== 'proposing', 'AGENT_WORKSPACE_ROUND_HELD', words.held);
     const anchor = this.#store.getBookOverview(bookId).manuscriptAnchor;
     require(anchor !== null && anchor.manuscriptId === input.selection.manuscriptId && anchor.branchId === input.selection.branchId,
       'AGENT_WORKSPACE_SCOPE', words.scope);
     this.#dialogues.requireReady(this.#store.dialogueSourceDigest(bookId, input.selection));
-    const turn = this.#store.askAboutSelection(bookId, { selection: input.selection, question: input.instruction }, this.#now());
+    const turn = this.#store.askAboutSelection(bookId, { selection: input.selection, question: input.instruction }, this.#now(), 'agent-workspace');
     const round: HeldRound = {
       proposalSetId: randomUUID(),
       bookId,
@@ -176,24 +183,39 @@ export class AgentWorkspace {
         fromGrapheme: input.selection.fromGrapheme,
         toGrapheme: input.selection.toGrapheme,
         text: turn.message.selection,
+        ...(input.selection.span === undefined ? {} : { span: input.selection.span }),
       },
       startedAt: this.#now().toISOString(),
       state: 'proposing',
       candidates: [],
       dropped: [],
       label: words.proposing,
+      streamedCharacters: 0,
     };
     this.#rounds.set(bookId, round);
     try {
       this.#dialogues.beginWorkspaceTurn({
         ...turn,
+        ...(held?.state === 'ready' && held.candidates.length > 0 ? { message: { ...turn.message, followUp: true as const,
+          kept: `上一轮修改要求：${held.instruction}\n上一轮提议：${JSON.stringify(held.candidates.map((candidate) => ({
+            anchor: candidate.anchor.text, proposedText: candidate.proposedText, rationale: candidate.rationale,
+          })))}` } } : {}),
+        progress: (streamed) => {
+          if (this.#rounds.get(bookId) === round) {
+            const preview = settledRound(round, 'completed', streamed, true);
+            if (preview.state === 'ready') { round.candidates = preview.candidates; round.dropped = preview.dropped; }
+            round.streamedCharacters = [...streamed].length;
+            round.label = `正在提出变更集…已收到 ${round.streamedCharacters} 字`;
+          }
+        },
         settled: (outcome, streamed) => {
           // A round discarded or replaced meanwhile takes nothing from its answer.
           if (this.#rounds.get(bookId) === round) Object.assign(round, settledRound(round, outcome, streamed));
         },
       });
     } catch (error) {
-      this.#rounds.delete(bookId);
+      if (held === undefined) this.#rounds.delete(bookId);
+      else this.#rounds.set(bookId, held);
       throw error;
     }
     return this.inspect(bookId);
@@ -201,14 +223,14 @@ export class AgentWorkspace {
 
   /**
    * 提交为修改建议: every candidate of the held round becomes a 修改建议 mark on the words it anchors, attributed to the round's
-   * dialogue Task — together, in one transaction, and in one atomic group when there are two or more. Words the manuscript no
+   * workspace Task — together in one transaction, independently decidable on their cards. Words the manuscript no
    * longer holds at an anchor refuse the whole set, and nothing is written. Nothing is decided or applied.
    */
   async promote(bookId: string, input: AgentWorkspaceProposalSetInput): Promise<AgentWorkspacePromotionProjection> {
     const round = this.#requireRound(bookId, input);
     require(round.state === 'ready' && round.candidates.length > 0, 'AGENT_WORKSPACE_NOTHING_TO_PROMOTE', words.nothingToPromote);
     await this.#requireAvailable(bookId);
-    const atomicGroupId = round.candidates.length >= 2 ? randomUUID() : null;
+    const atomicGroupId = null;
     const inputs: ProducedEditorialMarkInput[] = round.candidates.map((candidate) => ({
       manuscriptId: round.selection.manuscriptId,
       branchId: round.selection.branchId,
@@ -221,7 +243,7 @@ export class AgentWorkspace {
       proposedText: candidate.proposedText,
       rationale: candidate.rationale,
       atomicGroupId,
-      atomicReason: atomicGroupId === null ? null : AGENT_WORKSPACE_ATOMIC_REASON,
+      atomicReason: null,
       source: { kind: 'ai7', origin: 'task', label: AGENT_WORKSPACE_MARK_SOURCE_LABEL, taskId: round.dialogueId },
       basis: [{
         label: words.basis(candidate.ordinal),
@@ -243,9 +265,7 @@ export class AgentWorkspace {
       atomicGroupId,
       manuscriptId: round.selection.manuscriptId,
       branchId: round.selection.branchId,
-      label: atomicGroupId === null
-        ? words.promotedOne
-        : words.promotedGroup(markIds.length),
+      label: markIds.length === 1 ? words.promotedOne : words.promotedGroup(markIds.length),
       workspace: await this.inspect(bookId),
     };
   }

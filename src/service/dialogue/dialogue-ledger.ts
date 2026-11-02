@@ -405,6 +405,7 @@ export interface StoredGlobalDialogueTask {
 }
 
 export interface StoredDialogueTask {
+  readonly origin?: 'agent-workspace';
   readonly dialogueId: string;
   readonly bookId: string;
   readonly manuscriptId: string;
@@ -519,6 +520,13 @@ function spanOfRecord(row: SqlRow): { span?: ReadonlyArray<SelectionSpanBlockPin
   return { span };
 }
 
+function originOfRecord(row: SqlRow): { origin?: 'agent-workspace' } {
+  const record = parseStoredJson(text(row.canonical_json), () => new DialogueError('DIALOGUE_RECORD_INVALID', INVALID));
+  const origin = isRecord(record) ? record.origin : undefined;
+  requireDialogue(origin === undefined || origin === 'agent-workspace', 'DIALOGUE_RECORD_INVALID', INVALID);
+  return origin === undefined ? {} : { origin };
+}
+
 function verified(row: SqlRow, record: Record<string, unknown>): void {
   const json = text(row.canonical_json);
   requireDialogue(sha256Hex(json) === text(row.sha256) && json === canonicalJson(record), 'DIALOGUE_RECORD_INVALID', INVALID);
@@ -533,7 +541,7 @@ export class DialogueLedger {
 
   /** A new dialogue Task and its first attempt, inside the caller's transaction. */
   ask(input: Omit<StoredDialogueTask, 'dialogueId' | 'askedAt'> & { readonly now: Date }): { task: StoredDialogueTask; attemptId: string } {
-    requireDialogue(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) &&
+    requireDialogue((input.origin === undefined || input.origin === 'agent-workspace') && UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.manuscriptId) && UUID_PATTERN.test(input.branchId) &&
       UUID_PATTERN.test(input.revisionId) && Number.isSafeInteger(input.journalSequence) && input.journalSequence >= 0 &&
       /^blk_[0-9a-f]{24}$/u.test(input.blockId) && Number.isSafeInteger(input.fromGrapheme) && input.fromGrapheme >= 0 &&
       Number.isSafeInteger(input.toGrapheme) && input.toGrapheme > input.fromGrapheme && DIGEST_PATTERN.test(input.blockDigest) &&
@@ -542,6 +550,7 @@ export class DialogueLedger {
     'DIALOGUE_INVALID', '对话的所选文字或问题无效。');
     const task: StoredDialogueTask = {
       dialogueId: randomUUID(),
+      ...(input.origin === undefined ? {} : { origin: input.origin }),
       bookId: input.bookId,
       manuscriptId: input.manuscriptId,
       branchId: input.branchId,
@@ -625,6 +634,7 @@ export class DialogueLedger {
       toGrapheme: integer(row.to_grapheme),
       blockDigest: text(row.block_digest),
       ...spanOfRecord(row),
+      ...originOfRecord(row),
       selectionSha256: text(row.selection_sha256),
       questionSha256: text(row.question_sha256),
       askedAt: text(row.asked_at),
@@ -801,12 +811,12 @@ export class DialogueLedger {
    * interrupted with something kept, 重新回答 after any. Inside the caller's transaction.
    */
   nextAttempt(dialogueId: string, kind: 'continue' | 'regenerate', keptFragments: (attempt: StoredDialogueAttempt) => number, now: Date,
-    qualification?: QualifiedGlobalAttemptMetadata): string {
+    qualification?: QualifiedGlobalAttemptMetadata, followUp = false): string {
     const attempts = this.attempts(dialogueId);
     const last = attempts.at(-1);
     requireDialogue(last !== undefined, 'DIALOGUE_NOT_FOUND', '这段对话不存在。');
     requireDialogue(last.outcome !== null, 'DIALOGUE_ANSWERING', '这个问题还在回答中；停止回答后才能继续或重新回答。');
-    if (kind === 'continue') {
+    if (kind === 'continue' && !followUp) {
       requireDialogue(last.outcome.outcome === 'stopped' || last.outcome.outcome === 'interrupted', 'DIALOGUE_NOT_INCOMPLETE',
         '只有停止或中断、内容不完整的回答才能继续回答。');
       requireDialogue(keptFragments(last) > 0, 'DIALOGUE_NOTHING_KEPT', '这次回答没有留下完整的内容可以接着回答；请重新回答。');

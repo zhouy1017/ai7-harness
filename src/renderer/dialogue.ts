@@ -1,5 +1,6 @@
 import {
   MAX_DIALOGUE_PROPOSAL_CHARACTERS,
+  MAX_DIALOGUE_QUESTION_CHARACTERS,
   type DialogueAttemptProjection,
   type DialogueProjection,
   type RendererApi,
@@ -34,6 +35,7 @@ import {
   dialogueConvertedLine,
   dialogueIncompleteLine,
 } from './dialogue-labels.js';
+import { dialogueReplacementText } from './dialogue-answer.js';
 
 /**
  * The foreground Interactive Editorial Dialogue (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-006 to 016), in the
@@ -99,7 +101,25 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
   reasoning.hidden = true;
   const convertHost = el('div', 'dialogue-convert-host');
   const note = el('p', 'field-note dialogue-authority', DIALOGUE_AUTHORITY_NOTE);
-  element.append(context, reasoning, attemptsHost, actions, promoteRow, convertHost, note);
+  const followUpForm = el('form', 'editorial-mark-composer dialogue-follow-up');
+  const followUp = el('textarea');
+  followUp.id = uid('follow-up');
+  followUp.rows = 3;
+  followUp.maxLength = MAX_DIALOGUE_QUESTION_CHARACTERS;
+  followUp.required = true;
+  followUp.dataset['dialogueFollowUp'] = '';
+  const followUpLabel = el('label', undefined, '继续追问');
+  followUpLabel.htmlFor = followUp.id;
+  const sendFollowUp = el('button', 'secondary', '发送追问');
+  sendFollowUp.type = 'submit';
+  sendFollowUp.dataset['dialogueAction'] = 'follow-up';
+  followUpForm.append(followUpLabel, followUp, sendFollowUp);
+  followUpForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!sendFollowUp.disabled && followUp.value.trim()) void act('follow-up');
+  });
+  followUpForm.hidden = true;
+  element.append(context, reasoning, attemptsHost, actions, promoteRow, convertHost, followUpForm, note);
 
   let dialogueId: string | null = null;
   let dialogue: DialogueProjection | null = null;
@@ -143,6 +163,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       answer.append(el('p', 'field-note', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
     }
     for (const fragment of attempt.fragments) answer.append(fragmentNode(fragment.text, fragment.breakAfter));
+    if (attempt.question !== undefined) section.append(el('p', 'dialogue-question', `追问：${attempt.question}`));
     section.append(head, answer);
     const incomplete = dialogueIncompleteLine(attempt);
     if (incomplete !== null) section.append(el('p', 'field-note dialogue-incomplete', incomplete));
@@ -156,6 +177,15 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     element.dataset['dialogue'] = 'ready';
     element.dataset['dialogueId'] = next.dialogueId;
     const latest = next.attempts.at(-1) ?? null;
+    if (next.origin === 'agent-workspace') {
+      context.replaceChildren(el('p', 'field-note', '这轮变更集在 Agent 工作区中查看和提交。'));
+      attemptsHost.replaceChildren();
+      actions.replaceChildren();
+      promoteRow.replaceChildren();
+      convertHost.replaceChildren();
+      followUpForm.hidden = true;
+      return;
+    }
     element.dataset['dialogueLatestState'] = latest?.state ?? '';
     const selectionHeading = el('h3', 'section-label', DIALOGUE_SELECTION_HEADING);
     const quote = el('blockquote', 'editorial-mark-quote dialogue-selection', next.selection ?? DIALOGUE_HISTORY_MISSING);
@@ -198,6 +228,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     if (dialogue === null) return;
     const latest = dialogue.attempts.at(-1);
     const can = dialogue.actions;
+    followUpForm.hidden = dialogue.origin === 'agent-workspace';
+    followUp.disabled = working || converting || latest?.state === 'answering' || dialogue.question === null;
+    sendFollowUp.disabled = followUp.disabled;
     const active = document.activeElement instanceof HTMLElement && actions.contains(document.activeElement)
       ? document.activeElement.dataset['dialogueAction'] ?? null
       : null;
@@ -308,7 +341,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     }
   }
 
-  async function act(action: 'stop' | 'continue' | 'regenerate'): Promise<void> {
+  async function act(action: 'stop' | 'continue' | 'regenerate' | 'follow-up'): Promise<void> {
     if (working || dialogue === null) return;
     const latest = dialogue.attempts.at(-1);
     if (latest === undefined) return;
@@ -316,15 +349,16 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     paintActions();
     clearTimer();
     ticket += 1;
-    const input = { dialogueId: dialogue.dialogueId, attemptId: latest.attemptId };
-    const words = action === 'stop' ? DIALOGUE_STATUS.stopping : action === 'continue' ? DIALOGUE_STATUS.continuing : DIALOGUE_STATUS.regenerating;
+    const input = { dialogueId: dialogue.dialogueId, attemptId: latest.attemptId, ...(action === 'follow-up' ? { question: followUp.value.trim() } : {}) };
+    const words = action === 'follow-up' ? '正在发送追问…' : action === 'stop' ? DIALOGUE_STATUS.stopping : action === 'continue' ? DIALOGUE_STATUS.continuing : DIALOGUE_STATUS.regenerating;
     options.setStatus(words, 'busy');
     try {
       const next = action === 'stop'
         ? await api.stopDialogueAnswer(input)
-        : action === 'continue' ? await api.continueDialogueAnswer(input) : await api.regenerateDialogueAnswer(input);
+        : action === 'continue' || action === 'follow-up' ? await api.continueDialogueAnswer(input) : await api.regenerateDialogueAnswer(input);
       working = false;
-      if (dialogueId !== next.dialogueId) return;
+      if (action === 'follow-up') followUp.value = '';
+      if (dialogueId !== next.dialogueId) { paintActions(); return; }
       paint(next);
       options.setStatus(action === 'stop' ? (latest.queued === true ? DIALOGUE_QUEUED_CANCELLED : DIALOGUE_STATUS.stopped) : words, 'success');
       options.onChanged();
@@ -350,6 +384,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const latest = target.attempts.at(-1);
     if (latest === undefined || !target.actions.convert) return;
     converting = true;
+    paintActions();
     const form = el('form', 'editorial-mark-composer dialogue-convert');
     form.dataset['dialogueConvert'] = 'open';
     const title = el('h4', undefined, DIALOGUE_CONVERT_TITLE);
@@ -370,7 +405,8 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       return area;
     };
     form.append(title, original);
-    const proposed = field(DIALOGUE_CONVERT_PROPOSED, '', 'proposedText');
+    const answer = latest.fragments.map((fragment) => fragment.text + (fragment.breakAfter ? '\n' : '')).join('');
+    const proposed = field(DIALOGUE_CONVERT_PROPOSED, [...dialogueReplacementText(answer)].slice(0, MAX_DIALOGUE_PROPOSAL_CHARACTERS).join(''), 'proposedText');
     proposed.required = true;
     // 理由 starts empty: what is written there is kept with the 修改建议, so the question is never copied into it unasked.
     const rationale = field(DIALOGUE_CONVERT_RATIONALE, '', 'rationale');
@@ -386,6 +422,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const closeForm = (focusConvert: boolean): void => {
       converting = false;
       form.remove();
+      paintActions();
       if (focusConvert) actions.querySelector<HTMLButtonElement>('[data-dialogue-action="convert"]')?.focus();
     };
     cancel.addEventListener('click', () => closeForm(true));
@@ -427,6 +464,8 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
       const changed = next !== dialogueId;
       dialogueId = next;
       if (changed) {
+        followUp.value = '';
+        followUpForm.hidden = true;
         dialogue = null;
         shown = null;
         converting = false;

@@ -21,7 +21,7 @@ import { type CurationRun } from './learning/curation.js';
 import type { LearningCurationBundle } from '../shared/protocol/learning.js';
 import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
 import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
-import { buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
 import { fragmentsText } from './dialogue/fragments.js';
 import { globalAgentDialogueProjection, globalAgentScopedTools, readGlobalAgentHistory, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
 import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalAgentProcedure, GlobalAgentProcedurePin, GlobalAgentScope, GlobalAgentScopeInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
@@ -18947,7 +18947,7 @@ export class EditorialStore {
    * exact words selected in the Book's manuscript, verified as a mark's range is, and its first attempt. Nothing is sent here;
    * the execution owner sends the message this answers, which holds the selected words and the question and nothing else.
    */
-  askAboutSelection(bookId: string, input: AskAboutSelectionInput, now: Date = new Date()): DialogueTurnStart {
+  askAboutSelection(bookId: string, input: AskAboutSelectionInput, now: Date = new Date(), origin?: 'agent-workspace'): DialogueTurnStart {
     return this.#dialogueCall(() => {
       requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
       requireStore(typeof input === 'object' && input !== null && typeof input.selection === 'object' && input.selection !== null,
@@ -18955,9 +18955,10 @@ export class EditorialStore {
       const question = dialogueQuestion(input.question);
       const verified = this.verifySelectionSpan(input.selection);
       requireStore(verified.bookId === bookId, 'DIALOGUE_SELECTION_INVALID', '所选文字不在这本书的稿件中。');
-      requireStore(verified.text.length > 0 && spanGraphemes(input.selection) <= MAX_DIALOGUE_SELECTION_GRAPHEMES,
+      requireStore(verified.text.length > 0 && (origin === 'agent-workspace' || spanGraphemes(input.selection) <= MAX_DIALOGUE_SELECTION_GRAPHEMES),
         'DIALOGUE_SELECTION_TOO_LONG', `所选文字最多 ${MAX_DIALOGUE_SELECTION_GRAPHEMES} 个字；请选短一些再提问。`);
       const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.ask({
+        ...(origin === undefined ? {} : { origin }),
         bookId,
         manuscriptId: input.selection.manuscriptId,
         branchId: input.selection.branchId,
@@ -18992,13 +18993,27 @@ export class EditorialStore {
       requireStore(first !== null, 'DIALOGUE_HISTORY_MISSING', '这个问题的记录不在本机，不能继续或重新回答。');
       requireStore(sha256(first.selection) === task.selectionSha256 && sha256(first.question) === task.questionSha256,
         'DIALOGUE_RECORD_INVALID', '对话记录与它的问题不一致。');
-      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => latest.fragments.length, now));
+      requireStore(task.origin !== 'agent-workspace', 'DIALOGUE_WORKSPACE', '请在 Agent 工作区继续提出修改要求。');
+      const previousMessage = latest.message ?? first;
+      const question = input.question === undefined ? previousMessage.question : dialogueQuestion(input.question);
+      const following = input.question !== undefined;
+      const conversation: Array<{ question: string; answer: string }> = [];
+      for (const entry of resolved.attempts) {
+        if (conversation.length === 0 || entry.attempt.kind === 'continue' && entry.message?.followUp === true) {
+          conversation.push({ question: entry.message?.question ?? first.question, answer: keptText(entry) });
+        } else conversation.at(-1)!.answer = keptText(entry);
+      }
+      const transcript = (turns: typeof conversation): string => turns.map((turn) => `编辑：${turn.question}\nAI7：${turn.answer}`).join('\n');
+      const previousContext = transcript(conversation.slice(0, -1));
+      const context = following ? transcript(conversation) : [previousContext, keptText(latest)].filter(Boolean).join('\n');
+      const attemptId = this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => latest.fragments.length, now, undefined, following));
       return {
         dialogueId: task.dialogueId,
         attemptId,
         message: kind === 'continue'
-          ? { kind: 'continue', selection: first.selection, question: first.question, kept: keptText(latest) }
-          : { kind: 'ask', selection: first.selection, question: first.question, kept: null },
+          ? { kind: 'continue', selection: first.selection, question, kept: context, ...(following ? { followUp: true } : {}) }
+          : { kind: 'ask', selection: first.selection, question, kept: conversation.length > 1 ? previousContext : null,
+            ...(conversation.length > 1 ? { followUp: true } : {}) },
       };
     });
   }
@@ -19114,10 +19129,13 @@ export class EditorialStore {
   /** The Book's dialogue Tasks as the 任务 panel reads them (TASK-044): each latest answer's state, from the ledger. */
   #dialogueTaskReadings(bookId: string, live: (attemptId: string) => LiveAnswer | null): DialogueTaskReading[] {
     const bookTitle = this.#evaluationBookTitle(bookId);
-    return this.#dialogues.tasksOf(bookId).map((task) => {
-      const resolved = resolveAttempts(this.#dialogues.attempts(task.dialogueId), this.#dialogueHistory, live);
+    return this.#dialogues.tasksOf(bookId).flatMap((task) => {
+      const attempts = this.#dialogues.attempts(task.dialogueId);
+      // Also hide older workspace rounds identified by their existing execution binding.
+      if (task.origin === 'agent-workspace' || attempts.some((attempt) => [AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST].includes(attempt.binding?.promptContractSha256 ?? ''))) return [];
+      const resolved = resolveAttempts(attempts, this.#dialogueHistory, live);
       const latest = resolved.attempts.at(-1)!;
-      return {
+      return [{
         bookId,
         bookTitle,
         dialogueId: task.dialogueId,
@@ -19126,7 +19144,7 @@ export class EditorialStore {
         answered: latest.fragments.length > 0,
         attempts: resolved.attempts.length,
         at: latest.attempt.outcome?.settledAt ?? latest.attempt.createdAt,
-      };
+      }];
     });
   }
 
