@@ -1,0 +1,69 @@
+.global-agent {
+  width: min(100%, 70rem);
+  min-width: 0;
+  margin-inline: auto;
+  display: grid;
+  gap: 1.25rem;
+}
+.global-agent [hidden] { display: none !important; }
+.global-agent h2, .global-agent h3, .global-agent h4, .global-agent p { margin: 0; }
+.global-agent-heading, .global-agent-conversation, .global-agent-previous-turns,
+.global-agent-answer, .global-agent-turn { display: grid; gap: .8rem; min-width: 0; }
+.global-agent-heading p, .global-agent-status, .global-agent fieldset > p {
+  color: var(--text-subdued);
+  line-height: 1.65;
+}
+.global-agent-status { border-left: 3px solid var(--boundary-strong); padding-left: .8rem; }
+.global-agent-composer, .global-agent-governance, .global-agent-sources, .global-agent-scope,
+.global-agent-directives, .global-agent-history {
+  min-width: 0;
+  border: 1px solid var(--boundary);
+  border-radius: .75rem;
+  background: var(--surface);
+  padding: 1rem;
+  display: grid;
+  gap: .85rem;
+}
+.global-agent legend { font-weight: 600; padding-inline: .35rem; }
+.global-agent-field { display: grid; gap: .4rem; min-width: 0; }
+.global-agent textarea, .global-agent select {
+  width: 100%; min-width: 0; box-sizing: border-box;
+  border: 1px solid var(--boundary-strong); border-radius: .4rem;
+  padding: .65rem; color: var(--text); background: var(--manuscript); font: inherit;
+}
+.global-agent textarea { resize: vertical; line-height: 1.7; }
+.global-agent-choice-list { display: grid; gap: .65rem; }
+.global-agent-choice { display: flex; align-items: flex-start; gap: .65rem; cursor: pointer; line-height: 1.65; }
+.global-agent-choice input[type="checkbox"] { flex: 0 0 auto; width: 1rem; height: 1rem; margin: .3rem 0 0; accent-color: var(--action-primary); }
+.global-agent-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.global-agent button { font: inherit; cursor: pointer; }
+.global-agent button:disabled { cursor: default; opacity: .55; }
+.global-agent button:focus-visible, .global-agent input:focus-visible, .global-agent textarea:focus-visible,
+.global-agent select:focus-visible, .global-agent summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.global-agent-source-card, .global-agent-tool-card, .global-agent-proposal-card,
+.global-agent-procedure, .global-agent-preview {
+  min-width: 0; display: grid; gap: .6rem;
+  border: 1px solid var(--boundary); border-radius: .5rem; padding: .85rem;
+  background: var(--manuscript); overflow-wrap: anywhere; line-height: 1.7;
+}
+.global-agent-source-card > p { white-space: pre-wrap; }
+.global-agent-question-bubble { justify-self: end; max-width: 85%; border-radius: .85rem .85rem .2rem .85rem; padding: .85rem 1rem; background: var(--selection); color: var(--selection-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.global-agent-answer-bubble { border-radius: .85rem .85rem .85rem .2rem; padding: 1rem; background: var(--surface); border: 1px solid var(--boundary); line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; display: grid; gap: .65rem; }
+.global-agent-answer-bubble:empty { display: none; }
+.global-agent [data-global-agent-tool-calls], .global-agent [data-global-agent-proposals] { display: grid; gap: .6rem; }
+.global-agent summary { cursor: pointer; color: var(--action-text); }
+.global-agent-technical { color: var(--text-subdued); font-size: .85rem; }
+.global-agent-technical pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: inherit; }
+.global-agent-history-list { display: grid; gap: .35rem; max-height: 18rem; overflow: auto; }
+.global-agent-history-entry { text-align: left; overflow-wrap: anywhere; }
+.global-agent-directives p { padding-block: .4rem; border-bottom: 1px solid var(--boundary); line-height: 1.7; }
+@media (min-width: 900px) {
+  .global-agent-scope .global-agent-choice-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .global-agent-governance { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .global-agent-governance h3, .global-agent-governance p { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .global-agent { gap: .85rem; }
+  .global-agent-question-bubble { max-width: 95%; }
+  .global-agent-actions > button { flex: 1 1 auto; }
+}

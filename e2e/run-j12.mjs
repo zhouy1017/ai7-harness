@@ -743,7 +743,7 @@ async function main() {
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
-    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('当前处理策略未允许')`, 'global-agent-policy-disclosed');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
     await waitFor(primary, `document.querySelector('.compact-model-selector')?.hidden === false`, 'global-agent-model-selector-visible');
     await assertRenderer(primary, `(() => { const selector=document.querySelector('.compact-model-selector');
@@ -793,6 +793,24 @@ async function main() {
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
     await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
+    // Wave 23 #1286: entering the global destination closes the book-only drawer and releases its column.
+    await assertRenderer(primary, `(() => { const entry=document.querySelector('[data-edge-entry="tasks"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return true; })()`, 'global-agent-book-drawer-open');
+    await waitFor(primary, `document.querySelector('#task-drawer')?.hidden===false`, 'global-agent-book-drawer-ready');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-from-book');
+    await waitFor(primary, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const submit=root?.querySelector('[data-global-agent-question-form] button[type="submit"]');
+      return root instanceof HTMLElement && getComputedStyle(root).display==='grid' &&
+        getComputedStyle(root.querySelector('.global-agent-composer')).borderTopStyle==='solid' &&
+        submit?.textContent==='发送问题' && submit.classList.contains('primary') &&
+        document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed' &&
+        getComputedStyle(document.body).paddingRight==='0px';
+    })()`, 'global-agent-styled-drawer-closed');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-to-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-before-book');
+    await clickBook(primary, bookA, 'global-agent-reopen-book');
+    await waitFor(primary, `document.querySelector('[data-screen="editor"]') && document.querySelector('#task-drawer')?.hidden===true`, 'global-agent-book-return-closed');
+
 
     at('serialized-newest-route-wins');
     const racedRoutes = await primary.evaluate(`Promise.allSettled([

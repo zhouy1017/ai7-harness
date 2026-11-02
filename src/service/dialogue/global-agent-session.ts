@@ -289,17 +289,17 @@ export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner:
     route, owner.globalDisclosureReference());
 }
 
-/** The explicit action consumes the preview; the same check is repeated at the final payload gate, including queued turns. */
+/** Direct send prepares its payload in the same action; recheck it at the final payload gate, including queued turns. */
 export function startGlobalAgentTurn(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: () => LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput, disclosureSha256: string | undefined): DialogueTurnStart {
   const disclosure = prepareGlobalAgentDisclosure(store, owner, policy(), input);
-  if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。未发送任何内容。');
+  if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新发送问题。未发送任何内容。');
   const initialPolicy = policy();
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(initialPolicy) : owner.requireGlobalReady(initialPolicy);
   const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31' || (initialPolicy.providerProcessing.version === 'v32' || initialPolicy.providerProcessing.version === 'v33'))
     ? qualifiedGlobalPreparation(store, owner, initialPolicy, input, store.prepareGlobalAgentTurn(input)) : null;
   if (prepared !== null && prepared.disclosure.sha256 !== disclosure.sha256)
-    throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。');
+    throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新发送问题。');
   const turn = input.kind === 'ask' ? store.askGlobalAgent(input, undefined, prepared?.qualification)
     : store.globalAgentAttempt(input, input.kind, undefined, false, prepared?.qualification);
   if (typeof turn === 'string') throw new DialogueError('DIALOGUE_INVALID', '回答标识无效。');
