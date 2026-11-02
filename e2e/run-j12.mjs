@@ -743,7 +743,7 @@ async function main() {
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
-    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('当前处理策略未允许')`, 'global-agent-policy-disclosed');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
     await waitFor(primary, `document.querySelector('.compact-model-selector')?.hidden === false`, 'global-agent-model-selector-visible');
     await assertRenderer(primary, `(() => { const selector=document.querySelector('.compact-model-selector');
