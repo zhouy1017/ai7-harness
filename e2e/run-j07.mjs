@@ -788,6 +788,12 @@ async function acknowledgedEdit(renderer, text, name) {
   await waitFor(renderer, `(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return (save instanceof HTMLButtonElement && !save.disabled) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
   await renderer.evaluate(`(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); if (save instanceof HTMLButtonElement && !save.disabled) save.click(); return true; })()`);
   await waitFor(renderer, `(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return window.__j07.journal() > ${before} && save instanceof HTMLButtonElement && save.disabled && document.documentElement.dataset.ai7CloseRisk !== 'true' && window.__j07.tone() === 'success'; })()`, `${name}-acknowledged`, 120_000);
+  // Real editor reconciliation must retain the loaded preview while paragraph edits still reach the journal.
+  await waitFor(renderer, `(async()=>{const image=document.querySelector('.manuscript-source-image img');
+    if(!image||image.naturalWidth===0)return false;const source=image.src;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    return image.isConnected && image===document.querySelector('.manuscript-source-image img') && image.src===source && image.naturalWidth>0;
+  })()`, `${name}-source-image-stable`);
 }
 
 async function openDesignateForm(renderer, name) {
@@ -1406,21 +1412,7 @@ async function main() {
     // The file's own 批注 and 修改建议 stand where the import put them, open and under the author's name; the
     // editor adds one 备注 on a paragraph no stage edits.
     await openManuscript(renderer, 'note');
-    await waitFor(renderer, `document.querySelector('.manuscript-source-table td') && document.querySelector('.manuscript-source-image img')?.naturalWidth > 0`, 'readonly-table-and-image-visible').catch(async (error) => {
-      error.detail = await renderer.evaluate(`(async()=>{
-        const image=document.querySelector('.manuscript-source-image img');
-        const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null});
-        const binding=overview.primaryAction;
-        const page=await window.ai7.getManuscriptWindow({manuscriptId:binding.manuscriptId,branchId:binding.branchId,cursor:null});
-        const images=page.blocks.flatMap(block=>block.sourceDisplay?.images??[]);
-        let chunk=null;
-        if(images[0]?.sourceImage)try{const value=await window.ai7.readManuscriptImageChunk({manuscriptId:page.manuscriptId,branchId:page.branchId,...images[0].sourceImage,offset:0});chunk={mime:value.mime,totalBytes:value.totalBytes,frameCharacters:value.base64.length};}catch(failure){chunk={error:failure.message};}
-        return {tableCells:document.querySelectorAll('.manuscript-source-table td').length,imageElements:document.querySelectorAll('.manuscript-source-image img').length,
-          image:image?{complete:image.complete,width:image.naturalWidth,alt:image.alt,sourceScheme:image.src.split(':')[0]}:null,
-          projectedTables:page.blocks.filter(block=>block.sourceDisplay?.table).length,projectedImages:images.length,chunk};
-      })()`);
-      throw error;
-    });
+    await waitFor(renderer, `document.querySelector('.manuscript-source-table td') && document.querySelector('.manuscript-source-image img')?.naturalWidth > 0`, 'readonly-table-and-image-visible');
     await assertRenderer(renderer, `document.querySelector('[data-block-kind="table"]')?.getAttribute('contenteditable') === 'false' && document.querySelector('.manuscript-source-label')?.textContent.includes('只读 · 导出时从原文件完整恢复')`, 'readonly-table-not-editable');
     await assertRenderer(renderer, MARK_HELPERS, 'mark-helpers');
     await assertRenderer(renderer, `(() => { const head = window.__j07m.text(${NOTE.block})?.slice(0, ${NOTE.to}) ?? ''; return window.__j07m.blocks().length === ${EXCERPT.blocks} && head.length === ${NOTE.to} && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === ${NOTE.to}; })()`, 'note-paragraph-markable');
