@@ -1513,7 +1513,7 @@ async function main() {
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
         // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-        firstConnection.policy?.activePolicySetVersion === 'v23' &&
+        firstConnection.policy?.activePolicySetVersion === 'v24' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
