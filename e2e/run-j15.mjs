@@ -1236,6 +1236,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'editable-local-entry');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'editable-local-options');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'editable-local-options-ready');
+    await waitFor(renderer, `document.querySelector('[data-procedure-definition="${localProcedure.procedureId}@1"]') && document.querySelector('dialog.review-sheet input[name="review-category"][value="local-text-check"]')?.checked===true && document.querySelector('dialog.review-sheet [data-review-action="prepare"]')?.disabled===false`, 'editable-local-definition-ready');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); if(sheet.querySelector('[data-local-check-prose]')?.checked!==true)return false; const button=sheet.querySelector('[data-review-action="prepare"]'); if(button.disabled)return false; button.click(); return true; })()`, 'editable-local-prepare');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'editable-local-plan');
     const localRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(p=>p.run)`);

@@ -2255,21 +2255,25 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   /** Fill the sheet from a composite version (Issue #1173): every member ticked, 确定性检查 first; the plan is still read before 开始. */
   async function chooseDefinition(state: SheetState, key: string): Promise<void> {
+    if (projection === null || sheetState !== state || destroyed) return;
+    const ticket = state.requests.ask();
+    sheetUpdate();
     const at = key.lastIndexOf('@');
     try {
       const entry = (await api.procedureLibrary({ action: 'inspect' })).procedures.find((procedure) => procedure.procedureId === key.slice(0, at));
       const pin = entry?.versions.find((version) => version.version === Number(key.slice(at + 1)));
       const document = entry?.documents.find((candidate) => candidate.version === pin?.version);
       if (pin === undefined || document === undefined || entry === undefined) throw new Error('PROCEDURE_DEFINITION_UNAVAILABLE');
-      if (projection === null || sheetState !== state || destroyed) return;
+      if (projection === null || sheetState !== state || destroyed || !state.requests.current(ticket)) return;
       state.definition = { composite: document.members !== undefined, pin, title: document.title, categoryIds: document.members?.map((member) => member.categoryId) ?? [entry.executorKind.replace(/^editorial-review\//u, '')] };
       state.categories.clear();
       for (const categoryId of state.definition.categoryIds) state.categories.add(categoryId);
       state.scope ??= 'whole';
     } catch (error) {
-      if (projection === null || sheetState !== state || destroyed) return;
+      if (projection === null || sheetState !== state || destroyed || !state.requests.current(ticket)) return;
       state.problem = options.errorMessage(error, '无法读取所选工序版本；请在「知识库 › 工序与规则」重新运行此工序。');
     }
+    state.requests.settle(ticket);
     renderSheet(projection, state);
   }
 
