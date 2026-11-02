@@ -1618,12 +1618,12 @@ async function main() {
       'selection-task-no-paging-under-composer', { loadsAfter, now: await windowLoads() });
 
     at('selection-task-reanalyze');
-    // 重新分析这段 prepares an analysis update over that paragraph, named by its block identity, its plan opened in the slot naming
-    // the ranges it reads again; it waits in 等你处理 as 基线分析 · 重新分析所选范围, and nothing starts behind the editor's back.
+    // 重新分析这段 starts the exact paragraph update and closes the composer; the recorded outcome retains any fixture gaps.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
-    await waitFor(renderer, `window.__j16.composer() === null && window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.run?.state==='completed')`, 'selection-task-reanalyze-direct', 120_000);
-    const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
-    requireJourney(rangeTask?.mode === 'reanalyze-range' && rangeTask.run?.state === 'completed' &&
+    await waitFor(renderer, `window.__j16.composer() === null && window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.state==='settled')`, 'selection-task-reanalyze-direct', 120_000);
+    const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, outcome: analysis.taskOutcome, resultRevisionId: analysis.resultSetRevision?.revisionId, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
+    requireJourney(rangeTask?.mode === 'reanalyze-range' && ['completed', 'completed-with-gaps'].includes(rangeTask.run?.state) &&
+      rangeTask.outcome?.classification === rangeTask.run.state && rangeTask.outcome.resultSetRevisionId === rangeTask.resultRevisionId && UUID_PATTERN.test(rangeTask.resultRevisionId ?? '') &&
       rangeTask.update?.mode === 'reanalyze-range' && rangeTask.update.selectedRange?.startPosition === Number(position) &&
       rangeTask.update.selectedRange.endPosition === Number(position), 'selection-task-reanalyze-recorded', rangeTask);
     await openPanel(renderer, 'selection-task-reanalyze-panel');
