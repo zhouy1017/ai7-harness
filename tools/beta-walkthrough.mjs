@@ -34,6 +34,7 @@ const wait=async(predicate,name,ms=60000)=>{const end=Date.now()+ms;while(Date.n
 const native=(exe,options)=>{
  const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(ROOT,'tools','beta-native-dialog.ps1'),'-Executable',exe,...options],{cwd:ROOT,windowsHide:true,encoding:'utf8',timeout:60000});
  const ui=result.stdout?.split(/\r?\n/).find(line=>line.startsWith('BETA_NATIVE_UI:'));if(ui){report.nativeStartupUi=JSON.parse(ui.slice('BETA_NATIVE_UI:'.length));}
+ const dialog=result.stdout?.split(/\r?\n/).find(line=>line.startsWith('BETA_NATIVE_DIALOG:'));if(dialog){report.nativeFileDialog=JSON.parse(dialog.slice('BETA_NATIVE_DIALOG:'.length));}
  const marker=result.stdout?.match(/^BETA_NATIVE\/[A-Za-z0-9/._-]+$/m)?.[0]??'BETA_NATIVE/no-marker';
  report.nativeCalls??=[];report.nativeCalls.push({stage,exit:result.status,marker});
  if(result.status!==0)throw Error(marker.toLowerCase().replaceAll('_','-').replaceAll('.','-'));
