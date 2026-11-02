@@ -290,7 +290,7 @@ export interface MountTaskDrawerOptions {
   startWholeBookTask(
     bookId: string,
     input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
-  ): Promise<{ ref: string; note?: string } | null>;
+  ): Promise<{ ref: string; note?: string; started?: true } | null>;
   /** 回到所选文字 from a dialogue (Issue #52, S17a): the selected words in the manuscript. */
   dialogueJump(bookId: string, target: { readonly manuscriptId: string; readonly blockId: string }): void;
   /** 转为修改建议 made a 修改建议: the manuscript's marks read again. */
@@ -530,7 +530,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const book = panelBookId;
       if (book === null) return;
       const next = await options.startWholeBookTask(book, input);
-      if (next === null || root.hidden || view !== 'panel' || panelBookId !== book) return;
+      if (next === null || next.started === true || root.hidden || view !== 'panel' || panelBookId !== book) return;
       surface.open({ bookId: book, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
     },
     onRecorded: (book) => options.onRecorded('baseline-analysis', book),

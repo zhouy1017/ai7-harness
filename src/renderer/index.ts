@@ -346,7 +346,7 @@ function jumpToSelectionText(bookId: string, selection: { readonly manuscriptId:
 async function startWholeBookTask(
   bookId: string,
   input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
-): Promise<{ ref: string; note?: string } | null> {
+): Promise<{ ref: string; note?: string; started?: true } | null> {
   // The Task Input is frozen from the journal: the words typed just now, and any held after a failed write, are
   // settled first, or nothing is prepared.
   if (!(await settleScreen())) return null;
@@ -370,7 +370,7 @@ async function startWholeBookTask(
       taskSurfaceRefresh['baseline-analysis']?.();
       globalAttentionReader.refresh();
       setStatus('已开始分析', 'success');
-      return null;
+      return { ref: taskIntentId, started: true };
     }
     if (planEnvelopeDigest === null) throw new Error('任务计划尚未准备完成。');
     const rule = input.quick;
@@ -385,7 +385,7 @@ async function startWholeBookTask(
     taskSurfaceRefresh['baseline-analysis']?.();
     if (result.outcome === 'started') {
       setStatus(quickStartStartedLine(rule, result.projection), 'success');
-      return null;
+      return { ref: taskIntentId, started: true };
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
     setStatus(note);
@@ -439,7 +439,7 @@ async function prepareSelectionTask(
       quick: null,
     });
     if (next === null) return false;
-    taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
+    if (next.started !== true) taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
     return true;
   }
   if (choice.kind === 'procedure') {
