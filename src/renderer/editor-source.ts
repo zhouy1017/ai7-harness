@@ -25,7 +25,8 @@ export function observeSourceImages(host: HTMLElement, read: RendererApi['readMa
   const urls = new Set<string>();
   let stopped = false;
   const load = async (img: HTMLImageElement): Promise<void> => {
-    const pin = { ...binding(), sourceVersionId: img.dataset['sourceVersion']!, ordinal: Number(img.dataset['sourceImage']) };
+    const { manuscriptId, branchId } = binding();
+    const pin = { manuscriptId, branchId, sourceVersionId: img.dataset['sourceVersion']!, ordinal: Number(img.dataset['sourceImage']) };
     const parts: ArrayBuffer[] = [];
     let offset = 0;
     let mime = '';
