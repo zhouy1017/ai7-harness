@@ -228,9 +228,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await key('Backspace',8);await key('Backspace',8);
   await ready(page,`JSON.stringify([...document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]')].map(n=>n.textContent))===${JSON.stringify(JSON.stringify(beforeParagraphs))}`,'backspace-merge-restores-text');
   check(true,expectedChannel+'-rapid-enter-and-merge');
-  const headingCount=await page.evaluate("document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-kind=heading]').length");
-  await fill(page,'select[aria-label=段落样式]','heading-2');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-kind=heading]').length===${headingCount+1}`,'heading-style-saved');
-  await fill(page,'select[aria-label=段落样式]','paragraph');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-kind=heading]').length===${headingCount}`,'paragraph-style-restored');
+  const headingCount=await page.evaluate("document.querySelectorAll('[data-testid=manuscript-editor] > :is(h2,h3,h4,h5,h6)[data-block-id]').length");
+  await fill(page,'select[aria-label=段落样式]','heading-2');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > :is(h2,h3,h4,h5,h6)[data-block-id]').length===${headingCount+1}`,'heading-style-saved');
+  await fill(page,'select[aria-label=段落样式]','paragraph');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > :is(h2,h3,h4,h5,h6)[data-block-id]').length===${headingCount}`,'paragraph-style-restored');
   check(true,expectedChannel+'-heading-style-edit');
   check(await page.evaluate(`(()=>{const p=[...document.querySelectorAll('[data-testid=manuscript-editor] > p[data-block-id]')].find(n=>n.firstChild?.nodeType===3&&n.firstChild.length>30&&!n.querySelector('.editorial-mark'));if(!p)return false;const r=document.createRange();r.setStart(p.firstChild,2);r.setEnd(p.firstChild,22);getSelection().removeAllRanges();getSelection().addRange(r);p.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));const rect=p.getBoundingClientRect();p.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,clientX:rect.x+20,clientY:rect.y+10}));return true})()`),'contextual-selection');
   await ready(page,"document.querySelector('[data-mark-action=ask-on-selection]')",'context-menu');await select(page,'[data-mark-action=ask-on-selection]');

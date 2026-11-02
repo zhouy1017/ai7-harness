@@ -1313,7 +1313,7 @@ async function collectEditorBlockIdentities(renderer, scenario, openEditor = tru
   await rewindEditorPages(renderer, scenario);
   const identities = {};
   for (;;) {
-    const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
+    const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => { const copy = block.cloneNode(true); for (const marker of copy.querySelectorAll('[data-note-reference]')) marker.remove(); return { id: block.dataset.blockId, text: copy.textContent }; })`);
     requireJourney(Array.isArray(page) && page.length > 0 && page.length <= 32, `${scenario}-bounded-editor-page`);
     for (const block of page) {
       const label = /^(?:有界内容块 \d{3}(?:（已编辑）)?|明确新增内容块|拆分后半)/.exec(block.text)?.[0] ?? block.text;
@@ -1335,7 +1335,7 @@ async function collectEditorBlockIdentitySequence(renderer, scenario) {
   await rewindEditorPages(renderer, scenario);
   const identities = [];
   for (;;) {
-    const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => ({ id: block.dataset.blockId, text: block.textContent }))`);
+    const page = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] [data-block-id]'), (block) => { const copy = block.cloneNode(true); for (const marker of copy.querySelectorAll('[data-note-reference]')) marker.remove(); return { id: block.dataset.blockId, text: copy.textContent }; })`);
     requireJourney(Array.isArray(page) && page.length > 0 && page.length <= 32, `${scenario}-bounded-editor-page`);
     const overlapStart = identities.findIndex(block => block.id === page[0].id);
     const overlapLength = overlapStart < 0 ? 0 : identities.length - overlapStart;
@@ -1850,7 +1850,7 @@ async function runJourney(
 }
 
 async function runNativeWordImport(renderer, scenario, restart, recoverCommitted) {
-  const { mode, learnFromEdits, existingBook, allInserted, expectedTexts, sampleCount, degraded = false } = scenario;
+  const { mode, learnFromEdits, existingBook, allInserted, expectedTexts, sampleCount, notes = false } = scenario;
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'word-landing');
   if (existingBook) {
     await clickExactButton(renderer, '新建图书', 'word-empty-book-open');
@@ -1900,9 +1900,9 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   await clickExactButton(renderer, prepareLabel, 'word-actual-prepare');
   const reviewedChoice = `document.querySelector('[data-word-reviewed-mode="${mode}"][data-word-reviewed-learning="${learnFromEdits}"]')`;
   await waitFor(renderer, `document.querySelector('[data-screen="review"]') && ${reviewedChoice}`, 'word-review-exact-choice');
-  if (degraded) {
-    await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && document.querySelector('.commit-bar button')?.disabled === false`, 'word-default-degradation');
-    await waitFor(renderer, `${reviewedChoice} && document.querySelector('.commit-bar button')?.disabled === false`, 'word-degradation-retains-exact-choice');
+  if (notes) {
+    await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && document.querySelector('.commit-bar button')?.disabled === false`, 'word-note-import-ready');
+    await waitFor(renderer, `${reviewedChoice} && document.querySelector('.commit-bar button')?.disabled === false`, 'word-note-import-retains-exact-choice');
   }
   if (restart !== undefined) {
     renderer = await restart();
@@ -1920,6 +1920,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   const selectedReading = await collectEditorBlockIdentitySequence(renderer, 'word-selected-reading');
   requireJourney(JSON.stringify(selectedReading.map(block => block.text)) === JSON.stringify(expectedTexts),
     'word-selected-baseline-exact', { expectedTexts, selectedReading });
+  if (notes) await assertRenderer(renderer, `(() => { const reference = document.querySelector('[aria-label="跳转到脚注 1"]'); const note = document.querySelector('.manuscript-note [data-block-id]'); return reference && note && reference.dataset.noteReference === note.dataset.blockId && document.querySelector('.manuscript-note-label')?.textContent.includes('脚注 1'); })()`, 'word-selected-note-source-link');
   const capture = await renderer.evaluate(`(async () => { const ids = []; let offset = 0; let pages = 0; let source = null; do { const page = await window.ai7.inspectEditorialLearning({ signalOffset: offset, itemOffset: 0 }); if (page.signals.length > 30 || page.signals.some(signal => signal.kind !== 'word-tracked-edit' || signal.currentEligibility !== 'house' || signal.memoryCandidate !== null)) return null; source ??= page.signals[0]?.source ?? null; ids.push(...page.signals.map(signal => signal.source.sampleId)); offset = page.nextSignalOffset; pages += 1; } while (offset !== null); return { count: ids.length, unique: new Set(ids).size, pages, source }; })()`);
   requireJourney(capture?.count === (learnFromEdits ? sampleCount : 0) && capture.unique === capture.count &&
     capture.pages >= (learnFromEdits && sampleCount > 30 ? 2 : 1), 'word-entire-signal-manifest');
@@ -2783,23 +2784,24 @@ async function main() {
       { name: 'accepted-empty-book', mode: 'accepted-baseline', learnFromEdits: false, existingBook: true, allInserted: false, count: 1 },
       { name: 'all-inserted-accepted', mode: 'accepted-baseline', learnFromEdits: true, existingBook: false, allInserted: true, count: 1, interruptAfterCommit: true },
       { name: 'detail-beyond-first-page', mode: 'suggestions', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, insertRuns: 45, detailPages: true },
-      { name: 'accepted-degradation', mode: 'accepted-baseline', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, degraded: true },
+      { name: 'suggestions-notes', mode: 'suggestions', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, notes: true },
+      { name: 'accepted-notes', mode: 'accepted-baseline', learnFromEdits: true, existingBook: false, allInserted: false, count: 1, notes: true },
     ]) {
       at(`word-${wordCase.name}`);
       const wordLaunchScenario = wordCase.name === 'suggestions-new' ? 'word-suggestions-new'
         : wordCase.name === 'accepted-empty-book' ? 'word-accepted-empty-book'
           : wordCase.name === 'all-inserted-accepted' ? 'word-all-inserted-accepted'
-            : wordCase.name === 'detail-beyond-first-page' ? 'word-detail-beyond-first-page' : 'word-accepted-degradation';
+            : wordCase.name === 'detail-beyond-first-page' ? 'word-detail-beyond-first-page' : wordCase.name === 'suggestions-notes' ? 'word-suggestions-notes' : 'word-accepted-notes';
       const inputPath = resolve(syntheticRoot, `word-${wordCase.name}.docx`);
-      const baseSpan = wordCase.degraded ? { block: 8 } : { block: 8, from: 0, to: 10 }; const insertionSpan = { block: 9, from: 0, to: 5 };
-      if (!wordCase.degraded) await composeRevisedAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 双阅读导入',
+      const baseSpan = wordCase.notes ? { block: 8 } : { block: 8, from: 0, to: 10 }; const insertionSpan = { block: 9, from: 0, to: 5 };
+      if (!wordCase.notes) await composeRevisedAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, title: 'Word 双阅读导入',
         paragraphs: Array.from({ length: wordCase.count }, (_, index) => ({ runs: [
           ...(wordCase.allInserted ? [] : [{ text: baseSpan }]),
           ...Array.from({ length: wordCase.insertRuns ?? 1 }, (_, runIndex) => ({ text: insertionSpan, revision: { kind: 'ins', author: `作者${index}-${runIndex}`, date: '2026-10-25T00:00:00Z' } })),
         ] })) });
       const baseline = wordCase.allInserted ? '' : await admittedSpanText(ADMITTED_BASELINE_DOCX, baseSpan);
       const insertion = await admittedSpanText(ADMITTED_BASELINE_DOCX, insertionSpan);
-      if (wordCase.degraded) {
+      if (wordCase.notes) {
         await composeAdmittedDocx(inputPath, { source: ADMITTED_BASELINE_DOCX, startBlock: 8, blocks: 1, title: 'Word 双阅读导入',
           retention: { footnote: { block: 1, noteSourceBlock: 10 } } });
         const archive = unzipSync(readFileSync(inputPath));
@@ -2809,6 +2811,7 @@ async function main() {
         await writeFile(inputPath, zipSync(archive, { mtime: fixedArchiveTime() }));
       }
       const expectedTexts = Array(wordCase.count).fill(baseline + (wordCase.mode === 'accepted-baseline' ? insertion.repeat(wordCase.insertRuns ?? 1) : ''));
+      if (wordCase.notes) expectedTexts.push(await admittedSpanText(ADMITTED_BASELINE_DOCX, { block: 10 }));
       const wordRoot = await createCanonicalExternalDataRoot(resolve(runRoot, `word-${wordCase.name}-data`), checkoutRoot);
       renderer = await launchProduct({ dataRoot: wordRoot, pickerPath: inputPath, launchScenario: wordLaunchScenario,
         ...(wordCase.interruptAfterCommit ? { importControl: 'after-commit-before-response' } : {}) });
