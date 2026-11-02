@@ -1674,7 +1674,19 @@ async function runProtectionJourney(renderer) {
   at('protection-reversed-recovery');
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-reversed-off');
   // First acknowledge the exact outstanding command, then its reversal; neither is duplicated or silently discarded.
-  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-reversed-recovered', 60_000);
+  const reversedRecoveryChecks = `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`;
+  try {
+    await protectionChecks(renderer, reversedRecoveryChecks, 'protection-reversed-recovered', 60_000);
+  } catch (error) {
+    // Ordinary runs expose only which fixed assertion failed; never journal payloads or text.
+    const checks = await renderer.evaluate(`(() => { const p = ${PROTECTION_PROBE}; return ${reversedRecoveryChecks}; })()`);
+    requireJourney(checks.cleared, 'protection-reversed-recovered-mode');
+    requireJourney(checks.twoEntries, 'protection-reversed-recovered-sequence');
+    requireJourney(checks.exactVisibleLength, 'protection-reversed-recovered-visible-length');
+    requireJourney(checks.writable, 'protection-reversed-recovered-writable');
+    requireJourney(checks.closeRisk, 'protection-reversed-recovered-close-risk');
+    throw error;
+  }
   at('protection-capacity-fill');
   const softLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
   const capacity = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferCapacity)`);

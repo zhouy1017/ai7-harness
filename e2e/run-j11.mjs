@@ -3321,7 +3321,7 @@ async function main() {
       }
       // The destination mounts its form before its projection loads: wait for this projection's exact targets and category.
       await waitFor(renderer, `(() => { const form=document.querySelector('[data-global-agent-governance]'); const root=form?.closest('[data-global-agent]'); return form?.querySelector('[data-global-agent-save]')?.disabled === false && Array.from(form.querySelectorAll('select')).some((select)=>select.value==='typos-and-usage') && ${JSON.stringify(ids)}.every((id)=>root?.querySelector('[data-global-agent-item="'+id+'"]') instanceof HTMLInputElement); })()`, `${name}-ready`);
-      await assertRenderer(renderer, `(() => {for(const id of ${JSON.stringify(ids)}) {const checkbox=document.querySelector('[data-global-agent-item="'+id+'"]');if(!(checkbox instanceof HTMLInputElement))return false;checkbox.click();}return true;})()`, `${name}-targets`);
+      await assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; for(const checkbox of document.querySelectorAll('[data-global-agent-item]')) { if(!(checkbox instanceof HTMLInputElement))return false; const wanted=ids.includes(checkbox.dataset.globalAgentItem); if(checkbox.checked!==wanted)checkbox.click(); } return ids.every(id=>document.querySelector('[data-global-agent-item="'+id+'"]')?.checked===true); })()`, `${name}-targets`);
       await choose(renderer, '[data-global-agent-operation]', operation, `${name}-operation`);
       if (operation === 'supervise') await choose(renderer, '[data-global-agent-effect]', effect, `${name}-effect`);
       await fill(renderer, '[data-global-agent-text]', text, `${name}-text`);
