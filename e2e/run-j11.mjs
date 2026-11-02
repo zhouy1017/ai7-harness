@@ -574,6 +574,7 @@ const ITEM_LEGENDS = ['文学品质与作者声音 · 满分 20', '主题、价�
 
 /** Open a Book with a manuscript from 书库 into its manuscript, then its 分析 (②A) from the 资料与记录 group, as J-16 does. */
 async function openAnalysisOf(renderer, bookId, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-open-library`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`, 120_000);
@@ -1582,16 +1583,11 @@ async function main() {
     // The analysis's prerequisites through the product's own setup, as J-16 makes them: the editorial workspace profile at
     // Revision 2 for 评估旅程丙, and one Main Editorial Role connection whose synthetic credential is saved and removed
     // again, so only its reference is recorded — the J-04 adapter's route sends nothing and needs no credential.
-    await click(renderer, '返回', 'feedback-knowledge-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'feedback-knowledge-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'feedback-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'feedback-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'feedback-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'feedback-overview');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'feedback-artifact-install-ready');
-    await click(renderer, '获取并安装（保持停用）', 'feedback-artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'feedback-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'feedback-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'feedback-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'feedback-model-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'feedback-model-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'feedback-model-open-settings');
@@ -1833,7 +1829,7 @@ async function main() {
     // the Run to its end on the J-04 adapter's authored fixture.
     const beforeInitial = await readEvaluation(renderer, (page) => page.initial !== null, 'initial-evaluation-offered');
     requireJourney(beforeInitial.initial.state === 'none' && beforeInitial.initial.none === 'AI7 还没有为这本书做初评。' &&
-      JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['prepare-initial', '准备 AI7 初评', false]]) && beforeInitial.startFromInitial === null,
+      JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['prepare-initial', '查看计划', false], ['start-initial', 'AI7 初评', false]]) && beforeInitial.startFromInitial === null,
     'initial-evaluation-offered-words', beforeInitial.initial);
     await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'initial-evaluation-plan', 120_000);
@@ -1861,7 +1857,7 @@ async function main() {
     requireJourney(settledInitial.initial.latest === '第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀' &&
       JSON.stringify(settledInitial.initial.items) === JSON.stringify(AI7_ITEM_LINES) &&
       settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议（由你选定）' &&
-      JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['prepare-initial', '重新初评', false], ['open-initial-task', '查看任务', false]]) &&
+      JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['prepare-initial', '查看计划', false], ['start-initial', '重新初评', false], ['open-initial-task', '查看任务', false]]) &&
       settledInitial.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && settledInitial.startFromInitial === null,
     'initial-evaluation-latest-words', settledInitial.initial);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'initial-evaluation-close-open-conclusion');
@@ -1947,7 +1943,7 @@ async function main() {
     const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
     requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
     // Back to 评估 by the manuscript's 工作 group, where the Journey goes on.
-    await click(renderer, '返回', 'initial-evaluation-calibration-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'initial-evaluation-calibration-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-back-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'initial-evaluation-back-book');
     await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'initial-evaluation-back-manuscript', 120_000);
@@ -2058,12 +2054,6 @@ async function main() {
     await mkdir(draftExportsRoot, { recursive: true });
     await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="export"]', 'readers-report-export-open');
     const draftCard = `document.querySelector('[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export')`;
-    await waitFor(renderer, `(() => { const choose = ${draftCard}?.querySelector('[data-export-action="choose"]'); return choose instanceof HTMLButtonElement && !choose.disabled && choose.textContent === '选择保存位置…'; })()`, 'readers-report-export-reviewed', 120_000);
-    requireJourney(!existsSync(draftExportPath), 'readers-report-export-nothing-before');
-    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="choose"]', 'readers-report-export-choose');
-    await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'prepared' && ${draftCard}.querySelector('.export-destination-line')?.textContent === ${JSON.stringify(`${draftExportPath}（新建文件）`)}`, 'readers-report-export-prepared', 120_000);
-    requireJourney(!existsSync(draftExportPath), 'readers-report-export-nothing-before-approval');
-    await clickSelector(renderer, '[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export [data-export-action="approve"]', 'readers-report-export-approve');
     await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'done' && ${draftCard}.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'readers-report-export-written', 120_000);
     const writtenDraft = await readFile(draftExportPath);
     requireJourney(writtenDraft.length > 0 && writtenDraft.subarray(0, 2).toString('latin1') === 'PK' &&
@@ -2473,7 +2463,7 @@ async function main() {
     at('feedback-history-attribution');
     // The Book's 作者 and 责编, set on its 工作概览, attribute its feedback (FDBK-013): 作者 冯五 keeps all four, 责编 郑三 with it
     // too, and with 来源 审阅 — the Book gave none — nothing is left, and the page says so.
-    await click(renderer, '返回', 'attribution-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'attribution-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'attribution-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'attribution-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'attribution-manuscript', 120_000);
@@ -2501,7 +2491,7 @@ async function main() {
 
     // A later 责编 takes nothing from the one before (FDBK-013, Issue #61 review): all four came before any people were saved,
     // so they stay with the first — 郑三 is still the 责编 offered and keeps all four, and each entry names whose it is.
-    await click(renderer, '返回', 'later-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'later-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(thirdId)}]`, 'later-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(thirdId)}]')`, 'later-manuscript', 120_000);
@@ -2731,7 +2721,7 @@ async function main() {
     })()`);
     requireJourney(learningSeeded === true, 'learning-pages-seeded');
     await clickSelector(learningOtherRenderer, '[data-learning-action="cancel"]', 'learning-pages-close-draft');
-    await click(learningOtherRenderer, '返回', 'learning-pages-back');
+    await assertRenderer(learningOtherRenderer, sidebarNavigate(SIDEBAR.destination('library')), 'learning-pages-back');
     await waitFor(learningOtherRenderer, `document.querySelector('[data-screen="landing"]')`, 'learning-pages-landing');
     await assertRenderer(learningOtherRenderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-pages-open');
     await clickSelector(learningOtherRenderer, '#quality-tab-learning', 'learning-pages-open-tab');
@@ -3125,13 +3115,10 @@ async function main() {
     const calibrationBookId = await importSample1(renderer, '校准样书1', sample1, name, true);
     // AI7 reads a Book only under its enabled workspace profile: the house's Revision 2, installed for 评估旅程丙 at
     // feedback-prerequisites, is enabled for this Book from its card on the overview the import lands on, as J-16 does.
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, `${name}-profile-enable-ready`);
-    await click(renderer, '审阅并为本图书启用 Revision 2', `${name}-profile-enable`);
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, `${name}-profile-enabled`);
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), `${name}-open`);
     const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
-    requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['prepare-initial', '准备 AI7 初评', false]]), `${name}-prepare-offered`, fresh.initial);
+    requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['prepare-initial', '查看计划', false], ['start-initial', 'AI7 初评', false]]), `${name}-prepare-offered`, fresh.initial);
     await runInitialEvaluation(name);
     await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', `${name}-begin`);
     const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
@@ -3190,7 +3177,7 @@ async function main() {
     requireJourney(disclosedService === JSON.stringify([2, 2, 0, true, 1, 1, [['literary-quality', 0.5, 1], ['theme-and-context', 0, 1], ['structure-and-coherence', 0, 1], ['chinese-language', 0, 1], ['readers-and-market', -2, 1]]]), 'calibration-disclosed-service', disclosedService);
     await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled || !input.checked) return false; input.click(); return true; })()`, 'calibration-off-click');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
-    await click(renderer, '返回', 'calibration-off-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'calibration-off-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'calibration-off-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${calibrationBookId}"]`, 'calibration-off-book');
     await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'calibration-off-manuscript', 120_000);
@@ -3219,7 +3206,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.evaluation-profile[data-profile-version="2"]') && !document.querySelector('[data-profile-edit]')`, 'profile-editing-saved');
     const editedProfiles = await renderer.evaluate(`window.ai7.inspectEvaluationProfiles().then((page)=>({versions:page.profiles.map(p=>p.version),items:page.profiles[0].items.map(i=>[i.label,i.fullMarks]),readiness:page.profiles[0].readiness,description:page.profiles[0].items[0].description}))`);
     requireJourney(JSON.stringify(editedProfiles.versions) === JSON.stringify(['2','1']) && editedProfiles.items.length === 4 && editedProfiles.items.every(([,max])=>max===25) && editedProfiles.items[0][0] === '作品品质' && editedProfiles.description.includes('作者声音') && editedProfiles.readiness.length === 1, 'profile-editing-version', editedProfiles);
-    await click(renderer, '返回', 'profile-editing-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'profile-editing-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'profile-editing-library');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(calibrationBookId)}]`, 'profile-editing-book');
     // A Book opens on its manuscript, as calibration-off reads it: 评估 is its work destination there.
@@ -3293,9 +3280,6 @@ async function main() {
     await close(); modelFixtureIdentity = 'sample1-review-authored'; await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'memory-governance-source-launch');
     const memorySourceBook = await importSample1(renderer, '编辑记忆来源旅程', sample1, 'memory-governance-source', true);
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'memory-governance-profile-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'memory-governance-profile-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision === '2'`, 'memory-governance-profile-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'memory-governance-review');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] [data-review-action="new-review"]')`, 'memory-governance-review-ready');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'memory-governance-review-new');

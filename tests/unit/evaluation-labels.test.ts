@@ -233,7 +233,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationAi7LatestLine(PROFILE, latest)).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, current: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀（稿件此后改过：重新初评后才能从初评开始）');
     expect(evaluationAi7LatestLine(PROFILE, { ...latest, complete: false })).toBe('第 1 次初评 · 读的是修订版 r1 · 全书综合没有给出分数');
-    expect(EVALUATION_AI7_PREPARE).toEqual({ 'evaluation-first': '准备 AI7 初评', 'evaluation-again': '重新初评' });
+    expect(EVALUATION_AI7_PREPARE).toEqual({ 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' });
   });
 
   it('shows AI7\'s evidence range by range, and says which ranges a 初评 that completed with gaps never read', () => {

@@ -354,7 +354,7 @@ export function createImportReview(options: ImportReviewOptions) {
               draftId: staged.draftId,
               expectedDraftVersion: staged.draftVersion,
               target: { kind: 'new-book', choiceId: selectedChoice.id, confirmedTitle },
-              acceptDegradation: false,
+              acceptDegradation: true,
               textBoxDisposition: fidelityView.textBoxDisposition(),
               ...(trackedChanges === undefined ? {} : { trackedChanges }),
               ...(structure === undefined ? {} : { structure }),
@@ -397,7 +397,7 @@ export function createImportReview(options: ImportReviewOptions) {
             draftId: staged.draftId,
             expectedDraftVersion: staged.draftVersion,
             target: { kind: 'existing-book', bookId: selectedChoice.bookId, relationship: 'first-manuscript' },
-            acceptDegradation: false,
+            acceptDegradation: true,
             textBoxDisposition: fidelityView.textBoxDisposition(),
             ...(trackedChanges === undefined ? {} : { trackedChanges }),
             ...(structure === undefined ? {} : { structure }),
@@ -804,24 +804,6 @@ export function createImportReview(options: ImportReviewOptions) {
     ));
     content.append(boundary, provenance, sourceResult);
 
-    const dimensions = element('section', 'review-section');
-    dimensions.append(
-      element('h3', undefined, '图书编辑维度集 · 8 项'),
-      element(
-        'p',
-        'field-note',
-        `${review.editorialDimensionSet.createdWithBook ? '随新图书创建' : '保留现有集合'} · ${review.editorialDimensionSet.name} · 版本 ${review.editorialDimensionSet.profileVersion} · ${review.editorialDimensionSet.weightSemantics}`,
-      ),
-    );
-    const dimensionList = element('ul', 'dimension-list');
-    for (const dimension of review.editorialDimensionSet.dimensions) {
-      dimensionList.append(element('li', undefined, `${dimension.label} · 中性起始权重 ${dimension.weight}`));
-    }
-    dimensions.append(dimensionList);
-    const grid = element('div', 'review-grid');
-    grid.append(dimensions, listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
-    content.append(grid);
-
     const commitBar = element('section', 'commit-bar');
     const explanation = element('div');
     explanation.append(
@@ -1120,7 +1102,7 @@ export function createImportReview(options: ImportReviewOptions) {
     });
 
     const grid = element('div', 'review-grid');
-    grid.append(listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
+    grid.append(listSection('将创建的记录', review.recordsToCreate));
     content.append(grid);
     const actions = element('div', 'button-row compact-actions');
     const abandon = button('取消导入', 'quiet', () =>
@@ -1210,7 +1192,7 @@ export function createImportReview(options: ImportReviewOptions) {
     content.append(
       element('p', 'section-label', '步骤 2 / 3 · 导入前复核'),
       element('h2', undefined, '导入前复核'),
-      element('p', 'lede', '最后一次确认：下面的记录会在一个事务中一起创建；列出的非影响不会随导入发生。'),
+      element('p', 'lede', '确认书名与目标后即可导入。'),
     );
     if (recoveryNotice) content.append(element('p', 'recovery-notice', recoveryNotice));
     if (review.trackedChanges !== undefined) {
@@ -1274,103 +1256,6 @@ export function createImportReview(options: ImportReviewOptions) {
     if (review.identityFindings.length > 0) {
       content.append(identityFindingDisclosure(review.identityFindings, review.target.label));
     }
-
-    const fidelity = element('section', 'review-section');
-    fidelity.append(
-      element('h3', undefined, fidelityReviewHeading(review.fidelity)),
-      ...renderFidelityReview(review.fidelity, review.source.conversion, {
-        kind: 'stated',
-        disposition: review.textBoxDisposition,
-      }).elements,
-      ...renderStructureReview(review.structure?.projection, review.structure?.choice).elements,
-    );
-    content.append(fidelity);
-
-    if (review.degradationDecision.state !== 'not-required-clean-import') {
-      const decision = element('section', 'review-section degradation-decision');
-      decision.append(
-        element('h3', undefined, '导入降级决定'),
-        element('p', undefined, '本次接受只适用于当前导入，并覆盖下面由服务端确定的完整降级集合。'),
-        degradationItems(review),
-      );
-      const acceptance = element('label', 'choice degradation-acceptance');
-      const checkbox = element('input');
-      checkbox.type = 'checkbox';
-      checkbox.id = 'accept-import-degradation';
-      checkbox.checked = review.degradationDecision.state === 'accepted-complete-set';
-      checkbox.disabled = review.degradationDecision.state === 'accepted-complete-set';
-      const copy = element('span');
-      copy.append(
-        element('strong', undefined, '接受上述完整降级集合'),
-        element('small', undefined, '接受后才会形成复核摘要，并允许一次性创建全部导入记录。'),
-      );
-      acceptance.append(checkbox, copy);
-      decision.append(acceptance);
-      if (review.degradationDecision.state === 'required-unselected') {
-        checkbox.addEventListener('change', async () => {
-          if (!checkbox.checked) return;
-          checkbox.disabled = true;
-          setStatus('正在记录本次导入的完整降级接受…', 'busy');
-          try {
-            const acceptedReview = await window.ai7.prepareNewBookReview({
-              draftId: review.draftId,
-              expectedDraftVersion: review.draftVersion,
-              target: review.target.kind === 'new-book'
-                ? {
-                    kind: 'new-book',
-                    choiceId: review.target.choiceId,
-                    confirmedTitle: review.target.confirmedTitle,
-                  }
-                : {
-                    kind: 'existing-book',
-                    bookId: review.target.bookId,
-                    relationship: review.target.relationship,
-                  },
-              acceptDegradation: true,
-              textBoxDisposition: review.textBoxDisposition ?? 'retain',
-              ...(review.trackedChanges === undefined ? {} : { trackedChanges: review.trackedChanges }),
-              ...(review.structure === undefined ? {} : { structure: review.structure.choice }),
-            });
-            setStatus('已接受本次导入的完整降级集合', 'success');
-            renderReview(acceptedReview, recoveryNotice, recoveryReturn);
-          } catch (error) {
-            renderError(error, () => void initializeStartup());
-          }
-        });
-      }
-      content.append(decision);
-    }
-
-    const grid = element('div', 'review-grid');
-    const workflow = element('section', 'review-section');
-    workflow.append(
-      element('h3', undefined, '固定工作流程方案'),
-      element('p', undefined, `${review.workflowProfile.name} · 版本 ${review.workflowProfile.version}`),
-      element('p', 'field-note', `AI7 投影 ${review.workflowProfile.id}@${review.workflowProfile.version} · ${review.workflowProfile.digest}`),
-      element('p', 'field-note', `原生 Profile ${review.workflowProfile.nativeProfile.id}@${review.workflowProfile.nativeProfile.version} · ${review.workflowProfile.nativeProfile.digest}`),
-      element('p', 'field-note', '将创建一个同时绑定上述精确 AI7 投影与原生 Profile 的工作流程实例。'),
-    );
-    const dimensions = element('section', 'review-section');
-    dimensions.append(
-      element('h3', undefined, '图书编辑维度集 · 8 项'),
-      element(
-        'p',
-        'field-note',
-        `${review.editorialDimensionSet.name} · 版本 ${review.editorialDimensionSet.profileVersion} · ${review.editorialDimensionSet.weightSemantics}`,
-      ),
-    );
-    const dimensionList = element('ul', 'dimension-list');
-    for (const dimension of review.editorialDimensionSet.dimensions) {
-      const item = element('li');
-      item.append(
-        element('span', undefined, dimension.label),
-        element('span', 'neutral-weight', `中性起始权重 ${dimension.weight}`),
-      );
-      dimensionList.append(item);
-    }
-    dimensions.append(dimensionList);
-    grid.append(workflow, dimensions, listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.nonEffects));
-    content.append(grid);
 
     if (review.reviewDigest !== null) {
       const commitBar = element('section', 'commit-bar');

@@ -253,7 +253,7 @@ async function readKnowledge(renderer, predicate, name) {
 // book, handed to 放入资料… through the picker control of the relaunched window.
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const LIBRARY_TITLE = '样书一';
-const LIBRARY_EMPTY = '资料库里还没有资料。放进来以后，先定归属与学习准入，任务才能把它列进「允许参考」。';
+const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
 /** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
 const READ_LIBRARY = `(() => {
   const root = document.querySelector('[data-screen="knowledge-base"] .library-materials');
@@ -411,260 +411,6 @@ async function pressKey(renderer, key) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: codes[key] });
 }
 
-async function focusAction(renderer, action, name) {
-  await renderer.evaluate(`(() => { const active=document.activeElement; if(active instanceof HTMLElement)active.blur(); return true; })()`);
-  for (let count = 0; count < 40; count += 1) {
-    await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
-    await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
-    if (await renderer.evaluate(`document.activeElement?.dataset.nativeArtifactAction===${JSON.stringify(action)} && document.activeElement.matches(':focus-visible')`).catch(() => false)) return;
-  }
-  throw journeyCheckFailure('J-15', name);
-}
-
-async function activateFocused(renderer, key) {
-  const descriptor = key === 'Enter'
-    ? { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: process.platform === 'darwin' ? 36 : 13, text: '\r', unmodifiedText: '\r' }
-    : { key: ' ', code: 'Space', windowsVirtualKeyCode: 32, nativeVirtualKeyCode: process.platform === 'darwin' ? 49 : 32, text: ' ', unmodifiedText: ' ' };
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...descriptor });
-  const { text: _text, unmodifiedText: _unmodifiedText, ...released } = descriptor;
-  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...released });
-}
-
-async function requireRetainedCarrier(dataRoot) {
-  let current = dataRoot;
-  for (const segment of ['native-artifacts', 'sha256', PROFILE_DIGEST.slice(0, 2), PROFILE_DIGEST]) {
-    current = resolve(current, segment);
-    const metadata = await lstat(current);
-    requireJourney(metadata.isDirectory() && !metadata.isSymbolicLink() && (await realpath(current)) === current, 'retained-directory');
-  }
-  const carrier = resolve(current, 'package.json');
-  const metadata = await lstat(carrier);
-  const bytes = await readFile(carrier);
-  requireJourney(
-    metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(carrier)) === carrier &&
-      bytes.length === PROFILE_BYTES && createHash('sha256').update(bytes).digest('hex') === PROFILE_DIGEST,
-    'retained-carrier',
-  );
-}
-
-async function constructPredecessorV12(dataRoot, bookId) {
-  const databasePath = resolve(dataRoot, 'store', 'ai7.sqlite');
-  const metadata = await lstat(databasePath);
-  requireJourney(
-    metadata.isFile() && !metadata.isSymbolicLink() && (await realpath(databasePath)) === databasePath,
-    'predecessor-v12-database',
-  );
-  const database = new DatabaseSync(databasePath);
-  try {
-    // Every post-v12 table. A table left off is not caught here: the open accepts a predecessor that kept a later layer's
-    // tables (`includeMaterialIndexTables ||= committed(…)` in bounded-manuscript.ts), so that mutant survives by design.
-    // Synchronized delta with Issue #901: revision 77's four factual verification relations lead the list.
-    // Synchronized delta with Issue #89: revision 83's updates lead revision 82's custom dimensions, then revision 81's imported Skills.
-    // Synchronized delta with #66: revision 81's four imported Skill relations follow them.
-    // Synchronized delta with Issue #423 (slice 7a): revision 80's three Task Intent Draft relations follow them.
-    // Synchronized delta with Issue #1084: revision 88's review_excluded_findings goes with the Review Run relations it extends.
-    // Synchronized delta with Issue #1119: revision 90's review_local_stage_artifacts, a child of review_runs, goes just before it.
-    // Word's revision-93 layer did not exist in this genuine v12 predecessor fixture.
-    database.exec(`
-      PRAGMA foreign_keys = OFF;
-      BEGIN IMMEDIATE;
-      DROP TABLE procedure_run_choices;
-      DROP TABLE procedure_version_stops;
-      DROP TABLE procedure_version_origins;
-      DROP TABLE house_word_list_versions;
-      DROP TABLE word_import_mark_sources;
-      DROP TABLE word_tracked_edit_sample_imports;
-      DROP TABLE word_tracked_edit_samples;
-      DROP TABLE word_manuscript_source_segments;
-      DROP TABLE word_revision_imports;
-      DROP TABLE word_revision_sources;
-      DROP TABLE staged_word_revision_intakes;
-      DROP TABLE imported_skill_update_candidates;
-      DROP TABLE imported_skill_current_selections;
-      DROP TABLE imported_skill_update_rules;
-      DROP TABLE custom_analysis_dimension_states;
-      DROP TABLE custom_analysis_dimension_versions;
-      DROP TABLE custom_analysis_dimensions;
-      DROP TABLE imported_skill_states;
-      DROP TABLE imported_skill_revisions;
-      DROP TABLE imported_skill_snapshots;
-      DROP TABLE imported_skills;
-      DROP TABLE task_intent_draft_promotions;
-      DROP TABLE task_intent_draft_versions;
-      DROP TABLE task_intent_drafts;
-      DROP TABLE review_run_preference_pins;
-      DROP TABLE house_review_preference_versions;
-      DROP TABLE correction_proposals;
-      DROP TABLE factual_review_decisions;
-      DROP TABLE factual_verification_results;
-      DROP TABLE factual_run_assurance;
-      DROP TABLE manuscript_outcome_recovery;
-      DROP TABLE proposal_review_positions;
-      DROP TABLE proposal_decisions;
-      DROP TABLE proposal_decision_drafts;
-      DROP TABLE proposal_atomic_groups;
-      DROP TABLE material_translation_attempts;
-      DROP TABLE material_index_translations;
-      DROP TABLE material_index_vectors;
-      DROP TABLE analysis_outcome_resolutions;
-      DROP TABLE material_index_segments;
-      DROP TABLE material_index_builds;
-      DROP TABLE background_analysis_enrollment_states;
-      DROP TABLE background_analysis_enrollment_versions;
-      DROP TABLE background_analysis_enrollments;
-      DROP TABLE writing_drafts;
-      DROP TABLE writing_tasks;
-      DROP TABLE evaluation_rewrite_decisions;
-      DROP TABLE evaluation_rewrite_tasks;
-      DROP TABLE developer_capability_proposal_exports;
-      DROP TABLE developer_capability_proposals;
-      DROP TABLE procedure_plan_pins;
-      DROP TABLE procedure_definition_versions;
-      DROP TABLE procedure_definitions;
-      DROP TABLE review_run_procedure_pins;
-      DROP TABLE captured_procedure_states;
-      DROP TABLE captured_procedure_versions;
-      DROP TABLE captured_procedures;
-      DROP TABLE readers_report_drafts;
-      DROP TABLE readers_report_tasks;
-      DROP TABLE series_retrieval_exclusions;
-      DROP TABLE dialogue_conversions;
-      DROP TABLE dialogue_attempt_outcomes;
-      DROP TABLE dialogue_harness_spans;
-      DROP TABLE dialogue_execution_bindings;
-      DROP TABLE dialogue_attempts;
-      DROP TABLE dialogue_tasks;
-      DROP TABLE evaluation_initial_drafts;
-      DROP TABLE database_merge_books;
-      DROP TABLE database_merges;
-      DROP TABLE database_replacements;
-      DROP TABLE scheduled_backup_removals;
-      DROP TABLE scheduled_backups;
-      DROP TABLE backup_preferences;
-      DROP TABLE database_export_receipts;
-      DROP TABLE database_export_approvals;
-      DROP TABLE database_export_preparations;
-      DROP TABLE store_versions;
-      DROP TABLE series_knowledge_conflicts;
-      DROP TABLE series_knowledge_promotions;
-      DROP TABLE series_knowledge_revisions;
-      DROP TABLE series_knowledge_candidates;
-      DROP TABLE series_knowledge_items;
-      DROP TABLE series_membership_changes;
-      DROP TABLE series;
-      DROP TABLE evaluation_preferences;
-      DROP TABLE publication_actuals;
-      DROP TABLE learning_eligibility_decisions;
-      DROP TABLE proposal_decision_feedback;
-      DROP TABLE analysis_feedback_signals;
-      DROP TABLE evaluation_record_entries;
-      DROP TABLE evaluation_records;
-      DROP TABLE library_material_decisions;
-      DROP TABLE library_materials;
-      DROP TABLE review_guideline_versions;
-      DROP TABLE book_people_versions;
-      DROP TABLE maintenance_case_revisions;
-      DROP TABLE maintenance_errata_versions;
-      DROP TABLE maintenance_cases;
-      DROP TABLE production_document_origin_readings;
-      DROP TABLE book_delivery_package_export_files;
-      DROP TABLE book_delivery_package_exports;
-      DROP TABLE production_document_phase_transitions;
-      DROP TABLE production_document_workflow_instances;
-      DROP TABLE book_delivery_package_versions;
-      DROP TABLE production_document_deliveries;
-      DROP TABLE production_document_type_decisions;
-      DROP TABLE production_document_versions;
-      DROP TABLE production_documents;
-      DROP TABLE manuscript_reimport_mark_outcomes;
-      DROP TABLE manuscript_reimport_group_resolutions;
-      DROP TABLE manuscript_reimport_group_members;
-      DROP TABLE manuscript_reimport_groups;
-      DROP TABLE manuscript_reimport_group_sets;
-      DROP TABLE analysis_clarification_answers;
-      DROP TABLE analysis_clarification_requests;
-      DROP TABLE analysis_unit_checkpoints;
-      DROP TABLE default_execution_rule_states;
-      DROP TABLE default_execution_rule_versions;
-      DROP TABLE default_execution_rules;
-      DROP TABLE export_receipts;
-      DROP TABLE export_approvals;
-      DROP TABLE export_preparations;
-      DROP TABLE staged_import_marks;
-      DROP TABLE manuscript_block_sources;
-      DROP TABLE staged_import_text_box_paragraphs;
-      DROP TABLE staged_import_block_sources;
-      DROP TABLE import_fidelity_choices;
-      DROP TABLE proposal_conflict_outcomes;
-      DROP TABLE proposal_conflict_deferrals;
-      DROP TABLE proposal_conflict_drafts;
-      DROP TABLE publication_events;
-      DROP TABLE public_release_permissions;
-      DROP TABLE publication_versions;
-      DROP TABLE review_reports;
-      DROP TABLE quality_signals;
-      DROP TABLE review_finding_dispositions;
-      DROP TABLE review_findings;
-      DROP TABLE review_excluded_findings;
-      DROP TABLE review_run_category_events;
-      DROP TABLE review_run_authorizations;
-      DROP TABLE review_local_stage_artifacts;
-      DROP TABLE review_runs;
-      DROP TABLE manuscript_effect_receipts;
-      DROP TABLE manuscript_effect_dispatches;
-      DROP TABLE manuscript_effect_approvals;
-      DROP TABLE manuscript_effect_targets;
-      DROP TABLE manuscript_effect_intents;
-      DROP TABLE proposal_decision_reasons;
-      DROP TABLE proposal_item_decisions;
-      DROP TABLE proposal_change_items;
-      DROP TABLE editorial_mark_replies;
-      DROP TABLE editorial_marks;
-      DROP TABLE manuscript_entry_positions;
-      DROP TABLE analysis_task_outcomes;
-      DROP TABLE analysis_unit_results;
-      DROP TABLE analysis_result_set_revisions;
-      DROP TABLE analysis_result_sets;
-      DROP TABLE analysis_plan_adaptations;
-      DROP TABLE analysis_harness_spans;
-      DROP TABLE analysis_execution_bindings;
-      DROP TABLE analysis_execution_attempts;
-      DROP TABLE analysis_run_states;
-      DROP TABLE analysis_run_records;
-      DROP TABLE analysis_run_authorizations;
-      DROP TABLE analysis_plan_revisions;
-      DROP TABLE analysis_plan_versions;
-      DROP TABLE analysis_plan_records;
-      DROP TABLE analysis_task_input_checkpoints;
-      DROP TABLE analysis_task_intents;
-      DROP TABLE run_records;
-      DROP TABLE run_authorizations;
-      DROP TABLE plan_envelopes;
-      DROP TABLE execution_plans;
-      DROP TABLE provider_resolution_plans;
-      DROP TABLE run_source_scopes;
-      DROP TABLE task_artifact_pins;
-      DROP TABLE task_manuscript_pins;
-      DROP TABLE task_input_checkpoints;
-      DROP TABLE task_intents;
-      DROP TABLE editorial_workspace_profile_book_pins;
-      DROP TABLE editorial_workspace_profile_sidecar_revisions;
-    `);
-    const skewed = database.prepare(
-      `UPDATE native_artifact_book_enablements SET enabled_at = ?
-       WHERE book_id = ? AND artifact_id = '@ai7/editorial-workspace-profile'`,
-    ).run(FUTURE_SKEWED_ENABLED_AT, bookId);
-    requireJourney(skewed.changes === 1, 'predecessor-v12-future-clock-skew');
-    database.exec(`
-      PRAGMA user_version = 12;
-      COMMIT;
-      PRAGMA foreign_keys = ON;
-    `);
-  } finally {
-    database.close();
-  }
-}
-
 async function main() {
   parseJourney();
   let loopback;
@@ -756,226 +502,23 @@ async function main() {
     await renderer.send('Page.setBypassCSP', { enabled: false });
     requireJourney(fetchRejected === true && loopback.healthy() && loopback.observedRequests() === 0, 'offline-product');
     const bookA = await createEmptyBook(renderer, 'J15 空图书甲');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-state="available-to-install"]')`, 'available-card');
-    // Synchronized delta (#332): each of these sections now states its decision rows in its own dl and
-    // its digests in a second dl inside one closed 查看技术详情, so reading only the section's
-    // direct-child dl would miss 侧车身份 and every SHA-256. The helper below reads both layers, which
-    // is what V2-UX-LAYER-008 asks of a Journey: assert the decision reading, and assert that the
-    // technical layer still carries the exact value.
-    // Synchronized delta (#334): a ceiling's empty fields no longer cost a row each, so `Readable Scope`
-    // and the seven other foldable fields are read by their absence and by the one row that names them —
-    // `权限上限` when a revision declares none of the eight, `未声明` when it declares some. `Model Role`
-    // is not one of the eight and stays at full rank. Neither Revision is in force or on offer here, so
-    // nothing is past and both sections render in place.
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.native-artifact-card');
-      const text=card?.textContent??'';
-      const facts=(root)=>{
-        const result={};
-        for(const term of root?.querySelectorAll(':scope > dl.native-artifact-facts > dt, :scope > details.technical-details > dl > dt')??[]){
-          result[term.textContent??'']=term.nextElementSibling?.textContent??'';
-        }
-        return result;
-      };
-      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const revision1=card?.querySelector('[data-authority-sidecar-revision="1"]');
-      const revision2=card?.querySelector('[data-authority-sidecar-revision="2"]');
-      const sidecarFacts=facts(sidecar);
-      const revision1Facts=facts(revision1);
-      const revision2Facts=facts(revision2);
-      return card?.dataset.nativeArtifactIdentity==='@ai7/editorial-workspace-profile' &&
-        card.dataset.authoritySidecarIdentity===${JSON.stringify(SIDECAR_ID)} &&
-        !card.dataset.authoritySidecarActiveRevision && !card.dataset.authoritySidecarOfferedRevision &&
-        text.includes('DSH Profile') && text.includes('1.0.0') && text.includes('仓库内置') && text.includes('AI7 root license') &&
-        text.includes('config/native-artifact-sources/editorial-workspace-profile/package.json') && text.includes('263 bytes') &&
-        text.includes(${JSON.stringify(PROFILE_DIGEST)}) && text.includes('声明式 · Provider-free · 兼容') &&
-        sidecarFacts['侧车身份']===${JSON.stringify(SIDECAR_ID)} && sidecarFacts['当前生效 Revision']==='空（本图书未启用）' &&
-        sidecarFacts['可审阅后继']==='空（无）' && sidecarFacts['本图书 pin 历史']==='空（无）' &&
-        revision1Facts['规范字节']==='588 bytes' && revision1Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} &&
-        revision1Facts['模型角色']==='Main Editorial Role' &&
-        revision1Facts['权限上限']==='未声明任何权限（8 项均为空）' && revision1Facts['未声明']===undefined &&
-        revision1Facts['AI7 能力']===undefined && revision1Facts['可读范围']===undefined &&
-        revision1Facts['AI7 正式应用']===undefined && !revision1.textContent.includes('空（无）') &&
-        revision2Facts['规范字节']==='660 bytes' && revision2Facts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
-        revision2Facts['模型角色']==='Main Editorial Role' &&
-        revision2Facts['可读范围']==='current-book-primary-manuscript-revision、current-book-source-version' &&
-        revision2Facts['未声明']==='AI7 能力、模型提供方绑定、凭据访问、网络访问、受控动作、后台分析登记、AI7 正式应用' &&
-        revision2Facts['权限上限']===undefined && revision2Facts['AI7 能力']===undefined &&
-        !revision2.textContent.includes('空（无）') &&
-        revision1.parentElement===sidecar && revision2.parentElement===sidecar && !text.includes('其他 Revision') &&
-        text.includes('不创建 Task、Plan、Run 或 Session') && text.includes('不读取图书、稿件或来源内容') &&
-        text.includes('Revision 2 仅扩大可请求范围，不创建实际读取或运行权限') &&
-        text.includes('不授予 Provider、凭据、网络、Effect、Enrollment 或 Apply 权限') &&
-        Boolean(card.querySelector('[data-native-artifact-action="install-disabled"]')) && !card.querySelector('[data-native-artifact-action="enable-current-book"]') &&
-        window.ai7.inspectEditorialWorkspaceProfile.length===0 && window.ai7.installEditorialWorkspaceProfile.length===0 && window.ai7.enableEditorialWorkspaceProfile.length===0 &&
-        !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key));
-    })()`, 'exact-authority-card');
-
-    at('install-disabled');
-    await focusAction(renderer, 'install-disabled', 'install-keyboard-focus');
-    await activateFocused(renderer, 'Enter');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='busy' || document.querySelector('[data-native-artifact-state="installed-disabled"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'install-keyboard-activation', 5_000);
-    at('install-effect');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-state="installed-disabled"] [data-native-artifact-action="enable-current-book"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'installed-disabled-settled', 120_000);
-    await assertRenderer(renderer, `Boolean(document.querySelector('[data-native-artifact-state="installed-disabled"] [data-native-artifact-action="enable-current-book"]'))`, 'installed-disabled');
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('[data-native-artifact-state="installed-disabled"]');
-      return !document.querySelector('[data-native-artifact-action="install-disabled"]') &&
-        !card?.dataset.authoritySidecarActiveRevision && card?.dataset.authoritySidecarOfferedRevision==='2' &&
-        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并为本图书启用 Revision 2';
-    })()`, 'separate-enable-only-after-install');
-    await requireRetainedCarrier(dataRoot);
-
-    at('enable-current-book');
-    await focusAction(renderer, 'enable-current-book', 'enable-keyboard-focus');
-    await activateFocused(renderer, ' ');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='busy' || document.querySelector('[data-native-artifact-state="enabled-for-book"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'enable-keyboard-activation', 5_000);
-    at('enable-effect');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-state="enabled-for-book"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'enabled-book-a-settled', 120_000);
-    await assertRenderer(renderer, `Boolean(document.querySelector('[data-native-artifact-state="enabled-for-book"]'))`, 'enabled-book-a');
-    // Synchronized delta (#334): the pin history is a list in both layers, one `li` per pin, and the
-    // digest that used to ride in the decision reading now sits beside its exact instant in the
-    // disclosure. Reading the two lists asserts the same fact the joined string did — this Book pinned
-    // Revision 2 and nothing else — and that the digest is still there, per pin, to copy.
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.native-artifact-card');
-      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
-      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
-      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
-      return !document.querySelector('.native-artifact-actions button') && card?.textContent.includes('已安装 · 已为本图书启用') &&
-        card.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
-        decisionPins.length===1 && decisionPins[0].startsWith('Revision 2 · ') &&
-        !decisionPins[0].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
-        exactPins.length===1 && exactPins[0].startsWith('Revision 2 · ' + ${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} + ' · ') &&
-        exactPins[0].endsWith('Z');
-    })()`, 'enabled-no-repeat-action');
+    await assertRenderer(renderer, `document.querySelector('.native-artifact-card') === null && document.querySelector('[data-agent-workspace-entry="available"] [data-agent-workspace-action="open"]') instanceof HTMLButtonElement`, 'book-capabilities-without-install');
+    const freshWorkspace = await renderer.evaluate(`window.ai7.inspectAgentWorkspace()`);
+    requireJourney(freshWorkspace.available === true && freshWorkspace.proposal === null, 'fresh-book-workspace-available');
     await closeBrowser();
-
     at('restart-persistence');
-    await constructPredecessorV12(dataRoot, bookA);
-    manager = await launch();
-    renderer = await waitForRenderer(manager, 'restart-window');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
-    const wordMigration = new DatabaseSync(resolve(dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
-    try {
-      for (const table of ['staged_word_revision_intakes', 'word_revision_sources', 'word_revision_imports', 'word_manuscript_source_segments',
-        'word_tracked_edit_samples', 'word_tracked_edit_sample_imports', 'word_import_mark_sources']) {
-        requireJourney(wordMigration.prepare(`SELECT count(*) AS total FROM ${table}`).get().total === 0, 'word-predecessor-no-backfill');
-      }
-    } finally { wordMigration.close(); }
-    at('restart-open-book-a');
-    await clickBook(renderer, bookA, 'open-book-a-after-restart');
-    await waitFor(
-      renderer,
-      `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] [data-authority-sidecar-active-revision="1"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`,
-      'book-a-v12-migration',
-      120_000,
-    );
-    at('restart-enabled-book-a');
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] .native-artifact-card');
-      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
-      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
-      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
-      return card?.dataset.nativeArtifactState==='enabled-for-book' &&
-        card.dataset.authoritySidecarActiveRevision==='1' && card.dataset.authoritySidecarOfferedRevision==='2' &&
-        decisionPins.length===1 && decisionPins[0].startsWith('Revision 1 · ') &&
-        exactPins.length===1 && exactPins[0].startsWith('Revision 1 · ' + ${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} + ' · ') &&
-        exactPins[0].endsWith('Z') && !card.textContent.includes('其他 Revision') &&
-        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并追加 Revision 2' &&
-        card.lastElementChild?.classList.contains('native-artifact-actions');
-    })()`, 'book-a-v12-migrated-revision-1');
-
-    at('enable-current-book');
-    await focusAction(renderer, 'enable-current-book', 'successor-keyboard-focus');
-    await activateFocused(renderer, 'Enter');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='busy' || document.querySelector('[data-authority-sidecar-active-revision="2"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'successor-keyboard-activation', 5_000);
-    at('enable-effect');
-    await waitFor(renderer, `document.querySelector('[data-authority-sidecar-active-revision="2"]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`, 'successor-settled', 120_000);
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.native-artifact-card');
-      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
-      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
-      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
-      // Synchronized delta (#334): both pins read as list items in each layer, in the order this Book
-      // pinned them, and Revision 1 — neither in force nor on offer any more — is one step away inside
-      // the counted disclosure, with its ceiling and its digest still in the record.
-      const past=card?.querySelector('[data-authority-sidecar-revision="1"]')?.closest('details');
-      return card?.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
-        !card.querySelector('.native-artifact-actions button') &&
-        decisionPins.length===2 && decisionPins[0].startsWith('Revision 1 · ') && decisionPins[1].startsWith('Revision 2 · ') &&
-        exactPins.length===2 &&
-        exactPins[0].startsWith('Revision 1 · ' + ${JSON.stringify(SIDECAR_REVISION_1_DIGEST)} + ' · ') &&
-        exactPins[1].startsWith('Revision 2 · ' + ${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} + ' · ') &&
-        exactPins.every((line)=>line.endsWith('Z')) &&
-        card.querySelector('[data-authority-sidecar-revision="2"]')?.parentElement===sidecar &&
-        past?.parentElement===sidecar && past.querySelector(':scope > summary')?.textContent==='其他 Revision（1）' &&
-        past.querySelector('[data-authority-sidecar-revision="1"] .technical-identity')?.textContent===${JSON.stringify(SIDECAR_REVISION_1_DIGEST)};
-    })()`, 'successor-preserves-revision-1');
-    await closeBrowser();
-
-    at('restart-persistence');
-    manager = await launch();
-    renderer = await waitForRenderer(manager, 'restart-window');
+    manager = await launch(); renderer = await waitForRenderer(manager, 'restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'restart-ready');
     at('restart-open-book-a');
     await clickBook(renderer, bookA, 'open-book-a-after-restart');
-    await waitFor(
-      renderer,
-      `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}]') || document.querySelector('#persistence-status')?.dataset.tone==='error'`,
-      'book-a-route-after-restart',
-      120_000,
-    );
-    await assertRenderer(renderer, `Boolean(document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}]'))`, 'book-a-overview-after-restart');
-    at('restart-enabled-book-a');
-    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] [data-native-artifact-state]')`, 'book-a-after-restart');
-    const restartedLifecycle = await renderer.evaluate(`document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] [data-native-artifact-state]')?.dataset.nativeArtifactState`);
-    if (restartedLifecycle !== 'enabled-for-book') {
-      at(restartedLifecycle === 'installed-disabled' ? 'restart-book-a-disabled' : 'restart-book-a-unavailable');
-      requireJourney(false, 'book-a-enabled-after-restart');
-    }
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}] .native-artifact-card');
-      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
-      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
-      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
-      return card?.dataset.authoritySidecarActiveRevision==='2' && !card.dataset.authoritySidecarOfferedRevision &&
-        decisionPins.length===2 && decisionPins[0].startsWith('Revision 1 · ') && decisionPins[1].startsWith('Revision 2 · ') &&
-        exactPins.length===2 &&
-        exactPins[0].includes(${JSON.stringify(SIDECAR_REVISION_1_DIGEST)}) &&
-        exactPins[1].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)});
-    })()`, 'book-a-sidecar-history-after-restart');
+    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookA)}]')`, 'book-a-overview-after-restart');
+    await assertRenderer(renderer, `document.querySelector('.native-artifact-card') === null && document.querySelector('[data-agent-workspace-entry="available"]') !== null`, 'book-a-capabilities-after-restart');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'return-after-book-a');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'landing-before-book-b');
-
     at('second-book-disabled');
     const bookB = await createEmptyBook(renderer, 'J15 空图书乙');
     requireJourney(bookB !== bookA, 'distinct-books');
-    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}] [data-native-artifact-state="installed-disabled"]')`, 'book-b-disabled-after-restart');
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}] .native-artifact-card');
-      return Boolean(card?.querySelector('[data-native-artifact-action="enable-current-book"]')) &&
-        !card.querySelector('[data-native-artifact-action="install-disabled"]') &&
-        !card.dataset.authoritySidecarActiveRevision && card.dataset.authoritySidecarOfferedRevision==='2' &&
-        card.querySelector('[data-native-artifact-action="enable-current-book"]')?.textContent==='审阅并为本图书启用 Revision 2';
-    })()`, 'book-b-separate-enablement');
-
-    at('accessibility-reflow-forced-colors');
-    await focusAction(renderer, 'enable-current-book', 'book-b-keyboard-focus');
-    await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
-    // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
-    await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
-    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await assertRenderer(renderer, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.native-artifact-facts')).gridTemplateColumns.split(' ').length===1`, 'zoom-reflow');
-    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.native-artifact-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.native-artifact-card')).borderStyle!=='none' && getComputedStyle(document.querySelector('.native-artifact-status')).borderStyle!=='none'`, 'forced-colors');
-    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
-    await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
-    await renderer.send('Emulation.clearDeviceMetricsOverride');
+    await assertRenderer(renderer, `document.querySelector('[data-agent-workspace-entry="available"]') !== null`, 'second-book-capabilities');
 
     // ---- 知识库 › 审阅规范文件 (Issue #427, plan slice S79a; editor-surfaces §8.4, V2-UX-KB-001 to KB-003) ------------------
     at('knowledge-guidelines');
@@ -1145,18 +688,9 @@ async function main() {
             /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent));
       });
     })()`, 'preinstalled-cross-chapter-history');
-    const technical = new Map(procedures?.technical ?? []);
     requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(17).fill(['enabled', '已启用', '0', 'solid'])) &&
-      // #1084: the review procedures read under contract /2 are version 2, version 1 kept in their closed 历史版本.
-      procedures.first.includes('错别字与规范用语审阅工序 · 第 2 版') && procedures.first.includes('改写为新版本') && procedures.first.includes('历史版本第 1 版 · 分块审读 → 综合 → 派生报告') &&
-      JSON.stringify(procedures.reasons) === '[]' &&
-      procedures.artifact === '本社方案 v2 · 已安装 · 已为 1 本书启用' && procedures.identifierInWords === false &&
-      procedures.detailsOpen === false && procedures.summary === '查看技术详情' &&
-      technical.get('原生载体身份') === '@ai7/editorial-workspace-profile' && technical.get('原生载体版本') === '1.0.0' &&
-      /^[0-9a-f]{64}$/u.test(technical.get('SHA-256') ?? '') && technical.get('权限侧车') === 'ai7.editorial-workspace-profile.authority' &&
-      /^[0-9a-f]{64}$/u.test(technical.get('权限侧车 SHA-256') ?? '') && procedures.technical.length === 5 + 17 &&
-      procedures.technical.slice(5).every(([, procedureId]) => /^ai7-procedure\//u.test(procedureId ?? '')),
-    'knowledge-procedures-list', procedures);
+      procedures.first.includes('错别字与规范用语审阅工序 · 第 2 版') && JSON.stringify(procedures.reasons) === '[]' && procedures.artifact === null,
+      'knowledge-procedures-list', procedures);
     // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
     // capturing, validating, running and stopping one is J-13's, which runs Review Runs (Issue #65 review).
     await waitFor(renderer, `document.querySelector('.knowledge-captured-procedures')?.dataset.procedureCount==='0' && document.querySelector('.knowledge-developer-proposals')?.dataset.proposalCount==='0'`, 'knowledge-captured-painted');
@@ -1217,69 +751,23 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="confirm-add"]', 'library-confirm');
     const libraryAdded = await readLibrary(renderer, (page) => page.preview === null && page.cards.length === 1, 'library-added');
     const [libraryCard] = libraryAdded.cards;
-    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '图书' && libraryCard.attribution === 'none' && libraryCard.eligibility === 'none' &&
-      libraryCard.reference === 'pending' && libraryCard.decisions === '0' && libraryCard.attributionLine === '尚未定归属' && libraryCard.eligibilityLine === '尚未定' &&
-      libraryCard.referenceLine === '定了归属与学习准入，任务才能把它列进「允许参考」。' && libraryCard.history.length === 0, 'library-added-card', libraryCard);
-    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」；请定归属与学习准入。`)} && document.activeElement === document.querySelector('article.library-material h3')`, 'library-added-status', 10_000);
+    requireJourney(libraryCard.title === LIBRARY_TITLE && libraryCard.kind === '图书' && libraryCard.attribution === 'house' && libraryCard.eligibility === 'house' && libraryCard.reference === 'available' && libraryCard.decisions === '2', 'library-added-card', libraryCard);
+    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已放入资料库：「${LIBRARY_TITLE}」；已允许任务参考。`)}`, 'library-added-status', 10_000);
     // The original is kept byte for byte under its digest in the Agent Data Root, and the service reads it as the page does.
     const libraryKept = await readFile(resolve(libraryObjects, 'sha256', sample1Digest.slice(0, 2), `${sample1Digest}.docx`));
     requireJourney(libraryKept.equals(sample1), 'library-original-kept-whole');
     const materialId = libraryCard.id;
-    const libraryService = await renderer.evaluate(`window.ai7.inspectLibraryMaterials().then((projection)=>projection.materials.map((material)=>[material.materialId, material.title, material.kind, material.source.format, material.source.sha256, material.attribution, material.eligibility]))`);
-    requireJourney(JSON.stringify(libraryService) === JSON.stringify([[materialId, LIBRARY_TITLE, 'book', 'DOCX', sample1Digest, null, null]]), 'library-added-service', libraryService);
-
+    const libraryService = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({materialId:${JSON.stringify(materialId)}}).then((material)=>[material.source.sha256, material.attribution?.scope, material.eligibility?.choice, material.reference.state])`);
+    requireJourney(JSON.stringify(libraryService) === JSON.stringify([sample1Digest, 'house', 'house', 'available']), 'library-added-service', libraryService);
     at('knowledge-library-attention');
-    // 待我处理 lists it in 等待你的决定, under no Book yet, with the decision it waits for; opening it returns to 资料库 with that
-    // decision in focus.
-    const libraryItem = `library-material:${materialId}`;
-    const itemSelector = `[data-screen="global-attention"] li.global-attention-item[data-attention-item=${JSON.stringify(libraryItem)}]`;
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-attention-entry');
-    await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(itemSelector)}) !== null`, 'library-attention-listed', 30_000);
-    const libraryListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(itemSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, book: item.querySelector('.global-attention-book')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null, count: document.querySelector('#global-attention-entry')?.dataset.attentionCount ?? null }; })()`);
-    requireJourney(libraryListed.group === 'decisions' && libraryListed.state === 'library-attribution-pending' && libraryListed.book === '尚未定归属' &&
-      libraryListed.object === `资料库 · 图书「${LIBRARY_TITLE}」` && libraryListed.pill === '资料库归属待定' && libraryListed.next === '安全的下一步：定归属…' && libraryListed.count === '1',
-    'library-attention-words', libraryListed);
-    await clickSelector(renderer, `${itemSelector} button.global-attention-open`, 'library-attention-open');
-    const libraryReopened = await readLibrary(renderer, (page) => page.state === 'ready' && page.focus?.action === 'attribute', 'library-attention-opened');
-    requireJourney(libraryReopened.cards.length === 1 && libraryReopened.cards[0].id === materialId && libraryReopened.cards[0].attribution === 'none', 'library-attention-card', libraryReopened);
-
+    const immediateAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>projection.groups.flatMap((group)=>group.items).filter((item)=>item.object.kind==='library-material').length)`);
+    requireJourney(immediateAttention === 0, 'library-no-pending-authorization', immediateAttention);
     at('knowledge-library-decide');
-    // 定归属 to the first Book — a Series cannot be named until Series exist — then 定学习准入 under it: the choices start
-    // unselected, the house's states its consequence where it is chosen, and the Book's own with the editor's note is recorded.
-    await clickSelector(renderer, '[data-library-action="attribute"]', 'library-attribute');
-    const libraryAttributing = await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'attribution', 'library-attribution-chooser');
-    // The Books by title as 书库 orders them (乙 before 甲 by code point), a Series not yet there, and the house; the first
-    // choice takes focus and none is chosen.
-    requireJourney(JSON.stringify(libraryAttributing.cards[0].chooser.choices) === JSON.stringify([
-      [`book:${bookB}`, false, false, '《J15 空图书乙》'], [`book:${bookA}`, false, false, '《J15 空图书甲》'], ['series', false, true, '书系'], ['house', false, false, '社级'],
-    ]) && libraryAttributing.cards[0].chooser.confirmDisabled === true && libraryAttributing.focus?.choice === `book:${bookB}`, 'library-attribution-choices', libraryAttributing.cards[0].chooser);
-    await clickSelector(renderer, `.library-attribution-chooser [data-library-choice="book:${bookA}"]`, 'library-attribution-book-a');
-    await waitFor(renderer, `document.querySelector('[data-library-action="confirm-attribution"]')?.disabled === false`, 'library-attribution-confirm-enabled', 10_000);
-    await clickSelector(renderer, '[data-library-action="confirm-attribution"]', 'library-attribution-confirm');
-    const libraryAttributed = await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0].chooser === null, 'library-attributed');
-    requireJourney(libraryAttributed.cards[0].attributionLine === '《J15 空图书甲》' && libraryAttributed.cards[0].eligibility === 'none' && libraryAttributed.cards[0].reference === 'pending' &&
-      libraryAttributed.focus?.action === 'eligibility' && libraryAttributed.cards[0].history.length === 1, 'library-attributed-card', libraryAttributed.cards[0]);
-    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已记录归属：「${LIBRARY_TITLE}」归到《J15 空图书甲》。`)}`, 'library-attributed-status', 10_000);
-    await clickSelector(renderer, '[data-library-action="eligibility"]', 'library-eligibility');
-    const libraryChoosing = await readLibrary(renderer, (page) => page.cards[0]?.chooser?.kind === 'eligibility', 'library-eligibility-chooser');
-    requireJourney(JSON.stringify(libraryChoosing.cards[0].chooser.choices) === JSON.stringify([
-      ['book', false, false, '仅纳入《J15 空图书甲》建议'], ['series', false, true, '纳入当前书系'], ['house', false, false, '纳入出版社经验'],
-      ['excluded', false, false, '明确排除'], ['deferred', false, false, '稍后决定'],
-    ]) && libraryChoosing.cards[0].chooser.consequenceShown === false && libraryChoosing.cards[0].chooser.confirmDisabled === true && libraryChoosing.focus?.choice === 'book',
-    'library-eligibility-unselected', libraryChoosing.cards[0].chooser);
-    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="house"]', 'library-eligibility-house');
-    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.consequenceShown === true, 'library-house-consequence');
-    await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="book"]', 'library-eligibility-book');
-    await readLibrary(renderer, (page) => page.cards[0]?.chooser?.consequenceShown === false && page.cards[0].chooser.confirmDisabled === false, 'library-eligibility-book-chosen');
-    await assertRenderer(renderer, `(() => { const text=document.querySelector('.library-eligibility-chooser [data-library-field="reason"]'); if(!(text instanceof HTMLTextAreaElement))return false; text.value='责编确认可作本书参考。'; text.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, 'library-eligibility-reason');
-    await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-eligibility-confirm');
-    const libraryDecided = await readLibrary(renderer, (page) => page.cards[0]?.eligibility === 'book' && page.cards[0].chooser === null, 'library-decided');
-    requireJourney(libraryDecided.cards[0].eligibilityLine === '仅纳入《J15 空图书甲》（说明：责编确认可作本书参考。）' && libraryDecided.cards[0].reference === 'available' &&
-      libraryDecided.cards[0].referenceLine === '《J15 空图书甲》的任务可以把它列进「允许参考」。' && libraryDecided.cards[0].history.length === 2, 'library-decided-card', libraryDecided.cards[0]);
-    await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '')===${JSON.stringify(`已记录学习准入：「${LIBRARY_TITLE}」 · 仅纳入《J15 空图书甲》。`)}`, 'library-decided-status', 10_000);
-    // 待我处理 lets it go once both are decided.
-    const attentionAfter = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection)=>[projection.actionableCount, projection.groups.flatMap((group)=>group.items).filter((item)=>item.object.kind==='library-material').length])`);
-    requireJourney(JSON.stringify(attentionAfter) === JSON.stringify([0, 0]), 'library-attention-resolved', attentionAfter);
+    // Existing attribution controls remain optional. Reassign this fixture to Book A for the following index and Series checks.
+    await renderer.evaluate(`(async()=>{await window.ai7.decideLibraryMaterial({materialId:${JSON.stringify(materialId)},expectedDecisions:2,decision:{kind:'attribution',attribution:{scope:'book',bookId:${JSON.stringify(bookA)}}}});await window.ai7.decideLibraryMaterial({materialId:${JSON.stringify(materialId)},expectedDecisions:3,decision:{kind:'eligibility',choice:'book',reason:'责编确认可作本书参考。'}});})()`);
+    await click(renderer, '审阅规范文件', 'library-refresh-guidelines');
+    await click(renderer, '资料库', 'library-refresh');
+    await readLibrary(renderer, (page) => page.cards[0]?.attribution === 'book' && page.cards[0]?.reference === 'available', 'library-decided');
 
     // ---- 资料索引 (Issue #428, plan slice S80a; editor-surfaces §8.4, V2-UX-KB-009, ATTN-009) ----------------------------
     at('knowledge-library-index');
@@ -1378,7 +866,7 @@ async function main() {
     await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="book"]', 'library-long-note-choice');
     await fill(renderer, '[data-library-field="reason"]', longReason, 'library-long-note');
     await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-long-note-save');
-    await readLibrary(renderer, (page) => page.cards[0]?.decisions === '3' && page.cards[0].chooser === null, 'library-long-note-saved');
+    await readLibrary(renderer, (page) => page.cards[0]?.decisions === '5' && page.cards[0].chooser === null, 'library-long-note-saved');
     const reader = 'article.library-material > .library-reason-reader';
     await clickSelector(renderer, `${reader} [data-library-action="read-reason"]`, 'library-full-note-open');
     let reconstructed = '';
@@ -1501,7 +989,7 @@ async function main() {
     at('knowledge-library-bounded-readers');
 
     // Populate the Book chooser through the ordinary creation form, then retain one explicit choice across replacement pages.
-    await click(renderer, '返回', 'library-books-landing');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'library-books-landing');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'library-books-landed');
     for (let index = 0; index < 19; index += 1) {
       await createEmptyBook(renderer, `J15 分页图书${String(index).padStart(2, '0')}`);
@@ -1748,7 +1236,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-review-action="new-local-check"]')?.disabled===false`, 'editable-local-entry');
     await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-local-check"]').click(); return true; })()`, 'editable-local-options');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'editable-local-options-ready');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('[data-local-check-prose]').click(); const button=sheet.querySelector('[data-review-action="prepare"]'); if(button.disabled)return false; button.click(); return true; })()`, 'editable-local-prepare');
+    await waitFor(renderer, `document.querySelector('[data-procedure-definition="${localProcedure.procedureId}@1"]') && document.querySelector('dialog.review-sheet input[name="review-category"][value="local-text-check"]')?.checked===true && document.querySelector('dialog.review-sheet [data-review-action="prepare"]')?.disabled===false`, 'editable-local-definition-ready');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); if(sheet.querySelector('[data-local-check-prose]')?.checked!==true)return false; const button=sheet.querySelector('[data-review-action="prepare"]'); if(button.disabled)return false; button.click(); return true; })()`, 'editable-local-prepare');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'editable-local-plan');
     const localRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(p=>p.run)`);
     requireJourney(localRun.preinstalledProcedures.some(p=>p.procedure.procedureId===localProcedure.procedureId&&p.procedure.digest===localProcedure.digest), 'editable-run-exact-pin');

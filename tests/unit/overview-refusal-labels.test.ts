@@ -5,12 +5,7 @@ import { createSourceFile, forEachChild, isArrowFunction, isCallExpression, isFu
 import { describe, expect, it, vi } from 'vitest';
 import { miniDocument } from '../support/mini-dom.js';
 import { TASK_DRAWER_TITLE } from '../../src/renderer/task-drawer-labels.js';
-import {
-  ANALYSIS_PROFILE_ACTION_LABEL,
-  ANALYSIS_PROFILE_NEXT_STEP,
-  ANALYSIS_PROFILE_PIN_CODE,
-  analysisRefusalView,
-} from '../../src/renderer/overview-refusal-labels.js';
+import { analysisRefusalView } from '../../src/renderer/overview-refusal-labels.js';
 
 const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts', import.meta.url)), 'utf8');
 
@@ -23,7 +18,6 @@ const taskInspections: string[] = [];
 function extract(node: Node): void {
   if (isFunctionDeclaration(node) && node.name !== undefined && [
     'element', 'button', 'rendererErrorData', 'rendererErrorCode', 'rendererErrorMessage',
-    'openAgentWorkspaceProfile', 'focusEditorialProfileCard',
   ].includes(node.name.text)) helpers.set(node.name.text, node.getText(parsed));
   if (isArrowFunction(node) && node.parameters[0]?.name.getText(parsed) === 'error' &&
       /analysisRefusalView/u.test(node.body.getText(parsed))) refusals.push(node.getText(parsed));
@@ -83,21 +77,12 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
   const marker = surface === 'overview' ? 'analysisHost' : 'host.replaceChildren';
   const handler = surface === 'task' ? taskInspections : refusals.filter((source) => source.includes(marker));
   expect(handler).toHaveLength(1);
-  expect(helpers.size).toBe(7);
+  expect(helpers.size).toBe(5);
   await runInContext(compile([...helpers.values(), `const refuse = ${handler[0]}; refuse(error);`].join('\n')), context);
   return { host, heading, scroll, navigate, serviceRead, inspectTaskAuthorization, getModelServiceSettings };
 }
 
 describe('工作概览 refusals (#992)', () => {
-  it('turns the missing profile pin into a plain next step with one button', () => {
-    expect(ANALYSIS_PROFILE_PIN_CODE).toBe('ANALYSIS_ARTIFACT_PIN_UNAVAILABLE');
-    const view = analysisRefusalView(ANALYSIS_PROFILE_PIN_CODE, '当前图书尚未固定编辑工作区方案 Revision 2。');
-    expect(view).toEqual({ text: '开始分析前，先在 工作概览 › 编辑工作区方案 获取并启用本书的方案。', actionLabel: '前往编辑工作区方案' });
-    expect(view.text).toBe(ANALYSIS_PROFILE_NEXT_STEP);
-    expect(view.actionLabel).toBe(ANALYSIS_PROFILE_ACTION_LABEL);
-    expect(view.text).not.toContain('Revision');
-  });
-
   it('leaves every other analysis refusal with the service text and no button', () => {
     expect(analysisRefusalView('ANALYSIS_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。'))
       .toEqual({ text: '当前图书不是精确 sample1 主稿件血缘。', actionLabel: null });
@@ -158,23 +143,6 @@ describe('工作概览 refusals (#992)', () => {
     document.visibilityState = 'visible';
     host.replaceChildren();
     expect(recovered()).toBe(false);
-  });
-
-  it.each(['overview', 'analysis'] as const)('renders the profile next step on %s and only navigates or focuses on click', async (surface) => {
-    const { host, heading, scroll, navigate, serviceRead } = await refusalHarness(surface, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE');
-    expect(host.textContent).toContain(ANALYSIS_PROFILE_NEXT_STEP);
-    expect(host.textContent).not.toContain('原有拒绝说明。');
-    const buttons = host.querySelectorAll('button');
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0]!.textContent).toBe(ANALYSIS_PROFILE_ACTION_LABEL);
-    expect(navigate).not.toHaveBeenCalled();
-    buttons[0]!.click();
-    await vi.waitFor(() => expect(miniDocument.activeElement).toBe(heading));
-    expect(heading.tabIndex).toBe(-1);
-    expect(scroll).toHaveBeenCalledWith({ block: 'start' });
-    if (surface === 'analysis') expect(navigate).toHaveBeenCalledExactlyOnceWith({ bookId: 'book-1', title: '测试图书' }, 'overview');
-    else expect(navigate).not.toHaveBeenCalled();
-    expect(serviceRead).not.toHaveBeenCalled();
   });
 
   it.each(['overview', 'analysis'] as const)('keeps other refusal text without a next-step button on %s', async (surface) => {

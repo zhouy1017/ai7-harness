@@ -3,7 +3,7 @@ export const WORKSPACE_SERVICE_WORDS = Object.freeze({
   safety: '未联网 · 无文件系统 · 无 shell · 不能应用修改' as const,
   source: 'Agent 工作区',
   atomicReason: 'Agent 工作区变更集',
-  unavailable: '在「工作概览」的编辑工作区方案中为本图书启用第 2 版后，才能打开 Agent 工作区。',
+  unavailable: '无法读取当前图书。',
   invalidBook: '图书标识无效。',
   invalidSelection: '所选文字无效。',
   held: '这本书已有一组提议；先提交为修改建议或放弃，再提出新的一组。',

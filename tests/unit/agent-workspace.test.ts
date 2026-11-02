@@ -85,14 +85,11 @@ describe('the Agent 工作区 capability declaration', () => {
 });
 
 describe('the 工作概览 entry to the Agent 工作区', () => {
-  it('sits inside the profile card before its actions row, which stays the card’s last child (J-04 l.1151, J-15 l.863)', () => {
+  it('offers the workspace independently of a profile card', () => {
     const source = readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8');
-    const renderer = source.slice(source.indexOf('function renderEditorialWorkspaceProfile('), source.indexOf('function renderBookCreationReview('));
-    const appended = /card\.append\(([\s\S]*?)\);\r?\n {2}host\.replaceChildren\(card\);/u.exec(renderer);
-    expect(appended).not.toBeNull();
-    const children = appended![1]!.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
-    expect(children.at(-1)).toBe('actions');
-    expect(children.at(-2)).toBe('agentEntry');
+    expect(source).not.toContain('renderEditorialWorkspaceProfile');
+    expect(source).toContain('AGENT_WORKSPACE_WORDS.overviewEntry');
+    expect(source).not.toContain('openAgentWorkspaceProfile');
   });
 });
 

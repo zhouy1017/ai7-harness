@@ -112,15 +112,15 @@ describe('the 任务 panel', () => {
 describe('发起全书任务', () => {
   it('names the procedures and their actions', () => {
     expect(labels.TASK_PANEL_COMPOSE_HEADING).toBe('发起全书任务');
-    expect(labels.TASK_PANEL_COMPOSE_LEDE).toBe('在这本书上发起一项全书工序。准备任务先看计划再开始；快速开始按你设的默认执行规则直接开始。');
+    expect(labels.TASK_PANEL_COMPOSE_LEDE).toBe('选择工序即可开始，任务计划可随时查看。');
     expect(labels.TASK_PANEL_COMPOSE_FIELD).toBe('全书工序');
     expect(labels.TASK_PANEL_COMPOSE_ACTIONS).toEqual({ quick: '快速开始', prepare: '准备任务' });
-    expect(labels.TASK_PANEL_COMPOSE_NONE).toBe('这本书现在没有可以发起的全书工序。');
+    expect(labels.TASK_PANEL_COMPOSE_NONE).toBe('导入稿件后即可开始分析。');
     expect(labels.TASK_PANEL_COMPOSE_FIRST).toEqual({ label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' });
     expect(labels.TASK_PANEL_COMPOSE_FIRST_QUICK).toBe('首次基线分析没有快速开始：先看计划再开始。');
     expect(labels.TASK_PANEL_COMPOSE_STATUS).toEqual({
       preparing: '正在为任务保存修订版…',
-      prepared: '任务计划已准备；可在任务计划里开始任务。',
+      prepared: '任务已开始；可随时查看计划。',
       cancelled: '任务准备已取消；稿件与任务草稿保持不变。',
       failed: '无法准备这项任务。',
     });

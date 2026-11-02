@@ -63,7 +63,7 @@ export const CAPTURE_RESULT_LABELS = {
 } as const satisfies Record<ProcedureCaptureResultKind, string>;
 
 export const CAPTURE_RESULT_CONSEQUENCES = {
-  'captured-procedure': '保存为第 1 版 · 待验证。在知识库「工序与规则」里验证并启用后，才能在新建审阅里按它运行；它不会自己运行。',
+  'captured-procedure': '保存为第 1 版并启用；可在新建审阅里按它运行。',
   'developer-proposal': '需要 AI7 新增能力时选它：只记在本机，可以导出为文件交给开发流程；AI7 不会发送它，也不会安装或启用任何插件。',
   'skill-draft': '这一版还不能创建：需要新的指令写法时，先记为开发建议。',
   'workflow-draft': '这一版还不能创建：阶段、关卡与交付物的工作流定义尚未接通。',
@@ -120,7 +120,7 @@ export function captureNextVersionOption(title: string, latestVersion: number): 
 }
 
 export function captureSavedLine(title: string, version: number): string {
-  return `已保存《${title}》第 ${version} 版 · 待验证；在知识库「工序与规则」里验证并启用后才能运行。`;
+  return `已保存《${title}》第 ${version} 版 · 已启用，可直接运行。`;
 }
 
 export function proposalSavedLine(title: string, version: number): string {
@@ -130,13 +130,13 @@ export function proposalSavedLine(title: string, version: number): string {
 // ---- 知识库 › 工序与规则 --------------------------------------------------------------------------------------
 
 export const PROCEDURES_SECTION_HEADING = '可复用工序' as const;
-export const PROCEDURES_SECTION_NOTE = '从完成的审阅保存下来的工序。每一版验证并启用后，才能在一本书的新建审阅里按它运行；它从不自己运行，也不能设为快速开始或后台分析。' as const;
+export const PROCEDURES_SECTION_NOTE = '从完成的审阅保存下来的工序。保存后即可在新建审阅里按它运行。' as const;
 export const PROCEDURES_EMPTY = '还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。' as const;
 export const PROPOSALS_SECTION_HEADING = '开发建议' as const;
 export const PROPOSALS_SECTION_NOTE = '需要 AI7 新增能力的做法，只记在本机。可以导出为文件交给开发流程；AI7 不会发送它，也不会安装或启用任何插件。' as const;
 export const PROPOSALS_EMPTY = '还没有开发建议。' as const;
 export const PROCEDURE_ACTIONS = {
-  validate: '验证并启用…',
+  validate: '启用',
   confirm: '确认启用',
   cancel: '取消',
   stop: '停用…',
@@ -355,7 +355,7 @@ export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection):
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
   if (run.resolved === null) return [run.unavailableReason ?? ''];
   const resolved = run.resolved;
-  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划照常先看。`];
+  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划可按需查看。`];
   for (const step of resolved.steps) {
     if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
     else if (step.chosenApart) lines.push(sheetChosenApartLine(step.label));

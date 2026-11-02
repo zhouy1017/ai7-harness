@@ -1273,6 +1273,28 @@ async function main() {
     // Identifiers in the technical layer (ADR 0096 §3, #1177): a 书库 card prints no Book identity inline; its 图书 ID and 稳定标识
     // sit behind a closed 查看技术详情.
     await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=card.querySelector('details.technical-details'); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||details.open||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && details.querySelector('summary')?.textContent==='查看技术详情'; }); })()`, 'library-card-identity-disclosed');
+    at('screen-return-origins');
+    // Global destinations return to the exact Book subpage that opened them; settings children return to Settings.
+    await clickBook(primary, bookA, 'return-book-open');
+    await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'return-book-editor-ready');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('review')), 'return-book-review');
+    await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, 'return-book-review-ready');
+    for (const [destination, state] of [['knowledge','knowledge-base'], ['quality','quality-learning'], ['series','series-list']]) {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination(destination)), `return-${destination}-open`);
+      await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${destination}-ready`);
+      await click(primary, '返回', `return-${destination}-back`);
+      await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, `return-${destination}-source`);
+    }
+    for (const [label, state] of [['数据与存储','data-storage'], ['模型服务','model-service'], ['评估校准与预测','evaluation-calibration']]) {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), `return-${state}-settings`);
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, `return-${state}-settings-ready`);
+      await click(primary, label, `return-${state}-open`);
+      await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${state}-ready`);
+      await click(primary, '返回', `return-${state}-back`);
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, `return-${state}-source`);
+    }
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'return-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'return-library-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
@@ -1301,7 +1323,7 @@ async function main() {
     await assertRenderer(primary, `document.querySelector('.data-storage-summary')?.dataset.nativeRevealSuppressedForE2e==='true'`, 'main-owned-zero-argument-reveal');
 
     at('diagnostics-bundle-export');
-    await click(primary, '返回', 'data-storage-return');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'data-storage-return');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'diagnostics-landing');
     // 设置 › 本机 › 诊断 replaces 11a's 即将提供 row (Issue #938 restack onto #934).
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'diagnostics-open-settings');
@@ -1323,7 +1345,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v24.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 193 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 194 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');

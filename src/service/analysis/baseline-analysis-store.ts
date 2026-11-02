@@ -2642,14 +2642,6 @@ export class BaselineAnalysisStore {
     // Credential Reference, and the launch form's ceiling — not the production connection row, whose
     // binding this scope never uses. Otherwise every developer-live plan would look drifted at once.
     const live = this.#launch.live;
-    const pin = this.#db.prepare(
-      `SELECT pin.native_artifact_id, pin.sidecar_revision, pin.sidecar_sha256, installation.artifact_version, installation.content_sha256
-       FROM editorial_workspace_profile_book_pins pin
-       JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
-       WHERE pin.book_id = ? AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       ORDER BY pin.sidecar_revision DESC LIMIT 1`,
-    ).get(bookId) as SqlRow | undefined;
-    requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
     return {
       ...this.#selectedPlanMetadata(),
@@ -2671,11 +2663,11 @@ export class BaselineAnalysisStore {
             credentialReference: live.credentialReference,
           }),
       artifactPin: {
-        identity: asString(pin.native_artifact_id),
-        version: asString(pin.artifact_version),
-        nativeCarrierSha256: asString(pin.content_sha256),
-        sidecarRevision: asNumber(pin.sidecar_revision),
-        sidecarSha256: asString(pin.sidecar_sha256),
+        identity: '@ai7/editorial-workspace-profile',
+        version: '1.0.0',
+        nativeCarrierSha256: NATIVE_CARRIER_DIGEST,
+        sidecarRevision: 2,
+        sidecarSha256: SIDECAR_DIGEST,
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
@@ -3740,7 +3732,7 @@ export class BaselineAnalysisStore {
        FROM branch_working_state bws
        JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
        JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
-       WHERE m.manuscript_id = ? AND m.book_id = ? AND m.role = 'primary'`,
+       WHERE m.manuscript_id = ? AND m.book_id = ?`,
     ).get(manuscriptId, bookId) as SqlRow | undefined;
     requireAnalysis(head !== undefined, 'ANALYSIS_RECORD_INVALID', '无法读取当前稿件工作状态。');
     return {
@@ -4550,7 +4542,7 @@ export class BaselineAnalysisStore {
       bookId: checkpoint.bookId,
       manuscriptId: checkpoint.manuscriptId,
       taskInputRevision: { revisionId: checkpoint.revisionId, revisionDigest: checkpoint.revisionDigest },
-      readableScopeKinds: ['current-book-primary-manuscript-revision'],
+      readableScopeKinds: [this.#definition.manuscriptTarget === undefined ? 'current-book-primary-manuscript-revision' : 'current-book-production-document-revision'],
       ...(this.#definition.seriesScopes === undefined ? {} : { readableScopeKinds: ['current-book-primary-manuscript-revision', 'series'],
         seriesScopes: this.#definition.seriesScopes.map((scope) => ({ ...scope, members: scope.members.map((member) => member.bookId !== checkpoint.bookId ? member : {
           ...member, manuscriptId: checkpoint.manuscriptId, revisionId: checkpoint.revisionId, revisionDigest: checkpoint.revisionDigest, sourceVersionId: facts.sourceVersionId,
@@ -6434,27 +6426,20 @@ export class BaselineAnalysisStore {
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,
-              pin.sidecar_revision, pin.sidecar_sha256, installation.content_sha256 native_carrier_sha256,
               connection.credential_reference, connection.credential_operation_state
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
        JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
        JOIN manuscript_revisions mr ON mr.revision_id = ${checkpoint === undefined ? 'bws.base_revision_id' : '?'}
        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
-       LEFT JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = m.book_id
-         AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
-         AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       LEFT JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
        LEFT JOIN model_service_connections connection ON connection.connection_id = ?
-       WHERE m.book_id = ? AND m.role = 'primary'
-       ORDER BY pin.sidecar_revision DESC`,
-    ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId])) as SqlRow | undefined;
+       WHERE m.book_id = ? AND ${checkpoint !== undefined || this.#definition.manuscriptTarget !== undefined ? 'm.manuscript_id = ? AND mb.branch_id = ?' : "m.role = 'primary'"}`,
+    ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId]),
+      ...(checkpoint !== undefined ? [checkpoint.manuscriptId, checkpoint.branchId] : this.#definition.manuscriptTarget === undefined ? [] : [this.#definition.manuscriptTarget.manuscriptId, this.#definition.manuscriptTarget.branchId])) as SqlRow | undefined;
     requireAnalysis(row !== undefined && (production
       ? typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest)
       : isPublicSampleBookSourceDigest(row.source_digest)),
     'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
-    requireAnalysis(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST && row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
-      'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     // Ordinary production with no connection yet: 模型服务需设置, naming both routes (Issue #811).
     requireAnalysis(!production || (typeof row.credential_operation_state === 'string' && typeof row.credential_reference === 'string'),
       'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);

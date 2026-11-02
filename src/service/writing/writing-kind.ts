@@ -151,6 +151,7 @@ export function writingKindDefinition(input: WritingContractInput, rules: Writin
   const exemplars = { count: frozen.exemplars.length, statement: writingExemplarLine(frozen.type.label, frozen.exemplars) };
   const definition: AnalysisKindDefinition = {
     kind: WRITING_KIND,
+    ...(frozen.deliverable === undefined ? {} : { manuscriptTarget: frozen.deliverable }),
     // A material contract needs the Task's exact pins as well as its frozen words to admit live transmission.
     liveItemSlice: 'S84',
     ...(frozen.materials === undefined ? { livePromptContractDigest: () => writingContractDigest(contract) } : {}),

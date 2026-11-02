@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 193 as const;
+export const SERVICE_PROTOCOL_VERSION = 194 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -10996,7 +10996,7 @@ export interface AgentWorkspacePromotionProjection {
  * Where a Task Intent Draft began: the Context-bound Task Composer on a selection (就这段发起任务…) or on the whole Book
  * (发起全书任务), or a completed dialogue answer (转为任务意图草稿).
  */
-export type TaskIntentDraftOrigin = 'composer-selection' | 'composer-book' | 'dialogue-answer';
+export type TaskIntentDraftOrigin = 'composer-selection' | 'composer-book' | 'composer-deliverable' | 'dialogue-answer';
 /** The intended outcome a draft names (TASK-005): what kind of Task it should become once promoted. */
 export type TaskIntentOutcomeClass = 'analysis' | 'review' | 'factual' | 'writing';
 export const TASK_INTENT_OUTCOME_CLASSES: readonly TaskIntentOutcomeClass[] = ['analysis', 'review', 'factual', 'writing'];
@@ -11011,7 +11011,19 @@ export type TaskIntentDraftRangeInput =
   | { readonly kind: 'new'; readonly span: DialogueSelectionInput };
 
 /** What the draft is about (TASK-005, 007): the whole Book's manuscript, or only the Pinned Manuscript Ranges it carries. */
+export interface TaskIntentDeliverablePin {
+  readonly manuscriptId: string;
+  readonly branchId: string;
+  readonly revisionId: string;
+  readonly revisionDigest: string;
+  readonly journalSequence: number;
+  readonly version: number;
+  readonly typeId: string;
+  readonly label: string;
+}
+
 export type TaskIntentDraftTargetInput =
+  | { readonly kind: 'deliverable'; readonly manuscriptId: string; readonly branchId: string; readonly revisionId: string }
   | { readonly kind: 'book' }
   | { readonly kind: 'ranges'; readonly ranges: ReadonlyArray<TaskIntentDraftRangeInput> };
 
@@ -11025,7 +11037,7 @@ export interface SaveTaskIntentDraftInput {
   readonly draftId: string | null;
   readonly expectedOrdinal: number | null;
   /** Where a new draft began; a new version keeps its draft's. */
-  readonly origin: 'composer-selection' | 'composer-book';
+  readonly origin: 'composer-selection' | 'composer-book' | 'composer-deliverable';
   readonly goal: string;
   readonly target: TaskIntentDraftTargetInput;
   readonly outcomeClass: TaskIntentOutcomeClass | null;
@@ -11114,7 +11126,8 @@ export interface TaskIntentDraftProjection {
     readonly versionId: string;
     readonly ordinal: number;
     readonly goal: string;
-    readonly target: 'book' | 'ranges';
+    readonly target: 'book' | 'ranges' | 'deliverable';
+    readonly deliverable?: TaskIntentDeliverablePin & { readonly stale: boolean };
     readonly outcomeClass: TaskIntentOutcomeClass | null;
     readonly ranges: ReadonlyArray<TaskIntentDraftRangeProjection>;
     readonly answer: TaskIntentDraftAnswerProjection | null;
@@ -12253,7 +12266,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   };
   /** 放入资料库: the previewed file kept whole in the Agent Data Root, with the title and kind the editor gave it; the new item. */
   addLibraryMaterial: {
-    input: { previewId: string; title: string; kind: LibraryMaterialKind };
+    input: { previewId: string; title: string; kind: LibraryMaterialKind; bookId?: string | null };
     output: LibraryMaterialProjection;
   };
   /** 定归属 or 定学习准入: one decision appended to the item's chain, refused when the chain moved since it was read; the item. */

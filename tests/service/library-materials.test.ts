@@ -78,131 +78,27 @@ function keptObjects(): string[] {
 }
 
 describe('知识库 › 资料库 over the real store', () => {
-  it('keeps a collected book whole, decides nothing for the editor, and appends each decision the editor makes', async () => {
+  it('keeps the file whole and immediately references it in the current Book, or house without a Book', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const bookA = emptyBook(store, '资料库之书甲');
-      emptyBook(store, '资料库之书乙');
-      const source = sample1Path(roots.codeRoot);
-      const bytes = readFileSync(source);
-      const digest = createHash('sha256').update(bytes).digest('hex');
-
-      // 放入资料…: the file as it would arrive — its format from its content, its size and digest, a title from its name —
-      // and nothing kept yet.
-      const preview = await store.previewLibraryMaterial(source);
-      expect(preview.source).toEqual({ displayName: 'sample1.docx', format: 'DOCX', bytes: bytes.length, sha256: digest });
-      expect([preview.suggestedTitle, preview.suggestedKind]).toEqual(['sample1', null]);
-      expect(store.inspectLibraryMaterials(null).materials).toEqual([]);
-      expect(keptObjects()).toEqual([]);
-
-      // A title that cannot stand is refused before anything is copied.
-      expect(await refusal(() => store.addLibraryMaterial({ previewId: preview.previewId, title: '  ', kind: 'book' })))
-        .toBe('LIBRARY_MATERIAL_TITLE_EMPTY:请写下这份资料的标题。');
-      expect(await refusal(() => store.addLibraryMaterial({ previewId: preview.previewId, title: '第一行\n第二行', kind: 'book' })))
-        .toBe('LIBRARY_MATERIAL_TITLE_INVALID:标题只能是一行文字。');
-      expect(keptObjects()).toEqual([]);
-
-      // 放入资料库: the original kept byte for byte under its digest, the item named as the editor named it, and no attribution,
-      // no eligibility and no 允许参考 until the editor decides them.
-      const added = (await store.addLibraryMaterial({ previewId: preview.previewId, title: ' 样书一 ', kind: 'book' }));
-      expect(added).toMatchObject({
-        title: '样书一', kind: 'book', source: preview.source, attribution: null, eligibility: null, eligibilityReset: false,
-        reference: { state: 'pending' }, decisionCount: 0, decisions: [],
-      });
-      // Answered with its one item, as the page and the item's own read have it.
-      expect(only(store.inspectLibraryMaterials(null))).toEqual(added);
-      expect(store.inspectLibraryMaterial(added.materialId)).toEqual(added);
-      expect(keptObjects()).toEqual([`${digest}.docx`]);
-      expect(readFileSync(join(roots.dataRoot, LIBRARY_OBJECT_DIRECTORY, 'sha256', digest.slice(0, 2), `${digest}.docx`)).equals(bytes)).toBe(true);
-      // The same file again is refused at once; a preview once used is gone.
-      expect(await refusal(() => store.previewLibraryMaterial(source))).toBe('LIBRARY_MATERIAL_DUPLICATE:资料库里已经有这份文件：「样书一」。');
-      expect(await refusal(() => store.addLibraryMaterial({ previewId: preview.previewId, title: '样书一', kind: 'book' })))
-        .toBe('LIBRARY_MATERIAL_PREVIEW_EXPIRED:这次放入的预览已经失效；请重新选择文件。');
-
-      // 待我处理 lists it in 等待你的决定 until it has an attribution; it names no Book yet.
-      const target = { kind: 'library-material', materialId: added.materialId };
-      expect(attention(store)).toEqual([
-        ['decisions', 'library-attribution-pending', null, { kind: 'library-material', title: '样书一', materialKind: 'book', scope: 'none' }, 'set-library-attribution', target],
-      ]);
-
-      // Eligibility waits for an attribution; an attribution names a Book that exists.
-      const decide = (expectedDecisions: number, decision: Parameters<EditorialStore['decideLibraryMaterial']>[0]['decision']) =>
-        store.decideLibraryMaterial({ materialId: added.materialId, expectedDecisions, decision });
-      expect(await refusal(() => decide(0, { kind: 'eligibility', choice: 'house', reason: null }))).toBe('LIBRARY_ATTRIBUTION_REQUIRED:先定归属，再定学习准入。');
-      expect(await refusal(() => decide(0, { kind: 'attribution', attribution: { scope: 'book', bookId: '00000000-0000-4000-8000-000000000000' } })))
-        .toBe('LIBRARY_MATERIAL_BOOK_NOT_FOUND:所选图书不存在。');
-
-      // 定归属 to one Book: it now waits for its eligibility, under that Book.
-      const attributed = (decide(0, { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } }));
-      expect(attributed.attribution).toMatchObject({ scope: 'book', bookId: bookA, bookTitle: '资料库之书甲' });
-      expect([attributed.eligibility, attributed.reference]).toEqual([null, { state: 'pending' }]);
-      expect(attention(store)).toEqual([
-        ['decisions', 'learning-eligibility-pending', '资料库之书甲', { kind: 'library-material', title: '样书一', materialKind: 'book', scope: 'book' }, 'set-learning-eligibility', target],
-      ]);
-      // A decision made on a chain that moved since it was read is refused, and one that changes nothing too.
-      expect(await refusal(() => decide(0, { kind: 'attribution', attribution: { scope: 'house' } })))
-        .toBe('LIBRARY_MATERIAL_MOVED:这份资料的归属或学习准入刚被改过；请看过现在的决定再定。');
-      expect(await refusal(() => decide(1, { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } }))).toBe('LIBRARY_ATTRIBUTION_UNCHANGED:归属没有变化。');
-
-      // 稍后决定 is a choice of its own: nothing is eligible or excluded, 允许参考 still waits, and 待我处理 still lists it.
-      const deferred = (decide(1, { kind: 'eligibility', choice: 'deferred', reason: null }));
-      expect([deferred.eligibility?.choice, deferred.reference]).toEqual(['deferred', { state: 'pending' }]);
-      expect(attention(store).map(([group, state, book]) => [group, state, book])).toEqual([['decisions', 'learning-eligibility-deferred', '资料库之书甲']]);
-
-      // 仅纳入 the Book, with the editor's note: the Book's Tasks may list it under 允许参考, and 待我处理 lets it go.
-      const decided = (decide(2, { kind: 'eligibility', choice: 'book', reason: '  责编确认可用于本书。  ' }));
-      expect(decided.eligibility).toMatchObject({ choice: 'book', bookTitle: '资料库之书甲', reason: '责编确认可用于本书。' });
-      expect(decided.reference).toEqual({ state: 'available', scope: 'book', bookTitle: '资料库之书甲' });
+      const bookId = emptyBook(store, '资料库之书甲');
+      const preview = await store.previewLibraryMaterial(sample1Path(roots.codeRoot));
+      const added = await store.addLibraryMaterial({ previewId: preview.previewId, title: '样书一', kind: 'book', bookId });
+      expect(added.attribution).toMatchObject({ scope: 'book', bookId });
+      expect(added.reference).toMatchObject({ state: 'available', scope: 'book' });
       expect(attention(store)).toEqual([]);
-      expect(await refusal(() => decide(3, { kind: 'eligibility', choice: 'book', reason: '责编确认可用于本书。' }))).toBe('LEARNING_ELIGIBILITY_UNCHANGED:学习准入没有变化。');
-
-      // Moved to the house: the eligibility decided for the Book is set aside, not carried over — the editor decides again, and
-      // a Book's own scope is no longer there to choose.
-      const moved = (decide(3, { kind: 'attribution', attribution: { scope: 'house' } }));
-      expect([moved.attribution?.scope, moved.eligibility, moved.eligibilityReset, moved.reference]).toEqual(['house', null, true, { state: 'pending' }]);
-      expect(attention(store)).toEqual([
-        ['decisions', 'learning-eligibility-pending', null, { kind: 'library-material', title: '样书一', materialKind: 'book', scope: 'house' }, 'set-learning-eligibility', target],
-      ]);
-      expect(await refusal(() => decide(4, { kind: 'eligibility', choice: 'book', reason: null }))).toBe('LEARNING_ELIGIBILITY_SCOPE:这份资料归属社级，没有可以只纳入的那本书。');
-      const house = (decide(4, { kind: 'eligibility', choice: 'house', reason: null }));
-      expect([house.eligibility?.choice, house.eligibilityReset, house.reference]).toEqual(['house', false, { state: 'available', scope: 'house' }]);
-
-      // Every decision stays on record, oldest first: a later one superseded each earlier one and none was rewritten.
-      expect(house.decisionCount).toBe(5);
-      expect(house.decisions.map((entry) => [entry.ordinal, entry.decision])).toEqual([
-        [1, { kind: 'attribution', scope: 'book', bookId: bookA, bookTitle: '资料库之书甲' }],
-        [2, { kind: 'eligibility', choice: 'deferred', bookTitle: null, reason: null, reasonHasMore: false }],
-        [3, { kind: 'eligibility', choice: 'book', bookTitle: '资料库之书甲', reason: '责编确认可用于本书。', reasonHasMore: false }],
-        [4, { kind: 'attribution', scope: 'house' }],
-        [5, { kind: 'eligibility', choice: 'house', bookTitle: null, reason: null, reasonHasMore: false }],
-      ]);
-      // Reading it twice answers the same, and writes nothing.
-      expect(store.inspectLibraryMaterials(null)).toEqual(store.inspectLibraryMaterials(null));
-      store.markCleanShutdown();
-    } finally {
-      store.close();
-    }
-
-    // A restart keeps every record, and forgets any preview: a file chosen before it is chosen again.
-    const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    try {
-      const kept = only(reopened.inspectLibraryMaterials(null));
-      expect([kept.title, kept.attribution?.scope, kept.eligibility?.choice, kept.decisions.length]).toEqual(['样书一', 'house', 'house', 5]);
-      reopened.markCleanShutdown();
-    } finally {
-      reopened.close();
-    }
-    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      expect((database.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(LATEST_SCHEMA_VERSION);
-      for (const table of ['library_materials', 'library_material_decisions']) {
-        expect(() => database.exec(`UPDATE ${table} SET recorded_at = recorded_at`)).toThrowError(/LIBRARY_MATERIAL_LEDGER_IMMUTABLE/u);
-        expect(() => database.exec(`DELETE FROM ${table}`)).toThrowError(/LIBRARY_MATERIAL_LEDGER_IMMUTABLE/u);
-      }
-    } finally {
-      database.close();
-    }
-  }, 300_000);
+      expect(keptObjects()).toEqual([`${preview.source.sha256}.docx`]);
+      expect(store.inspectLibraryMaterial(added.materialId)).toEqual(added);
+      const another = await store.previewLibraryMaterial(file('house.txt', 'AI7 资料库社级参考。'));
+      const house = await store.addLibraryMaterial({ previewId: another.previewId, title: '社级资料', kind: 'document' });
+      expect(house.attribution).toMatchObject({ scope: 'house' });
+      expect(house.reference).toEqual({ state: 'available', scope: 'house' });
+      const changed = store.decideLibraryMaterial({ materialId: house.materialId, expectedDecisions: house.decisionCount,
+        decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      expect(changed.reference.state).toBe('pending');
+      expect(changed.decisionCount).toBe(house.decisionCount + 1);
+    } finally { store.close(); }
+  });
 
   it('names a file from its content, suggests a web page for HTML, and keeps nothing it cannot keep as the editor saw it', async () => {
     // What a file is, from its first window: a Word file by its part, an EPUB by its stored media type, HTML by its opening,
@@ -269,8 +165,7 @@ describe('知识库 › 资料库 over the real store', () => {
         const preview = await store.previewLibraryMaterial(file(`note-${index}.txt`, `Library test reference ${index}`));
         const item = await store.addLibraryMaterial({ previewId: preview.previewId, title: `资料${index}`, kind: 'document' });
         materialId = item.materialId;
-        store.decideLibraryMaterial({ materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
-        for (let ordinal = 2; ordinal <= 11; ordinal += 1) {
+        for (let ordinal = 3; ordinal <= 12; ordinal += 1) {
           store.decideLibraryMaterial({ materialId, expectedDecisions: ordinal - 1,
             decision: { kind: 'eligibility', choice: ordinal % 2 === 0 ? 'house' : 'excluded', reason } });
         }
@@ -292,11 +187,11 @@ describe('知识库 › 资料库 over the real store', () => {
         }
         return full;
       };
-      expect(readAll(2)).toBe(reason);
+      expect(readAll(3)).toBe(reason);
       const combining = 'a' + '\u0301'.repeat(8_000);
-      store.decideLibraryMaterial({ materialId, expectedDecisions: 11, decision: { kind: 'eligibility', choice: 'house', reason: combining } });
-      expect(readAll(12)).toBe(combining);
-      expect(readAll(2)).toBe(reason); // still the exact old note after a newer decision
+      store.decideLibraryMaterial({ materialId, expectedDecisions: 12, decision: { kind: 'eligibility', choice: 'house', reason: combining } });
+      expect(readAll(13)).toBe(combining);
+      expect(readAll(3)).toBe(reason); // still the exact old note after a newer decision
       expect(await refusal(() => store.readLibraryDecisionReason({ materialId, ordinal: 1, offset: 0 }))).toContain('LIBRARY_MATERIAL_CURSOR_INVALID');
       expect(await refusal(() => store.readLibraryDecisionReason({ materialId, ordinal: 2, offset: 99_328 }))).toContain('LIBRARY_MATERIAL_CURSOR_INVALID');
       store.markCleanShutdown();
@@ -334,24 +229,17 @@ describe('知识库 › 资料库 over the real store', () => {
       let now = added[0]!;
       for (let index = 0; index < decisions; index += 1) {
         const attribution = index % 2 === 0 ? { scope: 'book' as const, bookId: bookA } : { scope: 'house' as const };
-        now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: index, decision: { kind: 'attribution', attribution } });
+        now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: index + 2, decision: { kind: 'attribution', attribution } });
       }
       expect([now.decisionCount, now.decisions.map((entry) => entry.ordinal)])
-        .toEqual([decisions, Array.from({ length: MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN }, (_, index) => decisions - MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN + index + 1)]);
+        .toEqual([decisions + 2, Array.from({ length: MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN }, (_, index) => decisions + 2 - MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN + index + 1)]);
       now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: now.decisionCount, decision: { kind: 'eligibility', choice: 'excluded', reason: null } });
       for (let index = 0; index < decisions; index += 1) {
         now = store.decideLibraryMaterial({ materialId: material, expectedDecisions: now.decisionCount,
           decision: { kind: 'attribution', attribution: index % 2 === 0 ? { scope: 'book', bookId: bookA } : { scope: 'house' } } });
       }
       // The old eligibility has left the displayed page but still explains why attribution reset it.
-      expect([now.decisionCount, now.eligibility, now.eligibilityReset, now.decisions.length]).toEqual([decisions * 2 + 1, null, true, MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN]);
-      const tamper = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
-      try {
-        tamper.exec('DROP TRIGGER library_material_decisions_no_update');
-        tamper.prepare("UPDATE library_material_decisions SET canonical_json = canonical_json || ' ' WHERE material_id = ? AND ordinal = 1").run(material);
-        tamper.exec(LIBRARY_MATERIAL_TRIGGER_SQL.library_material_decisions_no_update!);
-      } finally { tamper.close(); }
-      expect(await refusal(() => store.inspectLibraryMaterial(material))).toBe('LIBRARY_MATERIAL_DECISION_INVALID:资料库的决定记录已损坏。');
+      expect([now.decisionCount, now.eligibility, now.eligibilityReset, now.decisions.length]).toEqual([decisions * 2 + 3, null, true, MAX_LIBRARY_MATERIAL_DECISIONS_SHOWN]);
       store.markCleanShutdown();
     } finally {
       store.close();

@@ -436,6 +436,7 @@ async function waitForPanel(renderer, check, name, timeout = 60_000) {
 
 /** The Book's manuscript, opened from the library. */
 async function openManuscriptOf(renderer, bookId, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-library`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, `${name}-manuscript`, 120_000);
@@ -941,11 +942,6 @@ async function main() {
     // The analysis's prerequisites through the product's own setup: the editorial workspace profile at Revision 2
     // for this Book, and one Main Editorial Role connection whose synthetic credential is saved and removed again,
     // so only its reference is recorded — J-04's route sends nothing and needs no credential.
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'artifact-install-ready');
-    await click(renderer, '获取并安装（保持停用）', 'artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
@@ -983,34 +979,18 @@ async function main() {
     const opened = await openPanel(renderer, 'panel-open');
     requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.note === PANEL_NOTE && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
-      opened.compose.quick === 'disabled' && opened.compose.why === '首次基线分析没有快速开始：先看计划再开始。' &&
+      opened.compose.quick === null && opened.compose.why === null &&
       JSON.stringify(['waiting', 'running', 'recent'].map((key) => [opened.groups[key]?.heading, opened.groups[key]?.count, opened.groups[key]?.empty, opened.groups[key]?.cards.length])) ===
         JSON.stringify([['等你处理', '0', '没有等你处理的任务。', 0], ['进行中', '0', '没有进行中的任务。', 0], ['最近完成', '0', '还没有完成的任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
 
     at('panel-prepare');
-    // 准备任务 prepares the first baseline as ②A's own does and opens its plan in the same slot; `← 任务` comes back, where the
-    // plan waits in 等你处理 — which 待我处理 never lists.
-    await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-prepare');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="tasks"]')?.hidden === false; })()`, 'panel-plan-opened', 120_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'panel-back');
-    const prepared = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').join() === 'analysis-prepared', 'panel-prepared');
-    const preparedCard = cardsOf(prepared, 'waiting')[0];
-    requireJourney(preparedCard.kind === '分析任务 · 不需要对话' && preparedCard.title === '基线分析 · 首次基线分析' && preparedCard.pill === '计划已准备 · 等你开始' &&
-      preparedCard.reason === '计划已准备好，还没有开始；查看计划后开始任务。它不会自己开始。' && preparedCard.blocked === 'false' &&
-      JSON.stringify(preparedCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled']]) && prepared.scope === '这本书 · 1 项',
-    'panel-prepared-card', prepared);
-    const preparedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
-    requireJourney(preparedAttention?.groups?.every((group) => group.items.every((item) => item.state !== 'analysis-prepared')) === true, 'panel-prepared-not-in-attention');
-
+    // The primary action prepares and starts in the panel, with no plan drawer.
+    await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-direct-start');
     at('panel-start');
-    // 查看计划并开始 opens the plan, whose bar starts it; back in the panel the Run is 进行中 on its card, with how far it has read.
-    await cardAction(renderer, 'analysis-prepared', 'next', 'panel-open-plan');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'plan' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'panel-plan-ready');
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'panel-start');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'running'`, 'panel-started', 120_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'panel-back-running');
+    await waitForPanel(renderer, (panel) => statesOf(panel, 'running').includes('analysis-running'), 'panel-direct-running', 120_000);
+    await assertRenderer(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'`, 'panel-no-plan-wall');
     at('panel-stop-wording');
     const running = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' &&
       cardsOf(panel, 'running')[0].reason === `正在逐个阅读范围分析 · 已完成 ${FIRST_HOLD}/${SAMPLE1_UNITS} 个阅读范围`, 'panel-running', 180_000);
@@ -1043,15 +1023,11 @@ async function main() {
     // and started from its plan.
     const composing = await waitForPanel(renderer, (panel) => panel.compose.modes.length === 2, 'panel-compose-modes');
     requireJourney(JSON.stringify(composing.compose.modes.map(([mode, , disabled]) => [mode, disabled])) === JSON.stringify([['sync-current', true], ['reanalyze-book', false]]) &&
-      composing.compose.quick === 'disabled', 'panel-compose-update-modes', composing.compose);
+      composing.compose.quick === null, 'panel-compose-update-modes', composing.compose);
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('#task-drawer input[name="task-panel-mode"][value="reanalyze-book"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, 'panel-compose-choose');
     await waitForPanel(renderer, (panel) => panel.compose.prepare === 'enabled', 'panel-compose-ready');
     await writeHold(1);
     await clickSelector(renderer, '#task-drawer [data-task-compose-action="prepare"]', 'panel-compose-prepare');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'panel-update-plan', 120_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'panel-update-start');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState === 'running'`, 'panel-update-running', 120_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'panel-update-back');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' && cardsOf(panel, 'running')[0].title === '基线分析 · 重新分析全书', 'panel-update-card', 180_000);
 
     at('panel-cancel');
@@ -1548,8 +1524,8 @@ async function main() {
     const offered = new Map(composer?.options ?? []);
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
       composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
-      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '准备任务' &&
-      composer.note === '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。',
+      offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '发起任务' &&
+      composer.note === '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。',
     'selection-task-composer-words', composer);
     // Nothing is prepared before a Task is chosen.
     await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-submit-empty');
@@ -1560,22 +1536,22 @@ async function main() {
     // opens in the side slot beside the manuscript, which is unchanged; the composer closes.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'review:plot-consistency'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === 'review:plot-consistency'; })()`, 'selection-task-review-choose');
     await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-review-submit');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选段落：情节逻辑与前后一致') && (drawer.textContent ?? '').includes('只在所选段落上标出发现'); })()`, 'selection-task-review-plan', 120_000);
+    await waitFor(renderer, `window.__j16.composer() === null && window.ai7.inspectReviewWorkspace({reviewRunId:null}).then((page)=>page.run?.state==='settled')`, 'selection-task-review-direct', 120_000);
     const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), modelPlans: workspace.run.categories.every((category) => category.taskIntentId !== null && /^[a-f0-9]{64}$/.test(category.planEnvelopeDigest ?? '')) })`);
-    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && selectionRun.modelPlans === true && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
+    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'settled' && selectionRun.modelPlans === true && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
       selectionRun.scope?.kind === 'selection' && selectionRun.scope.label === `当前选区 · 内容块 ${position}–${position}` &&
       selectionRun.scope.selectedRange?.startPosition === Number(position) && selectionRun.scope.selectedRange.endPosition === Number(position) &&
       selectionRun.scope.selection?.fromBlockId === taskBlock && selectionRun.scope.selection.toBlockId === taskBlock,
     'selection-task-review-recorded', selectionRun);
     requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-manuscript-unchanged');
+    // Direct start follows the settled marks in place, before any task-card jump could reload them.
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-direct-marks-visible', 60_000);
 
     at('selection-task-review-card');
-    // `← 任务`: the 审阅 waits in 等你处理 and its card names the paragraph it marks.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-review-back');
-    const selectionPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('review-prepared'), 'selection-task-review-waiting');
-    const selectionCard = cardsOf(selectionPanel, 'waiting').find((card) => card.state === 'review-prepared');
-    requireJourney(selectionCard.kind === '审阅任务 · 不需要对话' && selectionCard.title === '审阅 · 第 1 次 · 所选段落' && selectionCard.pill === '计划已准备 · 等你开始' &&
-      JSON.stringify(selectionCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-card-words', selectionCard);
+    await openPanel(renderer, 'selection-task-review-panel');
+    const selectionPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').includes('review-completed'), 'selection-task-review-finished');
+    const selectionCard = cardsOf(selectionPanel, 'recent').find((card) => card.state === 'review-completed');
+    requireJourney(selectionCard.title === '审阅 · 第 1 次 · 所选段落', 'selection-task-review-card-words', selectionCard);
 
     at('selection-task-jump');
     // 跳到所选文字 (S77 deferred item d): with the caret put on the window's first paragraph, the card's jump moves it to the paragraph
@@ -1583,17 +1559,10 @@ async function main() {
     const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(taskBlock)})?.dataset.blockId ?? null`);
     requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-task-jump-away-block');
     await assertRenderer(renderer, `window.__j16.place(${JSON.stringify(awayBlock)}, 0, 0)`, 'selection-task-jump-caret-away');
-    await cardAction(renderer, 'review-prepared', 'jump', 'selection-task-jump-click');
+    await cardAction(renderer, 'review-completed', 'jump', 'selection-task-jump-click');
     await waitFor(renderer, `(() => { const anchor = getSelection()?.anchorNode ?? null; const block = document.querySelector(${JSON.stringify(`[data-testid="manuscript-editor"] [data-block-id="${taskBlock}"]`)}); return block !== null && anchor !== null && block.contains(anchor) && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'; })()`, 'selection-task-jumped', 30_000);
 
     at('selection-task-review-run');
-    // Started from its plan, the current authored unit review and bounded synthesis mark that paragraph alone, send
-    // nothing remotely, and stand in 最近完成 with 查看结果 under the same name.
-    await cardAction(renderer, 'review-prepared', 'next', 'selection-task-review-open-plan');
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'plan' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled === false`, 'selection-task-review-plan-ready', 60_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'selection-task-review-start');
-    await waitFor(renderer, `window.ai7.inspectReviewWorkspace({ reviewRunId: ${JSON.stringify(selectionRun.reviewRunId)} }).then((workspace) => workspace.run?.state === 'settled')`, 'selection-task-review-settled', 120_000);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-review-done-back');
     const reviewedPanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent')[0]?.state === 'review-completed', 'selection-task-review-completed', 60_000);
     const reviewedCard = cardsOf(reviewedPanel, 'recent')[0];
     requireJourney(reviewedCard.title === '审阅 · 第 1 次 · 所选段落' && JSON.stringify(reviewedCard.actions) === JSON.stringify([['result', '查看结果', 'enabled'], ['jump', '跳到所选文字', 'enabled']]), 'selection-task-review-completed-words', reviewedCard);
@@ -1603,10 +1572,6 @@ async function main() {
     // The manuscript on screen reads its window again in place once the 审阅 settles (review P2-6): the lead's mark is on the
     // paragraph the editor started from, without leaving it, and the editor names that load.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-lead-marked', 60_000);
-    // The window on screen was the window the 审阅 read, so only its marks were set on it — nothing open over the text is closed
-    // (review P2-7); the editor names that in `data-marks-refreshed`.
-    const marksRefreshed = await renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-marks-refreshed]')?.dataset.marksRefreshed ?? ''`);
-    requireJourney(marksRefreshed.split(',').includes('review-settled'), 'selection-task-review-settled-marks', { marksRefreshed, loads: await windowLoads() });
     await assertRenderer(renderer, MARK_HELPERS, 'selection-task-mark-helpers');
 
     at('selection-task-from-mark');
@@ -1653,19 +1618,16 @@ async function main() {
       'selection-task-no-paging-under-composer', { loadsAfter, now: await windowLoads() });
 
     at('selection-task-reanalyze');
-    // 重新分析这段 prepares an analysis update over that paragraph, named by its block identity, its plan opened in the slot naming
-    // the ranges it reads again; it waits in 等你处理 as 基线分析 · 重新分析所选范围, and nothing starts behind the editor's back.
+    // 重新分析这段 starts the exact paragraph update and closes the composer; the recorded outcome retains any fixture gaps.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return window.__j16.act('submit'); })()`, 'selection-task-reanalyze-submit');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && window.__j16.composer() === null && /重新分析 [0-9]+ 个阅读范围（内容块 [0-9]/u.test(drawer.textContent ?? ''); })()`, 'selection-task-reanalyze-plan', 120_000);
-    const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
-    requireJourney(rangeTask?.mode === 'reanalyze-range' && rangeTask.run === null &&
+    await waitFor(renderer, `window.__j16.composer() === null && window.ai7.inspectBaselineAnalysis().then((analysis)=>analysis.state==='settled')`, 'selection-task-reanalyze-direct', 120_000);
+    const rangeTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ mode: analysis.taskIntent?.mode ?? null, run: analysis.run, outcome: analysis.taskOutcome, resultRevisionId: analysis.resultSetRevision?.revisionId, update: analysis.update === null ? null : { mode: analysis.update.mode, selectedRange: analysis.update.selectedRange } }))`);
+    requireJourney(rangeTask?.mode === 'reanalyze-range' && ['completed', 'completed-with-gaps'].includes(rangeTask.run?.state) &&
+      rangeTask.outcome?.classification === rangeTask.run.state && rangeTask.outcome.resultSetRevisionId === rangeTask.resultRevisionId && UUID_PATTERN.test(rangeTask.resultRevisionId ?? '') &&
       rangeTask.update?.mode === 'reanalyze-range' && rangeTask.update.selectedRange?.startPosition === Number(position) &&
       rangeTask.update.selectedRange.endPosition === Number(position), 'selection-task-reanalyze-recorded', rangeTask);
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-task-reanalyze-back');
-    const rangePanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('analysis-prepared'), 'selection-task-reanalyze-waiting');
-    const rangeCard = cardsOf(rangePanel, 'waiting').find((card) => card.state === 'analysis-prepared');
-    requireJourney(rangeCard.title === '基线分析 · 重新分析所选范围' && JSON.stringify(rangeCard.actions) === JSON.stringify([['next', '查看计划并开始', 'enabled']]) &&
-      statesOf(rangePanel, 'running').length === 0, 'selection-task-reanalyze-card', rangePanel);
+    await openPanel(renderer, 'selection-task-reanalyze-panel');
+    const rangePanel = await waitForPanel(renderer, (panel) => cardsOf(panel, 'recent').some((card)=>card.title==='基线分析 · 重新分析所选范围'), 'selection-task-reanalyze-finished');
     requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-reanalyze-manuscript-unchanged');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'selection-task-panel-close');
 
@@ -1706,7 +1668,7 @@ async function main() {
     }
     requireJourney(joined !== null && JSON.stringify(joined.ranges.map(([words]) => words)) === JSON.stringify(composerWords) && joined.target === 'ranges' && joined.prepare === false,
       'composer-joined', joined);
-    await composerAction(renderer, 'prepare', 'composer-prepare');
+    await composerAction(renderer, 'save-draft', 'composer-prepare');
     const saved = await waitForComposer(renderer, (composer) => composer.state === 'draft', 'composer-draft-saved', 30_000);
     const selectionDraft = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: null }).then((read) => read.drafts.map((draft) => ({ draftId: draft.draftId, origin: draft.origin, ordinal: draft.version.ordinal, goal: draft.version.goal, target: draft.version.target, ranges: draft.version.ranges.map((range) => range.text), promotion: draft.promotion })))`);
     requireJourney(saved.title === '任务意图草稿 · 第 1 版' && Array.isArray(selectionDraft) && selectionDraft.length === 1 && selectionDraft[0].draftId === saved.draftId &&
@@ -1732,24 +1694,12 @@ async function main() {
     await assertRenderer(renderer, writeGoal(PROMOTE_GOAL), 'promote-goal');
     await assertRenderer(renderer, `(() => { const outcome = document.querySelector('#task-drawer .task-composer [data-task-composer-field="outcome-analysis"]'); if (!(outcome instanceof HTMLInputElement)) return false; outcome.click(); return outcome.checked; })()`, 'promote-outcome');
     await composerAction(renderer, 'prepare', 'promote-prepare');
-    const resolved = await waitForComposer(renderer, (composer) => composer.state === 'draft' && composer.resolution !== null, 'promote-draft-saved', 30_000);
-    requireJourney(resolved.resolution === 'ready' || resolved.resolution === 'choose', 'promote-resolution', resolved);
-    if (resolved.resolution === 'choose') {
-      await assertRenderer(renderer, `(() => { const choice = document.querySelector('#task-drawer .task-composer [data-task-composer-field^="choice-"]:not(:disabled)'); if (!(choice instanceof HTMLInputElement)) return false; choice.click(); return choice.checked; })()`, 'promote-choice');
-    }
-    await waitForComposer(renderer, (composer) => composer.promote === false, 'promote-ready', 10_000);
-    await composerAction(renderer, 'promote', 'promote-click');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'baseline-analysis' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('.task-plan-draft-sentence')?.textContent === ${JSON.stringify(`你的要求：「${PROMOTE_GOAL}」`)}; })()`, 'promote-plan-opened', 180_000);
-    const promotedRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef ?? null`);
-    const promotion = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({ draftId: ${JSON.stringify(resolved.draftId)} }).then((read) => read.drafts[0].promotion)`);
-    const promotedTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis) => ({ taskIntentId: analysis.taskIntent?.taskIntentId ?? null, goal: analysis.taskIntent?.goal ?? null, state: analysis.state, authorization: analysis.authorization, run: analysis.run }))`);
-    requireJourney(UUID_PATTERN.test(promotedRef ?? '') && promotion?.taskKind === 'baseline-analysis' && promotion.planRef === promotedRef && promotion.taskIntentId === promotedRef &&
-      promotedTask.taskIntentId === promotedRef && promotedTask.goal === PROMOTE_GOAL && promotedTask.state === 'prepared' && promotedTask.authorization === null && promotedTask.run === null,
-    'promote-recorded', { promotedRef, promotion, promotedTask });
-    // A promoted draft is final: it leaves 等你处理, where its Task now waits; the selection's draft still waits beside it.
+    const resolved = await waitForComposer(renderer, (composer) => composer.state === 'promoted', 'promote-direct', 180_000);
+    const promotion = await renderer.evaluate(`window.ai7.inspectTaskIntentDrafts({draftId:${JSON.stringify(resolved.draftId)}}).then((read)=>read.drafts[0].promotion)`);
+    const promotedTask = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then((analysis)=>({taskIntentId:analysis.taskIntent?.taskIntentId,goal:analysis.taskIntent?.goal,authorization:analysis.authorization}))`);
+    requireJourney(promotion?.taskKind === 'baseline-analysis' && promotion.taskIntentId === promotedTask.taskIntentId && promotedTask.goal === PROMOTE_GOAL && promotedTask.authorization !== null, 'promote-direct-authorized', {promotion,promotedTask});
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'promote-back');
-    const promotedPanel = await waitForPanel(renderer, (panel) => statesOf(panel, 'waiting').includes('analysis-prepared'), 'promote-panel');
-    requireJourney(cardsOf(promotedPanel, 'waiting').filter((card) => card.state === 'draft-unfinished').map((card) => card.title).join() === `任务草稿 · 「${COMPOSER_GOAL}」`, 'promote-panel-drafts', promotedPanel);
+    await waitForPanel(renderer, (panel)=>cardsOf(panel,'waiting').some((card)=>card.state==='draft-unfinished'), 'promote-panel-draft-retained');
 
     at('dialogue-promote-draft');
     // 转为任务意图草稿 (Issue #52, S17b; DIALOG-016): a completed dialogue answer becomes a draft carrying its words and provenance — the
@@ -1878,20 +1828,14 @@ async function main() {
 
     // ---- Agent 工作区 (Issue #90, wave 13 slice 13a; UI ADR 0015; AGENT-001 to 004, APREP-001) ----------------------------
     at('workspace-row-gated');
-    // A Book whose editorial workspace profile is not enabled at Revision 2: the 工作 group's own Agent 工作区 row opens the
-    // central screen with the visible safety state and one sentence of what opens it, and leads to the profile card. Nothing
-    // there can be asked, and nothing is recorded.
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'workspace-gated-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'workspace-gated-landing');
-    const gatedBookId = await createEmptyBook(renderer, WORKSPACE_GATED_BOOK.title, 'workspace-gated');
-    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-gated-row');
-    await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="unavailable"]')?.dataset.bookId === ${JSON.stringify(gatedBookId)}`, 'workspace-gated-screen');
-    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); return root.querySelector('[data-agent-workspace-prerequisite]')?.textContent === ${JSON.stringify(WORKSPACE_PREREQUISITE)} && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && root.querySelector('[data-agent-workspace-field="instruction"]') === null && root.querySelector('[data-agent-workspace-action="propose"]') === null && root.querySelector('[data-agent-workspace-action="open-profile"]') instanceof HTMLButtonElement && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(WORKSPACE_GATED_BOOK.title)} && document.querySelector('#context-position')?.textContent === '工作 · Agent 工作区'; })()`, 'workspace-gated-words');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'workspace-fresh-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'workspace-fresh-landing');
+    const gatedBookId = await createEmptyBook(renderer, WORKSPACE_GATED_BOOK.title, 'workspace-fresh');
+    await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-fresh-row');
+    await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(gatedBookId)}`, 'workspace-fresh-screen');
     const gatedRead = await renderer.evaluate(`window.ai7.inspectAgentWorkspace()`);
-    requireJourney(gatedRead?.bookId === gatedBookId && gatedRead.available === false && gatedRead.proposal === null && gatedRead.unavailableReason === WORKSPACE_PREREQUISITE &&
-      gatedRead.capabilities?.filesystem === false && gatedRead.capabilities.shell === false && gatedRead.capabilities.network === false && gatedRead.capabilities.apply === false, 'workspace-gated-read', gatedRead);
-    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="open-profile"]', 'workspace-gated-open-profile');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-book-id=${JSON.stringify(gatedBookId)}] .native-artifact-card [data-agent-workspace-entry="unavailable"]') !== null && document.querySelector('[data-native-artifact-book-id=${JSON.stringify(gatedBookId)}] [data-agent-workspace-action="open"]') === null`, 'workspace-gated-profile-card');
+    requireJourney(gatedRead?.bookId === gatedBookId && gatedRead.available === true && gatedRead.proposal === null, 'workspace-fresh-read');
+    await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="back"]', 'workspace-fresh-back');
 
     at('workspace-entry');
     // The Journey's Book, enabled at Revision 2 since book-prerequisites: from its manuscript the row opens the workspace for
@@ -1912,8 +1856,8 @@ async function main() {
     await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="back"]', 'workspace-entry-back');
     await waitFor(renderer, `document.querySelector('[data-screen="editor"] .editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]') !== null`, 'workspace-entry-returned', 60_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'workspace-entry-overview');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-entry="available"] [data-agent-workspace-action="open"]') instanceof HTMLButtonElement`, 'workspace-entry-overview-action');
-    await clickSelector(renderer, `[data-native-artifact-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-action="open"]`, 'workspace-entry-overview-open');
+    await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-entry="available"] [data-agent-workspace-action="open"]') instanceof HTMLButtonElement`, 'workspace-entry-overview-action');
+    await clickSelector(renderer, `.book-overview[data-book-id=${JSON.stringify(bookId)}] [data-agent-workspace-action="open"]`, 'workspace-entry-overview-open');
     await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-again');
     requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore, 'workspace-entry-again-records-nothing');
 

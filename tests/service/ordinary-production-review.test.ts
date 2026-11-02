@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { afterEach, expect, it, beforeEach, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
@@ -640,7 +641,7 @@ function withdrawRetainedSource(context: Awaited<ReturnType<typeof reopenToolRev
     if (source === 'material') {
       expect(reopened.materialGuard(runRecordId, kept)).toBeNull();
       const material = originalBase.materialReferences!.sources[0]!;
-      reopened.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 2,
+      setLibraryDecision(reopened, { materialId: material.materialId, expectedDecisions: 2,
         decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       const refusal = reopened.materialGuard(runRecordId, kept); expect(refusal).not.toBeNull();
     } else if (source === 'influence') {

@@ -65,7 +65,6 @@ function open(): Promise<EditorialStore> {
 
 async function importBook(store: EditorialStore, title: string, first: boolean): Promise<{ bookId: string; manuscriptId: string; branchId: string }> {
   const imported = await importSample1Book(store, roots.codeRoot, title);
-  await pinEditorialWorkspaceProfileRevision2(store, imported.bookId);
   if (first) recordMissingCredentialConnection(store, 'L2 主编辑连接');
   return imported;
 }
@@ -149,7 +148,60 @@ function runPreparation(store: EditorialStore, bookId: string, preparation: Draf
   }
 }
 
+async function documentTarget(store: EditorialStore, bookId: string) {
+  const staged = await store.stageSelectedManuscript(randomUUID(), join(roots.codeRoot, 'SampleBooks/sample1.docx'));
+  const review = store.prepareSourceImportReview(staged.draftId, staged.draftVersion, { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: store.getBookOverview(bookId).records.find((entry) => entry.kind === 'source')!.sourceVersionId });
+  const committed = await store.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId: randomUUID() });
+  const made = await store.createProductionDocument({ bookId, typeId: WRITING_REQUEST.typeId, sourceVersionId: committed.sourceVersionId });
+  const doc = made.document!;
+  return { kind: 'deliverable' as const, manuscriptId: doc.documentId, branchId: doc.branchId, revisionId: doc.versions[0]!.revisionId };
+}
+
 describe('Task Intent Drafts over the real store on exact sample1', () => {
+  it('pins a production document and prepares writing on its manuscript rather than the primary', async () => {
+    fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+    const store = await open();
+    try {
+      const book = await importBook(store, '交付物任务绑定', true);
+      const target = await documentTarget(store, book.bookId);
+      const before = rowsOutsideDrafts();
+      const draft = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-deliverable',
+        goal: '精简这篇宣传文章', target, outcomeClass: 'writing' });
+      expect(rowsOutsideDrafts()).toBe(before);
+      expect(draft.version.deliverable).toMatchObject({ manuscriptId: target.manuscriptId, branchId: target.branchId, revisionId: target.revisionId, version: 1, stale: false });
+      const preparation = store.taskIntentDraftPreparation({ bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId,
+        choice: { kind: 'writing', typeId: WRITING_REQUEST.typeId }, writing: { audience: WRITING_REQUEST.audience, channel: WRITING_REQUEST.channel } });
+      runPreparation(store, book.bookId, preparation);
+      const task = store.inspectWriting(book.bookId)!;
+      expect(task.checkpoint).toMatchObject({ manuscriptId: target.manuscriptId, branchId: target.branchId, revisionId: target.revisionId });
+      expect(task.checkpoint!.manuscriptId).not.toBe(book.manuscriptId);
+      expect(task.authorization).toBeNull();
+      const started = store.authorizeWriting(book.bookId, task.taskIntent!.taskIntentId, task.planEnvelope!.digest);
+      expect(started.dispatchRunRecordId).not.toBeNull();
+      expect(store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!.promotion?.taskIntentId).toBe(task.taskIntent!.taskIntentId);
+    } finally { store.close(); }
+  });
+
+  it('refuses document promotion after journal edits and accepts a newly pinned saved version', async () => {
+    const store = await open();
+    try {
+      const book = await importBook(store, '交付物任务过期', true);
+      const target = await documentTarget(store, book.bookId);
+      const draft = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: null, expectedOrdinal: null, origin: 'composer-deliverable', goal: '精简文章', target, outcomeClass: 'writing' });
+      const doc = { manuscriptId: target.manuscriptId, branchId: target.branchId };
+      editBlock(store, doc, spanOf(store, doc).blockId, '〔修订〕');
+      const moved = store.inspectTaskIntentDrafts({ bookId: book.bookId, draftId: draft.draftId }).drafts[0]!;
+      expect(moved.version.deliverable?.stale).toBe(true);
+      expect(moved.resolution).toMatchObject({ state: 'unsupported', reason: '交付物已有新版本；请重新选择任务目标。' });
+      expect(refusal(() => store.taskIntentDraftPreparation({ bookId: book.bookId, draftId: draft.draftId, versionId: draft.version.versionId,
+        choice: { kind: 'writing', typeId: WRITING_REQUEST.typeId } }))).toBe('TASK_INTENT_DRAFT_DELIVERABLE_STALE');
+      const saved = await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: target.manuscriptId, branchId: target.branchId });
+      const repinned = store.saveTaskIntentDraft({ bookId: book.bookId, draftId: draft.draftId, expectedOrdinal: 1, origin: 'composer-deliverable', goal: draft.version.goal,
+        target: { ...target, revisionId: saved.document!.versions[0]!.revisionId }, outcomeClass: 'writing' });
+      expect(repinned.version.deliverable).toMatchObject({ version: 2, stale: false });
+    } finally { store.close(); }
+  });
+
   it('promotes writing atomically into a prepared plan with its writing context and no authorization', async () => {
     fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
     const store = await open();

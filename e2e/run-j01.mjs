@@ -812,7 +812,7 @@ async function prepareSourceImportReview(renderer, expectation) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); const effects = Array.from(review?.querySelectorAll('.review-section') ?? []).find((section) => section.querySelector('h3')?.textContent === '明确不会发生')?.textContent ?? ''; return review?.textContent.includes('来源导入记录') && effects.includes('不创建稿件') && effects.includes('不创建稿件修订版') && effects.includes('不创建工作流实例') && effects.includes('不创建运行来源范围') && effects.includes('不创建事实状态或事实核查结论') && effects.includes('不创建书系或书系成员关系') && effects.includes('不创建编辑学习准入决定') && effects.includes('不授予或执行模型提供方传输') && effects.includes('不创建发稿版本、公开发布许可或公开发布事实') && effects.includes('不导出、不发送、不交付、不发布'); })()`,
+    `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]'); return review?.textContent.includes('来源导入记录') && !review.textContent.includes('明确不会发生') && !review.querySelector('.dimension-list') && Array.from(review.querySelectorAll('.commit-bar button')).some(button=>!button.disabled); })()`,
     'source-review-effects',
   );
   await assertRenderer(
@@ -1012,7 +1012,7 @@ async function prepareManuscriptReimportReview(renderer, expectation) {
   await waitFor(renderer, `document.querySelector('[data-reimport-mappings="ready"]')`, `${scenario}-mappings`);
   await assertRenderer(
     renderer,
-    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const text = review?.textContent ?? ''; const changedMappings = review?.querySelectorAll('article.reimport-group[data-reimport-group-verb=""]').length ?? 0; const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const exactSource = review?.querySelector('[data-reimport-source-sha256]'); const lineageExact = ${lineageStatus === 'verified' ? `values['来源关系版本 ID'] === ${JSON.stringify(lineageSourceVersionId)} && /^[0-9a-f-]{36}$/i.test(values['来源关系修订版 ID'] ?? '')` : `values['来源关系版本 ID'] === undefined && values['来源关系修订版 ID'] === undefined`}; return review?.dataset.reimportLineageStatus === ${JSON.stringify(lineageStatus)} && review.dataset.reimportComparisonKind === ${JSON.stringify(lineageStatus === 'verified' ? 'three-way' : 'two-way')} && /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && lineageExact && exactSource?.dataset.reimportSourceSha256 === ${JSON.stringify(stagedSourceIdentity.sha256)} && exactSource.dataset.reimportSourceBytes === ${JSON.stringify(stagedSourceIdentity.bytes)} && text.includes(${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')}) && text.includes(${JSON.stringify(dirtyCheckpoint ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点')}) && text.includes('不执行模糊匹配或通用合并') && text.includes('不创建第二份主稿件') && text.includes('工作流程实例') && text.includes('不授予或执行模型提供方传输') && text.includes('不导出、不发送、不交付、不发布') && ${changed ? 'changedMappings > 0 && review.dataset.reimportCommitReady === "false"' : `changedMappings === 0 && review.dataset.reimportCommitReady === "${degraded ? 'false' : 'true'}" && text.includes("未发现稿件变化")`} && ${degraded ? "Boolean(review.querySelector('[data-accept-reimport-degradation]')) && text.includes('必须明确接受完整降级集合')" : "!review.querySelector('[data-accept-reimport-degradation]')"}; })()`,
+    `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const text = review?.textContent ?? ''; const changedMappings = review?.querySelectorAll('article.reimport-group[data-reimport-group-verb=""]').length ?? 0; const values = Object.fromEntries(Array.from(review?.querySelectorAll('dt') ?? [], (label) => [label.textContent, label.nextElementSibling?.textContent])); const exactSource = review?.querySelector('[data-reimport-source-sha256]'); const lineageExact = ${lineageStatus === 'verified' ? `values['来源关系版本 ID'] === ${JSON.stringify(lineageSourceVersionId)} && /^[0-9a-f-]{36}$/i.test(values['来源关系修订版 ID'] ?? '')` : `values['来源关系版本 ID'] === undefined && values['来源关系修订版 ID'] === undefined`}; return review?.dataset.reimportLineageStatus === ${JSON.stringify(lineageStatus)} && review.dataset.reimportComparisonKind === ${JSON.stringify(lineageStatus === 'verified' ? 'three-way' : 'two-way')} && /^[0-9a-f-]{36}$/i.test(values['当前固定点修订版 ID'] ?? '') && /^[0-9a-f]{64}$/.test(values['当前固定点修订版摘要'] ?? '') && lineageExact && exactSource?.dataset.reimportSourceSha256 === ${JSON.stringify(stagedSourceIdentity.sha256)} && exactSource.dataset.reimportSourceBytes === ${JSON.stringify(stagedSourceIdentity.bytes)} && text.includes(${JSON.stringify(lineageStatus === 'verified' ? '来源关系已确认' : '来源关系未确认')}) && text.includes(${JSON.stringify(dirtyCheckpoint ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点')}) && !text.includes('明确不会发生') && !text.includes('不授予或执行模型提供方传输') && !text.includes('不导出、不发送、不交付、不发布') && ${changed ? 'changedMappings > 0 && review.dataset.reimportCommitReady === "false"' : `changedMappings === 0 && review.dataset.reimportCommitReady === "${degraded ? 'false' : 'true'}" && text.includes("未发现稿件变化")`} && ${degraded ? "Boolean(review.querySelector('[data-accept-reimport-degradation]')) && text.includes('必须明确接受完整降级集合')" : "!review.querySelector('[data-accept-reimport-degradation]')"}; })()`,
     `${scenario}-review-contract`,
   );
   at('review');
@@ -1656,69 +1656,7 @@ async function runJourney(
     `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-screen="review"] [data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && Array.from(document.querySelectorAll('[data-screen="review"] dd')).some((item) => item.textContent === ${JSON.stringify(degraded ? '按上述降级方式新建图书并导入稿件' : '新建图书并导入稿件')})`,
     'review-source-and-action',
   );
-  if (textBoxDisposition !== null) {
-    await assertRenderer(
-      renderer,
-      `(() => { const stated = document.querySelector('[data-screen="review"] [data-text-box-choice="stated"]'); const checked = stated?.querySelector('input:checked'); const row = document.querySelector('[data-screen="review"] .fidelity-row[data-fidelity-category="text-boxes"]'); return checked?.value === ${JSON.stringify(textBoxDisposition)} && Array.from(stated.querySelectorAll('input')).every((input) => input.disabled) && row?.querySelector('.fidelity-detail')?.textContent.startsWith(${JSON.stringify(textBoxDisposition === 'merge' ? '并入正文：' : '保留为文本框：')}) && (document.querySelector('[data-screen="review"] [data-fidelity-summary="no-decision"]')?.textContent ?? '').includes(${JSON.stringify(textBoxDisposition === 'merge' ? '文本框 · 1 项并入正文' : '文本框 · 1 项随文件保留')}); })()`,
-      'review-text-box-choice-stated',
-    );
-  }
-  if (structure !== null) {
-    await assertRenderer(
-      renderer,
-      `(() => { const stated = document.querySelector('[data-screen="review"] [data-import-structure="stated"]'); const boxes = Array.from(stated?.querySelectorAll('[data-structure-candidate]') ?? []); const lineage = stated?.querySelector('.structure-lineage')?.textContent ?? ''; return boxes.length === ${structure.candidates} && boxes.every((box) => box.disabled) && boxes.filter((box) => box.checked).length === 1 && boxes[0].checked && stated.querySelector('[data-long-paragraph-choice="sentences"]')?.checked === true && /^第3段 来自原文第3段（共[0-9]+段）$/.test(lineage); })()`,
-      'review-structure-stated',
-    );
-  }
-  if (degraded) {
-    await assertRenderer(renderer, fidelityRowsExpression(fidelityRows), 'review-fidelity-degraded');
-    await assertRenderer(
-      renderer,
-      `(() => { const acceptance = document.querySelector('#accept-import-degradation'); const commit = Array.from(document.querySelectorAll('button')).find((button) => button.textContent.includes('新建图书并导入稿件')); return acceptance && !acceptance.checked && (!commit || commit.disabled); })()`,
-      'degradation-initially-unselected',
-    );
-    await assertRenderer(
-      renderer,
-      `(() => { const items = Array.from(document.querySelectorAll('[data-degradation-category]')); const expected = ${JSON.stringify(degradationItems)}; return expected.length > 0 && items.length === expected.length && items.every((item, index) => item.dataset.degradationCategory === expected[index][0] && item.dataset.degradationCount === expected[index][1]); })()`,
-      'degradation-complete-server-set',
-    );
-    atPrimaryReviewStage('review-acceptance');
-    await assertRenderer(
-      renderer,
-      `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance) return false; acceptance.click(); return true; })()`,
-      'degradation-accept',
-    );
-    await waitFor(
-      renderer,
-      `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
-      'degradation-accepted-review',
-    );
-  } else {
-    // A review that asks for no decision reads as one concise line whose rows expand (ADR 0086).
-    await assertRenderer(
-      renderer,
-      `${fidelityRowsExpression(fidelityRows)} && Boolean(document.querySelector('[data-screen="review"] [data-fidelity-summary="no-decision"]')) && !document.querySelector('#accept-import-degradation')`,
-      'review-fidelity-clean',
-    );
-  }
-  await assertRenderer(
-    renderer,
-    `(() => { const card = document.querySelector('.roundtrip-card[data-fidelity-category="round-trip-export"]'); return card?.textContent.includes('DOCX 导出将在后续提供') && card.textContent.includes('样式表随文件保留') && !document.body.textContent.includes('不提供往返保证') && !document.body.textContent.includes('不承诺 DOCX 往返'); })()`,
-    'review-roundtrip-non-effect',
-  );
-  // Issue #411: an import that converts a file's comments and tracked changes also creates them, right
-  // after the block-source mapping they stand on.
-  const expectedRecords = [
-    '图书与稳定标识', '图书编辑维度集（8 项）', '源材料版本与来源记录', '导入保真审阅', ...(degraded ? ['导入降级决定'] : []),
-    '主稿件', '稿件分支', '稿件修订版 r1 与有序稳定内容块', '来源段落对应',
-    ...(importedMarks > 0 ? [`来自文件作者的批注与修改建议 ${importedMarks} 条`] : []),
-    '工作流程实例与精确方案版本绑定', '稿件导入记录',
-  ];
-  await assertRenderer(
-    renderer,
-    `(() => { const sections = Array.from(document.querySelectorAll('.review-section')); const exact = (heading, expected) => { const section = sections.find((item) => item.querySelector('h3')?.textContent === heading); const actual = Array.from(section?.querySelectorAll('li') ?? [], (item) => item.textContent); return actual.length === expected.length && actual.every((item, index) => item === expected[index]); }; return exact('将创建的记录', ${JSON.stringify(expectedRecords)}) && exact('明确不会发生', ${JSON.stringify(expectedNonEffects)}); })()`,
-    'review-exact-effects',
-  );
+  await assertRenderer(renderer, `document.querySelector('[data-screen="review"] [data-fidelity-category]') === null && document.querySelector('[data-screen="review"] [data-import-structure]') === null && !document.querySelector('#accept-import-degradation') && document.querySelector('.commit-bar button')?.disabled === false`, 'review-ready-without-repeated-tables-or-consent');
   await assertRenderer(
     renderer,
     `!/(?:J-01|tracer|clean|Review Before Import)/.test(document.body.textContent)`,
@@ -1963,7 +1901,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   const reviewedChoice = `document.querySelector('[data-word-reviewed-mode="${mode}"][data-word-reviewed-learning="${learnFromEdits}"]')`;
   await waitFor(renderer, `document.querySelector('[data-screen="review"]') && ${reviewedChoice}`, 'word-review-exact-choice');
   if (degraded) {
-    await assertRenderer(renderer, `(() => { const acceptance=document.querySelector('#accept-import-degradation'); if(!acceptance||acceptance.checked||document.querySelector('.commit-bar button'))return false;acceptance.click();return true;})()`, 'word-explicit-degradation');
+    await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && document.querySelector('.commit-bar button')?.disabled === false`, 'word-default-degradation');
     await waitFor(renderer, `${reviewedChoice} && document.querySelector('.commit-bar button')?.disabled === false`, 'word-degradation-retains-exact-choice');
   }
   if (restart !== undefined) {
@@ -2160,7 +2098,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'existing-book-review');
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="review"]'); const effects = Array.from(screen?.querySelectorAll('.review-section') ?? []).find((section) => section.querySelector('h3')?.textContent === '将创建的记录'); const items = Array.from(effects?.querySelectorAll('li') ?? [], (item) => item.textContent); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && screen.textContent.includes('manuscript-editorial@1.0.0') && reviewed?.textContent === ${JSON.stringify(bookId)} && reviewed.dataset.reviewedBookId === ${JSON.stringify(bookId)} && screen.textContent.includes(${JSON.stringify(`book:${bookId}`)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && items.length === 8 && !items.includes('图书与稳定标识') && !items.includes('图书编辑维度集（8 项）'); })()`,
+    `(() => { const screen=document.querySelector('[data-screen="review"]'); const reviewed=screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && reviewed?.textContent===${JSON.stringify(bookId)} && reviewed.dataset.reviewedBookId===${JSON.stringify(bookId)} && screen.textContent.includes(${JSON.stringify(internalNumber)}) && !screen.querySelector('.dimension-list'); })()`,
     'existing-book-review-preserves-book',
   );
   await assertRenderer(
@@ -2897,7 +2835,7 @@ async function main() {
       await waitFor(relaunched, `document.querySelector('[data-screen="review"]')`, 'existing-book-revalidated-review');
       await assertRenderer(
         relaunched,
-        `(() => { const screen = document.querySelector('[data-screen="review"]'); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && screen.textContent.includes('manuscript-editorial@1.0.0') && reviewed?.dataset.reviewedBookId === ${JSON.stringify(bookId)} && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入为首份稿件'); })()`,
+        `(() => { const screen = document.querySelector('[data-screen="review"]'); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && reviewed?.dataset.reviewedBookId === ${JSON.stringify(bookId)} && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入为首份稿件'); })()`,
         'existing-book-revalidation-preserves-review',
       );
       return relaunched;
@@ -3253,7 +3191,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'text-manuscript-review');
     await assertRenderer(
       renderer,
-      `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'TXT' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(syntheticTxtSha256)} && !document.querySelector('#accept-import-degradation'); })()`,
+      `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent===${JSON.stringify(syntheticTxtSha256)} && !document.querySelector('#accept-import-degradation') && !document.querySelector('[data-screen="review"] [data-fidelity-category]')`,
       'text-manuscript-review-conversion-note',
     );
     await clickExactButton(renderer, '新建图书并导入稿件', 'text-manuscript-commit');
@@ -3349,20 +3287,8 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'doc-manuscript-review');
       await assertRenderer(
         renderer,
-        `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'DOC' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(LOCAL_DOC_SHA256)}; })()`,
+        `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent===${JSON.stringify(LOCAL_DOC_SHA256)} && document.querySelector('[data-screen="review"] [data-import-conversion-note]')===null`,
         'doc-manuscript-review-conversion-note',
-      );
-      // Conversion loss is degradation like any other: the editor decides it explicitly, from a
-      // control that starts unselected (V2-UX-IMP-005).
-      await assertRenderer(
-        renderer,
-        `(() => { const acceptance = document.querySelector('#accept-import-degradation'); if (!acceptance || acceptance.checked) return false; acceptance.click(); return true; })()`,
-        'doc-manuscript-degradation-accept',
-      );
-      await waitFor(
-        renderer,
-        `document.querySelector('#accept-import-degradation')?.checked && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '按上述降级方式新建图书并导入稿件' && !button.disabled)`,
-        'doc-manuscript-degradation-accepted',
       );
       await clickExactButton(renderer, '按上述降级方式新建图书并导入稿件', 'doc-manuscript-commit');
       await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'doc-manuscript-imported');
@@ -4430,8 +4356,8 @@ async function main() {
     at('completion-visibility-transition');
     await waitFor(
       renderer,
-      `document.querySelector('[data-native-artifact-state]')`,
-      'completion-pre-ack-artifact-inspection-settled',
+      `document.querySelector('[data-screen="imported"] .book-overview') && !document.querySelector('[data-native-artifact-state]')`,
+      'completion-pre-ack-book-shown-without-profile-card',
     );
     await assertRenderer(
       renderer,

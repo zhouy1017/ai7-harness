@@ -303,9 +303,11 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const actions = el('div', 'button-row captured-procedure-version-actions');
     if (version.state === 'pending-validation') {
       actions.append(button(PROCEDURE_ACTIONS.validate, 'primary', 'validate', () => act('正在验证…', '无法验证这一版。', async () => {
-        open.validation = await api.previewCapturedProcedureValidation({ versionId: version.versionId });
-        options.setStatus(procedureValidationResult(open.validation.passes));
-      }, `[data-version-id="${version.versionId}"] .captured-procedure-validation h5`)));
+        const preview = await api.previewCapturedProcedureValidation({ versionId: version.versionId });
+        const result = await api.enableCapturedProcedure({ versionId: version.versionId, previewDigest: preview.previewDigest });
+        const enabled = result.versions.find((candidate) => candidate.versionId === version.versionId);
+        options.setStatus(enabled?.state === 'enabled' ? procedureEnabledLine(version.title, version.version) : procedureValidationFailedLine(version.title, version.version), enabled?.state === 'enabled' ? 'success' : 'error');
+      }, `[data-version-id="${version.versionId}"]`)));
     }
     if (version.state !== 'stopped') {
       const stop = button(PROCEDURE_ACTIONS.stop, 'quiet', 'stop', () => openStop(procedure.procedureId, version.versionId,
@@ -316,7 +318,6 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       actions.append(stop, why);
     }
     if (actions.childElementCount > 0) item.append(actions);
-    if (open.validation?.versionId === version.versionId) item.append(validationPanel(open.validation));
     if (open.stop !== null && open.stop.versionId === version.versionId) item.append(stopPanel(open.stop));
     item.tabIndex = -1;
     item.append(options.technicalDetails('captured-procedure-facts',
@@ -328,50 +329,6 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       ...version.steps.flatMap((step) => [el('dt', undefined, step.label), el('dd', 'technical-identity', `${step.categoryId} · ${step.procedureTitle} · 第 ${step.procedureVersion} 版`)]),
     ));
     return item;
-  }
-
-  /** `验证并启用…`'s preview (ADR 0087 §3): every step, today's guideline versions, the ceiling, what stays unavailable. */
-  function validationPanel(preview: CapturedProcedureValidationProjection): HTMLElement {
-    const panel = el('section', 'captured-procedure-validation');
-    panel.dataset['validationPasses'] = String(preview.passes);
-    const heading = el('h5', undefined, `验证《${preview.title}》第 ${preview.version} 版`);
-    heading.tabIndex = -1;
-    panel.append(heading);
-    const steps = el('ol', 'captured-procedure-validation-steps');
-    for (const step of preview.steps) {
-      const item = el('li');
-      item.dataset['stepCategory'] = step.categoryId;
-      item.append(el('p', undefined, captureStepLine(step)));
-      for (const guideline of step.guidelines) item.append(el('p', 'field-note captured-procedure-guideline', procedureGuidelineLine(guideline)));
-      if (step.problem !== null) item.append(el('p', 'attention-note', step.problem));
-      steps.append(item);
-    }
-    const ceiling = el('ul', 'captured-procedure-ceiling');
-    for (const line of [`范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[preview.scopeSlot]}」`, ...procedureCeilingLines(preview.ceiling)]) ceiling.append(el('li', undefined, line));
-    const unavailable = el('ul', 'captured-procedure-unavailable');
-    for (const line of PROCEDURE_UNAVAILABLE_LINES) unavailable.append(el('li', undefined, line));
-    panel.append(steps, el('h6', undefined, '权限上限'), ceiling, el('h6', undefined, '仍不可用'), unavailable);
-    for (const problem of preview.problems.filter((candidate) => !preview.steps.some((step) => step.problem === candidate))) {
-      panel.append(el('p', 'attention-note', problem));
-    }
-    panel.append(el('p', preview.passes ? 'field-note captured-procedure-result' : 'attention-note captured-procedure-result', procedureValidationResult(preview.passes)));
-    const actions = el('div', 'button-row');
-    actions.append(
-      button(PROCEDURE_ACTIONS.confirm, 'primary', 'confirm-enable', () => act('正在启用…', '无法启用这一版。', async () => {
-        const result = await api.enableCapturedProcedure({ versionId: preview.versionId, previewDigest: preview.previewDigest });
-        open.validation = null;
-        const version = result.versions.find((candidate) => candidate.versionId === preview.versionId);
-        options.setStatus(version?.state === 'enabled'
-          ? procedureEnabledLine(preview.title, preview.version)
-          : procedureValidationFailedLine(preview.title, preview.version), version?.state === 'enabled' ? 'success' : 'error');
-      }, `[data-version-id="${preview.versionId}"]`)),
-      button(PROCEDURE_ACTIONS.cancel, 'quiet', 'cancel-enable', async () => {
-        open.validation = null;
-        await load(`[data-version-id="${preview.versionId}"] [data-procedure-action="validate"]`);
-      }),
-    );
-    panel.append(actions);
-    return panel;
   }
 
   /** `停用…` (Issue #66, S31): read the preview first; nothing is stopped until `确认停用`. */

@@ -2,6 +2,12 @@
 
 Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), adopted as the execution standard for every editor-facing surface by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) on 2026-09-09.** 本文是实现编辑面时的执行标准：它规定每一屏的最终形态、状态、措辞、需要的数据与对应的后端能力。它不是实现证据；实现状态只记在根 `PROGRESS.md` 与 [E2E journeys](../development/e2e-journeys.md)。交付顺序只记在 [development plan](../development/development-plan.md)。
 
+## Wave 23 direct workflows — Owner #1279 / #1284
+
+The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft promotion and mandatory plan-review passages in §§1, 6, 7, 8 and 9. Every Book immediately has analysis, review, evaluation, writing and Agent capabilities. Starting a task prepares and authorizes the exact plan in one action; plan details remain optional. A production document can be the target of a same-type writing task, pinned to its saved manuscript, branch and version; edits require repinning before execution.
+
+Import fidelity and structure choices appear once; ordinary DOCX degradation uses the standard policy without a required checkbox. Export has inline format/annotation choices and opens the native Save dialog directly. Library additions belong to the current Book, or the house without one, and are immediately referable; custom dimensions and captured procedures are enabled on save. Data and Storage, Quality and Learning, Knowledge Base, Model Service, Series and Evaluation Calibration return to their entry screen, including the concrete Book subpage or Settings.
+
 ## 0 · 总则
 
 ### 0.1 权威与阅读方式

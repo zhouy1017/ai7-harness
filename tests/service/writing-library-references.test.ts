@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { ruleFor, withRuleFor } from '../support/policy-rules.js';
@@ -185,8 +186,8 @@ async function put(store: EditorialStore, name: string, content: string | Uint8A
 
 /** 定归属 and 定学习准入 as the card records them. */
 function decide(store: EditorialStore, materialId: string, attribution: { scope: 'book'; bookId: string } | { scope: 'house' }, choice: 'book' | 'house' | 'excluded' | 'deferred'): void {
-  store.decideLibraryMaterial({ materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution } });
-  store.decideLibraryMaterial({ materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice, reason: null } });
+  setLibraryDecision(store, { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution } });
+  setLibraryDecision(store, { materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice, reason: null } });
 }
 
 /** Synthetic words with no repeated run: `length` distinct ideographs from `from` on, in a scattered order, a full stop every 40. */
@@ -293,7 +294,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       await store.settleMaterialIndexing();
       const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
       const accepted = store.authorizeWriting(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
-      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(store.inspectWriting(bookId)!.authorization).not.toBeNull();
       expect(store.inspectWritingTask(bookId).task!.refusal).toBeNull();
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: prepared.taskIntent!.taskIntentId }).state.label).not.toBe(WRITING_MATERIAL_UNAVAILABLE_LABEL);
@@ -318,7 +319,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       const prepared = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [item.materialId] });
       answerWriting(entries, prepared, AUTHORED_WRITING_DRAFT);
       const mutate = () => {
-        if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        if (change === 'withdrawn') setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         else withDatabase((db) => {
           for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
           if (change === 'missing') {
@@ -508,7 +509,8 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       const long = await put(store, '长资料.txt', sized(3_500, 0x7000), '长资料');
       const others = await put(store, '别的书的资料.txt', sized(200, 0x8000), '别的书的资料');
       const deferred = await put(store, '待定资料.txt', sized(200, 0x8400), '待定资料');
-      await put(store, '没定归属.txt', sized(200, 0x8800), '没定归属');
+      const unused = await put(store, '不参考.txt', sized(200, 0x8800), '不参考');
+      setLibraryDecision(store, { materialId: unused.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       // A scan whose text no admitted dependency reads (a web page was this item until Issue #428 read HTML).
       const scan = await put(store, '扫描件.pdf', syntheticPdf({ pages: [[['x']]], imageOnly: new Set([0]) }), '扫描件资料');
       decide(store, listed.materialId, { scope: 'book', bookId }, 'book');
@@ -666,13 +668,13 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       planEnvelopeDigest = next.planEnvelope!.digest;
 
       // The item remains on this machine but may no longer be listed by this Book's Tasks.
-      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       const unavailable = store.inspectWritingTask(bookId).task!;
       expect([unavailable.label, unavailable.refusal]).toEqual([WRITING_MATERIAL_UNAVAILABLE_LABEL, writingMaterialUnavailable('参考资料甲')]);
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId }).state.label).toBe(WRITING_MATERIAL_UNAVAILABLE_LABEL);
       expect(await refusal(() => store.authorizeWriting(bookId, taskIntentId, planEnvelopeDigest)))
         .toBe(`MATERIAL_REFERENCE_UNAVAILABLE:${writingMaterialUnavailable('参考资料甲')}`);
-      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      setLibraryDecision(store, { materialId: listed.materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId }).start.readiness).toBe('ready');
     });
 

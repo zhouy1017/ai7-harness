@@ -80,11 +80,11 @@ describe('the words of 就这段发起任务…', () => {
     expect(SELECTION_TASK_MENU_LABEL).toBe('就这段发起任务…');
     expect(SELECTION_TASK_TITLE).toBe('就这段发起任务');
     expect(SELECTION_TASK_FIELD).toBe('工序');
-    expect(SELECTION_TASK_PREPARE).toBe('准备任务');
-    expect(SELECTION_TASK_NOTE).toBe('只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。');
+    expect(SELECTION_TASK_PREPARE).toBe('发起任务');
+    expect(SELECTION_TASK_NOTE).toBe('只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。');
     expect(selectionTaskContextLine({ bookTitle: '合成书名', revisionLabel: 'r3', journalSequence: 12, graphemes: 10, position: 7 }))
       .toBe('《合成书名》 · 修订版 r3 · 修订日志序号 12 · 已选 10 字 · 第 7 段');
-    expect(SELECTION_TASK_DOCUMENT_REASON).toBe('交付物和制作文档上不能就选区发起任务');
+    expect(SELECTION_TASK_DOCUMENT_REASON).toBe('在交付物工具栏点击「发起任务」，以当前文档为目标。');
     expect(SELECTION_TASK_REANALYZE).toBe('重新分析这段');
     expect(selectionTaskReviewLabel('错别字与规范用语')).toBe('审阅这段 · 「错别字与规范用语」');
     // The house's 可复用工序 on the selection (S77 deferred item a), the one kept preset, and the refused 再选一段加入.
@@ -112,11 +112,11 @@ describe('the words of 就这段发起任务…', () => {
     expect(SELECTION_TASK_STATUS).toEqual({
       reading: '正在读取可以就这段发起的工序…',
       unreadable: '无法读取可以就这段发起的工序。',
-      choose: '选一项工序；准备任务会先打开它的计划。',
+      choose: '选择工序后即可发起任务。',
       pickFirst: '请先选择一项工序。',
       gone: '所选文字所在的段落已不在当前稿件中；请重新选择。',
       preparing: '正在为任务保存修订版…',
-      prepared: '任务计划已准备；可在任务计划里开始任务。',
+      prepared: '任务已开始；可随时查看计划。',
       cancelled: '任务准备已取消；稿件保持不变。',
       failed: '无法准备这项任务。',
       readingProcedure: '正在读取所选的可复用工序…',

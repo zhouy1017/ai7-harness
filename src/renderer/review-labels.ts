@@ -73,7 +73,7 @@ export const REVIEW_ACTION_LABELS = {
   'open-run': '查看这次审阅',
   // 开始审阅 (ADR 0096 §3): the sheet's one explicit action; 先看计划 opens the plan first.
   start: '开始审阅',
-  prepare: '先看计划',
+  prepare: '查看计划',
   'quick-start': '快速开始',
   'cancel-preparation': '取消准备',
   'close-sheet': '取消',
@@ -225,7 +225,7 @@ export function reviewRunsTruncatedLine(listed: number): string {
 // ---- 新建审阅 --------------------------------------------------------------------------------------
 
 export const REVIEW_SHEET_TITLE = '新建审阅';
-export const REVIEW_SHEET_NOTE = '类别和范围都不预选。先看计划会为每一类冻结一份计划，你看过后再一次授权。';
+export const REVIEW_SHEET_NOTE = '选择审阅类别，默认检查全书。点击开始审阅即可运行，也可按需查看计划；本地文字检查单独运行。';
 export const REVIEW_CATEGORY_LEGEND = '审阅类别（可多选）';
 export const REVIEW_SCOPE_LEGEND = '审阅范围（四选一）';
 export const REVIEW_CHAPTER_FROM = '从';

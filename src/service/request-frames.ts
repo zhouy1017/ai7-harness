@@ -1029,8 +1029,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 放入资料库: the preview, and the title and kind the editor gave it; the store holds the title to its bounds.
     case 'addLibraryMaterial': {
-      const input = requireInput(value.input, ['previewId', 'title', 'kind'], tentativeId);
-      if (!validUuid(input.previewId) || !isBoundedString(input.title, 2_000) || !LIBRARY_MATERIAL_KINDS.includes(input.kind as LibraryMaterialKind)) {
+      const input = requireInputWithOptional(value.input, ['previewId', 'title', 'kind'], ['bookId'], tentativeId);
+      if (!validUuid(input.previewId) || !(input.bookId === undefined || input.bookId === null || validUuid(input.bookId)) || !isBoundedString(input.title, 2_000) || !LIBRARY_MATERIAL_KINDS.includes(input.kind as LibraryMaterialKind)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -2754,13 +2754,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         (hasExactKeys(range, ['kind', 'rangeId']) && range.kind === 'kept' && validUuid(range.rangeId)) ||
         (hasExactKeys(range, ['kind', 'span']) && range.kind === 'new' && range.span !== null && validSelection(range.span)));
       const validTarget = isRecord(target) && ((hasExactKeys(target, ['kind']) && target.kind === 'book') ||
+        (hasExactKeys(target, ['kind', 'manuscriptId', 'branchId', 'revisionId']) && target.kind === 'deliverable' && validUuid(target.manuscriptId) && validUuid(target.branchId) && validUuid(target.revisionId)) ||
         (hasExactKeys(target, ['kind', 'ranges']) && target.kind === 'ranges' && Array.isArray(target.ranges) && target.ranges.length >= 1 &&
           target.ranges.length <= MAX_TASK_INTENT_DRAFT_RANGES && target.ranges.every(validRange)));
       const pin = input.procedurePin;
       const validPin = pin === undefined || pin === null ||
         (isRecord(pin) && hasExactKeys(pin, ['procedureId', 'versionId']) && validUuid(pin.procedureId) && validUuid(pin.versionId));
       if (!validUuid(input.bookId) || !(input.draftId === null ? input.expectedOrdinal === null : validUuid(input.draftId) && isSafeInteger(input.expectedOrdinal, 1)) ||
-          (input.origin !== 'composer-selection' && input.origin !== 'composer-book') || !isBoundedString(input.goal, 4 * MAX_TASK_INTENT_GOAL_LENGTH) ||
+          (input.origin !== 'composer-selection' && input.origin !== 'composer-book' && input.origin !== 'composer-deliverable') || !isBoundedString(input.goal, 4 * MAX_TASK_INTENT_GOAL_LENGTH) ||
           !validTarget || !(input.outcomeClass === null || TASK_INTENT_OUTCOME_CLASSES.includes(input.outcomeClass as never)) || !validPin) {
         throw new ProtocolError(tentativeId);
       }

@@ -365,6 +365,7 @@ async function importSample1(renderer, title, distinct, name) {
 
 /** Open a Book from the library into its manuscript, then its 分析 (②A) from the 资料与记录 group. */
 async function openAnalysisOf(renderer, bookId, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-open-library`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}]')`, `${name}-manuscript`);
@@ -797,11 +798,6 @@ async function main() {
     // The analysis's prerequisites through the product's own setup: the editorial workspace profile at Revision 2
     // for this Book, and one Main Editorial Role connection whose synthetic credential is saved and removed again,
     // so only its reference is recorded — J-04's route sends nothing and needs no credential.
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'artifact-install-ready');
-    await click(renderer, '获取并安装（保持停用）', 'artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
@@ -1076,9 +1072,6 @@ async function main() {
     at('second-book-import');
     const secondBookId = await importSample1(renderer, SECOND_BOOK.title, true, 'second-import');
     requireJourney(secondBookId !== bookId, 'two-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'second-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'second-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'second-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'second-return-library');
 
     at('second-run-held');
@@ -1146,9 +1139,6 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-library');
     const thirdBookId = await importSample1(renderer, THIRD_BOOK.title, true, 'third-import');
     requireJourney(thirdBookId !== bookId && thirdBookId !== secondBookId, 'three-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'third-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'third-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'third-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-return-library');
 
     at('third-run-paused');
@@ -1237,9 +1227,6 @@ async function main() {
     at('fourth-book-import');
     const fourthBookId = await importSample1(renderer, FOURTH_BOOK.title, true, 'fourth-import');
     requireJourney(![bookId, secondBookId, thirdBookId].includes(fourthBookId), 'four-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'fourth-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'fourth-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'fourth-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'fourth-return-library');
 
     at('ask-first-edit');
@@ -1446,9 +1433,6 @@ async function main() {
     at('fifth-book-import');
     const fifthBookId = await importSample1(renderer, FIFTH_BOOK.title, true, 'fifth-import');
     requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId].includes(fifthBookId), 'five-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'fifth-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'fifth-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'fifth-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'fifth-return-library');
 
     at('budget-set');
@@ -1597,9 +1581,6 @@ async function main() {
     at('sixth-book-import');
     const sixthBookId = await importSample1(renderer, SIXTH_BOOK.title, true, 'sixth-import');
     requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId, fifthBookId].includes(sixthBookId), 'six-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'sixth-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'sixth-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'sixth-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'sixth-return-library');
 
     at('account-limit-stop');
@@ -1669,9 +1650,6 @@ async function main() {
     at('seventh-book-import');
     const seventhBookId = await importSample1(renderer, SEVENTH_BOOK.title, true, 'seventh-import');
     requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId, fifthBookId, sixthBookId].includes(seventhBookId), 'seven-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'seventh-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'seventh-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'seventh-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'seventh-return-library');
 
     at('outcome-unknown-paused-checkpoint');
@@ -1781,9 +1759,6 @@ async function main() {
     at('eighth-book-import');
     const eighthBookId = await importSample1(renderer, EIGHTH_BOOK.title, true, 'eighth-import');
     requireJourney(![bookId, secondBookId, thirdBookId, fourthBookId, fifthBookId, sixthBookId, seventhBookId].includes(eighthBookId), 'eight-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'eighth-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'eighth-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'eighth-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'eighth-return-library');
 
     at('outcome-unconfirmed-completed');
@@ -1844,9 +1819,6 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-controls-ready');
     const reviewBookId = await importSample1(renderer, '审阅任务控制旅程', true, 'review-controls-import');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'review-controls-profile');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'review-controls-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'review-controls-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-controls-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] button[data-book-id=${JSON.stringify(reviewBookId)}]')`, 'review-controls-landing');
     await clickSelector(renderer, `button[data-book-id=${JSON.stringify(reviewBookId)}]`, 'review-controls-book');

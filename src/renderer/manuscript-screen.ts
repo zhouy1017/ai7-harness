@@ -462,7 +462,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 保存为版本 (Issue #415): a document's working text becomes its next version; the manuscript's milestones stay its own.
   const saveVersion = button(DOCUMENT_ACTION_LABELS.saveVersion, 'secondary', () => void saveDocumentVersion());
   saveVersion.dataset['documentAction'] = 'saveVersion';
-  toolbarActions.append(workGroup, ...(isDocument ? [] : [processingGroup]), recordsGroup, undo, redo, save, ...(isDocument ? [saveVersion] : []), retryAuthoritativeRefreshButton);
+  const taskOnDocument = button('发起任务', 'primary', async () => {
+    if (productionDocument === undefined || !(await settleLocalEdit())) return;
+    try {
+      const saved = await api.saveProductionDocumentVersion({ documentId: currentWindow.manuscriptId, branchId: currentWindow.branchId });
+      const version = saved.document?.versions[0];
+      if (version === undefined) throw new Error('无法固定交付物版本。');
+      taskDrawer.openComposer({ bookId: currentWindow.bookId, bookTitle, origin: 'composer-deliverable', manuscript: null, ranges: [], outcomeClass: 'writing',
+        deliverable: { manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId, revisionId: version.revisionId,
+          label: `交付物 · ${productionDocument.typeLabel} · ${version.label}` } }, () => editorHost.querySelector<HTMLElement>('.ProseMirror'));
+    } catch (error) { setStatus(rendererErrorMessage(error, '无法发起交付物任务。'), 'error'); }
+  });
+  taskOnDocument.dataset['documentAction'] = 'start-task';
+  toolbarActions.append(workGroup, ...(isDocument ? [] : [processingGroup]), recordsGroup, undo, redo, save, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');

@@ -133,14 +133,9 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     const workspace = new AgentWorkspace(store, dialogues);
     try {
       const book = await importSample1Book(store, roots.codeRoot, '工作区变更集');
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const selection = paragraphHolding(store, book, FIRST_ANCHOR);
       const digestBefore = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
 
-      // The scope kinds it may name are exactly the two Revision 2 of the profile's authority sidecar makes eligible.
-      const profile = await store.inspectEditorialWorkspaceProfile(book.bookId);
-      expect([...AGENT_WORKSPACE_CAPABILITIES.scopes]).toEqual([...profile.sidecar.revisions[1].authorityCeiling.readableScopeKinds]);
-      expect(profile.sidecar.revisions[1].authorityCeiling).toMatchObject({ networkAccess: false, applyAuthority: false, capabilities: [] });
       // Looking at the workspace writes nothing; it states what it may do.
       const looked = rowCounts();
       const empty = await workspace.inspect(book.bookId);
@@ -220,7 +215,6 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     const workspace = new AgentWorkspace(store, dialogues);
     try {
       const book = await importSample1Book(store, roots.codeRoot, '工作区单项');
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const selection = paragraphHolding(store, book, ONE_ANCHOR);
 
       // One round: only the dialogue ledger gains the rows of its one turn.
@@ -253,7 +247,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     }
   });
 
-  it('refuses before anything is recorded: profile not enabled, a selection not of the primary manuscript, and the dialogue route', async () => {
+  it('opens every imported Book and refuses before recording: a selection not of the primary manuscript, and the dialogue route', async () => {
     const store = await openStore();
     const dialogues = localOwner(store);
     const workspace = new AgentWorkspace(store, dialogues);
@@ -262,12 +256,9 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       const selection = paragraphHolding(store, book, FIRST_ANCHOR);
       const before = rowCounts();
       const closed = await workspace.inspect(book.bookId);
-      expect(closed).toMatchObject({ available: false, unavailableReason: AGENT_WORKSPACE_UNAVAILABLE_REASON, proposal: null });
-      expect(await refusal(() => workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION })))
-        .toEqual({ code: 'AGENT_WORKSPACE_UNAVAILABLE', message: AGENT_WORKSPACE_UNAVAILABLE_REASON });
+      expect(closed).toMatchObject({ available: true, unavailableReason: null, proposal: null });
       expect(changedTables(before, rowCounts())).toEqual({});
 
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const pinned = rowCounts();
       expect((await refusal(() => workspace.propose(book.bookId, { selection: { ...selection, manuscriptId: randomUUID() }, instruction: SET_INSTRUCTION }))).code)
         .toBe('AGENT_WORKSPACE_SCOPE');
@@ -285,7 +276,6 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     const store = await openStore();
     try {
       const book = await importSample1Book(store, roots.codeRoot, '工作区实时');
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
       const calls: Array<{ url: string; body: string }> = [];
       const content = JSON.stringify({ schema: AGENT_WORKSPACE_RESULT_SCHEMA, items: [{ anchor: SECOND_ANCHOR, proposedText: '以如此重器作比', rationale: '更凝练。' }] });
@@ -335,7 +325,6 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '工作区来源' }, false);
       const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId: randomUUID() });
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
       let sent = 0;
       const nativeFetch = (async () => { sent += 1; throw new Error('nothing may be sent'); }) as unknown as typeof fetch;

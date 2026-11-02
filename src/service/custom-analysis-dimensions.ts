@@ -575,8 +575,10 @@ export function saveCustomAnalysisDimension(host: CustomAnalysisStoreHost, input
   requireStore(typeof input === 'object' && input !== null && (input.dimensionId === null || isCustomAnalysisDimensionId(input.dimensionId)),
     'CUSTOM_ANALYSIS_REQUEST_INVALID', '自定义分析维度请求无效。');
   requireCustomAnalysisTexts(host, input.title, input.questionTemplate);
-  host.customAnalysisCall(() => host.customAnalysisDimensions.save(
+  const saved = host.customAnalysisCall(() => host.customAnalysisDimensions.save(
     { dimensionId: input.dimensionId, title: input.title, questionTemplate: input.questionTemplate }, new Date().toISOString()));
+  customAnalysisDefinition(host, saved);
+  host.customAnalysisCall(() => host.customAnalysisDimensions.enable(saved.versionId, new Date().toISOString()));
   return inspectCustomAnalysisDimensions(host, null);
 }
 
@@ -585,6 +587,7 @@ export function enableCustomAnalysisDimension(host: CustomAnalysisStoreHost, ver
   host.assertAvailable();
   const version = isCustomAnalysisDimensionId(versionId) ? host.customAnalysisCall(() => host.customAnalysisDimensions.version(versionId)) : null;
   requireStore(version !== null, 'CUSTOM_ANALYSIS_DIMENSION_NOT_FOUND', '这个自定义分析维度版本不存在。');
+  if (version.state === 'enabled') return inspectCustomAnalysisDimensions(host, null);
   requireCustomAnalysisTexts(host, version.document.title, version.document.questionTemplate);
   customAnalysisDefinition(host, version);
   host.customAnalysisCall(() => host.customAnalysisDimensions.enable(versionId, new Date().toISOString()));

@@ -103,7 +103,7 @@ describe('the one model-service flow', () => {
       const root = element('main');
       const setStatus = vi.fn();
       const initializeStartup = vi.fn(async () => undefined);
-      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup,
+      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup, returnToOrigin: initializeStartup,
         button: (label, className, action) => {
           const node = element('button', className, label); node.addEventListener('click', () => void action()); return node;
         },

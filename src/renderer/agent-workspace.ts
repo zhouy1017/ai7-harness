@@ -34,8 +34,6 @@ export interface MountAgentWorkspaceOptions {
   errorMessage(error: unknown, fallback: string): string;
   /** 返回: back to the work the editor left for the workspace. */
   back(): void;
-  /** The 工作概览 profile card, where the workspace is enabled. */
-  openProfile(): void;
   /** The manuscript with the first 修改建议 the promotion made open on its card. */
   openMarks(promotion: AgentWorkspacePromotionProjection): void;
 }
@@ -295,7 +293,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       stopPolling();
       const prerequisite = el('p', 'attention-note', projection.unavailableReason ?? '');
       prerequisite.dataset['agentWorkspacePrerequisite'] = '';
-      body.replaceChildren(prerequisite, actionButton(words.openProfile, 'open-profile', 'secondary', () => options.openProfile()));
+      body.replaceChildren(prerequisite);
       return;
     }
     if (!body.contains(pick)) {

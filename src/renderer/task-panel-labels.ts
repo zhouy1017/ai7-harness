@@ -169,10 +169,10 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
 // ---- 发起全书任务 -----------------------------------------------------------------------------------------
 
 export const TASK_PANEL_COMPOSE_HEADING = '发起全书任务';
-export const TASK_PANEL_COMPOSE_LEDE = '在这本书上发起一项全书工序。准备任务先看计划再开始；快速开始按你设的默认执行规则直接开始。';
+export const TASK_PANEL_COMPOSE_LEDE = '选择工序即可开始，任务计划可随时查看。';
 export const TASK_PANEL_COMPOSE_FIELD = '全书工序';
 export const TASK_PANEL_COMPOSE_ACTIONS = { quick: '快速开始', prepare: '准备任务' } as const;
-export const TASK_PANEL_COMPOSE_NONE = '这本书现在没有可以发起的全书工序。';
+export const TASK_PANEL_COMPOSE_NONE = '导入稿件后即可开始分析。';
 /** The first baseline, before the Book has one: the one whole-Book procedure it can start. */
 export const TASK_PANEL_COMPOSE_FIRST = { label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' } as const;
 /** No 默认执行规则 is ever set for the first baseline (Issue #421): it starts from its plan. */
@@ -188,7 +188,7 @@ export const TASK_PANEL_LEAVE_STATUS = {
 
 export const TASK_PANEL_COMPOSE_STATUS = {
   preparing: '正在为任务保存修订版…',
-  prepared: '任务计划已准备；可在任务计划里开始任务。',
+  prepared: '任务已开始；可随时查看计划。',
   cancelled: '任务准备已取消；稿件与任务草稿保持不变。',
   failed: '无法准备这项任务。',
 } as const;
@@ -381,7 +381,7 @@ export const TASK_COMPOSER_STATUS = {
   reading: '正在读取任务草稿…',
   unreadable: '无法读取这份任务草稿。',
   preparing: '正在为任务保存修订版并准备计划…',
-  prepared: '任务计划已准备；可在任务计划里开始任务。',
+  prepared: '任务已开始；可随时查看计划。',
   promoteFailed: '无法准备计划；草稿保持不变。',
   cancelled: '准备计划已取消；草稿保持不变。',
   goalEmpty: '请描述希望 AI7 完成的编辑工作。',
