@@ -1821,7 +1821,7 @@ async function main() {
     await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'capture-saved');
     const savedProcedures = await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`);
     const procedureId = savedProcedures?.procedures?.[0]?.procedureId;
-    requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') && savedProcedures.procedures[0].latestState === 'pending-validation',
+    requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') && savedProcedures.procedures[0].latestState === 'enabled',
       'capture-saved-service', savedProcedures?.procedures?.[0]);
     const savedVersion = (await renderer.evaluate(`window.ai7.inspectCapturedProcedure({ procedureId: ${JSON.stringify(procedureId)}, before: null })`))?.versions?.[0];
     // Its source is the Run this stage ran, by identity, not only by the words that name it.
@@ -2110,16 +2110,15 @@ async function main() {
     await waitFor(renderer, `${status}===${JSON.stringify('请至少勾选一个类别：不勾，这项工序就没有可以运行的步骤。')} && window.__j13.composer()?.dataset.markComposer === 'task-on-selection'`, 'selection-procedure-pick-category', 15_000);
     await clickSelector(renderer, '[data-mark-composer] input[data-mark-checkbox="series-consistency"]', 'selection-procedure-tick');
     await assertRenderer(renderer, `window.__j13.act('submit')`, 'selection-procedure-submit');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j13.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选段落：书系一致性'); })()`, 'selection-procedure-plan', 180_000);
-    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), procedure: workspace.run.procedure })`);
-    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && selectionRun.scope?.kind === 'selection' &&
+    await waitFor(renderer, `window.__j13.composer()===null && window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(page=>page.run?.authorization!==null && page.run?.state!=='prepared')`, 'selection-procedure-started', 180_000);
+    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), procedure: workspace.run.procedure, authorization: workspace.run.authorization })`);
+    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.authorization !== null && selectionRun.state !== 'prepared' && selectionRun.scope?.kind === 'selection' &&
       selectionRun.scope.selection?.fromBlockId === selectionBlock && selectionRun.scope.selection.toBlockId === selectionBlock &&
       JSON.stringify(selectionRun.categories) === JSON.stringify(['series-consistency']) && selectionRun.procedure?.procedureId === seriesProcedureId &&
       selectionRun.procedure.version === 1 && JSON.stringify(selectionRun.procedure.leftOut) === JSON.stringify([]), 'selection-procedure-pinned', selectionRun);
-    // ← 任务: the card names the paragraph and offers 跳到所选文字 beside its next step.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-procedure-tasks');
-    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-state="review-prepared"]`;
-    await waitFor(renderer, `(() => { const card = document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card !== null && (card.querySelector('.task-card-title')?.textContent ?? '').endsWith(' · 所选段落') && JSON.stringify(Array.from(card.querySelectorAll('[data-task-action]'), (button) => [button.dataset.taskAction, button.textContent, button.disabled])) === JSON.stringify([['next', '查看计划并开始', false], ['jump', '跳到所选文字', false]]); })()`, 'selection-procedure-card', 30_000);
+    await clickSelector(renderer, '[data-screen="editor"] [data-edge-entry="tasks"]', 'selection-procedure-tasks');
+    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-item-id$="${selectionRun.reviewRunId}"]`;
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card!==null && (card.querySelector('.task-card-title')?.textContent??'').endsWith(' · 所选段落') && card.querySelector('[data-task-action="jump"]')?.disabled===false;})()`, 'selection-procedure-card', 30_000);
     // With the caret put on another paragraph of the window, 跳到所选文字 brings it back onto the Task's paragraph; the panel stays.
     const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(selectionBlock)})?.dataset.blockId ?? null`);
     requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-procedure-away-block');
