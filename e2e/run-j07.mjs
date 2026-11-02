@@ -1744,6 +1744,16 @@ async function main() {
       at(await renderer.evaluate(`${phaseState('drafting', 'in-progress')} && window.__j07.status() === '「起草」已开始'`) ? 'document-workflow-start-focus' : 'document-workflow-start');
       throw error;
     }
+    at('document-task-target');
+    await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="start-task"]', 'document-task-open');
+    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView==='composer' && document.querySelector('.task-composer-deliverable')?.textContent.includes('新闻稿')`, 'document-task-composer');
+    await fill(renderer, '.task-composer [data-task-composer-field="goal"]', '按当前新闻稿润色行文，保留事实。', 'document-task-goal');
+    await clickSelector(renderer, '.task-composer [data-task-composer-action="save-draft"]', 'document-task-save');
+    await waitFor(renderer, `document.querySelector('.task-composer')?.dataset.taskComposer==='draft'`, 'document-task-saved');
+    const documentTarget = await renderer.evaluate(`(async()=>{const drafts=await window.ai7.inspectTaskIntentDrafts({draftId:null}); const draft=drafts.drafts.find(item=>item.origin==='composer-deliverable'); const document=(await window.ai7.inspectProductionDocuments()).types.find(item=>item.typeId==='news-release').document; return {target:draft?.version.target,pin:draft?.version.deliverable,manuscriptId:document.documentId,branchId:document.branchId,revisionId:document.versions[0].revisionId};})()`);
+    requireJourney(documentTarget.target==='deliverable' && documentTarget.pin?.manuscriptId===documentTarget.manuscriptId && documentTarget.pin?.branchId===documentTarget.branchId && documentTarget.pin?.revisionId===documentTarget.revisionId && documentTarget.pin?.version===2 && documentTarget.pin?.stale===false, 'document-task-exact-version', documentTarget);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'document-task-close');
+
     at('document-workflow-complete');
     await clickSelector(renderer, `aside.document-lens li.document-phase[data-phase-id="drafting"] [data-phase-action="complete"]`, 'document-workflow-complete');
     await waitFor(renderer, `${phaseState('drafting', 'completed')} && window.__j07.status() === '「起草」已完成'`, 'document-workflow-completed');

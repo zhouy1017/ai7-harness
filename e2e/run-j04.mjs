@@ -1144,6 +1144,24 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-overview .book-analysis-summary[data-analysis-state="unavailable"]') && !document.querySelector('.baseline-analysis-card')`, 'analysis-unavailable-before-prerequisites');
     await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
 
+    at('procedure-library-starts');
+    const openLibraryProcedure = async (kind, name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
+      await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, `${name}-knowledge-ready`);
+      await click(renderer, '工序与规则', `${name}-rules`);
+      await waitFor(renderer, `document.querySelector('.knowledge-procedure-list li h4')`, `${name}-library-ready`);
+      const id=await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(entry=>entry.executorKind===${JSON.stringify(kind)})?.procedureId)`);
+      requireJourney(typeof id==='string', `${name}-definition-present`);
+      await assertRenderer(renderer, `(() => { const card=document.querySelector('.knowledge-procedure-list li[data-procedure-id='+CSS.escape(${JSON.stringify(id)})+']'); const run=Array.from(card?.querySelectorAll('button')??[]).find(button=>button.textContent==='运行此工序…'); if(!(run instanceof HTMLButtonElement)||run.disabled)return false;run.click();return true;})()`, `${name}-run`);
+      await waitFor(renderer, `document.querySelector('[data-procedure-field="book"]')`, `${name}-book`);
+      await click(renderer, '打开任务', `${name}-open`);
+    };
+    await openLibraryProcedure('editorial-review/style-and-format', 'singleton');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"]') && document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('input[name="review-category"][value="style-and-format"]')?.checked===true`, 'singleton-review-preselected');
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'singleton-review-close');
+    await openLibraryProcedure('baseline-manuscript-analysis', 'baseline-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"]') && !document.querySelector('[data-screen="book-review"]')`, 'baseline-library-analysis-destination');
+
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
