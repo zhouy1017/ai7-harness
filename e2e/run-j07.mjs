@@ -1063,6 +1063,7 @@ async function main() {
       const restoration = `按「${mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${expected.length - regenerated} 段恢复可保留的原文件格式，${regenerated} 段重新生成，具体损失见保真审阅。`;
       const rows = ['inline-styles:preserved:1', 'annotations:preserved:1',
         ...(mode === 'suggestions' ? ['change-suggestions:preserved:1'] : []), 'editor-notes:excluded:0',
+        'tables:preserved:1', 'images-captions:preserved:1',
         'sections:preserved:1', 'headers-footers:preserved:1', 'file-revisions:degraded:2'];
       const originalMarkerDetail = `正文来源的 2 处原始修订记号不直接恢复；文字按导入时确认的${mode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。`;
       at('export-fidelity-table');
