@@ -168,8 +168,21 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   }
 
   at(expectedChannel+'-live-search-probe');
-  check(await page.evaluate(`(()=>{const root=document.querySelector('[data-search-backend="search-brave"]');const button=[...root.querySelectorAll('button')].find(n=>n.textContent==='测试检索');if(!button||button.disabled)return false;button.click();return true})()`),expectedChannel+'-search-probe-start');
-  await ready(page,"document.querySelector('[data-search-probe=search-brave]')?.textContent.startsWith('可达')",'search-probe-passed');
+  const probeUi=async(backend)=>{
+   check(await page.evaluate(`(()=>{const root=document.querySelector('[data-search-backend="${backend}"]');const button=[...root.querySelectorAll('button')].find(n=>n.textContent==='测试检索');if(!button||button.disabled)return false;button.click();return true})()`),expectedChannel+'-'+backend+'-probe-start');
+   await ready(page,`(()=>{const root=document.querySelector('[data-search-backend="${backend}"]');return document.querySelector('[data-search-probe="${backend}"] p')&&[...root.querySelectorAll('button')].some(n=>n.textContent==='测试检索'&&!n.disabled)})()`,'search-probe-finished');
+   const line=await page.evaluate(`document.querySelector('[data-search-probe="${backend}"] p').textContent`);
+   const result={channel:expectedChannel,backend,reachable:line.startsWith('可达'),statusLine:line};report.searchProbes??=[];report.searchProbes.push(result);return result.reachable;
+  };
+  const braveReady=await probeUi('search-brave');
+  const bochaReady=await probeUi('search-bochaai');
+  check(braveReady||bochaReady,expectedChannel+'-live-search-available');
+  if(!braveReady&&bochaReady){
+   await select(page,'[data-search-backend=search-bochaai] [data-action=clear-search-fallback]');
+   await ready(page,"window.ai7.getModelServiceSettings().then(v=>v.searchBackends.fallbackBackendId===null)",'fallback-cleared');
+   check(await page.evaluate(`(()=>{const n=[...document.querySelector('[data-search-backend=search-bochaai]').querySelectorAll('button')].find(n=>n.textContent==='选择后端');if(!n||n.disabled)return false;n.click();return true})()`),'choose-reachable-search');
+   await ready(page,"document.querySelector('[data-search-backend=search-bochaai]')?.dataset.selected==='true'",'reachable-search-selected');
+  }
 
   check(await page.evaluate(`(()=>{const root=document.querySelector('[data-screen=model-service-settings]')??document.body;return root.textContent.includes('联网检索')&&root.textContent.includes('测试检索')})()`),expectedChannel+'-search-settings');
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-agent');
