@@ -4425,7 +4425,11 @@ export class ReviewRunStore {
         const ledger = this.#categoryLedger(category);
         if (ledger.currentRunState(materialized.runRecordId) === 'completed-with-gaps') {
           const revision = ledger.inspect(snapshot.bookId, undefined, materialized.resultSetRevisionId).inspectedRevision!.revision;
-          completionDetail = `${revision.coverage.label}；${revision.reducerClosure.label}`;
+          const synthesis = 'crossChapterSynthesis' in revision ? revision.crossChapterSynthesis : undefined;
+          const warning = synthesis?.state === 'gap'
+            ? synthesis.code === 'outcome-unknown' ? '跨章汇总结果待确认' : '跨章检查尚未完成'
+            : '部分检查尚未完成';
+          completionDetail = `${last?.detail ?? ''}已读完 ${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个阅读范围；${warning}；已完成范围的发现仍可处理。`;
         }
       }
       return {
@@ -4435,7 +4439,7 @@ export class ReviewRunStore {
         // A category the exclusion stopped, or the editor then cancelled, reads the stop's own words (SER-024).
         stateLabel: reviewRunCategoryStopLabel(last?.record.code) ?? idle ?? reviewRunCategoryStateLabel(state, waitingForPlace),
         ...(idle === RUN_WAITING_IDLE_LABEL ? { idleQueued: true as const } : {}),
-        detail: state === 'settled' ? completionDetail : waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
+        detail: completionDetail ?? (waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail)),
         pending,
         materialized,
         retained: events.find((event) => this.#retained(event)) ?? null,

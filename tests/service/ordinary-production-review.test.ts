@@ -316,8 +316,9 @@ it('discloses a retained unknown synthesis beside complete unit findings after r
     expect(run.findings).toHaveLength(1);
     const category = run.categories[0]!;
     expect(category.state).toBe('settled');
-    expect(category.detail).toContain(revision.coverage.label);
-    expect(category.detail).toContain('跨章一致性未闭合');
+    expect(category.detail).toContain('已读完 8/8 个阅读范围');
+    expect(category.detail).toContain('跨章汇总结果待确认');
+    expect(category.detail).not.toMatch(/未闭合|outcome-unknown|requestDigest/);
     expect(reviewCategoryProgressLine(category, Date.now())).toContain(category.detail!);
   };
   inspect(result.store);

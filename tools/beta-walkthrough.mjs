@@ -15,7 +15,7 @@ import { build } from 'esbuild';
 import { unzipSync, strFromU8 } from 'fflate';
 
 const ROOT=resolve('.');
-const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only'),RESUME_LAST=args.includes('--resume-last');
+const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only'),RETAINED_REVIEW_ONLY=args.includes('--retained-review-only'),RESUME_LAST=args.includes('--resume-last')||RETAINED_REVIEW_ONLY;
 let resume;
 const assetsIndex=args.indexOf('--assets-from');
 const RELEASE=assetsIndex<0?join(ROOT,'release'):resolve(args[assetsIndex+1]??'');
@@ -23,7 +23,7 @@ const OUTPUT=join(ROOT,'release');await mkdir(OUTPUT,{recursive:true});
 if(assetsIndex>=0&&!RELEASE.toLowerCase().startsWith('c:\\ai7\\beta-inputs\\'))throw Error('assets-root-refused');
 const packagedKeyring=()=>import(pathToFileURL(join(RELEASE,'AI7','app','resources','app','node_modules','@napi-rs','keyring','index.js')).href);
 let stage='inputs';
-const report={schema:'ai7.windows-beta-acceptance/1',scope:STARTUP_ONLY?'native-startup-probe':'six-flow-packaged-acceptance',state:'running',checks:[],limitations:[
+const report={schema:'ai7.windows-beta-acceptance/1',scope:STARTUP_ONLY?'native-startup-probe':RETAINED_REVIEW_ONLY?'retained-review-disclosure-probe':'six-flow-packaged-acceptance',state:'running',checks:[],limitations:[
  'Separate Owner-authorized packaged live acceptance uses available Go and search accounts; other provider accounts remain unconfigured. Ordinary source Journeys and CI are provider-free.',
  'Human Beta acceptance and the external editor study remain pending.',
  'The prior-version public Book is seeded through the exact 0.4.1 product store; current import/export use the actual package UI.',
@@ -72,6 +72,34 @@ const act=async(page,operation,target,lookup,mutation)=>{
 const click=async(page,label)=>act(page,'click',label,`[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)}&&n.getClientRects().length>0)`,'node.click()');
 const select=async(page,selector)=>act(page,'select',selector,`document.querySelector(${JSON.stringify(selector)})`,'node.click()');
 const fill=async(page,selector,value)=>act(page,'fill',selector,`document.querySelector(${JSON.stringify(selector)})`,`node.value=${JSON.stringify(value)};node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}))`);
+async function followReview(page,dataRoot,runId){
+ let previous=null,advancedAt=Date.now();
+ for(;;){
+  const progress=await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(runId)}}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state,taskIntentId:c.taskIntentId,progress:c.progress?{unitsSettled:c.progress.unitsSettled,completedAttempts:c.progress.completedAttempts,stage:c.progress.stage,lastTransitionAt:c.progress.lastTransitionAt}:null}))}))`);
+  if(progress.runId!==runId)throw Error('observed-review-changed');
+  const db=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});
+  try{
+   progress.claimEvents=db.prepare('SELECT COUNT(*) total,MAX(e.recorded_at) latest FROM factual_claim_events e JOIN factual_claim_sessions s USING(session_id) JOIN analysis_run_records r USING(run_record_id) WHERE r.task_intent_id IN (SELECT json_extract(value,\'$.task.taskIntentId\') FROM review_runs rr,json_each(rr.canonical_json,\'$.categories\') WHERE rr.review_run_id=?)').get(runId);
+  }finally{db.close();}
+  const fingerprint=JSON.stringify(progress);
+  if(fingerprint!==previous){previous=fingerprint;advancedAt=Date.now();report.reviewProgress={...progress,advancedAt:new Date(advancedAt).toISOString()};checkpoint();}
+  if(['settled','partial','failed','scope-changed','plan-moved','cancelled'].includes(progress.state)&&progress.categories.every(c=>!['prepared','waiting','running'].includes(c.state)))return;
+  if(existsSync('C:/ai7/results/beta-cancel.txt')||Date.now()-advancedAt>360000){
+   report.reviewObserverStop={runId,reason:existsSync('C:/ai7/results/beta-cancel.txt')?'operator-request':'six-minutes-without-durable-progress',lastProgress:report.reviewProgress};checkpoint();
+   await page.evaluate(`window.ai7.controlTaskRun({kind:'review-run',ref:${JSON.stringify(runId)},action:'pause'})`);
+   const end=Date.now()+300000;
+   while(Date.now()<end){
+    const paused=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});
+    let states;
+    try{states=paused.prepare('SELECT s.state FROM analysis_run_states s JOIN analysis_run_records r USING(run_record_id) WHERE s.sequence=(SELECT MAX(x.sequence) FROM analysis_run_states x WHERE x.run_record_id=s.run_record_id) AND r.task_intent_id IN (SELECT json_extract(value,\'$.task.taskIntentId\') FROM review_runs rr,json_each(rr.canonical_json,\'$.categories\') WHERE rr.review_run_id=?)').all(runId);}finally{paused.close();}
+    if(states.every(s=>!['executing','pausing','authorized'].includes(s.state)))throw Error('full-review-paused-at-boundary');
+    await new Promise(r=>setTimeout(r,1000));
+   }
+   throw Error('full-review-pause-not-settled');
+  }
+  await new Promise(r=>setTimeout(r,1000));
+ }
+}
 async function cleanupInstallation(path){if(!path)return;const actual=resolve(path);if(!actual.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase())||!actual.endsWith('installed'))throw Error('cleanup-target-refused');if(!existsSync(actual))return;const name=(await readdir(actual)).find(n=>/^Uninstall.*\.exe$/i.test(n));if(name){run(join(actual,name),['/S']);await wait(()=>!existsSync(join(actual,'AI7.exe')),'cleanup-uninstall-timeout');}}
 
 async function seedPriorBook(temp,dataRoot){
@@ -149,7 +177,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    check(true,'native-first-run-relaunch');
   }
   if(STARTUP_ONLY){check(true,expectedChannel+'-native-startup-probe');return;}
-  await configureLiveConnections(expectedDataRoot,dirname(input),expectedChannel);
+  if(!RETAINED_REVIEW_ONLY)await configureLiveConnections(expectedDataRoot,dirname(input),expectedChannel);
   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
   let page=await renderer(browser);
   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'product-ready');
@@ -286,11 +314,25 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   at(expectedChannel+'-full-review');
   const retainedReview=resumePrefix?resume.completedReview?.review:null;
   if(retainedReview){
-   check(resume.completedReview.buildIdentity.sourceCommit===report.buildIdentity.sourceCommit,'resume-review-exact-product');
+   // A projection-only successor may inspect this valid historical Run without
+   // authorizing the original paid requests again. Keep its original binary identity.
    report.retainedReviewEvidence=resume.completedReview;
    await select(page,'#app-sidebar [data-nav-book-section=review]');
    await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId===${JSON.stringify(retainedReview.runId)}&&v.run.state==='settled')`,'retained-completed-review');
+   const expectedTasks=retainedReview.memberCoverage.filter(c=>!c.local).map(c=>({categoryId:c.categoryId,taskIntentId:c.taskIntentId}));
+   check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>${JSON.stringify(expectedTasks)}.every(e=>v.run.categories.some(c=>c.categoryId===e.categoryId&&c.taskIntentId===e.taskIntentId)))`),'retained-review-task-identities');
+  }else if(resumePrefix&&(resume.activeReview||resume.failedStage==='windows-installer-full-review'&&resume.checks.includes('select-dialog.review-sheet [data-review-action=start]'))){
+   const db=new DatabaseSync(join(expectedDataRoot,'store','ai7.sqlite'),{readOnly:true});
+   let kept;
+   try{const row=db.prepare('SELECT r.canonical_json FROM review_runs r JOIN review_run_authorizations a USING(review_run_id) WHERE r.book_id=? ORDER BY r.ordinal DESC LIMIT 1').get(bookId);kept=row?JSON.parse(row.canonical_json):null;}finally{db.close();}
+   check(Boolean(kept)&&(!resume.activeReview||kept.reviewRunId===resume.activeReview.runId),'resume-existing-authorized-review');
+   report.activeReview=resume.activeReview??{runId:kept.reviewRunId,buildIdentity:resume.buildIdentity,runnerHead:resume.runnerHead,tasks:kept.categories.filter(c=>c.task).map(c=>({categoryId:c.categoryId,taskIntentId:c.task.taskIntentId}))};checkpoint();
+   await select(page,'#app-sidebar [data-nav-book-section=review]');
+   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId===${JSON.stringify(kept.reviewRunId)})`,'existing-review-surface');
+   if(await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run.canContinue)'))await select(page,'[data-review-action=continue]');
+   await followReview(page,expectedDataRoot,kept.reviewRunId);
   }else{
+  check(!RETAINED_REVIEW_ONLY,'retained-review-receipt-required');
   await select(page,'#app-sidebar [data-nav-destination=knowledge]');
   await ready(page,"document.querySelector('[data-screen=knowledge-base]')",'knowledge-destination');
   await click(page,'工序与规则');
@@ -306,7 +348,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   const previousReviewRunId=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId??null)');
   await select(page,'input[name=review-scope][value=whole]');await select(page,'dialog.review-sheet [data-review-action=start]');
   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&v.run.reviewRunId!==${JSON.stringify(previousReviewRunId)})`,'new-full-review-created');
-  await ready(page,"window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&['settled','partial','failed','scope-changed','plan-moved','cancelled'].includes(v.run.state)&&v.run.categories.every(c=>!['prepared','waiting','running'].includes(c.state)))",'full-review-terminal',1800000);
+  report.activeReview=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run.reviewRunId,tasks:v.run.categories.filter(c=>c.taskIntentId).map(c=>({categoryId:c.categoryId,taskIntentId:c.taskIntentId}))}))');
+  report.activeReview.buildIdentity=report.buildIdentity;report.activeReview.runnerHead=report.runnerHead;checkpoint();
+  await followReview(page,expectedDataRoot,report.activeReview.runId);
   }
   const review=await page.evaluate("window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
@@ -320,12 +364,22 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
     if(!c.task)return {categoryId:c.categoryId,local:true};
     const row=coverageDb.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE task_intent_id=? ORDER BY created_at DESC,ordinal DESC LIMIT 1').get(c.task.taskIntentId);
     const revision=row?JSON.parse(row.canonical_json):null;
-    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result']};
+    const outcome=coverageDb.prepare('SELECT classification FROM analysis_task_outcomes WHERE task_intent_id=?').get(c.task.taskIntentId);
+    const synthesis=revision?.crossChapterSynthesis;
+    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,executionState:outcome?.classification??null,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result'],reducerClosure:revision?.reducerClosure?{state:revision.reducerClosure.state,stages:revision.reducerClosure.stages}:null,synthesis:synthesis?{state:synthesis.state,code:synthesis.code??null,requestDigest:synthesis.requestDigest??null}:null};
    });
   }finally{coverageDb.close();}
   report.reviews.at(-1).memberCoverage=memberCoverage;
   check(memberCoverage.every(c=>c.local||(c.coverage?.state==='complete'&&c.gaps.length===0)),expectedChannel+'-full-review-complete-coverage');
-  if(expectedChannel==='windows-installer')report.completedReview={buildIdentity:report.buildIdentity,runnerHead:report.runnerHead,review:report.reviews.at(-1),checks:[...report.checks]};
+  if(expectedChannel==='windows-installer')report.completedReview=retainedReview?resume.completedReview:{buildIdentity:report.buildIdentity,runnerHead:report.runnerHead,review:report.reviews.at(-1),checks:[...report.checks]};
+  const executionGaps=memberCoverage.filter(c=>!c.local&&(c.executionState!=='completed'||c.synthesis?.state==='gap'));
+  report.executionGaps??=[];report.executionGaps.push(...executionGaps.map(c=>({channel:expectedChannel,...c})));
+  for(const gap of executionGaps){
+   const status=gap.synthesis?.code==='outcome-unknown'?'跨章汇总结果待确认':gap.synthesis?.state==='gap'?'跨章检查尚未完成':'尚未完成';
+   await ready(page,`document.querySelector('.review-progress [data-review-category="${gap.categoryId}"] .review-progress-detail')?.textContent.includes(${JSON.stringify(status)})`,'retained-stage-gap-disclosed');
+  }
+  if(executionGaps.length)report.limitations.push('Completed unit findings remain usable; retained synthesis or execution gaps are disclosed and unknown paid outcomes are not resent.');
+  if(RETAINED_REVIEW_ONLY){at('retained-review-disclosure');check(true,'historical-review-read-without-model-enrollment-or-authorization');return;}
   at(expectedChannel+'-retained-factual-evidence');
   const factualTaskIntentId=memberCoverage.find(c=>c.categoryId==='factual-review')?.taskIntentId;
   check(Boolean(factualTaskIntentId),'current-factual-task');
@@ -431,10 +485,11 @@ try{
   const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));
   if(RESUME_LAST){
    const stages=['windows-installer-full-review','windows-installer-retained-factual-evidence','windows-installer-launch','await-protected-enrollment-windows-installer'];
-   if(previous.state!=='failed'||!stages.includes(previous.failedStage)||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');
+   if((RETAINED_REVIEW_ONLY?!['failed','passed'].includes(previous.state):previous.state!=='failed'||!stages.includes(previous.failedStage))||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');
    const completedReview=previous.completedReview??(()=>{const review=previous.reviews?.findLast(r=>r.channel==='windows-installer'&&r.state==='settled'&&r.categories?.length===5&&r.categories.every(c=>c.state==='settled'));return review?{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,review,checks:previous.checks}:null;})();
-   if(previous.failedStage==='windows-installer-retained-factual-evidence'&&!completedReview)throw Error('resume-completed-review-missing');
+   if((RETAINED_REVIEW_ONLY||previous.failedStage==='windows-installer-retained-factual-evidence')&&!completedReview)throw Error('resume-completed-review-missing');
    resume=previous;
+   report.activeReview=previous.activeReview??null;
    resume.completedReview=completedReview;report.completedReview=completedReview;
    report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};
    report.priorBook=previous.priorBook;
@@ -476,7 +531,7 @@ try{
  report.installedBuildIdentity=selfcheck.buildIdentity;
  check(selfcheck.channel==='windows-installer'&&selfcheck.writable&&selfcheck.keyringCarrier==='loaded'&&selfcheck.buildIdentity.sourceCommit===identity.sourceCommit,'installed-self-check');
  await walk(executable,env,'windows-installer',join(env.LOCALAPPDATA,'ai7','production'),input,join(temp,'installed-export.docx'));
- if(!STARTUP_ONLY){
+ if(!STARTUP_ONLY&&!RETAINED_REVIEW_ONLY){
  at('reinstall');run(setup,['/S','/D='+installed]);
  const after=JSON.parse(run(executable,['--self-check'],env).trim());check(after.channel==='windows-installer'&&after.store_versions==='readable','same-candidate-reinstall');
   const portableRoot=join(temp,'portable');await mkdir(portableRoot);run(join(process.env.SystemRoot,'System32','tar.exe'),['-xf',zip,'-C',portableRoot]);
@@ -493,5 +548,7 @@ try{
 try{await cleanupInstallation(report.testRoot?join(report.testRoot,'installed'):null);}catch{report.installationCleanup='failed';report.state='failed';process.exitCode=1;}
 try{await removeOwnedCredentials();}catch{report.credentialCleanup='failed';report.state='failed';process.exitCode=1;}
 await writeFile(join(OUTPUT,'beta-acceptance.json'),JSON.stringify(report,null,2)+'\n');
+await mkdir('C:/ai7/results/beta-receipts',{recursive:true});
+await writeFile(`C:/ai7/results/beta-receipts/${report.runnerHead??'unstarted'}-${Date.now()}.json`,JSON.stringify(report,null,2)+'\n');
 await writeFile('C:/ai7/results/beta-last-run.json',JSON.stringify(report,null,2)+'\n');
 console.log('BETA_PACKAGE/'+report.state);
