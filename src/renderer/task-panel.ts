@@ -1068,7 +1068,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       node.disabled = working ||
         ((action === 'prepare' || action === 'save-draft') && empty) ||
         (action === 'save' && (empty || !current.dirty)) ||
-        (action === 'promote' && empty);
+        (action === 'promote' && (empty || (!current.dirty && current.resolution?.state === 'unsupported')));
     }
     const unsaved = element.querySelector<HTMLElement>('.task-composer-unsaved');
     if (unsaved !== null) unsaved.hidden = !(mode() === 'draft' && current.dirty);
