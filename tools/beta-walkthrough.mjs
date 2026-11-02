@@ -141,7 +141,8 @@ async function configureLiveConnections(dataRoot,temp,channel){
    store.selectMainRoleModel('opencode-go','deepseek-v4.1-flash');store.selectFastRoleModel('opencode-go','deepseek-v4.1-flash');
    const refs=[{slot:'opencode-go',credentialReference:model.credentialReference}];
    for(const slot of ['search-brave','search-bochaai']){const current=store.getSearchBackendConnections().find(c=>c.backendId===slot);const saved=store.saveSearchBackendCredential(slot,current?.credentialReference??null,'ready');refs.push({slot,credentialReference:saved.credentialReference});}
-   store.selectSearchBackend('search-brave');store.selectSearchBackend('search-bochaai','fallback');
+   // Enrollment preserves the ordinary primary/fallback selection. The visible
+   // settings flow chooses a tested primary for new work; resumed tasks keep their pins.
    store.markCleanShutdown();console.log(JSON.stringify(refs));
   }finally{store.close();}
  `);
