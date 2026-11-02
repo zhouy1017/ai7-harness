@@ -136,7 +136,10 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   let page=await renderer(browser);
   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'product-ready');
   check(!await boolean(page,'Promise.resolve(false)')&&await boolean(page,'Promise.resolve(true)'),expectedChannel+'-async-predicate-resolution');
-  check(await boolean(page,"document.querySelector('[data-screen=landing]')"),expectedChannel+'-library');
+  at(expectedChannel+'-open-library');
+  await select(page,'#app-sidebar [data-nav-destination=library]');
+  await ready(page,"document.querySelector('[data-screen=landing]')",'initial-library-ready');
+  check(true,expectedChannel+'-library');
   if(expectedChannel==='windows-installer'){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.priorBook?.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'prior-book-survives-upgrade');
    check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===106&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))`),'upgrade-history-and-schema');
