@@ -20,6 +20,7 @@ import {
   WORD_IMPORT_MODE_NAMES,
   fidelityDetailText,
   fidelityReviewHeading,
+  fidelitySurfaceDetail,
   commitNote,
 } from './import-fidelity-labels.js';
 import type { ShellPlace } from './shell.js';
@@ -946,7 +947,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const fidelityList = element('ul', 'degradation-list');
     for (const category of review.fidelity) {
       fidelityList.append(element('li', undefined,
-        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelityDetailText(category.detail)}`));
+        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelitySurfaceDetail(category)}`));
     }
     fidelity.append(fidelityList);
     if (review.degradationDecision.state === 'required-unselected') {

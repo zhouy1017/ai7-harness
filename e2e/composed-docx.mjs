@@ -453,6 +453,29 @@ export async function composeExportAdmittedDocx(path, { source, startBlock, bloc
   return archive;
 }
 
+/** Put two admitted paragraphs in a table and add a local raster; the package's existing relationships stay intact. */
+export async function addReadOnlySourceObjects(path) {
+  const { unzipSync, zipSync, strToU8, strFromU8 } = await import('fflate');
+  const files = unzipSync(await readFile(path));
+  let xml = strFromU8(files['word/document.xml']);
+  const paragraphs = [...xml.matchAll(/<w:p[\s>][\s\S]*?<\/w:p>/g)].map((match) => match[0]);
+  const pair = paragraphs.slice(-2);
+  if (pair.length !== 2) throw new Error('source object composition needs two paragraphs');
+  const table = `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/></w:tblPr><w:tblGrid><w:gridCol w:w="2500"/><w:gridCol w:w="2500"/></w:tblGrid><w:tr>${pair.map((p) => `<w:tc>${p}</w:tc>`).join('')}</w:tr></w:tbl>`;
+  const image = '<w:p><w:r><w:pict><v:shape id="sourcePreview" style="width:12pt;height:12pt"><v:imagedata r:id="rIdSourcePreview"/></v:shape></w:pict></w:r></w:p>';
+  if (!xml.includes('xmlns:r=')) xml = xml.replace('<w:document ', '<w:document xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+  if (!xml.includes('xmlns:v=')) xml = xml.replace('<w:document ', '<w:document xmlns:v="urn:schemas-microsoft-com:vml" ');
+  files['word/document.xml'] = strToU8(xml.replace(pair.join(''), table + image));
+  const relation = '<Relationship Id="rIdSourcePreview" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/source-preview.png"/>';
+  files['word/_rels/document.xml.rels'] = strToU8(files['word/_rels/document.xml.rels']
+    ? strFromU8(files['word/_rels/document.xml.rels']).replace('</Relationships>', relation + '</Relationships>')
+    : `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relation}</Relationships>`);
+  // Trailing inert bytes make this a multi-frame preview while leaving the authored PNG's decoded pixel unchanged.
+  files['word/media/source-preview.png'] = Buffer.concat([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=', 'base64'), Buffer.alloc(150000)]);
+  files['[Content_Types].xml'] = strToU8(strFromU8(files['[Content_Types].xml']).replace('</Types>', '<Default Extension="png" ContentType="image/png"/></Types>'));
+  await writeFile(path, zipSync(files, { level: 6, mtime: fixedArchiveTime() }));
+}
+
 /**
  * What a written DOCX holds, as digests, counts and authors only — so a runner checks an exported file without
  * ever holding its words in a message: each part's digest; each body paragraph's text as the parser reads it

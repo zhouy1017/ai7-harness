@@ -26,4 +26,11 @@ export interface ManuscriptBlockProjection {
   digest: string;
   /** Present on a note block of the live window only. */
   note?: ManuscriptNoteProjection;
+  noteLinks?: ReadonlyArray<{ blockId: string; part: 'footnote' | 'endnote'; ordinal: number }>;
+  sourceDisplay?: ManuscriptSourceDisplay;
+}
+
+export interface ManuscriptSourceDisplay {
+  table: null | { rows: string[][]; continuation: boolean; truncated: boolean };
+  images: ReadonlyArray<{ label: string; dataUrl: string | null; before?: boolean; sourceImage?: { sourceVersionId: string; ordinal: number } }>;
 }

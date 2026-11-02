@@ -10,7 +10,7 @@ export interface BuildIdentity {
 
 /** Main binds these process/browser outputs before any application data is opened. */
 export const IDENTITY_BOUND_OUTPUTS = ['main/preload.cjs', 'service/index.mjs', 'renderer/index.html',
-  'renderer/renderer.js', 'renderer/styles.css', 'renderer/global-agent.css'] as const;
+  'renderer/renderer.js', 'renderer/styles.css', 'renderer/global-agent.css', 'renderer/manuscript-source.css'] as const;
 
 const CORE = '(?:0|[1-9][0-9]{0,3})';
 const PRERELEASE = '(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)';

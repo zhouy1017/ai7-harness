@@ -284,6 +284,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   save.title = shortcutHint('edit.save') ?? '';
   const undo = button('撤销', 'quiet', () => void runHistory('undo'));
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
+  const paragraphStyle = element('select');
+  paragraphStyle.setAttribute('aria-label', '段落样式');
+  for (const [value, label] of [['paragraph', '正文'], ['title', '书名标题'], ...Array.from({ length: 6 }, (_, i) => [`heading-${i + 1}`, `${i + 1} 级标题`])]) {
+    const option = element('option', undefined, label);
+    option.value = value!;
+    paragraphStyle.append(option);
+  }
+  paragraphStyle.addEventListener('change', () => {
+    const value = paragraphStyle.value;
+    editor?.setBlockStyle(value.startsWith('heading-') ? 'heading' : value === 'title' ? 'title' : 'paragraph',
+      value.startsWith('heading-') ? Number(value.slice(8)) : value === 'title' ? 1 : null);
+    editor?.focus();
+  });
   const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
   retryAuthoritativeRefreshButton.hidden = true;
   // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
@@ -349,7 +362,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
-  toolbarActions.append(undo, redo, save, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.append(paragraphStyle, undo, redo, save, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -514,6 +527,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   editorHost.addEventListener('click', (event) => {
     const reference = (event.target as Element | null)?.closest<HTMLElement>('[data-note-reference]')?.dataset['noteReference'];
     if (reference !== undefined) void navigate({ kind: 'block', blockId: reference });
+  });
+  editorHost.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const reference = (event.target as Element | null)?.closest<HTMLElement>('[data-note-reference]')?.dataset['noteReference'];
+    if (reference !== undefined) { event.preventDefault(); void navigate({ kind: 'block', blockId: reference }); }
   });
   const positionRailLabel = element('label', 'position-rail-label', '全稿位置');
   positionRailLabel.htmlFor = 'manuscript-position';
@@ -1891,6 +1909,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     platform: api.platform,
     initialWindow,
     flushJournalEdit: (input) => api.flushJournalEdit(input),
+    readManuscriptImageChunk: (input) => api.readManuscriptImageChunk(input),
     onStateChange: (state) => {
       const closeRisk = authoritativeMutationBusy() || state.dirty || state.saving || state.retryRequired || (state.interrupted && state.dirty) ||
         (state.protection?.atRisk.characters ?? 0) > 0;
@@ -1910,6 +1929,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       protectionSurface?.update(state.protection);
       setCloseRisk(closeRisk);
       if (editor) {
+        const style = editor.currentBlockStyle();
+        paragraphStyle.disabled = authoritativeMutationBusy() || state.interrupted || state.protection?.readOnly != null || style === null;
+        if (style !== null) paragraphStyle.value = style.kind === 'heading' ? `heading-${style.level}` : style.kind;
         const editorWindowProjection = editor.currentWindow();
         const bindingChanged = editorWindowProjection.revisionId !== currentWindow.revisionId ||
           editorWindowProjection.journalSequence !== currentWindow.journalSequence ||

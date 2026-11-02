@@ -113,7 +113,8 @@ describe('edited DOCX fidelity corpus (#814)', () => {
           // Four body paragraphs, then the footnote and the endnote as note blocks (Issue #1204).
           expect(view().blocks.map((block) => block.kind)).toEqual(['paragraph', 'paragraph', 'paragraph', 'paragraph', 'note', 'note']);
           if (variant === 'edited') {
-            for (let index = 0; index < 3; index += 1) {
+            // #1288: the table cell stays read-only; edit the two body paragraphs and keep the source table intact.
+            for (let index = 0; index < 2; index += 1) {
               const current = view();
               const block = current.blocks[index]!;
               store.flushJournalEdit({ clientEditId: randomUUID(), manuscriptId: book.manuscriptId, branchId: book.branchId,

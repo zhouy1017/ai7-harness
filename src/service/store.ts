@@ -2,6 +2,7 @@ import { pinTaskDeliverable, taskDeliverableStale } from './task-deliverable-tar
 import { procedureStopped } from './procedures/editable.js';
 import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
 import { initializeStructuralEditSchema } from './manuscript/structural-schema.js'; import { initializeNoteBlockSchema } from './manuscript/note-schema.js';
+import { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import { commitNoteSources, legacyBlockSources, routeBlockSource, type LegacyBlockSources } from './manuscript/note-blocks.js'; import { initializeImportStructureSchema } from './manuscript/structure-schema.js';
 import type { ImportStructureChoice } from '../shared/protocol.js'; import { importedMarksRecord, nonEffects, recordsToCreate } from './import-review-records.js'; export { importedMarksRecord };
 import { recordStructureChoice, recordedStructureChoice, reviewStructureChoice, reviewStructureField, stagedHasPieces, stagedStructureField } from './manuscript/import-structure.js';
@@ -59,7 +60,7 @@ import { LocalFixturePolicyCatalog, type LocalFixtureRuntimeContext } from './pr
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceChannelOf, modelServiceModels, modelServiceRuntimeBinding, validModelServiceModelId, type ModelConnectionTestStatus } from '../shared/protocol.js';
 import { MODEL_SERVICE_ROW_COLUMNS, initializeAdmittedChannelsSchema, initializeModelSelectionSchema, initializeModelServiceRoutesSchema, modelServiceRowsOutsideBindings } from './model-service-connections.js';
-import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -5135,7 +5136,11 @@ export class EditorialStore {
       ingest = new DatabaseSync(databasePath);
       configureDatabase(ingest);
       const lifetimeId = randomUUID();
-      const boundedAuthority = new BoundedManuscriptStore(authority);
+      const sourceObjects = new ManuscriptSourceObjects(authority, (digest) => {
+        const object = authority.prepare('SELECT relative_key FROM content_objects WHERE object_digest = ?').get(digest) as SqlRow;
+        return readFileSync(contentObjectPath(objectsRoot, digest, asString(object.relative_key)));
+      });
+      const boundedAuthority = new BoundedManuscriptStore(authority, sourceObjects);
       const store = new EditorialStore(
         dataRoot,
         objectsRoot,
@@ -5143,7 +5148,7 @@ export class EditorialStore {
         journal,
         ingest,
         boundedAuthority,
-        new BoundedManuscriptStore(journal),
+        new BoundedManuscriptStore(journal, sourceObjects),
         recoveryObjects,
         editorialWorkspaceProfile,
         new TaskAuthorizationStore(authority, boundedAuthority),
@@ -13994,10 +13999,8 @@ export class EditorialStore {
     requireStore(snapshot.state === 'staged', 'DRAFT_STATE_CHANGED', '导入草稿状态已变化。');
     requireStore(snapshot.version === expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
     snapshot = this.#selectLegacyWordStaging(snapshot);
-    // A reimport compares parsed blocks, so a format that was never parsed cannot begin one. A reading that split a paragraph
-    // over the bound (Issue #1205) maps its later pieces to no source paragraph, which a reimport's mapping cannot carry.
+    // Reimport compares bounded parsed pieces; their source paragraph and ordinal remain explicit lineage at commit.
     this.#requireEditableFormat(snapshot);
-    requireStore(snapshot.parserIdentity !== DOCX_SPLIT_PARSER_IDENTITY, 'REIMPORT_SPLIT_UNSUPPORTED', '含超出段落上限段落的文件暂不能重新导入稿件；可作为来源材料导入。');
     const binding = this.#reimportManuscriptBinding(targetSelection.bookId);
     requireStore(!Array.from(this.#reimportPreparationWork.values()).some((work) => work.draftId === draftId),
       'SERVICE_BUSY', '该重新导入草稿已有比较准备任务。');
@@ -15647,7 +15650,7 @@ export class EditorialStore {
       'DRAFT_NOT_REVIEWED', '稿件重新导入草稿尚未完成复核。');
     requireStore(snapshotBeforeAttempt.version === input.expectedDraftVersion, 'DRAFT_VERSION_CHANGED', '导入草稿版本已变化。');
     requireStore(snapshotBeforeAttempt.reviewDigest === input.reviewDigest, 'REVIEW_CHANGED', '稿件重新导入复核摘要已变化。');
-    requireStore(snapshotBeforeAttempt.parserIdentity === DOCX_PARSER_IDENTITY || snapshotBeforeAttempt.parserIdentity === DOCX_NOTE_PARSER_IDENTITY,
+    requireStore(snapshotBeforeAttempt.parserIdentity === DOCX_PARSER_IDENTITY || snapshotBeforeAttempt.parserIdentity === DOCX_NOTE_PARSER_IDENTITY || snapshotBeforeAttempt.parserIdentity === DOCX_SPLIT_PARSER_IDENTITY,
       'REVIEW_CHANGED', '解析器状态已变化，请重新复核稿件重新导入。');
     const targetBeforeAttempt = this.#reconstructReviewedReimportTarget(snapshotBeforeAttempt);
     requireStore(targetBeforeAttempt !== null, 'REVIEW_CHANGED', '稿件重新导入复核无法由当前权威状态重建。');
@@ -16215,13 +16218,26 @@ export class EditorialStore {
           `INSERT INTO manuscript_block_sources(
              revision_id, block_id, source_version_id, source_part, source_paragraph_index,
              box_ordinal, box_paragraph_ordinal, source_paragraph_digest, created_at
-           ) SELECT ?, r.block_id, ?, 'body', s.source_paragraph_index, NULL, NULL, r.digest, ?
+           ) SELECT ?, r.block_id, ?, 'body', s.source_paragraph_index, NULL, NULL, COALESCE(p.source_paragraph_digest, r.digest), ?
              FROM temp.reimport_commit_rows r
              JOIN staged_import_block_sources s ON s.draft_id = ? AND s.position = r.position
+             LEFT JOIN staged_import_paragraph_pieces p ON p.draft_id = s.draft_id AND p.position = s.position
              WHERE r.work_id = ? ORDER BY r.position`,
         ).run(resultingRevisionId, sourceVersionId, now, input.draftId, work.workId);
         const notedSources = commitNoteSources(this.#authority, { revisionId: resultingRevisionId, sourceVersionId, draftId: input.draftId, createdAt: now, reimportWorkId: work.workId });
-        requireStore(Number(mappedSources.changes) + notedSources === snapshot.blockCount,
+        const splitPieces = this.#authority.prepare(`INSERT INTO manuscript_import_lineage(
+          revision_id, block_id, first_block_id, source_paragraph_index, piece_ordinal, piece_count, method)
+          SELECT ?, r.block_id, first.block_id, p.source_paragraph_index, p.piece_ordinal,
+            (SELECT count(*) FROM staged_import_paragraph_pieces n WHERE n.draft_id = p.draft_id AND n.source_paragraph_index = p.source_paragraph_index),
+            CASE WHEN EXISTS(SELECT 1 FROM staged_import_paragraph_pieces n WHERE n.draft_id = p.draft_id
+              AND n.source_paragraph_index = p.source_paragraph_index AND n.joint = 'bound') THEN 'blocks' ELSE 'soft-break' END
+          FROM staged_import_paragraph_pieces p JOIN temp.reimport_commit_rows r ON r.work_id = ? AND r.position = p.position
+          JOIN staged_import_paragraph_pieces head ON head.draft_id = p.draft_id AND head.source_paragraph_index = p.source_paragraph_index AND head.piece_ordinal = 1
+          JOIN temp.reimport_commit_rows first ON first.work_id = r.work_id AND first.position = head.position
+          WHERE p.draft_id = ?`).run(resultingRevisionId, work.workId, input.draftId);
+        const splitHeads = asNumber((this.#authority.prepare(`SELECT count(*) total FROM staged_import_paragraph_pieces WHERE draft_id = ? AND piece_ordinal = 1`)
+          .get(input.draftId) as SqlRow).total);
+        requireStore(Number(mappedSources.changes) + notedSources + Number(splitPieces.changes) - splitHeads === snapshot.blockCount,
           'REIMPORT_COMPARISON_INVALID', '重新导入结果修订版的来源段落对应无法完整提交。');
         this.#authority.prepare(
           `UPDATE manuscript_command_groups SET status = 'superseded'
@@ -16534,6 +16550,13 @@ export class EditorialStore {
         cursor === null ? { kind: 'start' } : { kind: 'cursor', cursor },
       ),
     );
+  }
+
+  readManuscriptImageChunk(input: import('../shared/protocol.js').ServiceOperationMap['readManuscriptImageChunk']['input']) {
+    const branch = this.#authority.prepare('SELECT base_revision_id FROM manuscript_branches WHERE manuscript_id = ? AND branch_id = ?')
+      .get(input.manuscriptId, input.branchId) as SqlRow | undefined;
+    requireStore(branch !== undefined, 'MANUSCRIPT_NOT_FOUND', '稿件不存在。');
+    return this.#boundedCall(() => this.#boundedAuthority.sourceObjects!.imageChunk(asString(branch.base_revision_id), input.sourceVersionId, input.ordinal, input.offset));
   }
 
   /**

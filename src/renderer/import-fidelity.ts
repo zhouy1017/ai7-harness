@@ -13,6 +13,7 @@ import {
   fidelityPillText,
   fidelityRows,
   fidelitySummaryLine,
+  fidelitySurfaceDetail,
   needsDegradationDecision,
   offersTextBoxChoice,
   roundTripCard,
@@ -91,7 +92,7 @@ function fidelityRow(category: FidelityCategoryProjection, choice: HTMLElement |
   name.append(document.createTextNode(category.label), el('span', 'count', fidelityCountText(category.count)));
   const status = el('div', `status-pill status-${category.status}`, fidelityPillText(category));
   status.setAttribute('role', 'cell');
-  const detail = el('div', 'fidelity-detail', fidelityDetailText(category.detail));
+  const detail = el('div', 'fidelity-detail', fidelitySurfaceDetail(category));
   detail.setAttribute('role', 'cell');
   if (choice !== null) detail.append(choice);
   row.append(name, status, detail);

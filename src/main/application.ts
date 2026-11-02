@@ -2098,6 +2098,15 @@ function registerRendererHandlers(
         });
       }),
   );
+  ipcMain.handle(IPC_CHANNELS.readManuscriptImageChunk, (event, input: ServiceOperationMap['readManuscriptImageChunk']['input']) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      requireCurrentBookRoute(owned);
+      requireManuscriptCapability(owned, input);
+      return service.call('readManuscriptImageChunk', input);
+    }),
+  );
   ipcMain.handle(IPC_CHANNELS.getManuscriptWindow, (event, input: ServiceOperationMap['getManuscriptWindow']['input']) =>
     envelope(async () => {
       const owned = requireSender(event);

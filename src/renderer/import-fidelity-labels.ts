@@ -9,8 +9,8 @@ import type {
 
 /**
  * Every word of the Import Fidelity Review (④ 保真审阅; V2-UX-IMP-002 to 005, IMP-055; ADR 0086) that the
- * service projection does not already carry. The rows' labels, counts, status labels and details are the
- * service's; historical report terminology is translated for display without changing the report bytes. Pure, so the unit suite pins
+ * service projection does not already carry. Labels, counts and status labels remain the service's; table/image details
+ * describe the current read-only source projection without rewriting historical parser records. Pure, so the unit suite pins
  * every string byte for byte.
  */
 
@@ -19,6 +19,15 @@ export function fidelityDetailText(detail: string): string { return detail.repla
 
 /** The class that closes the review as a card rather than a row (ADR 0086 §1). */
 export const ROUND_TRIP_KEY = 'round-trip-export';
+
+/** Current manuscript presentation, alongside immutable historical parser/fidelity records. */
+export function fidelitySurfaceDetail(category: FidelityCategoryProjection): string {
+  if (category.count > 0 && category.status === 'retained') {
+    if (category.key === 'tables') return '表格单元格在稿件中只读显示；表格结构随来源版本保留，导出 DOCX 时从原文件完整恢复。';
+    if (category.key === 'images-captions') return '图片在稿件中只读预览，图注保留为文字；原图与关系随来源版本保留，导出 DOCX 时完整恢复。';
+  }
+  return fidelityDetailText(category.detail);
+}
 
 const WORD_INTAKE_REFUSALS: Readonly<Record<WordIntakeRefusalCode, string>> = {
   'table-revision': '表格行、单元格或合并修订',

@@ -167,6 +167,7 @@ async function ensureClosedOutputs() {
     'renderer/renderer.js',
     'renderer/styles.css',
     'renderer/global-agent.css',
+    'renderer/manuscript-source.css',
     'service/index.mjs',
     'shared/data-root.mjs',
     'shared/network-denial.mjs',
@@ -462,6 +463,7 @@ async function main() {
   await copyFile(resolve(ROOT, 'src', 'renderer', 'index.html'), outputPath('renderer', 'index.html'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'styles.css'), outputPath('renderer', 'styles.css'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'global-agent.css'), outputPath('renderer', 'global-agent.css'));
+  await copyFile(resolve(ROOT, 'src', 'renderer', 'manuscript-source.css'), outputPath('renderer', 'manuscript-source.css'));
   // Main checks this exact service/renderer closure before choosing or opening a data root.
   const outputDigests = Object.fromEntries(await Promise.all(IDENTITY_BOUND_OUTPUTS.map(async (path) =>
     [path, createHash('sha256').update(await readFile(outputPath(...path.split('/')))).digest('hex')])));

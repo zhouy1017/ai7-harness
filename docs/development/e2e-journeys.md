@@ -10,6 +10,8 @@ Wave 23 #1286 is a synchronized delta to J-12 and J-16: J-12 opens a Book's task
 
 ## J-01 new-Book import
 
+Wave 23 #1288 synchronizes the preload inventory with local `readManuscriptImageChunk`. After candidate-structure import, `split-paragraph-reimport` reimports the same over-bound source over its confirmed heading and sentence-split reading, resolves the comparison, commits, and checks the resulting revision/history graph. The service regression also commits an external insertion beside automatic soft-break pieces and reopens the store to verify their source mapping.
+
 Issue #1177 (Wave 22 · W22-S6; ADR 0096 §3; brief revision 9) is a synchronized delta at two checks. `existing-target-and-relationship-independent` keeps its value, title, 内部编号, relationship and 新建图书 conditions, and now requires that the selected target's aria-label does not contain the 图书 ID; the identity is in the closed `查看技术详情` disclosure beside the choice, whose only row is `图书 ID` with exactly that `bookId` in `dd.technical-identity`. `existing-book-relationship-review-focus` reads the status line naming the target Book by its title and 内部编号, with no 图书 ID.
 
 Issue #1044 synchronizes the exact sorted preload API pin with `selectFastRoleModel` and `testModelServiceConnection`; exact equality and both Node isolation assertions remain in force.
@@ -25,6 +27,8 @@ Issue #1205 (W22-S4c, ADR 0096 §2) is a synchronized delta that adds the `candi
 ## J-02 long-manuscript editing
 
 Issue #1287 (W23-S7) replaces the duplicated toolbar destinations with sidebar navigation. The editor viewport checks one action row, no page scroll, a persistence footer clear of window actions, and a navigation panel in a separate grid cell (below the text at narrow widths); protection still refuses a sidebar departure while edits are at risk. Layout-induced edge scrolls keep the current text window; the next reader scroll still pages normally.
+
+Wave 23 #1288 adds `structure-rapid-queue`, `structure-queue-retry`, and `structure-heading-enter`: eight synchronous Enter/Backspace events before IPC acknowledgement produce eight ordered journal entries without dropped keys; a four-key burst survives one refused write without duplicate entries; the editor changes a paragraph to a heading, creates a plain paragraph at its end, and undoes both changes. The window stays within 32 blocks. Service tests cover style undo/redo and unclean-close recovery.
 
 Issue #1177 (Wave 22 · W22-S6; ADR 0096 §3) is a synchronized delta at one stage. `milestone-search-state-stale` now reads the result set marked stale instead of discarded: its rows stay (`.search-results` keeps them, `data-search-stale="true"`, `data-inclusion-locked="true"`, every row's jump and inclusion control disabled), the replacement preview and `返回查找前位置` are gone, `预览替换` is disabled, and the summary starts `稿件已变化；以下结果已过时，请重新查找。` before the existing `稿件修订版已变化` reason. Every other J-02 stage runs a fresh `查找全稿` before it uses results and is unchanged.
 
@@ -218,6 +222,8 @@ Composes a 30-block manuscript from exact `sample1` — few enough blocks that t
 Not proven here: a conflict whose words were deleted outright, where `保存为新提案版本` is unavailable with its reason — `tests/service/proposal-conflicts.test.ts` proves the refusal and the other two paths; a draft of several units and `将全部无冲突更改加入解决草稿`, which one short suggestion never offers — `tests/unit/conflict-units.test.ts` proves the units and the bulk inclusion; a stale basis refused after a change elsewhere in the paragraph, an accepted-but-unapplied suggestion in conflict, digest-verified records refusing to show a changed row, the navigator across several conflicts, and the revision-25 migration, all proven by `tests/service/proposal-conflicts.test.ts`; a 审阅 finding followed into the new version its conflict saved, proven by `tests/service/review-runs.test.ts`; the mark menu's `解决冲突…` entry, and conflicts from a block split, merged or deleted, which are S63's; `基于当前稿件重新生成建议` itself — one 冲突 unit's words to the model, its answer saved into the Resolution Draft — which `tests/service/fast-role.test.ts` and `tests/service/fast-role-live.test.ts` prove (Issue #842); and a touch moving over the pane closing an open menu (`touchmove`, the touch screen's twin of the wheel that `menu-pane-scroll` proves), which no hosted runner has a touch screen to send.
 
 ## J-07 发稿: Milestone Versions, 设为发稿版本, 导出 · DOCX and 交付 · 生产文档
+
+Wave 23 #1288 places the last two admitted input paragraphs inside a source table and adds a local raster image. The manuscript shows a read-only table and a decoded image with the source-restoration label; DOCX export preserves the table XML and the media bytes. PDF/Markdown fidelity continues to disclose their unavailable table/image restoration. Service tests refuse table journal edits and verify the preserved image relationship and full source table XML.
 
 J-07's inventory of renderer members matching `/export|publish|send/` covers the paths that take Book material out of AI7. `saveDeveloperProposalFile` (Issue #65, S30) writes a 开发建议 — which holds no Book material and is not an External Export Policy target ([ADR 0087](../adr/0087-make-a-captured-procedure-runnable-through-the-review-run-path.md) §6) — through the same Save dialog, and is deliberately not named as an export; J-13 covers it.
 
