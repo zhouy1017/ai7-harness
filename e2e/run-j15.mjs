@@ -691,11 +691,11 @@ async function main() {
     requireJourney(JSON.stringify(procedures?.states) === JSON.stringify(Array(17).fill(['enabled', '已启用', '0', 'solid'])) &&
       procedures.first.includes('错别字与规范用语审阅工序 · 第 2 版') && JSON.stringify(procedures.reasons) === '[]' && procedures.artifact === null,
       'knowledge-procedures-list', procedures);
-    // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087) sit apart from the built-in 工序, empty here and saying how one is made;
-    // capturing, validating, running and stopping one is J-13's, which runs Review Runs (Issue #65 review).
+    // #1287: captured review procedures share the editable catalog; an empty captured section adds no second empty list.
+    // Developer proposals keep their own empty state. Capturing/running/stopping a procedure remains covered by J-13.
     await waitFor(renderer, `document.querySelector('.knowledge-captured-procedures')?.dataset.procedureCount==='0' && document.querySelector('.knowledge-developer-proposals')?.dataset.proposalCount==='0'`, 'knowledge-captured-painted');
-    const captured = await renderer.evaluate(`[document.querySelector('.knowledge-captured-procedures .captured-procedures-empty')?.textContent ?? null, document.querySelector('.knowledge-developer-proposals .developer-proposals-empty')?.textContent ?? null, document.querySelectorAll('[data-procedure-action]').length]`);
-    requireJourney(JSON.stringify(captured) === JSON.stringify(['还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。', '还没有开发建议。', 0]),
+    const captured = await renderer.evaluate(`(() => { const section=document.querySelector('.procedure-library .knowledge-captured-procedures'); return [section?.dataset.procedureCount ?? null, section?.querySelector('.captured-procedures-empty')?.textContent ?? null, document.querySelector('.knowledge-developer-proposals .developer-proposals-empty')?.textContent ?? null, section?.querySelectorAll('[data-procedure-action]').length ?? null, document.querySelectorAll('.knowledge-procedure-list').length]; })()`);
+    requireJourney(JSON.stringify(captured) === JSON.stringify(['0', null, '还没有开发建议。', 0, 1]),
       'knowledge-captured-empty', captured);
 
     // #1170: the editor creates and revises an immutable definition; incompatible dependency order is refused by name.
