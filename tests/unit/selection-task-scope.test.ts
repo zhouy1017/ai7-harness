@@ -17,12 +17,12 @@ describe('the reading ranges a range plan names', () => {
   it('reads each recomputed range from the paragraphs it repeats as context, and merges ranges that meet', () => {
     const units = [UNIT(1, 1, 15, 'reused'), UNIT(2, 16, 25, 'recomputed'), UNIT(3, 26, 43, 'recomputed'), UNIT(4, 44, 59, 'unreviewed')];
     expect(readSpans(units, MANIFEST)).toEqual([[15, 25], [24, 43]]);
-    expect(readSpansLabel(readSpans(units, MANIFEST))).toBe('内容块 15–43');
+    expect(readSpansLabel(readSpans(units, MANIFEST))).toBe('段落 15–43');
   });
 
   it('keeps ranges apart that do not meet, names a one-paragraph range by itself, and names nothing when nothing is read', () => {
-    expect(readSpansLabel([[60, 68], [3, 3], [10, 12], [13, 20]])).toBe('内容块 3、10–20、60–68');
-    expect(readSpansLabel(readSpans([UNIT(4, 44, 59, 'recomputed')], null))).toBe('内容块 44–59');
+    expect(readSpansLabel([[60, 68], [3, 3], [10, 12], [13, 20]])).toBe('段落 3、10–20、60–68');
+    expect(readSpansLabel(readSpans([UNIT(4, 44, 59, 'recomputed')], null))).toBe('段落 44–59');
     expect(readSpans([UNIT(1, 1, 15, 'recomputed')], MANIFEST)).toEqual([[1, 15]]);
     expect(readSpansLabel(readSpans([UNIT(2, 16, 25, 'reused')], MANIFEST))).toBeNull();
     expect(readSpansLabel([])).toBeNull();
