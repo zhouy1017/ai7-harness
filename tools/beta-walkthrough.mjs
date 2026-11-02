@@ -282,9 +282,11 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await fill(page,'.procedure-book-chooser select[data-procedure-field=book]',importedBookId);await click(page,'打开任务');
   await ready(page,"document.querySelector('dialog.review-sheet[open]')",'full-review-sheet');
   check(await boolean(page,"document.querySelector('[data-procedure-definition=\"ai7-procedure/full-review@1\"]')"),'full-review-pinned');
+  const previousReviewRunId=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId??null)');
   await select(page,'input[name=review-scope][value=whole]');await select(page,'dialog.review-sheet [data-review-action=start]');
-  await ready(page,"window.ai7.inspectReviewWorkspace().then(v=>v.run&&['settled','partial','failed','scope-changed','plan-moved','cancelled'].includes(v.run.state)&&v.run.categories.every(c=>!['prepared','waiting','running'].includes(c.state)))",'full-review-terminal',1800000);
-  const review=await page.evaluate("window.ai7.inspectReviewWorkspace().then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
+  await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&v.run.reviewRunId!==${JSON.stringify(previousReviewRunId)})`,'new-full-review-created');
+  await ready(page,"window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&['settled','partial','failed','scope-changed','plan-moved','cancelled'].includes(v.run.state)&&v.run.categories.every(c=>!['prepared','waiting','running'].includes(c.state)))",'full-review-terminal',1800000);
+  const review=await page.evaluate("window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
 
@@ -302,12 +304,16 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.reviews.at(-1).memberCoverage=memberCoverage;
   check(memberCoverage.every(c=>c.local||(c.coverage?.state==='complete'&&c.gaps.length===0)),expectedChannel+'-full-review-complete-coverage');
   at(expectedChannel+'-retained-factual-evidence');
-  let factualSources=await page.evaluate(`window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},after:null}).then(v=>({count:v.records.length,next:v.next,translated:v.records.filter(r=>r.translation?.state==='translated'||r.translation?.text?.length>0).length,captured:v.records.filter(r=>r.captureState==='full-text').length}))`);
+  const factualTaskIntentId=memberCoverage.find(c=>c.categoryId==='factual-review')?.taskIntentId;
+  check(Boolean(factualTaskIntentId),'current-factual-task');
+  const factualSources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},taskIntentId:${JSON.stringify(factualTaskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const translated=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {taskIntentId:${JSON.stringify(factualTaskIntentId)},count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,captured:records.filter(r=>r.captureState==='full-text').length,target:translated?{evidenceId:translated.evidenceId,url:translated.url,contentSha256:translated.contentSha256,attribution:translated.translation.attribution}:null}})()`);
   check(factualSources.count>0&&factualSources.captured>0,expectedChannel+'-retained-live-sources');
   report.factualEvidence??=[];report.factualEvidence.push({channel:expectedChannel,...factualSources});
+  check(Boolean(factualSources.target),'current-foreign-prose-translation-required');
+  const translatedSelector=`article[data-evidence-id=${JSON.stringify(factualSources.target.evidenceId)}] .research-evidence-translated blockquote`;
   await select(page,'#app-sidebar [data-nav-book-section=sources]');await ready(page,"document.querySelector('.research-evidence')",'sources-surface');
-  while(!await boolean(page,"document.querySelector('.research-evidence-translated blockquote')?.textContent.length>0")&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
-  check(await boolean(page,"document.querySelector('.research-evidence-translated blockquote')?.textContent.length>0"),expectedChannel+'-foreign-source-translation-visible');
+  while(!await boolean(page,`document.querySelector(${JSON.stringify(translatedSelector)})?.textContent.length>0`)&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
+  check(await boolean(page,`document.querySelector(${JSON.stringify(translatedSelector)})?.textContent.length>0`),expectedChannel+'-foreign-source-translation-visible');
   await select(page,'#app-sidebar [data-nav-book-section=review]');await ready(page,"document.querySelector('.review-workspace-card')",'review-after-evidence');
   const applicable=await page.evaluate("[...document.querySelectorAll('[data-review-action=accept-apply]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
   check(Boolean(applicable),expectedChannel+'-applicable-card-required');
