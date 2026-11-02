@@ -1855,7 +1855,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-remove-open-settings-hub');
     await click(primary, '模型服务', 'model-remove-open');
     await waitFor(primary, `document.querySelector('[data-credential-state="ready"]')`, 'model-remove-ready');
-    await click(primary, '移除', 'model-remove');
+    await click(primary, '移除凭据', 'model-remove');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     const removedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(
