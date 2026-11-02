@@ -138,6 +138,7 @@ import {
 import type { ProductionDocumentContext } from './production-document-lens.js';
 import { conflictCompletionOn } from './proposal-conflict-labels.js';
 import {
+  fidelityDetailText,
   fidelityDisclosureSummary,
   fidelityOutcomeLabel,
   WORD_IMPORT_MODE_NAMES,
@@ -1481,7 +1482,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
     // reporting a count of nothing.
     element('dt', undefined, '检测结果'),
     element('dd', undefined, staged.editableImport.available
-      ? `${staged.detectedBlockCount} 个可编辑内容块`
+      ? `${staged.detectedBlockCount} 个可编辑段落`
       : '未进行本地解析；仅保留原始文件'),
   );
   card.append(details, technicalDetails(undefined, element('dt', undefined, '来源 SHA-256'), sourceDigest));
@@ -2441,7 +2442,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       categories.append(element(
         'li',
         undefined,
-        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${category.detail}`,
+        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelityDetailText(category.detail)}`,
       ));
     }
     fidelity.append(categories);
@@ -2454,7 +2455,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       for (const item of record.degradationDecision.acceptedItems) {
         const category = record.fidelityCategories.find((candidate) => candidate.key === item.categoryKey);
         if (!category) throw new Error('AI7_IMPORT_RESULT_INVALID');
-        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${category.detail}`);
+        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${fidelityDetailText(category.detail)}`);
         row.dataset['degradationCategory'] = item.categoryKey;
         row.dataset['degradationCount'] = String(item.count);
         accepted.append(row);
@@ -2464,7 +2465,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
     }
   }
   if (record.kind === 'source-import-record') {
-    detail.append(listSection('明确不会发生', record.namedNonEffects));
+    detail.append(listSection('不会做', record.namedNonEffects));
   }
   if (record.kind === 'revision') {
     const openRevision = button('打开此历史修订版', 'secondary', async () => {
@@ -3110,7 +3111,7 @@ function renderBookOverview(
       element('dt', undefined, '分支 ID'), element('dd', 'technical-identity', anchor.branchId),
       element('dt', undefined, '修订版 ID'), element('dd', 'technical-identity', anchor.revisionId),
       element('dt', undefined, '修订日志序号'), element('dd', 'technical-identity', String(anchor.journalSequence)),
-      element('dt', undefined, '上次位置内容块 ID'),
+      element('dt', undefined, '上次位置段落 ID'),
       element('dd', 'technical-identity', anchor.entry === null ? '—' : anchor.entry.blockId),
       element('dt', undefined, '上次位置字素'),
       element('dd', 'technical-identity', anchor.entry === null ? '—' : String(anchor.entry.grapheme)),
@@ -3650,7 +3651,7 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
   content.append(
     identity,
     listSection('将创建的记录', review.recordsToCreate),
-    listSection('明确不会发生', review.nonEffects),
+    listSection('不会做', review.nonEffects),
   );
   const dimensions = element('section', 'review-section');
   dimensions.append(
@@ -4684,8 +4685,8 @@ function renderEditorWindow(
     setContextActions: (content) => shell.setContextActions(content),
     setStatus, setCloseRisk, errorMessage: rendererErrorMessage, recentlyActivatedControl, awaitServiceJob,
     composerRangeOf, selectionTaskOffer, selectionProcedureOffer, prepareSelectionTask,
-    renderEditorWindow, renderBookOverview, renderBookAnalysis, renderBookSources, renderBookReview,
-    renderBookDeliverables, renderBookEvaluation, renderBookFindings, renderProposalConflict, renderProposalWorkspace,
+    renderEditorWindow, renderBookAnalysis, renderBookReview,
+    renderBookDeliverables, renderProposalConflict, renderProposalWorkspace,
     returnToRecoveryComparison,
   });
 }

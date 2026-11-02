@@ -721,7 +721,7 @@ async function importAndOpen(renderer, dataRoot) {
   at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
   await waitForStagedTarget(renderer, dataRoot);
-  await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
+  await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑段落')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');
@@ -1522,9 +1522,9 @@ async function runAccessibilityJourney(renderer) {
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
   // Synchronized delta with Issue #409: at 200% the manuscript keeps the narrow rail beside it — the one
-  // persistent whole-manuscript control — the 导航 panel lies over the manuscript instead of beside it, and
+  // persistent whole-manuscript control — the supporting panel reflows below the text (#1287), and
   // nothing scrolls sideways.
-  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'absolute' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
+  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'relative' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
   at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');
@@ -1595,10 +1595,16 @@ async function runEditorModesJourney(renderer) {
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  // #1287: the viewport owns the editor height; navigation/analysis never cover text or its mark cards.
+  await assertRenderer(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelectorAll('button')).filter(button=>!button.hidden); const status=document.querySelector('#persistence-status').getBoundingClientRect(); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return !toolbar.querySelector('nav') && new Set(actions.map(button=>Math.round(button.getBoundingClientRect().top))).size===1 && document.documentElement.scrollHeight<=innerHeight+2 && footer.bottom<=status.top+1 && status.bottom<=innerHeight; })()`, 'editor-viewport-and-toolbar');
+  await assertRenderer(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); if(panel.hidden)document.querySelector('[data-edge-entry="navigation"]').click(); return !panel.hidden; })()`, 'editor-navigation-layout-open');
+  await waitForChecks(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const box=panel.getBoundingClientRect(); const width=document.querySelector('.editor-workspace').clientWidth; return { visible:!panel.hidden && box.width>0 && box.height>0, separate:box.left>=text.right-1 || box.top>=text.bottom-1, readable:width<864 || text.width>=480, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-navigation-no-overlap');
+  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return document.querySelector('#manuscript-navigation-panel').hidden; })()`, 'editor-navigation-layout-close');
   at('typography-defaults');
   await waitForChecks(renderer, `(() => { const text = document.querySelector('[data-testid="manuscript-editor"]'); const style = text ? getComputedStyle(text) : null; return { fontSize: style?.fontSize === '17px', lineHeight: Math.abs(parseFloat(style?.lineHeight ?? '0') - 17 * 1.9) < 0.6, column: Math.abs(parseFloat(style?.maxWidth ?? '0') - (38 * 17 + 16)) < 1.5, preset: document.documentElement.dataset.readingPreset === 'editing', density: document.documentElement.dataset.density === 'standard' }; })()`, 'typography-defaults', 15_000);
   at('focus-mode-enter');
   await assertRenderer(renderer, `(() => { document.querySelector('[data-edge-entry="analysis"]')?.click(); const panel = document.querySelector('#paragraph-analysis-panel'); const separator = document.querySelector('.editor-workspace > .region-separator'); return panel instanceof HTMLElement && !panel.hidden && panel.getBoundingClientRect().width > 0 && separator instanceof HTMLElement && getComputedStyle(separator).display !== 'none'; })()`, 'analysis-region-open');
+  await waitForChecks(renderer, `(() => { const panel=document.querySelector('#paragraph-analysis-panel').getBoundingClientRect(); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); return { separate:panel.left>=text.right-1 || panel.top>=text.bottom-1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-analysis-no-overlap');
   await assertRenderer(renderer, `(() => { const toggle = document.querySelector('[data-view-command="focus-mode"]'); if (!(toggle instanceof HTMLButtonElement) || toggle.getAttribute('aria-pressed') !== 'false') return false; toggle.focus(); toggle.click(); return true; })()`, 'focus-mode-toggle');
   await waitForChecks(renderer, `(() => { const hidden = (selector) => { const node = document.querySelector(selector); return node === null || getComputedStyle(node).display === 'none'; }; const status = document.querySelector('#persistence-status'); const toggle = document.querySelector('[data-view-command="focus-mode"]'); return { modeOn: document.documentElement.dataset.focusMode === 'on', sidebarHidden: hidden('#app-sidebar'), navigationHidden: hidden('#manuscript-navigation-panel'), analysisHidden: hidden('#paragraph-analysis-panel'), saveMenuShown: !hidden('#manuscript-save-menu') && document.querySelector('#context-actions #manuscript-save-menu') !== null, edgeEntriesHidden: hidden('.edge-entries'), drawerHidden: hidden('#task-drawer'), manuscriptShown: (document.querySelector('[data-testid="manuscript-editor"]')?.getBoundingClientRect().width ?? 0) > 0, statusShown: status instanceof HTMLElement && getComputedStyle(status).display !== 'none', restoreControl: toggle?.getAttribute('aria-pressed') === 'true' && toggle.textContent === '退出专注（Esc）' && toggle.getBoundingClientRect().width > 0 }; })()`, 'focus-mode-entered', 15_000);
   at('focus-mode-esc');
@@ -1637,8 +1643,8 @@ async function runProtectionJourney(renderer) {
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
   at('protection-blocked-action');
-  await assertRenderer(renderer, `(() => { const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回图书工作概览'); if (!(back instanceof HTMLButtonElement) || back.disabled) return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
-  await waitForChecks(renderer, `(() => { const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回图书工作概览'); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === '返回图书工作概览' && note.textContent.includes('暂不能执行「返回图书工作概览」'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);
+  await assertRenderer(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); if (!(back instanceof HTMLElement) || back.getAttribute('aria-disabled') === 'true') return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
+  await waitForChecks(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); const label = (back?.getAttribute('aria-label') ?? back?.textContent ?? '').trim(); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === label && note.textContent.includes('暂不能执行'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);
   at('protection-blocked-close');
   // The product's own close request (现在关闭 AI7) meets the close guard as the window's close button does; a page script's
   // `window.close()` is not one — Electron may close a page that asks for it without the preventable close event.
@@ -1668,7 +1674,19 @@ async function runProtectionJourney(renderer) {
   at('protection-reversed-recovery');
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-reversed-off');
   // First acknowledge the exact outstanding command, then its reversal; neither is duplicated or silently discarded.
-  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-reversed-recovered', 60_000);
+  const reversedRecoveryChecks = `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`;
+  try {
+    await protectionChecks(renderer, reversedRecoveryChecks, 'protection-reversed-recovered', 60_000);
+  } catch (error) {
+    // Ordinary runs expose only which fixed assertion failed; never journal payloads or text.
+    const checks = await renderer.evaluate(`(() => { const p = ${PROTECTION_PROBE}; return ${reversedRecoveryChecks}; })()`);
+    requireJourney(checks.cleared, 'protection-reversed-recovered-mode');
+    requireJourney(checks.twoEntries, 'protection-reversed-recovered-sequence');
+    requireJourney(checks.exactVisibleLength, 'protection-reversed-recovered-visible-length');
+    requireJourney(checks.writable, 'protection-reversed-recovered-writable');
+    requireJourney(checks.closeRisk, 'protection-reversed-recovered-close-risk');
+    throw error;
+  }
   at('protection-capacity-fill');
   const softLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
   const capacity = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferCapacity)`);

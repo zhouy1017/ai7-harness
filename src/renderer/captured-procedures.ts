@@ -73,6 +73,7 @@ type ProceduresApi = Pick<RendererApi,
 
 export interface MountCapturedProceduresOptions {
   readonly root: HTMLElement;
+  readonly embeddedCatalog?: boolean;
   readonly api: ProceduresApi;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -164,8 +165,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   ): void {
     const procedures = el('section', 'knowledge-captured-procedures');
     procedures.dataset['procedureCount'] = String(projection.procedures.length);
-    procedures.append(el('h3', undefined, PROCEDURES_SECTION_HEADING), el('p', 'field-note', PROCEDURES_SECTION_NOTE));
-    if (projection.procedures.length === 0) procedures.append(el('p', 'field-note captured-procedures-empty', PROCEDURES_EMPTY));
+    if (!options.embeddedCatalog) procedures.append(el('h3', undefined, PROCEDURES_SECTION_HEADING), el('p', 'field-note', PROCEDURES_SECTION_NOTE));
+    else if (projection.procedures.length > 0) procedures.append(el('h4', undefined, '从运行保存的审阅工序'));
+    if (projection.procedures.length === 0 && !options.embeddedCatalog) procedures.append(el('p', 'field-note captured-procedures-empty', PROCEDURES_EMPTY));
     for (const procedure of projection.procedures) procedures.append(procedureCard(procedure, procedureVersions.get(procedure.procedureId) ?? null));
     if (projection.proceduresTruncated) procedures.append(el('p', 'field-note', '只列出最近的可复用工序。'));
     const proposals = el('section', 'knowledge-developer-proposals');

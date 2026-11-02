@@ -96,7 +96,7 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_SECTION_LABEL).toBe('工作 · 审阅');
     expect(REVIEW_WORK_GROUP_LABEL).toBe('工作');
     expect(REVIEW_DESTINATION_ACTIONS).toEqual(['打开稿件', '工作概览']);
-    expect(reviewManuscriptLine(manuscript)).toBe('当前稿件：修订版 r2 · 97 个内容块');
+    expect(reviewManuscriptLine(manuscript)).toBe('当前稿件：修订版 r2 · 97 个段落');
     expect(reviewManuscriptLine(null)).toBe('这本书还没有稿件；导入稿件后才能审阅。');
   });
 
@@ -167,7 +167,7 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewCoverageLastReview({ lastRunOrdinal: 2, lastReviewedRevisionLabel: 'r1' })).toBe('第 2 次 · 读的是 r1');
     expect(reviewCoverageChanges({ changedBlocks: null })).toBe('—');
     expect(reviewCoverageChanges({ changedBlocks: 0 })).toBe('没有改动');
-    expect(reviewCoverageChanges({ changedBlocks: 3 })).toBe('改动了 3 个内容块');
+    expect(reviewCoverageChanges({ changedBlocks: 3 })).toBe('改动了 3 个段落');
     expect(reviewRunLine({ label: '第 3 次', categoryLabels: ['错别字与规范用语', '体例与格式'], scopeLabel: '全书', stateLabel: '已完成' }))
       .toBe('第 3 次 · 错别字与规范用语、体例与格式 · 全书 · 已完成');
     expect(reviewCountsLine(counts)).toBe('必须处理 2 · 建议处理 5 · 提示 1 · 待处理 6 · 已处理 1 · 已忽略 1');
@@ -182,9 +182,9 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_QUICK_START_REASON).toBe('快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。');
     const none = { from: null, to: null };
     expect(reviewReadConsequence(null, manuscript, none)).toBe('选好范围后显示');
-    expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个内容块');
+    expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个段落');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: null })).toBe('选好起止的章后显示');
-    expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」（内容块 1–43）');
+    expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」（段落 1–43）');
     expect(reviewReadConsequence('changed', manuscript, none)).toBe('每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审');
     expect(reviewReadConsequence('selection', manuscript, none)).toBe('稿件里选中的文字');
     expect(reviewSendConsequence([])).toBe('选好类别后显示');
@@ -192,7 +192,7 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }])).toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务。');
     expect(reviewSendConsequence([{ label: '错别字与规范用语', modelFree: false }, { label: '情节逻辑与前后一致', modelFree: true }]))
       .toBe('所读范围内的稿件正文和所选类别的规范条款，发往为审阅配置的模型服务；「情节逻辑与前后一致」只读基线分析的线索，不发送。');
-    expect(reviewChapterOptionLabel(third)).toBe('第三章（内容块 26–43）');
+    expect(reviewChapterOptionLabel(third)).toBe('第三章（段落 26–43）');
     expect(reviewPreparationLine({ completed: 1, total: 3, label: '正在冻结「错别字与规范用语」的计划' })).toBe('正在冻结「错别字与规范用语」的计划 · 1 / 3');
     expect(reviewPreparationLine({ completed: 0, total: 0, label: '排队中' })).toBe('排队中');
   });
@@ -238,9 +238,9 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('reads a finding: where it is, what it proposes, what it rests on, and never a verdict', () => {
-    expect(reviewFindingLocation({ chapterTitle: '第一章', blockPosition: 12 })).toBe('「第一章」 · 内容块 12');
-    expect(reviewFindingLocation({ chapterTitle: null, blockPosition: 12 })).toBe('内容块 12');
-    expect(reviewFindingLocation({ chapterTitle: null, blockPosition: null })).toBe('所在的内容块已不在当前稿件中');
+    expect(reviewFindingLocation({ chapterTitle: '第一章', blockPosition: 12 })).toBe('「第一章」 · 段落 12');
+    expect(reviewFindingLocation({ chapterTitle: null, blockPosition: 12 })).toBe('段落 12');
+    expect(reviewFindingLocation({ chapterTitle: null, blockPosition: null })).toBe('所在的段落已不在当前稿件中');
     expect(reviewReplacementLine('他们')).toBe('改为「他们」');
     expect(reviewReplacementLine('')).toBe('建议删去这段文字');
     expect(reviewClauseLine({ documentTitle: '通用规范汉字用字', clauseId: 'C1', text: '用规范字。' })).toBe('依据：条款 C1 · 通用规范汉字用字：用规范字。');
@@ -276,8 +276,8 @@ describe('the words of the 审阅 destination', () => {
   it('versions the 审阅报告 and says why export waits', () => {
     expect(REVIEW_EXPORT_NEEDS_REPORT).toBe('先生成报告，再导出。');
     expect(reviewReportVersionLine(2, '2026/09/21 18:00:00')).toBe('第 2 版 · 生成于 2026/09/21 18:00:00');
-    expect(reviewReportMustItemLine({ categoryLabel: '错别字与规范用语', locationLabel: '内容块 3', quote: '的的', note: '重复。', statusLabel: '待处理' }))
-      .toBe('错别字与规范用语 · 内容块 3 · 「的的」 · 重复。 · 待处理');
+    expect(reviewReportMustItemLine({ categoryLabel: '错别字与规范用语', locationLabel: '段落 3', quote: '的的', note: '重复。', statusLabel: '待处理' }))
+      .toBe('错别字与规范用语 · 段落 3 · 「的的」 · 重复。 · 待处理');
     expect(REVIEW_REPORT_OVERVIEW_COLUMNS).toEqual(['类别', '状态', '发现']);
     expect(reviewReportExcludedLine(0)).toBe('列出的发现都已在稿件上定位');
     expect(reviewReportExcludedLine(2)).toBe('另有 2 条无法在稿件上定位，没有列为发现');

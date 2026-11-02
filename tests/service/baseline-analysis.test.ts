@@ -967,9 +967,9 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: { startPosition: 20, endPosition: 20 } }).taskIntent?.taskIntentId)
         .toBe(prepared.taskIntent?.taskIntentId);
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId });
-      expect(plan.scope.process).toMatch(/· 重新分析 2 个阅读范围（内容块 15–43），沿用 6 个$/u);
-      expect(plan.steps[0]!.label).toBe('逐章读取（重新读取 内容块 15–43，沿用其余 6 个阅读范围）');
-      expect(plan.notDo.editorial).toContain('不重新读取内容块 15–43以外的正文');
+      expect(plan.scope.process).toMatch(/· 重新分析 2 个阅读范围（段落 15–43），沿用 6 个$/u);
+      expect(plan.steps[0]!.label).toBe('逐章读取（重新读取 段落 15–43，沿用其余 6 个阅读范围）');
+      expect(plan.notDo.editorial).toContain('不重新读取段落 15–43以外的正文');
       expect(plan.notDo.editorial).not.toContain('不重新读取所选范围以外的正文');
       // 重新确认计划 names the range by position, as the plan froze it: once another block stands at 20, it is refused rather than
       // read the neighbour (Issue #423 review, P3-4). Written beside the open store, as a structural change would leave it.

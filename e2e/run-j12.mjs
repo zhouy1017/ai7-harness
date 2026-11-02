@@ -1263,7 +1263,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(editSuffix)})`, 'restart-persisted-edit');
     await assertRenderer(primary, `(() => {
       const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
-      const place=/第 (\\d+) \\/ (\\d+) 个内容块/.exec(notice);
+      const place=/第 (\\d+) \\/ (\\d+) 个段落/.exec(notice);
       return notice.startsWith('回到上次位置 · ') && place!==null &&
         Number(place[1])===${JSON.stringify(pagedAwayPosition)} && Number(place[1])<=Number(place[2]) &&
         !/blk_[0-9a-f]{24}/.test(notice);
@@ -1284,7 +1284,7 @@ async function main() {
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         (anchorSection.compareDocumentPosition(overview.querySelector('.workbench-actions'))&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
-        readings[1].includes('个内容块') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
+        readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'restart-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-library');

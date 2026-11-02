@@ -178,7 +178,7 @@ export function composeOptions(projection: Pick<BaselineAnalysisProjection, 'act
     return {
       mode,
       label: entry.label,
-      meaning: entry.meaning,
+      meaning: entry.meaning.replaceAll('内容块', '段落'),
       available,
       reason: controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason,
       goal: entry.goal as BaselineAnalysisGoal,

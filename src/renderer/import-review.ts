@@ -18,6 +18,7 @@ import {
   wordImportModeOption,
   reimportFidelityHeading,
   WORD_IMPORT_MODE_NAMES,
+  fidelityDetailText,
   fidelityReviewHeading,
   commitNote,
 } from './import-fidelity-labels.js';
@@ -601,7 +602,7 @@ export function createImportReview(options: ImportReviewOptions) {
         cancelPreparation.hidden = true;
         const prepare = button('准备稿件重新导入比较', 'primary', async () => {
           prepare.disabled = true;
-          setStatus('正在建立安全固定点并准备逐块比较…', 'busy');
+          setStatus('正在保存当前修订版并准备逐段比较…', 'busy');
           try {
             activePreparationJob = await window.ai7.prepareManuscriptReimport({
               draftId: staged.draftId,
@@ -895,9 +896,9 @@ export function createImportReview(options: ImportReviewOptions) {
     values.append(
       element('dt', undefined, '目标图书'), element('dd', undefined, review.target.label),
       element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
-      element('dt', undefined, '安全固定点'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`),
-      element('dt', undefined, '固定点来源'), element('dd', undefined,
-        review.checkpoint.createdForDirtyJournal ? '已为未固定修订日志创建专用安全固定点' : '当前稿件已经位于持久固定点'),
+      element('dt', undefined, '已保存的修订版'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`),
+      element('dt', undefined, '保存状态'), element('dd', undefined,
+        review.checkpoint.createdForDirtyJournal ? '已将当前编辑保存为修订版' : '当前稿件已保存'),
       element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
       element('dt', undefined, '比较方式'), element('dd', undefined,
         review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
@@ -945,7 +946,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const fidelityList = element('ul', 'degradation-list');
     for (const category of review.fidelity) {
       fidelityList.append(element('li', undefined,
-        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${category.detail}`));
+        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelityDetailText(category.detail)}`));
     }
     fidelity.append(fidelityList);
     if (review.degradationDecision.state === 'required-unselected') {

@@ -8230,7 +8230,7 @@ export class EditorialStore {
         blockPosition,
         totalBlocks,
         structureLabel,
-        label: `${structureLabel === null ? '' : `${structureLabel} · `}第 ${blockPosition} / ${totalBlocks} 个内容块`,
+        label: `${structureLabel === null ? '' : `${structureLabel} · `}第 ${blockPosition} / ${totalBlocks} 个段落`,
         state: position.state,
       },
     };
@@ -11155,7 +11155,7 @@ export class EditorialStore {
         materials: this.#writingMaterialOffer(bookId),
       },
       consequences: {
-        read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个内容块，以及上面列出的参考材料`,
+        read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个段落，以及上面列出的参考材料`,
         send: this.#baselineAnalysis.launch.live === null || this.#writingLiveUnavailable() ? WRITING_SEND_CONSEQUENCE : WRITING_LIVE_SEND_CONSEQUENCE,
         notDo: WRITING_NOT_DO,
         cost: WRITING_COST_BEFORE_PLAN,

@@ -1,4 +1,4 @@
-import { renderProcedureLibrary, mountEditableProcedureLibrary } from './procedure-library.js';
+import { mountEditableProcedureLibrary } from './procedure-library.js';
 import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
@@ -423,7 +423,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (procedures !== null) {
       const section = element('section', 'knowledge-procedures');
       section.dataset['procedureCount'] = String(procedures.preinstalled.length);
-      const list = renderProcedureLibrary(procedures.preinstalled);
+      const captured = element('div', 'knowledge-captured');
+      const list = element('div', 'procedure-library');
       void mountEditableProcedureLibrary(list, window.ai7, async (book, kind, procedure) => {
         await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
           if (['baseline-analysis', 'baseline-manuscript-analysis'].includes(kind)) renderBookAnalysis(route.bookId, route.bookTitle);
@@ -431,12 +432,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
           else if (['evaluation', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'].includes(kind)) renderBookEvaluation(route.bookId, route.bookTitle);
           else renderBookReview(route.bookId, route.bookTitle, null, `${procedure.procedureId}@${procedure.version}`);
         });
-      }, rendererErrorMessage).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
+      }, rendererErrorMessage, captured).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
       section.append(element('h3', undefined, PROCEDURES_HEADING), list);
       // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.
-      const captured = element('div', 'knowledge-captured');
       const surface = mountCapturedProcedures({
         root: captured,
+        embeddedCatalog: true,
         api: window.ai7,
         setStatus,
         errorMessage: rendererErrorMessage,
@@ -476,7 +477,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const custom = element('div', 'knowledge-custom');
       const customSurface = mountCustomAnalysisDimensions({ root: custom, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, technicalDetails, localInstantLabel });
       const imported = element('section', 'knowledge-imported-skills');
-      panelNode.append(section, captured, custom, imported, element('h3', undefined, RULES_HEADING));
+      panelNode.append(section, custom, imported, element('h3', undefined, RULES_HEADING));
       void mountImportedSkills({ root: imported, api: window.ai7, setStatus, errorMessage: rendererErrorMessage }).load().catch((error: unknown) => {
         if (imported.isConnected) imported.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取外部 Skill。')));
       });

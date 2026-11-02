@@ -1187,7 +1187,7 @@ describe('a Review Run over the real store on exact sample1', () => {
         .toBe('REVIEW_SCOPE_INVALID');
 
       const prepared = prepare(session, book, [PLOT, LITERARY], scope);
-      expect(prepared.scope).toEqual({ kind: 'chapters', label: '选章 · 内容块 16–43', selectedRange: { startPosition: 16, endPosition: 43 }, selection: null });
+      expect(prepared.scope).toEqual({ kind: 'chapters', label: '选章 · 段落 16–43', selectedRange: { startPosition: 16, endPosition: 43 }, selection: null });
       const literaryPlan = prepared.categories.find((category) => category.categoryId === LITERARY)!;
       expect(literaryPlan.modeLabel).toBe('所选范围审阅');
       expect(literaryPlan.plan!.unreviewed).toBeGreaterThan(0);
@@ -1238,7 +1238,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const first = prepare(session, book, [TYPOS], on(twenty.blockId, twenty.blockId));
       expect(first.scope).toEqual({
         kind: 'selection',
-        label: '当前选区 · 内容块 20–20',
+        label: '当前选区 · 段落 20–20',
         selectedRange: { startPosition: 20, endPosition: 20 },
         selection: { fromBlockId: twenty.blockId, toBlockId: twenty.blockId },
       });
@@ -1248,9 +1248,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(card(first.reviewRunId)).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
       const plan = session.store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId });
       expect(plan.goal.sentence).toBe('按 1 类审阅所选段落：错别字与规范用语');
-      expect(plan.scope.process).toMatch(/^《.+》第 20–20 段 · \d+ 字 · 1 个类别；读取 内容块 15–43 作为上下文，只在所选段落上标出发现$/u);
-      expect(plan.scope.notRead).toMatch(/^内容块 15–43以外的正文；/u);
-      expect(plan.notDo.editorial).toEqual(expect.arrayContaining(['不读内容块 15–43以外的正文', '不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上']));
+      expect(plan.scope.process).toMatch(/^《.+》第 20–20 段 · \d+ 字 · 1 个类别；读取 段落 15–43 作为上下文，只在所选段落上标出发现$/u);
+      expect(plan.scope.notRead).toMatch(/^段落 15–43以外的正文；/u);
+      expect(plan.notDo.editorial).toEqual(expect.arrayContaining(['不读段落 15–43以外的正文', '不在所选段落以外标出发现：所读范围里别处的发现只计数，不标在稿件上']));
       expect(plan.notDo.editorial).not.toContain('不读所选范围以外的正文');
     });
   }, 300_000);
@@ -2282,7 +2282,7 @@ describe('the house\'s 可复用工序 on a 当前选区 (Issue #423, S77 deferr
         procedureId: steps.procedureId, versionId: steps.versionId, version: 1, title: '体例线索复核', documentSha256: steps.documentSha256, stopped: false, missing: false, leftOut: [],
       });
       expect(pinned.scope).toEqual({
-        kind: 'selection', label: '当前选区 · 内容块 29–29', selectedRange: { startPosition: 29, endPosition: 29 },
+        kind: 'selection', label: '当前选区 · 段落 29–29', selectedRange: { startPosition: 29, endPosition: 29 },
         selection: { fromBlockId: twentyNine.blockId, toBlockId: twentyNine.blockId },
       });
       expect(pinned.categories.map((category) => category.categoryId)).toEqual([STYLE, PLOT]);

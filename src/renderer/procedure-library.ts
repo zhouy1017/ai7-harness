@@ -1,60 +1,11 @@
 import { PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../shared/protocol/procedures.js';
-import type { PreinstalledProcedureProjection, EditableProcedureProjection, ProcedureDefinitionPin, SaveProcedureDefinitionInput } from '../shared/protocol/procedures.js';
+import type { EditableProcedureProjection, ProcedureDefinitionPin, SaveProcedureDefinitionInput } from '../shared/protocol/procedures.js';
 import type { RendererApi, BookSummaryProjection, BookSummaryCursor } from '../shared/protocol.js';
-import { PROCEDURE_PREDECESSOR_NOTE, PROCEDURE_STATE_LABELS, procedureLine, procedureStagesLine } from './knowledge-base-labels.js';
 import { mountProcedureRecommendation, ProcedureRecommendationSelection } from './procedure-choice.js';
-
-/** The pre-installed library is read-only in F-26a; Book-dependent availability stays on the ordinary task sheet. */
-export function renderProcedureLibrary(procedures: readonly PreinstalledProcedureProjection[]): HTMLElement {
-  const section = document.createElement('div');
-  section.className = 'preinstalled-procedure-library';
-  section.dataset['procedureCount'] = String(procedures.length);
-  const list = document.createElement('ul');
-  list.className = 'knowledge-procedure-list';
-  for (const procedure of procedures) {
-    const item = document.createElement('li');
-    item.dataset['procedureId'] = procedure.procedureId;
-    item.dataset['procedureVersion'] = String(procedure.version);
-    item.dataset['procedureState'] = procedure.state;
-    item.dataset['procedureRuns'] = String(procedure.uses);
-    const pill = document.createElement('span');
-    pill.className = `status-pill procedure-state-${procedure.state}`;
-    pill.textContent = PROCEDURE_STATE_LABELS[procedure.state];
-    const words = document.createElement('span');
-    words.textContent = ` ${procedureLine(procedure)}`;
-    const stages = document.createElement('span');
-    stages.className = 'field-note procedure-stages';
-    stages.textContent = ` · ${procedureStagesLine(procedure)}`;
-    item.append(pill, words, stages);
-    if ((procedure.previousVersions?.length ?? 0) > 0) {
-      const history = document.createElement('details');
-      history.className = 'procedure-previous-versions';
-      const summary = document.createElement('summary');
-      summary.textContent = '历史版本';
-      history.append(summary);
-      for (const previous of procedure.previousVersions ?? []) {
-        const row = document.createElement('p');
-        row.className = 'field-note';
-        row.dataset['procedurePreviousVersion'] = String(previous.version);
-        // The words carry no identifier (LAYER-008); the retained version's digest stays on the row for inspection.
-        row.dataset['procedureDigest'] = previous.digest;
-        row.textContent = `第 ${previous.version} 版 · ${previous.stages.map((stage) => stage.label).join(' → ')}`;
-        history.append(row);
-      }
-      item.append(history);
-    }
-    list.append(item);
-  }
-  const predecessor = document.createElement('p');
-  predecessor.className = 'field-note procedure-predecessor';
-  predecessor.textContent = PROCEDURE_PREDECESSOR_NOTE;
-  section.append(list, predecessor);
-  return section;
-}
 
 /** The form owns only its unsaved values; the service owns versions and selections. */
 export async function mountEditableProcedureLibrary(root: HTMLElement, api: RendererApi,
-  openRun: (book: BookSummaryProjection, kind: string, procedure: ProcedureDefinitionPin) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string): Promise<void> {
+  openRun: (book: BookSummaryProjection, kind: string, procedure: ProcedureDefinitionPin) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string, capturedCatalog?: HTMLElement): Promise<void> {
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
     const result = document.createElement(tag); if (text !== undefined) result.textContent = text; return result;
   };
@@ -63,15 +14,17 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     button.addEventListener('click', () => { button.disabled = true; void Promise.resolve().then(run).catch(showError).finally(() => { button.disabled = false; }); });
     return button;
   };
-  const status = node('p'); status.setAttribute('role', 'status');
+  root.classList.add('procedure-library');
+  const status = node('p', '正在读取工序…'); status.setAttribute('role', 'status');
   const showError = (error: unknown): void => { status.textContent = errorMessage(error, '无法保存工序，请重试。'); };
   const body = node('div'), formSlot = node('div');
+  formSlot.className = 'procedure-form-slot';
   root.replaceChildren(status, body, formSlot);
   const label = (title: string, input: HTMLElement): HTMLLabelElement => { const result = node('label'); result.className = 'review-field'; result.append(node('span', title), input); return result; };
   const pinOf = ({ procedureId, version, digest }: ProcedureDefinitionPin): ProcedureDefinitionPin => ({ procedureId, version, digest });
   const edit = (entry: EditableProcedureProjection, create: boolean, captureRunId?: string): void => {
     const form = node('form'), title = node('input'), instruction = node('textarea');
-    form.dataset['procedureEditor'] = ''; title.dataset['procedureField'] = 'title'; instruction.dataset['procedureField'] = 'instruction';
+    form.className = 'procedure-editor'; form.dataset['procedureEditor'] = ''; title.dataset['procedureField'] = 'title'; instruction.dataset['procedureField'] = 'instruction';
     title.value = create ? `${entry.document.title} · 自定义` : entry.document.title;
     title.required = true; title.maxLength = 480; instruction.value = entry.document.editorInstruction;
     const local = !entry.document.stages.some((stage) => procedureStageUsesModel(stage, entry.document.stages));
@@ -131,13 +84,13 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     return books.filter((book) => book.manuscriptState === 'populated');
   };
   const chooseBook = async (entry: EditableProcedureProjection, pin: ProcedureDefinitionPin, bookId?: string): Promise<void> => {
-    const chooser = node('div'), select = node('select'); select.dataset['procedureField'] = 'book';
+    const chooser = node('div'), select = node('select'); chooser.className = 'procedure-book-chooser'; select.dataset['procedureField'] = 'book';
     const books = await readBooks();
     for (const book of books) select.append(new Option(book.title, book.bookId));
     if (bookId !== undefined) select.value = bookId;
     // A composite (Issue #1173) is chosen for each of its members' kinds and runs as one 审阅 of the chosen Book.
-    chooser.append(label('选择图书', select), node('p', entry.document.members === undefined ? '为此书的这类任务选择精确工序版本；打开任务后仍需准备和开始。'
-      : '为此书选择这个组合工序版本：打开审阅后按它的成员依次准备；确定性检查选项仍由你明确选择，查看计划后再开始。'), action('打开任务', async () => {
+    chooser.append(label('选择图书', select), node('p', entry.document.members === undefined ? '为所选图书使用这个工序版本，在任务页选择范围即可开始。'
+      : '为所选图书使用这个组合工序版本；可在审阅页调整类别和检查选项后开始。'), action('打开任务', async () => {
       const book = books.find((item) => item.bookId === select.value); if (book === undefined) return;
       await api.procedureLibrary({ action: 'select', bookId: book.bookId, procedure: pin }); await openRun(book, entry.executorKind, pin);
     }));
@@ -164,16 +117,16 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
   });
   recommendationBook.addEventListener('change', () => recommendation.refreshIntent());
   const load = async (): Promise<void> => {
-    const projection = await api.procedureLibrary({ action: 'inspect' });
+    const [projection, books] = await Promise.all([api.procedureLibrary({ action: 'inspect' }), readBooks()]);
     current = [...projection.procedures];
-    body.replaceChildren();
+    const nextBody = node('div'); nextBody.className = 'procedure-catalog';
     const template = node('select'); template.dataset['procedureField'] = 'template';
     for (const entry of projection.procedures) template.append(new Option(entry.document.title, entry.procedureId));
-    body.append(label('新建工序的任务类型', template), action('新建工序', () => {
+    nextBody.append(label('新建工序的任务类型', template), action('新建工序', () => {
       const entry = projection.procedures.find((item) => item.procedureId === template.value); if (entry) edit(entry, true);
     }));
     const list = node('ul'); list.className = 'knowledge-procedure-list';
-    body.append(list);
+    nextBody.append(list);
     for (const entry of projection.procedures) {
       const card = node('li'); card.dataset['procedureId'] = entry.procedureId; card.dataset['procedureVersion'] = String(entry.version);
       const versions = node('select');
@@ -197,22 +150,24 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
       }
       list.append(card);
     }
-    const predecessor = node('p', PROCEDURE_PREDECESSOR_NOTE); predecessor.className = 'field-note procedure-predecessor'; body.append(predecessor);
-    const books = await readBooks();
+    if (capturedCatalog !== undefined) nextBody.append(capturedCatalog);
     if (books.length > 0) {
       const chosen = recommendationBook.value;
       recommendationBook.replaceChildren(...books.map((book) => new Option(book.title, book.bookId)));
       if (books.some((book) => book.bookId === chosen)) recommendationBook.value = chosen;
-      body.append(label('工序推荐的图书', recommendationBook), recommendationSlot);
+      nextBody.append(label('工序推荐的图书', recommendationBook), recommendationSlot);
     }
     if (projection.completedRuns.length > 0) {
       const runs = node('select'); runs.dataset['procedureField'] = 'capture-run';
       for (const run of projection.completedRuns) runs.append(new Option(`${run.bookTitle} · ${run.title}`, run.runId));
-      body.append(label('已完成的运行', runs), action('从本次运行捕获', () => {
+      nextBody.append(label('已完成的运行', runs), action('从本次运行捕获', () => {
         const run = projection.completedRuns.find((item) => item.runId === runs.value)!;
         edit({ ...run.procedure, document: run.document, executorKind: run.executorKind, preInstalled: false, stopped: false, sourceRunId: run.runId, versions: [run.procedure], documents: [run.document], uses: 0 }, true, run.runId);
       }));
     }
+    body.replaceChildren(nextBody);
+    status.textContent = '';
   };
+  if (capturedCatalog !== undefined) body.append(capturedCatalog);
   await load();
 }

@@ -1,4 +1,3 @@
-import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
 import { createSaveMenu } from './save-menu.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
@@ -6,7 +5,6 @@ import { PARAGRAPH_ANALYSIS_WORDS } from './paragraph-analysis-labels.js';
 import type { ParagraphAnalysisProjection } from '../shared/protocol.js';
 import { consumeReturnPlace, preserveReturnPlace, readReturnPlace, type ReadingPlace } from './reading-return.js';
 import type {
-  BookWorkOverviewProjection,
   ProposeSeriesKnowledgeInput,
   AskAboutSelectionInput,
   PolishSelectionInput,
@@ -19,10 +17,8 @@ import type {
   ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
 import { MAX_REPLACEMENT_EXCLUSIONS, MILESTONE_PURPOSE_KINDS, MILESTONE_PURPOSE_LABELS, type MilestonePurposeKind } from '../shared/protocol.js';
-import { SOURCES_ENTRY_LABEL, SOURCES_STATUS } from './research-evidence-labels.js';
 import { SEARCH_STALE_LINE, replacementRefusal, searchQueryRefusal } from './manuscript-search-labels.js';
 import { shortcutHint } from './commands.js';
-import { EVALUATION_STATUS, EVALUATION_TITLE } from './evaluation-labels.js';
 import { RETURN_CHIP_TITLE, returnChipArrived, returnChipLabel, returnChipPlace } from './task-panel-labels.js';
 import {
   DOCUMENT_ACTION_LABELS,
@@ -34,8 +30,6 @@ import {
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
 import {
-  DELIVERABLES_ENTRY_LABEL,
-  DELIVERABLES_STATUS_LINES,
   MILESTONE_FORM_WORDS,
   MILESTONE_PURPOSE_NOTE,
   milestoneFormBlockers,
@@ -53,7 +47,6 @@ import type { ComposerRange } from './task-panel.js';
 import { mountPositionRail, type PositionRail } from './position-rail.js';
 import type { ReviewFocus } from './review-workspace.js';
 import type { mountTaskDrawer } from './task-drawer.js';
-import { REVIEW_ENTRY_LABEL, REVIEW_WORK_GROUP_LABEL } from './review-labels.js';
 import type { ShellPreferences } from './shell.js';
 import type { RendererApi } from '../shared/protocol.js';
 import type { CommandDispatcher } from './commands.js';
@@ -115,13 +108,9 @@ interface ManuscriptScreenOptions {
   selectionProcedureOffer(): Promise<SelectionProcedureEntry[]>;
   prepareSelectionTask(bookId: string, choice: SelectionTaskChoice, anchor: { readonly blockId: string }, chosenApart: ReadonlyArray<string>, returnFocus: () => HTMLElement | null): Promise<boolean>;
   renderEditorWindow(initialWindow: ManuscriptWindowProjection, bookTitle: string, recoveryAttentionId?: string, entryNotice?: string, openMarkId?: string, reimport?: ManuscriptReimportCommitProjection, productionDocument?: ProductionDocumentContext): void;
-  renderBookOverview(overview: BookWorkOverviewProjection): void;
   renderBookAnalysis(bookId: string, bookTitle: string, revisionId?: string, focus?: { tab: 'entities' | 'events' | 'relationships' | 'settings' }): void;
-  renderBookSources(bookId: string, bookTitle: string): void;
   renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null): void;
   renderBookDeliverables(bookId: string, bookTitle: string): void;
-  renderBookEvaluation(bookId: string, bookTitle: string): void;
-  renderBookFindings(bookId: string, bookTitle: string): void;
   renderProposalConflict(target: { bookId: string; manuscriptId: string; branchId: string; markId: string }, bookTitle: string): void;
   renderProposalWorkspace(input: { manuscriptId: string; branchId: string; resultId: string | null }, bookId: string, bookTitle: string): Promise<void>;
   returnToRecoveryComparison(attentionId: string): Promise<void>;
@@ -193,11 +182,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const { api, initialWindow, bookTitle, recoveryAttentionId, entryNotice, openMarkId, productionDocument,
     persistenceStatus, viewPreferences, preferences, commandDispatcher, taskDrawer, setCloseRisk,
     recentlyActivatedControl, awaitServiceJob, composerRangeOf, selectionTaskOffer, selectionProcedureOffer,
-    prepareSelectionTask, renderEditorWindow, renderBookOverview, renderBookAnalysis,
-    renderBookSources, renderBookReview, renderBookDeliverables, renderBookEvaluation, renderBookFindings,
+    prepareSelectionTask, renderEditorWindow, renderBookAnalysis, renderBookReview, renderBookDeliverables,
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
   const entryNoticeTimers = new Set<number>();
+  let viewportObserver: ResizeObserver | undefined;
   /**
    * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
    * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
@@ -297,62 +286,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
   const retryAuthoritativeRefreshButton = button('重试权威刷新', 'quiet', () => void retryAuthoritativeRefresh());
   retryAuthoritativeRefreshButton.hidden = true;
-  const backToOverview = button('返回图书工作概览', 'secondary', async () => {
-    backToOverview.disabled = true;
-    setStatus('正在保存并返回图书工作概览…', 'busy');
-    try {
-      if (!(await settleLocalEdit())) {
-        backToOverview.disabled = false;
-        return;
-      }
-      // Leaving the manuscript is the last moment the caret is still where the editor left it, so the
-      // position is taken here, and taken before the overview is read, so the 上次位置 the overview
-      // states is the one the editor just left rather than the one before it (V2-UX-RET-002).
-      await rememberEntryPosition();
-      const overview = await api.getBookOverview({ bookId: currentWindow.bookId, historyCursor: null });
-      if (destroyed) return;
-      renderBookOverview(overview);
-    } catch (error) {
-      backToOverview.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法返回图书工作概览。'), 'error');
-    }
-  });
-  const openAnalysis = button('分析', 'secondary', async () => {
-    openAnalysis.disabled = true;
-    setStatus('正在保存并打开分析…', 'busy');
-    try {
-      if (!(await settleLocalEdit())) {
-        openAnalysis.disabled = false;
-        return;
-      }
-      // Leaving for 分析 is leaving the manuscript, so the position is taken exactly as it is for 工作概览.
-      await rememberEntryPosition();
-      if (destroyed) return;
-      renderBookAnalysis(currentWindow.bookId, bookTitle);
-    } catch (error) {
-      openAnalysis.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开分析。'), 'error');
-    }
-  });
-  openAnalysis.dataset['recordsDestination'] = 'analysis';
-  // 来源与证据 (Issue #425, S70; IA-012) leaves the manuscript as 分析 does: local edits settled and the position taken first.
-  const openSources = button(SOURCES_ENTRY_LABEL, 'secondary', async () => {
-    openSources.disabled = true;
-    setStatus(SOURCES_STATUS.leaving, 'busy');
-    try {
-      if (!(await settleLocalEdit())) {
-        openSources.disabled = false;
-        return;
-      }
-      await rememberEntryPosition();
-      if (destroyed) return;
-      renderBookSources(currentWindow.bookId, bookTitle);
-    } catch (error) {
-      openSources.disabled = false;
-      setStatus(rendererErrorMessage(error, SOURCES_STATUS.openFailed), 'error');
-    }
-  });
-  openSources.dataset['recordsDestination'] = 'sources';
   // Leaving for 审阅 is leaving the manuscript too: local edits are settled and the position is taken
   // first, exactly as for 分析. A Mark Card's 查看任务 leaves the same way, for its Review Run and finding.
   const leaveForReview = async (focus: ReviewFocus | null): Promise<boolean> => {
@@ -368,10 +301,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       return false;
     }
   };
-  const openReview = button(REVIEW_ENTRY_LABEL, 'secondary', async () => {
-    openReview.disabled = true;
-    if (!(await leaveForReview(null))) openReview.disabled = authoritativeMutationBusy();
-  });
   // 解决冲突… leaves the manuscript for 稿件冲突 (Issue #57): local edits are settled and the position taken
   // first, so the comparison reads the durable text and 返回稿件 comes back to where the editor was.
   const leaveForConflict = async (markId: string): Promise<void> => {
@@ -385,45 +314,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       setStatus(rendererErrorMessage(error, '无法打开稿件冲突。'), 'error');
     }
   };
-  openReview.dataset['workDestination'] = 'review';
-  // Leaving for 交付物 is leaving the manuscript as well: local edits are settled and the position taken first.
-  const openDeliverables = button(DELIVERABLES_ENTRY_LABEL, 'secondary', async () => {
-    openDeliverables.disabled = true;
-    setStatus(DELIVERABLES_STATUS_LINES.leaving, 'busy');
+  // The sidebar owns page navigation. The save menu can still reach the Book's deliverables.
+  const leaveForDeliverables = async (): Promise<void> => {
     try {
-      if (!(await settleLocalEdit())) {
-        openDeliverables.disabled = authoritativeMutationBusy();
-        return;
-      }
+      if (!(await settleLocalEdit())) return;
       await rememberEntryPosition();
-      if (destroyed) return;
-      renderBookDeliverables(currentWindow.bookId, bookTitle);
-    } catch (error) {
-      openDeliverables.disabled = authoritativeMutationBusy();
-      setStatus(rendererErrorMessage(error, DELIVERABLES_STATUS_LINES.openFailed), 'error');
-    }
-  });
-  openDeliverables.dataset['workDestination'] = 'deliverables';
-  if (isDocument) openDeliverables.textContent = DOCUMENT_ACTION_LABELS.back;
-  // 评估 (Issue #429, S81a review; IA-012, editor-surfaces §0.3) sits between 审阅 and 交付物, and leaves the manuscript as
-  // they do: local edits settled and the position taken first, and a refusal keeps the manuscript on screen.
-  const openEvaluation = button(EVALUATION_TITLE, 'secondary', async () => {
-    openEvaluation.disabled = true;
-    setStatus(EVALUATION_STATUS.leaving, 'busy');
-    try {
-      if (!(await settleLocalEdit())) {
-        openEvaluation.disabled = authoritativeMutationBusy();
-        return;
-      }
-      await rememberEntryPosition();
-      if (destroyed) return;
-      renderBookEvaluation(currentWindow.bookId, bookTitle);
-    } catch (error) {
-      openEvaluation.disabled = authoritativeMutationBusy();
-      setStatus(rendererErrorMessage(error, EVALUATION_STATUS.openFailed), 'error');
-    }
-  });
-  openEvaluation.dataset['workDestination'] = 'evaluation';
+      if (!destroyed) renderBookDeliverables(currentWindow.bookId, bookTitle);
+    } catch (error) { setStatus(rendererErrorMessage(error, '无法打开交付物。'), 'error'); }
+  };
   const toolbarActions = element('div', 'button-row');
   if (recoveryAttentionId) {
     toolbarActions.append(button('返回恢复待确认', 'secondary', async () => {
@@ -435,30 +333,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       }
     }));
   }
-  // IA-012's `资料与记录` group, as much of it as this surface owns: 工作概览 is reached from here,
-  // which is what makes it a destination rather than the way in. The action keeps its own label so
-  // the group names where it leads without renaming what it does.
-  const recordsGroup = element('nav', 'book-records-group');
-  recordsGroup.setAttribute('aria-label', '资料与记录');
-  recordsGroup.append(element('span', 'section-label', '资料与记录'), ...(isDocument ? [] : [openAnalysis, openSources]), backToOverview);
-  const processingGroup = element('nav', 'book-processing-group');
-  processingGroup.setAttribute('aria-label', '处理');
-  const openFindings = button('发现', 'secondary', async () => {
-    try {
-      if (!(await settleLocalEdit())) return;
-      await rememberEntryPosition();
-      if (destroyed) return;
-      renderBookFindings(currentWindow.bookId, bookTitle);
-    } catch (error) { setStatus(rendererErrorMessage(error, FINDINGS_CENTER_WORDS.openFailed), 'error'); }
-  });
-  openFindings.dataset['workDestination'] = 'findings';
-  processingGroup.append(element('span', 'section-label', '处理'), openFindings);
-  // IA-006's `工作` group (稿件 / 审阅 / 评估 / 交付物): 审阅 (editor-surfaces §4), 评估 (§5) and 交付物 (§9) — a document has
-  // only its way back. They are destinations of the Book beside 资料与记录, never entries on the right edge, whose three
-  // entries are 导航 / 分析 / 任务.
-  const workGroup = element('nav', 'book-work-group');
-  workGroup.setAttribute('aria-label', REVIEW_WORK_GROUP_LABEL);
-  workGroup.append(element('span', 'section-label', REVIEW_WORK_GROUP_LABEL), ...(isDocument ? [] : [openReview, openEvaluation]), openDeliverables);
   // 保存为版本 (Issue #415): a document's working text becomes its next version; the manuscript's milestones stay its own.
   const saveVersion = button(DOCUMENT_ACTION_LABELS.saveVersion, 'secondary', () => void saveDocumentVersion());
   saveVersion.dataset['documentAction'] = 'saveVersion';
@@ -474,7 +348,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     } catch (error) { setStatus(rendererErrorMessage(error, '无法发起交付物任务。'), 'error'); }
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
-  toolbarActions.append(workGroup, ...(isDocument ? [] : [processingGroup]), recordsGroup, undo, redo, save, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.classList.add('editor-edit-actions');
+  toolbarActions.append(undo, redo, save, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -621,12 +496,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     milestoneReason,
   );
   navigator.append(outlineSection, searchSection);
-  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => openDeliverables.click());
+  const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';
   analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);
   analysisPanel.hidden = true;
-  // The outline and the search are one 导航 panel, opened on demand over the manuscript's right side and
+  // The outline and the search are one 导航 panel, opened on demand beside the manuscript and
   // closed by default, so the manuscript stays the central object (V2-UX-ED-015).
   navigator.id = 'manuscript-navigation-panel';
   navigator.hidden = true;
@@ -954,12 +829,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const syncAuthoritativeMutationControls = (): void => {
     const busy = authoritativeMutationBusy();
     editorHost.dataset['authoritativeMutation'] = authoritativeMutation ? 'true' : 'false';
-    backToOverview.disabled = busy;
-    openAnalysis.disabled = busy;
-    openReview.disabled = busy;
-    openEvaluation.disabled = busy;
-    openDeliverables.disabled = busy;
-    openFindings.disabled = busy;
     undo.disabled = busy;
     redo.disabled = busy;
     positionRail.disabled = busy;
@@ -1906,7 +1775,26 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   milestoneName.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
   for (const radio of purposeRadios) radio.addEventListener('change', () => syncMilestoneForm(authoritativeMutationBusy()));
   customPurpose.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
+  let viewportWidth = editorWindow.clientWidth;
+  let viewportHeight = editorWindow.clientHeight;
+  let reflowScroll: { top: number } | undefined;
+  const noteViewportResize = (): void => {
+    if (viewportWidth === editorWindow.clientWidth && viewportHeight === editorWindow.clientHeight) return;
+    viewportWidth = editorWindow.clientWidth;
+    viewportHeight = editorWindow.clientHeight;
+    const mark = { top: editorWindow.scrollTop };
+    reflowScroll = mark;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (reflowScroll === mark) reflowScroll = undefined;
+    }));
+  };
+  viewportObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(noteViewportResize);
+  viewportObserver?.observe(editorWindow);
   editorWindow.addEventListener('scroll', () => {
+    // Panel/status reflow can clamp the viewport at an edge. That scroll did not ask to change windows.
+    // Read dimensions here as well: the browser may deliver scroll before its ResizeObserver callback.
+    noteViewportResize();
+    if (reflowScroll?.top === editorWindow.scrollTop) return;
     // Paging at an edge answers the reader's scroll. A position the editor restored itself — after an
     // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests
     // at the pane's top or bottom: the guards below lapse as soon as their operation ends, which can be
@@ -2192,6 +2080,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     for (const timer of entryNoticeTimers) window.clearTimeout(timer);
     entryNoticeTimers.clear();
     if (reviewMarksTimer !== undefined) window.clearTimeout(reviewMarksTimer);
+    viewportObserver?.disconnect();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
     if (milestonePersistenceTimer !== undefined) window.clearTimeout(milestonePersistenceTimer);
     if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);

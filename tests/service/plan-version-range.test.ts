@@ -80,7 +80,7 @@ function intentRowRange(taskIntentId: string): BaselineAnalysisSelectedRange | n
 }
 
 const segments = (range: BaselineAnalysisSelectedRange): string => `第 ${range.startPosition}–${range.endPosition} 段`;
-const blocks = (range: BaselineAnalysisSelectedRange): string => `内容块 ${range.startPosition}–${range.endPosition}`;
+const blocks = (range: BaselineAnalysisSelectedRange): string => `段落 ${range.startPosition}–${range.endPosition}`;
 
 describe('a Task\'s range reads as its latest plan version (Issue #288 甲)', () => {
   it('names the revised range on every surface while the Task Intent row keeps the first', async () => {

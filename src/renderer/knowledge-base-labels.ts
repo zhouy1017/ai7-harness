@@ -9,7 +9,6 @@ import type {
   MaterialIndexReason,
   MaterialSegmentsPageProjection,
   KnowledgeArtifactProjection,
-  PreinstalledProcedureProjection,
   ExemplarBookProjection,
   ExemplarProjection,
   ReadersReportExemplarProjection,
@@ -282,20 +281,6 @@ export function exemplarSkippedNote(skipped: ReadonlyArray<string>): string {
 
 export const PROCEDURES_HEADING = '专家经验工序';
 export const RULES_HEADING = '快速开始 · 默认执行规则';
-export const PROCEDURE_STATE_LABELS: Readonly<Record<PreinstalledProcedureProjection['state'], string>> = { enabled: '已启用' };
-/** ADR 0095 §1: a Captured Procedure is the first, review-only form of the Procedure Definition, still readable and runnable. */
-export const PROCEDURE_PREDECESSOR_NOTE = '下方的可复用工序是审阅专用前身，仅用于审阅；已保存的版本仍可查看和运行。';
-
-/** One pre-installed 工序 (Issue #1081, F-26a): what it does, its version and origin, and how many approved runs it served. */
-export function procedureLine(procedure: PreinstalledProcedureProjection): string {
-  return `${procedure.title} · 第 ${procedure.version} 版 · 预装 · 已使用 ${procedure.uses} 次`;
-}
-
-/** Its stages in the order a run takes them, by their product-built names. */
-export function procedureStagesLine(procedure: PreinstalledProcedureProjection): string {
-  return procedure.stages.map((stage) => stage.label).join(' → ');
-}
-
 /**
  * The native artifact in the house's words (editor-surfaces §10): 本社方案 vN in its lifecycle — as the Book card reads it —
  * and how many Books enabled it. Its identity and version identifiers stay in 查看技术详情 (ADR 0071 §1).

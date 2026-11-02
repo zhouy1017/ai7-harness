@@ -121,7 +121,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       projection.launchPolicy.integrityState === 'verified' ? 'success-note' : 'attention-note',
       projection.launchPolicy.integrityState === 'verified'
         ? launchPolicyIntegritySentence(projection.launchPolicy.providerProcessing.label)
-        : '策略完整性：验证未通过。Provider Processing 保持拒绝，不会进行模型传输。',
+        : '模型服务暂不可用，请检查设置后重试。',
     );
     policyIntegrity.dataset['policyIntegrityState'] = projection.launchPolicy.integrityState;
     policy.append(

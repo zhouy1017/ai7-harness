@@ -651,7 +651,7 @@ export function fixedTaskPlan(input: {
     participation: { during: NO_PARTICIPATION, after: null },
     service: {
       role: roleLabel(provider.role),
-      provider: `${providerLabel(provider.providerId)} · ${provider.modelId}`,
+      provider: providerLabel(provider.providerId),
       decision: pin.decision === 'deny'
         ? `远程模型服务被拒绝（${pin.operationalScope} · ${pin.version}：0 次实时传输）；这项任务只记录，不派发`
         : `远程模型服务在 ${pin.operationalScope} · ${pin.version} 下仅限资格；这项任务只记录，不派发`,
@@ -886,7 +886,7 @@ export function readSpansLabel(spans: ReadonlyArray<readonly [number, number]>):
     if (last !== undefined && start <= last[1] + 1) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);
   }
-  return `内容块 ${merged.map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、')}`;
+  return `段落 ${merged.map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、')}`;
 }
 
 /** The spans a frozen plan's records read again: its reuse or scope plan's recomputed units, with the manifest's overlap. */
@@ -988,13 +988,13 @@ export function baselineAnalysisPlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: null },
     service: {
       role: roleLabel(provider.role),
-      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
+      provider: providerLabel(live ? route.kind : remote.providerId) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       // The ceiling the Run is held to, the launch's or the editor's (Issue #51, S16a), is a ceiling and never a prediction.
       // It is evaluated before each request (MODEL-016), so the turn under way when it is reached still counts: nothing
@@ -1050,9 +1050,9 @@ export function baselineAnalysisPlan(input: {
       { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
       { key: 'task-input-checkpoint', label: '任务输入修订版用途', value: `${checkpoint.purpose} · ${checkpoint.createdForDirtyJournal ? '由已确认编辑创建' : '复用当前精确修订版'} · 修订日志序号 ${checkpoint.journalSequence}` },
-      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
-      { key: 'manifest-units', label: '分析单元', value: manifest.units.map((unit) => `单元 ${unit.ordinal} · 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`).join('；') },
-      ...(range === null ? [] : [{ key: 'selected-range', label: '所选范围', value: `内容块 ${range.startPosition}–${range.endPosition}` }]),
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个段落 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'manifest-units', label: '分析单元', value: manifest.units.map((unit) => `单元 ${unit.ordinal} · 段落 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`).join('；') },
+      ...(range === null ? [] : [{ key: 'selected-range', label: '所选范围', value: `段落 ${range.startPosition}–${range.endPosition}` }]),
       ...(update === null || update.reusePlan === null ? [] : [
         { key: 'reuse-plan', label: '复用计划', value: `${update.reusePlanDigest ?? ''} · ${update.reusePlan.units.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}（${unit.reason}）`).join('；')}` },
         { key: 'reuse-plan-predecessors', label: '前一修订版单元去向', value: update.reusePlan.predecessorUnits.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}`).join('；') },
@@ -1235,13 +1235,13 @@ export function initialEvaluationPlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中从 AI7 初评开始新的一版，再按你的判断定分' },
     service: {
       role: roleLabel(provider.role),
-      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
+      provider: providerLabel(live ? route.kind : remote.providerId) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1282,7 +1282,7 @@ export function initialEvaluationPlan(input: {
       { key: 'goal', label: '固定任务目标', value: intent.goal },
       { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
-      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个段落 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
         : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
@@ -1384,19 +1384,19 @@ export function readersReportPlan(input: {
       notRead: NOT_READ,
     },
     steps: [
-      { id: 'units', label: '逐章读取，找出可以引用的段落', result: '每处段落引用它所在的内容块', removable: false, removed: false },
+      { id: 'units', label: '逐章读取，找出可以引用的段落', result: '每处引用都能回到原文位置', removable: false, removed: false },
       { id: 'reduction', label: '按模板写出审稿意见', result: '总体评价、主要优点、主要问题、修改建议、结论', removable: false, removed: false },
     ],
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中打开草稿，在稿件编辑面上修改，保存为版本后可导出为 DOCX' },
     service: {
       role: roleLabel(provider.role),
-      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
+      provider: providerLabel(live ? route.kind : remote.providerId) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与评估记录发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与评估记录发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1442,7 +1442,7 @@ export function readersReportPlan(input: {
       { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
       { key: 'template', label: '审稿意见模板', value: `${templateLabel} · ${task.template}` },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
-      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个段落 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
         : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
@@ -1670,7 +1670,7 @@ export function writingPlan(input: {
       notRead: NOT_READ,
     },
     steps: [
-      { id: 'units', label: '逐章读取，找出文档可以取用的看点、人物与主题', result: '每处段落引用它所在的内容块', removable: false, removed: false },
+      { id: 'units', label: '逐章读取，找出文档可以取用的看点、人物与主题', result: '每处引用都能回到原文位置', removable: false, removed: false },
       { id: 'reduction', label: `依据参考材料写出「${typeLabel}」`, result: '文档的标题与各部分；范例只参照，不复制', removable: false, removed: false },
     ],
     participation: {
@@ -1679,13 +1679,13 @@ export function writingPlan(input: {
     },
     service: {
       role: roleLabel(provider.role),
-      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
+      provider: providerLabel(live ? route.kind : remote.providerId) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与参考材料发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与参考材料发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1732,7 +1732,7 @@ export function writingPlan(input: {
       { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
       { key: 'document-type', label: '文档类型', value: `${typeLabel} · ${task.type.typeId}` },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
-      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个段落 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
         : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },
@@ -1842,13 +1842,13 @@ export function evaluationRewritePlan(input: {
     participation: { during: boundary !== null && boundary.participation.expected ? boundary.participation.statement : NO_PARTICIPATION, after: '在「评估」中对照重写前后的评语，决定采用还是放弃' },
     service: {
       role: roleLabel(provider.role),
-      provider: (live ? `${route.kind} · ${route.model}` : `${providerLabel(remote.providerId)} · ${remote.modelId}`) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
+      provider: providerLabel(live ? route.kind : remote.providerId) + (provider.webToolsBackend === undefined ? '' : ` · 联网检索 · ${SEARCH_BACKENDS.find((entry) => entry.id === provider.webToolsBackend!.backendId)?.displayName ?? provider.webToolsBackend.backendId}`),
       decision: researchDecisionLine(live
         ? liveDecision(remote.providerProcessing)
         : route.kind === 'none'
           ? '远程模型服务被拒绝，且没有可执行的本地路由；授权后会在派发前阻止'
           : `远程模型服务被拒绝（${remote.providerProcessing.operationalScope} · ${remote.providerProcessing.version}：0 次实时传输）；由 AI7 本地确定性模型适配器执行`, projection.taskOutcome?.report, provider.webToolsBackend),
-      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${route.kind} · ${route.model}` : NOTHING_SENT,
+      send: live ? `所读范围内的稿件正文与这一版评估的评分和评语发往 ${providerLabel(route.kind)}` : NOTHING_SENT,
       sendCategory: outboundLabel(provider.outboundDataCategory),
       usage: ceiling !== 'unset' ? `达到 ${groupedCount(ceiling.maxTotalTokens)} tokens 后不再发送新的请求（${units} 个阅读范围）` : live && remote.providerProcessing.operationalScope === 'ordinary-production' ? PRODUCTION_UNSET_USAGE : NO_USAGE,
       usageIsCeiling: ceiling !== 'unset',
@@ -1893,7 +1893,7 @@ export function evaluationRewritePlan(input: {
       { key: 'goal', label: '固定任务目标', value: intent.goal },
       { key: 'expected-outcome', label: '预期结果类别', value: intent.expectedOutcome },
       { key: 'task-input-revision', label: '任务输入修订版', value: `${checkpoint.revisionLabel} · ${checkpoint.revisionId} · ${checkpoint.revisionDigest}` },
-      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
+      { key: 'coverage-manifest', label: '覆盖清单', value: `${units} 个分析单元 · ${manifest.sectionCount} 个结构段 · ${manifest.totalBlocks} 个段落 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` },
       { key: 'execution-route', label: '执行路由', value: route.kind === 'none'
         ? `none · ${route.reason}`
         : route.kind !== 'ai7-local-deterministic' ? `${route.kind} · ${route.model} · ${route.endpoint}` : `${route.kind} · ${route.model} · 夹具 ${route.fixtureIdentity} · ${route.fixtureSha256}` },

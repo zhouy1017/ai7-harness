@@ -105,7 +105,9 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
   background: var(--shell);
 }
 
@@ -197,7 +199,7 @@ body { padding-left: var(--sidebar-width); }
 .settings-coming-soon { padding: .1rem .55rem; border: 1px dashed var(--boundary-strong); border-radius: 999px; color: var(--text-subdued); font-size: .82rem; font-weight: 700; }
 .library-home { display: grid; grid-template-columns: 1.3fr .7fr; gap: 1.5rem 3rem; align-items: center; }
 
-.screen { width: min(1280px, calc(100% - 4rem)); margin: 2rem auto 5rem; }
+.screen { flex: 1 0 auto; width: min(1280px, calc(100% - 4rem)); margin: 2rem auto 1rem; }
 .panel { background: var(--surface); border: 1px solid var(--boundary); border-radius: 16px; box-shadow: 0 14px 40px var(--shadow); padding: clamp(1.5rem, 3vw, 2.5rem); }
 .hero { display: grid; grid-template-columns: 1.3fr .7fr; gap: 3rem; align-items: center; min-height: 420px; }
 .hero h2, .panel h2 { margin: 0 0 .7rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 2rem; }
@@ -585,7 +587,6 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-drawer[hidden] { display: none; }
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
-  body[data-task-drawer="open"] .status-bar { right: calc(var(--task-drawer-width) + 1.2rem); }
   .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
 }
 .task-drawer-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; padding: .55rem .8rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
@@ -1232,7 +1233,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 /* A Production Document's surface (DELIV-002): the 工作流程 column stands beside the text on a wide window and after it
    on a narrow one, so a 200% zoom never scrolls sideways. */
 .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem) 4.75rem; }
-.document-lens { min-width: 0; padding: 1rem; overflow-y: auto; border-left: 1px solid var(--boundary); background: var(--surface-subdued); overflow-wrap: anywhere; }
+.document-lens { grid-column: 2; grid-row: 1; min-height: 0; min-width: 0; padding: 1rem; overflow-y: auto; border-left: 1px solid var(--boundary); background: var(--surface-subdued); overflow-wrap: anywhere; }
 .document-lens h3 { margin: .8rem 0 0; font-size: 1rem; }
 .document-lens > .section-label { margin: 0; }
 .document-lens p { margin: .4rem 0 0; }
@@ -1414,7 +1415,13 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .completion .button-row { justify-content: center; }
 .record-detail { margin: 1.5rem auto 0; max-width: 700px; text-align: left; }
 
-.editor-shell { position: relative; padding: 0; overflow: hidden; }
+/* #1287: a single viewport for the editor; only the text and supporting regions scroll. */
+body:has(#screen[data-screen="editor"]) { height: 100dvh; min-height: 0; overflow: hidden; }
+body:has(#screen[data-screen="editor"]) .context-header { flex: none; }
+#screen[data-screen="editor"] { flex: 1 1 0; min-height: 0; width: calc(100% - 1.5rem); margin: .75rem auto 0; }
+.editor-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 0; overflow: hidden; container-type: inline-size; }
+.editor-shell > :not(.editor-workspace) { flex: none; }
+.editor-shell > .editor-identities { max-height: 20%; overflow: auto; }
 /* V2-UX-COPY-015: the entry notice floats over the surface instead of taking a row in it, so the
    manuscript below is already laid out as it will stay once the notice removes itself. It never takes
    the pointer and it settles nothing, so ignoring it costs the editor no decision. */
@@ -1424,23 +1431,23 @@ legend { margin-bottom: .7rem; font-weight: 800; }
   box-shadow: 0 8px 28px var(--shadow); color: var(--text); line-height: 1.55; text-align: center;
   pointer-events: none;
 }
-.editor-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 1rem 1.25rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
-.editor-toolbar h2 { margin: 0; font-size: 1.25rem; }
+.editor-toolbar { display: flex; justify-content: space-between; align-items: center; gap: .5rem 1rem; padding: .6rem 1rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
+.editor-toolbar > div:first-child { min-width: 0; }
+.editor-toolbar .section-label { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-toolbar h2 { margin: 0; font-size: 1.1rem; }
+.editor-toolbar .editor-edit-actions { flex-wrap: nowrap; white-space: nowrap; }
 .editor-toolbar .button-row { margin-top: 0; flex-shrink: 0; }
-/* IA-012's `资料与记录` group label sits beside the action it leads to, not above it, so the toolbar
-   keeps one row at full width and wraps with the rest of the actions below 760 px. IA-006's `工作`
-   group (审阅) is drawn the same way beside it. */
-.book-records-group, .book-work-group { display: inline-flex; align-items: center; gap: .5rem; }
-.book-records-group .section-label, .book-work-group .section-label { margin: 0; }
 .editor-meta { display: flex; flex-wrap: wrap; gap: .55rem 1rem; margin-top: .35rem; color: var(--text-subdued); font-size: .82rem; }
-/* The manuscript is the central object; the right edge carries three entries and the one whole-manuscript
-   rail, and the 导航 panel opens over the manuscript's right side on demand (V2-UX-ED-015). */
-.editor-workspace { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 4.75rem; min-height: 620px; }
-.manuscript-navigator { position: absolute; top: 0; right: 4.75rem; bottom: 0; z-index: 5; width: var(--supporting-effective-width); min-width: 0; padding: 1rem; overflow-y: auto; border-left: 1px solid var(--boundary); background: var(--surface-subdued); box-shadow: -14px 0 30px var(--shadow); }
+/* Supporting panels occupy their own grid cell, never the manuscript or its mark cards. */
+.editor-workspace { position: relative; display: grid; flex: 1 1 0; grid-template-columns: minmax(0, 1fr) 4.75rem; grid-template-rows: minmax(0, 1fr); min-height: 0; overflow: hidden; }
+.editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) var(--supporting-effective-width) 4.75rem; }
+.manuscript-surface { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.manuscript-navigator { grid-column: 2; grid-row: 1; position: relative; width: auto; min-width: 0; min-height: 0; padding: 1rem; overflow: auto; border-left: 1px solid var(--boundary); background: var(--surface-subdued); }
 .manuscript-navigator[hidden] { display: none; }
-/* #952: the analysis surface occupies the existing supporting slot; region sizing belongs to 12a. */
-.paragraph-analysis-panel { width: var(--supporting-effective-width); }
 .paragraph-analysis-panel p, .book-findings article { overflow-wrap: anywhere; }
+.editor-edge { grid-column: -2; grid-row: 1 / -1; min-height: 0; }
+.editor-workspace.document-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-rows: minmax(0, 1fr) minmax(0, 11rem); }
+.document-workspace:has(> .manuscript-navigator:not([hidden])) > .document-lens { grid-column: 1 / -2; grid-row: 2; border-left: 0; border-top: 1px solid var(--boundary); }
 .editor-save-menu { position: relative; max-width: min(34rem, 60vw); }
 .editor-save-menu > summary { cursor: pointer; overflow-wrap: anywhere; }
 html[data-editing-protection="active"] .editor-save-menu > summary, html[data-editing-protection="read-only"] .editor-save-menu > summary { color: var(--status-blocked); }
@@ -1495,7 +1502,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .milestone-save-reason[hidden] { display: none; }
 .manuscript-surface { min-width: 0; background: var(--manuscript); }
 /* ADR 0092: the former min(70vh, 760px) is a floor, so the pane is never shorter than before; it grows into the viewport height left after a 15rem header allowance, up to 960px. A context header taller than 15rem can still leave a small page scroll. */
-.editor-window { position: relative; max-height: min(960px, max(min(70vh, 760px), calc(100dvh - 15rem))); overflow: auto; padding: 2.2rem clamp(1.5rem, 5vw, 5rem) 3rem; background: var(--manuscript); }
+.editor-window { position: relative; flex: 1 1 0; min-height: 0; overflow: auto; padding: 1.5rem clamp(1rem, 3vw, 3rem) 2rem; background: var(--manuscript); }
 /* Manuscript reading typography (Issue #951; VIEW-004/005): the face, size, leading, column and alignment come from the local
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
@@ -1597,7 +1604,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editorial-mark-receipt dd { margin: 0 0 .3rem; overflow-wrap: anywhere; font-size: .82rem; }
 .editorial-mark-card .technical-details { margin-top: .8rem; }
 .editorial-mark-card .technical-details dd { overflow-wrap: anywhere; }
-.window-actions { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid var(--boundary); background: var(--surface); }
+.window-actions { position: relative; flex: none; display: flex; justify-content: space-between; align-items: center; gap: .7rem; padding: .7rem 1rem; border-top: 1px solid var(--boundary); background: var(--surface); }
 .position-rail-label { font-size: .7rem; font-weight: 700; color: var(--text-subdued); }
 /* The control itself: a vertical range whose own track is unseen, because the lanes behind it are the
    picture of the manuscript. Its thumb stays, so the pointer and the keyboard have something to hold. */
@@ -1614,8 +1621,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editor-identities { margin: 0; padding: .8rem 1.25rem; border-top: 1px solid var(--boundary); background: var(--surface-subdued); }
 .editor-identities summary { cursor: pointer; font-weight: 700; }
 
-.status-bar { position: fixed; left: 1.2rem; right: 1.2rem; bottom: 1rem; z-index: 20; width: fit-content; max-width: calc(100% - 2.4rem); margin: auto; padding: .55rem .9rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); box-shadow: 0 5px 20px var(--shadow); font-size: .86rem; }
-.status-bar { left: calc(var(--sidebar-width) + 1.2rem); }
+.status-bar { position: relative; flex: none; z-index: 20; width: fit-content; max-width: calc(100% - 1.5rem); margin: .65rem auto; padding: .4rem .85rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .86rem; overflow-wrap: anywhere; }
 .status-bar[data-tone="busy"] { color: var(--status-attention); }
 .status-bar[data-tone="success"] { color: var(--status-good); }
 .status-bar[data-tone="error"] { color: var(--status-blocked); }
@@ -1627,11 +1633,8 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
   .export-fidelity-row { grid-template-columns: 1fr; }
   .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
   .context-header { padding: .6rem 1rem; }
-  .editor-toolbar { align-items: flex-start; flex-direction: column; }
-  .editor-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
-  .editor-workspace.document-workspace { grid-template-columns: minmax(0, 1fr) 3.4rem; }
-  .document-lens { grid-column: 1; grid-row: 2; border-left: 0; border-top: 1px solid var(--boundary); }
-  .manuscript-navigator { right: 3.4rem; width: min(21rem, calc(100% - 3.4rem)); }
+
+
   /* The narrow column keeps all three lanes inside itself: smaller markers, closer lanes. */
   .rail-marker { width: 6px; height: 6px; margin-top: -3px; }
   .rail-marker[data-rail-lane="1"] { left: calc(50% + 5px); }
@@ -2056,7 +2059,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 /* ---- Editing Protection Mode, 专注模式, density and resizable regions (Issue #951, wave 12 slice 12a) ---- */
 
 /* The supporting slot's width (VIEW-007/008): the editor's chosen width, never so wide that the manuscript beside it falls
-   below its usable minimum, never narrower than a readable panel; below that the panel lies over the manuscript as a drawer. */
+   below its usable minimum, never narrower than a readable panel; below that the panel moves below the manuscript. */
 .editor-workspace {
   --supporting-effective-width: min(max(16rem, min(var(--supporting-surface-width, 21rem), calc(100% - 4.75rem - var(--manuscript-min-width, 480px)))), calc(100% - 4.75rem));
 }
@@ -2069,12 +2072,6 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 #task-drawer-separator { position: fixed; top: 0; bottom: 0; z-index: 31; right: calc(var(--task-drawer-width) - 4px); display: none; }
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] #task-drawer-separator { display: block; }
-}
-/* Only a manuscript needs this fallback: other destinations retain the normal drawer column above 1120px. */
-@media (min-width: 1120px) and (max-width: 1184px) {
-  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"]:has(.editor-workspace) { padding-right: 0; }
-  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"]:has(.editor-workspace) .status-bar { right: 1.2rem; }
-  :root:not([data-sidebar="icons"]) body[data-task-drawer="open"]:has(.editor-workspace) #task-drawer-separator { display: none; }
 }
 /* Optional Surface Visibility (VIEW-010): only what `视图` names; identity, status and danger have no such switch. */
 :root[data-hidden-regions~="position-rail"] .rail-column { display: none; }
@@ -2124,11 +2121,10 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 :root[data-focus-mode="on"] .editor-workspace > .region-separator,
 :root[data-focus-mode="on"] .edge-entries,
 :root[data-focus-mode="on"] #task-drawer,
-:root[data-focus-mode="on"] #task-drawer-separator,
-:root[data-focus-mode="on"] .book-work-group,
-:root[data-focus-mode="on"] .book-records-group { display: none !important; }
+:root[data-focus-mode="on"] #task-drawer-separator { display: none !important; }
 :root[data-focus-mode="on"] body { padding-left: 0; padding-right: 0 !important; }
-:root[data-focus-mode="on"] .status-bar { left: 1.2rem; right: 1.2rem !important; }
+:root[data-focus-mode="on"] .editor-workspace { grid-template-columns: minmax(0, 1fr) 4.75rem !important; grid-template-rows: minmax(0, 1fr) !important; }
+:root[data-focus-mode="on"] .document-lens { display: none; }
 
 /* Workspace Density Mode `紧凑` (VIEW-001/002): tighter navigation, tables, queues, filters and metadata. Manuscript type,
    focus rings, pointer targets (min-height stays) and contrast boundaries are untouched. */
@@ -2374,3 +2370,56 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 @media (forced-colors: active) {
   .model-service-flow fieldset, .compact-model-selector-body { border-color: CanvasText; box-shadow: none; }
 }
+
+/* #1287: reflow supporting regions below the text before its readable width is lost. */
+@container (max-width: 54rem) {
+  .editor-workspace, .editor-workspace.document-workspace,
+  .editor-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) 3.4rem; }
+  .editor-workspace:has(> .manuscript-navigator:not([hidden])),
+  .editor-workspace.document-workspace { grid-template-rows: minmax(0, 1fr) minmax(0, 11rem); }
+  .editor-workspace.document-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-rows: minmax(0, 1fr) minmax(0, 10rem) minmax(0, 8rem); }
+  .manuscript-navigator, .document-lens { grid-column: 1; grid-row: 2; width: auto; border-left: 0; border-top: 1px solid var(--boundary); }
+  .document-workspace:has(> .manuscript-navigator:not([hidden])) > .document-lens { grid-column: 1; grid-row: 3; }
+  .editor-workspace > .region-separator { visibility: hidden; }
+  .editor-meta { gap: .2rem .6rem; }
+  .editor-toolbar h2, .editor-toolbar .section-label { display: none; }
+}
+@container (max-width: 34rem) {
+  .editor-toolbar { flex-wrap: wrap; }
+  .editor-edit-actions { margin-left: auto; }
+  .editor-meta { font-size: .75rem; }
+  .editor-toolbar .quiet, .editor-toolbar .primary { padding: .4rem .6rem; min-height: 36px; }
+}
+
+/* #1287: secondary forms read as editing controls, with clear labels and one action row. */
+.reimport-landing { flex: none; max-height: min(35vh, 20rem); overflow: auto; padding: .8rem 1rem; border-bottom: 1px solid var(--boundary); background: var(--status-good-surface); }
+.reimport-landing h3 { margin: 0; font-size: 1rem; }
+.reimport-landing p { margin: .4rem 0; }
+.reimport-landing-record:empty { display: none; }
+.reimport-landing-record { margin-top: .7rem; padding-top: .7rem; border-top: 1px solid var(--boundary); }
+.procedure-library, .procedure-catalog, .learning-materials { min-width: 0; }
+.procedure-library [role="status"]:empty, .procedure-form-slot:empty, .memory-form-slot:empty { display: none; }
+.knowledge-procedure-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: 1rem; list-style: none; padding: 0; margin: 1rem 0; }
+.knowledge-procedure-list > li { min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); overflow-wrap: anywhere; }
+.knowledge-procedure-list h4 { margin: .5rem 0; }
+.knowledge-procedure-list > li > button { margin: .3rem .4rem .3rem 0; }
+.knowledge-procedure-list .review-field { margin-block: .5rem; }
+.procedure-editor, .procedure-book-chooser, .memory-create-form, .memory-candidate-form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem 1rem; padding: 1rem; margin-block: .75rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface-subdued); }
+.procedure-editor h4, .procedure-editor > p, .procedure-editor > ol { flex: 1 1 100%; margin: .2rem 0; }
+.procedure-editor > ol { padding-left: 1.5rem; }
+.procedure-editor > ol > li { padding: .75rem 0; border-bottom: 1px solid var(--boundary); }
+.procedure-editor > ol > li > button { margin-right: .5rem; }
+.procedure-editor label, .procedure-book-chooser label, .memory-create-form label, .memory-candidate-form label { display: grid; flex: 1 1 12rem; min-width: 0; gap: .35rem; font-size: .9rem; font-weight: 700; }
+.procedure-editor > label { flex-basis: 100%; }
+.procedure-book-chooser > p { flex: 1 1 18rem; margin: 0; color: var(--text-subdued); }
+.procedure-library input:not([type="checkbox"]), .procedure-library select, .procedure-library textarea,
+.learning-materials input:not([type="checkbox"]), .learning-materials select, .learning-materials textarea { min-width: 0; width: 100%; padding: .5rem .6rem; border: 1px solid var(--boundary-strong); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
+.procedure-library textarea, .learning-materials textarea { resize: vertical; }
+.procedure-library input[type="checkbox"], .learning-materials input[type="checkbox"] { accent-color: var(--action-primary); }
+.learning-material { margin-block: .8rem; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); }
+.learning-material > button { margin: .3rem .5rem .3rem 0; }
+.memory-composer { margin-block: 1rem; }
+.memory-composer > summary { width: fit-content; padding: .5rem .8rem; border: 1px solid var(--boundary-strong); border-radius: 8px; color: var(--action-text); cursor: pointer; font-weight: 700; }
+.memory-composer:not([open]) > :not(summary) { display: none; }
+.memory-create-form > button[type="submit"], .memory-candidate-form > button[type="submit"] { min-height: 42px; background: var(--action-primary); color: var(--action-primary-text); border: 1px solid var(--action-primary); border-radius: 8px; padding: .5rem 1rem; cursor: pointer; }
+.fact-lens-row > .review-finding { margin: 0; border: 0; padding: 0; }

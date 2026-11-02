@@ -36,7 +36,7 @@ import {
 const CAPTURED_DEVELOPMENT_CI = {
   analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。',
   taskAuthorizationDispatchNote: '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。',
-  launchPolicyIntegritySentence: '策略完整性：已验证。当前开发与持续集成范围保持零次实时传输。',
+  launchPolicyIntegritySentence: '当前开发与持续集成范围保持零次实时传输。',
 } as const;
 
 const DENIED_PIN: ProviderProcessingPin = {
@@ -105,7 +105,7 @@ describe('launchPolicyIntegritySentence', () => {
 
   it('reads a developer-live launch as its own scope and bound', () => {
     expect(launchPolicyIntegritySentence('开发者实时：实时传输受运行边界约束'))
-      .toBe('策略完整性：已验证。当前开发者实时范围保持实时传输受运行边界约束。');
+      .toBe('当前开发者实时范围保持实时传输受运行边界约束。');
   });
 });
 
@@ -189,11 +189,11 @@ const range = (blockId: string, fromGrapheme: number | null = null, toGrapheme: 
 
 describe('analysisBlockCountLabel', () => {
   it('counts distinct blocks, whole-block and partial ranges alike', () => {
-    expect(analysisBlockCountLabel([range('blk_a'), range('blk_b', 0, 12), range('blk_c')])).toBe('3 个内容块');
+    expect(analysisBlockCountLabel([range('blk_a'), range('blk_b', 0, 12), range('blk_c')])).toBe('3 个段落');
   });
 
   it('counts a block once however many ranges of it an item carries', () => {
-    expect(analysisBlockCountLabel([range('blk_a', 0, 5), range('blk_a', 9, 40), range('blk_a')])).toBe('1 个内容块');
+    expect(analysisBlockCountLabel([range('blk_a', 0, 5), range('blk_a', 9, 40), range('blk_a')])).toBe('1 个段落');
   });
 
   it('reads no exact range rather than zero blocks when the collection is empty', () => {
@@ -205,19 +205,19 @@ describe('analysisProvenanceSummary', () => {
   // V2-UX-LAYER-006's own example, so the Decision Layer's reading is pinned literally.
   it('reads as units and a block count, in ascending deduplicated unit order', () => {
     const ranges = Array.from({ length: 25 }, (_, index) => range(`blk_${index}`));
-    expect(analysisProvenanceSummary([5, 1, 2, 1], ranges)).toBe('来自单元 1、2、5 · 25 个内容块');
+    expect(analysisProvenanceSummary([5, 1, 2, 1], ranges)).toBe('来自单元 1、2、5 · 25 个段落');
   });
 
   it('sorts units by ordinal rather than by their decimal text', () => {
-    expect(analysisProvenanceSummary([10, 2], [range('blk_a')])).toBe('来自单元 2、10 · 1 个内容块');
+    expect(analysisProvenanceSummary([10, 2], [range('blk_a')])).toBe('来自单元 2、10 · 1 个段落');
   });
 
   it('reads a single-unit item with its one ordinal', () => {
-    expect(analysisProvenanceSummary([3], [range('blk_a'), range('blk_b', 2, 8)])).toBe('来自单元 3 · 2 个内容块');
+    expect(analysisProvenanceSummary([3], [range('blk_a'), range('blk_b', 2, 8)])).toBe('来自单元 3 · 2 个段落');
   });
 
   it('states the block count alone when the item records no unit, and never an empty unit list', () => {
-    expect(analysisProvenanceSummary([], [range('blk_a')])).toBe('1 个内容块');
+    expect(analysisProvenanceSummary([], [range('blk_a')])).toBe('1 个段落');
     expect(analysisProvenanceSummary([], [])).toBe('无精确范围');
   });
 

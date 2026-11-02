@@ -273,7 +273,7 @@ export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjectio
 /** 依据充分度 of one item (EVAL-005), with what it rests on. */
 export function evaluationAi7SufficiencyLine(item: Pick<EvaluationInitialDraftProjection['items'][number], 'sufficiency' | 'citedBlocks' | 'unitsCited'>): string {
   const label = `依据充分度 ${EVALUATION_AI7_SUFFICIENCY[item.sufficiency]}`;
-  return item.citedBlocks === 0 ? `${label}（没有引用内容块）` : `${label}（引用 ${item.citedBlocks} 个段落，分布在 ${item.unitsCited} 个阅读范围）`;
+  return item.citedBlocks === 0 ? `${label}（没有引用段落）` : `${label}（引用 ${item.citedBlocks} 个段落，分布在 ${item.unitsCited} 个阅读范围）`;
 }
 
 /**

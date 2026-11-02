@@ -236,7 +236,7 @@ describe('写作任务 over the real store on exact sample1', () => {
           book: '《写作旅程乙》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中',
         },
         // 会发送 as S84a is: a writing Task runs only where nothing is sent.
-        consequences: { read: '当前稿件的全部 97 个内容块，以及上面列出的参考材料', send: '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。', cost: '先看计划后显示' },
+        consequences: { read: '当前稿件的全部 97 个段落，以及上面列出的参考材料', send: '不发送任何内容：写作任务目前只在不连接模型服务的运行范围内起草。', cost: '先看计划后显示' },
         task: null,
       });
       expect(page.types.map((type) => [type.label, type.prepare, type.exemplars.statement, type.drafted, type.quickStart])).toEqual(TYPE_LABELS.map((label, index) => [
