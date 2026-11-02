@@ -317,10 +317,10 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   try{
    const snapshot=JSON.parse(coverageDb.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id=?').get(review.runId).canonical_json);
    memberCoverage=snapshot.categories.map(c=>{
-    if(!c.task)return {categoryId:c.entry.categoryId,local:true};
+    if(!c.task)return {categoryId:c.categoryId,local:true};
     const row=coverageDb.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE task_intent_id=? ORDER BY created_at DESC,ordinal DESC LIMIT 1').get(c.task.taskIntentId);
     const revision=row?JSON.parse(row.canonical_json):null;
-    return {categoryId:c.entry.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result']};
+    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result']};
    });
   }finally{coverageDb.close();}
   report.reviews.at(-1).memberCoverage=memberCoverage;
