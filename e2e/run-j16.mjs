@@ -436,6 +436,7 @@ async function waitForPanel(renderer, check, name, timeout = 60_000) {
 
 /** The Book's manuscript, opened from the library. */
 async function openManuscriptOf(renderer, bookId, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-library`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await clickSelector(renderer, `button[data-book-id=${JSON.stringify(bookId)}]`, `${name}-book`);
   await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, `${name}-manuscript`, 120_000);

@@ -1885,7 +1885,7 @@ async function main() {
     })()`);
     requireJourney(filled.procedure === procedureId && JSON.stringify(filled.checked) === JSON.stringify(['style-and-format']) && filled.enabled.length === 0 &&
       filled.scope === 'whole' && filled.book === targetBook &&
-      JSON.stringify(filled.lines) === JSON.stringify([`按《${PROCEDURE_TITLE}》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划照常先看。`]), 'run-sheet-words', filled);
+      JSON.stringify(filled.lines) === JSON.stringify([`按《${PROCEDURE_TITLE}》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划可按需查看。`]), 'run-sheet-words', filled);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'run-prepare');
     const ran = await startPreparedReview(renderer, 'run-review');
     requireJourney(ran?.state === 'settled' && JSON.stringify(ran.categories.map((category) => category.categoryId)) === JSON.stringify(['style-and-format']) &&
@@ -1928,7 +1928,7 @@ async function main() {
     const latestSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '2', 'exact-latest-filled');
     requireJourney(latestSheet.latestEligible === 'true' && JSON.stringify(latestSheet.options) === JSON.stringify(['第 2 版（最新可用）', '第 1 版']) &&
       latestSheet.chosen === 0 && latestSheet.versionDisabled === false && JSON.stringify(latestSheet.checked) === JSON.stringify(['style-and-format', 'literary-expression']) &&
-      latestSheet.lines[0] === `按《${PROCEDURE_TITLE}》第 2 版：体例与格式 → 文学性与表达改进；范围「全书」。类别已按它选好，计划照常先看。`, 'exact-latest-words', latestSheet);
+      latestSheet.lines[0] === `按《${PROCEDURE_TITLE}》第 2 版：体例与格式 → 文学性与表达改进；范围「全书」。类别已按它选好，计划可按需查看。`, 'exact-latest-words', latestSheet);
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.selectedIndex=1; select.dispatchEvent(new Event('change',{bubbles:true})); const prepare=document.querySelector('dialog.review-sheet [data-review-action="prepare"]'); return prepare instanceof HTMLButtonElement && prepare.disabled && select.disabled && document.querySelector('.review-sheet-procedure')?.dataset.procedureLoading==='true'; })()`, 'exact-choose-version');
     // While the chosen version loads, 先看计划 and the selectors wait: nothing is prepared from the version on show before its
     // answer fills the sheet (S31 review P2-1).
@@ -2055,7 +2055,7 @@ async function main() {
     requireJourney(JSON.stringify(seriesSheet.checked) === JSON.stringify([]) && seriesBox?.checked === false && seriesBox.disabled === false && seriesBox.apart === 'true' &&
       JSON.stringify(seriesBox.open) === JSON.stringify(['series-consistency']) &&
       JSON.stringify(seriesSheet.lines) === JSON.stringify([
-        `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划照常先看。`,
+        `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划可按需查看。`,
         '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。',
       ]), 'series-sheet-chosen-apart', { sheet: seriesSheet, box: seriesBox });
     // Left unticked, nothing is prepared: the sheet says to choose a category.

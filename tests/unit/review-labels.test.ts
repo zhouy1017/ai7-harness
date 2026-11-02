@@ -107,7 +107,7 @@ describe('the words of the 审阅 destination', () => {
       'rereview-changed': '只审改动过的章',
       'open-run': '查看这次审阅',
       start: '开始审阅',
-      prepare: '先看计划',
+      prepare: '查看计划',
       'quick-start': '快速开始',
       'cancel-preparation': '取消准备',
       'close-sheet': '取消',

@@ -355,7 +355,7 @@ export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection):
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
   if (run.resolved === null) return [run.unavailableReason ?? ''];
   const resolved = run.resolved;
-  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划照常先看。`];
+  const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划可按需查看。`];
   for (const step of resolved.steps) {
     if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
     else if (step.chosenApart) lines.push(sheetChosenApartLine(step.label));

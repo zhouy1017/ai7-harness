@@ -2330,7 +2330,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     procedureField.hidden = state.definition !== null;
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
     const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
-    for (const entry of workspace.categories) {
+    const localCategory: ReviewWorkspaceCategoryProjection = {
+      categoryId: 'local-text-check', label: '本地文字检查', description: '单独在本机检查标点、规范字形与异形词；数字检查可选。',
+      output: 'change-suggestion', riskPointsOnly: false, batchApply: true, searchEngine: false, modelFree: true,
+      materialReferencesAllowed: false, basisStatement: '本机确定性检查，不调用模型。', guidelineDocuments: [],
+      procedure: { title: '确定性检查', version: '3' }, available: workspace.manuscript !== null,
+      unavailableReason: workspace.manuscript === null ? '导入稿件后即可检查。' : null,
+      scopes: { whole: workspace.scopeOptions.whole, chapters: workspace.scopeOptions.chapters,
+        changed: { available: false, unavailableReason: '本地文字检查请选择全书、选章或当前选区。' }, selection: { available: true, unavailableReason: null } },
+    };
+    const offeredCategories = workspace.categories.some((entry) => entry.categoryId === localCategory.categoryId)
+      ? workspace.categories : [localCategory, ...workspace.categories];
+    for (const entry of offeredCategories) {
       const label = el('label', 'review-category-option');
       label.dataset['reviewCategoryOption'] = entry.categoryId;
       const input = el('input');

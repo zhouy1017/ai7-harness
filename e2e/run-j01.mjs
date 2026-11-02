@@ -3287,7 +3287,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'doc-manuscript-review');
       await assertRenderer(
         renderer,
-        `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'DOC' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(LOCAL_DOC_SHA256)}; })()`,
+        `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent===${JSON.stringify(LOCAL_DOC_SHA256)} && document.querySelector('[data-screen="review"] [data-import-conversion-note]')===null`,
         'doc-manuscript-review-conversion-note',
       );
       await clickExactButton(renderer, '按上述降级方式新建图书并导入稿件', 'doc-manuscript-commit');
