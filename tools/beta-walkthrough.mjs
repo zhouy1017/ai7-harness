@@ -353,7 +353,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.activeReview.buildIdentity=report.buildIdentity;report.activeReview.runnerHead=report.runnerHead;checkpoint();
   await followReview(page,expectedDataRoot,report.activeReview.runId);
   }
-  const review=await page.evaluate("window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
+  const review=await page.evaluate("window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state,detail:c.detail})),findings:v.run?.findings.length}))");
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
 
@@ -365,18 +365,26 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
     if(!c.task)return {categoryId:c.categoryId,local:true};
     const row=coverageDb.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE task_intent_id=? ORDER BY created_at DESC,ordinal DESC LIMIT 1').get(c.task.taskIntentId);
     const revision=row?JSON.parse(row.canonical_json):null;
-    const outcome=coverageDb.prepare('SELECT classification FROM analysis_task_outcomes WHERE task_intent_id=?').get(c.task.taskIntentId);
+    const outcome=coverageDb.prepare('SELECT run_record_id,classification FROM analysis_task_outcomes WHERE task_intent_id=?').get(c.task.taskIntentId);
     const synthesis=revision?.crossChapterSynthesis;
-    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,executionState:outcome?.classification??null,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result'],reducerClosure:revision?.reducerClosure?{state:revision.reducerClosure.state,stages:revision.reducerClosure.stages}:null,synthesis:synthesis?{state:synthesis.state,code:synthesis.code??null,requestDigest:synthesis.requestDigest??null}:null};
+    let claimProgress=null;
+    if(c.categoryId==='factual-review'&&outcome){
+     const membership=coverageDb.prepare("SELECT json_array_length(canonical_json,'$.claims') total,json_array_length(canonical_json,'$.excluded') excluded FROM factual_claim_ledgers WHERE run_record_id=?").get(outcome.run_record_id);
+     if(membership){
+      const rounds=coverageDb.prepare("SELECT json_extract(e.canonical_json,'$.state') state FROM factual_claim_sessions s LEFT JOIN factual_claim_events e ON e.session_id=s.session_id AND e.kind='verification-result' AND e.sequence=(SELECT MAX(x.sequence) FROM factual_claim_events x WHERE x.session_id=s.session_id AND x.kind='verification-result') WHERE s.run_record_id=? AND s.stage='web-verification'").all(outcome.run_record_id);
+      claimProgress={...membership,closed:rounds.filter(r=>r.state==='closed').length,unknown:rounds.filter(r=>r.state==='unknown').length,unfinished:rounds.filter(r=>!['closed','unknown'].includes(r.state)).length,notStarted:membership.total-rounds.length};
+     }
+    }
+    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,executionState:outcome?.classification??null,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result'],claimProgress,reducerClosure:revision?.reducerClosure?{state:revision.reducerClosure.state,stages:revision.reducerClosure.stages}:null,synthesis:synthesis?{state:synthesis.state,code:synthesis.code??null,requestDigest:synthesis.requestDigest??null}:null};
    });
   }finally{coverageDb.close();}
   report.reviews.at(-1).memberCoverage=memberCoverage;
   check(memberCoverage.every(c=>c.local||(c.coverage?.state==='complete'&&c.gaps.length===0)),expectedChannel+'-full-review-complete-coverage');
   if(expectedChannel==='windows-installer')report.completedReview=retainedReview?resume.completedReview:{buildIdentity:report.activeReview?.buildIdentity??report.buildIdentity,runnerHead:report.activeReview?.runnerHead??report.runnerHead,review:report.reviews.at(-1),checks:[...report.checks],observedBy:{buildIdentity:report.buildIdentity,runnerHead:report.runnerHead}};
-  const executionGaps=memberCoverage.filter(c=>!c.local&&(c.executionState!=='completed'||c.synthesis?.state==='gap'));
+  const executionGaps=memberCoverage.filter(c=>!c.local&&(c.executionState!=='completed'||c.synthesis?.state==='gap'||c.claimProgress&&c.claimProgress.closed<c.claimProgress.total));
   report.executionGaps??=[];report.executionGaps.push(...executionGaps.map(c=>({channel:expectedChannel,...c})));
   for(const gap of executionGaps){
-   const status=gap.synthesis?.code==='outcome-unknown'?'跨章汇总结果待确认':gap.synthesis?.state==='gap'?'跨章检查尚未完成':'尚未完成';
+   const status=gap.claimProgress?`已取证 ${gap.claimProgress.closed}/${gap.claimProgress.total} 条断言`:gap.synthesis?.code==='outcome-unknown'?'跨章汇总结果待确认':gap.synthesis?.state==='gap'?'跨章检查尚未完成':'尚未完成';
    await ready(page,`document.querySelector('.review-progress [data-review-category="${gap.categoryId}"] .review-progress-detail')?.textContent.includes(${JSON.stringify(status)})`,'retained-stage-gap-disclosed');
   }
   if(executionGaps.length)report.limitations.push('Completed unit findings remain usable; retained synthesis or execution gaps are disclosed and unknown paid outcomes are not resent.');

@@ -86,6 +86,7 @@ let roots: ServiceTestRoots;
 let policy: LaunchPolicyProjection;
 let store: EditorialStore;
 let owner: BaselineAnalysisExecutionOwner;
+let reopenExecutionOwner: () => BaselineAnalysisExecutionOwner;
 let sends: { model: number; search: number; pages: string[]; toolSchemas: number; runs: number };
 let scenario: Scenario;
 let connected = false;
@@ -194,7 +195,7 @@ async function setup(initial: Scenario): Promise<void> {
       : { schema: 'ai7.analysis.run-report-reflection-result/1', items: [{ suggestion: '复查核查结果。', basis: '合成回归账目。' }] };
     return answer({ content: JSON.stringify(result) });
   };
-  owner = new BaselineAnalysisExecutionOwner({
+  reopenExecutionOwner = () => new BaselineAnalysisExecutionOwner({
     requestGovernor,
     ledger: store.factualReviewLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async (reference) => {
@@ -209,6 +210,7 @@ async function setup(initial: Scenario): Promise<void> {
     researchEvidence: (input) => { store.recordResearchEvidence(input); },
     factualRunStart: (input) => { store.recordFactualRunAssurance({ ...input, offline: scenario.offline === true }); },
   });
+  owner = reopenExecutionOwner();
 }
 
 afterEach(async () => {
@@ -356,6 +358,62 @@ function syntheticClaimLedger() {
 }
 
 describe('factual claim occurrence ledger', () => {
+  it('keeps claim shutdown resumable and continues only unstarted work after ordinary reopen', async () => {
+    await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('断言核查正常退出后续行');
+    scenario.atClaimAnswer = () => {
+      delete scenario.atClaimAnswer; void owner.dispose();
+      throw Object.assign(new Error('synthetic shutdown after the claim send'), { code: 'TRANSPORT_FAILED' });
+    };
+    const stopped = await review(book);
+    const task = store.inspectReviewWorkspace(book.bookId, stopped.reviewRunId).run!.categories[0]!.taskIntentId!;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
+    let runRecordId: string;
+    try { runRecordId = String(db.prepare('SELECT run_record_id FROM analysis_run_records WHERE task_intent_id=?').get(task)!.run_record_id); }
+    finally { db.close(); }
+    const ledger = store.executionLedgerForRun(runRecordId);
+    expect(ledger.currentRunState(runRecordId)).toBe('resumable');
+    expect(ledger.hasCommittedOutcome(runRecordId)).toBe(false);
+    const claims = ledger.factualVerification.claims(runRecordId)!;
+    const first = ledger.factualVerification.claimSession(runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
+    const rounds = ledger.factualVerification.claimRounds(first.sessionId);
+    const allowance = ledger.factualVerification.claimAllowance(first.sessionId);
+    const checkpoints = ledger.unitCheckpoints(runRecordId);
+    expect(ledger.factualVerification.claimProgress(runRecordId)).toMatchObject({ total: 2, notStarted: 1 });
+    store.markCleanShutdown(); store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    store.baselineAnalysisLedger.bindLaunch(ledger.launch); store.factualReviewLedger.bindLaunch(ledger.launch);
+    owner = reopenExecutionOwner();
+    const driver = new ReviewRunDriver(store.reviewRunDriveSteps, owner);
+    try { await driver.continue(stopped.reviewRunId); } finally { await driver.dispose(); }
+    const kept = store.executionLedgerForRun(runRecordId);
+    expect(kept.currentRunState(runRecordId)).toBe('completed');
+    expect(kept.factualVerification.claims(runRecordId)!.digest).toBe(claims.digest);
+    expect(kept.factualVerification.claimRounds(first.sessionId)).toEqual(rounds);
+    expect(kept.factualVerification.claimAllowance(first.sessionId)).toEqual(allowance);
+    expect(kept.unitCheckpoints(runRecordId)).toEqual(checkpoints);
+    expect(kept.factualVerification.claimProgress(runRecordId)).toMatchObject({ total: 2, notStarted: 0, closed: 1, unknown: 1 });
+    const category = store.inspectReviewWorkspace(book.bookId, stopped.reviewRunId).run!.categories[0]!;
+    expect(category.detail).toContain('已取证 1/2 条断言'); expect(category.detail).toContain('1 条结果待确认');
+  });
+
+  it('shows not-attempted lineage when cancellation retains other claims from the same unit', async () => {
+    await setup({ claimStages: true, twoAssertions: true, relations: [] });
+    const book = await newBook('保留未开始的断言'); let reviewRunId = '';
+    scenario.atClaimAnswer = () => {
+      delete scenario.atClaimAnswer;
+      const stopped = store.requestTaskRunControl({ bookId: book.bookId, kind: 'review-run', ref: reviewRunId, action: 'cancel' });
+      owner.cancelRun(stopped.runRecordId!, stopped.ledger);
+    };
+    const retained = await review(book, undefined, { prepared: (id) => { reviewRunId = id; } });
+    const runRecordId = retained.results[0]!.runRecordId;
+    const ledger = store.executionLedgerForRun(runRecordId);
+    const claim = ledger.factualVerification.claims(runRecordId)!.claims[1]!;
+    expect(ledger.factualVerification.claimProgress(runRecordId)).toMatchObject({ total: 2, notStarted: 1 });
+    expect(retained.results.find(r=>r.findingId===`fnd_${claim.claimId.slice(0,24)}`)!.limitations)
+      .toContain('这条断言尚未开始联网核查；同一阅读范围内其他断言的证据不代表已核查本条。');
+  });
+
   it.each(['fresh', 'existing-prefix'] as const)('continues a claim-stage pause with %s evidence without replacing prior captures', async (prefix) => {
     await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('断言取证暂停后续行');

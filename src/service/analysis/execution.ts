@@ -1243,7 +1243,7 @@ export class BaselineAnalysisExecutionOwner {
       cancelRequested: options.cancel === true,
       pauseRequested: false,
       idleYieldRequested: false,
-      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
+      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND || ledger.definition.factualClaims !== undefined,
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);

@@ -4431,6 +4431,11 @@ export class ReviewRunStore {
             : '部分检查尚未完成';
           completionDetail = `${last?.detail ?? ''}已读完 ${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个阅读范围；${warning}；已完成范围的发现仍可处理。`;
         }
+        const claims = category.executor === 'factual-review-kind' ? ledger.factualVerification.claimProgress(materialized.runRecordId) : null;
+        if (claims !== null && claims.closed < claims.total) completionDetail = [last?.detail ?? '', `已取证 ${claims.closed}/${claims.total} 条断言`,
+          ...(claims.unknown === 0 ? [] : [`${claims.unknown} 条结果待确认`]),
+          ...(claims.notStarted === 0 ? [] : [`${claims.notStarted} 条尚未开始联网核查`]),
+          ...(claims.unfinished === 0 ? [] : [`${claims.unfinished} 条联网核查尚未完成`]), '已取得的证据与发现仍可查看。'].filter(Boolean).join('；');
       }
       return {
         category,

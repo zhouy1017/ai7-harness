@@ -440,6 +440,28 @@ export class FactualVerificationLedger {
     return row === undefined ? null : { ...JSON.parse(String(row.canonical_json)) as Omit<FactualClaimLedger, 'digest'>, digest: String(row.ledger_digest) };
   }
 
+  /** Claim work is distinct from extraction-unit coverage, including older terminal Runs. */
+  claimProgress(runRecordId: string) {
+    const ledger = this.claims(runRecordId);
+    if (ledger === null) return null;
+    const rows = this.#db.prepare(`SELECT s.scope_id, e.canonical_json FROM factual_claim_sessions s
+      LEFT JOIN factual_claim_events e ON e.session_id=s.session_id AND e.kind='verification-result'
+        AND e.sequence=(SELECT MAX(last.sequence) FROM factual_claim_events last WHERE last.session_id=s.session_id AND last.kind='verification-result')
+      WHERE s.run_record_id=? AND s.stage='web-verification'`).all(runRecordId);
+    const byClaim = new Map(rows.map((row) => [String(row.scope_id), row.canonical_json === null ? null : JSON.parse(String(row.canonical_json)) as FactualClaimRound]));
+    const progress = { total: ledger.claims.length, closed: 0, unknown: 0, unfinished: 0, notStarted: 0 };
+    for (const claim of ledger.claims) {
+      if (!byClaim.has(claim.claimId)) progress.notStarted += 1;
+      else {
+        const round = byClaim.get(claim.claimId);
+        if (round?.state === 'closed') progress.closed += 1;
+        else if (round?.state === 'unknown') progress.unknown += 1;
+        else progress.unfinished += 1;
+      }
+    }
+    return progress;
+  }
+
   /** The session key survives restart; a new technical session cannot inherit or reset its counters. */
   admitClaimSession(input: FactualClaimSession): FactualClaimSession {
     const prior = this.#db.prepare('SELECT canonical_json FROM factual_claim_sessions WHERE run_record_id = ? AND stage = ? AND scope_id = ?')
@@ -839,6 +861,8 @@ export class FactualVerificationLedger {
     const boundToThis = latestDecision !== null && latestDecision.boundVersion === result.version && latestDecision.resultId === result.resultId;
     const correctionAvailable = this.#correctionOffer(result, latestDecision, anchorCurrent) !== null;
     const actionNeed: FactualActionNeed = correctionAvailable && boundToThis ? 'correction' : !boundToThis && result.version === latestVersion ? 'review' : 'none';
+    const claim = result.body.factualDecision === undefined ? this.#claimLineage(result) : null;
+    const notAttempted = claim !== null && this.claimSession(claim.runRecordId, 'web-verification', claim.claim.claimId) === null;
     return {
       resultId: result.resultId, version: result.version, assertionKey: result.assertionKey, reviewRunId: result.reviewRunId,
       reviewFindingId: result.reviewFindingId, findingId: result.findingId, runRecordId: result.runRecordId, taskIntentId: result.body.taskIntentId,
@@ -847,7 +871,8 @@ export class FactualVerificationLedger {
       plannedLevel: result.body.plannedLevel, level: result.level, levelLabel: EVIDENCE_ASSURANCE_LEVEL_LABELS[result.level], disclosure: result.body.disclosure,
       states: { referenceIntegrity: 'verified', claimSupport: effective.claimSupport, factualVerification: effective.outcome },
       sourceCondition, actionNeed, sourceCounts: { checked, candidates, independent, reused: sources.filter((source) => source.reused).length },
-      limitations: result.body.limitations, policyPin: result.body.policy, producer: FACTUAL_VERIFICATION_PRODUCER, recordedAt: result.recordedAt,
+      limitations: notAttempted ? ['这条断言尚未开始联网核查；同一阅读范围内其他断言的证据不代表已核查本条。', ...result.body.limitations] : result.body.limitations,
+      policyPin: result.body.policy, producer: FACTUAL_VERIFICATION_PRODUCER, recordedAt: result.recordedAt,
       anchor: anchorCurrent ? { state: 'current', label: null } : { state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL },
       decision: latestDecision === null ? null : this.#decisionProjection(latestDecision, latestVersion),
       pendingReview: result.version === latestVersion && !boundToThis,
