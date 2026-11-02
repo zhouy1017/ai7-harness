@@ -35,8 +35,8 @@ import { canonicalJson } from './analysis/canonical.js';
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v23' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v23.json';
+export const ACTIVE_SET_VERSION = 'v24' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v24.json';
 const ACTIVE_SET_SHA256 = CURRENT_ACTIVE_SET_SHA256;
 const PROVIDER_PINS = {
   'development-ci': {
@@ -50,8 +50,8 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v32',
-    canonicalPath: 'docs/policies/provider-processing-policy.v32.json',
+    version: 'v33',
+    canonicalPath: 'docs/policies/provider-processing-policy.v33.json',
     sha256: CURRENT_PRODUCTION_POLICY_SHA256,
   },
   'developer-live': {
@@ -1941,9 +1941,9 @@ function readSearchConnectionTest(block: unknown): SearchConnectionTestPolicy {
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === ({ v30: '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3',
-    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '074f99e32e918d2a82676b7c6ec8d850932e88ccb6d9e6c26a7bbad805be1b52' } as Record<string, string>)[String(policy['version'])]);
+    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058', v33: '8b75acbe8c662abf00981b7762f91d87347a6267c0bde5ab2bcd3843d14eab46' } as Record<string, string>)[String(policy['version'])]);
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
-  const admission = policy['version'] === 'v32' ? readFamilyAdmission(policy) : null;
+  const admission = (policy['version'] === 'v32' || policy['version'] === 'v33') ? readFamilyAdmission(policy) : null;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
@@ -2010,7 +2010,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30' || policy['version'] === 'v31' || policy['version'] === 'v32') return projectOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30' || policy['version'] === 'v31' || (policy['version'] === 'v32' || policy['version'] === 'v33')) return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -2347,8 +2347,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v23.schema.json', 'e07ec97e7835be058c89ef4ffac5f09ed113c8201dc710a382a5940e37f46cda'],
-      ['docs/policies/provider-processing-policy.v32.schema.json', '6a084e2b1bcff2f1a81f8a9bed2b4220d10ecb76064336997eea08ada0a5e47c'],
+      ['docs/policies/active-policy-set.v24.schema.json', '96ab1479f9853c54980dfbf6aa467bbb9cf7393738d68b1c60d83345d3a001e1'],
+      ['docs/policies/provider-processing-policy.v33.schema.json', '2e01a84df92e4a31237924b73aefc5ff941cab1d86fc057dbbcc6978aa15e463'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(

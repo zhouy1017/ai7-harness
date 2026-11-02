@@ -151,13 +151,13 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
   const CARRIED = [
     'config/source-checkout-launch-authority.json',
     'docs/policies/active-policy-set.v19.json',
-    'docs/policies/active-policy-set.v23.json',
-    'docs/policies/active-policy-set.v23.schema.json',
+    'docs/policies/active-policy-set.v24.json',
+    'docs/policies/active-policy-set.v24.schema.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v30.json',
     'docs/policies/provider-processing-policy.v30.schema.json',
-    'docs/policies/provider-processing-policy.v32.json',
-    'docs/policies/provider-processing-policy.v32.schema.json',
+    'docs/policies/provider-processing-policy.v33.json',
+    'docs/policies/provider-processing-policy.v33.schema.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
     'docs/policies/provider-processing-policy.v24.json',
@@ -195,9 +195,9 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
 
   it('reports 需设置 with no admitted rule until a route is configured, and transmits nothing', async () => {
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
-    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v23' });
+    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v24' });
     expect(projection.providerProcessing).toMatchObject({
-      version: 'v32', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
+      version: 'v33', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
   });
 
