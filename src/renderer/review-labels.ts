@@ -334,10 +334,12 @@ export function reviewCategoryProgressLine(category: Pick<ReviewRunCategoryProje
   switch (category.state) {
     case 'running':
       return '正在审阅这一类';
-    case 'settled':
-      return category.excludedCount === 0
+    case 'settled': {
+      const findings = category.excludedCount === 0
         ? `${category.findingsCount} 条发现，已标在稿件上`
         : `${category.findingsCount} 条发现，已标在稿件上；另有 ${category.excludedCount} 条无法在稿件上定位，没有列为发现`;
+      return category.detail === null ? findings : `${findings}；${category.detail}`;
+    }
     case 'waiting':
       return category.detail ?? '排在前面的类别完成后开始';
     case 'prepared':

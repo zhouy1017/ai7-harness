@@ -10,6 +10,7 @@ import { renderReportExport } from '../../src/service/report-export.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { reviewCategoryProgressLine } from '../../src/renderer/review-labels.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
@@ -298,6 +299,34 @@ it('retains unit evidence when synthesis asks for a tool and sends no second syn
   expect(settled.resultSetRevision?.findings).toHaveLength(1);
   expect(settled.resultSetRevision?.crossChapterSynthesis?.state).toBe('gap');
   expect(settled.taskOutcome?.classification).toBe('completed-with-gaps');
+});
+
+it('discloses a retained unknown synthesis beside complete unit findings after restart without resending', async () => {
+  const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { response: async (response, _signal, body) => {
+    const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+    if (parseReviewCrossChapterMessage(request.messages.findLast((entry) => entry.role === 'user')!.content) === null) return response;
+    throw Object.assign(new Error('synthetic accepted synthesis connection loss'), { code: 'TRANSPORT_FAILED' });
+  } });
+  const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('style-and-format')!));
+  const revision = result.store.inspectReviewCategory(result.bookId, definition).resultSetRevision!;
+  expect(revision.coverage).toMatchObject({ state: 'complete', unitsClosed: 8, unitsTotal: 8, gapCount: 0 });
+  expect(revision.crossChapterSynthesis).toMatchObject({ state: 'gap', code: 'outcome-unknown' });
+  const inspect = (opened: EditorialStore) => {
+    const run = opened.inspectReviewWorkspace(result.bookId, result.reviewRunId).run!;
+    expect(run.findings).toHaveLength(1);
+    const category = run.categories[0]!;
+    expect(category.state).toBe('settled');
+    expect(category.detail).toContain(revision.coverage.label);
+    expect(category.detail).toContain('跨章一致性未闭合');
+    expect(reviewCategoryProgressLine(category, Date.now())).toContain(category.detail!);
+  };
+  inspect(result.store);
+  const launch = result.store.baselineAnalysisLedger.launch;
+  await driver!.dispose(); await owner!.dispose(); result.store.markCleanShutdown(); result.store.close();
+  store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
+  store.baselineAnalysisLedger.bindLaunch({ ...launch, live: null });
+  inspect(store);
+  expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(1);
 });
 
 it('proves current academic Series preparation and exact initial and retained consistency source pins (#1131 rev21)', async () => {

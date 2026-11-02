@@ -4416,6 +4416,18 @@ export class ReviewRunStore {
             : state === 'failed' ? FAILED_UNRECORDED_DETAIL
               : last !== null ? UNWRITTEN_DETAIL : UNSTARTED_DETAIL
         : null;
+      // A settled category can retain a complete unit set and an unresolved synthesis.
+      // Read its own immutable revision, including historical Runs, rather than the
+      // category ledger's latest result or the later materialization event's detail.
+      let completionDetail: string | null = null;
+      const materialized = events.find((event) => event.state === 'materialized') ?? null;
+      if (state === 'settled' && category.task !== null && materialized !== null && materialized.runRecordId !== null && materialized.resultSetRevisionId !== null) {
+        const ledger = this.#categoryLedger(category);
+        if (ledger.currentRunState(materialized.runRecordId) === 'completed-with-gaps') {
+          const revision = ledger.inspect(snapshot.bookId, undefined, materialized.resultSetRevisionId).inspectedRevision!.revision;
+          completionDetail = `${revision.coverage.label}；${revision.reducerClosure.label}`;
+        }
+      }
       return {
         category,
         events,
@@ -4423,9 +4435,9 @@ export class ReviewRunStore {
         // A category the exclusion stopped, or the editor then cancelled, reads the stop's own words (SER-024).
         stateLabel: reviewRunCategoryStopLabel(last?.record.code) ?? idle ?? reviewRunCategoryStateLabel(state, waitingForPlace),
         ...(idle === RUN_WAITING_IDLE_LABEL ? { idleQueued: true as const } : {}),
-        detail: waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
+        detail: state === 'settled' ? completionDetail : waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
         pending,
-        materialized: events.find((event) => event.state === 'materialized') ?? null,
+        materialized,
         retained: events.find((event) => this.#retained(event)) ?? null,
       };
     });
