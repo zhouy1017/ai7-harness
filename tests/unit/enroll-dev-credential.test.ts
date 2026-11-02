@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import { Writable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -31,6 +33,8 @@ type Helper = {
   storeEnrollment: (argv: string[], deps: {
     env: NodeJS.ProcessEnv; platform: NodeJS.Platform; architecture: string;
     readSecret: (path: string) => Promise<string>;
+    spawn?: (...args: unknown[]) => unknown;
+    readStdinSecret?: () => Promise<string>;
     importKeyring: () => Promise<{ AsyncEntry: new (service: string, account: string) => { setPassword: (value: string) => Promise<void> } }>;
   }) => Promise<void>;
 };
@@ -108,6 +112,41 @@ describe('parseEnrollmentArguments', () => {
     }
     expect(() => helper.parseEnrollmentArguments(['--slot', 'search-brave', '--credential-reference',
       CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['search-brave']!, '--from-file', ABSOLUTE])).toThrow();
+  });
+
+  it('carries a guest enrollment only in encrypted SSH stdin, with output closed', async () => {
+    let received = '';
+    const child = Object.assign(new EventEmitter(), { stdin: new Writable({
+      write(chunk, _encoding, done) { received += chunk.toString(); done(); },
+      final(done) { done(); queueMicrotask(() => child.emit('exit', 0)); },
+    }) });
+    const start = vi.fn(() => child);
+    await helper.storeEnrollment(['--slot', 'opencode-go', '--credential-reference', randomUUID(),
+      '--from-file', ABSOLUTE, '--to-guest', 'ai7-testbed-02-nat'], {
+      env: {}, ...SUPPORTED_HOST, readSecret: async () => 'synthetic-test-value', spawn: start,
+      importKeyring: async () => { throw new Error('Remote enrollment must not open the host store'); },
+    });
+    expect(received).toBe('synthetic-test-value');
+    expect(JSON.stringify(start.mock.calls)).not.toContain(received);
+    expect(start.mock.calls[0]).toEqual(['ssh.exe', expect.arrayContaining(['ai7-testbed-02-nat', '--from-stdin']),
+      { windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] }]);
+    expect(() => helper.parseEnrollmentArguments(['--slot', 'opencode-go', '--credential-reference', randomUUID(),
+      '--from-file', ABSOLUTE, '--to-guest', 'arbitrary-host'])).toThrow();
+  });
+
+  it('accepts stdin only for a named connection and keeps it separate from file/check modes', async () => {
+    const write = vi.fn(async () => {});
+    const read = vi.fn(async () => 'synthetic-pipe-value');
+    await helper.storeEnrollment(['--slot', 'search-brave', '--credential-reference', randomUUID(), '--from-stdin'], {
+      env: {}, ...SUPPORTED_HOST, readSecret: async () => { throw new Error('No file read'); }, readStdinSecret: read,
+      importKeyring: async () => ({ AsyncEntry: class { setPassword = write; } }),
+    });
+    expect(read).toHaveBeenCalledOnce();
+    expect(write).toHaveBeenCalledWith('synthetic-pipe-value');
+    for (const flags of [['--from-stdin', '--from-file', ABSOLUTE], ['--from-stdin', '--check'], ['--delete', '--from-stdin']]) {
+      expect(() => helper.parseEnrollmentArguments(['--slot', 'opencode-go', '--credential-reference', randomUUID(), ...flags])).toThrow();
+    }
+    expect(() => helper.parseEnrollmentArguments(['--slot', 'opencode-go', '--from-stdin'])).toThrow();
   });
 
   it('admits every configured slot under the reference its document fixes, and only those', () => {
