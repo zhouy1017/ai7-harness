@@ -58,10 +58,20 @@ async function renderer(browser){
 }
 const boolean=async(page,expression)=>page.evaluate('Promise.resolve('+expression+').then(Boolean)');
 const actionCheck=(condition,operation,target)=>{if(!condition){report.failedAction={operation,target};check(false,'ui-'+operation+'-unavailable');}check(true,operation+'-'+target);};
-const click=async(page,label)=>actionCheck(await page.evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)});if(!node||node.disabled)return false;node.click();return true})()`),'click',label);
-const select=async(page,selector)=>actionCheck(await page.evaluate(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node||node.disabled)return false;node.click();return true})()`),'select',selector);
 const ready=async(page,expression,name,ms=120000)=>wait(()=>boolean(page,expression).catch(()=>false),name,ms);
-const fill=async(page,selector,value)=>actionCheck(await page.evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n||n.disabled)return false;n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('input',{bubbles:true}));n.dispatchEvent(new Event('change',{bubbles:true}));return true})()`),'fill',selector);
+const actionable="node&&!node.disabled&&node.getAttribute('aria-disabled')!=='true'&&node.getClientRects().length>0";
+const act=async(page,operation,target,lookup,mutation)=>{
+ const observe=`(()=>{const node=${lookup};return Boolean(${actionable})})()`;
+ try{await ready(page,observe,'ui-'+operation+'-readiness');}catch(error){
+  report.failedAction={operation,target,phase:'readiness',surface:await page.evaluate("({path:location.pathname,screen:document.querySelector('[data-screen]')?.dataset.screen??null})").catch(()=>null)};
+  throw error;
+ }
+ // Observe until ready, then send exactly one mutation; never retry a sent action.
+ actionCheck(await page.evaluate(`(()=>{const node=${lookup};if(!(${actionable}))return false;${mutation};return true})()`),operation,target);
+};
+const click=async(page,label)=>act(page,'click',label,`[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)}&&n.getClientRects().length>0)`,'node.click()');
+const select=async(page,selector)=>act(page,'select',selector,`document.querySelector(${JSON.stringify(selector)})`,'node.click()');
+const fill=async(page,selector,value)=>act(page,'fill',selector,`document.querySelector(${JSON.stringify(selector)})`,`node.value=${JSON.stringify(value)};node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}))`);
 async function cleanupInstallation(path){if(!path)return;const actual=resolve(path);if(!actual.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase())||!actual.endsWith('installed'))throw Error('cleanup-target-refused');if(!existsSync(actual))return;const name=(await readdir(actual)).find(n=>/^Uninstall.*\.exe$/i.test(n));if(name){run(join(actual,name),['/S']);await wait(()=>!existsSync(join(actual,'AI7.exe')),'cleanup-uninstall-timeout');}}
 
 async function seedPriorBook(temp,dataRoot){
