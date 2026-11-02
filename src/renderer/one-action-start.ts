@@ -1,4 +1,4 @@
-import type { TaskPlanProjection } from '../shared/protocol.js';
+import type { RendererApi, TaskPlanKind, TaskPlanProjection } from '../shared/protocol.js';
 
 /**
  * Starting a procedure from its sheet is the one explicit action (ADR 0096 §3, extending ADR 0094 §6): when its bar would
@@ -13,6 +13,26 @@ export type OneActionStart =
   | { readonly kind: 'preview' };
 
 export function oneActionStart(plan: Pick<TaskPlanProjection, 'kind' | 'start'>): OneActionStart {
-  if (plan.kind !== 'review-run' || plan.start.readiness !== 'ready') return { kind: 'preview' };
+  if (!['ready', 'record-only', 'no-route'].includes(plan.start.readiness)) return { kind: 'preview' };
   return { kind: 'authorize', planDigests: plan.start.categoryDigests };
+}
+
+/** The user's Start click prepares and authorizes one exact plan; plan inspection stays optional. */
+export async function startPreparedTask(api: Partial<RendererApi>, kind: TaskPlanKind, ref: string): Promise<void> {
+  if (api.inspectTaskPlan === undefined) throw new Error('无法读取任务计划。');
+  const plan = await api.inspectTaskPlan({ kind, ref });
+  if (kind === 'review-run') {
+    if (api.authorizeReviewRun === undefined) throw new Error('无法开始审阅。');
+    await api.authorizeReviewRun({ reviewRunId: ref, planDigests: plan.start.categoryDigests });
+    return;
+  }
+  const planEnvelopeDigest = plan.start.planEnvelopeDigest;
+  if (planEnvelopeDigest === null) throw new Error('任务计划尚未准备完成。');
+  const authorize = kind === 'baseline-analysis' ? api.authorizeBaselineAnalysis
+    : kind === 'writing' ? api.authorizeWritingTask
+    : kind === 'initial-evaluation' ? api.authorizeInitialEvaluation
+    : kind === 'readers-report' ? api.authorizeReadersReport
+    : kind === 'evaluation-rewrite' ? api.authorizeEvaluationRewrite : api.authorizeTaskAuthorization;
+  if (authorize === undefined) throw new Error('无法开始任务。');
+  await authorize({ taskIntentId: ref, planEnvelopeDigest });
 }

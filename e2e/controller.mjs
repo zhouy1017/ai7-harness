@@ -702,6 +702,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'effect-before-route-arrival-order',
     'existing-book-source-commit-preflight',
     'restart-and-data-location',
+    'screen-return-origins',
     'diagnostics-bundle-export',
     'model-service-first-save',
     'model-service-openai-text-contract',

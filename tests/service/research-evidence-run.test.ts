@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -300,8 +301,8 @@ describe('a research Run of 事实核查 retains its external evidence', () => {
     store.startMaterialIndexing();
     await store.settleMaterialIndexing();
     expect(() => store.pinMaterialReference(bookId, saved.material.materialId)).toThrow(expect.objectContaining({ code: 'MATERIAL_REFERENCE_UNAVAILABLE' }));
-    store.decideLibraryMaterial({ materialId: saved.material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-    store.decideLibraryMaterial({ materialId: saved.material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: saved.material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: saved.material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     const pin = store.pinMaterialReference(bookId, saved.material.materialId);
     const watch = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {

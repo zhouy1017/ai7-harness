@@ -15,6 +15,7 @@ export interface DataStorageOptions {
   readonly element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
   readonly button: (label: string, className: 'primary' | 'secondary' | 'quiet', action: () => void | Promise<void>) => HTMLButtonElement;
   readonly rendererErrorMessage: (error: unknown, fallback: string) => string;
+  readonly returnToOrigin: () => Promise<void>;
   readonly initializeStartup: () => Promise<void>;
   readonly technicalDetails: (gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>) => HTMLElement;
   readonly replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
@@ -23,7 +24,7 @@ export interface DataStorageOptions {
 /** 数据与存储, moved verbatim from the shell (Issue #1235). */
 export function createDataStorage(options: DataStorageOptions) {
   const {
-    setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
+    setStatus, panel, element, button, rendererErrorMessage, initializeStartup, returnToOrigin, technicalDetails, replaceScreen,
   } = options;
 
   async function renderDataAndStorage(): Promise<void> {
@@ -88,7 +89,7 @@ export function createDataStorage(options: DataStorageOptions) {
       revealRow.append(reveal);
       summary.append(revealRow);
       const actions = element('div', 'button-row');
-      actions.append(button('返回', 'quiet', () => void initializeStartup()));
+      actions.append(button('返回', 'quiet', () => void returnToOrigin()));
       // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart, read from the store.
       const versions = element('section', 'source-card data-version');
       versions.append(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'field-note', '正在读取版本…'));

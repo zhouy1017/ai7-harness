@@ -1,3 +1,4 @@
+import { startPreparedTask } from './one-action-start.js';
 import type {
   EvaluationAdjustment,
   EvaluationAdjustmentReasonId,
@@ -143,7 +144,7 @@ import { localInstantLabel } from './plan-preview-labels.js';
  */
 export interface MountEvaluationOptions {
   readonly root: HTMLElement;
-  readonly api: Pick<RendererApi, 'searchReferableMaterials' | 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
+  readonly api: Partial<Pick<RendererApi, 'inspectTaskPlan' | 'authorizeInitialEvaluation' | 'authorizeReadersReport' | 'authorizeEvaluationRewrite'>> & Pick<RendererApi, 'searchReferableMaterials' | 'inspectEvaluation' | 'startEvaluation' | 'saveEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' |
     'createReadersReportDraft' | 'prepareEvaluationRewrite' | 'decideEvaluationRewrite' | 'reviewManuscriptExport' | 'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport'>;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly errorMessage: (error: unknown, fallback: string) => string;
@@ -553,7 +554,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       row.append(open);
     } else {
       if (initial.prepare.allowed) {
-        const prepare = action(EVALUATION_AI7_PREPARE[initial.prepare.mode], latest === null ? 'primary' : 'secondary', 'prepare-initial', () => void prepareInitial());
+        const prepare = action(EVALUATION_AI7_PREPARE[initial.prepare.mode], latest === null ? 'primary' : 'secondary', 'start-initial', () => void prepareInitial());
+        const preview = action('查看计划', 'secondary', 'prepare-initial', () => void prepareInitial(true));
+        preview.disabled = busy; row.append(preview);
         prepare.disabled = busy;
         row.append(prepare);
       } else {
@@ -938,7 +941,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   };
 
   /** 准备 AI7 初评: the Task's plan prepared as one cooperative job, then opened in the Task Drawer, whose bar starts it. */
-  const prepareInitial = async (): Promise<void> => {
+  const prepareInitial = async (preview = false): Promise<void> => {
     if (busy || workspace === null) return;
     busy = true;
     refusal = null;
@@ -962,7 +965,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       setStatus(EVALUATION_AI7_STATUS.prepared, 'success');
       paint(null, true);
       const ref = result.initial.task?.taskIntentId ?? null;
-      if (ref !== null) options.openPlan(ref);
+      if (ref !== null) { if (preview) { options.openPlan(ref); return; } await startPreparedTask(api, 'initial-evaluation', ref); workspace = { ...await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore: null }), record: workspace.record }; paint(null, true); }
     } catch (error) {
       busy = false;
       refusal = errorMessage(error, EVALUATION_AI7_STATUS.failed);

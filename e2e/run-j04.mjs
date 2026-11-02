@@ -1144,59 +1144,6 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-overview .book-analysis-summary[data-analysis-state="unavailable"]') && !document.querySelector('.baseline-analysis-card')`, 'analysis-unavailable-before-prerequisites');
     await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
 
-    at('artifact-revision2');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'artifact-install-ready');
-    at('artifact-install');
-    cancellation.throwIfRequested();
-    await click(renderer, '获取并安装（保持停用）', 'artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
-    at('artifact-enable');
-    cancellation.throwIfRequested();
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
-    at('artifact-enabled');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.native-artifact-card'); return card?.dataset.nativeArtifactState==='enabled-for-book' && card.textContent.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}); })()`, 'artifact-exact-revision2');
-    // Synchronized delta (#334), by addition: the artifact card folds each ceiling's empty fields into one
-    // row, lists the pin history, and moves a revision that is neither in force nor on offer into one
-    // counted disclosure. Every assertion above survives that unchanged, so this addition is what pins the
-    // new readings and, per V2-UX-LAYER-008, that the folded revision's ceiling digest and each pin's
-    // exact instant are still in the record one step away.
-    await assertRenderer(renderer, `(() => {
-      const card=document.querySelector('.native-artifact-card');
-      const sidecar=card?.querySelector(':scope > .native-artifact-authority');
-      const facts=(root)=>{
-        const result={};
-        for(const term of root?.querySelectorAll(':scope > dl.native-artifact-facts > dt, :scope > details.technical-details > dl > dt')??[]){
-          result[term.textContent??'']=term.nextElementSibling?.textContent??'';
-        }
-        return result;
-      };
-      const pins=(selector)=>Array.from(sidecar?.querySelectorAll(selector)??[],(item)=>item.textContent??'');
-      const decisionPins=pins(':scope > dl.native-artifact-facts li[data-sidecar-pin]');
-      const exactPins=pins(':scope > details.technical-details li[data-sidecar-pin]');
-      const active=card?.querySelector('[data-authority-sidecar-revision="2"]');
-      const superseded=card?.querySelector('[data-authority-sidecar-revision="1"]');
-      const past=superseded?.closest('details');
-      const activeFacts=facts(active);
-      const supersededFacts=facts(superseded);
-      return active?.parentElement===sidecar && past?.parentElement===sidecar &&
-        past.querySelector(':scope > summary')?.textContent==='其他 Revision（1）' &&
-        activeFacts['模型角色']==='Main Editorial Role' &&
-        activeFacts['可读范围']==='current-book-primary-manuscript-revision、current-book-source-version' &&
-        activeFacts['未声明']==='AI7 能力、模型提供方绑定、凭据访问、网络访问、受控动作、后台分析登记、AI7 正式应用' &&
-        activeFacts['SHA-256']===${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
-        supersededFacts['模型角色']==='Main Editorial Role' &&
-        supersededFacts['权限上限']==='未声明任何权限（8 项均为空）' && supersededFacts['未声明']===undefined &&
-        /^[0-9a-f]{64}$/.test(supersededFacts['SHA-256']) &&
-        supersededFacts['SHA-256']!==${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} &&
-        !active.textContent.includes('空（无）') && !superseded.textContent.includes('空（无）') &&
-        decisionPins.length===1 && decisionPins[0].startsWith('Revision 2 · ') &&
-        !decisionPins[0].includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}) &&
-        exactPins.length===1 && exactPins[0].startsWith('Revision 2 · ' + ${JSON.stringify(SIDECAR_REVISION_2_DIGEST)} + ' · ') &&
-        exactPins[0].endsWith('Z') &&
-        card.lastElementChild?.classList.contains('native-artifact-actions');
-    })()`, 'artifact-card-layer-surface');
-
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
@@ -1227,7 +1174,7 @@ async function main() {
     requireJourney(missingConnection?.credentialReference === readyConnection.credentialReference && missingConnection?.credentialOperationState === 'missing', 'model-missing-stable-reference');
     credentialRemoved = true;
     cancellation.throwIfRequested();
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-back-library');
 
     at('book-reopen');
@@ -3164,25 +3111,9 @@ async function main() {
     requireJourney(/^第 \d+ 次审阅$/u.test(runHeading ?? ''), 'report-export-run-heading', runHeading);
     const reportLabel = `审阅报告 · ${runHeading} · 第 1 版`;
     await assertRenderer(renderer, `document.querySelector('section.review-report [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('section.review-report .review-report-export-slot input[value="markdown"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'report-inline-markdown');
     await reviewAction(renderer, 'section.review-report [data-review-action="export"]', 'report-export-open');
-    await waitFor(renderer, `(() => { const card=${reportCard}; return card?.dataset.exportPhase==='ready' && card.dataset.exportTarget==='report' && card.querySelector('input[name="export-format"]:checked')?.value==='docx'; })()`, 'report-export-reviewed', 60_000);
-    await assertRenderer(renderer, `(() => {
-      const card=${reportCard};
-      const rows=Array.from(card.querySelectorAll('ol.export-fidelity-list > li.export-fidelity-row')).map((row)=>row.dataset.exportFidelity+':'+row.dataset.exportStatus);
-      const fidelity=card.querySelector('section.export-fidelity');
-      return card.querySelector('h4')?.textContent===${JSON.stringify(`导出 · ${reportLabel}`)} && card.querySelector('fieldset.export-options')===null &&
-        ['report-overview:preserved','report-statistics:preserved','report-findings:preserved','report-summaries:preserved','report-appendix:preserved'].every((row)=>rows.includes(row)) && rows.every((row)=>row.endsWith(':preserved')) &&
-        fidelity?.dataset.exportDegraded==='false' && (fidelity.querySelector('.export-restoration-line')?.textContent ?? '').startsWith('审阅报告按第 1 版的记录写出') &&
-        JSON.stringify(Array.from(card.querySelectorAll('input[name="export-format"]')).map((radio)=>radio.value+':'+radio.disabled))==='["docx:false","pdf:false","markdown:false"]';
-    })()`, 'report-export-review-is-the-reports');
-    await assertRenderer(renderer, `(() => { const radio=${reportCard}?.querySelector('input[name="export-format"][value="markdown"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return true; })()`, 'report-export-choose-markdown');
-    await waitFor(renderer, `(() => { const card=${reportCard}; return card?.dataset.exportPhase==='ready' && card.querySelector('input[name="export-format"]:checked')?.value==='markdown' && card.querySelector('li.export-fidelity-row[data-export-fidelity="report-overview"]')?.dataset.exportStatus==='degraded' && card.querySelector('section.export-fidelity')?.dataset.exportDegraded==='true'; })()`, 'report-export-markdown-reviewed', 60_000);
-    await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="choose"]', 'report-export-choose');
-    await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='prepared'`, 'report-export-prepared', 60_000);
-    await assertRenderer(renderer, `${reportCard}.querySelector('.export-destination-line')?.textContent===${JSON.stringify(`${reportExportPath}（新建文件）`)}`, 'report-export-destination-bound');
-    requireJourney((await readdir(exportsRoot)).length === 0, 'report-export-nothing-before-approval');
-    await reviewAction(renderer, 'section.review-report .review-report-export-slot [data-export-action="approve"]', 'report-export-approve');
-    await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created' && ${reportCard}.querySelector('.export-outcome-detail')?.textContent===${JSON.stringify(`已新建「${REPORT_EXPORT_FILE}」。`)}`, 'report-export-written', 60_000);
+    await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, 'report-export-written', 60_000);
     const reportMarkdown = await readFile(reportExportPath, 'utf8');
     const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');
     const overviewRows = await renderer.evaluate(`document.querySelectorAll('section.review-report table.review-report-table:not(.review-report-statistics) tbody tr').length`);
@@ -3256,9 +3187,6 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'overlap-launch-ready');
     const overlapBook = await importSample1(renderer, cancellation, true);
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'overlap-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'overlap-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'overlap-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'overlap-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'overlap-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(overlapBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'overlap-open-book');
@@ -3338,9 +3266,6 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'factual-launch-ready');
     const factualBook = await importSample1(renderer, cancellation, true);
     at('factual-level-plan');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'factual-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'factual-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'factual-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'factual-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'factual-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(factualBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'factual-open-book');
@@ -3469,9 +3394,6 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'custom-launch-ready');
     const customBook = await importSample1(renderer, cancellation, true);
     at('custom-dimension-define');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'custom-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'custom-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'custom-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'custom-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'custom-knowledge-open');
@@ -3481,8 +3403,7 @@ async function main() {
     await assertRenderer(renderer, `Array.from(document.querySelectorAll('.knowledge-custom-dimensions .custom-dimension-fixed li')).map((item)=>item.textContent).join('').includes('不打分') && document.querySelector('.knowledge-custom-dimensions')?.textContent.includes('名称只在本机显示，不会发送')`, 'custom-knowledge-fixed');
     await reviewAction(renderer, '.knowledge-custom-dimensions [data-custom-action="new"]', 'custom-new');
     await assertRenderer(renderer, `(() => { const form=document.querySelector('.knowledge-custom-dimensions [data-custom-form="new"]'); const title=form?.querySelector('input[name="title"]'); const template=form?.querySelector('textarea[name="questionTemplate"]'); if(!(title instanceof HTMLInputElement)||!(template instanceof HTMLTextAreaElement))return false; title.value=${JSON.stringify(CUSTOM_DIMENSION_TITLE)}; template.value=${JSON.stringify(CUSTOM_DIMENSION_TEMPLATE)}; const save=form.querySelector('[data-custom-action="save"]'); if(!(save instanceof HTMLButtonElement))return false; save.click(); return true; })()`, 'custom-save');
-    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='1' && document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='pending-validation'`, 'custom-saved');
-    await reviewAction(renderer, '.knowledge-custom-dimensions .custom-dimension-version[data-version="1"] [data-custom-action="enable"]', 'custom-enable');
+    await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions')?.dataset.dimensionCount==='1' && document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-saved');
     await waitFor(renderer, `document.querySelector('.knowledge-custom-dimensions .custom-dimension-version[data-version="1"]')?.dataset.versionState==='enabled'`, 'custom-enabled');
     const defined = await renderer.evaluate(`window.ai7.inspectCustomAnalysisDimensions({ forBook: false })`);
     const customDimension = defined?.dimensions?.[0];
@@ -3493,7 +3414,7 @@ async function main() {
 
     at('custom-dimension-run');
     // 自定义 is its own kind: the tab and its Run require no baseline Result Set Revision on this Book.
-    await click(renderer, '返回', 'custom-knowledge-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'custom-knowledge-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'custom-back-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(customBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'custom-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(customBook.bookId)}]')`, 'custom-manuscript-ready');
@@ -3566,9 +3487,6 @@ async function main() {
       entry.capture.capturedAt.startsWith('2026-10-12') && entry.capture.taskPromptContractDigest === RECORDED_PROMPT_CONTRACT_DIGEST) &&
       sameRecord(sourceRecordedUsage, { requests: 12, inputTokens: 38287, outputTokens: 113041 }), 'recorded-source-provenance');
     const recordedBook = await importSample1(renderer, cancellation, true);
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-open-book');
@@ -3642,9 +3560,6 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
     const recordedPausedBook = await importSample1(renderer, cancellation, true);
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'recorded-paused-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'recorded-paused-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'recorded-paused-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-open-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-open-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(recordedPausedBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'recorded-paused-open-book');
@@ -3839,9 +3754,6 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'stock-leaf-launch-ready');
     const leafBook = await importSample1(renderer, cancellation, true);
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'stock-leaf-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'stock-leaf-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'stock-leaf-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'stock-leaf-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stock-leaf-library');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(leafBook.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'stock-leaf-open-book');

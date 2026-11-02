@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { reviewFixtureContractVersion } from '../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
@@ -90,8 +91,8 @@ beforeEach(async () => {
   const preview = await store.previewLibraryMaterial(path);
   const material = await store.addLibraryMaterial({ previewId: preview.previewId, title, kind: 'document' });
   materialId = material.materialId;
-  store.decideLibraryMaterial({ materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-  store.decideLibraryMaterial({ materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+  setLibraryDecision(store, { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+  setLibraryDecision(store, { materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
   store.startMaterialIndexing();
   await store.settleMaterialIndexing();
   const page = store.startEvaluation(bookId);
@@ -303,7 +304,7 @@ describe('live material references (#809)', () => {
     const run = prepare(kind);
     atUnit = () => {
       atUnit = null;
-      if (damage === 'withdrawn') store.decideLibraryMaterial({ materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      if (damage === 'withdrawn') setLibraryDecision(store, { materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       else database((db) => {
         for (const trigger of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${trigger}`);
         if (damage === 'corrupt') db.prepare('UPDATE material_index_segments SET sha256 = ? WHERE index_id IN (SELECT index_id FROM material_index_builds WHERE material_id = ?)').run('f'.repeat(64), materialId);

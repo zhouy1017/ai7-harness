@@ -11,6 +11,7 @@ export interface ModelServiceSettingsOptions {
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly rendererErrorMessage: (error: unknown, fallback: string) => string;
   readonly panel: () => HTMLElement;
+  readonly returnToOrigin: () => Promise<void>;
   readonly initializeStartup: () => Promise<void>;
   readonly replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
 }
@@ -18,7 +19,7 @@ export interface ModelServiceSettingsOptions {
 /** 模型服务, moved verbatim from the shell (Issue #1235). */
 export function createModelServiceSettings(options: ModelServiceSettingsOptions) {
   const {
-    element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
+    element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
   } = options;
 
   function renderModelServiceProxyBlock(projection: ModelServiceSettingsProjection): HTMLElement {
@@ -139,7 +140,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const technical = element('details', 'model-service-technical');
     technical.append(element('summary', undefined, '查看技术详情'), unsupported, policy, protectedStore);
     const actions = element('div', 'button-row');
-    actions.append(button('返回', 'quiet', () => void initializeStartup()));
+    actions.append(button('返回', 'quiet', () => void returnToOrigin()));
     content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }), renderModelServiceProxyBlock(projection), technical, actions);
     replaceScreen('model-service', content);
   }

@@ -241,7 +241,7 @@ export function evaluationProfileUse(profile: { records: number; books: number }
 export const EVALUATION_AI7_HEADING = 'AI7 初评';
 export const EVALUATION_AI7_LEDE = 'AI7 按本社评估方案通读全书，给每一项一个初评分数和评语，供你打分时参考；记录保存的是你的评分，结论由你选定。';
 export const EVALUATION_AI7_NONE = 'AI7 还没有为这本书做初评。';
-export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': '准备 AI7 初评', 'evaluation-again': '重新初评' };
+export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' };
 export const EVALUATION_AI7_OPEN_PLAN = '查看计划并开始';
 export const EVALUATION_AI7_OPEN_TASK = '查看任务';
 export const EVALUATION_START_FROM_INITIAL = '从 AI7 初评开始';

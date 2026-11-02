@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { parseReviewCategoryUnitMessageHeader, parseReviewCrossChapterMessage, REVIEW_CROSS_CHAPTER_RESULT_SCHEMA } from '../../src/service/review/review-category-contract.js';
@@ -99,8 +100,8 @@ async function material(text = TEXT, scope: 'book' | 'house' = 'book', choice: '
   writeFileSync(path, text.length > 500 ? text.match(/[\s\S]{1,500}/gu)!.join('\n\n') : text);
   const preview = await store.previewLibraryMaterial(path);
   const item = await store.addLibraryMaterial({ previewId: preview.previewId, title: '合成背景资料', kind: 'document' });
-  store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: scope === 'house' ? { scope } : { scope, bookId } } });
-  store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice, reason: null } });
+  setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: scope === 'house' ? { scope } : { scope, bookId } } });
+  setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice, reason: null } });
   store.startMaterialIndexing();
   await store.settleMaterialIndexing();
   return item.materialId;
@@ -158,7 +159,7 @@ describe('review categories reference exact library versions over ordinary captu
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
     unitBoundary = () => {
       unitBoundary = null;
-      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     };
     await driver.drive(run.reviewRunId);
     const stopped = database((db) => db.prepare("SELECT canonical_json FROM analysis_run_states WHERE state = 'interrupted' ORDER BY rowid DESC LIMIT 1").get());
@@ -250,7 +251,7 @@ describe('review categories reference exact library versions over ordinary captu
     expect(result.categories.every((category) => category.state === 'settled')).toBe(true);
     expect(result.state).toBe('settled');
     expect(indexRows()).toBe(before);
-    if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    if (change === 'withdrawn') setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     else if (change === 'missing') removeBuild(id);
     else database((db) => {
       for (const name of Object.keys(MATERIAL_INDEX_TRIGGER_SQL)) db.exec(`DROP TRIGGER ${name}`);
@@ -269,11 +270,11 @@ describe('review categories reference exact library versions over ordinary captu
   it('distinguishes withdrawn eligibility from a missing frozen build and blocks stale authorization', async () => {
     const id = await material();
     const run = prepare([id]);
-    store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     expect(plan(run).scope.reference.some((line) => line.includes('现在不能列进'))).toBe(true);
     expect(plan(run).start.readiness).toBe('changed');
     expect(() => store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run))).toThrow('现在不能列进');
-    store.decideLibraryMaterial({ materialId: id, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: id, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     await close();
     removeBuild(id);
     await open();
@@ -285,12 +286,12 @@ describe('review categories reference exact library versions over ordinary captu
   it('runs a plan read while its reference was withdrawn once the reference is admitted again', async () => {
     const id = await material();
     const run = prepare([id]);
-    store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     // A fresh start, so the plan is first read while the pin cannot be: that unreadable contract must not be the one kept.
     await close();
     await open();
     expect(plan(run).start.readiness).toBe('changed');
-    store.decideLibraryMaterial({ materialId: id, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: id, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     expect(plan(run).start.readiness).toBe('ready');
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));
     await driver.drive(run.reviewRunId);
@@ -354,7 +355,7 @@ describe('review categories reference exact library versions over ordinary captu
     const local = await material('本书归属的合成资料。');
     const house = await material('社级归属的合成资料。', 'house', 'house');
     const other = await importSample1Book(store, roots.codeRoot, '另一份合成边界测试');
-    store.decideLibraryMaterial({ materialId: local, expectedDecisions: 2, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: other.bookId } } });
+    setLibraryDecision(store, { materialId: local, expectedDecisions: 2, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: other.bookId } } });
     expect(store.inspectReviewWorkspace(bookId, null).materials!.items.map((item) => item.materialId)).toEqual([house]);
     expect(() => prepare([local])).toThrow(StoreError);
     expect(recordPins(prepare([house]))[0]?.materialId).toBe(house);
@@ -362,8 +363,8 @@ describe('review categories reference exact library versions over ordinary captu
     writeFileSync(path, '合成的尚未建好索引的资料。');
     const preview = await store.previewLibraryMaterial(path);
     const pending = await store.addLibraryMaterial({ previewId: preview.previewId, title: '尚未建索引', kind: 'document' });
-    store.decideLibraryMaterial({ materialId: pending.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-    store.decideLibraryMaterial({ materialId: pending.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: pending.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: pending.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     expect(store.inspectReviewWorkspace(bookId, null).materials!.items.some((item) => item.materialId === pending.materialId)).toBe(false);
     expect(() => prepare([pending.materialId])).toThrow(StoreError);
   });
@@ -449,7 +450,7 @@ describe('review categories reference exact library versions over ordinary captu
       expect(pages.mock.calls.every((call) => call[2] === 1)).toBe(true);
       expect(pages.mock.calls.length).toBeGreaterThan(0);
       // A reference withdrawn since still refuses: the cache never stands in for the pin's availability.
-      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(plan(run).scope.reference.some((line) => line.includes('现在不能列进'))).toBe(true);
     } finally { pages.mockRestore(); }
   });

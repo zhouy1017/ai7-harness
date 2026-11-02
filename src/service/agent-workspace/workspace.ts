@@ -20,8 +20,7 @@ import { readAgentWorkspaceAnswer } from './change-set.js';
  * Apply", UI ADR 0015; V2-UX-AGENT-001 to 004, APREP-001): one bounded editor journey — propose a change set over a selected
  * range — and nothing more.
  *
- * The workspace opens for a Book only when that Book's editorial workspace profile is enabled at Revision 2 of its authority
- * sidecar. Looking at it writes nothing. One proposal round is one dialogue turn of the `editorial-dialogue` kind on the
+ * Every Book has the workspace. Looking at it writes nothing. One proposal round is one dialogue turn of the `editorial-dialogue` kind on the
  * dialogue's own owners — the selected words verified as a dialogue's are, the route the selected policy admits for the
  * dialogue, its refusals unchanged — under the workspace fragment of the dialogue contract; its dialogue Task is the one
  * record the round writes. What the answer proposes is held here, in memory, as candidates anchored inside the selection —
@@ -30,14 +29,14 @@ import { readAgentWorkspaceAnswer } from './change-set.js';
  * Apply, which this module never calls. 放弃 forgets the round and records nothing. A restart forgets every held round.
  */
 export type AgentWorkspaceStore = Pick<EditorialStore,
-  'inspectEditorialWorkspaceProfile' | 'getBookOverview' | 'dialogueSourceDigest' | 'askAboutSelection' | 'createProducedEditorialMarks'>;
+  'getBookOverview' | 'dialogueSourceDigest' | 'askAboutSelection' | 'createProducedEditorialMarks'>;
 export type AgentWorkspaceDialogues = Pick<DialogueExecutionOwner, 'requireReady' | 'beginWorkspaceTurn' | 'stop'>;
 
 /** The label every workspace mark carries as its source, beside the dialogue Task of the turn it came from. */
 export const AGENT_WORKSPACE_MARK_SOURCE_LABEL = words.source;
 /** What an atomic group of a promoted change set says partial acceptance would cause. */
 export const AGENT_WORKSPACE_ATOMIC_REASON = words.atomicReason;
-/** The one-sentence prerequisite of a Book whose profile is not enabled at Revision 2. */
+/** The reason an unavailable Book cannot be opened. */
 export const AGENT_WORKSPACE_UNAVAILABLE_REASON = words.unavailable;
 /** The longest quotation a workspace mark's basis keeps, in characters. */
 const BASIS_QUOTE_CHARACTERS = 200;
@@ -124,11 +123,11 @@ export class AgentWorkspace {
     this.#now = now;
   }
 
-  /** Whether the Book's profile opens the workspace: enabled for this Book and pinned at Revision 2. A read. */
+  /** Validate the Book without requiring a separately installed profile. */
   async #available(bookId: string): Promise<boolean> {
     require(typeof bookId === 'string' && UUID_PATTERN.test(bookId), 'BOOK_INVALID', words.invalidBook);
-    const profile = await this.#store.inspectEditorialWorkspaceProfile(bookId);
-    return profile.lifecycle.enabledForCurrentBook && profile.sidecar.activeRevision === 2;
+    this.#store.getBookOverview(bookId);
+    return true;
   }
 
   async #requireAvailable(bookId: string): Promise<void> {

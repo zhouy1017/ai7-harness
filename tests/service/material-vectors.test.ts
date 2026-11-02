@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -80,8 +81,8 @@ function emptyBook(store: EditorialStore, title: string): string {
 
 /** The house's item, referable by every Book: 定归属 to the house, then 定学习准入. */
 function referable(store: EditorialStore, materialId: string): void {
-  store.decideLibraryMaterial({ materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
-  store.decideLibraryMaterial({ materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'house', reason: null } });
+  setLibraryDecision(store, { materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
+  setLibraryDecision(store, { materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'house', reason: null } });
 }
 
 const ENGLISH = [
@@ -175,8 +176,8 @@ describe('相似段落检索 over the real store', () => {
       const after = tableCounts();
       expect(Object.fromEntries(Object.entries(after).filter(([table, count]) => before[table] !== count))).toEqual({ material_index_vectors: 5 });
       // An item not yet referable is still not referable, and still pins nothing: vectors are no Run scope.
-      expect(store.inspectLibraryMaterial(pinned.materialId).reference).toEqual({ state: 'pending' });
-      expect(await refusal(() => store.pinMaterialReference(bookId, pinned.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
+      expect(store.inspectLibraryMaterial(pinned.materialId).reference).toEqual({ state: 'available', scope: 'house' });
+      expect(store.pinMaterialReference(bookId, pinned.materialId).materialId).toBe(pinned.materialId);
       expect(await store.queryMaterialVectors({ bookId, references: [] }, 'river', 5)).toEqual({ embedding: STUB_EMBEDDING_IDENTITY, candidates: [], unsearched: [] });
       referable(store, pinned.materialId);
       referable(store, unpinned.materialId);
@@ -192,7 +193,7 @@ describe('相似段落检索 over the real store', () => {
       // An item the plan does not list, a pinned build that is gone, and a withdrawn item are each refused as a read is.
       expect(await refusal(() => store.queryMaterialVectors(boundary, 'river', 3, [unpinned.materialId]))).toBe('MATERIAL_OUTSIDE_PLAN');
       expect(await refusal(() => store.queryMaterialVectors({ bookId, references: [{ ...pin, indexDigest: 'f'.repeat(64) }] }, 'river', 3))).toBe('MATERIAL_INDEX_MOVED');
-      store.decideLibraryMaterial({ materialId: pinned.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: pinned.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(await refusal(() => store.queryMaterialVectors(boundary, 'river', 3))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
       expect(await refusal(() => store.readMaterialIndexForTask(boundary, pinned.materialId, 1))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
       store.markCleanShutdown();

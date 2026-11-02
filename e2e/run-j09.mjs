@@ -957,11 +957,6 @@ async function main() {
     // The analysis's prerequisites through the product's own setup: the editorial workspace profile at
     // Revision 2 for this Book, and one Main Editorial Role connection whose synthetic credential is saved and
     // removed again, so the route's credential is `missing` and only its reference is recorded.
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'artifact-install-ready');
-    await click(renderer, '获取并安装（保持停用）', 'artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'model-open-settings');
@@ -1013,9 +1008,6 @@ async function main() {
     at('second-book-import');
     const bookB = await importSample1(renderer, SECOND.title, true, 'second-import');
     requireJourney(bookB !== bookA, 'two-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'second-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'second-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'second-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'second-return-library');
 
     at('second-book-completed-run');
@@ -1181,9 +1173,6 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'third-ready');
     const bookC = await importSample1(renderer, THIRD.title, true, 'third-import');
     requireJourney(bookC !== bookA && bookC !== bookB, 'three-books');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'third-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'third-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'third-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-return-library');
 
     at('concurrent-first-run');
@@ -1700,9 +1689,6 @@ async function main() {
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'model-question-ready');
     const questionBook = await importSample1(renderer, '模型提问旅程', true, 'model-question-import');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'model-question-artifact-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'model-question-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'model-question-artifact-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-question-library');
     await openAnalysisOf(renderer, questionBook, 'model-question-analysis');
     const beforeQuestion = await readSettledAttention(renderer);

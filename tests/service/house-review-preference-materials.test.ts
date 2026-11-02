@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -79,8 +80,8 @@ describe('本社审阅偏好 beside a frozen 资料库 reference (#911 review)',
     writeFileSync(path, TEXT);
     const preview = await store.previewLibraryMaterial(path);
     const item = await store.addLibraryMaterial({ previewId: preview.previewId, title: '合成背景资料', kind: 'document' });
-    store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-    store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     store.startMaterialIndexing();
     await store.settleMaterialIndexing();
 
@@ -91,12 +92,12 @@ describe('本社审阅偏好 beside a frozen 资料库 reference (#911 review)',
     expect(plan().scope.reference).toContain(used);
     expect(plan().start.readiness).toBe('ready');
     // The reference withdrawn: the plan still reads, under its frozen contract, and names the reference's own reason.
-    store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     expect(plan().start.readiness).toBe('changed');
     expect(plan().scope.reference.some((line) => line.includes('现在不能列进'))).toBe(true);
     expect(() => store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run))).toThrow('现在不能列进');
     // Admitted again, the same plan re-derives its combined contract and is accepted.
-    store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 3, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     expect(plan().start.readiness).toBe('ready');
     expect(plan().scope.reference).toContain(used);
     store.authorizeReviewRun(bookId, run.reviewRunId, approvals(run));

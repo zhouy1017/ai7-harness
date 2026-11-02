@@ -23,6 +23,7 @@ import type { BookWorkbenchRoute, ResolvedBookWorkbenchRoute, FeedbackHistoryTar
 
 /** The shell's helpers and routes used by 知识库 and 质量与学习. */
 export interface KnowledgeBaseOptions {
+  readonly rememberReturn: (node: HTMLElement, restore: () => void | Promise<void>) => void;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
   readonly rendererErrorMessage: (error: unknown, fallback: string) => string;
   readonly element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
@@ -32,6 +33,7 @@ export interface KnowledgeBaseOptions {
   readonly button: (label: string, className: 'primary' | 'secondary' | 'quiet', action: () => void | Promise<void>) => HTMLButtonElement;
   readonly leaveThen: (open: () => Promise<void>) => Promise<void>;
   readonly renderGlobalAgent: (dialogueId?: string) => Promise<void>;
+  readonly returnToOrigin: () => Promise<void>;
   readonly initializeStartup: () => Promise<void>;
   readonly replaceScreen: (state: string, content: HTMLElement, place?: ShellPlace | null) => void;
   readonly openFeedbackTarget: (target: FeedbackHistoryTarget, entryId: string) => Promise<void>;
@@ -39,13 +41,14 @@ export interface KnowledgeBaseOptions {
   readonly requestBookWorkbenchRoute: (route: BookWorkbenchRoute, onRequestingWindow?: (resolved: ResolvedBookWorkbenchRoute) => Promise<void>, recoveryReturn?: RecoveryReturnContext) => Promise<void>;
   readonly renderBookDeliverables: (bookId: string, bookTitle: string, openCase?: { caseId: string; publicationVersionId: string; }, focusPackageVersionId?: string) => void;
   readonly renderBookEvaluation: (bookId: string, bookTitle: string, focus?: { recordId: string; riskId: string; }) => void;
+  readonly renderBookAnalysis: (bookId: string, bookTitle: string) => void;
   readonly renderBookReview: (bookId: string, bookTitle: string, focus?: ReviewFocus | null, procedureId?: string | null) => void;
 }
 
 /** 知识库 and 质量与学习, moved verbatim from the shell (Issue #1235). */
 export function createKnowledgeBase(options: KnowledgeBaseOptions) {
   const {
-    setStatus, rendererErrorMessage, element, openWordSourceVersion, technicalDetails, panel, button, leaveThen, renderGlobalAgent, initializeStartup, replaceScreen, openFeedbackTarget, openLearningMaterialSource, requestBookWorkbenchRoute, renderBookDeliverables, renderBookEvaluation, renderBookReview,
+    setStatus, rendererErrorMessage, element, openWordSourceVersion, technicalDetails, panel, button, leaveThen, renderGlobalAgent, initializeStartup, returnToOrigin, replaceScreen, openFeedbackTarget, openLearningMaterialSource, requestBookWorkbenchRoute, renderBookDeliverables, renderBookEvaluation, renderBookAnalysis, renderBookReview,
   } = options;
 
   /**
@@ -318,7 +321,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(all);
     }
     back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
-    back.append(button('返回', 'quiet', () => void initializeStartup()));
+    back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
       element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
@@ -329,6 +332,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back,
     );
     replaceScreen('quality-learning', content);
+    options.rememberReturn(content, () => renderQualityLearning(tab, bookId, false, openMaterial, returnToReview));
     if (tabFocused) content.querySelector<HTMLElement>(`#quality-tab-${tab}`)?.focus();
     const status = tab === 'feedback' ? FEEDBACK_HISTORY_STATUS : tab === 'learning' ? LEARNING_STATUS : LEARNING_AUDIT_STATUS;
     setStatus(status.loading, 'busy');
@@ -385,7 +389,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     panelNode.setAttribute('role', 'tabpanel');
     panelNode.setAttribute('aria-labelledby', `knowledge-tab-${tab}`);
     const back = element('div', 'button-row');
-    back.append(button('返回', 'quiet', () => void initializeStartup()));
+    back.append(button('返回', 'quiet', () => void returnToOrigin()));
     const holds = element('p', 'lede knowledge-holds', view.holds);
     content.append(
       element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),
@@ -401,6 +405,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     }
     content.append(panelNode, back);
     replaceScreen('knowledge-base', content);
+    options.rememberReturn(content, () => renderKnowledgeBase(tab));
     if (tabFocused) content.querySelector<HTMLElement>(`#knowledge-tab-${tab}`)?.focus();
     return { content, panelNode };
   }
@@ -421,34 +426,13 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       const list = renderProcedureLibrary(procedures.preinstalled);
       void mountEditableProcedureLibrary(list, window.ai7, async (book, kind, procedure) => {
         await requestBookWorkbenchRoute({ kind: 'book', bookId: book.bookId }, async (route) => {
-          if (kind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
-          else if (['evaluation', 'readers-report', 'evaluation-rewrite'].includes(kind)) renderBookEvaluation(route.bookId, route.bookTitle);
-          else renderBookReview(route.bookId, route.bookTitle, null, kind === 'review-run' ? `${procedure.procedureId}@${procedure.version}` : null);
+          if (['baseline-analysis', 'baseline-manuscript-analysis'].includes(kind)) renderBookAnalysis(route.bookId, route.bookTitle);
+          else if (kind === 'writing') renderBookDeliverables(route.bookId, route.bookTitle);
+          else if (['evaluation', 'initial-evaluation', 'readers-report', 'evaluation-rewrite'].includes(kind)) renderBookEvaluation(route.bookId, route.bookTitle);
+          else renderBookReview(route.bookId, route.bookTitle, null, `${procedure.procedureId}@${procedure.version}`);
         });
       }, rendererErrorMessage).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法读取工序版本。'), 'error'));
-      const artifacts = element('ul', 'knowledge-artifact-list');
-      for (const artifact of procedures.artifacts) {
-        const item = element('li', undefined, artifactLine(artifact));
-        item.dataset['artifactState'] = artifact.state;
-        item.dataset['artifactEnabledBooks'] = String(artifact.enabledBooks);
-        artifacts.append(item);
-      }
-      // The identities are the Technical Identity Layer's (ADR 0071 §1, LAYER-001): the 方案's carrier and 权限侧车, and each
-      // 工序's own id, one step away from the words above.
-      const identities = technicalDetails(
-        'native-artifact-facts',
-        ...procedures.artifacts.flatMap((artifact) => [
-          element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', artifact.technical.artifactId),
-          element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', artifact.technical.version),
-          element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', artifact.technical.sha256),
-          element('dt', undefined, '权限侧车'), element('dd', 'technical-identity', artifact.technical.sidecarId),
-          ...(artifact.technical.sidecarSha256 === null
-            ? []
-            : [element('dt', undefined, '权限侧车 SHA-256'), element('dd', 'technical-identity', artifact.technical.sidecarSha256)]),
-        ]),
-        ...procedures.preinstalled.flatMap((procedure) => [element('dt', undefined, procedure.title), element('dd', 'technical-identity', procedure.procedureId)]),
-      );
-      section.append(element('h3', undefined, PROCEDURES_HEADING), list, artifacts, identities);
+      section.append(element('h3', undefined, PROCEDURES_HEADING), list);
       // 可复用工序 and 开发建议 (Issue #65, S30; ADR 0087 §5, §6): apart from the built-in 工序, read on their own.
       const captured = element('div', 'knowledge-captured');
       const surface = mountCapturedProcedures({

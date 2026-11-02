@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -371,8 +372,8 @@ describe('取消 of a waiting or queued Run of another kind (Issue #760 review)'
       writeFileSync(path, '这份资料记录了一座古城在战火中保存青铜器的经过，馆员连夜把器物装箱转移。');
       const preview = await store.previewLibraryMaterial(path);
       const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: '参考资料', kind: 'document' });
-      store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-      store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+      setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
       let progress = store.createWritingPreparationWork(bookId, { ...WRITING_REQUEST, materialIds: [material.materialId] }, launchPolicy);
@@ -381,7 +382,7 @@ describe('取消 of a waiting or queued Run of another kind (Issue #760 review)'
       const digest = (await planOf(store, bookId, 'writing', taskIntentId, 'offline')).start.planEnvelopeDigest!;
       store.startTaskWhenOnline({ bookId, kind: 'writing', ref: taskIntentId, planEnvelopeDigest: digest, planDigests: [] });
       // While it waits offline, the item may no longer be listed by this Book's Tasks: the writing start check now refuses.
-      store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(await code(() => store.authorizeWriting(bookId, taskIntentId, digest))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
       // 取消 still ends it, offline, before anything is sent (OFF-010) — and a new Task can then be prepared.
       expect(store.cancelWaitingTask({ bookId, kind: 'writing', ref: taskIntentId })).toEqual({ dequeue: null });

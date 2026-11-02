@@ -76,7 +76,7 @@ describe('知识库', () => {
     }
     // 范例 keeps the Owner's default and 资料库 its gate, as the specification states them.
     expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')!.holds).toContain('学习准入默认「仅本社」');
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'library')!.holds).toContain('「允许参考」');
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'library')!.holds).toContain('任务');
   });
 
   it('says 审阅规范文件 in the editor\'s words: the version and issuer, its use, the Books on an older one, and each version', () => {
@@ -229,7 +229,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
       .toEqual(['仅纳入《甲书》', '纳入出版社经验', '明确排除', '稍后决定']);
     expect(LIBRARY_HOUSE_CONSEQUENCE).toBe('纳入出版社经验：全社以后的图书都可能从它学习。');
-    expect(LIBRARY_EMPTY).toContain('「允许参考」');
+    expect(LIBRARY_EMPTY).toContain('任务');
     // Each decision on record, by its ordinal, what it decided, who and when.
     expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
       .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');

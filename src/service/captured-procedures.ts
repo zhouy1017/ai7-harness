@@ -1450,13 +1450,19 @@ export function saveCapturedProcedure(host: CapturedProcedureStoreHost, input: S
     // The steps keep the configuration's order — the Run's own — whatever order they were named in (ADR 0087 §2).
     const entries = source.steps.filter((step) => input.categoryIds.includes(step.entry.categoryId)).map((step) => step.entry);
     const document = capturedProcedureDocument(input.title, entries, input.scopeSlot);
-    const stored = host.transaction(host.authority, () => host.capturedProcedures.save({
+    const stored = host.transaction(host.authority, () => {
+      const saved = host.capturedProcedures.save({
       procedureId: input.procedureId,
       document,
       sourceBookId: input.bookId,
       sourceReviewRunId: input.reviewRunId,
       sourceRunOrdinal: source.ordinal,
-    }, now));
+    }, now);
+    const preview = capturedValidation(host, saved);
+    requireStore(preview.passes, 'CAPTURED_PROCEDURE_INVALID', preview.problems.join('；'));
+    host.capturedProcedures.recordValidation(saved.versionId, preview.problems, preview.previewDigest, now);
+    return saved;
+    });
     return capturedProcedureProjection(host, stored.procedureId);
   });
 }
@@ -1530,6 +1536,7 @@ export function previewCapturedProcedureValidation(host: CapturedProcedureStoreH
 export function enableCapturedProcedure(host: CapturedProcedureStoreHost, versionId: string, previewDigest: string, now: Date = new Date()): CapturedProcedureProjection {
   return procedureCall(host, () => {
     const stored = requireCapturedVersion(host, versionId);
+    if (stored.state === 'enabled') return capturedProcedureProjection(host, stored.procedureId);
     const preview = capturedValidation(host, stored);
     requireStore(typeof previewDigest === 'string' && preview.previewDigest === previewDigest, 'CAPTURED_PROCEDURE_PREVIEW_STALE',
       '验证的结果在你查看之后有了变化；请重新查看再启用。');

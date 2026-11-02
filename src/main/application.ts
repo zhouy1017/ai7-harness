@@ -386,7 +386,7 @@ function parseArguments(argv: string[]): LaunchArguments {
   const j04SavePath = values.get('--j04-save-path');
   // J-12's for 导出数据库 (Issue #434, S86a).
   const j12SavePath = values.get('--j12-save-path');
-  requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && isAbsolute(j07SavePath)));
+  requireDesktop(j07SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-07' && (isAbsolute(j07SavePath) || j07SavePath === 'cancel')));
   requireDesktop(j04SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-04' && isAbsolute(j04SavePath)));
   requireDesktop(j12SavePath === undefined || (process.env.AI7_E2E_JOURNEY === 'J-12' && isAbsolute(j12SavePath)));
   // J-11's for a 审稿意见 draft's DOCX (Issue #429, S81c).
@@ -1397,6 +1397,7 @@ function registerRendererHandlers(
     requireDesktop(formatInput === undefined || formatInput === 'docx' || formatInput === 'pdf' || formatInput === 'markdown');
     const format = EXPORT_DIALOG_FORMATS[(formatInput ?? 'docx') as keyof typeof EXPORT_DIALOG_FORMATS];
     const injected = consumeInjectedSavePath();
+    if (injected === 'cancel' && process.env.AI7_E2E_JOURNEY === 'J-07') return undefined;
     if (injected !== undefined) {
       requireDesktop(isAbsolute(injected));
       return injected;
@@ -4413,7 +4414,7 @@ function registerRendererHandlers(
         requireDesktop(input !== null && typeof input === 'object', 'AI7_RENDERER_BOUNDARY_INVALID');
         return serializeEffect(async () => {
           requireAuthority();
-          return service.call('addLibraryMaterial', { previewId: input.previewId, title: input.title, kind: input.kind });
+          return service.call('addLibraryMaterial', { previewId: input.previewId, title: input.title, kind: input.kind, bookId: requireSender(event).bookId });
         });
       }),
   );
@@ -6593,7 +6594,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 105, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 106, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

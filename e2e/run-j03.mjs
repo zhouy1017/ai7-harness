@@ -753,19 +753,6 @@ async function main() {
     // Synchronized delta with Issue #418 (editor-surfaces §10): 准备任务授权计划 reads 准备任务.
     await assertRenderer(renderer, `!document.querySelector('[data-task-authorization-action="prepare"]') && !Array.from(document.querySelectorAll('.task-authorization-card button')).some((button)=>button.textContent==='准备任务') && document.querySelector('#task-drawer')?.hidden===true`, 'task-no-premature-prepare');
 
-    at('artifact-revision2');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'artifact-install-ready');
-    at('artifact-install');
-    cancellation.throwIfRequested();
-    await click(renderer, '获取并安装（保持停用）', 'artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
-    at('artifact-enable');
-    cancellation.throwIfRequested();
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
-    at('artifact-enabled');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.native-artifact-card'); return card?.dataset.nativeArtifactState==='enabled-for-book' && card.textContent.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}); })()`, 'artifact-exact-revision2');
-
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
@@ -796,7 +783,7 @@ async function main() {
     requireJourney(missingConnection?.credentialReference === readyConnection.credentialReference && missingConnection?.credentialOperationState === 'missing', 'model-missing-stable-reference');
     credentialRemoved = true;
     cancellation.throwIfRequested();
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-back-library');
     cancellation.throwIfRequested();
     await runSettingsPages(renderer, cancellation);

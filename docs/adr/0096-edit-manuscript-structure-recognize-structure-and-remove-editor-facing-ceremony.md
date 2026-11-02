@@ -25,8 +25,8 @@ A paragraph longer than the block bound no longer refuses the whole import: AI7 
 
 ## 3. Less ceremony, more trust
 
-- **The default 编辑工作区方案 is pinned when a Book is created.** The explicit review-and-enable step of ADR 0045 remains for any artifact other than the shipped default; the editor never installs the default by hand before an analysis can start.
-- **Starting a procedure from its sheet is the one explicit action.** When the prepared plan is not editable, `开始审阅` (or the procedure's own start) creates the Run Authorization directly; the full plan stays reachable and a changed boundary still stops before dispatch (ADR 0094 §6, extended from polish, research and redo to every procedure start).
+- **Every Book has the built-in editorial capabilities immediately.** Owner #1279 / #1284 supersede the default-profile pin decision: no editor-facing workspace profile, Revision 2 installation or enablement gate remains. Historical carrier identities remain internal compatibility data only.
+- **Starting a procedure from its sheet is the one explicit action.** Under Owner #1279 / #1284, each task start prepares and authorizes its exact plan in one action; `查看计划` remains optional. A changed pinned target still requires the current version before dispatch.
 - **One decision system on a card.** A 修改建议 card offers `接受并应用`, `修改后接受`, `拒绝` and `转为批注`; the draft dispositions 拟采纳 / 拟拒绝 / 暂不决定 live only in the proposal workspace where batches are prepared.
 - **Identifiers live in the technical layer.** Book identifiers, revision and decision identifiers and raw receipts are never printed inline on 书库 cards, in the proposal workspace, in reimport choices or in model settings; they stay one disclosure away as ADR 0071 §1 requires.
 - **The processing indicator tells the truth.** The context header's 「本地处理 · 未联网」 label is replaced by a live indicator derived from the execution state: `本地处理` when nothing is in flight, `正在发送至〈渠道〉` while a request is out, `等待网络` during a connectivity wait, and nothing it cannot vouch for.

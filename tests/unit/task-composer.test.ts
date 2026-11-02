@@ -1,3 +1,4 @@
+import type { RendererApi, TaskPlanProjection } from '../../src/shared/protocol.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -152,7 +153,7 @@ describe('the Context-bound Task Composer', () => {
     type('准备稿件分析');
     field('outcome-analysis')!.checked = true;
     field('outcome-analysis')!.dispatchEvent({ type: 'change' });
-    action('prepare')!.click();
+    action('save-draft')!.click();
     await settle();
     action('promote')!.click();
     await settle();
@@ -194,12 +195,12 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelector('.task-composer-goal span')!.textContent).toBe(TASK_COMPOSER_GOAL_LABEL);
     expect(root.querySelector('.task-composer-note')!.textContent).toBe(TASK_COMPOSER_NOTE);
     // Nothing is prepared without the editor's words.
-    expect(action('prepare')!.disabled).toBe(true);
+    expect(action('save-draft')!.disabled).toBe(true);
     type('  统一这段的人名  ');
-    expect(action('prepare')!.disabled).toBe(false);
+    expect(action('save-draft')!.disabled).toBe(false);
     field('outcome-review')!.checked = true;
     field('outcome-review')!.dispatchEvent({ type: 'change' });
-    action('prepare')!.click();
+    action('save-draft')!.click();
     await settle();
     expect(saved).toEqual([{ draftId: null, expectedOrdinal: null, origin: 'composer-selection', goal: '  统一这段的人名  ',
       target: { kind: 'ranges', ranges: [{ kind: 'new', span: words.span }] }, outcomeClass: 'review' }]);
@@ -272,7 +273,7 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelectorAll('li.task-composer-range')).toHaveLength(0);
     expect(field('target-book')!.checked).toBe(false);
     expect(field('target-ranges')!.checked).toBe(true);
-    expect(action('prepare')!.disabled).toBe(true);
+    expect(action('save-draft')!.disabled).toBe(true);
   });
 
   it('keeps 7c\'s recommendation slot element, follows the draft in its attributes only, and keeps the 工序 its event picks', async () => {
@@ -286,7 +287,7 @@ describe('the Context-bound Task Composer', () => {
     type('统一这段的人名');
     await settle();
     expect(slot.dataset['scopeKind']).toBe('selection');
-    expect(slot.dataset['taskKind']).toBe('');
+    expect(slot.dataset['taskKind']).toBe('review');
     expect(slot.dataset['goalDigest']).toBe(createHash('sha256').update('统一这段的人名').digest('hex'));
     type(' 统一这段的人名 ');
     await settle();
@@ -298,35 +299,32 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelector('[data-procedure-recommendation]')).toBe(slot);
     expect(slot.children.includes(child)).toBe(true);
     expect(root.querySelector('[data-task-composer-pin]')!.textContent).toContain('已选工序：《人名统一》');
-    action('prepare')!.click();
+    action('save-draft')!.click();
     await settle();
     expect(saved[0]!.procedurePin).toEqual({ procedureId, versionId });
     slot.dispatchEvent({ type: 'procedure-recommendation-cleared', bubbles: true });
     expect(root.querySelector('[data-task-composer-pin]')).toBeNull();
   });
 
-  it('makes a prepared Task with 准备计划 through the draft operation and opens its plan, never on an unsaved version', async () => {
-    const { composer, root, action, type, field, promoted, opened } = harness();
+  it('starts the exact prepared task from one click and keeps plan inspection optional', async () => {
+    const authorize = vi.fn(async () => ({}));
+    const { composer, root, action, type, field, promoted, opened, options } = harness();
+    options.api.inspectTaskPlan = vi.fn(async () => ({ start: { planEnvelopeDigest: 'f'.repeat(64), categoryDigests: [] } } as unknown as TaskPlanProjection));
+    options.api.authorizeBaselineAnalysis = authorize as unknown as RendererApi['authorizeBaselineAnalysis'];
     composer.openNew({ bookId: BOOK, bookTitle: '任务撰写', origin: 'composer-book', manuscript: null, ranges: [] });
     await settle();
     type('为这本书做基线分析');
-    field('outcome-analysis')!.checked = true;
-    field('outcome-analysis')!.dispatchEvent({ type: 'change' });
+    field('outcome-analysis')!.checked = true; field('outcome-analysis')!.dispatchEvent({ type: 'change' });
     action('prepare')!.click();
     await settle();
-    expect(root.querySelector('.task-composer-ready')!.textContent).toBe('准备计划会按「首次基线分析」准备一项任务；由你在计划里开始。');
-    type('为这本书做基线分析，重点看人物');
-    expect(action('promote')!.disabled).toBe(true);
-    expect(root.querySelector('.task-composer-unsaved')!.hidden).toBe(false);
-    action('save')!.click();
-    await settle();
-    action('promote')!.click();
-    await settle();
     expect(promoted).toEqual([{ draftId: DRAFT, versionId: VERSION, choice: { kind: 'baseline', mode: 'first-baseline' } }]);
-    expect(opened).toEqual([[BOOK, 'baseline-analysis', 'c0000000-0000-4000-8000-000000000001']]);
+    expect(authorize).toHaveBeenCalledWith({ taskIntentId: 'c0000000-0000-4000-8000-000000000001', planEnvelopeDigest: 'f'.repeat(64) });
+    expect(opened).toEqual([]);
     expect(root.dataset['taskComposer']).toBe('promoted');
-    expect(action('copy')!.textContent).toBe(TASK_COMPOSER_ACTIONS.copy);
+    action('open-plan')!.click();
+    expect(opened).toEqual([[BOOK, 'baseline-analysis', 'c0000000-0000-4000-8000-000000000001']]);
   });
+
 });
 
 describe('the composer\'s words', () => {
