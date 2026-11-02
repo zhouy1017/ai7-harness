@@ -100,6 +100,16 @@ describe('parseEnrollmentArguments', () => {
     expect(helper.parseEnrollmentArguments(['--check', '--slot', 'opencode-go']).mode).toBe('check');
   });
 
+  it('enrolls admitted search keys under a disposable production reference for Beta measurement', () => {
+    const reference = randomUUID();
+    for (const slot of ['search-bochaai', 'search-brave', 'search-tinyfish', 'search-parallel', 'search-deepseek']) {
+      expect(helper.parseEnrollmentArguments(['--slot', slot, '--credential-reference', reference, '--from-file', ABSOLUTE]))
+        .toEqual({ mode: 'store-named', slot, credentialReference: reference, fromFile: ABSOLUTE });
+    }
+    expect(() => helper.parseEnrollmentArguments(['--slot', 'search-brave', '--credential-reference',
+      CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['search-brave']!, '--from-file', ABSOLUTE])).toThrow();
+  });
+
   it('admits every configured slot under the reference its document fixes, and only those', () => {
     for (const [slot, reference] of SLOT_LIST) {
       expect(helper.parseEnrollmentArguments(['--slot', slot, '--check'])).toEqual({ mode: 'check', slot, credentialReference: reference, fromFile: null });

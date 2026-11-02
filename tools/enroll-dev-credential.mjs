@@ -60,6 +60,9 @@ const DEVELOPMENT_REFERENCES = new Set([...SLOTS.values()].map((reference) => re
  * service's allowed bindings because this file runs before any build; `tests/unit/enroll-dev-credential.test.ts` pins them equal.
  */
 export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);
+// #1290: the already-authorized search evaluation keys may also populate a disposable
+// ordinary-production connection, through this helper alone, for the Beta walkthrough.
+const PRODUCTION_SEARCH_CONNECTION_SLOTS = ['search-bochaai', 'search-brave', 'search-tinyfish', 'search-parallel', 'search-deepseek'];
 const CREDENTIAL_REFERENCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_SECRET_BYTES = 16_384;
 
@@ -92,7 +95,8 @@ export function parseEnrollmentArguments(argv) {
   if (named !== undefined) {
     // The named-reference form: a production connection's own reference, never a development one, and only a store.
     const fromFile = values.get('--from-file');
-    requireEnrollment(!check && typeof fromFile === 'string' && typeof slot === 'string' && PRODUCTION_CONNECTION_SLOTS.includes(slot) &&
+    requireEnrollment(!check && typeof fromFile === 'string' && typeof slot === 'string' &&
+      [...PRODUCTION_CONNECTION_SLOTS, ...PRODUCTION_SEARCH_CONNECTION_SLOTS].includes(slot) &&
       CREDENTIAL_REFERENCE_PATTERN.test(named) && !DEVELOPMENT_REFERENCES.has(named.toLowerCase()));
     return { mode: 'store-named', slot, credentialReference: named.toLowerCase(), fromFile: resolve(fromFile) };
   }
