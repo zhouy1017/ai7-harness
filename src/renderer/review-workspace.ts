@@ -1736,7 +1736,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     );
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     section.append(actions);
-    if (exportRunId === run.reviewRunId) section.append(exportSlot);
+    if (report !== null) section.append(exportSlot);
     if (run.report === null) section.append(el('p', 'field-note', REVIEW_REPORT_NONE));
     else section.append(renderReportRecord(run.report));
     return section;
