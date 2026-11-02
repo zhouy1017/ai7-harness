@@ -361,11 +361,25 @@ export function evidenceStaleness(input: {
 
 // ---- 来源译文 ---------------------------------------------------------------------------------------------------------
 
-/** Whether a captured text is not Chinese: fewer than three Han characters in ten of its letters. */
+const SOURCE_LINK = /!?\[([^\]\n]*)\]\([^\n)]*\)/gu;
+const SOURCE_ADDRESS = /https?:\/\/[^\s<>]+/gu;
+
+/** Language detection reads prose, without counting addresses or link-only navigation as foreign words. */
+function sourceProse(text: string): string {
+  return text.split('\n').map((line) => {
+    const diagnostic = line.replace(/[*`]/gu, '').trim();
+    if (/^(?:PHP\s+)?(?:Warning|Fatal error|Parse error|Notice):.*(?:require(?:_once)?|include(?:_once)?|Uncaught|on line \d|failed to open stream)/iu.test(diagnostic)) return '';
+    const prose = line.replace(SOURCE_LINK, '').replace(SOURCE_ADDRESS, '');
+    if (!/\p{L}/u.test(prose) || /^\s*#{1,6}\s/u.test(line)) return '';
+    return line.replace(SOURCE_LINK, '$1').replace(SOURCE_ADDRESS, '');
+  }).join('\n');
+}
+
+/** Whether a captured text's prose is not Chinese: fewer than three Han characters in ten of its letters. */
 export function needsSourceTranslation(text: string): boolean {
   let han = 0;
   let letters = 0;
-  for (const character of text) {
+  for (const character of sourceProse(text)) {
     if (/\p{Script=Han}/u.test(character)) { han += 1; letters += 1; } else if (/\p{L}/u.test(character)) letters += 1;
   }
   return letters >= 8 && han / letters < 0.3;
@@ -404,12 +418,24 @@ export async function sourceTranslation(input: {
   readonly translator: SourceTranslator | null;
 }): Promise<ResearchEvidenceTranslation | null> {
   if (!needsSourceTranslation(input.captured)) return null;
+  // Keep offsets in the untouched capture. Filter whole lines before splitting sentences so punctuation in
+  // navigation URLs cannot leave a URL fragment looking like an article sentence.
+  const sentences: Array<{ from: number; to: number }> = [];
+  let lineFrom = 0;
+  for (const line of input.captured.split('\n')) {
+    if (sourceProse(line).trim().length > 0) {
+      for (const sentence of evidenceSentences(line)) {
+        if (needsSourceTranslation(line.slice(sentence.from, sentence.to))) {
+          sentences.push({ from: lineFrom + sentence.from, to: lineFrom + sentence.to });
+        }
+      }
+    }
+    lineFrom += line.length + 1;
+  }
+  const range = sentences.find((sentence) => input.anchors.some((anchor) => anchor.from < sentence.to && anchor.to > sentence.from)) ?? sentences[0];
+  if (range === undefined) return null;
   if (!sourceTranslationAdmitted(input.rule)) return { state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED };
   if (input.translator === null) return { state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE };
-  const sentences = evidenceSentences(input.captured);
-  const range = input.anchors.length > 0
-    ? { from: sentences[input.anchors[0]!.sentence - 1]?.from ?? 0, to: sentences[input.anchors[input.anchors.length - 1]!.sentence - 1]?.to ?? input.captured.length }
-    : { from: sentences[0]?.from ?? 0, to: sentences[0]?.to ?? Math.min(input.captured.length, MAX_PASSAGE_CHARACTERS) };
   const to = Math.min(range.to, range.from + MAX_PASSAGE_CHARACTERS);
   const translated = await input.translator({ text: input.captured.slice(range.from, to), url: input.url });
   if (translated === null || translated.text.trim().length === 0) return { state: 'refused', reason: '模型没有给出可用的译文；只保留原文。' };

@@ -168,6 +168,38 @@ describe('来源译文', () => {
     expect(calls).toBe(0);
   });
 
+  it('ignores URL-heavy navigation on a Chinese page instead of translating a home link', async () => {
+    const captured = '[](https://www.public-source.example.org/home)\n[Home](https://www.public-source.example.org/navigation)\n[新闻](https://www.public-source.example.org/news/archive)\n\n这里介绍器物的出土年代与收藏地点。';
+    let calls = 0;
+    expect(needsSourceTranslation(captured)).toBe(false);
+    expect(await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async () => { calls += 1; return { text: '无效链接', route: 'r', model: 'm' }; } })).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('translates foreign prose after navigation with offsets in the unchanged original capture', async () => {
+    const navigation = '[](https://www.public-source.example.org/home)\n[Home](https://www.public-source.example.org/) | [About](https://www.public-source.example.org/about)\n\n';
+    const prose = 'They are held by the Hubei Provincial Museum.';
+    const captured = navigation + prose;
+    const asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '它们由湖北省博物馆收藏。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual([prose]);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { contentSha256: digest(captured), from: navigation.length, to: captured.length } });
+    if (translation?.state === 'translated') expect(captured.slice(translation.attribution.from, translation.attribution.to)).toBe(prose);
+  });
+
+  it('keeps server diagnostic text without presenting it as translated source prose', async () => {
+    const captured = '**Warning**: require_once(article.php): failed to open stream: No such file or directory\n\n**Fatal error**: Uncaught Error: Failed opening required article.php';
+    let calls = 0;
+    expect(await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async () => { calls += 1; return { text: '服务器错误', route: 'r', model: 'm' }; } })).toBeNull();
+    expect(calls).toBe(0);
+  });
+
   it('under an admitting rule labels the Run model’s translation, attributes it to the captured range, and keeps the original beside it', async () => {
     const asked: string[] = [];
     const translation = await sourceTranslation({ ...base, rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },

@@ -8,7 +8,7 @@ import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { fullReviewProcedureDefinition } from '../../src/service/procedures/preinstalled.js';
-import type { BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
+import { assuranceContractMoved, type BaselineAnalysisStore } from '../../src/service/analysis/baseline-analysis-store.js';
 import { STYLE_AND_FORMAT } from '../support/review-categories.js';
 import type { LaunchPolicyProjection, ProcedureDefinitionPin } from '../../src/shared/protocol.js';
 import type { LocalCheckOptions } from '../../src/shared/protocol/procedures.js';
@@ -132,7 +132,15 @@ describe('composite procedures and 全文审校 (#1173)', () => {
     const order: string[] = [];
     const driver = new ReviewRunDriver(target.reviewRunDriveSteps, {
       // A stand-in owner that sends nothing: each member's Run ends at once, so the next member's turn comes.
-      admitAndDispatch: (runRecordId, ledger) => { order.push(ledger.definition.kind); ledger.recordRunState(runRecordId, 'failed', { detail: '合成测试未发送。', code: 'TEST_NOT_SENT' }); },
+      admitAndDispatch: (runRecordId, ledger) => {
+        const facts = ledger.loadExecutionPlan(runRecordId);
+        const definition = ledger.definitionForRun(runRecordId, facts.promptContractDigest);
+        // Production checks this exact frozen sampling pin before any member transmits.
+        expect(assuranceContractMoved(definition, facts.assurancePromptContractDigest)).toBe(false);
+        if (definition.assurance !== null) expect(assuranceContractMoved(definition, '0'.repeat(64))).toBe(true);
+        order.push(ledger.definition.kind);
+        ledger.recordRunState(runRecordId, 'failed', { detail: '合成测试未发送。', code: 'TEST_NOT_SENT' });
+      },
       whenPlaceFree: async () => undefined, whenDone: async () => undefined,
     });
     await driver.drive(run.reviewRunId); await driver.dispose();

@@ -3115,9 +3115,10 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId).promptContractDigest &&
+    const currentDefinition = this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId);
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === currentDefinition.promptContractDigest &&
       (existing.executionPlan === null ||
-        !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
+        !assuranceContractMoved(currentDefinition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
@@ -3493,7 +3494,7 @@ export class BaselineAnalysisStore {
           ...editorEdits,
         };
     // The sampling contract, only when it is not /1 (Issue #826): every other plan's record reads exactly as before.
-    const assurance = this.#definition.assurance;
+    const assurance = definition.assurance;
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};
