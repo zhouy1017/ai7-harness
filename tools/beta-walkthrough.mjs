@@ -155,7 +155,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   }else{
   if(expectedChannel==='windows-installer'){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.priorBook?.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'prior-book-survives-upgrade');
-   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===106&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))`),'upgrade-history-and-schema');
+   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))`),'upgrade-history-and-schema');
   }
   // The application presents the real six channel choices; no synthetic credential is installed.
   await select(page,'#app-sidebar [data-nav-settings]');await ready(page,"document.querySelector('[data-screen=settings]')",'settings');

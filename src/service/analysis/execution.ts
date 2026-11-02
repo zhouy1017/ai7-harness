@@ -8,7 +8,7 @@ import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '.
 import { learningCurationRule } from './live-kind-admission.js';
 import type { EditorialStore } from '../store.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
-import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit, type SourceTranslator } from './factual-review-evidence.js';
+import { mergeClaimEvidenceUnits, researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit, type SourceTranslator } from './factual-review-evidence.js';
 import { factualFindingId, locatedUnitFindings } from './factual-review-reducers.js';
 import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type FactualReviewUnitResultV2 } from './factual-review-contract-v2.js';
@@ -3350,10 +3350,12 @@ export class BaselineAnalysisExecutionOwner {
                   exact: relation.excerptRef !== null && pages.has(relation.sourceRef) && excerptLocated(pages.get(relation.sourceRef)!.text, relation.excerptRef), group: groups[index] ?? null })) });
               const pending = result !== null && !['证据支持', '疑似错误', '证据冲突'].includes(mapped.outcome) && rounds.length === 0 && claimOwner.claimAllowance(session.sessionId).search > 0;
               const round = claimOwner.recordClaimVerification({ sessionId: session.sessionId, result, evidence,
+                ...(isolated.platformSession!.fallbackSources.size === 0 ? {} : { fallbackSources: [...isolated.platformSession!.fallbackSources] }),
                 state: ambiguousTurnReason(turn.signals) !== null ? 'unknown' : result === null ? 'incomplete' : pending ? 'pending' : 'closed' });
               ledger.checkpointFactualRequests(facts.runRecordId, round);
               rounds = claimOwner.claimRounds(session.sessionId);
             }
+            for (const round of rounds) for (const [url, source] of round.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source);
             retainedByUnit.set(producer.sourceUnitOrdinal, [...(retainedByUnit.get(producer.sourceUnitOrdinal) ?? []), ...rounds.map((round) => round.evidence)]);
           } finally {
             for (const [url, source] of isolated.platformSession?.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source);
@@ -3364,14 +3366,11 @@ export class BaselineAnalysisExecutionOwner {
             await isolated.finish(); contexts.delete(isolated);
           }
         }
+        if (stopWithoutEnding()) return;
         for (const [unitOrdinal, retained] of retainedByUnit) {
           this.#deps.researchEvidence?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, unitOrdinal, ...(fallbackSources.size === 0 ? {} : { fallbackSources }),
-            backendId: facts.webToolsBackend!.backendId, unit: { state: retained.some((entry) => entry.state === 'incomplete') ? 'incomplete' : 'completed',
-              searchCalls: retained.reduce((sum, entry) => sum + entry.searchCalls, 0), retentionFetches: 0,
-              failedRetrievals: retained.reduce((sum, entry) => sum + entry.failedRetrievals, 0),
-              findings: retained.flatMap((entry) => entry.findings), evidence: retained.flatMap((entry) => entry.evidence) } });
+            backendId: facts.webToolsBackend!.backendId, unit: mergeClaimEvidenceUnits(retained) });
         }
-        if (stopWithoutEnding()) return;
       }
       const closedOutcomes = outcomes
         .filter((outcome): outcome is ClosedUnitOutcome<BaselineUnitResult> => outcome.state === 'closed')

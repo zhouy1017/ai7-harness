@@ -543,3 +543,9 @@ J-11 also requests a Feedback History analysis entry from a second workbench whi
 ## Wave 23 Stage 1 channel admission (#1281)
 
 J-12 now asserts that admitted channel models are selectable with configured credentials without a per-model connection test, that Zen catalogue choices require channel credentials, and that an arbitrary model ID persists without a live probe. Its explicit connection-test path remains denied under provider-free CI. J-04 retains factual and review behavior; provider-free service regressions cover all-channel tool admission and absent model/search credentials leaving factual-recheck onceKey unused. Guest runs and exact candidate results are recorded in the slice PR; these checks claim no live account availability.
+
+## Wave 23 S10 candidate verification (#1290)
+
+J-01 covers both selected Word revision readings with source-linked notes and the combined source objects. The separate packaged Windows runner records actual native import/export, model/search calls and retained source translation; terminal failed Review Runs stop the acceptance wait and cannot satisfy complete-coverage checks. A resumed paid prefix keeps its earlier build identity and receipts distinct from the current candidate.
+
+Real-store regressions cover claim-stage pause/continue, schema 106→107 recovery of earlier retained evidence prefixes, immutable citation identity, latest-summary finding filters, fallback attribution, and selected-Book export/merge/reopen. These service checks do not claim live packaged acceptance; exact guest heads and remaining limitations are recorded in [S10 PR #1301](https://github.com/zhouy1017/ai7-harness/pull/1301).

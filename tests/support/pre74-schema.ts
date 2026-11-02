@@ -4,7 +4,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { FACTUAL_CLAIM_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION, FACTUAL_TASK_INTENTS_SQL, CURATION_SCHEMA_SQL, ANALYSIS_LEDGER_REVISION_79_SQL, ANALYSIS_LEDGER_REVISION_81_SQL, ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL, CUSTOM_ANALYSIS_SCHEMA_VERSION, WEB_TOOLS_PLAN_RECORDS_SQL, IDLE_RUN_AUTHORIZATIONS_SQL } from '../../src/service/task-authorization.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL, CUSTOM_ANALYSIS_DIMENSION_TRIGGER_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { TASK_INTENT_DRAFT_SCHEMA_SQL, TASK_INTENT_DRAFT_TRIGGER_SQL } from '../../src/service/task-intent-drafts.js';
-import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
+import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL } from '../../src/service/research-evidence-schema.js';
 import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL } from '../../src/service/material-index.js';
 import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from '../../src/service/factual-verification-schema.js';
 import { PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
@@ -32,7 +32,7 @@ export const PROPOSAL_REVIEW_RELATIONS = Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL)
 
 /** The exact schema before 8b: its added objects are absent and its predecessor CHECK still stands. */
 export function pre77SchemaRows<T extends { name: string; sql: unknown }>(rows: readonly T[]): Array<T | { name: string; sql: unknown }> {
-  const added = new Set([...Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL), ...Object.keys(PROPOSAL_REVIEW_TRIGGER_SQL)]);
+  const added = new Set([...Object.keys(PROPOSAL_REVIEW_SCHEMA_SQL), ...Object.keys(PROPOSAL_REVIEW_TRIGGER_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL)]);
   return rows.filter((row) => !added.has(row.name)).map((row) => row.name === 'proposal_item_decisions'
     ? { ...row, sql: PROPOSAL_ITEM_DECISIONS_PRE77_SQL } : row);
 }
@@ -127,7 +127,7 @@ export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]
       : row.name === 'analysis_result_set_revisions' ? { ...row, sql: ANALYSIS_LEDGER_SCHEMA_SQL.analysis_result_set_revisions }
       : row.name === 'proposal_item_decisions' ? { ...row, sql: EDITORIAL_MARK_SCHEMA_SQL.proposal_item_decisions } : row),
     ...Object.entries({ ...PROPOSAL_REVIEW_SCHEMA_SQL, ...PROPOSAL_REVIEW_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
-    ...Object.entries({ ...RESEARCH_EVIDENCE_SCHEMA_SQL, ...RESEARCH_EVIDENCE_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
+    ...Object.entries({ ...RESEARCH_EVIDENCE_SCHEMA_SQL, ...RESEARCH_EVIDENCE_TRIGGER_SQL, ...RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL, ...RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
     ...(materialIndex ? Object.entries({ ...MATERIAL_INDEX_LAYER_SCHEMA_SQL, ...MATERIAL_INDEX_LAYER_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })) : []),
     ...Object.entries({ ...FACTUAL_VERIFICATION_SCHEMA_SQL, ...FACTUAL_VERIFICATION_TRIGGER_SQL }).map(([name, sql]) => ({ name, sql })),
   ].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
@@ -135,6 +135,7 @@ export function expectedSchema75(rows: readonly { name: string; sql: unknown }[]
 
 /** Remove this slice's append-only schema when planting a predecessor. */
 export function dropFactualVerificationRelations(db: DatabaseSync): void {
+  db.exec('DROP TABLE IF EXISTS research_evidence_unit_revisions');
   for (const trigger of Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
   for (const table of Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
 }
@@ -172,6 +173,7 @@ export function dropMaterialIndexLayerRelations(db: DatabaseSync): void {
 
 /** Drop revision 75's research evidence relations and triggers (Issue #425), so a planted store is the predecessor it claims. */
 export function dropResearchEvidenceRelations(db: DatabaseSync): void {
+  db.exec('DROP TABLE IF EXISTS research_evidence_unit_revisions');
   for (const trigger of Object.keys(RESEARCH_EVIDENCE_TRIGGER_SQL)) db.exec(`DROP TRIGGER IF EXISTS ${trigger}`);
   for (const table of Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL).reverse()) db.exec(`DROP TABLE IF EXISTS ${table}`);
 }

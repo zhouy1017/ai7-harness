@@ -200,6 +200,38 @@ describe('来源译文', () => {
     expect(calls).toBe(0);
   });
 
+  it('passes over unanchored headings, dates, slogans and maintenance notices to reach article prose', async () => {
+    const navigation = 'Browse the archive\nWhen was this ancient object made?\nNews Release 12-May-2025\nThe home of remarkable historical collections\nThe service is temporarily unavailable and will be back soon.\nLog in any time to see account details.\nCopyright 2025 Collection Archive All rights reserved.\n';
+    const prose = 'The bronze vessel was excavated beside the old settlement.';
+    const captured = navigation + prose;
+    const asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '这件青铜器在旧聚落旁出土。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual([prose]);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { from: navigation.length, to: captured.length } });
+  });
+
+  it('does not mistake an English platform notice for prose on a Chinese source page', async () => {
+    const captured = '这篇文章介绍青铜器的出土过程、发现年代和收藏地点，并逐项说明考古记录。'.repeat(8) + '\nNotice: The content above was uploaded by a user and this platform provides storage services.';
+    let calls = 0;
+    expect(await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async () => { calls += 1; return { text: '平台声明', route: 'r', model: 'm' }; } })).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('preserves a short foreign quotation genuinely anchored in the original source', async () => {
+    const captured = 'The collection contains several objects from the old settlement. Rare amber.';
+    const from = captured.indexOf('Rare amber.');
+    const asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [{ from, to: captured.length, sentence: 2 }],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '稀有琥珀。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual(['Rare amber.']);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { from, to: captured.length } });
+  });
+
   it('under an admitting rule labels the Run model’s translation, attributes it to the captured range, and keeps the original beside it', async () => {
     const asked: string[] = [];
     const translation = await sourceTranslation({ ...base, rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },

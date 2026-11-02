@@ -81,6 +81,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 104, class: 'additive' }, // #1226: the one 备用来源 selection row (103 is W22b-A2 #1225's).
   { revision: 105, class: 'additive' }, // #1282: independent role model and account catalogue columns.
   { revision: 106, class: 'additive' }, // #1284: deliverable draft target and origin checks.
+  { revision: 107, class: 'additive' }, // #1290: immutable evidence summary successors after continuation.
 ];
 
 /**

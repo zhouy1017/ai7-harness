@@ -417,7 +417,6 @@ export async function sourceTranslation(input: {
   readonly rule: SourceTranslationRule | null;
   readonly translator: SourceTranslator | null;
 }): Promise<ResearchEvidenceTranslation | null> {
-  if (!needsSourceTranslation(input.captured)) return null;
   // Keep offsets in the untouched capture. Filter whole lines before splitting sentences so punctuation in
   // navigation URLs cannot leave a URL fragment looking like an article sentence.
   const sentences: Array<{ from: number; to: number }> = [];
@@ -432,7 +431,16 @@ export async function sourceTranslation(input: {
     }
     lineFrom += line.length + 1;
   }
-  const range = sentences.find((sentence) => input.anchors.some((anchor) => anchor.from < sentence.to && anchor.to > sentence.from)) ?? sentences[0];
+  const anchored = sentences.find((sentence) => input.anchors.some((anchor) => anchor.from < sentence.to && anchor.to > sentence.from));
+  if (anchored === undefined && !needsSourceTranslation(input.captured)) return null;
+  // Without a quotation anchor, prefer a complete prose statement over page headings, dates and slogans.
+  // This is deliberately conservative; a short, genuinely anchored quotation does not need this fallback.
+  const range = anchored ?? sentences.find((sentence) => {
+    const text = sourceProse(input.captured.slice(sentence.from, sentence.to)).trim();
+    return /[.。！!][\s”’"')\]]*$/u.test(text) && (text.match(/\p{L}[\p{L}\p{M}’'-]*/gu)?.length ?? 0) >= 5 &&
+      !/\b(?:back soon|under maintenance|temporarily unavailable|scheduled maintenance)\b/iu.test(text) &&
+      !/^(?:copyright\b|log\s?in\b|sign\s?in\b|notice:\s+(?:the|this)\s+content\b)/iu.test(text);
+  });
   if (range === undefined) return null;
   if (!sourceTranslationAdmitted(input.rule)) return { state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED };
   if (input.translator === null) return { state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE };
@@ -488,6 +496,14 @@ export interface RetainedUnit {
   readonly failedRetrievals: number;
   readonly findings: ReadonlyArray<{ readonly findingId: string; readonly blockId: string; readonly quote: string; readonly category: FactualAssertionCategory; readonly sources: number }>;
   readonly evidence: ReadonlyArray<RetainedEvidence>;
+}
+
+/** The immutable claim rounds are the source of a unit's complete retention aggregate. */
+export function mergeClaimEvidenceUnits(retained: ReadonlyArray<RetainedUnit>): RetainedUnit {
+  return { state: retained.some((entry) => entry.state === 'incomplete') ? 'incomplete' : 'completed',
+    searchCalls: retained.reduce((sum, entry) => sum + entry.searchCalls, 0), retentionFetches: 0,
+    failedRetrievals: retained.reduce((sum, entry) => sum + entry.failedRetrievals, 0),
+    findings: retained.flatMap((entry) => entry.findings), evidence: retained.flatMap((entry) => entry.evidence) };
 }
 
 // ---- Reading the Research Snapshot Cache ------------------------------------------------------------------------------

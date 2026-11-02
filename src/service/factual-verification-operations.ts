@@ -56,6 +56,7 @@ import type {
 } from './analysis/factual-review-contract-v2.js';
 import { planEditAssuranceLevel, planEditsOf } from './analysis/plan-edits.js';
 import { canonicalRecord } from './analysis/canonical.js';
+import { mergeClaimEvidenceUnits } from './analysis/factual-review-evidence.js';
 import { EditorialMarkStore } from './editorial-marks.js';
 import { CORRECTION_MARK_SOURCE_LABEL, FACTUAL_LENS_EMPTY, FACTUAL_LENS_STATEMENT } from './store-operation-support.js';
 
@@ -114,7 +115,22 @@ export function inspectResearchEvidence(host: FactualVerificationOperationsHost,
 }
 
 export function recordResearchEvidence(host: FactualVerificationOperationsHost, input: Parameters<ResearchEvidenceLedger['record']>[0]): string[] {
-  return host.evidenceCall(() => host.transaction(host.authority, () => host.researchEvidence.record(input)));
+  return host.evidenceCall(() => host.transaction(host.authority, () => {
+    const claims = host.factualVerification.claims(input.runRecordId);
+    if (claims === null) return host.researchEvidence.record(input);
+    const { digest, ...body } = claims;
+    requireStore(canonicalRecord(body).digest === digest, 'FACTUAL_CLAIM_DIGEST_INVALID', '断言账本摘要不一致。');
+    const owner = host.authority.prepare(`SELECT i.book_id FROM analysis_run_records r JOIN analysis_task_intents i USING(task_intent_id)
+      WHERE r.run_record_id=?`).get(input.runRecordId);
+    requireStore(owner?.book_id === input.bookId, 'RESEARCH_EVIDENCE_INVALID', '断言取证不属于这本书。');
+    const retained = claims.claims.filter((claim) => claim.producers[0]!.sourceUnitOrdinal === input.unitOrdinal).flatMap((claim) => {
+      const session = host.factualVerification.claimSession(input.runRecordId, 'web-verification', claim.claimId);
+      return session === null ? [] : host.factualVerification.claimRounds(session.sessionId).map((round) => round.evidence);
+    });
+    requireStore(retained.length > 0 && canonicalJson(mergeClaimEvidenceUnits(retained)) === canonicalJson(input.unit),
+      'RESEARCH_EVIDENCE_CLAIM_DRIFT', '留存内容与已记录的断言取证回合不一致。');
+    return host.researchEvidence.recordClaimUnit(input);
+  }));
 }
 
 export function internalFactualRecheckCandidate(host: FactualVerificationOperationsHost, enrollment: BackgroundAnalysisEnrollmentRecord, decisionId: string): FactualRecheckCandidate | null {

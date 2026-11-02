@@ -944,6 +944,7 @@ import {
   ResearchEvidenceError,
   ResearchEvidenceLedger,
   initializeResearchEvidenceSchema,
+  initializeResearchEvidenceUnitRevisionSchema,
 } from './research-evidence.js';
 import {
   FactualVerificationLedger,
@@ -3199,6 +3200,7 @@ export class EditorialStore {
       initializeSearchBackendSchema(authority); initializeSearchFallbackSchema(authority);
       // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
       initializeResearchEvidenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      initializeResearchEvidenceUnitRevisionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
       initializeMaterialIndexLayerSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProposalReviewSchema(authority);

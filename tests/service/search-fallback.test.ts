@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import type { SourceTranslator } from '../../src/service/analysis/factual-review-evidence.js';
+import { mergeClaimEvidenceUnits, type SourceTranslator } from '../../src/service/analysis/factual-review-evidence.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync, searchFallbackTermsOf } from '../../src/service/launch-policy.js';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
@@ -218,6 +218,17 @@ describe('the 联网检索 备用来源 in the 联网取证 stage (#1226)', () =
     const line = evidence.records.find((record) => record.url === MUSEUM)!;
     expect(line.backendId).toBe(BRAVE.id);
     expect(evidence.units[0]!.backendId).toBe(BRAVE.id);
+    const ledger = store.executionLedgerForRun(runRecordId).factualVerification;
+    const claim = ledger.claims(runRecordId)!.claims[0]!;
+    const session = ledger.claimSession(runRecordId, 'web-verification', claim.claimId)!;
+    const rounds = ledger.claimRounds(session.sessionId);
+    expect(rounds[0]!.fallbackSources).toContainEqual([MUSEUM, { backendId: BRAVE.id, fallbackFrom: TINYFISH.id, failureClass: 'http-5xx' }]);
+    // A resumed publisher can read the same paid rounds after its earlier ephemeral source map is gone.
+    store.recordResearchEvidence({ bookId: book.bookId, runRecordId, unitOrdinal: claim.producers[0]!.sourceUnitOrdinal,
+      backendId: TINYFISH.id, unit: mergeClaimEvidenceUnits(rounds.map((round) => round.evidence)) });
+    const resumed = store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null });
+    expect(resumed.records.map((record) => record.evidenceId)).toEqual(evidence.records.map((record) => record.evidenceId));
+    expect(resumed.units[0]).toEqual(evidence.units[0]);
     const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {
       expect(new ResearchEvidenceLedger(db).source(book.bookId, line.evidenceId)).toMatchObject({ backendId: BRAVE.id,

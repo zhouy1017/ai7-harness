@@ -294,6 +294,7 @@ export const MERGE_TABLE_POLICY: Readonly<Record<string, MergeTablePolicy>> = {
   // 保存为来源材料 made of them come with the Book; a captured text is kept once by its digest, taken when this data lacks it.
   research_evidence: 'owned',
   research_evidence_units: 'owned',
+  research_evidence_unit_revisions: 'owned',
   research_evidence_materials: 'owned',
   // House rows a Book's records reference: taken when this store lacks them. The 方案 is the one every AI7 carries, fixed to
   // its bytes: a Book that enabled it brings it, whole, to data that has not installed it.

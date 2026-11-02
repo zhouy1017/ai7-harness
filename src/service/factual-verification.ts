@@ -48,6 +48,7 @@ import {
 import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION, graphemeCount } from './analysis/factual-review-contract.js';
 import { retrievalCandidateOf, type FactualEvidenceRelation } from './analysis/factual-review-contract-v2.js';
+import { ResearchEvidenceLedger } from './research-evidence.js';
 import { evidenceStaleness, titleSiteLabel } from './analysis/factual-review-evidence.js';
 import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
 import type { FactualClaimLedger } from './analysis/factual-claim-ledger.js';
@@ -116,6 +117,7 @@ export interface FactualClaimRound {
   readonly state: 'pending' | 'closed' | 'incomplete' | 'unknown';
   readonly result: FactualClaimVerificationResult | null;
   readonly evidence: import('./analysis/factual-review-evidence.js').RetainedUnit;
+  readonly fallbackSources?: ReadonlyArray<readonly [string, import('./provider/platform-tool-session.js').SearchFallbackAttribution]>;
 }
 
 export interface FactualRecheckSelection {
@@ -705,10 +707,7 @@ export class FactualVerificationLedger {
   #researchUnits(runRecordId: string): Map<number, 'completed' | 'incomplete' | 'not-searched'> {
     const units = new Map<number, 'completed' | 'incomplete' | 'not-searched'>();
     if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'research_evidence_units'").get() === undefined) return units;
-    for (const row of this.#db.prepare('SELECT unit_ordinal, search_state FROM research_evidence_units WHERE run_record_id = ?').all(runRecordId) as SqlRow[]) {
-      units.set(Number(row.unit_ordinal), String(row.search_state) as 'completed' | 'incomplete' | 'not-searched');
-    }
-    return units;
+    return new ResearchEvidenceLedger(this.#db).unitStates(runRecordId);
   }
 
   /**
