@@ -170,7 +170,7 @@ function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 
     outOfScope: 'leave-unreviewed',
     systemPrompt: contract.systemPrompt,
     promptContractDigest,
-    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version)) }),
+    ...(category.deliverables === undefined ? {} : { livePromptContractDigest: () => reviewCategoryContractDigest(reviewCategoryContract(input, version, names)) }),
     unitResultSchema: contract.responseSchema,
     revisionSchema: REVIEW_CATEGORY_RESULT_SET_REVISION_SCHEMA,
     successorRevisionSchema: REVIEW_CATEGORY_SUCCESSOR_REVISION_SCHEMA,
