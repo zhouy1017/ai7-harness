@@ -1,6 +1,6 @@
 /** Owner-authorized manual Windows Beta acceptance on a background guest; never a CI layer. */
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
@@ -15,7 +15,8 @@ import { build } from 'esbuild';
 import { unzipSync, strFromU8 } from 'fflate';
 
 const ROOT=resolve('.');
-const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only');
+const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only'),RESUME_LAST=args.includes('--resume-last');
+let resume;
 const assetsIndex=args.indexOf('--assets-from');
 const RELEASE=assetsIndex<0?join(ROOT,'release'):resolve(args[assetsIndex+1]??'');
 const OUTPUT=join(ROOT,'release');await mkdir(OUTPUT,{recursive:true});
@@ -27,10 +28,11 @@ const report={schema:'ai7.windows-beta-acceptance/1',scope:STARTUP_ONLY?'native-
  'Human Beta acceptance and the external editor study remain pending.',
  'The prior-version public Book is seeded through the exact 0.4.1 product store; current import/export use the actual package UI.',
 ]};
-const check=(condition,name)=>{if(!condition)throw Error(name);report.checks.push(name);console.log('BETA_PACKAGE/pass/'+name);};
-const at=(name)=>{stage=name;console.log('BETA_PACKAGE/stage/'+name);};
+const checkpoint=()=>{if(report.testRoot)writeFileSync(join(OUTPUT,'beta-in-progress.json'),JSON.stringify({...report,currentStage:stage},null,2)+'\n');};
+const check=(condition,name)=>{if(!condition)throw Error(name);report.checks.push(name);console.log('BETA_PACKAGE/pass/'+name);checkpoint();};
+const at=(name)=>{stage=name;console.log('BETA_PACKAGE/stage/'+name);checkpoint();};
 const run=(file,args,env=process.env)=>{const result=spawnSync(file,args,{cwd:ROOT,env,windowsHide:true,encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});if(result.status!==0)throw Error('child-failed');return result.stdout;};
-const wait=async(predicate,name,ms=60000)=>{const end=Date.now()+ms;while(Date.now()<end){if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error(name);};
+const wait=async(predicate,name,ms=60000)=>{const end=Date.now()+ms;while(Date.now()<end){if(existsSync('C:/ai7/results/beta-cancel.txt'))throw Error('operator-cancelled');if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error(name);};
 const native=(exe,options)=>{
  const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(ROOT,'tools','beta-native-dialog.ps1'),'-Executable',exe,...options],{cwd:ROOT,windowsHide:true,encoding:'utf8',timeout:60000});
  const ui=result.stdout?.split(/\r?\n/).find(line=>line.startsWith('BETA_NATIVE_UI:'));if(ui){report.nativeStartupUi=JSON.parse(ui.slice('BETA_NATIVE_UI:'.length));}
@@ -142,6 +144,15 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-destination=library]');
   await ready(page,"document.querySelector('[data-screen=landing]')",'initial-library-ready');
   check(true,expectedChannel+'-library');
+  const resumePrefix=Boolean(resume&&expectedChannel==='windows-installer');
+  let bookId;
+  if(resumePrefix){
+   bookId=await page.evaluate("[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes('Beta package compatibility'))?.dataset.navBook");
+   check(Boolean(bookId),'resume-existing-public-book');
+   await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
+   await select(page,'#app-sidebar [data-nav-book-section=manuscript]');
+   await ready(page,"document.querySelector('[aria-label^=跳转到尾注]')&&document.querySelector('.manuscript-source-table td')",'resume-current-source-objects');
+  }else{
   if(expectedChannel==='windows-installer'){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.priorBook?.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'prior-book-survives-upgrade');
    check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===106&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))`),'upgrade-history-and-schema');
@@ -216,7 +227,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
 
   await ready(page,"document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)",'source-table-image-ready');
   check(true,expectedChannel+'-source-table-image');
-  const bookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
+  bookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
 
   at(expectedChannel+'-paragraph-editing-and-contextual-dialogue');
   const beforeParagraphs=await page.evaluate("[...document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]')].map(n=>n.textContent)");
@@ -255,6 +266,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'.baseline-analysis-card [data-analysis-action=start]');
   await ready(page,"window.ai7.inspectBaselineAnalysis().then(v=>v.resultSetRevision!==null)",'baseline-result',900000);
   check(await page.evaluate("window.ai7.inspectBaselineAnalysis().then(v=>v.resultSetRevision?.coverage?.state==='complete')"),expectedChannel+'-baseline-complete');
+  }
   at(expectedChannel+'-full-review');
   await select(page,'#app-sidebar [data-nav-destination=knowledge]');await click(page,'工序与规则');
   await ready(page,"document.querySelector('.procedure-library [data-procedure-id=\"ai7-procedure/full-review\"]')",'procedure-library');
@@ -267,8 +279,8 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"document.querySelector('dialog.review-sheet[open]')",'full-review-sheet');
   check(await boolean(page,"document.querySelector('[data-procedure-definition=\"ai7-procedure/full-review@1\"]')"),'full-review-pinned');
   await select(page,'input[name=review-scope][value=whole]');await select(page,'dialog.review-sheet [data-review-action=start]');
-  await ready(page,"window.ai7.inspectReviewWorkspace().then(v=>v.run?.state==='settled')",'full-review-settled',1800000);
-  const review=await page.evaluate("window.ai7.inspectReviewWorkspace().then(v=>({runId:v.run?.reviewRunId,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
+  await ready(page,"window.ai7.inspectReviewWorkspace().then(v=>v.run&&['settled','partial','failed','scope-changed','plan-moved','cancelled'].includes(v.run.state)&&v.run.categories.every(c=>!['prepared','waiting','running'].includes(c.state)))",'full-review-terminal',1800000);
+  const review=await page.evaluate("window.ai7.inspectReviewWorkspace().then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
 
@@ -383,7 +395,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
 }
 
 try{
- try{const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));await cleanupInstallation(join(previous.testRoot,'installed'));}catch(e){if(e.code!=='ENOENT')throw e;}
+ try{const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));if(RESUME_LAST){if(previous.state!=='failed'||previous.failedStage!=='windows-installer-full-review'||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');resume=previous;report.priorEvidence={buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};report.priorBook=previous.priorBook;}else await cleanupInstallation(join(previous.testRoot,'installed'));}catch(e){if(e.code!=='ENOENT')throw e;}
  check(process.platform==='win32'&&process.arch==='x64','windows-x64');
  // This runner is invoked by the host guest runner inside the guest's interactive scheduled task.
  check(/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''),'background-test-guest');
@@ -398,21 +410,23 @@ try{
  check(names.filter(name=>name.startsWith('AI7/data/')).every(name=>name.endsWith('/')),'pristine-portable-data');
  report.assets=[];
  for(const path of [setup,zip]){const bytes=await readFile(path);report.assets.push({name:path.split(/[\\/]/).at(-1),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});}
- const temp=await realpath(await mkdtemp(join(tmpdir(),'ai7-beta-package-')));report.testRoot=temp;
+ if(RESUME_LAST&&!resume)throw Error('resume-receipt-missing');
+ const temp=resume?await realpath(resume.testRoot):await realpath(await mkdtemp(join(tmpdir(),'ai7-beta-package-')));report.testRoot=temp;
  const input=join(temp,'public-sample1-objects.docx');
- await composeExportAdmittedDocx(input,{endnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:24,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
- await addReadOnlySourceObjects(input);
+ if(!resume){await composeExportAdmittedDocx(input,{endnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:24,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
+ await addReadOnlySourceObjects(input);}
+ if(resume)check(createHash('sha256').update(await readFile(input)).digest('hex')===resume.input.sha256,'resume-exact-public-input');
  report.input={source:'sample1.docx',startBlock:1,blocks:24,sha256:createHash('sha256').update(await readFile(input)).digest('hex'),classes:['Word revisions','comments','endnote','table','image']};
  const noteParts=unzipSync(await readFile(input));check(Boolean(noteParts['word/endnotes.xml'])&&strFromU8(noteParts['word/document.xml']).includes('<w:endnoteReference w:id="1"/>')&&strFromU8(noteParts['word/_rels/document.xml.rels']).includes('Target="endnotes.xml"')&&strFromU8(noteParts['[Content_Types].xml']).includes('PartName="/word/endnotes.xml"'),'composed-endnote-archive');
  const installed=join(temp,'installed');const executable=join(installed,'AI7.exe');
  const env=selfCheckEnvironment(executable);env.LOCALAPPDATA=join(temp,'local');await mkdir(env.LOCALAPPDATA,{recursive:true});env.APPDATA=join(temp,'roaming');await mkdir(env.APPDATA,{recursive:true});
  const priorSetup='C:/ai7/beta-inputs/AI7-0.4.1-win-x64-setup.exe';
  check(createHash('sha256').update(await readFile(priorSetup)).digest('hex')==='3df2653125ace44b58dd8e5cce458a14d0937080906cf6b38684b62793cb7927','trusted-prior-installer');
- at('prior-install');run(priorSetup,['/S','/D='+installed]);check(existsSync(executable),'prior-nsis-install');
+ if(!resume){at('prior-install');run(priorSetup,['/S','/D='+installed]);check(existsSync(executable),'prior-nsis-install');
  const priorCheck=JSON.parse(run(executable,['--self-check'],env).trim());
  check(priorCheck.softwareVersion==='0.4.1'&&priorCheck.buildIdentity.sourceCommit==='754f1bdc541f69bc5adf573b9d70116004982cb6','prior-binary-identity');
  report.priorBook=await seedPriorBook(temp,join(env.LOCALAPPDATA,'ai7','production'));
- check(report.priorBook.softwareVersion==='0.4.1'&&report.priorBook.schemaRevision===104,'prior-public-book-schema');
+ check(report.priorBook.softwareVersion==='0.4.1'&&report.priorBook.schemaRevision===104,'prior-public-book-schema');}
  at('upgrade-to-beta');run(setup,['/S','/D='+installed]);check(existsSync(executable),'nsis-upgrade-install');
  const selfcheck=JSON.parse(run(executable,['--self-check'],env).trim());
  report.installedBuildIdentity=selfcheck.buildIdentity;
