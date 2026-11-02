@@ -211,7 +211,7 @@ export function reviewChangedScopeNotes(
 
 /** One entry of the 审阅记录: `第 N 次 · 类别 · 范围 · 状态`, newest first. */
 export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' | 'categoryLabels' | 'scopeLabel' | 'stateLabel'>): string {
-  return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel} · ${summary.stateLabel}`;
+  return `${summary.label} · ${summary.categoryLabels.join('、')} · ${summary.scopeLabel.replaceAll('内容块', '段落')} · ${summary.stateLabel}`;
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
@@ -476,7 +476,7 @@ export function reviewRunHeading(label: string): string {
 }
 
 export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): string {
-  return `${scopeLabel} · 读的是修订版 ${revisionLabel}`;
+  return `${scopeLabel.replaceAll('内容块', '段落')} · 读的是修订版 ${revisionLabel}`;
 }
 
 export function reviewCreatedLine(localInstant: string): string {

@@ -1086,7 +1086,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(plan.start.needsModelConnection).toBe(true);
     expect(plan.scope.send).not.toBe('不发送任何内容');
     expect(plan.service.decision).toContain('本地正式生产');
-    expect(plan.service.send).toContain(route);
+    expect(plan.service.send).toContain(route === 'opencode-go' ? 'OpenCode Go' : 'DeepSeek 开放平台');
     expect(plan.service.usage).toBe('发送到所选模型服务；模型用量按实际调用记录，未设任务运行预算上限');
     const blocked = await store.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId }, async () => 'missing');
     expect(blocked.start.readiness).toBe('needs-connection');

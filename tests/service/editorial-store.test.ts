@@ -535,7 +535,7 @@ describe('EditorialStore on a temporary Agent Data Root', () => {
       // (V2-UX-LAYER-001), so the reading never carries it.
       expect(entry.blockPosition).toBeGreaterThan(1);
       expect(entry.blockPosition).toBeLessThanOrEqual(entry.totalBlocks);
-      expect(entry.label).toContain(`第 ${entry.blockPosition} / ${entry.totalBlocks} 个内容块`);
+      expect(entry.label).toContain(`第 ${entry.blockPosition} / ${entry.totalBlocks} 个段落`);
       expect(entry.label).not.toContain(entryBlockId);
 
       // The anchor's block opens as a `block` window target with no translation, which is what the

@@ -1818,7 +1818,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const must = el('ol', 'review-report-list');
     if (record.mustItems.items.length === 0) must.append(el('li', undefined, REVIEW_REPORT_NO_MUST_ITEMS));
     for (const item of record.mustItems.items) {
-      const line = el('li', undefined, reviewReportMustItemLine(item));
+      const line = el('li', undefined, reviewReportMustItemLine({ ...item, locationLabel: item.locationLabel.replaceAll('内容块', '段落') }));
       line.dataset['findingId'] = item.findingId;
       must.append(line);
     }
@@ -1849,7 +1849,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const statsBody = el('tbody');
       for (const row of [...record.statistics.rows, { label: REVIEW_REPORT_TOTAL, counts: record.statistics.totals, total: record.statistics.total }]) {
         const tr = el('tr');
-        const name = el('th', undefined, row.label);
+        const name = el('th', undefined, row.label.replaceAll('内容块', '段落'));
         name.scope = 'row';
         tr.append(name, ...row.counts.map((count) => el('td', undefined, String(count))), el('td', undefined, String(row.total)));
         statsBody.append(tr);
@@ -1862,7 +1862,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const [index, entry] of record.findings.entries.entries()) {
         const item = el('li');
         item.dataset['findingIds'] = entry.findingIds.join(' ');
-        item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines(entry).map((line) => el('p', undefined, line)));
+        item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines({ ...entry, chapterLabel: entry.chapterLabel.replaceAll('内容块', '段落'), locationLabel: entry.locationLabel.replaceAll('内容块', '段落') }).map((line) => el('p', undefined, line)));
         if (entry.sources.length > 0) item.append(findingEvidenceList(entry.sources, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
         list.append(item);
       }
