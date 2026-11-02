@@ -35,6 +35,8 @@ import { ProviderResultCache } from '../provider/provider-result-cache.js';
 import {
   AGENT_WORKSPACE_PROMPT_CONTRACT,
   AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST,
+  AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT,
+  AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST,
   DIALOGUE_PROMPT_CONTRACT,
   DIALOGUE_PROMPT_CONTRACT_DIGEST,
   buildDialogueMessage,
@@ -152,15 +154,16 @@ export function productionDialogueRoute(
 
 /**
  * An Agent 工作区 turn (Issue #90, wave 13 slice 13a): a dialogue turn like any other — the same Task, attempt, route,
- * refusals, Execution Binding and Harness Session Ledger — under the workspace fragment of the dialogue contract, with no tool
- * registered, whose whole streamed answer is handed to the workspace once the attempt has settled.
+ * refusals, Execution Binding and Harness Session Ledger — under the workspace contract, with the route’s admitted retrieval tools. Progress is handed to the workspace as it
+ * streams; the settled result is validated before submission can create marks.
  */
 export interface WorkspaceTurnStart extends DialogueTurnStart {
   readonly settled: (outcome: DialogueOutcome, streamed: string) => void;
+  readonly progress?: (streamed: string) => void;
 }
 
 /** A turn this owner runs: a dialogue's, or a workspace's with the hand-over it settles into. */
-type OwnedTurn = DialogueTurnStart & { readonly settled?: WorkspaceTurnStart['settled']; readonly globalRoute?: AdmittedDialogueRoute; readonly globalCredentialReference?: string; readonly sourceGuard?: () => boolean };
+type OwnedTurn = DialogueTurnStart & { readonly settled?: WorkspaceTurnStart['settled']; readonly progress?: WorkspaceTurnStart['progress']; readonly globalRoute?: AdmittedDialogueRoute; readonly globalCredentialReference?: string; readonly sourceGuard?: () => boolean };
 
 /** Hand a workspace turn its settled answer; a hand-over that throws changes nothing already recorded. */
 function handOver(turn: OwnedTurn, outcome: DialogueOutcome, streamed: string): void {
@@ -359,21 +362,20 @@ export class DialogueExecutionOwner {
     const live = this.#deps.live;
     const message = buildDialogueMessage(turn.message);
     const sessionId = randomUUID();
-    // An Agent 工作区 turn registers no tool, whatever the rule or fixture offers the dialogue (Issue #90, slice 13a).
     const global = turn.message.globalSources !== undefined;
     // A scoped Global turn registers exactly its rule's four declared tools on composition v2 (#1171); the no-tools turn none.
     const scoped = global && turn.message.globalScope !== undefined ? turn.globalRoute?.localTools ?? null : null;
     const workspace = turn.settled !== undefined;
-    const admittedLocalRule = workspace || global ? null
+    const admittedLocalRule = global ? null
       : live?.route?.localTools ?? (live === null && this.#deps.fixture !== null ? dialogueRetrievalFixtureRule(this.#deps.fixture, turn.message) : null);
     // This caller still pins composition v1; Book dialogue's expanded tool composition belongs to F-18b.
     const localRule = scoped ?? (admittedLocalRule === null ? null : { targetedRetrieval: admittedLocalRule.targetedRetrieval, breaker: admittedLocalRule.breaker });
     let retrieval: RetrievalIndex | null = null;
     let scopedTools: GlobalAgentScopedToolOwner | undefined;
     const promptContractDigest = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT_DIGEST : global ? GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST
-      : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
+      : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST) : localRule === null ? DIALOGUE_PROMPT_CONTRACT_DIGEST : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST;
     const systemPrompt = scoped !== null ? GLOBAL_AGENT_SCOPED_PROMPT_CONTRACT.systemPrompt : global ? GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt
-      : workspace ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
+      : workspace ? (localRule === null ? AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt : AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt) : localRule === null ? DIALOGUE_PROMPT_CONTRACT.systemPrompt : DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt;
     let current: string | null = null;
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
@@ -397,7 +399,7 @@ export class DialogueExecutionOwner {
         (turn.globalRoute !== undefined ? turn.sourceGuard?.() === true : live.current?.(credentialReference, route) ?? true));
       const executionRoute: ExecutionRoute = route === null ? LOCAL_DETERMINISTIC_ROUTE : route.profile.route as ExecutionRoute;
       const model = route === null ? LOCAL_DETERMINISTIC_MODEL : route.modelProfile.model;
-      const composition = describeComposition(executionRoute, model, promptContractDigest, workspace ? AGENT_WORKSPACE_COMPOSITION_OPTIONS
+      const composition = describeComposition(executionRoute, model, promptContractDigest, workspace && localRule === null ? AGENT_WORKSPACE_COMPOSITION_OPTIONS
         : scoped !== null ? { version: 2, sessionLog: true, localTools: scoped } : { sessionLog: true, localTools: localRule !== null });
       const localRuntime = live === null ? records.localFixtureRuntime?.() : null;
       if (global && localRuntime != null) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '本地夹具没有全域原文字段消费者。');
@@ -496,10 +498,9 @@ export class DialogueExecutionOwner {
             return nativeFetch(url, init);
           };
           // The streaming capability is a declaration, not an admission: it chooses the transport for a model the policy admitted.
-          // The SSE request shape is the dialogue's own and admitted for its contracts alone; an Agent 工作区 turn, read only once
-          // it has settled, keeps the whole-answer request (Issue #90, slice 13a).
+          // The SSE shape admits the prose and structured-workspace contracts, including local retrieval rounds.
           // A scoped Global turn keeps the whole-answer request tool rounds use elsewhere: the SSE shape admits no Global tools.
-          const streamShape = !workspace && scoped === null && streamingDeclared(route.modelProfile) ? 'editorial-dialogue-sse' as const : null;
+          const streamShape = scoped === null && streamingDeclared(route.modelProfile) ? 'editorial-dialogue-sse' as const : null;
           const adapter = new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
             slotBinding,
@@ -582,6 +583,7 @@ export class DialogueExecutionOwner {
         if (active.stopRequested || this.#disposed) { active.requestAbort.abort(); if (live === null) harness.interrupt(); }
         outcome = await harness.submitStreaming(message, (delta) => {
           active.streamed += delta;
+          turn.progress?.(active.streamed);
           // A stop asked before the turn began found the agent idle, which ignores an interruption: it is asked again now.
           if (active.stopRequested || this.#disposed) { active.requestAbort.abort(); if (live === null) harness.interrupt(); }
         });

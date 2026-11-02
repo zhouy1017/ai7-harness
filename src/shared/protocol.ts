@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 194 as const;
+export const SERVICE_PROTOCOL_VERSION = 195 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -10826,6 +10826,8 @@ export interface InspectDialogueInput {
 export interface DialogueAttemptInput {
   readonly dialogueId: string;
   readonly attemptId: string;
+  /** On continueDialogueAnswer, ask a new question with the conversation so far. */
+  readonly question?: string;
 }
 
 export interface ConvertDialogueToChangeSuggestionInput extends DialogueAttemptInput {
@@ -10847,6 +10849,8 @@ export interface DialogueFragmentProjection {
 }
 
 export interface DialogueAttemptProjection {
+  /** A new question in this conversation, absent on legacy continue/regenerate attempts. */
+  readonly question?: string;
   /** Still waiting behind another answer; no request or new business state has been recorded. */
   readonly queued?: boolean;
   readonly attemptId: string;
@@ -10880,6 +10884,7 @@ export interface DialogueAttemptProjection {
  * a Proposal (DIALOG-016).
  */
 export interface DialogueProjection {
+  readonly origin?: 'agent-workspace';
   readonly anchors?: ReadonlyArray<LocalRetrievalCandidateProjection>;
   readonly retrievalWarning?: '未经精确取文' | null;
   readonly dialogueId: string;
@@ -10905,8 +10910,7 @@ export interface DialogueConversionProjection {
 
 /**
  * What the Book-bound Agent 工作区 may do, as its capability declaration states it: no filesystem, no shell, no network of
- * its own and no Apply; it may name only the two current-Book scope kinds Revision 2 of the editorial workspace profile's
- * authority sidecar makes eligible. `safetyLabel` is the visible safety state the screen shows.
+ * its own and no Apply. Model streaming and local Book retrieval use the admitted dialogue execution owner. `safetyLabel` is the visible safety state the screen shows.
  */
 export interface AgentWorkspaceCapabilityProjection {
   readonly filesystem: false;
@@ -10914,7 +10918,7 @@ export interface AgentWorkspaceCapabilityProjection {
   readonly network: false;
   readonly apply: false;
   readonly scopes: readonly ['current-book-primary-manuscript-revision', 'current-book-source-version'];
-  readonly safetyLabel: '未联网 · 无文件系统 · 无 shell · 不能应用修改';
+  readonly safetyLabel: '可检索本书 · 修改由你逐条决定';
 }
 
 /** One proposed change of a change set, anchored on exact words of the selected range; a candidate, not a mark. */
@@ -10950,17 +10954,20 @@ export interface AgentWorkspaceProposalProjection {
     readonly fromGrapheme: number;
     readonly toGrapheme: number;
     readonly text: string;
+    readonly span?: ReadonlyArray<SelectionSpanBlockPin>;
   };
   readonly candidates: ReadonlyArray<AgentWorkspaceCandidateProjection>;
   readonly dropped: ReadonlyArray<AgentWorkspaceDroppedProjection>;
   /** What the round says now, in the editor's words. */
   readonly label: string;
   readonly startedAt: string;
+  /** Progress only; internal change-set JSON is never sent to the renderer. */
+  readonly streamedCharacters?: number;
 }
 
 export interface AgentWorkspaceProjection {
   readonly bookId: string;
-  /** Whether this Book's editorial workspace profile is enabled at Revision 2, which opens the workspace. */
+  /** Whether the current Book is readable. */
   readonly available: boolean;
   /** The one-sentence prerequisite when it is not; `null` when it is. */
   readonly unavailableReason: string | null;
@@ -10969,7 +10976,7 @@ export interface AgentWorkspaceProjection {
 }
 
 export interface ProposeAgentWorkspaceChangeSetInput {
-  /** The exact words of the Book's primary manuscript the change set is about (one block), as the editor selected them. */
+  /** The exact words of the Book's primary manuscript the change set is about (one paragraph or a contiguous span), as the editor selected them. */
   readonly selection: DialogueSelectionInput;
   /** The editor's instruction, sent as a dialogue question is. */
   readonly instruction: string;
@@ -10979,7 +10986,7 @@ export interface AgentWorkspaceProposalSetInput {
   readonly proposalSetId: string;
 }
 
-/** 提交为修改建议: the 修改建议 marks the change set became — one atomic group when there are two or more — never applied. */
+/** 提交为修改建议: the independently decidable 修改建议 marks the change set became, never applied. */
 export interface AgentWorkspacePromotionProjection {
   readonly bookId: string;
   readonly markIds: ReadonlyArray<string>;

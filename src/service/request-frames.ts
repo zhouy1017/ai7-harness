@@ -256,7 +256,7 @@ function validKnowledgeTarget(value: unknown): boolean {
 }
 
 /** The manuscript span a candidate cites, as a mark names its range, or `null` for the editor's own words. */
-function validKnowledgeSpan(value: unknown): boolean {
+function validKnowledgeSpan(value: unknown, textLimit = MAX_BLOCK_CODE_UNITS): boolean {
   if (value === null) return true;
   return isRecord(value) && hasExactKeys(value, [
     'manuscriptId', 'branchId', 'windowStartBlockId', 'baseRevisionId', 'expectedJournalSequence', 'blockId', 'baseBlockDigest', 'fromGrapheme',
@@ -264,7 +264,7 @@ function validKnowledgeSpan(value: unknown): boolean {
   ]) && validMarkBinding(value) && isBoundedString(value.baseRevisionId, 36) && UUID_PATTERN.test(value.baseRevisionId) &&
     isSafeInteger(value.expectedJournalSequence, 0) && isBoundedString(value.blockId, 28) && MARK_BLOCK_PATTERN.test(value.blockId) &&
     isBoundedString(value.baseBlockDigest, 64) && HEX_DIGEST_PATTERN.test(value.baseBlockDigest) && isSafeInteger(value.fromGrapheme, 0) &&
-    isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, MAX_BLOCK_CODE_UNITS);
+    isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, textLimit);
 }
 
 /**
@@ -274,7 +274,7 @@ function validKnowledgeSpan(value: unknown): boolean {
 function validSelection(value: unknown): boolean {
   if (!isRecord(value) || !('span' in value)) return validKnowledgeSpan(value);
   const { span, ...range } = value;
-  return validKnowledgeSpan(range) && Array.isArray(span) && span.length >= 2 && span.length <= MAX_SELECTION_SPAN_BLOCKS && span.every((pin) =>
+  return validKnowledgeSpan(range, MAX_BLOCK_CODE_UNITS * MAX_SELECTION_SPAN_BLOCKS) && Array.isArray(span) && span.length >= 2 && span.length <= MAX_SELECTION_SPAN_BLOCKS && span.every((pin) =>
     isRecord(pin) && hasExactKeys(pin, ['blockId', 'blockDigest', 'fromGrapheme', 'toGrapheme']) && isBoundedString(pin.blockId, 28) &&
     MARK_BLOCK_PATTERN.test(pin.blockId) && isBoundedString(pin.blockDigest, 64) && HEX_DIGEST_PATTERN.test(pin.blockDigest) &&
     isSafeInteger(pin.fromGrapheme, 0) && isSafeInteger(pin.toGrapheme, 0));
@@ -2727,8 +2727,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopDialogueAnswer':
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : [], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      if (input.question !== undefined && !isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'convertDialogueToChangeSuggestion': {
@@ -2795,7 +2796,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'proposeAgentWorkspaceChangeSet': {
       const input = requireInput(value.input, ['bookId', 'selection', 'instruction'], tentativeId);
-      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection) ||
+      if (!validUuid(input.bookId) || input.selection === null || !validSelection(input.selection) ||
           !isBoundedString(input.instruction, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }

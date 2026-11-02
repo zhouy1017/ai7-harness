@@ -55,20 +55,65 @@ function locate(selection: string, anchor: string): { from: number; to: number }
 }
 
 /** The answer's one JSON object; a model that fences it in a code block is read the same, and nothing else around it is. */
-function answerObject(text: string): unknown {
-  const trimmed = text.trim();
-  const fenced = /^```(?:json)?\n([\s\S]*)\n```$/u.exec(trimmed);
-  return JSON.parse(fenced === null ? trimmed : fenced[1]!);
+function answerObject(text: string, partial: boolean): unknown {
+  // Scan balanced objects rather than a greedy brace regex: strings may themselves contain braces or escaped quotes.
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let end = start; end < text.length; end += 1) {
+      const char = text[end];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') quoted = false;
+      } else if (char === '"') quoted = true;
+      else if (char === '{') depth += 1;
+      else if (char === '}' && --depth === 0) {
+        try {
+          const value: unknown = JSON.parse(text.slice(start, end + 1));
+          if (isRecord(value) && value['schema'] === AGENT_WORKSPACE_RESULT_SCHEMA) return value;
+        } catch { /* Keep looking past explanatory text. */ }
+        break;
+      }
+    }
+  }
+  if (partial && text.includes(`"${AGENT_WORKSPACE_RESULT_SCHEMA}"`)) {
+    const start = /"items"\s*:\s*\[/u.exec(text);
+    if (start !== null) {
+      // Completed items can be previewed before the surrounding array/object has arrived.
+      const body = text.slice(start.index + start[0].length);
+      let quoted = false;
+      let escaped = false;
+      let depth = 0;
+      let itemStart = -1;
+      const items: unknown[] = [];
+      for (let at = 0; at < body.length; at += 1) {
+        const char = body[at];
+        if (quoted) {
+          if (escaped) escaped = false;
+          else if (char === '\\') escaped = true;
+          else if (char === '"') quoted = false;
+        } else if (char === '"') quoted = true;
+        else if (char === '{') { if (depth === 0) itemStart = at; depth += 1; }
+        else if (char === '}' && --depth === 0 && itemStart !== -1) {
+          try { items.push(JSON.parse(body.slice(itemStart, at + 1))); } catch { break; }
+        } else if (char === ']' && depth === 0) break;
+      }
+      return { schema: AGENT_WORKSPACE_RESULT_SCHEMA, items };
+    }
+  }
+  return null;
 }
 
 /**
  * Read a workspace answer against the selection it was asked about. The answer is one JSON object holding exactly `schema`
  * and `items`; anything else withholds it whole. Each item holds exactly `anchor`, `proposedText` and `rationale`.
  */
-export function readAgentWorkspaceAnswer(text: string, selection: string): AgentWorkspaceReading {
+export function readAgentWorkspaceAnswer(text: string, selection: string, partial = false): AgentWorkspaceReading {
   let parsed: unknown;
   try {
-    parsed = answerObject(text);
+    parsed = answerObject(text, partial);
   } catch {
     return { kind: 'withheld', reason: NOT_A_CHANGE_SET };
   }
@@ -91,8 +136,8 @@ export function readAgentWorkspaceAnswer(text: string, selection: string): Agent
       drop(words.tooLong);
       continue;
     }
-    const line = rationale.trim();
-    if (line.length === 0 || /[\r\n]/u.test(line) || [...line].length > MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS) {
+    const line = [...rationale.replace(/\s+/gu, ' ').trim()].slice(0, MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS).join('');
+    if (line.length === 0) {
       drop(words.invalidRationale(MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS));
       continue;
     }

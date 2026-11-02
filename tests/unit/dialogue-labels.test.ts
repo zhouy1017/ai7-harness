@@ -209,6 +209,7 @@ describe('the frames the dialogue takes', () => {
       ['inspectDialogue', { bookId: BOOK, dialogueId: DIALOGUE, afterFragment: 0 }],
       ['stopDialogueAnswer', attemptInput],
       ['continueDialogueAnswer', attemptInput],
+      ['continueDialogueAnswer', { ...attemptInput, question: '请再简洁一些。' }],
       ['regenerateDialogueAnswer', attemptInput],
       ['convertDialogueToChangeSuggestion', { ...attemptInput, proposedText: '改', rationale: '' }],
     ] as const) {
@@ -221,6 +222,8 @@ describe('the frames the dialogue takes', () => {
       ['inspectDialogue', { bookId: BOOK, dialogueId: DIALOGUE, afterFragment: -1 }],
       ['inspectDialogue', { bookId: BOOK, dialogueId: 'bad', afterFragment: 0 }],
       ['stopDialogueAnswer', { ...attemptInput, extra: true }],
+      ['regenerateDialogueAnswer', { ...attemptInput, question: '追问' }],
+      ['continueDialogueAnswer', { ...attemptInput, question: '问'.repeat(501) }],
       ['convertDialogueToChangeSuggestion', { ...attemptInput, proposedText: '', rationale: '' }],
       ['convertDialogueToChangeSuggestion', { ...attemptInput, proposedText: '改' }],
     ] as const) {

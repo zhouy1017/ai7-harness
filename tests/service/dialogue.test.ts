@@ -141,6 +141,31 @@ function storeBytes(): Buffer {
 }
 
 describe('就这段提问… over the real store and harness', () => {
+  it('asks consecutive follow-ups with prior answers and restores their questions after reopening', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const dialogues = owner(store, null);
+    const book = await importSample1Book(store, roots.codeRoot, '连续追问');
+    try {
+      const first = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
+      dialogues.begin(first);
+      const read = () => store.inspectDialogue(book.bookId, first.dialogueId, 0, (id) => dialogues.liveText(id));
+      await waitFor(read, (value) => value.attempts.at(-1)?.state === 'completed', 'first answer');
+      const second = store.nextDialogueAttempt(book.bookId, { dialogueId: first.dialogueId, attemptId: first.attemptId, question: QUESTION }, 'continue');
+      expect(second.message.kept).toContain(FIRST_SENTENCE);
+      dialogues.begin(second);
+      await waitFor(read, (value) => value.attempts.at(-1)?.state === 'completed', 'second answer');
+      const third = store.nextDialogueAttempt(book.bookId, { dialogueId: first.dialogueId, attemptId: second.attemptId, question: QUESTION }, 'continue');
+      expect(third.message.kept).toContain(second.message.kept!);
+      dialogues.begin(third);
+      const done = await waitFor(read, (value) => value.attempts.at(-1)?.state === 'completed', 'third answer');
+      expect(done.attempts.slice(1).map((attempt) => attempt.question)).toEqual([QUESTION, QUESTION]);
+      await dialogues.dispose();
+      store.close();
+      const reopened = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      try { expect(reopened.inspectDialogue(book.bookId, first.dialogueId, 0, () => null)).toEqual(done); }
+      finally { reopened.close(); }
+    } finally { await dialogues.dispose(); try { store.close(); } catch { /* reopened above */ } }
+  });
   it('runs the retained workspace fixture under lightweight v1 without Global history', async () => {
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const workspaceFixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-agent-workspace');

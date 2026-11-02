@@ -4,7 +4,7 @@ import type { RetrievalCandidate } from '../retrieval/index.js';
 import { dialogueRetrievalCitations } from '../retrieval/result-validator.js';
 import { toolResultOf, type AssembledMessage } from '../provider/payload.js';
 import { harnessSessionLogBytes, readHarnessSessionLog, type StoredHarnessLog } from '../harness/session-log.js';
-import { parseDialogueMessage, type DialogueMessageInput } from './contract.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage, type DialogueMessageInput } from './contract.js';
 import type { StoredDialogueAttempt, StoredDialogueTask } from './dialogue-ledger.js';
 import { fragmentsText, splitFragments, type DialogueFragment, type FragmentReading } from './fragments.js';
 
@@ -132,6 +132,7 @@ export function fragmentReading(state: DialogueAnswerState): FragmentReading {
 }
 
 export interface ResolvedAttempt {
+  readonly message: DialogueMessageInput | null;
   readonly exactFetched?: ReadonlyMap<string, RetrievalCandidate>;
   readonly queued?: boolean;
   readonly attempt: StoredDialogueAttempt;
@@ -172,9 +173,9 @@ export function resolveAttempts(
     const streamed = streaming?.streamed ?? turn?.streamed ?? null;
     const source: ResolvedAttempt['source'] = streaming !== null ? 'live' : turn !== null ? 'ledger' : reading as 'missing' | 'damaged';
     const own = streamed === null ? [] : splitFragments(streamed, fragmentReading(state));
-    const prior = attempt.kind === 'continue' ? resolved.at(-1) : undefined;
+    const prior = attempt.kind === 'continue' && message?.followUp !== true ? resolved.at(-1) : undefined;
     const carried = prior === undefined ? [] : prior.fragments;
-    resolved.push({ attempt, state, fragments: [...carried, ...own], source, exactFetched: streaming?.exactFetched ?? turn?.exactFetched ?? new Map(),
+    resolved.push({ attempt, message, state, fragments: [...carried, ...own], source, exactFetched: streaming?.exactFetched ?? turn?.exactFetched ?? new Map(),
       ...(streaming?.queued === true ? { queued: true } : {}) });
   }
   return { attempts: resolved, first };
@@ -194,16 +195,19 @@ export function dialogueProjection(
   resolved: { attempts: ReadonlyArray<ResolvedAttempt>; first: DialogueMessageInput | null },
   afterFragment: number,
 ): DialogueProjection {
+  const workspace = task.origin === 'agent-workspace' || resolved.attempts.some((entry) =>
+    [AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST].includes(entry.attempt.binding?.promptContractSha256 ?? ''));
   const latest = resolved.attempts.at(-1);
   const attempts: DialogueAttemptProjection[] = resolved.attempts.map((entry) => {
     const from = entry === latest ? Math.min(afterFragment, entry.fragments.length) : 0;
     return {
+      ...(entry.message?.followUp === true ? { question: entry.message.question } : {}),
       attemptId: entry.attempt.attemptId,
       ordinal: entry.attempt.ordinal,
       kind: entry.attempt.kind,
       state: entry.state,
       ...(entry.queued === true ? { queued: true } : {}),
-      fragments: entry.fragments.slice(from).map((fragment) => ({ text: fragment.text, breakAfter: fragment.breakAfter })),
+      fragments: workspace ? [] : entry.fragments.slice(from).map((fragment) => ({ text: fragment.text, breakAfter: fragment.breakAfter })),
       fragmentsFrom: from,
       fragmentTotal: entry.fragments.length,
       source: entry.source,
@@ -217,6 +221,7 @@ export function dialogueProjection(
   const citations = dialogueRetrievalCitations(latest === undefined ? '' : fragmentsText(latest.fragments), latest?.exactFetched ?? new Map());
   const known = resolved.first !== null;
   return {
+    ...(workspace ? { origin: 'agent-workspace' as const } : {}),
     dialogueId: task.dialogueId,
     bookId: task.bookId,
     manuscriptId: task.manuscriptId,
@@ -229,13 +234,13 @@ export function dialogueProjection(
     anchors: citations.anchors.filter((candidate) => candidate.sourceKind === 'manuscript' && candidate.sourceId === task.manuscriptId && candidate.anchor.blockId !== undefined),
     retrievalWarning: citations.unverified ? '未经精确取文' : null,
     actions: {
-      stop: latestState === 'answering',
+      stop: !workspace && latestState === 'answering',
       // 继续回答 goes on from complete fragments the answer kept; 重新回答 asks again (DIALOG-014). Both need the question.
-      continue: known && latest !== undefined && (latestState === 'stopped' || latestState === 'interrupted') && latest.fragments.length > 0,
-      regenerate: known && latestState !== null && latestState !== 'answering',
+      continue: !workspace && known && latest !== undefined && (latestState === 'stopped' || latestState === 'interrupted') && latest.fragments.length > 0,
+      regenerate: !workspace && known && latestState !== null && latestState !== 'answering',
       // An Incomplete Dialogue Answer is no completed answer and is never converted (DIALOG-013); a 修改建议 stands in one
       // paragraph, so a question across paragraphs (Issue #1176) is converted to a Task Intent Draft instead.
-      convert: latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && !citations.unverified && task.span === undefined,
+      convert: !workspace && latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && !citations.unverified && task.span === undefined,
     },
   };
 }

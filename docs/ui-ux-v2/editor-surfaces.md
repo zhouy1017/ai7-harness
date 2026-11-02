@@ -8,6 +8,12 @@ The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft p
 
 Import fidelity and structure choices appear once; ordinary DOCX degradation uses the standard policy without a required checkbox. Export has inline format/annotation choices and opens the native Save dialog directly. Library additions belong to the current Book, or the house without one, and are immediately referable; custom dimensions and captured procedures are enabled on save. Data and Storage, Quality and Learning, Knowledge Base, Model Service, Series and Evaluation Calibration return to their entry screen, including the concrete Book subpage or Settings.
 
+## Wave 23 Book Agent and dialogue — Owner #1279 / #1285
+
+The Book Agent workspace retains the current manuscript position, accepts whole paragraphs and contiguous paragraph selections, and streams validated candidate items using the admitted Book retrieval tools. Completed rounds, including empty results, allow new instructions immediately; a new round replaces the prior unsubmitted proposals and can refine them. Internal change-set JSON belongs to the workspace and is never rendered as dialogue prose. Submitted independent paragraph suggestions are accepted or rejected individually on their manuscript cards.
+
+The right dialogue drawer has a persistent follow-up composer for the pinned selection and retrievable Book context. Each follow-up retains prior questions and answers in the Harness Session Ledger. `转为修改建议` prefills quoted/fenced replacement text, or the answer itself for editing; the editor still explicitly submits the suggestion and decides its application.
+
 ## 0 · 总则
 
 ### 0.1 权威与阅读方式
