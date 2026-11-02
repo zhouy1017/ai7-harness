@@ -1,13 +1,10 @@
-import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
+import { validateRequestAdmissionRecords } from './analysis/request-admissions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   J03_TASK_GOAL,
   isTrustedOperationalScope,
-  isSupportedProviderProcessingVersion,
   selectedPolicyIdentityOf,
-  localFixtureProfileOf,
-  isResultSetPolicyPin,
   type SelectedPolicyIdentity,
   type DeveloperLiveProviderProcessingVersion,
   type OrdinaryProductionProviderProcessingVersion,
@@ -16,15 +13,6 @@ import {
   type ProviderProcessingPin,
   type TaskAuthorizationProjection,
   type TrustedOperationalScope,
-} from '../shared/protocol.js';
-import {
-  BASELINE_ANALYSIS_CONTRACT_VERSION,
-  BASELINE_ANALYSIS_KIND,
-  BASELINE_ANALYSIS_MODE_GOALS,
-  BASELINE_ANALYSIS_TASK_GOAL,
-  TASK_INPUT_CHECKPOINT_PURPOSE,
-} from './analysis/identity.js';
-import {
   EDITORIAL_REVIEW_CONTRACT_VERSION,
   FACTUAL_REVIEW_CONTRACT_VERSION,
   FACTUAL_REVIEW_KIND,
@@ -44,10 +32,20 @@ import {
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
   MAX_TASK_INTENT_GOAL_LENGTH,
 } from '../shared/protocol.js';
+import {
+  BASELINE_ANALYSIS_CONTRACT_VERSION,
+  BASELINE_ANALYSIS_KIND,
+  BASELINE_ANALYSIS_MODE_GOALS,
+  BASELINE_ANALYSIS_TASK_GOAL,
+  TASK_INPUT_CHECKPOINT_PURPOSE,
+} from './analysis/identity.js';
 import { isRecord, canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
 import { providerPlanPolicyMetadata } from './analysis/plan-boundary.js';
-import { DialogueLedger } from './dialogue/dialogue-ledger.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
+import {
+  ACTIVE_SET_VERSION,
+  DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
+  ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
+} from './launch-policy.js';
 import {
   ANALYSIS_RESULT_SET_REVISION_58_SQL,
   ANALYSIS_RESULT_SET_REVISION_59_SQL,

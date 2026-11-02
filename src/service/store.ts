@@ -1,66 +1,599 @@
+import * as modelSearchSettings from './model-search-settings.js';
+import * as materialIndexOperations from './material-index-operations.js';
+import * as globalAgentOperations from './global-agent-operations.js';
+import * as writingTaskOperations from './writing-task-operations.js';
+import * as factualVerificationOperations from './factual-verification-operations.js';
+import * as initialEvaluationOperations from './initial-evaluation-operations.js';
 import { pinTaskDeliverable, taskDeliverableStale } from './task-deliverable-target.js';
-import { procedureStopped } from './procedures/editable.js';
 import { initializeEditableProcedureSchema } from './procedures/editable-schema.js';
-import { initializeStructuralEditSchema } from './manuscript/structural-schema.js'; import { initializeNoteBlockSchema } from './manuscript/note-schema.js';
+import { initializeStructuralEditSchema } from './manuscript/structural-schema.js';
+import { initializeNoteBlockSchema } from './manuscript/note-schema.js';
 import { ManuscriptSourceObjects } from './manuscript/source-objects.js';
-import { commitNoteSources, legacyBlockSources, routeBlockSource, type LegacyBlockSources } from './manuscript/note-blocks.js'; import { initializeImportStructureSchema } from './manuscript/structure-schema.js';
-import type { ImportStructureChoice } from '../shared/protocol.js'; import { importedMarksRecord, nonEffects, recordsToCreate } from './import-review-records.js'; export { importedMarksRecord };
-import { recordStructureChoice, recordedStructureChoice, reviewStructureChoice, reviewStructureField, stagedHasPieces, stagedStructureField } from './manuscript/import-structure.js';
-import { insertMergedImportBlocks } from './manuscript/merged-import-blocks.js'; import { heldSpanPins, selectionSpanRange, verifySelectionSpan, verifyWorkingSpan, type VerifiedSelection } from './manuscript/selection-span.js'; import { SELECTION_SPAN_SEPARATOR, spanGraphemes } from '../shared/selection-span.js';
+import {
+  commitNoteSources,
+  legacyBlockSources,
+  routeBlockSource,
+  type LegacyBlockSources,
+} from './manuscript/note-blocks.js';
+import { initializeImportStructureSchema } from './manuscript/structure-schema.js';
+import {
+  type ImportStructureChoice,
+  type AskGlobalAgentInput,
+  type GlobalAgentDialogueProjection,
+  type GlobalAgentAttemptInput,
+  type GlobalAgentProcedure,
+  type GlobalAgentProcedurePin,
+  type GlobalAgentScope,
+  type GlobalAgentScopeInput,
+  type GlobalMemoryPin,
+  type HouseReviewPreferenceVersion,
+  type PrepareGlobalAgentTurnInput,
+  type GlobalAgentProjection,
+  type RecordLearningSupervisionInput,
+  type ImportedSkillImportProjection,
+  type ImportedSkillRevisionProjection,
+  type ImportedSkillsProjection,
+  type ImportedSkillUpdateCandidateProjection,
+  type ImportedSkillUpdateCheckProjection,
+  type ImportedSkillUpdateRuleProjection,
+  type ProcedureRecommendationInput,
+  type ProcedureRecommendationProjection,
+  isCustomAnalysisKindId,
+  type CustomAnalysisDimensionsProjection,
+  type PrepareCustomAnalysisInput,
+  type SaveCustomAnalysisDimensionInput,
+  type HouseReviewPreferenceProjection,
+  type HouseReviewPreferenceUse,
+  type EditQualitySignalsProjection,
+  type ApplyReceiptProjection,
+  type BatchProposalDecisionDraftInput,
+  type InspectApplyReceiptInput,
+  type PrepareReverseApplyInput,
+  type ProposalDraftBatchProjection,
+  type ProposalWorkspaceInput,
+  type ProposalWorkspaceProjection,
+  type RecordProposalDecisionInput,
+  type ReverseApplyPreparationProjection,
+  type SaveProposalDecisionDraftInput,
+  type ModelConnectionTestStatus,
+  acceptedSourceImportRetainedBoundaryLabels,
+  sourceImportRetainedBoundaryLabel,
+  BASELINE_ANALYSIS_MODE_GOALS,
+  BASELINE_ANALYSIS_MODE_LABELS,
+  J03_TASK_GOAL,
+  MAX_DIALOGUE_SELECTION_GRAPHEMES,
+  MAX_EVALUATION_CALIBRATION_BOOKS,
+  LEARNING_MATERIAL_KEY_PATTERN,
+  MAX_BLOCK_CODE_UNITS,
+  MAX_FRAME_BYTES,
+  MAX_LEARNING_MATERIALS_PAGE,
+  MAX_LEARNING_AUDIT_PAGE,
+  MAX_PRODUCTION_DOCUMENT_BLOCKS,
+  MAX_REIMPORT_EXCERPT_GRAPHEMES,
+  MAX_REIMPORT_EXCERPTS_PER_SIDE,
+  MAX_REIMPORT_RECORD_ITEMS,
+  REIMPORT_GROUP_VERB_LABELS,
+  TASK_PLAN_KINDS,
+  fidelityStatusLabel,
+  isReviewCategoryKindId,
+  resolveMilestonePurpose,
+  type ControlTaskRunInput,
+  type EditTaskPlanInput,
+  type CoverageManifestProjection,
+  type InspectSeriesKnowledgeReviewInput,
+  type ServiceOperationMap,
+  type InspectTaskPlanInput,
+  type TaskPlanProjection,
+  type GlobalAttentionProjection,
+  type BookTasksProjection,
+  type AskAboutSelectionInput,
+  type ConvertDialogueToChangeSuggestionInput,
+  type DialogueAttemptInput,
+  type DialogueConversionProjection,
+  type DialogueProjection,
+  type CapturedProcedureProjection,
+  type CapturedProceduresProjection,
+  type CapturedProcedureApplicabilityProjection,
+  type CapturedProcedureScopeSlot,
+  type CapturedProcedureRunProjection,
+  type CapturedProcedureStopPreviewProjection,
+  type CapturedProcedureValidationProjection,
+  type DeveloperProposalProjection,
+  type DeveloperProposalVersionProjection,
+  type ProcedureCaptureProjection,
+  type SaveCapturedProcedureInput,
+  type SaveDeveloperProposalInput,
+  type ApproveManuscriptExportInput,
+  type InspectManuscriptExportReceiptInput,
+  type StageManuscriptExportInput,
+  type ManuscriptExportStageProjection,
+  type ManuscriptExportPreparationProjection,
+  type ManuscriptExportReceiptProjection,
+  type ManuscriptExportReviewProjection,
+  type PrepareManuscriptExportInput,
+  type ReviewManuscriptExportInput,
+  type DeliverablesProjection,
+  type ProposalConflictDraftSaveProjection,
+  type ProposalConflictProjection,
+  type ProposalConflictResolutionProjection,
+  type ProposalConflictBindingInput,
+  type ResolveProposalConflictInput,
+  type SaveProposalConflictDraftInput,
+  type DesignatePublicationVersionInput,
+  type CreateProductionDocumentInput,
+  type DecideProductionDocumentTypeInput,
+  type ProductionDocumentResultProjection,
+  type SaveProductionDocumentVersionInput,
+  type RecordProductionDocumentDeliveryInput,
+  type TransitionProductionDocumentPhaseInput,
+  type BookDeliveryPackageProjection,
+  type BookDeliveryPackageResultProjection,
+  type PrepareBookDeliveryPackageInput,
+  type ApproveBookDeliveryPackageExportInput,
+  type BookPeopleResultProjection,
+  type BookSummaryFilter,
+  type UpdateBookPeopleInput,
+  type ReviewGuidelinePreviewProjection,
+  type ReviewGuidelinesProjection,
+  type ExemplarBookCursor,
+  type ImportedExemplarInput,
+  type ImportedExemplarPreview,
+  type ImportedExemplarDecisionInput,
+  type LibraryMaterialCursor,
+  type LibraryMaterialDecisionInput,
+  type LibraryMaterialKind,
+  type LibraryMaterialPreviewProjection,
+  type LibraryMaterialProjection,
+  type LibraryMaterialsProjection,
+  type EvaluationProfilesProjection,
+  type EvaluationProfileProjection,
+  type SaveEvaluationProfileInput,
+  type EvaluationWorkspaceProjection,
+  type AnalysisFeedbackProjection,
+  type RecordAnalysisFeedbackInput,
+  type ExemplarsProjection,
+  type ExemplarBookProjection,
+  type ReadersReportExemplarProjection,
+  type AdmitReadersReportExemplarInput,
+  type KnowledgeProceduresProjection,
+  type ReviewGuidelinesPage,
+  type AppendMaintenanceCaseRevisionInput,
+  type InspectMaintenanceCaseInput,
+  type ListMaintenanceCasesInput,
+  type MaintenanceCasePageProjection,
+  type MaintenanceCaseProjection,
+  type MaintenanceCaseResultProjection,
+  type RecordMaintenanceCaseInput,
+  type SaveMaintenanceErrataInput,
+  type BookDeliveryPackageExportProjection,
+  type BookDeliveryPackageExportResultProjection,
+  type BookDeliveryPackageExportReviewProjection,
+  type PrepareBookDeliveryPackageExportInput,
+  type PrepareBookDeliveryPackageArchiveInput,
+  type ReviewBookDeliveryPackageExportInput,
+  type ProductionDocumentsProjection,
+  type MilestonePurposeKind,
+  type PublicationDesignationProjection,
+  type BookCreationCommitProjection,
+  type BookCreationReviewProjection,
+  type BookHistoryCursor,
+  type BookSummaryCursor,
+  type BookSummaryPageProjection,
+  type BookManuscriptAnchorProjection,
+  type BookRecordPresentation,
+  type BookWorkOverviewProjection,
+  type EditorialWorkspaceProfileProjection,
+  type FidelityCategoryProjection,
+  type HistoricalRevisionProjection,
+  type ImportCommitProjection,
+  type ImportDegradationDecisionReviewProjection,
+  type ImportDraftRecoveryProjection,
+  type ImportIdentityFindingProjection,
+  type ImportStartupProjection,
+  type ImportTargetSelection,
+  type ManuscriptImportCommitProjection,
+  type ManuscriptBlockProjection,
+  type ManuscriptReimportCommitProjection,
+  type ManuscriptReimportTargetSelection,
+  type ApplyChangeSuggestionBatchInput,
+  type ApplyChangeSuggestionInput,
+  type CreateEditorialMarkInput,
+  type EditorialMarkCardProjection,
+  type EditorialMarkCommandProjection,
+  type JournalAcknowledgement,
+  type JournalEditInput,
+  type ManuscriptApplyCommandProjection,
+  type ManuscriptApplyOutcomeProjection,
+  type ManuscriptConversionProjection,
+  type ManuscriptRailProjection,
+  type ManuscriptEntryPositionProjection,
+  type ManuscriptWindowProjection,
+  type ModelCredentialOperationState,
+  type ModelServiceConnectionProjection,
+  type ModelServiceRouteId,
+  type RecordChangeSuggestionDecisionInput,
+  type RecordProposalDecisionFeedbackInput,
+  type DecideLearningMaterialInput,
+  type InspectEvaluationCalibrationInput,
+  type EvaluationCalibrationBookProjection,
+  type BookSeriesProjection,
+  type ChangeSeriesMembershipInput,
+  type CreateSeriesInput,
+  type PreviewSeriesMembershipChangeInput,
+  type SeriesCandidatesCursor,
+  type SeriesCandidatesProjection,
+  type SeriesCreationProjection,
+  type SeriesHistoryCursor,
+  type SeriesHistoryPageProjection,
+  type SeriesListCursor,
+  type SeriesListProjection,
+  type SeriesMemberProjection,
+  type SeriesMembersCursor,
+  type SeriesMembersPageProjection,
+  type SeriesMembershipChangeResultProjection,
+  type SeriesMembershipPreviewProjection,
+  type SeriesProjection,
+  type EditSeriesKnowledgeCandidateInput,
+  type PromoteSeriesKnowledgeInput,
+  type ProposeSeriesKnowledgeInput,
+  type SeriesKnowledgeCandidatesCursor,
+  type SeriesKnowledgeCandidatesPageProjection,
+  type SeriesKnowledgeItemsCursor,
+  type SeriesKnowledgeItemsPageProjection,
+  type SeriesKnowledgeRevisionsProjection,
+  type SeriesKnowledgeConflictsProjection,
+  type SeriesKnowledgePromotionProjection,
+  type SeriesKnowledgeProposalProjection,
+  type SeriesKnowledgeReviewProjection,
+  type DataVersionProjection,
+  type DatabaseExportActivityProjection,
+  type DatabaseExportPreparationProjection,
+  type DatabaseExportReceiptProjection,
+  type DatabaseExportsProjection,
+  type ScheduledBackupsProjection,
+  type UsageGrouping,
+  type UsageProjection,
+  type UsageRange,
+  type SetScheduledBackupInput,
+  type DatabaseImportPreviewProjection,
+  type DatabaseReplacementsProjection,
+  type EvaluationCalibrationProjection,
+  type RecordPublicationActualsInput,
+  type SetEvaluationPreferencesInput,
+  type FeedbackHistoryInput,
+  type FeedbackHistoryProjection,
+  type LearningMaterialCursor,
+  type LearningMaterialProjection,
+  type LearningMaterialsBookProjection,
+  type LearningMaterialsProjection,
+  type LearningAuditBookProjection,
+  type LearningAuditInput,
+  type LearningAuditMaterialProjection,
+  type LearningAuditProjection,
+  type LearningLineageProjection,
+  type LearningRemediationOutcomeProjection,
+  type LearningRemediationPreviewProjection,
+  type PreviewLearningRemediationInput,
+  type RecordLearningRemediationInput,
+  type RecordProposalDecisionReasonInput,
+  type ReverseAppliedChangeSuggestionInput,
+  type UpdateEditorialMarkInput,
+  type NewBookImportTargetChoiceId,
+  type OriginalFileAccessProjection,
+  type ReviewBeforeImportProjection,
+  type ReviewBeforeSourceImportProjection,
+  type ReviewBeforeManuscriptReimportProjection,
+  type ReimportLineageSourceVersionPageProjection,
+  type EditorialMarkKind,
+  type ReimportGroupProjection,
+  type ReimportGroupVerb,
+  type ReimportMappingPageProjection,
+  type SourceFormat,
+  type SourceImportCommitProjection,
+  type SourceImportRetainedBoundaryLabel,
+  type SourceImportTargetSelection,
+  type StagedImportProjection,
+  type ContinueImportProjection,
+  type DurableHistoryProjection,
+  type ManuscriptWindowTarget,
+  type MilestoneProjection,
+  type OutlineProjection,
+  type PriorWorkItemProjection,
+  type ReplacementCommitProjection,
+  type ReplacementDismissalProjection,
+  type ReplacementPreviewProjection,
+  type RecoveryComparisonProjection,
+  type RecoveryDeferralProjection,
+  type RecoveryRestorationProjection,
+  type RecoverySelection,
+  type RecoveryWindowProjection,
+  type RecoveryWindowTarget,
+  type SearchResultsProjection,
+  type SearchSummaryProjection,
+  type StartupProjection,
+  type BookWorkbenchRoute,
+  type ResolvedBookWorkbenchRoute,
+  type ForegroundExecutionBoundaryProjection,
+  type LaunchPolicyProjection,
+  type TaskAuthorizationProjection,
+  type BaselineAnalysisGoal,
+  type BaselineAnalysisProjection,
+  type AnalysisProjection,
+  type BaselineAnalysisResultSetRevisionProjection,
+  type BaselineAnalysisRunState,
+  type BaselineAnalysisQuickStartProjection,
+  type BaselineAnalysisUpdateActionProjection,
+  type BaselineAnalysisUpdateMode,
+  type BaselineAnalysisUpdateRequest,
+  type DefaultExecutionRulePattern,
+  type MaterialPlanInputsProjection,
+  type DefaultExecutionRuleProjection,
+  type DefaultExecutionRuleReference,
+  type BackgroundAnalysisEnrollmentProjection,
+  type BackgroundAnalysisScopeKind,
+  type BackgroundAnalysisStartingPoint,
+  type DefaultExecutionRuleBinding,
+  type DefaultExecutionRulesProjection,
+  type TaskPlanDefaultRuleProjection,
+  type FactualReviewGoal,
+  type FactualReviewProjection,
+  type EvaluationInitialProjection,
+  type InitialEvaluationProjection,
+  type ReadersReportProjection,
+  type ReadersReportTemplate,
+  type EvaluationComparableProjection,
+  type EvaluationPricingProjection,
+  type EvaluationMarketProjection,
+  type EvaluationRewriteDecision,
+  type EvaluationRewriteProjection,
+  type WritingDraftCreatedProjection,
+  type WritingProjection,
+  type WritingTaskProjection,
+  type WritingTaskTypeProjection,
+  type ReviewCategoryGoal,
+  type ReviewCategoryProjection,
+  type ReviewCategoryTaskRequest,
+  type ReviewFindingPageRequest,
+  type ReviewRunScopeRequest,
+  type ReviewWorkspaceProjection,
+  type BookFindingProjection,
+  type BookFindingsProjection,
+  type ParagraphAnalysisProjection,
+  MAX_EVALUATION_COMPARABLES,
+  MIN_SERIES_PREDICTION_BOOKS,
+  READERS_REPORT_TEMPLATES,
+  MAX_WRITING_REQUIREMENTS_GRAPHEMES,
+  MAX_WRITING_MATERIALS,
+  MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
+  MAX_WRITING_MATERIAL_GRAPHEMES,
+  MAX_WRITING_MATERIAL_OFFERS,
+  WRITING_KIND,
+  BASELINE_ANALYSIS_KIND,
+  FACTUAL_REVIEW_KIND,
+  INITIAL_EVALUATION_KIND,
+  READERS_REPORT_KIND,
+  EVALUATION_REWRITE_KIND,
+  type TaskPlanKind,
+  type TaskPlanUnconfirmedProjection,
+  reviewCategoryKindId,
+  type FrozenSeriesScope,
+  type CorrectionProposalDraftProjection,
+  type CorrectionProposalSavedProjection,
+  type EvidenceWorkspaceProjection,
+  type FactualRunAssuranceProjection,
+  type FactualVerificationLensProjection,
+  type InspectEvidenceWorkspaceInput,
+  type InspectFactualVerificationInput,
+  type PlanEditsProjection,
+  type PrepareCorrectionProposalInput,
+  type RecordVerificationReviewDecisionInput,
+  type SaveCorrectionProposalInput,
+  type VerificationReviewDecisionRecordedProjection,
+  MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES,
+  type ResearchEvidenceBookProjection,
+  type ResearchEvidenceCaptureState,
+  type MaterialTranslationProjection,
+  type MaterialVectorSearchProjection,
+  MAX_SERIES_MEMBERS_PAGE,
+  PUBLICATION_ACTUALS_RECORDED_STATE,
+  type InspectSeriesExclusionHistoryInput,
+  type InspectSeriesExclusionTargetsInput,
+  type PreviewSeriesExclusionInput,
+  type RecordSeriesExclusionInput,
+  type SeriesExclusionHistoryPageProjection,
+  type SeriesExclusionPreviewProjection,
+  type SeriesExclusionResultProjection,
+  type SeriesExclusionTargetsProjection,
+  type CancelWaitingTaskInput,
+  type StartTaskWhenOnlineInput,
+  type StartWhenOnlineTaskKind,
+  type DialogueSelectionInput,
+  type InspectTaskIntentDraftsInput,
+  type PromoteAnswerToTaskIntentDraftInput,
+  type PromoteTaskIntentDraftInput,
+  type SaveTaskIntentDraftInput,
+  type TaskIntentDraftProjection,
+  type TaskIntentDraftRangeProjection,
+  type TaskIntentDraftsProjection,
+  MAX_TASK_INTENT_DRAFT_RANGES,
+  MAX_EXEMPLAR_BOOKS_PAGE,
+} from '../shared/protocol.js';
+import { importedMarksRecord, nonEffects, recordsToCreate } from './import-review-records.js';
+import {
+  recordStructureChoice,
+  recordedStructureChoice,
+  reviewStructureChoice,
+  reviewStructureField,
+  stagedHasPieces,
+  stagedStructureField,
+} from './manuscript/import-structure.js';
+import { insertMergedImportBlocks } from './manuscript/merged-import-blocks.js';
+import {
+  heldSpanPins,
+  selectionSpanRange,
+  verifySelectionSpan,
+  verifyWorkingSpan,
+  type VerifiedSelection,
+} from './manuscript/selection-span.js';
+import { SELECTION_SPAN_SEPARATOR, spanGraphemes } from '../shared/selection-span.js';
 import { HouseWordLists, initializeHouseWordListSchema } from './review/house-word-list.js';
-import { HouseWordListError, type InspectHouseWordListInput, type SaveHouseWordListInput } from '../shared/protocol/house-word-list.js';
-import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, WORD_TRACKED_IMPORT_SCHEMA_VERSION, POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION, LEARNING_CURATION_SCHEMA_VERSION } from './task-authorization.js';
-import { IDLE_BACKGROUND_SCHEMA_VERSION, LOCAL_REVIEW_SCHEMA_VERSION, EDITORIAL_MEMORY_SCHEMA_VERSION } from './task-authorization.js';
-import { initializeLocalStageSchema, reviewRunEvidence } from './review/review-runs.js';
-import { sha256Hex } from './analysis/canonical.js';
-import { graphemeCount } from './analysis/factual-review-contract.js';
+import {
+  HouseWordListError,
+  type InspectHouseWordListInput,
+  type SaveHouseWordListInput,
+} from '../shared/protocol/house-word-list.js';
+import {
+  validateRequestAdmissionRecords,
+  AnalysisError,
+  BaselineAnalysisStore,
+  RUN_WAITING_IDLE_LABEL,
+  runIsActive,
+  type AnalysisPreparationResult,
+  type BaselineAnalysisPreparationResult,
+  type ProgressReader,
+  type ResendPlan,
+  type UnconfirmedOutcomeRecord,
+} from './analysis/baseline-analysis-store.js';
+import {
+  MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
+  WORD_TRACKED_IMPORT_SCHEMA_VERSION,
+  EDITORIAL_MEMORY_SCHEMA_VERSION,
+  initializeTaskAuthorizationSchema,
+  EDITORIAL_LEARNING_SCHEMA_VERSION,
+  LATEST_SCHEMA_VERSION,
+  TaskAuthorizationError,
+  TaskAuthorizationStore,
+  validateTaskAuthorizationSchema,
+  type TaskPreparationResult,
+} from './task-authorization.js';
+import {
+  initializeLocalStageSchema,
+  reviewRunEvidence,
+  initializeReviewRunSchema,
+  ReviewRunError,
+  ReviewRunStore,
+  type ReviewRunPlanFacts,
+  type ReviewRunPreparationProgress,
+} from './review/review-runs.js';
+import { sha256Hex, canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
+import { graphemeCount, FACTUAL_VERIFICATION_POLICY_VERSION } from './analysis/factual-review-contract.js';
 import { executionBackgroundShare } from './analysis/execution.js';
 import { initializeProcedureDefinitionSchema } from './procedures/definition-store.js';
-import { EditorialLearningLedger, LearningReads, initializeEditorialLearningSchema, type WordLearningProofs } from './learning/ledger.js';
-import { type CurationRun } from './learning/curation.js';
-import type { LearningCurationBundle } from '../shared/protocol/learning.js';
-import type { WordTrackedEditLearningSource } from '../shared/protocol/learning.js';
-import type { ChangeEditorialLearningInput, CreateEditorialMemoryInput, DeactivateEditorialMemoryInput, InspectEditorialLearningInput, EditorialLearningProjection, LearningReasonAskInput, LearningReasonAskProjection } from '../shared/protocol/learning.js';
-import { AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, buildDialogueMessage, dialogueQuestionDigest } from './dialogue/contract.js';
-import { fragmentsText } from './dialogue/fragments.js';
-import { globalAgentDialogueProjection, globalAgentScopedTools, readGlobalAgentHistory, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
-import type { AskGlobalAgentInput, GlobalAgentDialogueProjection, GlobalAgentAttemptInput, GlobalAgentProcedure, GlobalAgentProcedurePin, GlobalAgentScope, GlobalAgentScopeInput, GlobalMemoryPin, GlobalAgentSourceCandidate, HouseReviewPreferenceVersion, PrepareGlobalAgentTurnInput } from '../shared/protocol.js';
-import { PROCEDURE_STAGE_LABELS, type ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
-import { GLOBAL_AGENT_SCHEMA_VERSION } from './task-authorization.js';
-import { SupervisionDirectives, governedMemoryItems, preferenceItems, initializeSupervisionSchema, supervisionSourceCandidates, editorialMemoryGovernanceItem, type EditorialMemoryGovernanceHooks } from './learning/supervision-directives.js';
-import { GLOBAL_AGENT_POLICY_BLOCKED, MODEL_SERVICE_SETUP_REQUIRED_REASON, type GlobalAgentProjection, type RecordLearningSupervisionInput } from '../shared/protocol.js';
-import { analysisBytePage, revisionUnitsPage, analysisOverviewPage, baselineAnalysisSummaryPage } from './analysis/baseline-analysis-wire.js';
+import {
+  EditorialLearningLedger,
+  LearningReads,
+  initializeEditorialLearningSchema,
+  type WordLearningProofs,
+} from './learning/ledger.js';
+import type { CurationRun } from './learning/curation.js';
+import type {
+  LearningCurationBundle,
+  WordTrackedEditLearningSource,
+  ChangeEditorialLearningInput,
+  CreateEditorialMemoryInput,
+  DeactivateEditorialMemoryInput,
+  InspectEditorialLearningInput,
+  EditorialLearningProjection,
+  LearningReasonAskInput,
+  LearningReasonAskProjection,
+} from '../shared/protocol/learning.js';
+import {
+  AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST,
+  AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST,
+  dialogueQuestion,
+} from './dialogue/contract.js';
+import { globalAgentScopedTools, type GlobalAgentTurnHistory } from './dialogue/global-agent-session.js';
+import type { ProcedureDefinitionDocument } from '../shared/protocol/procedures.js';
+import {
+  SupervisionDirectives,
+  initializeSupervisionSchema,
+  type EditorialMemoryGovernanceHooks,
+} from './learning/supervision-directives.js';
+import {
+  analysisBytePage,
+  revisionUnitsPage,
+  analysisOverviewPage,
+  baselineAnalysisSummaryPage,
+} from './analysis/baseline-analysis-wire.js';
 import { SkillAcquisitions } from './imported-skills.js';
-import type { ImportedSkillImportProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, ImportedSkillUpdateRuleProjection, ProcedureRecommendationInput, ProcedureRecommendationProjection } from '../shared/protocol.js';
 import { initializeImportedSkillSchema, initializeImportedSkillUpdateSchema } from './imported-skill-schema.js';
-import { HOUSE_REVIEW_PREFERENCE_CATEGORY } from './launch-policy.js';
-import { CustomAnalysisDimensionError, CustomAnalysisDimensions, customAnalysisVersionInput, initializeCustomAnalysisDimensionSchema } from './custom-analysis-dimensions.js';
+import {
+  HOUSE_REVIEW_PREFERENCE_CATEGORY,
+  allowedProductionBindingOf,
+  resolveSourceCheckoutLaunchPolicySync,
+  readRetainedBoundAnalysisPolicySync,
+  type ConfiguredProviderBinding,
+} from './launch-policy.js';
+import * as customAnalysisOperations from './custom-analysis-dimensions.js';
+import {
+  CustomAnalysisDimensionError,
+  CustomAnalysisDimensions,
+  customAnalysisVersionInput,
+  initializeCustomAnalysisDimensionSchema,
+} from './custom-analysis-dimensions.js';
 import { CustomAnalysisDocumentError } from './analysis/custom-analysis-contract.js';
 import { customAnalysisPlan } from './analysis/custom-analysis-kind.js';
-import { isCustomAnalysisKindId } from '../shared/protocol.js';
-import type { CustomAnalysisDimensionsProjection, PrepareCustomAnalysisInput, SaveCustomAnalysisDimensionInput } from '../shared/protocol.js';
-import { HouseReviewPreferenceLedger, houseReviewPreferenceKindDefinition, initializeHouseReviewPreferenceSchema, preferenceNames, withdrawalOf, withoutNames } from './house-review-preference.js';
-import type { HouseReviewPreferenceProjection, HouseReviewPreferenceUse, EditQualitySignalsProjection } from '../shared/protocol.js';
-import type { ApplyReceiptProjection, BatchProposalDecisionDraftInput, InspectApplyReceiptInput, PrepareReverseApplyInput, ProposalDraftBatchProjection, ProposalWorkspaceInput, ProposalWorkspaceProjection, RecordProposalDecisionInput, ReverseApplyPreparationProjection, SaveProposalDecisionDraftInput } from '../shared/protocol.js';
-import { initializeProposalReviewSchema } from './editorial-marks.js';
-import { SEARCH_BACKENDS, defaultSearchBackend } from './provider/search-backends.js'; import { initializeSearchFallbackSchema, readSearchBackendConnections, readSearchFallback, searchBackendSettingsProjection, writeSearchFallback } from './provider/search-backend-settings.js';
-import { RetrievalIndex, RetrievalError, type RetrievalMaterialVectorQuery, type RetrievalSource } from './retrieval/index.js';
+import * as learningSupervision from './house-review-preference.js';
+import {
+  HouseReviewPreferenceLedger,
+  houseReviewPreferenceKindDefinition,
+  initializeHouseReviewPreferenceSchema,
+} from './house-review-preference.js';
+import {
+  initializeProposalReviewSchema,
+  EditorialMarkError,
+  EditorialMarkStore,
+  initializeEditorialMarkSchema,
+  followReimportedMarks,
+  resolveBranchMarksAfterRewrite,
+  workingBlockDigests,
+  type ReimportMarkOutcome,
+  type ReimportMarkRow,
+  type ProducedEditorialMarkInput,
+} from './editorial-marks.js';
+import { initializeSearchFallbackSchema } from './provider/search-backend-settings.js';
+import {
+  RetrievalIndex,
+  RetrievalError,
+  type RetrievalMaterialVectorQuery,
+  type RetrievalSource,
+} from './retrieval/index.js';
 import { materialRetrievalSources } from './retrieval/source-readers.js';
-import { TASK_MATERIALS_NONE, TASK_MATERIALS_STATEMENT, TASK_MATERIAL_LIVE_UNAVAILABLE, REVIEW_MATERIAL_CATEGORY_REQUIRED, taskMaterialReferenceLine, taskMaterialKindDefinition, taskMaterialSources, taskMaterialWords, taskMaterialRefusal, taskMaterialSettled, TASK_MATERIAL_OFFER_DAMAGED, type MaterialGuardRefusal, type TaskMaterialBoundary, type TaskMaterialReading, type TaskMaterialSource } from './task-material-references.js';
+import {
+  TASK_MATERIALS_NONE,
+  TASK_MATERIALS_STATEMENT,
+  TASK_MATERIAL_LIVE_UNAVAILABLE,
+  REVIEW_MATERIAL_CATEGORY_REQUIRED,
+  taskMaterialKindDefinition,
+  taskMaterialSources,
+  taskMaterialWords,
+  taskMaterialRefusal,
+  TASK_MATERIAL_OFFER_DAMAGED,
+  type MaterialGuardRefusal,
+  type TaskMaterialBoundary,
+  type TaskMaterialReading,
+  type TaskMaterialSource,
+} from './task-material-references.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { readProxySetting, writeProxySetting } from './provider/proxy-setting.js';
-import { allowedProductionBindingOf, selectedPolicyIdentityOf, resolveSourceCheckoutLaunchPolicySync, readRetainedBoundAnalysisPolicySync, type ConfiguredProviderBinding } from './launch-policy.js';
-import { factualClaimVerificationInput } from './analysis/factual-claim-ledger.js';
-import { factualClaimVerificationPrompt } from './analysis/factual-claim-contract.js';
-import { resolveProcedureDefinition } from './procedures/definition-store.js';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './analysis/factual-recheck.js';
-import { searchBackend, searchBackendConfigurationDigest } from './provider/search-backends/index.js';
 import { LocalFixturePolicyCatalog, type LocalFixtureRuntimeContext } from './provider/model-fixture.js';
-import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
-import { MODEL_SERVICE_CONNECTION_IDS, MODEL_SERVICE_ROUTE_BINDINGS, MODEL_SERVICE_ROUTES, modelServiceChannelOf, modelServiceModels, modelServiceRuntimeBinding, validModelServiceModelId, type ModelConnectionTestStatus } from '../shared/protocol.js';
-import { MODEL_SERVICE_ROW_COLUMNS, initializeAdmittedChannelsSchema, initializeModelSelectionSchema, initializeModelServiceRoutesSchema, modelServiceRowsOutsideBindings } from './model-service-connections.js';
-import { closeSync, constants, createReadStream, existsSync, fstatSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from 'node:fs';
+import {
+  initializeAdmittedChannelsSchema,
+  initializeModelSelectionSchema,
+  initializeModelServiceRoutesSchema,
+} from './model-service-connections.js';
+import {
+  closeSync,
+  constants,
+  createReadStream,
+  existsSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} from 'node:fs';
 import { copyFile, lstat, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -76,326 +609,13 @@ import {
   sha256,
   type SqlRow,
 } from './store-records.js';
-// The store's error types are still read from here by every caller that catches them.
-export { StoreError, StoreFatalError };
-import { acceptedSourceImportRetainedBoundaryLabels, sourceImportRetainedBoundaryLabel, BASELINE_ANALYSIS_MODE_GOALS, BASELINE_ANALYSIS_MODE_LABELS, J03_TASK_GOAL, MAX_DIALOGUE_SELECTION_GRAPHEMES, MAX_EVALUATION_CALIBRATION_BOOKS, LEARNING_MATERIAL_KEY_PATTERN, MAX_BLOCK_CODE_UNITS, MAX_FRAME_BYTES, MAX_LEARNING_MATERIALS_PAGE, MAX_LEARNING_AUDIT_PAGE, MAX_PRODUCTION_DOCUMENT_BLOCKS, MAX_REIMPORT_EXCERPT_GRAPHEMES, MAX_REIMPORT_EXCERPTS_PER_SIDE, MAX_REIMPORT_RECORD_ITEMS, REIMPORT_GROUP_VERB_LABELS, TASK_PLAN_KINDS, fidelityStatusLabel, isReviewCategoryKindId, resolveMilestonePurpose } from '../shared/protocol.js';
-import type {
-  ControlTaskRunInput,
-  EditTaskPlanInput,
-  CoverageManifestProjection,
-  InspectSeriesKnowledgeReviewInput,
-  ServiceOperationMap,
-  InspectTaskPlanInput,
-  TaskPlanProjection,
-  GlobalAttentionProjection,
-  BookTasksProjection,
-  AskAboutSelectionInput,
-  ConvertDialogueToChangeSuggestionInput,
-  DialogueAttemptInput,
-  DialogueConversionProjection,
-  DialogueProjection,
-  CapturedProcedureProjection,
-  CapturedProceduresProjection,
-  CapturedProcedureApplicabilityProjection,
-  CapturedProcedureScopeSlot,
-  CapturedProcedureRunProjection,
-  CapturedProcedureStopPreviewProjection,
-  CapturedProcedureValidationProjection,
-  DeveloperProposalProjection,
-  DeveloperProposalVersionProjection,
-  ProcedureCaptureProjection,
-  SaveCapturedProcedureInput,
-  SaveDeveloperProposalInput,
-  ApproveManuscriptExportInput,
-  InspectManuscriptExportReceiptInput,
-  StageManuscriptExportInput,
-  ManuscriptExportStageProjection,
-  ManuscriptExportPreparationProjection,
-  ManuscriptExportReceiptProjection,
-  ManuscriptExportReviewProjection,
-  PrepareManuscriptExportInput,
-  ReviewManuscriptExportInput,
-  DeliverablesProjection,
-  ProposalConflictDraftSaveProjection,
-  ProposalConflictProjection,
-  ProposalConflictResolutionProjection,
-  ProposalConflictBindingInput,
-  ResolveProposalConflictInput,
-  SaveProposalConflictDraftInput,
-  DesignatePublicationVersionInput,
-  CreateProductionDocumentInput,
-  DecideProductionDocumentTypeInput,
-  ProductionDocumentResultProjection,
-  SaveProductionDocumentVersionInput,
-  RecordProductionDocumentDeliveryInput,
-  TransitionProductionDocumentPhaseInput,
-  BookDeliveryPackageProjection,
-  BookDeliveryPackageResultProjection,
-  PrepareBookDeliveryPackageInput,
-  ApproveBookDeliveryPackageExportInput,
-  BookPeopleResultProjection,
-  BookSummaryFilter,
-  UpdateBookPeopleInput,
-  ReviewGuidelinePreviewProjection,
-  ReviewGuidelinesProjection,
-  ExemplarBookCursor,
-  ImportedExemplarInput,
-  ImportedExemplarPreview,
-  ImportedExemplarDecisionInput,
-  LibraryMaterialCursor,
-  LibraryMaterialDecisionInput,
-  LibraryMaterialKind,
-  LibraryMaterialPreviewProjection,
-  LibraryMaterialProjection,
-  LibraryMaterialsProjection,
-  EvaluationProfilesProjection,
-  EvaluationProfileProjection,
-  SaveEvaluationProfileInput,
-  EvaluationWorkspaceProjection,
-  AnalysisFeedbackProjection,
-  RecordAnalysisFeedbackInput,
-  ExemplarsProjection,
-  ExemplarBookProjection,
-  ReadersReportExemplarProjection,
-  AdmitReadersReportExemplarInput,
-  KnowledgeProceduresProjection,
-  ReviewGuidelinesPage,
-  AppendMaintenanceCaseRevisionInput,
-  InspectMaintenanceCaseInput,
-  ListMaintenanceCasesInput,
-  MaintenanceCasePageProjection,
-  MaintenanceCaseProjection,
-  MaintenanceCaseResultProjection,
-  RecordMaintenanceCaseInput,
-  SaveMaintenanceErrataInput,
-  BookDeliveryPackageExportProjection,
-  BookDeliveryPackageExportResultProjection,
-  BookDeliveryPackageExportReviewProjection,
-  PrepareBookDeliveryPackageExportInput,
-  PrepareBookDeliveryPackageArchiveInput,
-  ReviewBookDeliveryPackageExportInput,
-  ProductionDocumentsProjection,
-  MilestonePurposeKind,
-  PublicationDesignationProjection,
-  BookCreationCommitProjection,
-  BookCreationReviewProjection,
-  BookHistoryCursor,
-  BookSummaryCursor,
-  BookSummaryPageProjection,
-  BookManuscriptAnchorProjection,
-  BookRecordPresentation,
-  BookWorkOverviewProjection,
-  EditorialWorkspaceProfileProjection,
-  FidelityCategoryProjection,
-  HistoricalRevisionProjection,
-  ImportCommitProjection,
-  ImportDegradationDecisionReviewProjection,
-  ImportDraftRecoveryProjection,
-  ImportIdentityFindingProjection,
-  ImportStartupProjection,
-  ImportTargetSelection,
-  ManuscriptImportCommitProjection,
-  ManuscriptBlockProjection,
-  ManuscriptReimportCommitProjection,
-  ManuscriptReimportTargetSelection,
-  ApplyChangeSuggestionBatchInput,
-  ApplyChangeSuggestionInput,
-  CreateEditorialMarkInput,
-  EditorialMarkCardProjection,
-  EditorialMarkCommandProjection,
-  JournalAcknowledgement,
-  JournalEditInput,
-  ManuscriptApplyCommandProjection,
-  ManuscriptApplyOutcomeProjection,
-  ManuscriptConversionProjection,
-  ManuscriptRailProjection,
-  ManuscriptEntryPositionProjection,
-  ManuscriptWindowProjection,
-  ModelCredentialOperationState,
-  ModelServiceConnectionProjection,
-  ModelServiceRouteId,
-  RecordChangeSuggestionDecisionInput,
-  RecordProposalDecisionFeedbackInput,
-  DecideLearningMaterialInput,
-  InspectEvaluationCalibrationInput,
-  EvaluationCalibrationBookProjection,
-  BookSeriesProjection,
-  ChangeSeriesMembershipInput,
-  CreateSeriesInput,
-  PreviewSeriesMembershipChangeInput,
-  SeriesCandidatesCursor,
-  SeriesCandidatesProjection,
-  SeriesCreationProjection,
-  SeriesHistoryCursor,
-  SeriesHistoryPageProjection,
-  SeriesListCursor,
-  SeriesListProjection,
-  SeriesMemberProjection,
-  SeriesMembersCursor,
-  SeriesMembersPageProjection,
-  SeriesMembershipChangeResultProjection,
-  SeriesMembershipPreviewProjection,
-  SeriesProjection,
-  EditSeriesKnowledgeCandidateInput,
-  PromoteSeriesKnowledgeInput,
-  ProposeSeriesKnowledgeInput,
-  SeriesKnowledgeCandidatesCursor,
-  SeriesKnowledgeCandidatesPageProjection,
-  SeriesKnowledgeItemsCursor,
-  SeriesKnowledgeItemsPageProjection,
-  SeriesKnowledgeRevisionsProjection,
-  SeriesKnowledgeConflictsProjection,
-  SeriesKnowledgePromotionProjection,
-  SeriesKnowledgeProposalProjection,
-  SeriesKnowledgeReviewProjection,
-  DataVersionProjection,
-  DatabaseExportActivityProjection,
-  DatabaseExportContentsProjection,
-  DatabaseExportPreparationProjection,
-  DatabaseExportReceiptProjection,
-  DatabaseExportsProjection,
-  ScheduledBackupsProjection,
-  UsageGrouping,
-  UsageProjection,
-  UsageRange,
-  SetScheduledBackupInput,
-  DatabaseImportPreviewProjection,
-  DatabaseReplacementsProjection,
-  EvaluationCalibrationProjection,
-  RecordPublicationActualsInput,
-  SetEvaluationPreferencesInput,
-  FeedbackHistoryInput,
-  FeedbackHistoryProjection,
-  LearningMaterialCursor,
-  LearningMaterialProjection,
-  LearningMaterialTarget,
-  LearningMaterialsBookProjection,
-  LearningMaterialsProjection,
-  LearningAuditBookProjection,
-  LearningAuditInput,
-  LearningAuditMaterialProjection,
-  LearningAuditProjection,
-  LearningLineageProjection,
-  LearningRemediationOutcomeProjection,
-  LearningRemediationPreviewProjection,
-  PreviewLearningRemediationInput,
-  RecordLearningRemediationInput,
-  RecordProposalDecisionReasonInput,
-  ReverseAppliedChangeSuggestionInput,
-  UpdateEditorialMarkInput,
-  NewBookImportTargetChoiceId,
-  OriginalFileAccessProjection,
-  ReviewBeforeImportProjection,
-  ReviewBeforeSourceImportProjection,
-  ReviewBeforeManuscriptReimportProjection,
-  ReimportLineageSourceVersionPageProjection,
-  EditorialMarkKind,
-  ReimportGroupProjection,
-  ReimportGroupVerb,
-  ReimportMappingPageProjection,
-  SourceFormat,
-  SourceImportCommitProjection,
-  SourceImportRetainedBoundaryLabel,
-  SourceImportTargetSelection,
-  StagedImportProjection,
-  ContinueImportProjection,
-  DurableHistoryProjection,
-  ManuscriptWindowTarget,
-  MilestoneProjection,
-  OutlineProjection,
-  PriorWorkItemProjection,
-  ReplacementCommitProjection,
-  ReplacementDismissalProjection,
-  ReplacementPreviewProjection,
-  RecoveryComparisonProjection,
-  RecoveryDeferralProjection,
-  RecoveryRestorationProjection,
-  RecoverySelection,
-  RecoveryWindowProjection,
-  RecoveryWindowTarget,
-  SearchResultsProjection,
-  SearchSummaryProjection,
-  StartupProjection,
-  BookWorkbenchRoute,
-  ResolvedBookWorkbenchRoute,
-  ForegroundExecutionBoundaryProjection,
-  LaunchPolicyProjection,
-  TaskAuthorizationProjection,
-  BaselineAnalysisGoal,
-  BaselineAnalysisProjection,
-  AnalysisProjection,
-  BaselineAnalysisResultSetRevisionProjection,
-  BaselineAnalysisRunState,
-  BaselineAnalysisQuickStartProjection,
-  BaselineAnalysisUpdateActionProjection,
-  BaselineAnalysisUpdateMode,
-  BaselineAnalysisUpdateRequest,
-  DefaultExecutionRulePattern,
-  MaterialPlanInputsProjection,
-  DefaultExecutionRuleProjection,
-  DefaultExecutionRuleReference,
-  BackgroundAnalysisEnrollmentProjection,
-  BackgroundAnalysisScopeKind,
-  BackgroundAnalysisStartingPoint,
-  DefaultExecutionRuleBinding,
-  DefaultExecutionRulesProjection,
-  TaskPlanDefaultRuleProjection,
-  FactualReviewGoal,
-  FactualReviewProjection,
-  EvaluationInitialProjection,
-  InitialEvaluationProjection,
-  ReadersReportProjection,
-  ReadersReportTemplate,
-  EvaluationComparableProjection,
-  EvaluationPricingProjection,
-  EvaluationMarketProjection,
-  EvaluationRewriteDecision,
-  EvaluationRewriteProjection,
-  WritingDraftCreatedProjection,
-  WritingProjection,
-  WritingTaskProjection,
-  WritingTaskTypeProjection,
-  ReviewCategoryGoal,
-  ReviewCategoryProjection,
-  ReviewCategoryTaskRequest,
-  ReviewFindingPageRequest,
-  ReviewRunScopeRequest,
-  ReviewWorkspaceProjection,
-} from '../shared/protocol.js';
 import { bookFindingsPage, paragraphAnalysis } from './book-findings.js';
-import type { BookFindingProjection, BookFindingsProjection, ParagraphAnalysisProjection } from '../shared/protocol.js';
-import {
-  INITIAL_EVALUATION_MODE_GOALS,
-  MAX_EVALUATION_COMPARABLES,
-  MIN_SERIES_PREDICTION_BOOKS,
-  READERS_REPORT_NO_EXEMPLAR,
-  READERS_REPORT_TEMPLATES,
-  MAX_WRITING_AUDIENCE_GRAPHEMES,
-  MAX_WRITING_CHANNEL_GRAPHEMES,
-  MAX_WRITING_REQUIREMENTS_GRAPHEMES,
-  MAX_WRITING_MATERIALS,
-  MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
-  MAX_WRITING_MATERIAL_GRAPHEMES,
-  MAX_WRITING_MATERIAL_OFFERS,
-  WRITING_KIND,
-  BASELINE_ANALYSIS_KIND,
-  FACTUAL_REVIEW_KIND,
-  INITIAL_EVALUATION_KIND,
-  READERS_REPORT_KIND,
-  EVALUATION_REWRITE_KIND,
-  type TaskPlanKind,
-  type TaskPlanUnconfirmedProjection,
-  WRITING_LIVE_UNAVAILABLE,
-  WRITING_MATERIAL_LIVE_UNAVAILABLE,
-  WRITING_MODE_GOALS,
-} from '../shared/protocol.js';
-import { INITIAL_EVALUATION_LIVE_UNAVAILABLE, initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
-import { EVALUATION_PAYLOAD_CATEGORIES, liveKindRule, liveMaterialRule, kindLocalTools, modelAdmitsPlatformTools } from './analysis/live-kind-admission.js';
-import { platformToolsFromProjection } from './provider/search-service.js';
-import { reviewCategoryKindId } from '../shared/protocol.js';
+import { initialEvaluationKindDefinition } from './evaluation/initial-evaluation-kind.js';
+import { liveKindRule, liveMaterialRule, kindLocalTools } from './analysis/live-kind-admission.js';
 import { producedUnverified } from './evaluation/unverified-disclosure.js';
 import { evaluationRewriteScoredItems } from './evaluation/evaluation-rewrite-contract.js';
 import { predictionRange } from './evaluation/pricing-prediction.js';
+import * as evaluationRewriteOperations from './evaluation-rewrites.js';
 import {
   EvaluationRewriteError,
   EvaluationRewrites,
@@ -408,30 +628,10 @@ import {
   type ReadersReportContractInput,
   type ReadersReportExemplarInput,
 } from './evaluation/readers-report-contract.js';
+import * as readersReportOperations from './readers-reports.js';
+import { ReadersReportError, ReadersReports, initializeReadersReportSchema } from './readers-reports.js';
 import {
-  ReadersReportError,
-  ReadersReports,
-  initializeReadersReportSchema,
-} from './readers-reports.js';
-import {
-  MAX_WRITING_CHARACTERS,
-  MAX_WRITING_EXEMPLARS_REFERENCED as MAX_WRITING_EXEMPLARS,
-  MAX_WRITING_EXEMPLAR_GRAPHEMES,
-  MAX_WRITING_SYNOPSIS_GRAPHEMES,
-  WRITING_COST_BEFORE_PLAN,
-  WRITING_DRAFT_PARSER_IDENTITY,
   WRITING_EXEMPLAR_MOVED,
-  WRITING_FIELD_CONTROL,
-  WRITING_NEEDS_MANUSCRIPT,
-  WRITING_NOT_DO,
-  WRITING_SEND_CONSEQUENCE,
-  WRITING_LIVE_SEND_CONSEQUENCE,
-  WRITING_MATERIALS_NONE,
-  WRITING_MATERIALS_STATEMENT,
-  WRITING_MATERIALS_TOO_MANY,
-  WRITING_QUICK_START_MATERIALS,
-  WRITING_RULE_MATERIALS,
-  WritingTaskError,
   WritingTasks,
   graphemeLength,
   writingMaterialDigest,
@@ -440,23 +640,15 @@ import {
   writingMaterialParagraph,
   writingMaterialsOverTotal,
   readWritingExemplarWords,
-  writingExemplarDigest,
   initializeWritingTaskSchema,
-  writingBlockLength,
-  writingDocumentExists,
-  writingDraftBlocks,
-  writingNotForThisBook,
   writingWords,
   type StoredWritingTask,
   type WritingExemplarSource,
   type WritingMaterialReading,
   type WritingMaterialSource,
 } from './writing-tasks.js';
-import { writingKindDefinition, writingRecordedKindDefinition } from './writing/writing-kind.js';
-import { liveWritingRule } from './writing/live-writing-admission.js';
 import {
   WRITING_COPY_RULES,
-  writingExemplarLine,
   type WritingCopyRules,
   type WritingBookInput,
   type WritingContractInput,
@@ -466,30 +658,18 @@ import {
   type WritingSynopsisInput,
 } from './writing/writing-contract.js';
 import {
-  AnalysisError,
-  BaselineAnalysisStore,
-  RUN_WAITING_IDLE_LABEL,
-  activeRunReason,
-  runIsActive,
-  type AnalysisPreparationResult,
-  type BaselineAnalysisPreparationResult,
-  type BaselineAnalysisRouteFacts,
-  type ProgressReader,
-  type ResendPlan,
-  type UnconfirmedOutcomeRecord,
-} from './analysis/baseline-analysis-store.js';
-import {
   baselineAnalysisKindDefinition,
   factualReviewKindDefinition,
   RETAINED_V1_RECORDED_FIXTURE_IDENTITY,
   type AnalysisKindDefinition,
-  type BaselinePromptContractSelection,
 } from './analysis/kind-definition.js';
 import { convertDocManuscript, isDocConversionRefusal } from './doc-manuscript.js';
 import {
   buildFidelityReport,
   deriveImportFidelityPlan,
-  DOCX_PARSER_IDENTITY, DOCX_NOTE_PARSER_IDENTITY, DOCX_SPLIT_PARSER_IDENTITY,
+  DOCX_PARSER_IDENTITY,
+  DOCX_NOTE_PARSER_IDENTITY,
+  DOCX_SPLIT_PARSER_IDENTITY,
   isCleanTracerFidelity,
   MAX_ARCHIVE_BYTES,
   parseDocx,
@@ -516,18 +696,22 @@ import {
   isManuscriptObjectKey,
   manuscriptObjectExtension,
 } from './manuscript-format.js';
-import {
-  convertTextManuscript,
-  isTextConversionRefusal,
-  type ConversionLoss,
-} from './text-manuscript.js';
+import { convertTextManuscript, isTextConversionRefusal, type ConversionLoss } from './text-manuscript.js';
 import { initializeManuscriptEffectSchema, ManuscriptApplyStore } from './manuscript-apply.js';
-import { initializeReviewRunSchema, ReviewRunError, ReviewRunStore, type ReviewRunPlanFacts, type ReviewRunPreparationProgress } from './review/review-runs.js';
 import { OUTCOME_UNKNOWN_NOT_RESENT } from './analysis/outcome-unknown.js';
-import { newSeriesKnowledgeReadings, freezeSeriesScope, frozenSeriesScopes, seriesScopeMaterials, liveSeriesContract, seriesScopeKindDefinition, seriesConsistencyKindDefinition, seriesKnowledgeAllowed, procedureOffersSeries, seriesScopeChanged, SERIES_POLICY_CLOSED } from './review/series-consistency.js';
-import type { FrozenSeriesScope } from '../shared/protocol.js';
-import { HISTORICALLY_AFFECTED_RESULT_MARKER } from '../shared/protocol.js';
-import { initializePublicationVersionSchema, PublicationVersionError, PublicationVersionStore } from './publication-versions.js';
+import {
+  newSeriesKnowledgeReadings,
+  frozenSeriesScopes,
+  seriesScopeMaterials,
+  seriesScopeKindDefinition,
+  seriesConsistencyKindDefinition,
+  procedureOffersSeries,
+} from './review/series-consistency.js';
+import {
+  initializePublicationVersionSchema,
+  PublicationVersionError,
+  PublicationVersionStore,
+} from './publication-versions.js';
 import {
   GLOBAL_ATTENTION_READ_LIMIT,
   GlobalAttentionError,
@@ -538,6 +722,10 @@ import {
   readRecoveryAttention,
   recentWindowStart,
   type UnconfirmedAttentionReading,
+  type DialogueTaskReading,
+  type MaterialIndexAttentionReading,
+  type TaskIntentDraftAttentionReading,
+  type WaitingTaskAttentionReading,
 } from './global-attention.js';
 import { ALWAYS_ONLINE, type TaskPlanConnectivity } from './connectivity.js';
 import { RecentCache } from './recent-cache.js';
@@ -547,11 +735,9 @@ import {
   initialEvaluationPlan,
   seriesScopePlan,
   evaluationMaterialPlan,
-  analysisTaskStateLabel,
   readersReportPlan,
   evaluationRewritePlan,
   writingPlan,
-  writingTaskStateLabel,
   defaultRuleBindingRows,
   fixedTaskPlan,
   noDefaultRule,
@@ -575,8 +761,20 @@ import {
   RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
   type BaselineCancellationRanges,
+  assuranceSelector,
+  taskPlanPage,
+  taskDraftsPage,
+  reviewWorkspacePage,
+  REVIEW_CHAPTER_PAGE_PATH,
 } from './task-plan.js';
-import { decisionResolvesConflict, initializeProposalConflictSchema, ProposalConflictError, ProposalConflictStore, readConflictAttention, type ProposalConflictRegenerationLineage } from './proposal-conflicts.js';
+import {
+  decisionResolvesConflict,
+  initializeProposalConflictSchema,
+  ProposalConflictError,
+  ProposalConflictStore,
+  readConflictAttention,
+  type ProposalConflictRegenerationLineage,
+} from './proposal-conflicts.js';
 import {
   ImportRetentionError,
   initializeImportRetentionSchema,
@@ -630,7 +828,12 @@ import {
   stageImportedMarks,
   stagedImportedMarksMatch,
 } from './imported-marks.js';
-import { ExportLedgerError, ManuscriptExportStore, initializeExportLedgerSchema, readWordManuscriptExportSource } from './manuscript-export.js';
+import {
+  ExportLedgerError,
+  ManuscriptExportStore,
+  initializeExportLedgerSchema,
+  readWordManuscriptExportSource,
+} from './manuscript-export.js';
 import {
   DEFAULT_EXECUTION_RULES_STATEMENT,
   DEFAULT_EXECUTION_RULE_PROCEDURES,
@@ -658,10 +861,7 @@ import {
   defaultExecutionRuleCovers,
   defaultExecutionRuleDoes,
   defaultExecutionRuleKind,
-  writingRuleOtherTypeReason,
-  writingRulePattern,
   reviewRulePattern,
-  writingRuleTypeLabel,
   defaultExecutionRuleDrift,
   defaultExecutionRuleReference,
   initializeDefaultExecutionRuleSchema,
@@ -672,6 +872,7 @@ import {
   type DefaultExecutionRuleRecord,
 } from './default-execution-rules.js';
 import { initializeRunCheckpointSchema } from './analysis/run-checkpoints.js';
+import * as backgroundEnrollments from './background-analysis-enrollments.js';
 import {
   BACKGROUND_ANALYSIS_LISTED,
   BACKGROUND_ANALYSIS_NOT_GRANTED,
@@ -714,9 +915,11 @@ import {
   type BackgroundAnalysisEnrollmentRecord,
 } from './background-analysis-enrollments.js';
 import { initializeClarificationSchema } from './analysis/clarifications.js';
-import { clarificationPlanBaseDigest } from './provider/clarification-contract.js';
 import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
-import { initializeProductionDocumentDeliverySchema, initializeProductionDocumentSchema } from './production-document-ledger.js';
+import {
+  initializeProductionDocumentDeliverySchema,
+  initializeProductionDocumentSchema,
+} from './production-document-ledger.js';
 import {
   BOOK_DELIVERY_PACKAGE_WORDS,
   BookDeliveryPackageError,
@@ -726,57 +929,38 @@ import {
 } from './book-delivery-packages.js';
 import { MaintenanceCaseError, MaintenanceCases, initializeMaintenanceCaseSchema } from './maintenance-cases.js';
 import { BookPeople, BookPeopleError, initializeBookPeopleSchema } from './book-people.js';
-import { ReviewGuidelineError, ReviewGuidelineLedger, initializeReviewGuidelineSchema, readGuidelineFile } from './review-guidelines.js';
-import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY, ResearchEvidenceError, ResearchEvidenceLedger, initializeResearchEvidenceSchema } from './research-evidence.js';
 import {
-  FactualVerificationError,
+  ReviewGuidelineError,
+  ReviewGuidelineLedger,
+  initializeReviewGuidelineSchema,
+  readGuidelineFile,
+} from './review-guidelines.js';
+import {
+  RESEARCH_EVIDENCE_INCOMPLETE,
+  RESEARCH_EVIDENCE_READ_ONLY,
+  ResearchEvidenceError,
+  ResearchEvidenceLedger,
+  initializeResearchEvidenceSchema,
+} from './research-evidence.js';
+import {
   FactualVerificationLedger,
-  initializeFactualVerificationSchema, initializeFactualClaimSchema,
+  initializeFactualVerificationSchema,
+  initializeFactualClaimSchema,
   type ManuscriptReader,
-  type MaterializedFactualFinding,
 } from './factual-verification.js';
-import { FACTUAL_VERIFICATION_POLICY_VERSION, sliceGraphemes } from './analysis/factual-review-contract.js';
-import { factualFindingId } from './analysis/factual-review-reducers.js';
-import type { FactualCorrectionEntry, FactualEvidenceRelation, FactualUnitAssertionV2 } from './analysis/factual-review-contract-v2.js';
-import { planEditAssuranceLevel, planEditsOf } from './analysis/plan-edits.js';
-import { assuranceSelector, taskPlanPage, taskDraftsPage, reviewWorkspacePage, REVIEW_CHAPTER_PAGE_PATH } from './task-plan.js';
+import { planEditAssuranceLevel } from './analysis/plan-edits.js';
 import {
-  CORRECTION_ASSURANCE_INCOMPLETE_LABEL,
-  FACTUAL_VERIFICATION_OUTCOMES,
-  type CorrectionProposalDraftProjection,
-  type CorrectionProposalSavedProjection,
-  type EvidenceAssuranceLevel,
-  type EvidenceWorkspaceProjection,
-  type FactualReviewResultSetRevisionProjection,
-  type FactualRunAssuranceProjection,
-  type FactualVerificationLensProjection,
-  type InspectEvidenceWorkspaceInput,
-  type InspectFactualVerificationInput,
-  type PlanEditsProjection,
-  type PrepareCorrectionProposalInput,
-  type RecordVerificationReviewDecisionInput,
-  type SaveCorrectionProposalInput,
-  type VerificationReviewDecisionRecordedProjection,
-  SUPPLEMENTARY_CHECK_DEFERRED,
-} from '../shared/protocol.js';
-
-/** The Fact-check Lens's words (Issue #901). */
-const FACTUAL_LENS_EMPTY = '这本书还没有事实核查结果：在 审阅 中选择 事实核查 并开始任务后，这里列出每条断言的核查结果。' as const;
-const FACTUAL_LENS_STATEMENT = '核查结果是证据评估：引文完整性、断言支持与事实核查三项分开显示，不是事实定论，也不构成审阅决定。' as const;
-/** The source a Correction Proposal's 修改建议 names (Issue #901; CORR-012). */
-const CORRECTION_MARK_SOURCE_LABEL = '事实核查 · 更正提案' as const;
-import { MAX_LIBRARY_MATERIAL_TITLE_GRAPHEMES, type ResearchEvidenceBookProjection, type ResearchEvidenceCaptureState } from '../shared/protocol.js';
-import { LIBRARY_OBJECT_DIRECTORY, LibraryMaterialError, LibraryMaterialLedger, initializeLibraryMaterialSchema, libraryMaterialTitle, type LibraryMaterialOriginal } from './library-materials.js';
+  LibraryMaterialError,
+  LibraryMaterialLedger,
+  initializeLibraryMaterialSchema,
+  libraryMaterialTitle,
+} from './library-materials.js';
 import {
-  MaterialIndexAborted,
   MaterialIndexError,
   MaterialIndexLedger,
-  extractMaterialText,
   initializeMaterialIndexLayerSchema,
   initializeMaterialTranslationAttemptSchema,
-  isModelTextAttemptProvenance,
   initializeMaterialIndexSchema,
-  prepareMaterialIndexInSlices,
   sweepMaterialIndexWork,
   type MaterialEmbeddingFacts,
   type MaterialLayerActivity,
@@ -787,19 +971,7 @@ import {
 } from './material-index.js';
 import type { EmbeddingProvider } from './knowledge/embedding.js';
 import { StubEmbeddingProvider } from './knowledge/embedding-stub.js';
-import {
-  MATERIAL_TRANSLATION_BATCH_CODE_UNITS,
-  MATERIAL_TRANSLATION_BATCH_PARAGRAPHS,
-  MATERIAL_TRANSLATION_NOT_ADMITTED,
-  MAX_MATERIAL_TRANSLATION_REQUESTS,
-  type MaterialTranslator,
-} from './fast-role/material-translation-contract.js';
-import {
-  MAX_MATERIAL_VECTOR_CANDIDATES,
-  MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS,
-  type MaterialTranslationProjection,
-  type MaterialVectorSearchProjection,
-} from '../shared/protocol.js';
+import type { MaterialTranslator } from './fast-role/material-translation-contract.js';
 import {
   BUILTIN_EVALUATION_PROFILE,
   EvaluationError,
@@ -824,15 +996,21 @@ import {
   reviewDispositionCandidate,
   type LearningMaterialCandidate,
 } from './learning-eligibility.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, HISTORICAL_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry } from './review/category-configuration.js';
-import { EvaluationCalibrationError, EvaluationCalibrationLedger, initializeEvaluationCalibrationSchema } from './evaluation-calibration.js';
-import { UsageLedger } from './usage.js';
 import {
-  SeriesError,
-  SeriesLedger,
-  initializeSeriesSchema,
-  weighedPage,
-} from './series.js';
+  BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
+  HISTORICAL_REVIEW_CATEGORY_CONFIGURATION,
+  reviewCategoryEntry,
+  reviewCategoryContractInput,
+  type ReviewCategoryConfigurationEntry,
+} from './review/category-configuration.js';
+import {
+  EvaluationCalibrationError,
+  EvaluationCalibrationLedger,
+  initializeEvaluationCalibrationSchema,
+} from './evaluation-calibration.js';
+import { UsageLedger } from './usage.js';
+import * as seriesOperations from './series.js';
+import { SeriesError, SeriesLedger, initializeSeriesSchema, weighedPage } from './series.js';
 import {
   CALIBRATION_MIN_ADJUSTMENTS,
   PREDICTION_MIN_BOOKS_WITH_ACTUALS,
@@ -840,11 +1018,6 @@ import {
   predictionAvailable,
 } from '../shared/evaluation-calibration.js';
 import {
-  MAX_SERIES_MEMBERS_PAGE,
-  PUBLICATION_ACTUALS_RECORDED_STATE,
-} from '../shared/protocol.js';
-import {
-  type ClassifiedSchemaRevision,
   DATA_VERSION,
   DATA_VERSION_FROZEN,
   dataVersionAt,
@@ -861,7 +1034,12 @@ import {
 } from './data-version.js';
 import { DatabaseExportError, DatabaseExports, initializeDatabaseExportSchema } from './database-exports.js';
 import { DATA_VERSION_MARKER_UNWRITABLE } from '../shared/data-version-labels.js';
-import { ScheduledBackupError, ScheduledBackups, backupLocationFor, initializeScheduledBackupSchema } from './scheduled-backups.js';
+import {
+  ScheduledBackupError,
+  ScheduledBackups,
+  backupLocationFor,
+  initializeScheduledBackupSchema,
+} from './scheduled-backups.js';
 import { backUpBeforeUpgrade, completeUpgrade } from './upgrade-backup.js';
 import { DatabasePackageError } from './database-package-reader.js';
 import {
@@ -879,20 +1057,6 @@ import {
   type SeriesKnowledgeMaterial,
 } from './series-exclusions.js';
 import {
-  type InspectSeriesExclusionHistoryInput,
-  type InspectSeriesExclusionTargetsInput,
-  type PreviewSeriesExclusionInput,
-  type RecordSeriesExclusionInput,
-  type SeriesExclusionHistoryPageProjection,
-  type SeriesExclusionPreviewProjection,
-  type SeriesExclusionResultProjection,
-  type SeriesExclusionTargetsProjection,
-  type CancelWaitingTaskInput,
-  type StartTaskWhenOnlineInput,
-  type StartWhenOnlineTaskKind,
-} from '../shared/protocol.js';
-import { canonicalRecord, hasExactKeys, isRecord } from './analysis/canonical.js';
-import {
   DIALOGUE_BASIS_QUOTE_CHARACTERS,
   DIALOGUE_MARK_SOURCE_LABEL,
   DialogueError,
@@ -904,12 +1068,16 @@ import {
   type StoredDialogueBinding,
   type StoredDialogueTask,
   type QualifiedGlobalAttemptMetadata,
-  qualifiedGlobalAttemptMetadataOf,
 } from './dialogue/dialogue-ledger.js';
-import { dialogueProjection, harnessHistoryReader, keptText, resolveAttempts, type DialogueHistoryReader, type LiveAnswer } from './dialogue/dialogue-history.js';
-import { dialogueQuestion } from './dialogue/contract.js';
+import {
+  dialogueProjection,
+  harnessHistoryReader,
+  keptText,
+  resolveAttempts,
+  type DialogueHistoryReader,
+  type LiveAnswer,
+} from './dialogue/dialogue-history.js';
 import { HARNESS_SESSION_LOG_DIRECTORY, readHarnessSessionLog } from './harness/session-log.js';
-import type { DialogueTaskReading, MaterialIndexAttentionReading, TaskIntentDraftAttentionReading, WaitingTaskAttentionReading } from './global-attention.js';
 import {
   DRAFT_FIRST_BASELINE_UNAVAILABLE,
   DRAFT_RANGE_STATE_LABELS,
@@ -919,7 +1087,11 @@ import {
   draftGoal,
   draftOutcomeClass,
   goalFromText,
-  initializeTaskIntentDraftSchema, initializeDeliverableDraftSchema, draftBlockBounds, draftParagraphs, draftRangesPlan,
+  initializeTaskIntentDraftSchema,
+  initializeDeliverableDraftSchema,
+  draftBlockBounds,
+  draftParagraphs,
+  draftRangesPlan,
   isProcedurePin,
   requireDraft,
   resolutionOffers,
@@ -928,31 +1100,13 @@ import {
   type StoredDraft,
   type StoredDraftRange,
 } from './task-intent-drafts.js';
-import type {
-  DialogueSelectionInput,
-  InspectTaskIntentDraftsInput,
-  PromoteAnswerToTaskIntentDraftInput,
-  PromoteTaskIntentDraftInput,
-  SaveTaskIntentDraftInput,
-  TaskIntentDraftProjection,
-  TaskIntentDraftRangeProjection,
-  TaskIntentDraftsProjection,
-} from '../shared/protocol.js';
-import { MAX_TASK_INTENT_DRAFT_RANGES } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
-import {
-  SeriesKnowledgeError,
-  SeriesKnowledgeLedger,
-  initializeSeriesKnowledgeSchema,
-} from './series-knowledge.js';
-import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
+import { SeriesKnowledgeError, SeriesKnowledgeLedger, initializeSeriesKnowledgeSchema } from './series-knowledge.js';
 import { EvaluationProfiles, initializeEvaluationProfileSchema } from './evaluation-profiles.js';
 import { ImportedExemplars, ImportedExemplarError, initializeImportedExemplarSchema } from './imported-exemplars.js';
 import { readExemplarBook, type ExemplarSources } from './exemplars.js';
-import {
-  CapturedProcedures,
-  initializeCapturedProcedureSchema,
-} from './captured-procedures.js';
+import * as capturedProcedureOperations from './captured-procedures.js';
+import { CapturedProcedures, initializeCapturedProcedureSchema } from './captured-procedures.js';
 import {
   ProductionDocumentOriginError,
   initializeProductionDocumentOriginSchema,
@@ -964,10 +1118,16 @@ import {
   initializeBookDeliveryPackageExportSchema,
 } from './book-delivery-package-exports.js';
 import {
-  ProductionDocumentWorkflow, ProductionDocumentWorkflowError, initializeProductionDocumentWorkflowSchema, type WorkflowProfilePin,
+  ProductionDocumentWorkflow,
+  ProductionDocumentWorkflowError,
+  initializeProductionDocumentWorkflowSchema,
+  type WorkflowProfilePin,
 } from './production-document-workflow.js';
 import {
-  PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT, ProductionDocumentError, ProductionDocuments, productionDocumentMarksNotCarried,
+  PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT,
+  ProductionDocumentError,
+  ProductionDocuments,
+  productionDocumentMarksNotCarried,
 } from './production-documents.js';
 import type { WaitingRunBlockCause } from './reconnect-preflight.js';
 import {
@@ -975,29 +1135,24 @@ import {
   readersReportDocumentType,
   readersReportDocumentTypeId,
 } from './production-document-types.js';
-import { REIMPORT_GROUP_VERBS, groupReimportMappings, reimportGroupResolutions, reimportGroupVerbs } from './reimport-groups.js';
-import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
-import { reviewCategoryContractInput, type ReviewCategoryConfigurationEntry } from './review/category-configuration.js';
-import { historicalReviewCategoryDefinitions, reviewCategoryKindDefinition, withReviewLocalTools } from './review/review-category-kind.js';
 import {
-  EditorialMarkError,
-  EditorialMarkStore,
-  initializeEditorialMarkSchema,
-  followReimportedMarks,
-  resolveBranchMarksAfterRewrite,
-  workingBlockDigests,
-  type ReimportMarkOutcome,
-  type ReimportMarkRow,
-  type ProducedEditorialMarkInput,
-} from './editorial-marks.js';
+  REIMPORT_GROUP_VERBS,
+  groupReimportMappings,
+  reimportGroupResolutions,
+  reimportGroupVerbs,
+} from './reimport-groups.js';
+import type { ReviewRunDriveSteps } from './review/review-run-driver.js';
+import {
+  historicalReviewCategoryDefinitions,
+  reviewCategoryKindDefinition,
+  withReviewLocalTools,
+} from './review/review-category-kind.js';
 import {
   BoundedManuscriptStore,
-  BoundedStoreError, BoundedStoreFatalError,
+  BoundedStoreError,
+  BoundedStoreFatalError,
   initializeBoundedSchema,
   initializeManuscriptEntryPositionSchema,
-  MODEL_SERVICE_CONNECTION_REVISION_11_SQL,
-  validateManuscriptReimportSchemaTruth,
-  validateSourceImportSchemaTruth,
   type RecoverySnapshotCursor,
   type RecoverySnapshotRecord,
   type ReimportCheckpointBinding,
@@ -1009,125 +1164,77 @@ import {
   ensureCanonicalDataDirectory,
   inspectCanonicalDataFile,
 } from '../shared/data-root.js';
+import { loadBuiltInManuscriptProfile, type BuiltInWorkflowProfile } from './native-workflow-profile.js';
 import {
-  loadBuiltInManuscriptProfile,
-  type BuiltInWorkflowProfile,
-} from './native-workflow-profile.js';
-import {
-  EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
-  EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
   EditorialWorkspaceProfileError,
   EditorialWorkspaceProfileFatalError,
   EditorialWorkspaceProfileStore,
   initializeEditorialWorkspaceProfileSchema,
-  validateEditorialWorkspaceProfileNativeSchema,
   validateEditorialWorkspaceProfileSchema,
 } from './editorial-workspace-profile.js';
 import {
-  initializeTaskAuthorizationSchema,
-  J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
-  EDITORIAL_MARK_SCHEMA_VERSION,
-  EDITORIAL_REVIEW_SCHEMA_VERSION,
-  MANUSCRIPT_EFFECT_SCHEMA_VERSION,
-  J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
-  MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-  MANUSCRIPT_INTAKE_SCHEMA_VERSION,
-  PUBLICATION_VERSION_SCHEMA_VERSION,
-  PROPOSAL_CONFLICT_SCHEMA_VERSION,
-  IMPORT_RETENTION_SCHEMA_VERSION,
-  IMPORTED_MARK_SCHEMA_VERSION,
-  EXPORT_LEDGER_SCHEMA_VERSION,
-  CONNECTIVITY_WAIT_SCHEMA_VERSION,
-  DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
-  RUN_CANCELLATION_SCHEMA_VERSION,
-  RUN_CONTINUATION_SCHEMA_VERSION,
-  PLAN_EDIT_SCHEMA_VERSION,
-  CLARIFICATION_SCHEMA_VERSION,
-  REIMPORT_GROUP_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
-  BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
-  BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
-  PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
-  MAINTENANCE_CASE_SCHEMA_VERSION,
-  BOOK_PEOPLE_SCHEMA_VERSION,
-  REVIEW_GUIDELINE_SCHEMA_VERSION,
-  LIBRARY_MATERIAL_SCHEMA_VERSION,
-  EVALUATION_RECORD_SCHEMA_VERSION,
-  ANALYSIS_FEEDBACK_SCHEMA_VERSION,
-  DECISION_FEEDBACK_SCHEMA_VERSION,
-  LEARNING_ELIGIBILITY_SCHEMA_VERSION,
-  EVALUATION_CALIBRATION_SCHEMA_VERSION,
-  SERIES_SCHEMA_VERSION,
-  SERIES_KNOWLEDGE_SCHEMA_VERSION,
-  STORE_VERSION_SCHEMA_VERSION,
-  DATABASE_EXPORT_SCHEMA_VERSION,
-  SCHEDULED_BACKUP_SCHEMA_VERSION,
-  DATABASE_REPLACEMENT_SCHEMA_VERSION,
-  DATABASE_MERGE_SCHEMA_VERSION,
-  INITIAL_EVALUATION_SCHEMA_VERSION,
-  DIALOGUE_SCHEMA_VERSION,
-  SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
-  READERS_REPORT_SCHEMA_VERSION,
-  CAPTURED_PROCEDURE_SCHEMA_VERSION,
-  EVALUATION_REWRITE_SCHEMA_VERSION,
-  WRITING_TASK_SCHEMA_VERSION,
-  BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
-  MATERIAL_INDEX_SCHEMA_VERSION,
-  OUTCOME_RESOLUTION_SCHEMA_VERSION,
-  IMPORTED_EXEMPLAR_SCHEMA_VERSION,
-  EVALUATION_PROFILE_SCHEMA_VERSION,
-  DIALOGUE_LIVE_BINDING_SCHEMA_VERSION,
-  MODEL_SERVICE_ROUTES_SCHEMA_VERSION,
-  MODEL_CLARIFICATION_SCHEMA_VERSION,
-  SEARCH_BACKEND_SCHEMA_VERSION, SEARCH_BACKEND_CONNECTIONS_SQL, RESEARCH_EVIDENCE_SCHEMA_VERSION, MATERIAL_INDEX_LAYER_SCHEMA_VERSION, PROPOSAL_REVIEW_SCHEMA_VERSION, FACTUAL_VERIFICATION_SCHEMA_VERSION, HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_UPDATE_SCHEMA_VERSION, MODEL_SELECTION_SCHEMA_VERSION, PROCEDURE_DEFINITION_SCHEMA_VERSION, EDITORIAL_LEARNING_SCHEMA_VERSION,
-  LATEST_SCHEMA_VERSION, REVIEW_CONTRACT_SCHEMA_VERSION,
-  SUCCESSIVE_TASK_SCHEMA_VERSION,
-  TASK_AUTHORIZATION_SCHEMA_VERSION,
-  TEXT_CONVERSION_SCHEMA_VERSION,
-  FACTUAL_REVIEW_SCHEMA_VERSION,
-  TaskAuthorizationError,
-  TaskAuthorizationStore,
-  validateTaskAuthorizationSchema,
-  type TaskPreparationResult,
-} from './task-authorization.js';
-import * as seriesOperations from './series.js';
-import * as capturedProcedureOperations from './captured-procedures.js';
-import * as evaluationRewriteOperations from './evaluation-rewrites.js';
-import * as learningSupervision from './house-review-preference.js';
-import * as customAnalysisOperations from './custom-analysis-dimensions.js';
-import * as backgroundEnrollments from './background-analysis-enrollments.js';
-import * as readersReportOperations from './readers-reports.js';
+  REVIEW_CATEGORY_CACHE_CAPACITY,
+  TASK_PLAN_NOT_CURRENT_REASON,
+  one,
+  parseStoredJson,
+  type DraftPromotion,
+  type LedgerTaskKind,
+  type StoreControl,
+  type WritingExemplarScan,
+  unwrappedPlanPromptDigest,
+} from './store-operation-support.js';
+import {
+  configureDatabase,
+  initializeManuscriptIntakeSchema,
+  initializeManuscriptReimportSchema,
+  initializeModelServiceSchema,
+  initializeSchema,
+  initializeSearchBackendSchema,
+  initializeSourceImportSchema,
+  initializeTextConversionSchema,
+} from './store-schema.js';
+
+export { importedMarksRecord };
+export { StoreError, StoreFatalError };
 export { CUSTOM_ANALYSIS_TEMPLATE_ECHO_REASON, CUSTOM_ANALYSIS_NOT_ADMITTED_REASON } from './custom-analysis-dimensions.js';
 
+export { type StoreControl, REVIEW_CATEGORY_CACHE_CAPACITY, type LedgerTaskKind, EVALUATION_PROFILE_UNKNOWN_ID, EVALUATION_PROFILE_UNKNOWN_TITLE, type DraftPromotion } from './store-operation-support.js';
+
+
 const TOKEN_PATTERN = UUID_PATTERN;
-const CORE_SCHEMA_VERSION = 5;
-const EDITOR_SCHEMA_VERSION = 6;
-const RECOVERY_SCHEMA_VERSION = 7;
-const SCHEMA_VERSION = 8;
-const SOURCE_IMPORT_SCHEMA_VERSION = 9;
-const MANUSCRIPT_REIMPORT_SCHEMA_VERSION = 10;
-const MODEL_SERVICE_SCHEMA_VERSION = 11;
+
 const BOOK_SUMMARY_PAGE_SIZE = 20;
+
 const BOOK_HISTORY_PAGE_SIZE = 8;
+
 const INGEST_BATCH_SIZE = 256;
+
 const REIMPORT_MAPPING_BATCH_SIZE = 64;
+
 const REIMPORT_COMMIT_FILE_BATCH_BYTES = 256 * 1024;
+
 const REIMPORT_MAX_JSON_BLOCK_BYTES = MAX_BLOCK_CODE_UNITS * 6;
+
 const REIMPORT_WIRE_HEADROOM_BYTES = 4_096;
+
 const REIMPORT_MAPPING_PAGE_SIZE = 4;
+
 /** Rows of the chapter-level comparison per page (Issue #412, S63): each shows at most three excerpts a side. */
 const REIMPORT_GROUP_PAGE_SIZE = 10;
+
 const REIMPORT_GROUPING = 'ai7.reimport-groups/1' as const;
+
 const REIMPORT_IDENTITY_CANDIDATE_PAGE_SIZE = 16;
+
 const REIMPORT_LINEAGE_CHOICE_LIMIT = 32;
+
 const LEGACY_WORKFLOW_PROFILE = {
   id: 'ai7.manuscript.editorial.zh-CN',
   name: '基础书稿编辑流程',
   version: '1.0.0',
   phases: ['接收与准备', '来源建设', '起草', '审阅与核查', '定稿', '交付', '维护'],
 } as const;
+
 const BASELINE_EDITORIAL_DIMENSION_SET = {
   profileId: 'ai7.editorial.baseline',
   name: '基础图书编辑维度集',
@@ -1144,6 +1251,7 @@ const BASELINE_EDITORIAL_DIMENSION_SET = {
     { id: 'production-cross-deliverable-consistency', label: '制作与跨交付物一致性', weight: 1 },
   ],
 } as const;
+
 const EMPTY_BOOK_NON_EFFECTS = [
   '不创建稿件、来源、修订版、工作流实例或导入记录',
   '不创建书系或书系成员关系',
@@ -1153,8 +1261,11 @@ const EMPTY_BOOK_NON_EFFECTS = [
   '不创建公开发布许可或公开发布事实',
   '不导出、不发送、不交付、不发布',
 ] as const;
+
 const DEGRADATION_DECISION_SCHEMA = 'ai7.import-degradation-decision/1';
+
 const SOURCE_IMPORT_RECORD_SCHEMA = 'ai7.source-import-record/1';
+
 const SOURCE_IMPORT_NON_EFFECTS = [
   '不创建稿件',
   '不创建稿件修订版',
@@ -1167,7 +1278,9 @@ const SOURCE_IMPORT_NON_EFFECTS = [
   '不创建发稿版本、公开发布许可或公开发布事实',
   '不导出、不发送、不交付、不发布',
 ] as const;
+
 const MANUSCRIPT_REIMPORT_RECORD_SCHEMA = 'ai7.manuscript-reimport-record/1';
+
 const MANUSCRIPT_REIMPORT_NON_EFFECTS = [
   '不创建第二份主稿件或并行稿件分支',
   '不把来源关系未确认解释为导入阻断、来源确认或血缘证明',
@@ -1182,445 +1295,11 @@ const MANUSCRIPT_REIMPORT_NON_EFFECTS = [
   '不导出、不发送、不交付、不发布',
 ] as const;
 
-const SOURCE_IMPORT_SCHEMA_SQL = `CREATE TABLE source_import_records (
-  source_import_record_id TEXT PRIMARY KEY,
-  commit_id TEXT NOT NULL UNIQUE,
-  book_id TEXT NOT NULL REFERENCES books(book_id),
-  source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-  provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
-  target_kind TEXT NOT NULL CHECK(target_kind IN ('new-book', 'existing-book')),
-  source_version_disposition TEXT NOT NULL CHECK(source_version_disposition IN ('created', 'reused-same-book')),
-  retained_boundary_json TEXT NOT NULL,
-  named_non_effects_json TEXT NOT NULL,
-  record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
-  imported_at TEXT NOT NULL
-) STRICT`;
-const SOURCE_PROVENANCE_V9_SCHEMA_SQL = `CREATE TABLE source_provenance (
-  provenance_id TEXT PRIMARY KEY,
-  source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-  acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
-  locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
-  sanitized_identity TEXT NOT NULL,
-  parser_identity TEXT NOT NULL,
-  recorded_at TEXT NOT NULL
-) STRICT`;
-/**
- * Revision 18's Source Version relations (ADR 0072 §2). A Source Version may now be an original the
- * product retained without ever parsing it, so `format` widens to what the intake router identified
- * and the three parse fields become nullable together: a Source Version carries a whole local parse
- * or none of it, never half of one.
- */
-const SOURCE_VERSION_V18_SCHEMA_SQL = `CREATE TABLE source_versions (
-  source_version_id TEXT PRIMARY KEY,
-  book_id TEXT NOT NULL REFERENCES books(book_id),
-  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
-  source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
-  content_digest TEXT CHECK(content_digest IS NULL OR length(content_digest) = 64),
-  structure_digest TEXT CHECK(structure_digest IS NULL OR length(structure_digest) = 64),
-  parser_identity TEXT,
-  format TEXT NOT NULL CHECK(format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN')),
-  display_name TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  CHECK((content_digest IS NULL) = (structure_digest IS NULL) AND (structure_digest IS NULL) = (parser_identity IS NULL)),
-  UNIQUE(book_id, source_digest)
-) STRICT`;
-const SOURCE_PROVENANCE_V18_SCHEMA_SQL = `CREATE TABLE source_provenance (
-  provenance_id TEXT PRIMARY KEY,
-  source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-  acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
-  locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
-  sanitized_identity TEXT NOT NULL,
-  parser_identity TEXT,
-  recorded_at TEXT NOT NULL
-) STRICT`;
-/** Every draft records what its file was identified as; every row that predates revision 18 is a DOCX. */
-const IMPORT_DRAFT_SOURCE_FORMAT_V18_COLUMN_SQL =
-  "ALTER TABLE import_drafts ADD COLUMN source_format TEXT NOT NULL DEFAULT 'DOCX' " +
-  "CHECK(source_format IN ('DOCX', 'DOC', 'PDF', 'ODT', 'RTF', 'TXT', 'MD', 'UNKNOWN'))";
-/**
- * Revision 19's conversion columns, all nullable so every existing row keeps its exact identity: a
- * Source Version and its draft name the DOCX working representation the original was read through
- * and the converter that produced it, and an abandonment cleanup intent names the working object it
- * must remove beside the original (ADR 0072 §2).
- */
-const SOURCE_VERSION_V19_COLUMNS_SQL = [
-  'ALTER TABLE source_versions ADD COLUMN working_object_digest TEXT REFERENCES content_objects(object_digest)',
-  'ALTER TABLE source_versions ADD COLUMN converter_identity TEXT',
-];
-const IMPORT_DRAFT_V19_COLUMNS_SQL = [
-  'ALTER TABLE import_drafts ADD COLUMN working_object_digest TEXT',
-  'ALTER TABLE import_drafts ADD COLUMN converter_identity TEXT',
-];
-const ABANDONMENT_CLEANUP_V19_COLUMN_SQL = [
-  'ALTER TABLE import_abandonment_cleanup_intents ADD COLUMN working_object_digest TEXT',
-];
-/** The three `source_versions` guards, re-created verbatim after the table is rebuilt. */
-const SOURCE_VERSION_REBUILT_TRIGGER_SQL = `
-  CREATE TRIGGER abandonment_cleanup_block_source_insert
-  BEFORE INSERT ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_source_update
-  BEFORE UPDATE OF object_digest ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_source_update_v5
-  BEFORE UPDATE ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-`;
-const SOURCE_IMPORT_DRAFT_V9_SCHEMA_SQL = `CREATE TABLE import_drafts (
-  draft_id TEXT PRIMARY KEY,
-  selection_token TEXT NOT NULL UNIQUE,
-  state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
-  draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
-  display_name TEXT NOT NULL,
-  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
-  selected_path TEXT,
-  reviewed_title TEXT,
-  reviewed_target_choice_id TEXT
-    CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
-  review_digest TEXT UNIQUE,
-  committed_commit_id TEXT UNIQUE,
-  staged_at TEXT NOT NULL,
-  reviewed_at TEXT,
-  committed_at TEXT,
-  reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
-  reviewed_existing_book_id TEXT REFERENCES books(book_id),
-  reviewed_relationship TEXT
-    CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only')),
-  reviewed_book_state_digest TEXT
-    CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
-  reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id)
-) STRICT`;
-const SOURCE_IMPORT_COMMIT_V9_SCHEMA_SQL = `CREATE TABLE import_commits (
-  commit_id TEXT PRIMARY KEY,
-  draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
-  request_fingerprint TEXT NOT NULL,
-  expected_draft_version INTEGER NOT NULL,
-  review_digest TEXT NOT NULL,
-  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import')),
-  result_json TEXT NOT NULL,
-  committed_at TEXT NOT NULL
-) STRICT`;
-const SOURCE_IMPORT_ATTEMPT_V9_SCHEMA_SQL = `CREATE TABLE import_commit_attempts (
-  attempt_id TEXT PRIMARY KEY,
-  draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
-  request_fingerprint TEXT NOT NULL,
-  expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
-  review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
-  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import')),
-  state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
-  prepared_at TEXT NOT NULL,
-  committed_at TEXT,
-  uncertain_at TEXT,
-  uncertainty_code TEXT,
-  completion_acknowledged_at TEXT,
-  CHECK(
-    (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
-      AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
-    OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
-      AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
-    OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
-      AND uncertainty_code IS NULL)
-  )
-) STRICT`;
-const REIMPORT_DRAFT_V10_SCHEMA_SQL = `CREATE TABLE import_drafts (
-  draft_id TEXT PRIMARY KEY,
-  selection_token TEXT NOT NULL UNIQUE,
-  state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
-  draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
-  display_name TEXT NOT NULL,
-  object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
-  selected_path TEXT,
-  reviewed_title TEXT,
-  reviewed_target_choice_id TEXT
-    CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
-  review_digest TEXT UNIQUE,
-  committed_commit_id TEXT UNIQUE,
-  staged_at TEXT NOT NULL,
-  reviewed_at TEXT,
-  committed_at TEXT,
-  reviewed_target_kind TEXT CHECK(reviewed_target_kind IS NULL OR reviewed_target_kind IN ('new-book', 'existing-book')),
-  reviewed_existing_book_id TEXT REFERENCES books(book_id),
-  reviewed_relationship TEXT
-    CHECK(reviewed_relationship IS NULL OR reviewed_relationship IN ('new-book-first-manuscript', 'first-manuscript', 'source-only', 'reimport')),
-  reviewed_book_state_digest TEXT
-    CHECK(reviewed_book_state_digest IS NULL OR length(reviewed_book_state_digest) = 64),
-  reviewed_reuse_source_version_id TEXT REFERENCES source_versions(source_version_id),
-  reviewed_lineage_status TEXT CHECK(reviewed_lineage_status IS NULL OR reviewed_lineage_status IN ('verified', 'unconfirmed')),
-  reviewed_lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
-  reviewed_checkpoint_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-  reviewed_manuscript_id TEXT REFERENCES manuscripts(manuscript_id),
-  reviewed_branch_id TEXT REFERENCES manuscript_branches(branch_id)
-) STRICT`;
-const REIMPORT_COMMIT_V10_SCHEMA_SQL = `CREATE TABLE import_commits (
-  commit_id TEXT PRIMARY KEY,
-  draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
-  request_fingerprint TEXT NOT NULL,
-  expected_draft_version INTEGER NOT NULL,
-  review_digest TEXT NOT NULL,
-  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import', 'manuscript-reimport')),
-  result_json TEXT NOT NULL,
-  committed_at TEXT NOT NULL
-) STRICT`;
-const REIMPORT_ATTEMPT_V10_SCHEMA_SQL = `CREATE TABLE import_commit_attempts (
-  attempt_id TEXT PRIMARY KEY,
-  draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
-  request_fingerprint TEXT NOT NULL,
-  expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
-  review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
-  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('manuscript-import', 'source-import', 'manuscript-reimport')),
-  state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
-  prepared_at TEXT NOT NULL,
-  committed_at TEXT,
-  uncertain_at TEXT,
-  uncertainty_code TEXT,
-  completion_acknowledged_at TEXT,
-  CHECK(
-    (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
-      AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
-    OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
-      AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
-    OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
-      AND uncertainty_code IS NULL)
-  )
-) STRICT`;
-const REIMPORT_FACT_SCHEMA_SQL = `
-  CREATE TABLE manuscript_reimport_comparisons (
-    comparison_id TEXT PRIMARY KEY,
-    draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
-    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-    checkpoint_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-    checkpoint_revision_label TEXT NOT NULL,
-    checkpoint_revision_digest TEXT NOT NULL CHECK(length(checkpoint_revision_digest) = 64),
-    checkpoint_journal_sequence INTEGER NOT NULL CHECK(checkpoint_journal_sequence >= 0),
-    checkpoint_created_for_dirty_journal INTEGER NOT NULL CHECK(checkpoint_created_for_dirty_journal IN (0, 1)),
-    lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
-    lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
-    lineage_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-    lineage_revision_digest TEXT CHECK(lineage_revision_digest IS NULL OR length(lineage_revision_digest) = 64),
-    comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
-    staged_source_digest TEXT NOT NULL CHECK(length(staged_source_digest) = 64),
-    staged_content_digest TEXT NOT NULL CHECK(length(staged_content_digest) = 64),
-    staged_structure_digest TEXT NOT NULL CHECK(length(staged_structure_digest) = 64),
-    staged_parser_identity TEXT NOT NULL,
-    staged_block_count INTEGER NOT NULL CHECK(staged_block_count > 0),
-    checkpoint_block_count INTEGER NOT NULL CHECK(checkpoint_block_count > 0),
-    total_mappings INTEGER NOT NULL CHECK(total_mappings > 0),
-    unresolved_mappings INTEGER NOT NULL CHECK(unresolved_mappings >= 0 AND unresolved_mappings <= total_mappings),
-    changed_mappings INTEGER NOT NULL CHECK(changed_mappings >= 0 AND changed_mappings <= total_mappings),
-    comparison_digest TEXT NOT NULL UNIQUE CHECK(length(comparison_digest) = 64),
-    resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
-    degradation_accepted INTEGER NOT NULL CHECK(degradation_accepted IN (0, 1)),
-    created_at TEXT NOT NULL,
-    CHECK(
-      (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL
-        AND lineage_revision_id IS NOT NULL AND comparison_kind = 'three-way')
-      OR (lineage_status = 'unconfirmed' AND lineage_source_version_id IS NULL
-        AND lineage_revision_id IS NULL AND comparison_kind = 'two-way')
-    )
-  ) STRICT;
-  CREATE TABLE manuscript_reimport_mappings (
-    mapping_id TEXT PRIMARY KEY,
-    comparison_id TEXT NOT NULL REFERENCES manuscript_reimport_comparisons(comparison_id) ON DELETE CASCADE,
-    position INTEGER NOT NULL CHECK(position > 0),
-    change_kind TEXT NOT NULL CHECK(change_kind IN ('unchanged', 'move', 'edit', 'insert', 'delete')),
-    current_block_id TEXT REFERENCES manuscript_blocks(block_id),
-    current_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-    current_position INTEGER CHECK(current_position IS NULL OR current_position > 0),
-    lineage_block_id TEXT REFERENCES manuscript_blocks(block_id),
-    lineage_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-    lineage_position INTEGER CHECK(lineage_position IS NULL OR lineage_position > 0),
-    staged_block_id TEXT,
-    staged_draft_id TEXT,
-    staged_position INTEGER CHECK(staged_position IS NULL OR staged_position > 0),
-    identity_consequence TEXT CHECK(identity_consequence IS NULL OR identity_consequence IN
-      ('preserve-current-identity', 'create-new-identity', 'retire-current-identity')),
-    current_kind TEXT CHECK(current_kind IS NULL OR current_kind IN ('title', 'heading', 'paragraph')),
-    current_level INTEGER,
-    current_text TEXT,
-    current_digest TEXT CHECK(current_digest IS NULL OR length(current_digest) = 64),
-    lineage_kind TEXT CHECK(lineage_kind IS NULL OR lineage_kind IN ('title', 'heading', 'paragraph')),
-    lineage_level INTEGER,
-    lineage_text TEXT,
-    lineage_digest TEXT CHECK(lineage_digest IS NULL OR length(lineage_digest) = 64),
-    staged_kind TEXT CHECK(staged_kind IS NULL OR staged_kind IN ('title', 'heading', 'paragraph')),
-    staged_level INTEGER,
-    staged_text TEXT,
-    staged_digest TEXT CHECK(staged_digest IS NULL OR length(staged_digest) = 64),
-    resolved_changed INTEGER CHECK(resolved_changed IS NULL OR resolved_changed IN (0, 1)),
-    UNIQUE(comparison_id, position),
-    CHECK(current_block_id IS NOT NULL OR staged_block_id IS NOT NULL),
-    CHECK((current_block_id IS NULL) = (current_kind IS NULL)),
-    CHECK((current_block_id IS NULL) = (current_text IS NULL)),
-    CHECK((current_block_id IS NULL) = (current_digest IS NULL)),
-    CHECK((lineage_block_id IS NULL) = (lineage_kind IS NULL)),
-    CHECK((lineage_block_id IS NULL) = (lineage_text IS NULL)),
-    CHECK((lineage_block_id IS NULL) = (lineage_digest IS NULL)),
-    CHECK((staged_block_id IS NULL) = (staged_kind IS NULL)),
-    CHECK((staged_block_id IS NULL) = (staged_text IS NULL)),
-    CHECK((staged_block_id IS NULL) = (staged_digest IS NULL)),
-    CHECK(
-      (change_kind = 'unchanged' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL
-        AND current_position = staged_position AND identity_consequence = 'preserve-current-identity')
-      OR (change_kind = 'move' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL
-        AND current_position != staged_position AND identity_consequence = 'preserve-current-identity')
-      OR (change_kind = 'edit' AND current_block_id IS NOT NULL AND staged_block_id IS NOT NULL
-        AND identity_consequence IS NULL)
-      OR (change_kind = 'insert' AND current_block_id IS NULL AND staged_block_id IS NOT NULL
-        AND identity_consequence IS NULL)
-      OR (change_kind = 'delete' AND current_block_id IS NOT NULL AND staged_block_id IS NULL
-        AND identity_consequence IS NULL)
-    )
-  ) STRICT;
-  CREATE TABLE manuscript_reimport_mapping_resolutions (
-    mapping_id TEXT PRIMARY KEY REFERENCES manuscript_reimport_mappings(mapping_id) ON DELETE CASCADE,
-    comparison_id TEXT NOT NULL REFERENCES manuscript_reimport_comparisons(comparison_id) ON DELETE CASCADE,
-    resolution TEXT NOT NULL CHECK(resolution IN
-      ('preserve-current-identity', 'create-new-identity', 'retire-current-identity')),
-    resolved_current_block_id TEXT REFERENCES manuscript_blocks(block_id),
-    resolved_at TEXT NOT NULL,
-    UNIQUE(comparison_id, resolved_current_block_id),
-    CHECK((resolution = 'preserve-current-identity') = (resolved_current_block_id IS NOT NULL))
-  ) STRICT;
-  CREATE TABLE manuscript_reimport_records (
-    reimport_record_id TEXT PRIMARY KEY,
-    comparison_id TEXT NOT NULL UNIQUE REFERENCES manuscript_reimport_comparisons(comparison_id),
-    commit_id TEXT NOT NULL UNIQUE,
-    book_id TEXT NOT NULL REFERENCES books(book_id),
-    manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-    branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-    source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-    provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
-    previous_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-    resulting_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-    result_kind TEXT NOT NULL CHECK(result_kind IN ('changed', 'no-change')),
-    result_label TEXT NOT NULL CHECK(result_label IN ('稿件已重新导入', '未发现稿件变化')),
-    lineage_status TEXT NOT NULL CHECK(lineage_status IN ('verified', 'unconfirmed')),
-    lineage_source_version_id TEXT REFERENCES source_versions(source_version_id),
-    comparison_kind TEXT NOT NULL CHECK(comparison_kind IN ('three-way', 'two-way')),
-    comparison_digest TEXT NOT NULL CHECK(length(comparison_digest) = 64),
-    resolution_digest TEXT NOT NULL CHECK(length(resolution_digest) = 64),
-    fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
-    degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
-    record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
-    imported_at TEXT NOT NULL,
-    CHECK(
-      (result_kind = 'changed' AND result_label = '稿件已重新导入' AND resulting_revision_id IS NOT NULL)
-      OR (result_kind = 'no-change' AND result_label = '未发现稿件变化' AND resulting_revision_id IS NULL)
-    ),
-    CHECK(
-      (lineage_status = 'verified' AND lineage_source_version_id IS NOT NULL AND comparison_kind = 'three-way')
-      OR (lineage_status = 'unconfirmed' AND lineage_source_version_id IS NULL AND comparison_kind = 'two-way')
-    )
-  ) STRICT;
-`;
-const SOURCE_IMPORT_REBUILT_TRIGGER_SQL = `
-  CREATE TRIGGER abandonment_cleanup_block_draft_insert
-  BEFORE INSERT ON import_drafts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_draft_update
-  BEFORE UPDATE ON import_drafts
-  WHEN EXISTS (SELECT 1 FROM import_abandonment_cleanup_intents i WHERE i.draft_id = OLD.draft_id)
-    OR EXISTS (SELECT 1 FROM import_abandonment_cleanup_intents i WHERE i.object_digest = NEW.object_digest)
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_draft_update_v5
-  BEFORE UPDATE ON import_drafts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
-      OR i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_commit_insert
-  BEFORE INSERT ON import_commits
-  WHEN EXISTS (SELECT 1 FROM import_abandonment_cleanup_intents i WHERE i.draft_id = NEW.draft_id)
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_commit_update_v5
-  BEFORE UPDATE ON import_commits
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_attempt_insert
-  BEFORE INSERT ON import_commit_attempts
-  WHEN EXISTS (SELECT 1 FROM import_abandonment_cleanup_intents i WHERE i.draft_id = NEW.draft_id)
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER abandonment_cleanup_block_attempt_update_v5
-  BEFORE UPDATE ON import_commit_attempts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-  CREATE TRIGGER source_import_record_excludes_manuscript_result
-  BEFORE INSERT ON source_import_records
-  WHEN EXISTS (SELECT 1 FROM manuscript_import_records WHERE commit_id = NEW.commit_id)
-  BEGIN
-    SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
-  END;
-  CREATE TRIGGER manuscript_import_record_excludes_source_result
-  BEFORE INSERT ON manuscript_import_records
-  WHEN EXISTS (SELECT 1 FROM source_import_records WHERE commit_id = NEW.commit_id)
-  BEGIN
-    SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
-  END;
-`;
-
-/** The house's 范例 a writing draft may reference, by type, and the damaged imported versions the scan named and skipped (Issue #789). */
-interface WritingExemplarScan {
-  readonly found: Map<string, Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>>;
-  readonly damaged: Map<string, string[]>;
-}
-/** What 写作任务 says of a type's 范例: the line as it reads, and any damaged record named as 评估 names it (Issue #778, #789). */
-function writingExemplarStatement(line: string, readable: number, damaged: ReadonlyArray<string>): string {
-  if (damaged.length === 0) return line;
-  const names = damaged.map((title) => `《${title}》`).join('、');
-  const unread = `另有 ${damaged.length} 份范例记录已损坏，无法读取`;
-  return readable === 0 ? `本社没有可以读取的这类范例，本次不参考范例；${unread}：${names}` : `${line}；${unread}，本次不参考：${names}`;
-}
 type StoredImportCommitProjection =
   | Omit<ManuscriptImportCommitProjection, 'firstWindow'>
   | SourceImportCommitProjection
   | ManuscriptReimportCommitProjection;
+
 type ImmutableManuscriptImportResult = Omit<ManuscriptImportCommitProjection, 'firstWindow' | 'overview'>;
 
 function requireBoundedBookOverview(projection: BookWorkOverviewProjection): BookWorkOverviewProjection {
@@ -1642,14 +1321,6 @@ function unconfirmedSurfaceOf(kind: string): TaskPlanKind | null {
   if (kind === EVALUATION_REWRITE_KIND) return 'evaluation-rewrite';
   if (kind === WRITING_KIND) return 'writing';
   return null;
-}
-
-/** Material readers rebuild the exact inner contract before the optional clarification instruction is restored. */
-function unwrappedPlanPromptDigest(execution: Record<string, unknown>, envelope: Record<string, unknown>): string {
-  const base = clarificationPlanBaseDigest(execution, envelope);
-  requireStore(base !== null,
-  'ANALYSIS_RECORD_INVALID', '任务澄清指令的基础契约与计划不一致。');
-  return base;
 }
 
 /** What 保留为缺口 names: the digest of exactly the outcomes listed, in key order (Issue #757). */
@@ -1688,7 +1359,9 @@ function immutableCommitResult(result: StoredImportCommitProjection): Record<str
 }
 
 const LEGACY_WORKFLOW_PROFILE_DIGEST = sha256(canonicalJson(LEGACY_WORKFLOW_PROFILE));
+
 const BASELINE_EDITORIAL_DIMENSION_SET_DIGEST = sha256(canonicalJson(BASELINE_EDITORIAL_DIMENSION_SET));
+
 const EDITORIAL_DIMENSIONS = BASELINE_EDITORIAL_DIMENSION_SET.dimensions;
 
 function workflowProjectionJson(profile: BuiltInWorkflowProfile): string {
@@ -1700,11 +1373,6 @@ function workflowProjectionJson(profile: BuiltInWorkflowProfile): string {
     phases: profile.projection.phases,
     gates: profile.projection.gates,
   });
-}
-
-function one<T extends SqlRow>(rows: T[], code: string, message: string): T {
-  requireStore(rows.length === 1, code, message);
-  return rows[0]!;
 }
 
 /** The material key of one template's 审稿意见 offered into 范例 (Issue #429), on the Learning Eligibility ledger of S26b. */
@@ -1919,1678 +1587,6 @@ function isInside(parent: string, child: string): boolean {
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
 }
 
-function configureDatabase(db: DatabaseSync, tempStore: 'MEMORY' | 'FILE' = 'MEMORY'): void {
-  db.exec(`
-    PRAGMA foreign_keys = ON;
-    PRAGMA recursive_triggers = ON;
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = FULL;
-    PRAGMA busy_timeout = 5000;
-    PRAGMA trusted_schema = OFF;
-    PRAGMA secure_delete = ON;
-    PRAGMA temp_store = ${tempStore};
-  `);
-  const recursiveTriggers = db.prepare('PRAGMA recursive_triggers').get() as SqlRow;
-  requireStore(
-    asNumber(recursiveTriggers.recursive_triggers) === 1,
-    'SCHEMA_INVALID',
-    'SQLite 递归触发器未启用，无法保护不可变记录。',
-  );
-}
-
-const ABANDONMENT_CLEANUP_SCHEMA = `
-  CREATE TABLE import_abandonment_cleanup_intents (
-    draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id),
-    object_digest TEXT NOT NULL UNIQUE REFERENCES content_objects(object_digest),
-    expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
-    relative_key TEXT NOT NULL,
-    state TEXT NOT NULL CHECK(state IN ('prepared', 'bytes-removed')),
-    requested_at TEXT NOT NULL,
-    bytes_removed_at TEXT,
-    CHECK(
-      (state = 'prepared' AND bytes_removed_at IS NULL)
-      OR (state = 'bytes-removed' AND bytes_removed_at IS NOT NULL)
-    )
-  ) STRICT;
-
-  CREATE TRIGGER abandonment_cleanup_validate_insert
-  BEFORE INSERT ON import_abandonment_cleanup_intents
-  WHEN NOT EXISTS (
-      SELECT 1
-      FROM import_drafts d
-      JOIN content_objects co ON co.object_digest = d.object_digest
-      WHERE d.draft_id = NEW.draft_id
-        AND d.state IN ('staged', 'reviewed')
-        AND d.draft_version = NEW.expected_draft_version
-        AND d.object_digest = NEW.object_digest
-        AND co.relative_key = NEW.relative_key
-    )
-    OR EXISTS (SELECT 1 FROM source_versions sv WHERE sv.object_digest = NEW.object_digest)
-    OR (SELECT count(*) FROM import_drafts d WHERE d.object_digest = NEW.object_digest) != 1
-    OR EXISTS (SELECT 1 FROM import_commits c WHERE c.draft_id = NEW.draft_id)
-    OR EXISTS (
-      SELECT 1 FROM import_commit_attempts a
-      WHERE a.draft_id = NEW.draft_id AND a.state != 'prepared'
-    )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_INVALID');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_content_object_update
-  BEFORE UPDATE ON content_objects
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = OLD.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_draft_insert
-  BEFORE INSERT ON import_drafts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_draft_update
-  BEFORE UPDATE ON import_drafts
-  WHEN EXISTS (
-      SELECT 1 FROM import_abandonment_cleanup_intents i
-      WHERE i.draft_id = OLD.draft_id
-    )
-    OR EXISTS (
-      SELECT 1 FROM import_abandonment_cleanup_intents i
-      WHERE i.object_digest = NEW.object_digest
-    )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_source_insert
-  BEFORE INSERT ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_source_update
-  BEFORE UPDATE OF object_digest ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_commit_insert
-  BEFORE INSERT ON import_commits
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = NEW.draft_id
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_attempt_insert
-  BEFORE INSERT ON import_commit_attempts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = NEW.draft_id
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-`;
-
-const ABANDONMENT_CLEANUP_UPDATE_GUARDS_SCHEMA = `
-  CREATE TRIGGER abandonment_cleanup_validate_intent_update_v5
-  BEFORE UPDATE ON import_abandonment_cleanup_intents
-  WHEN NEW.draft_id != OLD.draft_id
-    OR NEW.object_digest != OLD.object_digest
-    OR NEW.expected_draft_version != OLD.expected_draft_version
-    OR NEW.relative_key != OLD.relative_key
-    OR NEW.requested_at != OLD.requested_at
-    OR NOT (
-      (
-        OLD.state = 'prepared' AND OLD.bytes_removed_at IS NULL
-        AND NEW.state = 'bytes-removed' AND NEW.bytes_removed_at IS NOT NULL
-      )
-      OR (
-        OLD.state = 'bytes-removed' AND NEW.state = 'bytes-removed'
-        AND NEW.bytes_removed_at = OLD.bytes_removed_at
-      )
-    )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_INTENT_IMMUTABLE');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_content_object_update_v5
-  BEFORE UPDATE ON content_objects
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_draft_update_v5
-  BEFORE UPDATE ON import_drafts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
-      OR i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_source_update_v5
-  BEFORE UPDATE ON source_versions
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.object_digest = OLD.object_digest OR i.object_digest = NEW.object_digest
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_commit_update_v5
-  BEFORE UPDATE ON import_commits
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-
-  CREATE TRIGGER abandonment_cleanup_block_attempt_update_v5
-  BEFORE UPDATE ON import_commit_attempts
-  WHEN EXISTS (
-    SELECT 1 FROM import_abandonment_cleanup_intents i
-    WHERE i.draft_id = OLD.draft_id OR i.draft_id = NEW.draft_id
-  )
-  BEGIN
-    SELECT RAISE(ABORT, 'ABANDONMENT_CLEANUP_PENDING');
-  END;
-`;
-
-function migrateSchemaV1ToV2(db: DatabaseSync): void {
-  db.exec('PRAGMA foreign_keys = OFF');
-  let migrationError: unknown;
-  try {
-    const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-    requireStore(asNumber(foreignKeys.foreign_keys) === 0, 'SCHEMA_INVALID', '无法暂时停用引用校验以迁移数据库。');
-    db.exec(`
-      BEGIN IMMEDIATE;
-
-      CREATE TABLE import_fidelity_reviews_v2 (
-        fidelity_review_id TEXT PRIMARY KEY,
-        book_id TEXT NOT NULL REFERENCES books(book_id),
-        source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
-        review_digest TEXT NOT NULL UNIQUE,
-        outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
-        round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
-        created_at TEXT NOT NULL
-      ) STRICT;
-
-      INSERT INTO import_fidelity_reviews_v2(
-        fidelity_review_id, book_id, source_version_id, review_digest, outcome, round_trip_guaranteed, created_at
-      )
-      SELECT fidelity_review_id, book_id, source_version_id, review_digest, outcome, round_trip_guaranteed, created_at
-      FROM import_fidelity_reviews;
-
-      CREATE TABLE manuscript_import_records_v2 (
-        import_record_id TEXT PRIMARY KEY,
-        commit_id TEXT NOT NULL UNIQUE,
-        book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
-        manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
-        source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
-        fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews_v2(fidelity_review_id),
-        degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
-        resulting_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
-        provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
-        imported_at TEXT NOT NULL
-      ) STRICT;
-
-      INSERT INTO manuscript_import_records_v2(
-        import_record_id, commit_id, book_id, manuscript_id, source_version_id, fidelity_review_id,
-        degradation_decision_id, resulting_revision_id, provenance_id, imported_at
-      )
-      SELECT import_record_id, commit_id, book_id, manuscript_id, source_version_id, fidelity_review_id,
-             degradation_decision_id, resulting_revision_id, provenance_id, imported_at
-      FROM manuscript_import_records;
-
-      DROP TABLE manuscript_import_records;
-      DROP TABLE import_fidelity_reviews;
-      ALTER TABLE import_fidelity_reviews_v2 RENAME TO import_fidelity_reviews;
-      ALTER TABLE manuscript_import_records_v2 RENAME TO manuscript_import_records;
-      PRAGMA user_version = 2;
-    `);
-    const violations = db.prepare('PRAGMA foreign_key_check').all();
-    requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库迁移后的引用校验失败。');
-    db.exec('COMMIT');
-  } catch (error) {
-    migrationError = error;
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      migrationError = new AggregateError([error, rollbackError], 'SQLite schema migration rollback failed.');
-    }
-  } finally {
-    try {
-      db.exec('PRAGMA foreign_keys = ON');
-      const foreignKeys = one(db.prepare('PRAGMA foreign_keys').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取引用校验状态。');
-      requireStore(asNumber(foreignKeys.foreign_keys) === 1, 'SCHEMA_INVALID', '无法恢复引用校验。');
-    } catch (restoreError) {
-      migrationError = migrationError
-        ? new AggregateError([migrationError, restoreError], 'SQLite schema migration and foreign-key restoration failed.')
-        : restoreError;
-    }
-  }
-  if (migrationError) throw migrationError;
-}
-
-function migrateSchemaV2ToV3(db: DatabaseSync): void {
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-
-      ALTER TABLE import_drafts ADD COLUMN selected_path TEXT;
-      ALTER TABLE import_drafts ADD COLUMN reviewed_target_choice_id TEXT
-        CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work'));
-
-      CREATE TABLE import_commit_attempts (
-        attempt_id TEXT PRIMARY KEY,
-        draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
-        request_fingerprint TEXT NOT NULL,
-        expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
-        review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
-        state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
-        prepared_at TEXT NOT NULL,
-        committed_at TEXT,
-        uncertain_at TEXT,
-        uncertainty_code TEXT,
-        completion_acknowledged_at TEXT,
-        CHECK(
-          (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
-            AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
-          OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
-            AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
-          OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
-            AND uncertainty_code IS NULL)
-        )
-      ) STRICT;
-
-      INSERT INTO import_commit_attempts(
-        attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-        state, prepared_at, committed_at
-      )
-      SELECT commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-             'committed', committed_at, committed_at
-      FROM import_commits;
-
-      CREATE INDEX import_attempts_recovery_order
-        ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
-
-      PRAGMA user_version = 3;
-      COMMIT;
-    `);
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite schema v3 migration rollback failed.');
-    }
-    throw error;
-  }
-}
-
-function migrateSchemaV3ToV4(db: DatabaseSync): void {
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      ${ABANDONMENT_CLEANUP_SCHEMA}
-      PRAGMA user_version = 4;
-      COMMIT;
-    `);
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite schema v4 migration rollback failed.');
-    }
-    throw error;
-  }
-}
-
-function migrateSchemaV4ToV5(db: DatabaseSync): void {
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      ${ABANDONMENT_CLEANUP_UPDATE_GUARDS_SCHEMA}
-      PRAGMA user_version = 5;
-      COMMIT;
-    `);
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite schema v5 migration rollback failed.');
-    }
-    throw error;
-  }
-}
-
-function initializeSchema(db: DatabaseSync): void {
-  const versionRow = one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。');
-  const currentVersion = asNumber(versionRow.user_version);
-  requireStore(
-    currentVersion === 0 ||
-      currentVersion === 1 ||
-      currentVersion === 2 ||
-      currentVersion === 3 ||
-      currentVersion === 4 ||
-      currentVersion === CORE_SCHEMA_VERSION ||
-      currentVersion === EDITOR_SCHEMA_VERSION ||
-      currentVersion === RECOVERY_SCHEMA_VERSION ||
-      currentVersion === SCHEMA_VERSION ||
-      currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION ||
-      currentVersion === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
-      currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
-      currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
-      currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
-      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
-      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
-      currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
-      currentVersion === CLARIFICATION_SCHEMA_VERSION ||
-      currentVersion === REIMPORT_GROUP_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
-      currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
-      currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      currentVersion === SERIES_SCHEMA_VERSION ||
-      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      currentVersion === STORE_VERSION_SCHEMA_VERSION ||
-      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
-      currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
-      currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      currentVersion === DIALOGUE_SCHEMA_VERSION ||
-      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      currentVersion === READERS_REPORT_SCHEMA_VERSION ||
-      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      currentVersion === WRITING_TASK_SCHEMA_VERSION ||
-      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === 98 || currentVersion === 99 || currentVersion === 100 || currentVersion === 101 || currentVersion === 102 || currentVersion === 103 || currentVersion === 104 || currentVersion === 105 || currentVersion === LATEST_SCHEMA_VERSION),
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  if (
-    currentVersion === CORE_SCHEMA_VERSION ||
-    currentVersion === EDITOR_SCHEMA_VERSION ||
-    currentVersion === RECOVERY_SCHEMA_VERSION ||
-    currentVersion === SCHEMA_VERSION ||
-    currentVersion === SOURCE_IMPORT_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-    currentVersion === MODEL_SERVICE_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION ||
-    currentVersion === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-    currentVersion === J04_BASELINE_ANALYSIS_SCHEMA_VERSION ||
-    currentVersion === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-    currentVersion === TASK_AUTHORIZATION_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-    currentVersion === TEXT_CONVERSION_SCHEMA_VERSION ||
-    currentVersion === FACTUAL_REVIEW_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_MARK_SCHEMA_VERSION ||
-    currentVersion === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-    currentVersion === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-    currentVersion === PUBLICATION_VERSION_SCHEMA_VERSION || currentVersion === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      currentVersion === IMPORT_RETENTION_SCHEMA_VERSION || currentVersion === IMPORTED_MARK_SCHEMA_VERSION ||
-      currentVersion === EXPORT_LEDGER_SCHEMA_VERSION || currentVersion === CONNECTIVITY_WAIT_SCHEMA_VERSION || currentVersion === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      currentVersion === RUN_CANCELLATION_SCHEMA_VERSION ||
-      currentVersion === RUN_CONTINUATION_SCHEMA_VERSION ||
-      currentVersion === PLAN_EDIT_SCHEMA_VERSION ||
-      currentVersion === CLARIFICATION_SCHEMA_VERSION ||
-      currentVersion === REIMPORT_GROUP_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      currentVersion === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      currentVersion === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      currentVersion === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      currentVersion === BOOK_PEOPLE_SCHEMA_VERSION ||
-      currentVersion === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      currentVersion === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_RECORD_SCHEMA_VERSION ||
-      currentVersion === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      currentVersion === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      currentVersion === SERIES_SCHEMA_VERSION ||
-      currentVersion === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      currentVersion === STORE_VERSION_SCHEMA_VERSION ||
-      currentVersion === DATABASE_EXPORT_SCHEMA_VERSION ||
-      currentVersion === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      currentVersion === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      currentVersion === DATABASE_MERGE_SCHEMA_VERSION ||
-      currentVersion === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      currentVersion === DIALOGUE_SCHEMA_VERSION ||
-      currentVersion === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      currentVersion === READERS_REPORT_SCHEMA_VERSION ||
-      currentVersion === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      currentVersion === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      currentVersion === WRITING_TASK_SCHEMA_VERSION ||
-      currentVersion === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      currentVersion === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (currentVersion === OUTCOME_RESOLUTION_SCHEMA_VERSION || currentVersion === IMPORTED_EXEMPLAR_SCHEMA_VERSION || currentVersion === EVALUATION_PROFILE_SCHEMA_VERSION || currentVersion === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || currentVersion === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || currentVersion === MODEL_CLARIFICATION_SCHEMA_VERSION || currentVersion === SEARCH_BACKEND_SCHEMA_VERSION || currentVersion === RESEARCH_EVIDENCE_SCHEMA_VERSION || currentVersion === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || currentVersion === PROPOSAL_REVIEW_SCHEMA_VERSION || currentVersion === FACTUAL_VERIFICATION_SCHEMA_VERSION || currentVersion === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || currentVersion === TASK_INTENT_DRAFT_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_SCHEMA_VERSION || currentVersion === CUSTOM_ANALYSIS_SCHEMA_VERSION || currentVersion === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || currentVersion === MODEL_SELECTION_SCHEMA_VERSION || currentVersion === PROCEDURE_DEFINITION_SCHEMA_VERSION || currentVersion === EDITORIAL_LEARNING_SCHEMA_VERSION || currentVersion === GLOBAL_AGENT_SCHEMA_VERSION || currentVersion === REVIEW_CONTRACT_SCHEMA_VERSION || currentVersion === IDLE_BACKGROUND_SCHEMA_VERSION || currentVersion === LOCAL_REVIEW_SCHEMA_VERSION || currentVersion === EDITORIAL_MEMORY_SCHEMA_VERSION || currentVersion === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || currentVersion === WORD_TRACKED_IMPORT_SCHEMA_VERSION || currentVersion === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || currentVersion === LEARNING_CURATION_SCHEMA_VERSION || currentVersion === 97 || currentVersion === 98 || currentVersion === 99 || currentVersion === 100 || currentVersion === 101 || currentVersion === 102 || currentVersion === 103 || currentVersion === 104 || currentVersion === 105 || currentVersion === LATEST_SCHEMA_VERSION)
-  ) return;
-  if (currentVersion === 1) {
-    migrateSchemaV1ToV2(db);
-    migrateSchemaV2ToV3(db);
-    migrateSchemaV3ToV4(db);
-    migrateSchemaV4ToV5(db);
-    return;
-  }
-  if (currentVersion === 2) {
-    migrateSchemaV2ToV3(db);
-    migrateSchemaV3ToV4(db);
-    migrateSchemaV4ToV5(db);
-    return;
-  }
-  if (currentVersion === 3) {
-    migrateSchemaV3ToV4(db);
-    migrateSchemaV4ToV5(db);
-    return;
-  }
-  if (currentVersion === 4) {
-    migrateSchemaV4ToV5(db);
-    return;
-  }
-
-  db.exec(`
-    BEGIN IMMEDIATE;
-
-    CREATE TABLE content_objects (
-      object_digest TEXT PRIMARY KEY CHECK(length(object_digest) = 64),
-      relative_key TEXT NOT NULL UNIQUE,
-      byte_length INTEGER NOT NULL CHECK(byte_length > 0),
-      verified_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE import_drafts (
-      draft_id TEXT PRIMARY KEY,
-      selection_token TEXT NOT NULL UNIQUE,
-      state TEXT NOT NULL CHECK(state IN ('staged', 'reviewed', 'committed')),
-      draft_version INTEGER NOT NULL CHECK(draft_version >= 1),
-      display_name TEXT NOT NULL,
-      object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
-      selected_path TEXT,
-      reviewed_title TEXT,
-      reviewed_target_choice_id TEXT
-        CHECK(reviewed_target_choice_id IS NULL OR reviewed_target_choice_id IN ('new-book', 'new-book-distinct-intended-work')),
-      review_digest TEXT UNIQUE,
-      committed_commit_id TEXT UNIQUE,
-      staged_at TEXT NOT NULL,
-      reviewed_at TEXT,
-      committed_at TEXT
-    ) STRICT;
-
-    CREATE TABLE staged_import_snapshots (
-      draft_id TEXT PRIMARY KEY REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
-      parser_identity TEXT NOT NULL,
-      source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
-      content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
-      structure_digest TEXT NOT NULL CHECK(length(structure_digest) = 64),
-      block_count INTEGER NOT NULL CHECK(block_count > 0),
-      fidelity_json TEXT NOT NULL,
-      title_suggestion TEXT NOT NULL,
-      title_source TEXT NOT NULL,
-      snapshot_created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE staged_import_blocks (
-      draft_id TEXT NOT NULL REFERENCES staged_import_snapshots(draft_id) ON DELETE CASCADE,
-      staged_block_id TEXT NOT NULL,
-      position INTEGER NOT NULL CHECK(position > 0),
-      kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
-      level INTEGER,
-      text TEXT NOT NULL,
-      digest TEXT NOT NULL CHECK(length(digest) = 64),
-      PRIMARY KEY(draft_id, position),
-      UNIQUE(draft_id, staged_block_id)
-    ) STRICT;
-
-    CREATE TABLE books (
-      book_id TEXT PRIMARY KEY,
-      stable_identity TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE book_dimension_sets (
-      dimension_set_id TEXT PRIMARY KEY,
-      book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
-      version INTEGER NOT NULL CHECK(version = 1),
-      profile_id TEXT NOT NULL,
-      profile_version TEXT NOT NULL,
-      definition_digest TEXT NOT NULL CHECK(length(definition_digest) = 64),
-      weight_semantics TEXT NOT NULL CHECK(weight_semantics = '中性起始权重；非穷尽评分量表'),
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE book_dimensions (
-      dimension_set_id TEXT NOT NULL REFERENCES book_dimension_sets(dimension_set_id),
-      dimension_id TEXT NOT NULL,
-      display_label TEXT NOT NULL,
-      weight REAL NOT NULL CHECK(weight > 0),
-      position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
-      PRIMARY KEY(dimension_set_id, dimension_id),
-      UNIQUE(dimension_set_id, position)
-    ) STRICT;
-
-    CREATE TABLE source_versions (
-      source_version_id TEXT PRIMARY KEY,
-      book_id TEXT NOT NULL REFERENCES books(book_id),
-      object_digest TEXT NOT NULL REFERENCES content_objects(object_digest),
-      source_digest TEXT NOT NULL CHECK(length(source_digest) = 64),
-      content_digest TEXT NOT NULL CHECK(length(content_digest) = 64),
-      structure_digest TEXT NOT NULL CHECK(length(structure_digest) = 64),
-      parser_identity TEXT NOT NULL,
-      format TEXT NOT NULL CHECK(format = 'DOCX'),
-      display_name TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      UNIQUE(book_id, source_digest)
-    ) STRICT;
-
-    CREATE TABLE source_provenance (
-      provenance_id TEXT PRIMARY KEY,
-      source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
-      acquisition_path TEXT NOT NULL CHECK(acquisition_path = 'native-file-picker'),
-      locality TEXT NOT NULL CHECK(locality = 'local-provider-free'),
-      sanitized_identity TEXT NOT NULL,
-      parser_identity TEXT NOT NULL,
-      recorded_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE import_fidelity_reviews (
-      fidelity_review_id TEXT PRIMARY KEY,
-      book_id TEXT NOT NULL REFERENCES books(book_id),
-      source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
-      review_digest TEXT NOT NULL UNIQUE,
-      outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
-      round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE import_fidelity_categories (
-      fidelity_review_id TEXT NOT NULL REFERENCES import_fidelity_reviews(fidelity_review_id),
-      category_key TEXT NOT NULL,
-      display_label TEXT NOT NULL,
-      item_count INTEGER NOT NULL CHECK(item_count >= 0),
-      status TEXT NOT NULL CHECK(status IN ('preserved', 'degraded', 'unsupported')),
-      detail TEXT NOT NULL,
-      position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
-      PRIMARY KEY(fidelity_review_id, category_key),
-      UNIQUE(fidelity_review_id, position)
-    ) STRICT;
-
-    CREATE TABLE import_degradation_decisions (
-      degradation_decision_id TEXT PRIMARY KEY,
-      fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
-      decision TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE manuscripts (
-      manuscript_id TEXT PRIMARY KEY,
-      book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
-      role TEXT NOT NULL CHECK(role = 'primary'),
-      created_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE manuscript_branches (
-      branch_id TEXT PRIMARY KEY,
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      name TEXT NOT NULL,
-      base_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-      created_at TEXT NOT NULL,
-      UNIQUE(manuscript_id, name)
-    ) STRICT;
-
-    CREATE TABLE manuscript_revisions (
-      revision_id TEXT PRIMARY KEY,
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-      ordinal INTEGER NOT NULL CHECK(ordinal = 1),
-      revision_label TEXT NOT NULL CHECK(revision_label = 'r1'),
-      parent_revision_id TEXT REFERENCES manuscript_revisions(revision_id),
-      source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-      revision_digest TEXT NOT NULL CHECK(length(revision_digest) = 64),
-      created_at TEXT NOT NULL,
-      UNIQUE(manuscript_id, ordinal),
-      UNIQUE(manuscript_id, revision_label)
-    ) STRICT;
-
-    CREATE TABLE manuscript_blocks (
-      block_id TEXT PRIMARY KEY,
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      created_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id)
-    ) STRICT;
-
-    CREATE TABLE manuscript_block_versions (
-      revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-      block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-      position INTEGER NOT NULL CHECK(position > 0),
-      kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
-      level INTEGER,
-      text TEXT NOT NULL,
-      digest TEXT NOT NULL CHECK(length(digest) = 64),
-      PRIMARY KEY(revision_id, block_id),
-      UNIQUE(revision_id, position)
-    ) STRICT;
-
-    CREATE TABLE workflow_profiles (
-      profile_id TEXT NOT NULL,
-      profile_version TEXT NOT NULL,
-      profile_name TEXT NOT NULL,
-      profile_digest TEXT NOT NULL CHECK(length(profile_digest) = 64),
-      definition_json TEXT NOT NULL,
-      PRIMARY KEY(profile_id, profile_version)
-    ) STRICT;
-
-    CREATE TABLE workflow_instances (
-      workflow_instance_id TEXT PRIMARY KEY,
-      book_id TEXT NOT NULL REFERENCES books(book_id),
-      manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
-      profile_id TEXT NOT NULL,
-      profile_version TEXT NOT NULL,
-      current_phase TEXT NOT NULL,
-      state TEXT NOT NULL CHECK(state = 'active'),
-      created_at TEXT NOT NULL,
-      FOREIGN KEY(profile_id, profile_version) REFERENCES workflow_profiles(profile_id, profile_version)
-    ) STRICT;
-
-    CREATE TABLE manuscript_import_records (
-      import_record_id TEXT PRIMARY KEY,
-      commit_id TEXT NOT NULL UNIQUE,
-      book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
-      manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
-      source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
-      fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
-      degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
-      resulting_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
-      provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
-      imported_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE import_commits (
-      commit_id TEXT PRIMARY KEY,
-      draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id),
-      request_fingerprint TEXT NOT NULL,
-      expected_draft_version INTEGER NOT NULL,
-      review_digest TEXT NOT NULL,
-      result_json TEXT NOT NULL,
-      committed_at TEXT NOT NULL
-    ) STRICT;
-
-    CREATE TABLE import_commit_attempts (
-      attempt_id TEXT PRIMARY KEY,
-      draft_id TEXT NOT NULL UNIQUE REFERENCES import_drafts(draft_id) ON DELETE CASCADE,
-      request_fingerprint TEXT NOT NULL,
-      expected_draft_version INTEGER NOT NULL CHECK(expected_draft_version >= 1),
-      review_digest TEXT NOT NULL CHECK(length(review_digest) = 64),
-      state TEXT NOT NULL CHECK(state IN ('prepared', 'uncertain', 'committed')),
-      prepared_at TEXT NOT NULL,
-      committed_at TEXT,
-      uncertain_at TEXT,
-      uncertainty_code TEXT,
-      completion_acknowledged_at TEXT,
-      CHECK(
-        (state = 'prepared' AND committed_at IS NULL AND uncertain_at IS NULL
-          AND uncertainty_code IS NULL AND completion_acknowledged_at IS NULL)
-        OR (state = 'uncertain' AND committed_at IS NULL AND uncertain_at IS NOT NULL
-          AND uncertainty_code = 'COMMIT_PROOF_INCONCLUSIVE' AND completion_acknowledged_at IS NULL)
-        OR (state = 'committed' AND committed_at IS NOT NULL AND uncertain_at IS NULL
-          AND uncertainty_code IS NULL)
-      )
-    ) STRICT;
-
-    CREATE TABLE branch_working_state (
-      branch_id TEXT PRIMARY KEY REFERENCES manuscript_branches(branch_id),
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-      journal_sequence INTEGER NOT NULL CHECK(journal_sequence >= 0),
-      working_digest TEXT NOT NULL CHECK(length(working_digest) = 64)
-    ) STRICT;
-
-    CREATE TABLE working_blocks (
-      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-      block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-      position INTEGER NOT NULL CHECK(position > 0),
-      kind TEXT NOT NULL CHECK(kind IN ('title', 'heading', 'paragraph')),
-      level INTEGER,
-      text TEXT NOT NULL,
-      digest TEXT NOT NULL CHECK(length(digest) = 64),
-      PRIMARY KEY(branch_id, block_id),
-      UNIQUE(branch_id, position)
-    ) STRICT;
-
-    CREATE TABLE edit_journal_entries (
-      journal_entry_id TEXT PRIMARY KEY,
-      client_edit_id TEXT NOT NULL UNIQUE,
-      request_fingerprint TEXT NOT NULL,
-      manuscript_id TEXT NOT NULL REFERENCES manuscripts(manuscript_id),
-      branch_id TEXT NOT NULL REFERENCES manuscript_branches(branch_id),
-      base_revision_id TEXT NOT NULL REFERENCES manuscript_revisions(revision_id),
-      sequence INTEGER NOT NULL CHECK(sequence > 0),
-      block_id TEXT NOT NULL REFERENCES manuscript_blocks(block_id),
-      from_grapheme INTEGER NOT NULL CHECK(from_grapheme >= 0),
-      to_grapheme INTEGER NOT NULL CHECK(to_grapheme >= from_grapheme),
-      insert_text TEXT NOT NULL,
-      resulting_block_digest TEXT NOT NULL CHECK(length(resulting_block_digest) = 64),
-      resulting_working_digest TEXT NOT NULL CHECK(length(resulting_working_digest) = 64),
-      durable_at TEXT NOT NULL,
-      UNIQUE(branch_id, sequence)
-    ) STRICT;
-
-    ${ABANDONMENT_CLEANUP_SCHEMA}
-    ${ABANDONMENT_CLEANUP_UPDATE_GUARDS_SCHEMA}
-
-    CREATE INDEX working_blocks_window ON working_blocks(branch_id, position);
-    CREATE INDEX journal_branch_order ON edit_journal_entries(branch_id, sequence);
-    CREATE INDEX import_attempts_recovery_order
-      ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
-
-    PRAGMA user_version = 5;
-    COMMIT;
-  `);
-}
-
-function initializeSourceImportSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  const version = asNumber(
-    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
-  );
-  requireStore(
-    version === SCHEMA_VERSION || version === SOURCE_IMPORT_SCHEMA_VERSION ||
-      version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === LATEST_SCHEMA_VERSION),
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  if (version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === LATEST_SCHEMA_VERSION)) return;
-  const legacyAlterTable = asNumber(
-    one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
-  );
-  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
-  let migrationError: unknown;
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      DROP TRIGGER abandonment_cleanup_block_draft_insert;
-      DROP TRIGGER abandonment_cleanup_block_draft_update;
-      DROP TRIGGER abandonment_cleanup_block_draft_update_v5;
-      DROP TRIGGER abandonment_cleanup_block_commit_insert;
-      DROP TRIGGER abandonment_cleanup_block_commit_update_v5;
-      DROP TRIGGER abandonment_cleanup_block_attempt_insert;
-      DROP TRIGGER abandonment_cleanup_block_attempt_update_v5;
-      ALTER TABLE import_commit_attempts RENAME TO import_commit_attempts_v8;
-      ALTER TABLE import_commits RENAME TO import_commits_v8;
-      ALTER TABLE import_drafts RENAME TO import_drafts_v8;
-      ALTER TABLE source_provenance RENAME TO source_provenance_v8;
-      ${SOURCE_IMPORT_DRAFT_V9_SCHEMA_SQL};
-      INSERT INTO import_drafts(
-        draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
-        reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at,
-        reviewed_at, committed_at, reviewed_target_kind, reviewed_existing_book_id,
-        reviewed_relationship, reviewed_book_state_digest, reviewed_reuse_source_version_id
-      )
-      SELECT draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
-             reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at,
-             reviewed_at, committed_at, reviewed_target_kind, reviewed_existing_book_id,
-             reviewed_relationship, reviewed_book_state_digest, NULL
-      FROM import_drafts_v8 ORDER BY draft_id;
-      ${SOURCE_IMPORT_COMMIT_V9_SCHEMA_SQL};
-      INSERT INTO import_commits(
-        commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-        operation_kind, result_json, committed_at
-      )
-      SELECT commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-             'manuscript-import', result_json, committed_at
-      FROM import_commits_v8 ORDER BY commit_id;
-      ${SOURCE_IMPORT_ATTEMPT_V9_SCHEMA_SQL};
-      INSERT INTO import_commit_attempts(
-        attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-        operation_kind, state, prepared_at, committed_at, uncertain_at, uncertainty_code,
-        completion_acknowledged_at
-      )
-      SELECT attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-             'manuscript-import', state, prepared_at, committed_at, uncertain_at, uncertainty_code,
-             completion_acknowledged_at
-      FROM import_commit_attempts_v8 ORDER BY attempt_id;
-      ${SOURCE_PROVENANCE_V9_SCHEMA_SQL};
-      INSERT INTO source_provenance(
-        provenance_id, source_version_id, acquisition_path, locality,
-        sanitized_identity, parser_identity, recorded_at
-      )
-      SELECT provenance_id, source_version_id, acquisition_path, locality,
-             sanitized_identity, parser_identity, recorded_at
-      FROM source_provenance_v8
-      ORDER BY provenance_id;
-      DROP TABLE import_commit_attempts_v8;
-      DROP TABLE import_commits_v8;
-      DROP TABLE import_drafts_v8;
-      DROP TABLE source_provenance_v8;
-      ${SOURCE_IMPORT_SCHEMA_SQL};
-      CREATE INDEX import_attempts_recovery_order
-        ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
-      ${SOURCE_IMPORT_REBUILT_TRIGGER_SQL}
-    `);
-    validateSourceImportSchemaTruth(db, profile);
-    db.exec(`PRAGMA user_version = ${SOURCE_IMPORT_SCHEMA_VERSION}; COMMIT;`);
-  } catch (error) {
-    migrationError = error;
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      migrationError = new AggregateError([error, rollbackError], 'SQLite source import schema migration rollback failed.');
-    }
-  } finally {
-    try {
-      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}; PRAGMA foreign_keys = ON;`);
-    } catch (restoreError) {
-      migrationError = migrationError
-        ? new AggregateError([migrationError, restoreError], 'SQLite source import migration and pragma restoration failed.')
-        : restoreError;
-    }
-  }
-  if (migrationError) throw migrationError;
-  const violations = db.prepare('PRAGMA foreign_key_check').all();
-  requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-}
-
-function initializeManuscriptReimportSchema(db: DatabaseSync, profile: BuiltInWorkflowProfile): void {
-  const version = asNumber(
-    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
-  );
-  requireStore(
-    version === SOURCE_IMPORT_SCHEMA_VERSION || version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION ||
-      version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === LATEST_SCHEMA_VERSION),
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  if (version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === LATEST_SCHEMA_VERSION)) return;
-  validateSourceImportSchemaTruth(db, profile);
-  const legacyAlterTable = asNumber(
-    one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
-  );
-  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
-  let migrationError: unknown;
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      DROP TRIGGER abandonment_cleanup_block_draft_insert;
-      DROP TRIGGER abandonment_cleanup_block_draft_update;
-      DROP TRIGGER abandonment_cleanup_block_draft_update_v5;
-      DROP TRIGGER abandonment_cleanup_block_commit_insert;
-      DROP TRIGGER abandonment_cleanup_block_commit_update_v5;
-      DROP TRIGGER abandonment_cleanup_block_attempt_insert;
-      DROP TRIGGER abandonment_cleanup_block_attempt_update_v5;
-      DROP TRIGGER source_import_record_excludes_manuscript_result;
-      DROP TRIGGER manuscript_import_record_excludes_source_result;
-      ALTER TABLE import_commit_attempts RENAME TO import_commit_attempts_v9;
-      ALTER TABLE import_commits RENAME TO import_commits_v9;
-      ALTER TABLE import_drafts RENAME TO import_drafts_v9;
-      ${REIMPORT_DRAFT_V10_SCHEMA_SQL};
-      INSERT INTO import_drafts(
-        draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
-        reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at,
-        reviewed_at, committed_at, reviewed_target_kind, reviewed_existing_book_id,
-        reviewed_relationship, reviewed_book_state_digest, reviewed_reuse_source_version_id,
-        reviewed_lineage_status, reviewed_lineage_source_version_id, reviewed_checkpoint_revision_id,
-        reviewed_manuscript_id, reviewed_branch_id
-      )
-      SELECT draft_id, selection_token, state, draft_version, display_name, object_digest, selected_path,
-             reviewed_title, reviewed_target_choice_id, review_digest, committed_commit_id, staged_at,
-             reviewed_at, committed_at, reviewed_target_kind, reviewed_existing_book_id,
-             reviewed_relationship, reviewed_book_state_digest, reviewed_reuse_source_version_id,
-             NULL, NULL, NULL, NULL, NULL
-      FROM import_drafts_v9 ORDER BY draft_id;
-      ${REIMPORT_COMMIT_V10_SCHEMA_SQL};
-      INSERT INTO import_commits(
-        commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-        operation_kind, result_json, committed_at
-      )
-      SELECT commit_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-             operation_kind, result_json, committed_at
-      FROM import_commits_v9 ORDER BY commit_id;
-      ${REIMPORT_ATTEMPT_V10_SCHEMA_SQL};
-      INSERT INTO import_commit_attempts(
-        attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-        operation_kind, state, prepared_at, committed_at, uncertain_at, uncertainty_code,
-        completion_acknowledged_at
-      )
-      SELECT attempt_id, draft_id, request_fingerprint, expected_draft_version, review_digest,
-             operation_kind, state, prepared_at, committed_at, uncertain_at, uncertainty_code,
-             completion_acknowledged_at
-      FROM import_commit_attempts_v9 ORDER BY attempt_id;
-      DROP TABLE import_commit_attempts_v9;
-      DROP TABLE import_commits_v9;
-      DROP TABLE import_drafts_v9;
-      CREATE TABLE import_fidelity_reviews_v10 (
-        fidelity_review_id TEXT PRIMARY KEY,
-        book_id TEXT NOT NULL REFERENCES books(book_id),
-        source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
-        review_digest TEXT NOT NULL UNIQUE,
-        outcome TEXT NOT NULL CHECK(outcome IN ('clean-import-no-round-trip', 'degraded-import-no-round-trip')),
-        round_trip_guaranteed INTEGER NOT NULL CHECK(round_trip_guaranteed = 0),
-        created_at TEXT NOT NULL
-      ) STRICT;
-      CREATE TABLE import_fidelity_categories_v10 (
-        fidelity_review_id TEXT NOT NULL REFERENCES import_fidelity_reviews(fidelity_review_id),
-        category_key TEXT NOT NULL,
-        display_label TEXT NOT NULL,
-        item_count INTEGER NOT NULL CHECK(item_count >= 0),
-        status TEXT NOT NULL CHECK(status IN ('preserved', 'degraded', 'unsupported')),
-        detail TEXT NOT NULL,
-        position INTEGER NOT NULL CHECK(position BETWEEN 1 AND 8),
-        PRIMARY KEY(fidelity_review_id, category_key),
-        UNIQUE(fidelity_review_id, position)
-      ) STRICT;
-      CREATE TABLE import_degradation_decisions_v10 (
-        degradation_decision_id TEXT PRIMARY KEY,
-        fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
-        decision TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      ) STRICT;
-      CREATE TABLE manuscript_import_records_v10 (
-        import_record_id TEXT PRIMARY KEY,
-        commit_id TEXT NOT NULL UNIQUE,
-        book_id TEXT NOT NULL UNIQUE REFERENCES books(book_id),
-        manuscript_id TEXT NOT NULL UNIQUE REFERENCES manuscripts(manuscript_id),
-        source_version_id TEXT NOT NULL UNIQUE REFERENCES source_versions(source_version_id),
-        fidelity_review_id TEXT NOT NULL UNIQUE REFERENCES import_fidelity_reviews(fidelity_review_id),
-        degradation_decision_id TEXT REFERENCES import_degradation_decisions(degradation_decision_id),
-        resulting_revision_id TEXT NOT NULL UNIQUE REFERENCES manuscript_revisions(revision_id),
-        provenance_id TEXT NOT NULL UNIQUE REFERENCES source_provenance(provenance_id),
-        imported_at TEXT NOT NULL
-      ) STRICT;
-      INSERT INTO import_fidelity_reviews_v10 SELECT * FROM import_fidelity_reviews ORDER BY fidelity_review_id;
-      INSERT INTO import_fidelity_categories_v10 SELECT * FROM import_fidelity_categories
-        ORDER BY fidelity_review_id, position;
-      INSERT INTO import_degradation_decisions_v10 SELECT * FROM import_degradation_decisions
-        ORDER BY degradation_decision_id;
-      INSERT INTO manuscript_import_records_v10 SELECT * FROM manuscript_import_records ORDER BY import_record_id;
-      DROP TABLE manuscript_import_records;
-      DROP TABLE import_degradation_decisions;
-      DROP TABLE import_fidelity_categories;
-      DROP TABLE import_fidelity_reviews;
-      ALTER TABLE import_fidelity_reviews_v10 RENAME TO import_fidelity_reviews;
-      ALTER TABLE import_fidelity_categories_v10 RENAME TO import_fidelity_categories;
-      ALTER TABLE import_degradation_decisions_v10 RENAME TO import_degradation_decisions;
-      ALTER TABLE manuscript_import_records_v10 RENAME TO manuscript_import_records;
-      ${REIMPORT_FACT_SCHEMA_SQL}
-      CREATE INDEX import_attempts_recovery_order
-        ON import_commit_attempts(state, completion_acknowledged_at, prepared_at);
-      CREATE INDEX reimport_mappings_page
-        ON manuscript_reimport_mappings(comparison_id, position);
-      CREATE INDEX staged_reimport_identity
-        ON staged_import_blocks(draft_id, digest, kind, level);
-      CREATE INDEX revision_reimport_identity
-        ON manuscript_block_versions(revision_id, digest, kind, level);
-      ${SOURCE_IMPORT_REBUILT_TRIGGER_SQL}
-      CREATE TRIGGER reimport_record_excludes_other_results
-      BEFORE INSERT ON manuscript_reimport_records
-      WHEN EXISTS (SELECT 1 FROM manuscript_import_records WHERE commit_id = NEW.commit_id)
-        OR EXISTS (SELECT 1 FROM source_import_records WHERE commit_id = NEW.commit_id)
-      BEGIN
-        SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
-      END;
-      CREATE TRIGGER manuscript_import_record_excludes_reimport_result
-      BEFORE INSERT ON manuscript_import_records
-      WHEN EXISTS (SELECT 1 FROM manuscript_reimport_records WHERE commit_id = NEW.commit_id)
-      BEGIN
-        SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
-      END;
-      CREATE TRIGGER source_import_record_excludes_reimport_result
-      BEFORE INSERT ON source_import_records
-      WHEN EXISTS (SELECT 1 FROM manuscript_reimport_records WHERE commit_id = NEW.commit_id)
-      BEGIN
-        SELECT RAISE(ABORT, 'IMPORT_RESULT_KIND_CONFLICT');
-      END;
-      PRAGMA user_version = ${MANUSCRIPT_REIMPORT_SCHEMA_VERSION};
-    `);
-    validateManuscriptReimportSchemaTruth(db, profile);
-    db.exec('COMMIT;');
-  } catch (error) {
-    migrationError = error;
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      migrationError = new AggregateError([error, rollbackError], 'SQLite manuscript reimport migration rollback failed.');
-    }
-  } finally {
-    try {
-      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}; PRAGMA foreign_keys = ON;`);
-    } catch (restoreError) {
-      migrationError = migrationError
-        ? new AggregateError([migrationError, restoreError], 'SQLite manuscript reimport migration and pragma restoration failed.')
-        : restoreError;
-    }
-  }
-  if (migrationError) throw migrationError;
-  const violations = db.prepare('PRAGMA foreign_key_check').all();
-  requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-}
-
-/** Whether a relation already carries the revision-18 shape, which decides the rebuild below. */
-function columnIsNullable(db: DatabaseSync, table: string, column: string): boolean {
-  const rows = (db.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[])
-    .filter((row) => asString(row.name) === column);
-  requireStore(rows.length === 1, 'SCHEMA_INVALID', '无法读取来源版本结构。');
-  return asNumber(rows[0]!.notnull) === 0;
-}
-
-function columnExists(db: DatabaseSync, table: string, column: string): boolean {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as SqlRow[])
-    .some((row) => asString(row.name) === column);
-}
-
-/**
- * Revision 18's intake relations. `source_versions` and `source_provenance` are rebuilt so that a
- * retained original with no parse can be recorded (ADR 0072 §2), with every existing row copied
- * forward byte for byte — every one of them is a DOCX the product did parse, so none loses a digest
- * — and the three `source_versions` guards re-created verbatim. `import_drafts` gains the format its
- * file was identified as, defaulted so every row that predates this revision reads `DOCX`.
- *
- * The version itself moves in `task-authorization.ts`, where the terminal revision is declared. This
- * runs first and is shape-detected, so a store created fresh at revision 18 does no work here and an
- * interruption between the rebuild and the version bump simply repeats the bump on the next open.
- */
-function initializeManuscriptIntakeSchema(db: DatabaseSync): void {
-  const rebuildRelations = !columnIsNullable(db, 'source_versions', 'content_digest');
-  const addDraftFormat = !columnExists(db, 'import_drafts', 'source_format');
-  if (!rebuildRelations && !addDraftFormat) return;
-  const legacyAlterTable = asNumber(
-    one(db.prepare('PRAGMA legacy_alter_table').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取旧式改表状态。').legacy_alter_table,
-  );
-  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;');
-  let migrationError: unknown;
-  try {
-    db.exec('BEGIN IMMEDIATE;');
-    if (rebuildRelations) {
-      db.exec(`
-        DROP TRIGGER abandonment_cleanup_block_source_insert;
-        DROP TRIGGER abandonment_cleanup_block_source_update;
-        DROP TRIGGER abandonment_cleanup_block_source_update_v5;
-        ALTER TABLE source_versions RENAME TO source_versions_v17;
-        ALTER TABLE source_provenance RENAME TO source_provenance_v17;
-        ${SOURCE_VERSION_V18_SCHEMA_SQL};
-        INSERT INTO source_versions(
-          source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
-          parser_identity, format, display_name, created_at
-        )
-        SELECT source_version_id, book_id, object_digest, source_digest, content_digest, structure_digest,
-               parser_identity, format, display_name, created_at
-        FROM source_versions_v17 ORDER BY rowid;
-        ${SOURCE_PROVENANCE_V18_SCHEMA_SQL};
-        INSERT INTO source_provenance(
-          provenance_id, source_version_id, acquisition_path, locality,
-          sanitized_identity, parser_identity, recorded_at
-        )
-        SELECT provenance_id, source_version_id, acquisition_path, locality,
-               sanitized_identity, parser_identity, recorded_at
-        FROM source_provenance_v17 ORDER BY rowid;
-        DROP TABLE source_versions_v17;
-        DROP TABLE source_provenance_v17;
-        ${SOURCE_VERSION_REBUILT_TRIGGER_SQL}
-      `);
-    }
-    if (addDraftFormat) db.exec(`${IMPORT_DRAFT_SOURCE_FORMAT_V18_COLUMN_SQL};`);
-    db.exec('COMMIT;');
-  } catch (error) {
-    migrationError = error;
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      migrationError = new AggregateError([error, rollbackError], 'SQLite manuscript intake schema migration rollback failed.');
-    }
-  } finally {
-    try {
-      db.exec(`PRAGMA legacy_alter_table = ${legacyAlterTable}; PRAGMA foreign_keys = ON;`);
-    } catch (restoreError) {
-      migrationError = migrationError
-        ? new AggregateError([migrationError, restoreError], 'SQLite manuscript intake migration and pragma restoration failed.')
-        : restoreError;
-    }
-  }
-  if (migrationError) throw migrationError;
-  const violations = db.prepare('PRAGMA foreign_key_check').all();
-  requireStore(violations.length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-}
-
-/**
- * Revision 19's conversion columns (ADR 0072 §2). Every one is added by `ALTER TABLE ADD COLUMN`
- * with a null default, so no relation is rebuilt, no row is copied, and no digest of record moves;
- * a store that predates the revision simply gains five empty columns.
- *
- * `ALTER` cannot add a table `CHECK`, so the invariant those columns carry — both null or both set,
- * and set only where the format is one the product converts — is enforced in this module's writes
- * and in its read-side validation instead. Like revision 18 this runs before the version moves in
- * `task-authorization.ts` and is shape-detected, so an interruption between the two repeats only
- * the version bump on the next open.
- */
-function initializeTextConversionSchema(db: DatabaseSync): void {
-  const statements = [
-    ...(columnExists(db, 'source_versions', 'working_object_digest') ? [] : SOURCE_VERSION_V19_COLUMNS_SQL),
-    ...(columnExists(db, 'import_drafts', 'working_object_digest') ? [] : IMPORT_DRAFT_V19_COLUMNS_SQL),
-    ...(columnExists(db, 'import_abandonment_cleanup_intents', 'working_object_digest')
-      ? []
-      : ABANDONMENT_CLEANUP_V19_COLUMN_SQL),
-  ];
-  if (statements.length === 0) return;
-  try {
-    db.exec(`BEGIN IMMEDIATE;
-      ${statements.join(';\n      ')};
-      COMMIT;`);
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite text conversion schema migration rollback failed.');
-    }
-    throw error;
-  }
-  requireStore(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '数据库引用校验失败。');
-}
-
-function validateModelServiceSchema(
-  db: DatabaseSync,
-  profile: BuiltInWorkflowProfile,
-  validateStoreTruth = true,
-): void {
-  const version = asNumber(
-    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
-  );
-  if (validateStoreTruth || version !== LATEST_SCHEMA_VERSION) {
-    validateManuscriptReimportSchemaTruth(
-      db,
-      profile,
-      true,
-      version >= EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION,
-      version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION,
-      version >= J03_TASK_AUTHORIZATION_SCHEMA_VERSION,
-      version >= J04_BASELINE_ANALYSIS_SCHEMA_VERSION,
-      version >= TASK_AUTHORIZATION_SCHEMA_VERSION,
-      version >= MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
-      version >= EDITORIAL_MARK_SCHEMA_VERSION,
-      version >= MANUSCRIPT_EFFECT_SCHEMA_VERSION,
-      version >= EDITORIAL_REVIEW_SCHEMA_VERSION,
-      version >= PUBLICATION_VERSION_SCHEMA_VERSION,
-      version >= PROPOSAL_CONFLICT_SCHEMA_VERSION,
-      version >= IMPORT_RETENTION_SCHEMA_VERSION,
-      version >= IMPORTED_MARK_SCHEMA_VERSION,
-      version >= EXPORT_LEDGER_SCHEMA_VERSION,
-      version >= DEFAULT_EXECUTION_RULE_SCHEMA_VERSION,
-      version >= RUN_CONTINUATION_SCHEMA_VERSION,
-      version >= CLARIFICATION_SCHEMA_VERSION,
-      version >= REIMPORT_GROUP_SCHEMA_VERSION,
-      version >= PRODUCTION_DOCUMENT_SCHEMA_VERSION,
-      version >= PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION,
-      version >= BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION,
-      version >= PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION,
-      version >= BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION,
-      version >= PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION,
-      version >= MAINTENANCE_CASE_SCHEMA_VERSION,
-      version >= BOOK_PEOPLE_SCHEMA_VERSION,
-      version >= REVIEW_GUIDELINE_SCHEMA_VERSION,
-      version >= LIBRARY_MATERIAL_SCHEMA_VERSION,
-      version >= EVALUATION_RECORD_SCHEMA_VERSION,
-      version >= ANALYSIS_FEEDBACK_SCHEMA_VERSION,
-      version >= DECISION_FEEDBACK_SCHEMA_VERSION,
-      version >= LEARNING_ELIGIBILITY_SCHEMA_VERSION,
-      version >= EVALUATION_CALIBRATION_SCHEMA_VERSION,
-      version >= SERIES_SCHEMA_VERSION,
-      version >= SERIES_KNOWLEDGE_SCHEMA_VERSION,
-      version >= STORE_VERSION_SCHEMA_VERSION,
-      version >= DATABASE_EXPORT_SCHEMA_VERSION,
-      version >= SCHEDULED_BACKUP_SCHEMA_VERSION,
-      version >= DATABASE_REPLACEMENT_SCHEMA_VERSION,
-      version >= DATABASE_MERGE_SCHEMA_VERSION,
-      version >= INITIAL_EVALUATION_SCHEMA_VERSION,
-      version >= DIALOGUE_SCHEMA_VERSION,
-      version >= SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION,
-      version >= READERS_REPORT_SCHEMA_VERSION,
-      version >= CAPTURED_PROCEDURE_SCHEMA_VERSION,
-      version >= EVALUATION_REWRITE_SCHEMA_VERSION,
-      version >= WRITING_TASK_SCHEMA_VERSION,
-      version >= BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION,
-      version >= MATERIAL_INDEX_SCHEMA_VERSION,
-      version >= OUTCOME_RESOLUTION_SCHEMA_VERSION,
-    );
-  }
-    requireStore(!modelServiceRowsOutsideBindings(db), 'SCHEMA_INVALID', '模型服务连接记录超出当前固定绑定。');
-  for (const row of db.prepare('SELECT * FROM model_service_connections').iterate()) readModelConnectionTest(row);
-}
-
-/** Revision 74 (Issue #473): one connection row per shipped search backend, the registry's top rank selected; an existing table is checked, never rebuilt. */
-function initializeSearchBackendSchema(db: DatabaseSync): void {
-  const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'search_backend_connections'").get() as SqlRow | undefined;
-  const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
-  if (row !== undefined) {
-    requireStore(fold(asString(row.sql)) === fold(SEARCH_BACKEND_CONNECTIONS_SQL), 'SCHEMA_INVALID', '联网检索连接表结构不兼容。');
-    requireStore(asNumber((db.prepare('SELECT count(*) total FROM search_backend_connections').get() as SqlRow).total) === 5 && db.prepare('SELECT 1 FROM search_backend_connections WHERE selected = 1').all().length === 1, 'SCHEMA_INVALID', '联网检索连接记录不完整。');
-    return;
-  }
-  requireStore(asNumber((db.prepare('PRAGMA user_version').get() as SqlRow).user_version) < SEARCH_BACKEND_SCHEMA_VERSION, 'SCHEMA_INVALID', '联网检索连接表缺失。');
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    db.exec(SEARCH_BACKEND_CONNECTIONS_SQL);
-    const insert = db.prepare("INSERT INTO search_backend_connections VALUES (?, NULL, 'missing', ?, ?)");
-    const instant = new Date().toISOString();
-    for (const entry of SEARCH_BACKENDS.filter((backend) => backend.shipped)) insert.run(entry.id, entry.id === defaultSearchBackend()!.id ? 1 : null, instant);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; }
-}
-
-/** Read only the closed, generation-bound metadata retained by the protected synthetic test. */
-function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus | null {
-  if (row.connection_test == null) return null;
-  const json = asString(row.connection_test);
-  requireStore(json.length <= 8192, 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
-  const value: unknown = JSON.parse(json);
-  requireStore(isRecord(value) && hasExactKeys(value, ['modelId', 'credentialUpdatedAt', 'testedAt', 'outcome', 'code', 'verified',
-    ...(value.provenance === undefined ? [] : ['provenance'])]) &&
-    value.credentialUpdatedAt === row.credential_updated_at && typeof value.testedAt === 'string' && value.testedAt.length <= 30 && Number.isFinite(Date.parse(value.testedAt)) &&
-    ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(value.outcome as string) && value.verified === 'buffered-text-only' &&
-    (value.code === null || (typeof value.code === 'string' && /^[A-Z0-9_]{1,100}$/u.test(value.code))) &&
-    MODEL_SERVICE_ROUTES.includes(row.provider_id as ModelServiceRouteId) && validModelServiceModelId(value.modelId as string),
-    'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
-  const facts = value.provenance;
-  requireStore(value.outcome !== 'passed' || (value.code === null && facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
-  if (facts !== undefined) requireStore(isModelTextAttemptProvenance(facts) && facts.model === value.modelId && modelServiceChannelOf(facts.route) === row.provider_id &&
-    facts.credentialReference === row.credential_reference && facts.credentialSlot === row.credential_slot && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || (facts.policyVersion === 'v32' || facts.policyVersion === 'v33')) && facts.failureCode === value.code &&
-    (facts.credentialUpdatedAt === undefined || facts.credentialUpdatedAt === value.credentialUpdatedAt) &&
-    allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null,
-    'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
-  return value as unknown as ModelConnectionTestStatus;
-}
-
-/**
- * `validateStoreTruth` follows the same rule as `initializeBoundedSchema`: only a caller that keeps
- * an earlier and a later terminal-version store-truth validation in the same `EditorialStore.open`
- * may suppress this intermediate one. The fixed model-service connection check always runs, and any
- * version below the terminal one validates exactly as it does when the flag is absent.
- */
-function initializeModelServiceSchema(
-  db: DatabaseSync,
-  profile: BuiltInWorkflowProfile,
-  validateStoreTruth = true,
-): void {
-  const version = asNumber(
-    one(db.prepare('PRAGMA user_version').all() as SqlRow[], 'SCHEMA_INVALID', '无法读取数据库版本。').user_version,
-  );
-  requireStore(
-    version === MANUSCRIPT_REIMPORT_SCHEMA_VERSION || version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === LATEST_SCHEMA_VERSION),
-    'SCHEMA_UNSUPPORTED',
-    '数据库版本不受支持。',
-  );
-  if (version === MODEL_SERVICE_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION ||
-      version === EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION || version === J03_TASK_AUTHORIZATION_SCHEMA_VERSION ||
-      version === J04_BASELINE_ANALYSIS_SCHEMA_VERSION || version === SUCCESSIVE_TASK_SCHEMA_VERSION ||
-      version === TASK_AUTHORIZATION_SCHEMA_VERSION || version === MANUSCRIPT_INTAKE_SCHEMA_VERSION ||
-      version === TEXT_CONVERSION_SCHEMA_VERSION || version === FACTUAL_REVIEW_SCHEMA_VERSION ||
-      version === MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION || version === EDITORIAL_MARK_SCHEMA_VERSION ||
-      version === MANUSCRIPT_EFFECT_SCHEMA_VERSION ||
-      version === EDITORIAL_REVIEW_SCHEMA_VERSION ||
-      version === PUBLICATION_VERSION_SCHEMA_VERSION || version === PROPOSAL_CONFLICT_SCHEMA_VERSION ||
-      version === IMPORT_RETENTION_SCHEMA_VERSION || version === IMPORTED_MARK_SCHEMA_VERSION ||
-      version === EXPORT_LEDGER_SCHEMA_VERSION || version === CONNECTIVITY_WAIT_SCHEMA_VERSION || version === DEFAULT_EXECUTION_RULE_SCHEMA_VERSION ||
-      version === RUN_CANCELLATION_SCHEMA_VERSION ||
-      version === RUN_CONTINUATION_SCHEMA_VERSION ||
-      version === PLAN_EDIT_SCHEMA_VERSION ||
-      version === CLARIFICATION_SCHEMA_VERSION ||
-      version === REIMPORT_GROUP_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_VERSION ||
-      version === BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_VERSION ||
-      version === PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_VERSION ||
-      version === MAINTENANCE_CASE_SCHEMA_VERSION ||
-      version === BOOK_PEOPLE_SCHEMA_VERSION ||
-      version === REVIEW_GUIDELINE_SCHEMA_VERSION ||
-      version === LIBRARY_MATERIAL_SCHEMA_VERSION ||
-      version === EVALUATION_RECORD_SCHEMA_VERSION ||
-      version === ANALYSIS_FEEDBACK_SCHEMA_VERSION ||
-      version === DECISION_FEEDBACK_SCHEMA_VERSION ||
-      version === LEARNING_ELIGIBILITY_SCHEMA_VERSION ||
-      version === EVALUATION_CALIBRATION_SCHEMA_VERSION ||
-      version === SERIES_SCHEMA_VERSION ||
-      version === SERIES_KNOWLEDGE_SCHEMA_VERSION ||
-      version === STORE_VERSION_SCHEMA_VERSION ||
-      version === DATABASE_EXPORT_SCHEMA_VERSION ||
-      version === SCHEDULED_BACKUP_SCHEMA_VERSION ||
-      version === DATABASE_REPLACEMENT_SCHEMA_VERSION ||
-      version === DATABASE_MERGE_SCHEMA_VERSION ||
-      version === INITIAL_EVALUATION_SCHEMA_VERSION ||
-      version === DIALOGUE_SCHEMA_VERSION ||
-      version === SERIES_RETRIEVAL_EXCLUSION_SCHEMA_VERSION ||
-      version === READERS_REPORT_SCHEMA_VERSION ||
-      version === CAPTURED_PROCEDURE_SCHEMA_VERSION ||
-      version === EVALUATION_REWRITE_SCHEMA_VERSION ||
-      version === WRITING_TASK_SCHEMA_VERSION ||
-      version === BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_VERSION ||
-      version === MATERIAL_INDEX_SCHEMA_VERSION ||
-      (version === OUTCOME_RESOLUTION_SCHEMA_VERSION || version === IMPORTED_EXEMPLAR_SCHEMA_VERSION || version === EVALUATION_PROFILE_SCHEMA_VERSION || version === DIALOGUE_LIVE_BINDING_SCHEMA_VERSION || version === MODEL_SERVICE_ROUTES_SCHEMA_VERSION || version === MODEL_CLARIFICATION_SCHEMA_VERSION || version === SEARCH_BACKEND_SCHEMA_VERSION || version === RESEARCH_EVIDENCE_SCHEMA_VERSION || version === MATERIAL_INDEX_LAYER_SCHEMA_VERSION || version === PROPOSAL_REVIEW_SCHEMA_VERSION || version === FACTUAL_VERIFICATION_SCHEMA_VERSION || version === HOUSE_REVIEW_PREFERENCE_SCHEMA_VERSION || version === TASK_INTENT_DRAFT_SCHEMA_VERSION || version === IMPORTED_SKILL_SCHEMA_VERSION || version === CUSTOM_ANALYSIS_SCHEMA_VERSION || version === IMPORTED_SKILL_UPDATE_SCHEMA_VERSION || version === MODEL_SELECTION_SCHEMA_VERSION || version === PROCEDURE_DEFINITION_SCHEMA_VERSION || version === EDITORIAL_LEARNING_SCHEMA_VERSION || version === GLOBAL_AGENT_SCHEMA_VERSION || version === REVIEW_CONTRACT_SCHEMA_VERSION || version === IDLE_BACKGROUND_SCHEMA_VERSION || version === LOCAL_REVIEW_SCHEMA_VERSION || version === EDITORIAL_MEMORY_SCHEMA_VERSION || version === MODEL_REQUEST_ADMISSION_SCHEMA_VERSION || version === WORD_TRACKED_IMPORT_SCHEMA_VERSION || version === POLICY_ORIGINAL_FIELDS_READER_SCHEMA_VERSION || version === LEARNING_CURATION_SCHEMA_VERSION || version === 97 || version === 98 || version === 99 || version === 100 || version === 101 || version === 102 || version === 103 || version === 104 || version === 105 || version === LATEST_SCHEMA_VERSION)) {
-    validateModelServiceSchema(db, profile, validateStoreTruth);
-    if (version === EDITORIAL_WORKSPACE_PROFILE_PREDECESSOR_SCHEMA_VERSION) {
-      validateEditorialWorkspaceProfileNativeSchema(db);
-    } else if (version >= EDITORIAL_WORKSPACE_PROFILE_SCHEMA_VERSION) {
-      validateEditorialWorkspaceProfileSchema(db);
-    }
-    return;
-  }
-  try {
-    db.exec(`
-      BEGIN IMMEDIATE;
-      ${MODEL_SERVICE_CONNECTION_REVISION_11_SQL};
-      PRAGMA user_version = ${MODEL_SERVICE_SCHEMA_VERSION};
-    `);
-    validateModelServiceSchema(db, profile);
-    db.exec('COMMIT;');
-  } catch (error) {
-    try {
-      db.exec('ROLLBACK;');
-    } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'SQLite model-service schema migration rollback failed.');
-    }
-    throw error;
-  }
-}
-
 interface DraftSnapshot {
   draftId: string;
   state: string;
@@ -3689,49 +1685,6 @@ interface AbandonmentCleanupIntent {
   workingObjectDigest: string | null;
 }
 
-export interface StoreControl {
-  induceUnprovableReconciliation: boolean;
-  persistLegacyReviewedDraft: boolean;
-  induceReimportProofTamper: boolean;
-  induceAbandonObjectRemovalFailure: boolean;
-  interruptAfterAbandonObjectRemoval: boolean;
-  /** The J-04-only local deterministic route resolved at service startup; `null` in every other launch. */
-  baselineAnalysisRoute: BaselineAnalysisRouteFacts | null;
-  /**
-   * The prompt contract the baseline ledger asks under (Issue #826): the service entry sets `retained-v1` only as
-   * `baselinePromptContractForLaunch` decides it, for J-04's replay of the recorded /1 Run; absent, the current one. The
-   * store refuses it beside any route but that recorded fixture alone.
-   */
-  baselinePromptContract?: BaselinePromptContractSelection;
-  /**
-   * The adjusted Books the house calibration offset waits on (Issue #429, EVAL-011a): `CALIBRATION_MIN_ADJUSTMENTS` unless a
-   * development-ci J-11 launch lowers it with `--j11-calibration-min-books`, so the Journey proves the gate with two Books.
-   */
-  calibrationMinAdjustments?: number;
-  /**
-   * The software version the service entry read from the package the product ships in (Issue #433, S85a): the built
-   * carrier holds no package manifest. Absent, the store reads the one at its code root — the source tree's, as the
-   * service suites open it.
-   */
-  softwareVersion?: string;
-  /**
-   * The suites' own classification of schema revisions (Issue #433, S85b), so an upgrade to a later Data Version can be
-   * opened before a later revision is classified breaking. The service entry never sets it.
-   */
-  schemaRevisionClasses?: ReadonlyArray<ClassifiedSchemaRevision>;
-  /**
-   * The suites stop an open here (Issue #433 review): after every migration and just before the versions that opened the store
-   * are recorded, or just after, before the upgrade's note is cleared. The service entry never sets it.
-   */
-  interruptUpgradeAt?: 'before-record' | 'after-record';
-  /**
-   * The suites record a new writing Task under these copy rules (#707): `1` composes its contract, its plan and its row as the
-   * software before #698 did — a row naming no rules — so a genuine `/1` Task is driven through the store's authorize, run and
-   * parse wiring. The service entry never sets it; absent, every Task is `/2`.
-   */
-  writingCopyRules?: WritingCopyRules;
-}
-
 function continuationNotice(access: OriginalFileAccessProjection): string {
   if (access.state === 'available-exact') return '已重新校验完整暂存快照；原始所选文件仍可访问且身份一致。';
   return `${access.label}。已重新校验完整暂存快照，不会从原路径读取或替换暂存内容。`;
@@ -3764,14 +1717,6 @@ function canonicalDegradationDecision(plan: ImportFidelityPlan): string | null {
     state: 'accepted-complete-set',
     items: plan.degradations,
   });
-}
-
-function parseStoredJson(value: string, message: string): unknown {
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    throw new StoreError('STORE_CORRUPT', message);
-  }
 }
 
 function createLegacyNewBookReviewDigestV2(
@@ -4366,18 +2311,6 @@ function closeDatabaseQuietly(db: DatabaseSync | null): void {
   }
 }
 
-/**
- * Why a Book's own Source Version cannot take the same file again (Issue #532): an earlier parser read it, and AI7 reads
- * files differently now. Said at the choice, in the editor's words; the way on is a new Book.
- */
-/**
- * How many review-category ledgers, and as many category kind definitions, the store keeps (Issue #649). Every distinct
- * category contract — with 书系一致性, every Series Knowledge revision and Series a member Book reviews against — asks
- * for its own, so the store keeps the most recently used and makes any other afresh from the Book database; a ledger
- * with a preparation in flight is always kept, because only that instance holds it.
- */
-export const REVIEW_CATEGORY_CACHE_CAPACITY = 16;
-
 export const SOURCE_VERSION_PARSER_CHANGED_MESSAGE =
   '这本书里已有同一个文件的来源版本，但它是用旧版 AI7 的读取方式导入的；AI7 现在读取文件的方式已经不同，不能在原来的来源版本上再次导入这个文件。可以把它作为新建图书导入。';
 
@@ -4427,9 +2360,6 @@ export interface BackgroundAnalysisRuntime {
   readonly quietMs: number;
 }
 
-/** The kinds whose Tasks run on an analysis ledger and wait with 联网后开始任务 through `startTaskWhenOnline` (Issue #760). */
-export type LedgerTaskKind = Exclude<StartWhenOnlineTaskKind, 'review-run'>;
-
 /**
  * A Run waiting in Connectivity Wait, of any kind (Issue #760, plan slice S74c): its Book, its Task, and its Run — a Review Run
  * waits as a whole, and names itself, since its categories' Runs are recorded only as each one's turn comes.
@@ -4445,7 +2375,6 @@ export interface WaitingTaskRun {
   readonly at: string;
 }
 
-const TASK_PLAN_NOT_CURRENT_REASON = '这项任务已不是这本书当前的任务；请从它所在的位置重新打开计划。';
 /**
  * What moved, by the refusal a waiting ledger Task's own start check makes at Reconnect Preflight (Issue #760; OFF-008), in the
  * words 需要重新确认计划 names it with.
@@ -4459,28 +2388,8 @@ const WAITING_TASK_MOVED_LABELS: Readonly<Record<string, string>> = {
   MATERIAL_REFERENCE_UNAVAILABLE: '参考资料的允许参考（已撤回）',
   MATERIAL_INDEX_RECORD_INVALID: '参考资料的索引记录（已损坏）',
 };
+
 const WAITING_TASK_MOVED_FALLBACK = '计划依据的内容';
-/**
- * Records merged from another house keep their own profile by value (KB-002), so they match none of this house's 评估方案
- * versions. 知识库 › 评估方案 counts them under this labelled bucket (Issue #798, P3-6) instead of dropping them from every
- * version's use count. The renderer holds the same id literal to label the card.
- */
-export const EVALUATION_PROFILE_UNKNOWN_ID = 'unknown/merged-profile';
-export const EVALUATION_PROFILE_UNKNOWN_TITLE = '未知版本';
-
-/** How many paragraphs 构建相似索引 embeds and writes at a time (Issue #892): the service takes its other work between two. */
-const MATERIAL_VECTOR_BATCH = 256;
-/** Why the two on-request layers are not made while a database replacement waits (Issue #892). */
-const MATERIAL_LAYERS_READ_ONLY = '数据库替换正在等待：资料索引暂不建立新的层。';
-
-/** 准备计划's draft as a preparation carries it (Issue #423, slice 7a): its version, its sentence, and how the promotion is recorded. */
-export interface DraftPromotion {
-  readonly versionId: string;
-  readonly goal: string;
-  readonly paragraphs?: number;
-  readonly deliverable?: import('../shared/protocol.js').TaskIntentDeliverablePin;
-  promoted(task: { readonly taskIntentId: string | null; readonly reviewRunId: string | null }): void;
-}
 
 /** What 准备计划 starts (Issue #423, slice 7a): the existing preparation of one kind, with the draft it is prepared from. */
 export type DraftPreparation =
@@ -4493,6 +2402,210 @@ export type DraftPreparation =
   };
 
 export class EditorialStore {
+  readonly #initialEvaluationOperationsHost: initialEvaluationOperations.InitialEvaluationOperationsHost = this.#initialEvaluationOperationsHostOf();
+
+  #initialEvaluationOperationsHostOf(): initialEvaluationOperations.InitialEvaluationOperationsHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      get control() { return store.#control; },
+      evaluationBookTitle: this.#evaluationBookTitle.bind(this),
+      evaluationCall: this.#evaluationCall.bind(this),
+      get evaluationProfiles() { return store.#evaluationProfiles; },
+      get evaluations() { return store.#evaluations; },
+      get initialEvaluation() { return store.#initialEvaluation; },
+      get initialEvaluationLedgers() { return store.#initialEvaluationLedgers; },
+      get initialEvaluationWork() { return store.#initialEvaluationWork; },
+      ledgerTaskOf: this.#ledgerTaskOf.bind(this),
+      prepareTaskMaterials: this.#prepareTaskMaterials.bind(this),
+      requireLedgerKindScope: this.#requireLedgerKindScope.bind(this),
+      taskMaterialOffers: this.#taskMaterialOffers.bind(this),
+      taskMaterialReadings: this.#taskMaterialReadings.bind(this),
+      transaction: this.#transaction.bind(this),
+      get initialEvaluationLedgerForBook() { return store.initialEvaluationLedgerForBook.bind(store); },
+      get inspectEvaluationProfiles() { return store.inspectEvaluationProfiles.bind(store); },
+      get inspectInitialEvaluation() { return store.inspectInitialEvaluation.bind(store); },
+    };
+  }
+
+  readonly #factualVerificationOperationsHost: factualVerificationOperations.FactualVerificationOperationsHost = this.#factualVerificationOperationsHostOf();
+
+  #factualVerificationOperationsHostOf(): factualVerificationOperations.FactualVerificationOperationsHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      get authority() { return store.#authority; },
+      get backgroundEnrollmentHost() { return store.#backgroundEnrollmentHost; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get editorialMarks() { return store.#editorialMarks; },
+      get enrollments() { return store.#enrollments; },
+      evidenceCall: this.#evidenceCall.bind(this),
+      evidenceSaveRefusal: this.#evidenceSaveRefusal.bind(this),
+      get factualReview() { return store.#factualReview; },
+      get factualVerification() { return store.#factualVerification; },
+      libraryCall: this.#libraryCall.bind(this),
+      markCall: this.#markCall.bind(this),
+      get researchEvidence() { return store.#researchEvidence; },
+      reviewCall: this.#reviewCall.bind(this),
+      get reviewRuns() { return store.#reviewRuns; },
+      transaction: this.#transaction.bind(this),
+      get factualRecheckCurrent() { return store.factualRecheckCurrent.bind(store); },
+      get getConfiguredModelRoleBinding() { return store.getConfiguredModelRoleBinding.bind(store); },
+      get getSearchBackendConnections() { return store.getSearchBackendConnections.bind(store); },
+      get replacementFrozen() { return store.replacementFrozen.bind(store); },
+      get retrievalSourcesForRun() { return store.retrievalSourcesForRun.bind(store); },
+    };
+  }
+
+  readonly #writingTaskOperationsHost: writingTaskOperations.WritingTaskOperationsHost = this.#writingTaskOperationsHostOf();
+
+  #writingTaskOperationsHostOf(): writingTaskOperations.WritingTaskOperationsHost {
+    const store = this;
+    return {
+      analysisCall: this.#analysisCall.bind(this),
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get bookPeople() { return store.#bookPeople; },
+      get boundedAuthority() { return store.#boundedAuthority; },
+      boundedCall: this.#boundedCall.bind(this),
+      get control() { return store.#control; },
+      documentCall: this.#documentCall.bind(this),
+      get documentWorkflow() { return store.#documentWorkflow; },
+      evaluationCall: this.#evaluationCall.bind(this),
+      get evaluations() { return store.#evaluations; },
+      importedCall: this.#importedCall.bind(this),
+      indexedMaterialOffers: this.#indexedMaterialOffers.bind(this),
+      ledgerTaskOf: this.#ledgerTaskOf.bind(this),
+      libraryCall: this.#libraryCall.bind(this),
+      get libraryMaterials() { return store.#libraryMaterials; },
+      get materialIndex() { return store.#materialIndex; },
+      materialIndexCall: this.#materialIndexCall.bind(this),
+      peopleCall: this.#peopleCall.bind(this),
+      get productionDocuments() { return store.#productionDocuments; },
+      requireLedgerKindScope: this.#requireLedgerKindScope.bind(this),
+      ruleCall: this.#ruleCall.bind(this),
+      ruleOffer: this.#ruleOffer.bind(this),
+      ruleProjection: this.#ruleProjection.bind(this),
+      ruleStartedBy: this.#ruleStartedBy.bind(this),
+      get rules() { return store.#rules; },
+      get series() { return store.#series; },
+      seriesCall: this.#seriesCall.bind(this),
+      transaction: this.#transaction.bind(this),
+      get writingExemplarCache() { return store.#writingExemplarCache; },
+      get writingLedgers() { return store.#writingLedgers; },
+      get writingRevisionDrafts() { return store.#writingRevisionDrafts; },
+      get writingTasks() { return store.#writingTasks; },
+      get writingWork() { return store.#writingWork; },
+      get inspectExemplars() { return store.inspectExemplars.bind(store); },
+      get inspectTaskPlanWithConnection() { return store.inspectTaskPlanWithConnection.bind(store); },
+      get inspectWritingTask() { return store.inspectWritingTask.bind(store); },
+      get pinMaterialReference() { return store.pinMaterialReference.bind(store); },
+      get readMaterialIndexForTask() { return store.readMaterialIndexForTask.bind(store); },
+    };
+  }
+
+  readonly #globalAgentOperationsHost: globalAgentOperations.GlobalAgentOperationsHost = this.#globalAgentOperationsHostOf();
+
+  #globalAgentOperationsHostOf(): globalAgentOperations.GlobalAgentOperationsHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get baselineAnalysis() { return store.#baselineAnalysis; },
+      get codeRoot() { return store.#codeRoot; },
+      dialogueCall: this.#dialogueCall.bind(this),
+      get dialogueHistory() { return store.#dialogueHistory; },
+      get dialogues() { return store.#dialogues; },
+      editorialMemoryGovernanceHooks: this.#editorialMemoryGovernanceHooks.bind(this),
+      learningCall: this.#learningCall.bind(this),
+      learningLedger: this.#learningLedger.bind(this),
+      get learningSupervisionHost() { return store.#learningSupervisionHost; },
+      get localFixtureCatalog() { return store.#localFixtureCatalog; },
+      set localFixtureCatalog(value) { store.#localFixtureCatalog = value; },
+      transaction: this.#transaction.bind(this),
+      get getConfiguredModelRoleBinding() { return store.getConfiguredModelRoleBinding.bind(store); },
+      get getManuscriptWindow() { return store.getManuscriptWindow.bind(store); },
+      get getModelServiceConnections() { return store.getModelServiceConnections.bind(store); },
+      get globalAgentAttempt() { return store.globalAgentAttempt.bind(store); },
+      get globalAgentModelConnection() { return store.globalAgentModelConnection.bind(store); },
+      get globalAgentProcedureDocument() { return store.globalAgentProcedureDocument.bind(store); },
+      get globalAgentRedact() { return store.globalAgentRedact.bind(store); },
+      get globalAgentScopeCurrent() { return store.globalAgentScopeCurrent.bind(store); },
+      get globalAgentSourcesCurrent() { return store.globalAgentSourcesCurrent.bind(store); },
+      get inspectGlobalAgent() { return store.inspectGlobalAgent.bind(store); },
+      get prepareGlobalAgentTurn() { return store.prepareGlobalAgentTurn.bind(store); },
+    };
+  }
+
+  readonly #materialIndexOperationsHost: materialIndexOperations.MaterialIndexOperationsHost = this.#materialIndexOperationsHostOf();
+
+  #materialIndexOperationsHostOf(): materialIndexOperations.MaterialIndexOperationsHost {
+    const store = this;
+    return {
+      get authority() { return store.#authority; },
+      get dataRoot() { return store.#dataRoot; },
+      get embedding() { return store.#embedding; },
+      enrollmentCall: this.#enrollmentCall.bind(this),
+      get enrollments() { return store.#enrollments; },
+      get idleVectorItems() { return store.#idleVectorItems; },
+      get indexController() { return store.#indexController; },
+      set indexController(value) { store.#indexController = value; },
+      get indexEnabled() { return store.#indexEnabled; },
+      set indexEnabled(value) { store.#indexEnabled = value; },
+      get indexQueue() { return store.#indexQueue; },
+      get indexRun() { return store.#indexRun; },
+      set indexRun(value) { store.#indexRun = value; },
+      get indexStopped() { return store.#indexStopped; },
+      set indexStopped(value) { store.#indexStopped = value; },
+      get indexing() { return store.#indexing; },
+      set indexing(value) { store.#indexing = value; },
+      libraryCall: this.#libraryCall.bind(this),
+      get libraryMaterials() { return store.#libraryMaterials; },
+      get materialIndex() { return store.#materialIndex; },
+      get poisoned() { return store.#poisoned; },
+      transaction: this.#transaction.bind(this),
+      get translating() { return store.#translating; },
+      set translating(value) { store.#translating = value; },
+      get translationFailures() { return store.#translationFailures; },
+      get translationRun() { return store.#translationRun; },
+      set translationRun(value) { store.#translationRun = value; },
+      get translator() { return store.#translator; },
+      set translator(value) { store.#translator = value; },
+      get vectorBuilding() { return store.#vectorBuilding; },
+      set vectorBuilding(value) { store.#vectorBuilding = value; },
+      get vectorLaneIdle() { return store.#vectorLaneIdle; },
+      set vectorLaneIdle(value) { store.#vectorLaneIdle = value; },
+      get vectorQueue() { return store.#vectorQueue; },
+      get vectorRun() { return store.#vectorRun; },
+      set vectorRun(value) { store.#vectorRun = value; },
+      get inspectLibraryMaterial() { return store.inspectLibraryMaterial.bind(store); },
+      get replacementFrozen() { return store.replacementFrozen.bind(store); },
+      get startMaterialIndexing() { return store.startMaterialIndexing.bind(store); },
+    };
+  }
+
+  readonly #modelSearchSettingsHost: modelSearchSettings.ModelSearchSettingsHost = this.#modelSearchSettingsHostOf();
+
+  #modelSearchSettingsHostOf(): modelSearchSettings.ModelSearchSettingsHost {
+    const store = this;
+    return {
+      assertAvailable: this.#assertAvailable.bind(this),
+      get authority() { return store.#authority; },
+      get dataRoot() { return store.#dataRoot; },
+      transaction: this.#transaction.bind(this),
+      get getModelServiceConnections() { return store.getModelServiceConnections.bind(store); },
+      get getModelServiceModels() { return store.getModelServiceModels.bind(store); },
+      get getModelServiceRouteConnection() { return store.getModelServiceRouteConnection.bind(store); },
+      get getSearchBackendConnections() { return store.getSearchBackendConnections.bind(store); },
+      get modelServiceBinding() { return store.modelServiceBinding.bind(store); },
+      get selectRoleModel() { return store.selectRoleModel.bind(store); },
+    };
+  }
+
   readonly #dataRoot: string;
   readonly #objectsRoot: string;
   readonly #authority: DatabaseSync;
@@ -9134,33 +7247,7 @@ export class EditorialStore {
    * scheduled by it.
    */
   inspectResearchEvidence(input: ServiceOperationMap['inspectResearchEvidence']['input']): ResearchEvidenceBookProjection {
-    return this.#evidenceCall(() => {
-      requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '所选图书不存在。');
-      requireStore(input.staleAfterDays === null || (Number.isSafeInteger(input.staleAfterDays) && input.staleAfterDays >= 1 && input.staleAfterDays <= 3650),
-        'RESEARCH_EVIDENCE_STALE_AFTER_INVALID', '过期天数无效。');
-      let runRecordId: string | undefined;
-      let findingId: string | undefined;
-      if (input.taskIntentId !== undefined) {
-        const run = this.#authority.prepare(`SELECT r.run_record_id FROM analysis_run_records r
-          JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE t.book_id = ? AND t.task_intent_id = ?`)
-          .get(input.bookId, input.taskIntentId) as SqlRow | undefined;
-        // An unstarted task has no evidence, never the Book's unrelated latest Run.
-        runRecordId = run === undefined ? '' : String(run.run_record_id);
-      }
-      if (input.reviewFindingId !== undefined) {
-        requireStore(input.taskIntentId !== undefined, 'RESEARCH_EVIDENCE_INVALID', '查看发现的来源需要指定任务。');
-        const finding = this.#authority.prepare(`SELECT f.kind_ref FROM review_findings f
-          JOIN review_runs r ON r.review_run_id = f.review_run_id WHERE r.book_id = ? AND f.finding_id = ? AND f.category_id = 'factual-review'`)
-          .get(input.bookId, input.reviewFindingId) as SqlRow | undefined;
-        findingId = finding === undefined ? '' : String(finding.kind_ref);
-      }
-      return this.#researchEvidence.projection({
-        bookId: input.bookId, after: input.after, now: new Date(),
-        ...(runRecordId === undefined ? {} : { runRecordId }), ...(findingId === undefined ? {} : { findingId }),
-        ...(input.staleAfterDays === null ? {} : { staleAfterDays: input.staleAfterDays }),
-        saveRefusal: (source) => this.#evidenceSaveRefusal(source),
-      });
-    });
+    return factualVerificationOperations.inspectResearchEvidence(this.#factualVerificationOperationsHost, input);
   }
 
   /**
@@ -9168,115 +7255,38 @@ export class EditorialStore {
    * authorizing Task). The Run's own Book only; the unit once.
    */
   recordResearchEvidence(input: Parameters<ResearchEvidenceLedger['record']>[0]): string[] {
-    return this.#evidenceCall(() => this.#transaction(this.#authority, () => this.#researchEvidence.record(input)));
+    return factualVerificationOperations.recordResearchEvidence(this.#factualVerificationOperationsHost, input);
   }
 
   // ---- Factual verification (Issue #901; FACT, EVID, EASSURE, FREV, CORR) ---------------------------------------------------
 
   #factualRecheckCandidate(enrollment: BackgroundAnalysisEnrollmentRecord, decisionId: string): FactualRecheckCandidate | null {
-    const launch = this.#baselineAnalysis.launch;
-    const live = launch.live;
-    const policy = selectedPolicyIdentityOf(launch.policy?.selectedPolicyIdentity);
-    const admitted = liveKindRule(launch.policy, 'factual-recheck', [], 'background');
-    const rule = admitted?.factualRecheck;
-    if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
-      launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || (policy?.providerProcessingVersion !== 'v31' && (policy?.providerProcessingVersion !== 'v32' && policy?.providerProcessingVersion !== 'v33')) ||
-      rule?.maximumClaims !== 1 || this.replacementFrozen()) return null;
-    const binding = this.getConfiguredModelRoleBinding('main-editorial');
-    if (binding === null || canonicalJson(binding) !== canonicalJson({ route: live.route, endpoint: live.endpoint, model: live.model,
-      credentialSlot: live.credentialSlot, credentialReference: live.credentialReference }) ||
-      admitted?.route !== live.route || admitted.model !== live.model || admitted.endpoint !== live.endpoint || admitted.credentialSlot !== live.credentialSlot ||
-      !modelAdmitsPlatformTools(live.route, live.model) || platformToolsFromProjection(admitted) === null) return null;
-    const enrolledBinding = backgroundEnrollments.enrollmentBinding(this.#backgroundEnrollmentHost, enrollment.bookId, 'factual-recheck');
-    if (enrolledBinding === null || canonicalJson({ ...enrolledBinding, runBudgetCeiling: enrollment.version.binding.runBudgetCeiling }) !== canonicalJson(enrollment.version.binding)) return null;
-    const row = this.#authority.prepare('SELECT result_id FROM factual_review_decisions WHERE decision_id = ? AND book_id = ?').get(decisionId, enrollment.bookId);
-    if (row === undefined) return null;
-    const { reader } = this.#resultBinding(enrollment.bookId, String(row.result_id));
-    const selection = this.#factualVerification.recheckSelection(enrollment.bookId, decisionId, reader);
-    const checkpoint = this.#authority.prepare(`SELECT c.* FROM analysis_task_input_checkpoints c JOIN analysis_run_records r
-      ON r.task_intent_id = c.task_intent_id WHERE r.run_record_id = ?`).get(selection.sourceRunRecordId);
-    const point = this.#factualReview.workingPointOf(enrollment.bookId);
-    if (checkpoint === undefined || checkpoint.revision_id !== point.revisionId || checkpoint.revision_digest !== point.workingDigest ||
-      Number(checkpoint.journal_sequence) !== point.journalSequence) return null;
-    const search = this.getSearchBackendConnections().find((entry) => entry.selected && entry.credentialOperationState === 'ready' && entry.credentialReference !== null);
-    if (search === undefined) return null;
-    const backend = searchBackend(search.backendId);
-    const ledger = this.#factualVerification.claims(selection.originalRunRecordId)!;
-    const message = factualClaimVerificationInput(ledger, selection.claimId, rule.verificationContract.maximumMetadataUtf8Bytes);
-    const prompt = factualClaimVerificationPrompt(selection.level);
-    const { pin } = resolveProcedureDefinition(this.#authority, 'ai7-procedure/factual-claim-check', 1);
-    return { enrollmentId: enrollment.enrollmentId, enrollmentVersionId: enrollment.version.enrollmentVersionId,
-      onceKey: canonicalRecord({ enrollmentId: enrollment.enrollmentId, ledgerDigest: ledger.digest, claimId: selection.claimId, decisionId }).digest,
-      selection, ledger, policy, binding: { route: live.route, endpoint: live.endpoint, model: live.model, credentialSlot: live.credentialSlot, credentialReference: live.credentialReference },
-      search: { backendId: search.backendId, host: backend.declaration.host!, selectedAt: search.selectedAt,
-        configurationDigest: searchBackendConfigurationDigest(search.backendId), credentialReference: search.credentialReference! },
-      procedure: pin, maximumTokens: enrollment.version.share.maxTotalTokens, message: message.message,
-      prompt: prompt.systemPrompt, promptDigest: canonicalRecord(prompt).digest,
-      limits: { model: rule.verificationContract.maximumModelRequestsPerSession, tool: rule.verificationContract.maximumPlatformToolRoundsPerSession,
-        search: rule.verificationContract.maximumSearchSubmissionsPerClaim } };
+    return factualVerificationOperations.internalFactualRecheckCandidate(this.#factualVerificationOperationsHost, enrollment, decisionId);
   }
 
   nextFactualRecheck(): FactualRecheckCandidate | null {
-    return this.#verificationCall(() => {
-      for (const enrollment of this.#enrollments.active().filter((entry) => entry.kind === 'factual-recheck' && !entry.paused)) {
-        for (const row of this.#authority.prepare("SELECT decision_id FROM factual_review_decisions WHERE book_id = ? AND disposition = 'request-evidence' ORDER BY rowid").all(enrollment.bookId)) {
-          try {
-            const candidate = this.#factualRecheckCandidate(enrollment, String(row.decision_id));
-            if (candidate !== null && !this.#factualReview.factualRecheckUsed(candidate.onceKey)) return candidate;
-          } catch (error) { if (!(error instanceof FactualVerificationError) && !(error instanceof StoreError)) throw error; }
-        }
-      }
-      return null;
-    });
+    return factualVerificationOperations.nextFactualRecheck(this.#factualVerificationOperationsHost);
   }
 
   startFactualRecheck(candidate: FactualRecheckCandidate): FactualRecheckRun {
-    return this.#verificationCall(() => this.#transaction(this.#authority, () => {
-      const enrollment = this.#enrollments.forBook(candidate.selection.bookId, 'factual-recheck');
-      requireStore(enrollment !== null && canonicalJson(this.#factualRecheckCandidate(enrollment, candidate.selection.decisionId)) === canonicalJson(candidate),
-        'FACTUAL_RECHECK_STALE', '复核登记、决定或冻结来源已变化。');
-      return this.#factualReview.startFactualRecheck(candidate);
-    }));
+    return factualVerificationOperations.startFactualRecheck(this.#factualVerificationOperationsHost, candidate);
   }
 
   factualRecheckCurrent(run: FactualRecheckRun): boolean {
-    try {
-      const enrollment = this.#enrollments.forBook(run.selection.bookId, 'factual-recheck');
-      const current = enrollment === null ? null : this.#factualRecheckCandidate(enrollment, run.selection.decisionId);
-      return current !== null && current.enrollmentVersionId === run.enrollmentVersionId && current.onceKey === run.onceKey &&
-        canonicalJson(current.selection) === canonicalJson(run.selection) && canonicalJson(current.binding) === canonicalJson(run.binding) &&
-        canonicalJson(current.policy) === canonicalJson(run.policy) && canonicalJson(current.search) === canonicalJson(run.search) && current.message === run.message;
-    } catch { return false; }
+    return factualVerificationOperations.factualRecheckCurrent(this.#factualVerificationOperationsHost, run);
   }
 
   publishFactualRecheck(run: FactualRecheckRun, round: import('./factual-verification.js').FactualClaimRound, usage: import('./provider/classification.js').UsageFacts | null): void {
-    this.#verificationCall(() => this.#transaction(this.#authority, () => {
-      requireStore(this.factualRecheckCurrent(run) && round.result !== null, 'FACTUAL_RECHECK_STALE', '复核来源或决定已经变化，未发布结果。');
-      const claim = this.#factualVerification.claims(run.runRecordId)!.claims.find((entry) => entry.claimId === run.selection.claimId)!;
-      this.#researchEvidence.record({ bookId: run.selection.bookId, runRecordId: run.runRecordId,
-        unitOrdinal: claim.producers[0]!.sourceUnitOrdinal, backendId: run.search.backendId, unit: round.evidence });
-      this.#factualVerification.materializeRecheck(run, round.result!);
-      this.#factualReview.settleFactualRecheck(run, 'completed', usage);
-    }));
+    return factualVerificationOperations.publishFactualRecheck(this.#factualVerificationOperationsHost, run, round, usage);
   }
 
   #verificationCall<T>(operation: () => T): T {
-    return this.#libraryCall(() => {
-      try {
-        return operation();
-      } catch (error) {
-        if (error instanceof FactualVerificationError) throw new StoreError(error.code, error.message);
-        throw error;
-      }
-    });
+    return factualVerificationOperations.internalVerificationCall(this.#factualVerificationOperationsHost, operation);
   }
 
   /** The edits one frozen plan version of a Task names, read from its execution plan. */
   #frozenPlanEdits(taskIntentId: string, ordinal: number): PlanEditsProjection {
-    const row = this.#authority.prepare(
-      "SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ? AND component = 'execution-plan'",
-    ).get(taskIntentId, ordinal) as SqlRow | undefined;
-    return row === undefined ? planEditsOf({}) : planEditsOf(JSON.parse(asString(row.canonical_json)) as unknown);
+    return factualVerificationOperations.internalFrozenPlanEdits(this.#factualVerificationOperationsHost, taskIntentId, ordinal);
   }
 
   /**
@@ -9284,73 +7294,20 @@ export class EditorialStore {
    * 快速整理 with its disclosure only when this device reads offline then. The execution owner calls it; nothing else lowers it.
    */
   recordFactualRunAssurance(input: { bookId: string; runRecordId: string; taskIntentId: string; offline: boolean }): FactualRunAssuranceProjection {
-    return this.#verificationCall(() => {
-      const facts = this.#analysisCall(() => this.#factualReview.loadExecutionPlan(input.runRecordId));
-      const plannedLevel = planEditAssuranceLevel(this.#frozenPlanEdits(facts.taskIntentId, facts.planVersionOrdinal));
-      const contractLevel = this.#factualReview.definitionForDigest(facts.promptContractDigest).evidenceAssuranceLevel ?? null;
-      return this.#transaction(this.#authority, () => this.#factualVerification.recordRunAssurance({ ...input, plannedLevel, contractLevel }));
-    });
+    return factualVerificationOperations.recordFactualRunAssurance(this.#factualVerificationOperationsHost, input);
   }
 
   /** The current working text of a Review Run's branch and its pinned revision's blocks, as the verification ledger reads them. */
   #manuscriptReader(branchId: string, manuscriptId: string): ManuscriptReader {
-    const working = this.#authority.prepare('SELECT text FROM working_blocks WHERE branch_id = ? AND block_id = ?');
-    return {
-      rangeUntouched: (runRecordId, blockId, fromGrapheme, toGrapheme) => {
-        const task = this.#authority.prepare(`SELECT t.kind, t.canonical_json FROM analysis_task_intents t JOIN analysis_run_records r
-          ON r.task_intent_id = t.task_intent_id WHERE r.run_record_id = ?`).get(runRecordId);
-        if (task?.kind === 'factual-recheck') runRecordId = (JSON.parse(String(task.canonical_json)) as { factualDecision: import('./factual-verification.js').FactualRecheckSelection }).factualDecision.sourceRunRecordId;
-        const checkpoint = this.#authority.prepare(`SELECT c.journal_sequence FROM analysis_task_input_checkpoints c
-          JOIN analysis_run_records r ON r.task_intent_id = c.task_intent_id
-          WHERE r.run_record_id = ? AND c.branch_id = ? AND c.manuscript_id = ?`).get(runRecordId, branchId, manuscriptId);
-        requireStore(checkpoint !== undefined, 'FACTUAL_VERIFICATION_RECORD_INVALID', '核查结果的原文固定点缺失。');
-        let from = fromGrapheme;
-        let to = toGrapheme;
-        const edits = this.#authority.prepare(`SELECT from_grapheme, to_grapheme, insert_text FROM edit_journal_entries
-          WHERE branch_id = ? AND block_id = ? AND sequence > ? ORDER BY sequence`)
-          .all(branchId, blockId, asNumber(checkpoint.journal_sequence)) as SqlRow[];
-        for (const edit of edits) {
-          const start = asNumber(edit.from_grapheme);
-          const end = asNumber(edit.to_grapheme);
-          if (start < to && end > from || start === end && start > from && start < to) return false;
-          if (end <= from) {
-            const delta = graphemeLength(asString(edit.insert_text)) - (end - start);
-            from += delta;
-            to += delta;
-          }
-        }
-        return true;
-      },
-      sourceCurrent: (runRecordId, pin) => {
-        try {
-          const source = this.retrievalSourcesForRun(runRecordId, this.#factualReview).find((entry) =>
-            entry.sourceKind === pin.sourceKind && entry.sourceId === pin.sourceId && entry.digest === pin.digest);
-          return source !== undefined && source.read().digest === pin.digest;
-        } catch { return false; }
-      },
-      currentBlockText: (blockId) => {
-        const row = working.get(branchId, blockId) as SqlRow | undefined;
-        return row === undefined ? null : asString(row.text);
-      },
-      revisionBlocks: (manuscriptRevisionId) => {
-        let heading: string | null = null;
-        return this.#factualReview.readRevisionBlocks(manuscriptId, manuscriptRevisionId).map((block) => {
-          if (block.kind === 'heading') heading = block.text;
-          return { blockId: block.blockId, text: block.text, heading };
-        });
-      },
-    };
+    return factualVerificationOperations.internalManuscriptReader(this.#factualVerificationOperationsHost, branchId, manuscriptId);
   }
 
   #reviewRunBranch(bookId: string, reviewRunId: string): { branchId: string; manuscriptId: string } {
-    const row = this.#authority.prepare('SELECT branch_id, manuscript_id FROM review_runs WHERE review_run_id = ? AND book_id = ?').get(reviewRunId, bookId) as SqlRow | undefined;
-    requireStore(row !== undefined, 'FACTUAL_VERIFICATION_NOT_FOUND', '这次审阅不属于这本书。');
-    return { branchId: asString(row.branch_id), manuscriptId: asString(row.manuscript_id) };
+    return factualVerificationOperations.internalReviewRunBranch(this.#factualVerificationOperationsHost, bookId, reviewRunId);
   }
 
   #bookManuscript(bookId: string): { branchId: string; manuscriptId: string } | null {
-    const row = this.#authority.prepare(`SELECT rr.branch_id, rr.manuscript_id FROM review_runs rr WHERE rr.book_id = ? ORDER BY rr.ordinal DESC LIMIT 1`).get(bookId) as SqlRow | undefined;
-    return row === undefined ? null : { branchId: asString(row.branch_id), manuscriptId: asString(row.manuscript_id) };
+    return factualVerificationOperations.internalBookManuscript(this.#factualVerificationOperationsHost, bookId);
   }
 
   /**
@@ -9359,150 +7316,26 @@ export class EditorialStore {
    * assertions, which the ledger checks against what the Run captured. Repeating it records nothing more.
    */
   #materializeFactualVerification(reviewRunId: string): void {
-    const event = this.#authority.prepare(`SELECT state, result_set_revision_id, run_record_id FROM review_run_category_events WHERE review_run_id = ? AND category_id = 'factual-review'
-      AND (state = 'materialized' OR (state IN ('failed', 'interrupted') AND json_extract(canonical_json, '$.partialFactualRetentionVersion') = 1))
-      AND result_set_revision_id IS NOT NULL ORDER BY sequence DESC LIMIT 1`).get(reviewRunId) as SqlRow | undefined;
-    if (event === undefined) return;
-    const revisionId = asString(event.result_set_revision_id);
-    if (event.state !== 'materialized' && this.#reviewCall(() => this.#reviewRuns.retainedFactualRevision(reviewRunId)) !== revisionId) return;
-    const run = this.#authority.prepare('SELECT book_id, branch_id, manuscript_id FROM review_runs WHERE review_run_id = ?').get(reviewRunId) as SqlRow;
-    const bookId = asString(run.book_id);
-    const revisionRow = this.#authority.prepare(`SELECT v.task_intent_id, v.run_record_id, v.manuscript_revision_id FROM analysis_result_set_revisions v
-      JOIN analysis_result_sets s ON s.result_set_id = v.result_set_id AND s.book_id = ? AND s.kind = 'factual-review'
-      WHERE v.revision_id = ? AND v.run_record_id = ?`)
-      .get(bookId, revisionId, asString(event.run_record_id)) as SqlRow | undefined;
-    if (revisionRow === undefined) return;
-    const runRecordId = asString(revisionRow.run_record_id);
-    const inspected = this.#analysisCall(() => this.#factualReview.inspect(bookId, undefined, revisionId)).inspectedRevision;
-    if (inspected === null) return;
-    const revision = inspected.revision as FactualReviewResultSetRevisionProjection;
-    const manuscriptRevisionId = asString(revisionRow.manuscript_revision_id);
-    const taskIntentId = asString(revisionRow.task_intent_id);
-    const blocks = this.#factualReview.readRevisionBlocks(revision.manuscriptPin.manuscriptId, manuscriptRevisionId);
-    const blockText = new Map(blocks.map((block) => [block.blockId, block.text] as const));
-    let heading: string | null = null;
-    const headings = new Map<string, string | null>();
-    for (const block of blocks) {
-      if (block.kind === 'heading') heading = block.text;
-      headings.set(block.blockId, heading);
-    }
-    // The relations and variants of every assertion, by the finding identity its block and quotation mint.
-    const manifestRow = this.#authority.prepare(`SELECT canonical_json FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'coverage-manifest'
-      ORDER BY plan_version DESC LIMIT 1`).get(taskIntentId) as SqlRow | undefined;
-    const manifest = manifestRow === undefined ? null : JSON.parse(asString(manifestRow.canonical_json)) as CoverageManifestProjection;
-    const stated = new Map<string, { relations: FactualEvidenceRelation[]; corrections: Array<{ text: string; rationale: string }> }>();
-    let relationsStated = false;
-    for (const row of this.#authority.prepare("SELECT unit_ordinal, canonical_json FROM analysis_unit_results WHERE revision_id = ? AND state = 'closed'").all(revisionId) as SqlRow[]) {
-      const record = JSON.parse(asString(row.canonical_json)) as { assertions?: ReadonlyArray<FactualUnitAssertionV2 | { blockOrdinal: number; quote: string }>; corrections?: ReadonlyArray<FactualCorrectionEntry> };
-      if (!Object.hasOwn(record, 'corrections')) continue;
-      relationsStated = true;
-      const unit = manifest?.units.find((entry) => entry.ordinal === asNumber(row.unit_ordinal));
-      if (unit === undefined) continue;
-      const messageBlockIds = [...unit.overlapBlockIds, ...unit.blockIds];
-      (record.assertions ?? []).forEach((assertion, index) => {
-        const blockId = messageBlockIds[assertion.blockOrdinal - 1];
-        if (blockId === undefined) return;
-        const id = factualFindingId(blockId, assertion.quote);
-        const entry = stated.get(id) ?? { relations: [], corrections: [] };
-        entry.relations.push(...('evidenceRelations' in assertion ? assertion.evidenceRelations : []));
-        const correction = (record.corrections ?? []).find((candidate) => candidate.assertionRef === index + 1);
-        if (correction !== undefined && entry.corrections.length === 0) entry.corrections.push(...correction.variants.slice(0, 3));
-        stated.set(id, entry);
-      });
-    }
-    const claimLedger = this.#factualVerification.claims(runRecordId);
-    if (claimLedger !== null) {
-      relationsStated = true;
-      for (const claim of claimLedger.claims) {
-        const session = this.#factualVerification.claimSession(runRecordId, 'web-verification', claim.claimId);
-        const rounds = session === null ? [] : this.#factualVerification.claimVerifications(session.sessionId);
-        stated.set(`fnd_${claim.claimId.slice(0, 24)}`, { relations: rounds.flatMap((round) => round.evidenceRelations),
-          corrections: rounds.flatMap((round) => round.corrections).slice(0, 3) });
-      }
-    }
-    const assurance = this.#factualVerification.runAssurance(runRecordId);
-    // Local recovery reads the persisted revision's contract/plan pins; it needs no currently executable provider route.
-    const contractLevel = this.#factualReview.definitionForDigest(revision.bindingPin.promptContractDigest).evidenceAssuranceLevel ?? null;
-    const findingsById = new Map(revision.findings.map((finding) => [finding.findingId, finding] as const));
-    const findings: MaterializedFactualFinding[] = [];
-    for (const row of this.#authority.prepare("SELECT finding_id, kind_ref, mark_id FROM review_findings WHERE review_run_id = ? AND category_id = 'factual-review' ORDER BY ordinal")
-      .all(reviewRunId) as SqlRow[]) {
-      const finding = findingsById.get(asString(row.kind_ref));
-      const text = finding === undefined ? undefined : blockText.get(finding.sourceRange.blockId);
-      if (finding === undefined || text === undefined) continue;
-      const entry = stated.get(finding.findingId);
-      findings.push({
-        assertionClass: finding.assertionClass,
-        reviewFindingId: asString(row.finding_id), findingId: finding.findingId, blockId: finding.sourceRange.blockId,
-        fromGrapheme: finding.sourceRange.fromGrapheme, toGrapheme: finding.sourceRange.toGrapheme, quote: finding.quote,
-        pinnedText: sliceGraphemes(text, finding.sourceRange.fromGrapheme, finding.sourceRange.toGrapheme), question: finding.question,
-        category: finding.category, severity: finding.severity, heading: headings.get(finding.sourceRange.blockId) ?? null,
-        markId: row.mark_id === null ? null : asString(row.mark_id),
-        unitOrdinals: [finding.unitOrdinal, ...finding.mergedFrom.map((merged) => merged.unitOrdinal)],
-        relations: relationsStated ? entry?.relations ?? [] : null, corrections: entry?.corrections ?? [],
-      });
-    }
-    this.#transaction(this.#authority, () => this.#factualVerification.materialize({
-      bookId, reviewRunId, runRecordId, taskIntentId, revisionId, manuscriptRevisionId, contractLevel,
-      ...(() => { const row = this.#authority.prepare('SELECT canonical_json FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId);
-        const decision = row === undefined ? undefined : (JSON.parse(String(row.canonical_json)) as { factualDecision?: import('./factual-verification.js').FactualRecheckSelection }).factualDecision;
-        return decision === undefined ? {} : { factualDecision: decision }; })(),
-      plannedLevel: assurance?.plannedLevel ?? planEditAssuranceLevel(this.#frozenPlanEdits(taskIntentId, revision.provenance.planVersion ?? 1)), findings,
-    }));
+    return factualVerificationOperations.internalMaterializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
   }
 
   /** Record the results of a Review Run's 事实核查 category if it has formed them and they are not yet recorded. */
   materializeFactualVerification(reviewRunId: string): void {
-    this.#verificationCall(() => this.#materializeFactualVerification(reviewRunId));
+    return factualVerificationOperations.materializeFactualVerification(this.#factualVerificationOperationsHost, reviewRunId);
   }
 
   /** The Fact-check Lens (FACT-004, FACT-005, FACT-007): one bounded page over the existing cursor paging; a read. */
   inspectFactualVerification(input: InspectFactualVerificationInput): FactualVerificationLensProjection {
-    return this.#verificationCall(() => {
-      requireStore(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').get(input.bookId) !== undefined, 'BOOK_NOT_FOUND', '所选图书不存在。');
-      const binding = input.reviewRunId === null ? this.#bookManuscript(input.bookId) : this.#reviewRunBranch(input.bookId, input.reviewRunId);
-      const policyPin = { ...FACTUAL_VERIFICATION_POLICY_VERSION };
-      if (binding === null) {
-        return { bookId: input.bookId, reviewRunId: null, results: [], nextCursor: null, total: 0, counts: FACTUAL_VERIFICATION_OUTCOMES.map((outcome) => ({ outcome, count: 0 })),
-          chapters: [], run: null, policyPin, statement: FACTUAL_LENS_EMPTY };
-      }
-      const reader = this.#manuscriptReader(binding.branchId, binding.manuscriptId);
-      const chapterRows = this.#authority.prepare("SELECT block_id, text, position FROM working_blocks WHERE branch_id = ? AND kind = 'heading' ORDER BY position").all(binding.branchId) as SqlRow[];
-      const chapters = chapterRows.map((row) => ({ blockId: asString(row.block_id), heading: asString(row.text), position: asNumber(row.position) }));
-      const positionOf = this.#authority.prepare('SELECT position FROM working_blocks WHERE branch_id = ? AND block_id = ?');
-      const chapterOf = (blockId: string): string | null => {
-        const row = positionOf.get(binding.branchId, blockId) as SqlRow | undefined;
-        if (row === undefined) return null;
-        const position = asNumber(row.position);
-        return chapters.filter((chapter) => chapter.position <= position).at(-1)?.blockId ?? null;
-      };
-      const page = this.#factualVerification.lens({ bookId: input.bookId, reviewRunId: input.reviewRunId, after: input.after, chapterOf, filters: {
-        chapterBlockId: input.chapterBlockId, outcome: input.outcome, severity: input.severity, sourceCondition: input.sourceCondition, actionNeed: input.actionNeed,
-      } }, reader);
-      const runRecordId = page.results[0]?.runRecordId ?? null;
-      return {
-        bookId: input.bookId, reviewRunId: input.reviewRunId, results: page.results, nextCursor: page.nextCursor, total: page.total, counts: page.counts,
-        chapters: chapters.map(({ blockId, heading }) => ({ blockId, heading })),
-        run: runRecordId === null ? null : this.#factualVerification.runAssurance(runRecordId), policyPin,
-        statement: page.total === 0 ? FACTUAL_LENS_EMPTY : FACTUAL_LENS_STATEMENT,
-      };
-    });
+    return factualVerificationOperations.inspectFactualVerification(this.#factualVerificationOperationsHost, input);
   }
 
   #resultBinding(bookId: string, resultId: string): { reader: ManuscriptReader } {
-    requireStore(typeof resultId === 'string' && UUID_PATTERN.test(resultId), 'FACTUAL_VERIFICATION_INVALID', '核查结果标识无效。');
-    const row = this.#authority.prepare('SELECT review_run_id FROM factual_verification_results WHERE result_id = ? AND book_id = ?').get(resultId, bookId) as SqlRow | undefined;
-    requireStore(row !== undefined, 'FACTUAL_VERIFICATION_NOT_FOUND', '这条核查结果不属于这本书。');
-    const binding = this.#reviewRunBranch(bookId, asString(row.review_run_id));
-    return { reader: this.#manuscriptReader(binding.branchId, binding.manuscriptId) };
+    return factualVerificationOperations.internalResultBinding(this.#factualVerificationOperationsHost, bookId, resultId);
   }
 
   /** The Evidence Workspace of one result (EVID-001 to EVID-013): a read; it creates no mutation of any kind (EVID-012). */
   inspectEvidenceWorkspace(input: InspectEvidenceWorkspaceInput): EvidenceWorkspaceProjection {
-    return this.#verificationCall(() => {
-      const { reader } = this.#resultBinding(input.bookId, input.resultId);
-      return this.#factualVerification.workspace(input.bookId, input.resultId, input.sourcesAfter, reader);
-    });
+    return factualVerificationOperations.inspectEvidenceWorkspace(this.#factualVerificationOperationsHost, input);
   }
 
   /**
@@ -9510,31 +7343,12 @@ export class EditorialStore {
    * range and level of the supplementary check it asks for; no Task is prepared until the factual update modes land (#905).
    */
   recordVerificationReviewDecision(input: RecordVerificationReviewDecisionInput): VerificationReviewDecisionRecordedProjection {
-    return this.#verificationCall(() => {
-      const { reader } = this.#resultBinding(input.bookId, input.resultId);
-      const recorded = this.#transaction(this.#authority, () => {
-        const recorded = this.#factualVerification.recordDecision(input, reader);
-        if (input.excludedSourceRefs !== undefined) {
-          requireStore(input.disposition === 'request-evidence', 'FACTUAL_SOURCE_EXCLUSION_INVALID', '排除来源后请要求补充证据。');
-          this.#factualVerification.excludeClaimSources(input.bookId, input.resultId, recorded.decisionId, input.excludedSourceRefs, reader);
-        }
-        return recorded;
-      });
-      const workspace = this.#factualVerification.workspace(input.bookId, input.resultId, null, reader);
-      // 要求补充证据 (FREV-008): recorded with its range and level; a Book holds one 事实核查 Run until #905, so no Task is prepared.
-      return { workspace, supplementary: recorded.requestedLevel === null ? null
-        : { blockId: workspace.result.blockId, level: recorded.requestedLevel,
-          ...(workspace.claimRecheckAvailable !== true ? { statement: SUPPLEMENTARY_CHECK_DEFERRED }
-            : { statement: '已记录补充核查要求；点「补充核查」准备计划，再批准运行。', decisionId: recorded.decisionId }) } };
-    });
+    return factualVerificationOperations.recordVerificationReviewDecision(this.#factualVerificationOperationsHost, input);
   }
 
   /** 准备更正提案 (CORR-001): the draft offer; a read. */
   prepareCorrectionProposal(input: PrepareCorrectionProposalInput): CorrectionProposalDraftProjection {
-    return this.#verificationCall(() => {
-      const { reader } = this.#resultBinding(input.bookId, input.resultId);
-      return this.#factualVerification.draft(input.bookId, input.resultId, reader);
-    });
+    return factualVerificationOperations.prepareCorrectionProposal(this.#factualVerificationOperationsHost, input);
   }
 
   /**
@@ -9543,40 +7357,7 @@ export class EditorialStore {
    * Proposal Decision, Apply or manuscript change is made; the marks then go the ordinary decision → Apply → receipt way.
    */
   saveCorrectionProposal(input: SaveCorrectionProposalInput): CorrectionProposalSavedProjection {
-    return this.#verificationCall(() => {
-      const { reader } = this.#resultBinding(input.bookId, input.resultId);
-      const prepared = this.#factualVerification.prepareSave(input, reader);
-      const result = prepared.draft.result;
-      const run = this.#reviewRunBranch(input.bookId, result.reviewRunId);
-      const proposalId = randomUUID();
-      const label = prepared.draft.assuranceIncomplete ? `${CORRECTION_ASSURANCE_INCOMPLETE_LABEL} · ` : '';
-      const markIds = this.#markCall(() => this.#editorialMarks.createProducedMany(prepared.ranges.map((range) => ({
-        manuscriptId: run.manuscriptId,
-        branchId: run.branchId,
-        blockId: range.blockId,
-        fromGrapheme: range.fromGrapheme,
-        toGrapheme: range.toGrapheme,
-        pinnedText: range.text,
-        kind: 'change-suggestion' as const,
-        body: '',
-        proposedText: prepared.text,
-        rationale: prepared.rationale,
-        atomicGroupId: null,
-        source: { kind: 'ai7' as const, origin: 'task' as const, label: CORRECTION_MARK_SOURCE_LABEL, taskId: result.taskIntentId },
-        basis: [{ label: `${label}事实核查 · 核查结果第 ${result.version} 版 · ${result.states.factualVerification}`, blockId: result.blockId,
-          fromGrapheme: result.fromGrapheme, toGrapheme: result.toGrapheme, quote: result.quote }],
-      })), (created) => {
-        requireStore(created.every((markId) => markId !== null), 'CORRECTION_TARGET_CHANGED', '所选位置的文字已经改动；不会改到别处，请重新准备更正提案。');
-        const ids = created as string[];
-        this.#factualVerification.recordProposal({ bookId: input.bookId, proposalId, draft: prepared.draft, markIds: ids, ranges: prepared.ranges,
-          text: prepared.text, rationale: prepared.rationale, variant: prepared.variant });
-        return ids;
-      }));
-      return {
-        proposalId, markIds, assuranceIncomplete: prepared.draft.assuranceIncomplete, label: prepared.draft.label,
-        completionLabel: '已保存为更正提案：它是普通的修改建议，不会自动应用，是否接受由你决定。',
-      };
-    });
+    return factualVerificationOperations.saveCorrectionProposal(this.#factualVerificationOperationsHost, input);
   }
 
   /**
@@ -9635,11 +7416,7 @@ export class EditorialStore {
    * is built now, and every later arrival as it arrives. Nothing is asked: indexing is automatic (editor-surfaces §0.3 少打扰).
    */
   startMaterialIndexing(): void {
-    if (this.#indexStopped) return;
-    this.#indexEnabled = true;
-    // A replacement prepared or waiting holds every build back: 取消替换, or a preparation that failed, starts them (#729).
-    if (this.replacementFrozen()) return;
-    this.#scheduleMaterialIndex(this.#libraryCall(() => this.#materialIndex.unindexed()));
+    return materialIndexOperations.startMaterialIndexing(this.#materialIndexOperationsHost);
   }
 
   /**
@@ -9647,8 +7424,7 @@ export class EditorialStore {
    * is not prepared meanwhile (`replacementBlockedBy`), as it is not while a Run or a 后台分析登记 pass is under way.
    */
   materialIndexing(): boolean {
-    // Similarity vectors and 来源译文 asked for write too (Issue #892).
-    return this.#indexRun !== null || this.#vectorRun !== null || this.#translationRun !== null;
+    return materialIndexOperations.materialIndexing(this.#materialIndexOperationsHost);
   }
 
   /**
@@ -9656,33 +7432,21 @@ export class EditorialStore {
    * replacement waiting. Only for a store that serves; never a reason for the call that lifted the freeze to fail.
    */
   #resumeMaterialIndexing(): void {
-    if (!this.#indexEnabled) return;
-    try { this.startMaterialIndexing(); } catch { /* the next open builds what is still missing */ }
+    return materialIndexOperations.internalResumeMaterialIndexing(this.#materialIndexOperationsHost);
   }
 
   /** Resolves once the queue is empty: for a caller that must see the index built. */
   async settleMaterialIndexing(): Promise<void> {
-    while (this.#indexRun !== null) await this.#indexRun;
+    return materialIndexOperations.settleMaterialIndexing(this.#materialIndexOperationsHost);
   }
 
   /** Resolves once no similarity vectors or 来源译文 are being made (Issue #892): for a caller that must see them recorded. */
   async settleMaterialLayers(): Promise<void> {
-    while (this.#vectorRun !== null || this.#translationRun !== null) {
-      await this.#vectorRun;
-      await this.#translationRun;
-    }
+    return materialIndexOperations.settleMaterialLayers(this.#materialIndexOperationsHost);
   }
 
   #scheduleMaterialIndex(materialIds: ReadonlyArray<string>): void {
-    if (this.#indexStopped || !this.#indexEnabled) return;
-    for (const materialId of materialIds) {
-      if (this.#indexing !== materialId && !this.#indexQueue.includes(materialId)) this.#indexQueue.push(materialId);
-    }
-    if (this.#indexRun === null && this.#indexQueue.length > 0) {
-      this.#indexRun = this.#pumpMaterialIndex().finally(() => {
-        this.#indexRun = null;
-      });
-    }
+    return materialIndexOperations.internalScheduleMaterialIndex(this.#materialIndexOperationsHost, materialIds);
   }
 
   /**
@@ -9692,59 +7456,16 @@ export class EditorialStore {
    * store that can no longer write, leaves an item for the next open.
    */
   async #pumpMaterialIndex(): Promise<void> {
-    while (!this.#indexStopped && this.#indexQueue.length > 0) {
-      const materialId = this.#indexQueue.shift()!;
-      this.#indexing = materialId;
-      const controller = new AbortController();
-      this.#indexController = controller;
-      try {
-        if (this.#poisoned || this.replacementFrozen()) continue;
-        if (this.#materialIndex.current(materialId) !== null) continue;
-        const original: LibraryMaterialOriginal = this.#libraryMaterials.original(materialId);
-        const extraction = await extractMaterialText({
-          originalPath: resolve(this.#dataRoot, LIBRARY_OBJECT_DIRECTORY, ...original.objectKey.split('/')),
-          format: original.source.format,
-          displayName: original.source.displayName,
-          objectSha256: original.source.sha256,
-          bytes: original.source.bytes,
-          dataRoot: this.#dataRoot,
-          signal: controller.signal,
-        });
-        // The segments are prepared a slice at a time, the service taking its other work between slices (#729); the freeze is
-        // checked again after the last await, right before the one write.
-        const prepared = await prepareMaterialIndexInSlices(extraction, controller.signal);
-        if (this.#indexStopped || this.#poisoned || this.replacementFrozen()) continue;
-        this.#transaction(this.#authority, () => {
-          if (this.#materialIndex.current(materialId) !== null) return;
-          this.#materialIndex.record({ materialId, sha256: original.sha256, format: original.source.format }, prepared);
-        });
-      } catch {
-        // Stopped, refused, or its item changed meanwhile: nothing is recorded, and the next open tries again. A rollback that
-        // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
-      } finally {
-        this.#indexing = null;
-        this.#indexController = null;
-      }
-    }
+    return materialIndexOperations.internalPumpMaterialIndex(this.#materialIndexOperationsHost);
   }
 
   #materialIndexCall<T>(operation: () => T): T {
-    return this.#libraryCall(() => {
-      try {
-        return operation();
-      } catch (error) {
-        if (error instanceof MaterialIndexError) throw new StoreError(error.code, error.message);
-        throw error;
-      }
-    });
+    return materialIndexOperations.internalMaterialIndexCall(this.#materialIndexOperationsHost, operation);
   }
 
   /** 查看分段 (KB-009): one page of an item's indexed paragraphs and sentence anchors; read-only. */
   inspectLibraryMaterialSegments(input: ServiceOperationMap['inspectLibraryMaterialSegments']['input']): ServiceOperationMap['inspectLibraryMaterialSegments']['output'] {
-    return this.#materialIndexCall(() => {
-      const original = this.#libraryMaterials.original(input.materialId);
-      return this.#materialIndex.page(input.materialId, original.title, input.from);
-    });
+    return materialIndexOperations.inspectLibraryMaterialSegments(this.#materialIndexOperationsHost, input);
   }
 
   /**
@@ -9752,8 +7473,7 @@ export class EditorialStore {
    * only for an item this Book's Tasks may list and whose text was read. 写作任务 pins each item it lists (Issue #428).
    */
   pinMaterialReference(bookId: string, materialId: string): MaterialReferencePin {
-    return this.#materialIndexCall(() =>
-      this.#materialIndex.referencePin(materialId, bookId, (id, book) => this.#libraryMaterials.available(id, book)));
+    return materialIndexOperations.pinMaterialReference(this.#materialIndexOperationsHost, bookId, materialId);
   }
 
   /**
@@ -9762,44 +7482,32 @@ export class EditorialStore {
    * sends of what it read stays bounded by the plan's 发送 line. 写作任务 reads each item it lists through it (Issue #428).
    */
   readMaterialIndexForTask(boundary: MaterialReferenceBoundary, materialId: string, from: number): MaterialTaskReading {
-    return this.#materialIndexCall(() => {
-      const original = this.#libraryMaterials.original(materialId);
-      return this.#materialIndex.readForTask(boundary, materialId, original.title, from, (id, book) => this.#libraryMaterials.available(id, book));
-    });
+    return materialIndexOperations.readMaterialIndexForTask(this.#materialIndexOperationsHost, boundary, materialId, from);
   }
 
   // ---- 相似段落检索 and 来源译文 (Issue #892; editor-surfaces §8.4, V2-UX-KB-009) ---------------------------------------------
 
   /** The store's similarity provider: the built-in one in every test, CI run and test guest, and until a model adapter is admitted. */
   embeddingProvider(): EmbeddingProvider {
-    return this.#embedding;
+    return materialIndexOperations.embeddingProvider(this.#materialIndexOperationsHost);
   }
 
   #embeddingFacts(): MaterialEmbeddingFacts {
-    return { identity: this.#embedding.identity, dimensions: this.#embedding.dimensions, readiness: this.#embedding.readiness() };
+    return materialIndexOperations.internalEmbeddingFacts(this.#materialIndexOperationsHost);
   }
 
   /** Who makes 来源译文 under this launch — the service sets it once it serves; `null` refuses every request. */
   useMaterialTranslator(translator: MaterialTranslator | null): void {
-    this.#translator = translator;
+    return materialIndexOperations.useMaterialTranslator(this.#materialIndexOperationsHost, translator);
   }
 
   /** Whether 生成来源译文 may be asked for an item, by its original's SHA-256, now; in the editor's words when not. */
   #translationRequest(sha256: string): MaterialTranslationProjection['request'] {
-    if (this.replacementFrozen()) return { available: false, reason: MATERIAL_LAYERS_READ_ONLY };
-    if (this.#translating !== null) return { available: false, reason: '另一份资料的来源译文正在生成；请等它完成。' };
-    const reason = this.#translator === null ? MATERIAL_TRANSLATION_NOT_ADMITTED : this.#translator.refusal(sha256);
-    return { available: reason === null, reason };
+    return materialIndexOperations.internalTranslationRequest(this.#materialIndexOperationsHost, sha256);
   }
 
   #layerActivity(materialId: string, sha256: string): MaterialLayerActivity {
-    return {
-      embedding: this.#embeddingFacts(),
-      vectorsBuilding: this.#vectorBuilding === materialId || this.#vectorQueue.includes(materialId),
-      translating: this.#translating === materialId,
-      translationRequest: this.#translationRequest(sha256),
-      translationFailure: this.#translationFailures.get(materialId) ?? null,
-    };
+    return materialIndexOperations.internalLayerActivity(this.#materialIndexOperationsHost, materialId, sha256);
   }
 
   /**
@@ -9809,26 +7517,11 @@ export class EditorialStore {
    * again for vectors already complete or under way changes nothing. Nothing is sent.
    */
   buildMaterialVectors(materialId: string): LibraryMaterialProjection {
-    requireStore(typeof materialId === 'string' && UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
-    this.#libraryCall(() => this.#libraryMaterials.original(materialId));
-    const pending = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, 1));
-    requireStore(this.#embedding.readiness().state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
-    requireStore(!this.replacementFrozen(), 'MATERIAL_INDEX_READ_ONLY', MATERIAL_LAYERS_READ_ONLY);
-    // Asked for by the editor: an item the idle lane queued no longer gives way to the editor's work.
-    this.#idleVectorItems.delete(materialId);
-    if (pending.targets.length > 0 && !this.#indexStopped && this.#vectorBuilding !== materialId && !this.#vectorQueue.includes(materialId)) {
-      this.#vectorQueue.push(materialId);
-      this.#startVectorPump();
-    }
-    return this.inspectLibraryMaterial(materialId);
+    return materialIndexOperations.buildMaterialVectors(this.#materialIndexOperationsHost, materialId);
   }
 
   #startVectorPump(): void {
-    if (this.#vectorRun === null) {
-      this.#vectorRun = this.#pumpMaterialVectors().finally(() => {
-        this.#vectorRun = null;
-      });
-    }
+    return materialIndexOperations.internalStartVectorPump(this.#materialIndexOperationsHost);
   }
 
   /** The items the idle lane queued, which give way while the editor works; and whether the lane is idle now (Issue #1166). */
@@ -9844,25 +7537,7 @@ export class EditorialStore {
    * ranks those items lexically. Nothing is sent.
    */
   indexIdleMaterialVectors(idle: boolean): void {
-    this.#vectorLaneIdle = idle;
-    if (!idle || this.#vectorRun !== null || this.#indexStopped || this.#poisoned || this.replacementFrozen() ||
-      this.#embedding.readiness().state !== 'ready') return;
-    const books = new Set(this.#enrollmentCall(() => this.#enrollments.active())
-      .filter((enrollment) => enrollment.kind === 'material-index' && !enrollment.paused).map((enrollment) => enrollment.bookId));
-    for (const bookId of books) {
-      for (const item of this.#libraryCall(() => this.#libraryMaterials.referable(bookId))) {
-        if (this.#vectorQueue.includes(item.materialId)) continue;
-        try {
-          if (this.#materialIndexCall(() => this.#materialIndex.vectorTargets(item.materialId, this.#embedding.identity, 1)).targets.length === 0) continue;
-        } catch (error) {
-          if (!(error instanceof StoreError)) throw error;
-          continue; // Not yet read, or its index is not ready: a later pass looks again.
-        }
-        this.#idleVectorItems.add(item.materialId);
-        this.#vectorQueue.push(item.materialId);
-      }
-    }
-    if (this.#vectorQueue.length > 0) this.#startVectorPump();
+    return materialIndexOperations.indexIdleMaterialVectors(this.#materialIndexOperationsHost, idle);
   }
 
   /**
@@ -9871,31 +7546,7 @@ export class EditorialStore {
    * store that can no longer write ends the item's run; what was recorded stays and the next request goes on from there.
    */
   async #pumpMaterialVectors(): Promise<void> {
-    while (!this.#indexStopped && this.#vectorQueue.length > 0) {
-      const materialId = this.#vectorQueue.shift()!;
-      this.#vectorBuilding = materialId;
-      try {
-        for (;;) {
-          if (this.#indexStopped || this.#poisoned || this.replacementFrozen() || this.#embedding.readiness().state !== 'ready') break;
-          if (this.#idleVectorItems.has(materialId) && !this.#vectorLaneIdle) break;
-          const next = this.#materialIndexCall(() => this.#materialIndex.vectorTargets(materialId, this.#embedding.identity, MATERIAL_VECTOR_BATCH));
-          if (next.targets.length === 0) break;
-          const vectors = await this.#embedding.embed(next.targets.map((target) => target.text));
-          requireStore(vectors.length === next.targets.length, 'MATERIAL_INDEX_INVALID', '相似向量无效。');
-          await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
-          if (this.#indexStopped || this.#poisoned || this.replacementFrozen()) break;
-          this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordVectors(
-            next, { identity: this.#embedding.identity, dimensions: this.#embedding.dimensions },
-            next.targets.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, vector: vectors[index]! })))));
-        }
-      } catch {
-        // Refused, or its build changed meanwhile: what was recorded stays, and asking again goes on from there. A rollback that
-        // itself failed has already left the store unable to write: `#transaction` poisons it and throws `StoreFatalError`.
-      } finally {
-        this.#vectorBuilding = null;
-        this.#idleVectorItems.delete(materialId);
-      }
-    }
+    return materialIndexOperations.internalPumpMaterialVectors(this.#materialIndexOperationsHost);
   }
 
   /**
@@ -9903,14 +7554,7 @@ export class EditorialStore {
    * read-only, on this machine. The ranking finds candidates; the words are read where each anchor points (ADR 0026).
    */
   async searchLibraryMaterialVectors(input: ServiceOperationMap['queryMaterialVectors']['input']): Promise<MaterialVectorSearchProjection> {
-    requireStore(typeof input.materialId === 'string' && UUID_PATTERN.test(input.materialId) && typeof input.text === 'string' &&
-      input.text.trim().length > 0 && input.text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS && input.text.isWellFormed() &&
-      Number.isSafeInteger(input.k) && input.k >= 1 && input.k <= MAX_MATERIAL_VECTOR_CANDIDATES, 'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效：请写 1 到 2,000 字。');
-    this.#libraryCall(() => this.#libraryMaterials.original(input.materialId));
-    const embedding = this.#embeddingFacts();
-    requireStore(embedding.readiness.state === 'ready', 'MATERIAL_VECTORS_NEED_MODEL', '相似索引的模型文件不在本机或摘要不符：请在 设置 › 本机 › 相似索引模型 处理。');
-    const [query] = await this.#embedding.embed([input.text]);
-    return this.#materialIndexCall(() => this.#materialIndex.search(input.materialId, embedding, query!, input.k));
+    return materialIndexOperations.searchLibraryMaterialVectors(this.#materialIndexOperationsHost, input);
   }
 
   /**
@@ -9922,12 +7566,7 @@ export class EditorialStore {
    * scheduled, and a built index grants no Run scope, egress or learning eligibility.
    */
   async queryMaterialVectors(boundary: MaterialReferenceBoundary, text: string, k: number, materialIds?: readonly string[]): Promise<MaterialVectorQuery> {
-    requireStore(typeof text === 'string' && text.trim().length > 0 && text.length <= MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS && text.isWellFormed(),
-      'MATERIAL_VECTOR_QUERY_INVALID', '检索内容无效。');
-    const embedding = this.#embeddingFacts();
-    const query = embedding.readiness.state === 'ready' ? (await this.#embedding.embed([text]))[0]! : null;
-    return this.#materialIndexCall(() => this.#materialIndex.queryForTask(boundary, materialIds, embedding, query, k,
-      (id, book) => this.#libraryMaterials.available(id, book), (id) => this.#libraryMaterials.original(id).title));
+    return materialIndexOperations.queryMaterialVectors(this.#materialIndexOperationsHost, boundary, text, k, materialIds);
   }
 
   /**
@@ -9939,71 +7578,11 @@ export class EditorialStore {
    * why, and is never sent again on its own; asking again goes on from the first paragraph without one.
    */
   requestMaterialTranslation(materialId: string): LibraryMaterialProjection {
-    requireStore(typeof materialId === 'string' && UUID_PATTERN.test(materialId), 'LIBRARY_MATERIAL_INVALID', '资料标识无效。');
-    const original = this.#libraryCall(() => this.#libraryMaterials.original(materialId));
-    const pending = this.#materialIndexCall(() => this.#materialIndex.translationTargets(materialId, 1));
-    requireStore(pending.targets.length > 0, 'MATERIAL_TRANSLATION_COMPLETE', '每段都已有来源译文。');
-    const request = this.#translationRequest(original.source.sha256);
-    requireStore(request.available, this.#translating !== null ? 'MATERIAL_TRANSLATION_BUSY' : 'MATERIAL_TRANSLATION_NOT_ADMITTED', request.reason ?? MATERIAL_TRANSLATION_NOT_ADMITTED);
-    const translator = this.#translator!;
-    this.#translationFailures.delete(materialId);
-    this.#translating = materialId;
-    this.#translationRun = this.#translateMaterial(materialId, translator, original.source.sha256).finally(() => {
-      this.#translating = null;
-      this.#translationRun = null;
-    });
-    return this.inspectLibraryMaterial(materialId);
+    return materialIndexOperations.requestMaterialTranslation(this.#materialIndexOperationsHost, materialId);
   }
 
   async #translateMaterial(materialId: string, translator: MaterialTranslator, originalSha256: string): Promise<void> {
-    try {
-      for (let requests = 0; ; requests += 1) {
-        if (this.#indexStopped || this.#poisoned) return;
-        if (this.replacementFrozen()) {
-          this.#translationFailures.set(materialId, MATERIAL_LAYERS_READ_ONLY);
-          return;
-        }
-        const next = this.#materialIndexCall(() => this.#materialIndex.translationTargets(materialId, MATERIAL_TRANSLATION_BATCH_PARAGRAPHS));
-        if (next.targets.length === 0) return;
-        // One 生成来源译文 sends at most this many requests (Issue #892, brief revision 5); the rest is asked for again.
-        if (requests >= MAX_MATERIAL_TRANSLATION_REQUESTS) {
-          const remaining = this.#materialIndexCall(() => this.#materialIndex.translationRemaining(materialId));
-          this.#translationFailures.set(materialId,
-            `已达到一次生成的上限（${MAX_MATERIAL_TRANSLATION_REQUESTS} 批，至多 ${(MAX_MATERIAL_TRANSLATION_REQUESTS * MATERIAL_TRANSLATION_BATCH_PARAGRAPHS).toLocaleString('en-US')} 段）；还有 ${remaining} 段未译，可再次「生成来源译文」。`);
-          return;
-        }
-        const batch: typeof next.targets[number][] = [];
-        let characters = 0;
-        for (const target of next.targets) {
-          if (batch.length > 0 && characters + target.text.length > MATERIAL_TRANSLATION_BATCH_CODE_UNITS) break;
-          batch.push(target);
-          characters += target.text.length;
-        }
-        if (characters > MATERIAL_TRANSLATION_BATCH_CODE_UNITS) {
-          this.#translationFailures.set(materialId, `第 ${batch[0]!.ordinal} 段超过一次可译的长度（${MATERIAL_TRANSLATION_BATCH_CODE_UNITS.toLocaleString('en-US')} 字），来源译文停在这一段之前。`);
-          return;
-        }
-        const answer = await translator.translate(originalSha256, batch.map((target) => target.text), `${next.indexSha256.slice(0, 16)}/${batch[0]!.ordinal}`);
-        if (answer.kind === 'failed') {
-          if (answer.provenance !== undefined) this.#transaction(this.#authority, () => this.#materialIndexCall(() => this.#materialIndex.recordTranslationAttempt(
-            next, originalSha256, batch, ['AI7_OUTCOME_UNKNOWN', 'PROVIDER_VALIDATION_OUTCOME_UNKNOWN'].includes(answer.provenance!.failureCode ?? '') ? 'outcome-unknown' : 'failed', answer.provenance!)));
-          this.#translationFailures.set(materialId, answer.message);
-          return;
-        }
-        if (this.#indexStopped || this.#poisoned) return;
-        if (this.replacementFrozen()) {
-          this.#translationFailures.set(materialId, MATERIAL_LAYERS_READ_ONLY);
-          return;
-        }
-        this.#transaction(this.#authority, () => this.#materialIndexCall(() => {
-          if (answer.made.provenance !== undefined) this.#materialIndex.recordTranslationAttempt(next, originalSha256, batch, 'translated', answer.made.provenance);
-          this.#materialIndex.recordTranslations(next, answer.made,
-            batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })));
-        }));
-      }
-    } catch (error) {
-      this.#translationFailures.set(materialId, error instanceof StoreError ? error.message : '来源译文没有完成；已记录的译文保留。');
-    }
+    return materialIndexOperations.internalTranslateMaterial(this.#materialIndexOperationsHost, materialId, translator, originalSha256);
   }
 
   /** Pinned revision authority, shared by Run and foreground attempt retrieval; no working-head substitution. */
@@ -10083,41 +7662,16 @@ export class EditorialStore {
 
   /** 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003): the profile a new 评估 version snapshots, and its use. */
   inspectEvaluationProfiles(before: number | null = null): EvaluationProfilesProjection {
-    return this.#evaluationCall(() => {
-      requireStore(before === null || (Number.isSafeInteger(before) && before > 0), 'EVALUATION_PROFILE_PAGE_INVALID', '评估方案版本页码无效。');
-      const page = this.#evaluationProfiles.page(before);
-      const profiles = page.profiles.map((profile) => {
-        const use = this.#authority.prepare('SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records WHERE profile_sha256 = ?').get(profile.sha256)!;
-        return { ...profile, records: Number(use.records), books: Number(use.books) };
-      });
-      // The first page names the records that came from another house (Issue #798, P3-6). The known set is every house
-      // version, not just this page's, so a record from an earlier page's version is never mistaken for an unknown one.
-      if (before === null) {
-        const unknown = this.#authority.prepare(
-          `SELECT count(*) AS records, count(DISTINCT book_id) AS books FROM evaluation_records
-           WHERE profile_sha256 <> ?
-             AND profile_sha256 NOT IN (SELECT json_extract(canonical_json, '$.profile.sha256') FROM evaluation_profile_versions
-                                        WHERE json_extract(canonical_json, '$.profile.sha256') IS NOT NULL)`,
-        ).get(evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE))!;
-        if (Number(unknown.records) > 0) profiles.push({
-          profileId: EVALUATION_PROFILE_UNKNOWN_ID, title: EVALUATION_PROFILE_UNKNOWN_TITLE, version: '—', issuer: '',
-          total: 100, items: [], readiness: [], bands: BUILTIN_EVALUATION_PROFILE.bands, risks: BUILTIN_EVALUATION_PROFILE.risks,
-          conclusions: BUILTIN_EVALUATION_PROFILE.conclusions, sha256: '',
-          records: Number(unknown.records), books: Number(unknown.books),
-        });
-      }
-      return { activeSha256: this.#evaluationProfiles.current().sha256, nextBefore: page.nextBefore, profiles };
-    });
+    return initialEvaluationOperations.inspectEvaluationProfiles(this.#initialEvaluationOperationsHost, before);
   }
 
   saveEvaluationProfile(input: SaveEvaluationProfileInput): EvaluationProfilesProjection {
-    this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.save(input)));
-    return this.inspectEvaluationProfiles();
+    return initialEvaluationOperations.saveEvaluationProfile(this.#initialEvaluationOperationsHost, input);
   }
 
   /** ②C 评估 of one Book (Issue #429, S81a; EVAL-001, EVAL-012): its versions, one on show, and whether one can begin. */
   inspectEvaluation(bookId: string, recordId: string | null, recordsBefore?: number | null): EvaluationWorkspaceProjection {
-    return this.#withEvaluationMaterials(this.#evaluationCall(() => this.#evaluations.workspace(bookId, this.#evaluationBookTitle(bookId), recordId, recordsBefore)));
+    return initialEvaluationOperations.inspectEvaluation(this.#initialEvaluationOperationsHost, bookId, recordId, recordsBefore);
   }
 
   /**
@@ -10126,59 +7680,26 @@ export class EditorialStore {
    * `skipDamaged` says the editor saw it skipped (Issue #726).
    */
   startEvaluation(bookId: string, fromInitial = false, skipDamaged = false): EvaluationWorkspaceProjection {
-    return this.#evaluationCall(() => {
-      const title = this.#evaluationBookTitle(bookId);
-      const recordId = this.#transaction(this.#authority, () => this.#evaluations.start(bookId, fromInitial, skipDamaged));
-      return this.#withEvaluationMaterials(this.#evaluations.workspace(bookId, title, recordId));
-    });
+    return initialEvaluationOperations.startEvaluation(this.#initialEvaluationOperationsHost, bookId, fromInitial, skipDamaged);
   }
 
   // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) ----------------------------------------
 
   #withEvaluationMaterials(page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {
-    // Only a plan not yet started can be refused for a reference that went away; a started one read it as it was.
-    const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean } => {
-      const frozen = task === null ? null : this.#evaluationMaterialPlan(task.taskIntentId);
-      if (frozen === null) return { lines: [], blocked: false };
-      const readings = this.#taskMaterialReadings(frozen.boundary, '评估')
-        .map((reading) => task!.state === 'prepared' ? reading : taskMaterialSettled(reading));
-      return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null) };
-    };
-    const initial = frozenOf(page.initial.task);
-    const readersReport = frozenOf(page.readersReport.task);
-    return { ...page, materials: this.#taskMaterialOffers(page.bookId, '评估'), materialReferences: {
-      initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
-    } };
+    return initialEvaluationOperations.internalWithEvaluationMaterials(this.#initialEvaluationOperationsHost, page);
   }
 
   #evaluationPlanMaterials(ledger: BaselineAnalysisStore, bookId: string, authorized: boolean): ReadonlyArray<TaskMaterialReading> {
-    const references = ledger.definition.materialReferences?.sources;
-    if (references === undefined) return [];
-    const readings = this.#taskMaterialReadings({ bookId, references }, '评估');
-    return authorized ? readings.map(taskMaterialSettled) : readings;
+    return initialEvaluationOperations.internalEvaluationPlanMaterials(this.#initialEvaluationOperationsHost, ledger, bookId, authorized);
   }
 
   #evaluationMaterialPlan(taskIntentId: string): { boundary: TaskMaterialBoundary; baseDigest: string; promptDigest: string } | null {
-    const records = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = (SELECT max(plan_version) FROM analysis_plan_records WHERE task_intent_id = ?) AND component IN ('execution-plan', 'plan-envelope')").all(taskIntentId, taskIntentId) as SqlRow[];
-    const components = new Map(records.map((record) => {
-      const json = asString(record.canonical_json);
-      requireStore(sha256(json) === record.sha256, 'ANALYSIS_RECORD_INVALID', '任务计划记录与摘要不一致。');
-      return [asString(record.component), JSON.parse(json) as Record<string, unknown>] as const;
-    }));
-    const execution = components.get('execution-plan');
-    if (execution?.materialReferences === undefined) return null;
-    const envelope = components.get('plan-envelope');
-    const row = this.#authority.prepare('SELECT book_id FROM analysis_task_intents WHERE task_intent_id = ?').get(taskIntentId) as SqlRow | undefined;
-    requireStore(row !== undefined && typeof execution.materialReferenceBasePromptContractDigest === 'string' && DIGEST_PATTERN.test(execution.materialReferenceBasePromptContractDigest) &&
-      typeof envelope?.promptContractDigest === 'string' && DIGEST_PATTERN.test(envelope.promptContractDigest), 'ANALYSIS_RECORD_INVALID', '任务参考资料的基础契约记录无效。');
-    return { boundary: { bookId: asString(row.book_id), references: this.#analysisCall(() => taskMaterialSources(execution.materialReferences)) },
-      baseDigest: execution.materialReferenceBasePromptContractDigest, promptDigest: unwrappedPlanPromptDigest(execution, envelope) };
+    return initialEvaluationOperations.internalEvaluationMaterialPlan(this.#initialEvaluationOperationsHost, taskIntentId);
   }
 
   /** The 初评 contract of one profile: the built-in ledger's own for AI7's default profile, else the house version's (Issue #427). */
   #initialBaseDefinition(profile: EvaluationProfileProjection): AnalysisKindDefinition {
-    const builtIn = this.#initialEvaluation.definition;
-    return profile.sha256 === evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) ? builtIn.clarificationBase ?? builtIn : initialEvaluationKindDefinition(profile);
+    return initialEvaluationOperations.internalInitialBaseDefinition(this.#initialEvaluationOperationsHost, profile);
   }
 
   /**
@@ -10186,25 +7707,12 @@ export class EditorialStore {
    * profile with none, else one kept per contract — made afresh when a reference no longer reads, as #428's always was.
    */
   #initialLedger(profile: EvaluationProfileProjection, materials?: TaskMaterialBoundary, frozenPromptDigest?: string, scopes?: ReadonlyArray<FrozenSeriesScope>): BaselineAnalysisStore {
-    const base = this.#initialBaseDefinition(profile);
-    const readings = materials === undefined || materials.references.length === 0 ? [] : this.#taskMaterialReadings(materials, '评估');
-    if (scopes === undefined && readings.length === 0 && base === (this.#initialEvaluation.definition.clarificationBase ?? this.#initialEvaluation.definition)) return this.#initialEvaluation;
-    const material = readings.length === 0 ? base : this.#analysisCall(() => taskMaterialKindDefinition(base, materials!, readings, scopes === undefined ? frozenPromptDigest : undefined));
-    const definition = seriesScopeKindDefinition(this.#authority, material, scopes);
-    const make = (): BaselineAnalysisStore => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#initialEvaluation.launch);
-      return ledger;
-    };
-    const seriesRule = scopes === undefined ? '' : sha256(canonicalJson(this.#initialEvaluation.launch.policy?.providerProcessing.admittedRules ?? []));
-    return readings.some((reading) => reading.refusal !== null) ? make() : this.#initialEvaluationLedgers.obtain(`${definition.promptContractDigest}\n${canonicalJson(scopes ?? null)}\n${seriesRule}`, make);
+    return initialEvaluationOperations.internalInitialLedger(this.#initialEvaluationOperationsHost, profile, materials, frozenPromptDigest, scopes);
   }
 
   /** The profile contract a ledger's Task snapshots its profile under: the base a plan's references wrap, or the contract itself. */
   #initialBaseDigest(ledger: BaselineAnalysisStore): string {
-    const definition = ledger.definition.clarificationBase ?? ledger.definition;
-    return liveSeriesContract(definition)?.base.materialReferences?.basePromptContractDigest ?? liveSeriesContract(definition)?.base.promptContractDigest
-      ?? definition.materialReferences?.basePromptContractDigest ?? definition.promptContractDigest;
+    return initialEvaluationOperations.internalInitialBaseDigest(this.#initialEvaluationOperationsHost, ledger);
   }
 
   /**
@@ -10212,31 +7720,12 @@ export class EditorialStore {
    * references wrap (#428), or the plan's own contract — and AI7's built-in profile for a Task from before house versions.
    */
   #initialProfileForTask(taskIntentId: string): EvaluationProfileProjection {
-    const row = this.#authority.prepare("SELECT component, canonical_json, sha256 FROM analysis_plan_records WHERE task_intent_id = ? AND component = 'plan-envelope' ORDER BY plan_version DESC LIMIT 1").get(taskIntentId) as SqlRow | undefined;
-    if (row === undefined) {
-      const pin = this.#authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId);
-      return pin === undefined ? this.#evaluationProfiles.current() : this.#evaluationProfiles.taskProfile(taskIntentId, asString(pin.prompt_contract_sha256))!;
-    }
-    requireStore(sha256(asString(row.canonical_json)) === row.sha256, 'EVALUATION_PROFILE_DAMAGED', '初评任务计划已损坏。');
-    const envelope = parseStoredJson(asString(row.canonical_json), '初评任务计划已损坏。');
-    requireStore(isRecord(envelope) && typeof envelope.promptContractDigest === 'string', 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
-    const scope = frozenSeriesScopes(this.#authority, taskIntentId);
-    const baseDigest = this.#evaluationMaterialPlan(taskIntentId)?.baseDigest ?? (scope === undefined ? envelope.promptContractDigest :
-      asString(this.#authority.prepare('SELECT prompt_contract_sha256 FROM initial_evaluation_tasks WHERE task_intent_id = ? ORDER BY rowid DESC LIMIT 1').get(taskIntentId)!.prompt_contract_sha256));
-    const snapshot = this.#evaluationProfiles.taskProfile(taskIntentId, baseDigest);
-    if (snapshot !== null) return snapshot;
-    requireStore(baseDigest === this.#initialEvaluation.definition.promptContractDigest, 'EVALUATION_PROFILE_DAMAGED', '初评任务方案快照缺失。');
-    return { ...BUILTIN_EVALUATION_PROFILE, sha256: evaluationProfileDigest(BUILTIN_EVALUATION_PROFILE) };
+    return initialEvaluationOperations.internalInitialProfileForTask(this.#initialEvaluationOperationsHost, taskIntentId);
   }
 
   /** One 初评 Task's ledger: its frozen profile and its frozen 资料库 references, both from its own plan (Issue #427, #428). */
   #initialLedgerForTask(taskIntentId: string): BaselineAnalysisStore {
-    const profile = this.#initialProfileForTask(taskIntentId);
-    const frozen = this.#evaluationMaterialPlan(taskIntentId);
-    if (frozen !== null) {
-      requireStore(frozen.baseDigest === this.#initialBaseDefinition(profile).promptContractDigest, 'ANALYSIS_RECORD_INVALID', '初评参考资料的基础契约与计划不一致。');
-    }
-    return this.#initialLedger(profile, frozen?.boundary, frozen?.promptDigest, frozenSeriesScopes(this.#authority, taskIntentId));
+    return initialEvaluationOperations.internalInitialLedgerForTask(this.#initialEvaluationOperationsHost, taskIntentId);
   }
 
   /**
@@ -10244,24 +7733,15 @@ export class EditorialStore {
    * lists them on; with no Task yet, the current profile's.
    */
   initialEvaluationLedgerForBook(bookId: string, materials?: TaskMaterialBoundary): BaselineAnalysisStore {
-    if (materials !== undefined) return this.#initialLedger(this.#evaluationProfiles.current(), materials);
-    const row = this.#authority.prepare("SELECT task_intent_id FROM analysis_task_intents WHERE book_id = ? AND kind = 'evaluation' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(bookId) as SqlRow | undefined;
-    return row === undefined ? this.#initialLedger(this.#evaluationProfiles.current()) : this.#initialLedgerForTask(asString(row.task_intent_id));
+    return initialEvaluationOperations.initialEvaluationLedgerForBook(this.#initialEvaluationOperationsHost, bookId, materials);
   }
 
   initialEvaluationLedgerForRun(runRecordId: string): BaselineAnalysisStore {
-    this.#assertAvailable();
-    const row = this.#authority.prepare("SELECT r.task_intent_id FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id WHERE r.run_record_id = ? AND t.kind = 'evaluation'").get(runRecordId);
-    requireStore(row !== undefined, 'TASK_PLAN_NOT_CURRENT', TASK_PLAN_NOT_CURRENT_REASON);
-    return this.#initialLedgerForTask(asString(row.task_intent_id));
+    return initialEvaluationOperations.initialEvaluationLedgerForRun(this.#initialEvaluationOperationsHost, runRecordId);
   }
 
   #snapshotInitialPreparation(result: AnalysisPreparationResult<AnalysisProjection>, profile: EvaluationProfileProjection, ledger: BaselineAnalysisStore): void {
-    const projection = result.projection;
-    if (result.done && projection?.taskIntent !== null && projection?.taskIntent !== undefined && projection.planEnvelope !== null) {
-      this.#evaluationCall(() => this.#transaction(this.#authority, () => this.#evaluationProfiles.snapshotTask(projection.taskIntent!.taskIntentId, this.#initialBaseDigest(ledger), profile)));
-    }
-    if (result.workId !== null) this.#initialEvaluationWork.set(result.workId, { ledger, profile });
+    return initialEvaluationOperations.internalSnapshotInitialPreparation(this.#initialEvaluationOperationsHost, result, profile, ledger);
   }
 
   /**
@@ -10275,11 +7755,7 @@ export class EditorialStore {
 
   /** The Book's AI7 初评 Task, latest Result Set Revision and history, as the evaluation kind's ledger holds them. */
   inspectInitialEvaluation(bookId: string, progress?: ProgressReader, revisionId: string | null = null): InitialEvaluationProjection {
-    const projection = this.#analysisCall(() => this.initialEvaluationLedgerForBook(bookId).inspect(bookId, progress, revisionId)) as InitialEvaluationProjection;
-    const scopes = projection.runSourceScope?.seriesScopes;
-    if (scopes !== undefined && projection.taskIntent !== null && (projection.run?.state === 'completed' || projection.run?.state === 'completed-with-gaps') &&
-        seriesScopeChanged(this.#authority, scopes, projection.taskIntent.createdAt) !== null) return { ...projection, historicalMarker: HISTORICALLY_AFFECTED_RESULT_MARKER };
-    return projection;
+    return initialEvaluationOperations.inspectInitialEvaluation(this.#initialEvaluationOperationsHost, bookId, progress, revisionId);
   }
 
   /**
@@ -10287,47 +7763,15 @@ export class EditorialStore {
    * goal is the kind's own fixed text. The preparation is a cooperative job; its plan opens in the Task Drawer.
    */
   createInitialEvaluationPreparationWork(bookId: string, launchPolicy: LaunchPolicyProjection, materialIds: ReadonlyArray<string> = [], redoOf: string | null = null, seriesId: string | null = null): AnalysisPreparationResult<InitialEvaluationProjection> {
-    requireStore(seriesId === null || seriesKnowledgeAllowed(launchPolicy, INITIAL_EVALUATION_KIND), 'SERIES_SCOPE_UNAVAILABLE', SERIES_POLICY_CLOSED);
-    const scopes = seriesId === null ? undefined : [freezeSeriesScope(this.#authority, bookId, seriesId)];
-    this.#requireEvaluationMaterialScope(materialIds.length > 0, INITIAL_EVALUATION_KIND);
-    this.#requireInitialEvaluationScope();
-    const current = this.inspectInitialEvaluation(bookId);
-    // One reading of the house profile gives both the contract the Task is prepared under and the snapshot it keeps (Issue #427).
-    const profile = this.#evaluationProfiles.current();
-    const ledger = this.#initialLedger(profile, { bookId, references: this.#prepareTaskMaterials(bookId, materialIds) }, undefined, scopes);
-    const mode = current.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again';
-    const result = this.#analysisCall(() => ledger.prepare({
-      phase: 'start',
-      bookId,
-      goal: INITIAL_EVALUATION_MODE_GOALS[mode],
-      redoOf,
-      update: mode === 'evaluation-first' ? null : { mode, selectedRange: null },
-      reconfirm: false,
-      launchPolicy,
-      ...(canonicalJson(this.initialEvaluationLedgerForBook(bookId).definition.materialReferences?.sources ?? []) === canonicalJson(ledger.definition.materialReferences?.sources ?? []) ? {} : { newTask: true }),
-    }));
-    // The snapshot pins the Task the preparation returned, inside `#snapshotInitialPreparation`, never a separate
-    // "latest evaluation Task" query (Issue #798, P3-2): that query could pin an unrelated earlier row.
-    this.#snapshotInitialPreparation(result, profile, ledger);
-    return { ...result, projection: result.projection as InitialEvaluationProjection | null };
+    return initialEvaluationOperations.createInitialEvaluationPreparationWork(this.#initialEvaluationOperationsHost, bookId, launchPolicy, materialIds, redoOf, seriesId);
   }
 
   advanceInitialEvaluationPreparationWork(workId: string): AnalysisPreparationResult<InitialEvaluationProjection> {
-    const work = this.#initialEvaluationWork.get(workId);
-    requireStore(work !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '初评计划准备已不存在。');
-    const result = this.#analysisCall(() => work.ledger.prepare({ phase: 'advance', workId }));
-    this.#snapshotInitialPreparation(result, work.profile, work.ledger);
-    if (result.done) this.#initialEvaluationWork.delete(workId);
-    return { ...result, projection: result.projection as InitialEvaluationProjection | null };
+    return initialEvaluationOperations.advanceInitialEvaluationPreparationWork(this.#initialEvaluationOperationsHost, workId);
   }
 
   cancelInitialEvaluationPreparationWork(workId: string): boolean {
-    // As the reader's report's: a preparation already settled or let go has nothing left to cancel.
-    const work = this.#initialEvaluationWork.get(workId);
-    if (work === undefined) return false;
-    this.#analysisCall(() => work.ledger.prepare({ phase: 'cancel', workId }));
-    this.#initialEvaluationWork.delete(workId);
-    return true;
+    return initialEvaluationOperations.cancelInitialEvaluationPreparationWork(this.#initialEvaluationOperationsHost, workId);
   }
 
   /** 开始任务 in the drawer's bar: the standard-direct Run Authorization and the Run; the caller hands the Run to the owner. */
@@ -10337,30 +7781,18 @@ export class EditorialStore {
     planEnvelopeDigest: string,
     start: 'now' | 'when-online' | 'idle' = 'now',
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#requireLedgerKindScope('initial-evaluation', bookId, taskIntentId);
-    const ledger = this.#ledgerTaskOf('initial-evaluation', bookId, taskIntentId);
-    const scopes = ledger.definition.seriesScopes;
-    if (scopes !== undefined) {
-      requireStore(canonicalJson(scopes) === canonicalJson(scopes.map((scope) => freezeSeriesScope(this.#authority, bookId, scope.seriesId))),
-        'SERIES_SCOPE_CHANGED', '书系参考范围已变化；请重新准备计划。');
-    }
-    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
+    return initialEvaluationOperations.authorizeInitialEvaluation(this.#initialEvaluationOperationsHost, bookId, taskIntentId, planEnvelopeDigest, start);
   }
 
   /**
    * Material-bearing evaluation requires the same kind's selected rule to admit frozen material.
    */
   #requireEvaluationMaterialScope(hasReferences: boolean, kind: string): void {
-    const launch = this.#baselineAnalysis.launch;
-    if (hasReferences && launch.live !== null && liveMaterialRule(launch.policy, kind) === null) throw new StoreError('TASK_MATERIAL_UNAVAILABLE', TASK_MATERIAL_LIVE_UNAVAILABLE);
+    return initialEvaluationOperations.internalRequireEvaluationMaterialScope(this.#initialEvaluationOperationsHost, hasReferences, kind);
   }
 
   #requireEvaluationMaterialReadings(ledger: BaselineAnalysisStore, bookId: string): void {
-    const sources = ledger.definition.materialReferences?.sources;
-    if (sources === undefined) return;
-    const refusal = this.#taskMaterialReadings({ bookId, references: sources }, '评估').find((reading) => reading.refusal !== null)?.refusal;
-    if (refusal !== undefined) throw new StoreError(refusal.code, refusal.message);
+    return initialEvaluationOperations.internalRequireEvaluationMaterialReadings(this.#initialEvaluationOperationsHost, ledger, bookId);
   }
 
   /**
@@ -10369,57 +7801,17 @@ export class EditorialStore {
    * is prepared or started there, and 评估 says why. The provider-free scope is unaffected.
    */
   #requireInitialEvaluationScope(): void {
-    this.#assertAvailable();
-    if (this.#evaluationLiveRefused(INITIAL_EVALUATION_KIND)) throw new StoreError('EVALUATION_INITIAL_UNAVAILABLE', INITIAL_EVALUATION_LIVE_UNAVAILABLE);
+    return initialEvaluationOperations.internalRequireInitialEvaluationScope(this.#initialEvaluationOperationsHost);
   }
 
   /** Whether the launch is live and its selected policy names no rule that admits this evaluation kind (Issue #429). */
   #evaluationLiveRefused(kind: typeof INITIAL_EVALUATION_KIND | typeof READERS_REPORT_KIND | typeof EVALUATION_REWRITE_KIND): boolean {
-    // 初评's ledgers take the launch the built-in profile's ledger is bound through; 审稿意见's and the rewrite's, the baseline's.
-    const launch = kind === INITIAL_EVALUATION_KIND ? this.#initialEvaluation.launch : this.#baselineAnalysis.launch;
-    return launch.live !== null && liveKindRule(launch.policy, kind, EVALUATION_PAYLOAD_CATEGORIES[kind]) === null;
+    return initialEvaluationOperations.internalEvaluationLiveRefused(this.#initialEvaluationOperationsHost, kind);
   }
 
   /** AI7's latest settled 初评 as 评估 snapshots it; `null` while there is none, or the Book cannot be evaluated by AI7 at all. */
   #initialEvaluationFacts(bookId: string): InitialEvaluationFacts | null {
-    let projection: InitialEvaluationProjection;
-    try {
-      projection = this.inspectInitialEvaluation(bookId);
-    } catch (error) {
-      if (error instanceof AnalysisError || error instanceof StoreError) return null;
-      throw error;
-    }
-    const revision = projection.resultSetRevision;
-    if (revision === null) return null;
-    const evaluation = revision.evaluation;
-    const items = evaluation.items.map((item) => ({
-      itemId: item.itemId, score: item.score, comment: item.comment, sufficiency: item.sufficiency, citedBlocks: item.citedBlocks, unitsCited: item.unitsCited,
-      // AI7's evidence for the item (EVAL-006), kept with the draft a version begins from so the record shows what each score rests on.
-      evidence: item.observations.map((observation) => ({ unitOrdinal: observation.unitOrdinal, note: observation.note, blockIds: [...observation.blockIds] })),
-    }));
-    return {
-      draft: {
-        revisionId: revision.revisionId,
-        ordinal: revision.ordinal,
-        revisionLabel: revision.manuscriptPin.revisionLabel,
-        createdAt: revision.createdAt,
-        items,
-        strengths: [...evaluation.strengths],
-        weaknesses: [...evaluation.weaknesses],
-        nextStep: evaluation.nextStep,
-        suggestedConclusion: evaluation.suggestedConclusion,
-        complete: evaluation.synthesis.state === 'closed' && items.every((item) => item.score !== null),
-        // A 初评 that completed with gaps scored without these ranges; every version begun from it says so.
-        unitsTotal: revision.coverage.unitsTotal,
-        unreadUnits: [...new Set(revision.gaps.map((gap) => gap.unitOrdinal))].sort((left, right) => left - right),
-        // AI7's market section (S81b2; EVAL-009), snapshotted with the draft like everything AI7 wrote.
-        market: evaluation.market,
-      },
-      manuscriptRevisionId: revision.manuscriptPin.revisionId,
-      current: revision.freshness.state === 'current',
-      profileSha256: evaluation.profile.sha256,
-      profile: this.#initialProfileForTask(asString(this.#authority.prepare('SELECT task_intent_id FROM analysis_result_set_revisions WHERE revision_id = ?').get(revision.revisionId)!.task_intent_id)),
-    };
+    return initialEvaluationOperations.internalInitialEvaluationFacts(this.#initialEvaluationOperationsHost, bookId);
   }
 
   /**
@@ -10427,23 +7819,7 @@ export class EditorialStore {
    * Run of it is under way or waiting, and not for a Book AI7 cannot read, which says why.
    */
   #initialEvaluationTask(bookId: string): Pick<EvaluationInitialProjection, 'task' | 'prepare'> {
-    let projection: InitialEvaluationProjection;
-    try {
-      projection = this.inspectInitialEvaluation(bookId);
-    } catch (error) {
-      if (error instanceof AnalysisError || error instanceof StoreError) return { task: null, prepare: { allowed: false, reason: `AI7 初评暂不可用：${error.message}` } };
-      throw error;
-    }
-    const runState = projection.run?.state ?? null;
-    return {
-      task: projection.taskIntent === null ? null : { taskIntentId: projection.taskIntent.taskIntentId, state: projection.state, label: analysisTaskStateLabel(projection),
-        ...(projection.historicalMarker === undefined ? {} : { historicalMarker: projection.historicalMarker }) },
-      prepare: this.#evaluationLiveRefused(INITIAL_EVALUATION_KIND)
-        ? { allowed: false, reason: INITIAL_EVALUATION_LIVE_UNAVAILABLE }
-        : runIsActive(runState)
-        ? { allowed: false, reason: activeRunReason(runState, INITIAL_EVALUATION_KIND) }
-        : { allowed: true, mode: projection.resultSetRevision === null ? 'evaluation-first' : 'evaluation-again' },
-    };
+    return initialEvaluationOperations.internalInitialEvaluationTask(this.#initialEvaluationOperationsHost, bookId);
   }
 
   // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013; editor-surfaces §5 ②C) -------------------------------------
@@ -10607,13 +7983,7 @@ export class EditorialStore {
    * for and kept while it prepares, as 审稿意见's is. It takes the launch the baseline ledger was bound to.
    */
   #writingLedger(input: WritingContractInput, rules: WritingCopyRules = WRITING_COPY_RULES, sources?: ReadonlyArray<TaskMaterialSource>): BaselineAnalysisStore {
-    const definition = this.#analysisCall(() => writingKindDefinition(input, rules, sources));
-    const key = sources === undefined ? definition.promptContractDigest : `${definition.promptContractDigest}:${canonicalJson(sources)}`;
-    return this.#writingLedgers.obtain(key, () => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
-    });
+    return writingTaskOperations.internalWritingLedger(this.#writingTaskOperationsHost, input, rules, sources);
   }
 
   /**
@@ -10622,82 +7992,45 @@ export class EditorialStore {
    * request, so its outcome and drafts stay readable and nothing of it is run again.
    */
   #writingLedgerOf(task: StoredWritingTask): BaselineAnalysisStore {
-    // A Task recorded under `/1` is run and judged under `/1` (#704 P2-2).
-    const material = task.materials.find((entry) => entry.refusal !== null)?.refusal ?? null;
-    if (task.exemplarsReadable && material === null) return this.#writingLedger(task.input, task.copyRules, task.materials.length === 0 ? undefined : task.materials.map((entry) => entry.source));
-    // …and one whose 资料库 item no longer reads at its pinned build refuses as one whose 范例 is gone does (Issue #428).
-    const moved = task.exemplarsReadable && material !== null ? material : { code: 'WRITING_EXEMPLAR_MOVED', message: WRITING_EXEMPLAR_MOVED };
-    const definition = this.#analysisCall(() => writingRecordedKindDefinition(task.input, task.promptContractSha256, task.copyRules, moved));
-    return this.#writingLedgers.obtain(`${task.promptContractSha256}:recorded:${moved.code}`, () => {
-      const ledger = new BaselineAnalysisStore(this.#authority, this.#boundedAuthority, this.#control.baselineAnalysisRoute, definition);
-      ledger.bindLaunch(this.#baselineAnalysis.launch);
-      return ledger;
-    });
+    return writingTaskOperations.internalWritingLedgerOf(this.#writingTaskOperationsHost, task);
   }
 
   #writingCall<T>(operation: () => T): T {
-    this.#assertAvailable();
-    try {
-      return operation();
-    } catch (error) {
-      if (error instanceof WritingTaskError || error instanceof AnalysisError || error instanceof EvaluationError || error instanceof ImportedExemplarError) {
-        throw new StoreError(error.code, error.message);
-      }
-      throw error;
-    }
+    return writingTaskOperations.internalWritingCall(this.#writingTaskOperationsHost, operation);
   }
 
   /** One Task's type and reference set — the one its frozen plan names when it froze one. */
   #writingTaskOf(taskIntentId: string): { task: StoredWritingTask; ledger: BaselineAnalysisStore } | null {
-    let task = this.#writingCall(() => this.#writingTasks.task(taskIntentId));
-    if (task === null) return null;
-    let ledger = this.#writingLedgerOf(task);
-    const planContract = this.#writingCall(() => this.#writingTasks.planContract(taskIntentId));
-    if (planContract !== null && planContract !== task.promptContractSha256) {
-      task = this.#writingCall(() => this.#writingTasks.task(taskIntentId, planContract));
-      requireStore(task !== null, 'WRITING_RECORD_INVALID', '写作任务的计划与它的记录不一致。');
-      ledger = this.#writingLedgerOf(task);
-    }
-    return { task, ledger };
+    return writingTaskOperations.internalWritingTaskOf(this.#writingTaskOperationsHost, taskIntentId);
   }
 
   /** The Book's latest writing Task with its ledger and projection; `null` before the first, or for one no record names. */
   #latestWriting(bookId: string, progress?: ProgressReader): { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null {
-    const intentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
-    if (intentId === null) return null;
-    const found = this.#writingTaskOf(intentId);
-    if (found === null) return null;
-    const projection = this.#analysisCall(() => found.ledger.inspect(bookId, progress)) as WritingProjection;
-    return { ...found, projection };
+    return writingTaskOperations.internalLatestWriting(this.#writingTaskOperationsHost, bookId, progress);
   }
 
   /** The Book's latest writing Task as its ledger reads it, or `null`; `progress` is the execution owner's reader. */
   inspectWriting(bookId: string, progress?: ProgressReader): WritingProjection | null {
-    this.#assertAvailable();
-    return this.#latestWriting(bookId, progress)?.projection ?? null;
+    return writingTaskOperations.inspectWriting(this.#writingTaskOperationsHost, bookId, progress);
   }
 
   /**
    * 写作任务 runs only where the selected policy admits its exact binding. The provider-free scope is unaffected.
    */
   #requireWritingScope(): void {
-    this.#assertAvailable();
-    if (this.#writingLiveUnavailable()) throw new StoreError('WRITING_UNAVAILABLE', WRITING_LIVE_UNAVAILABLE);
+    return writingTaskOperations.internalRequireWritingScope(this.#writingTaskOperationsHost);
   }
 
   /** Whether the launch is live and its selected policy admits no writing on the bound route; never under the provider-free scope. */
   #writingLiveUnavailable(): boolean {
-    const launch = this.#baselineAnalysis.launch;
-    return launch.live !== null && liveWritingRule(launch.policy, launch.live) === null;
+    return writingTaskOperations.internalWritingLiveUnavailable(this.#writingTaskOperationsHost);
   }
 
   /**
    * Preserve the precise predecessor refusal unless the writing rule explicitly admits frozen material.
    */
   #requireWritingMaterialScope(listsMaterials: boolean): void {
-    this.#assertAvailable();
-    const launch = this.#baselineAnalysis.launch;
-    if (listsMaterials && launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null) throw new StoreError('WRITING_UNAVAILABLE', WRITING_MATERIAL_LIVE_UNAVAILABLE);
+    return writingTaskOperations.internalRequireWritingMaterialScope(this.#writingTaskOperationsHost, listsMaterials);
   }
 
   /**
@@ -10707,21 +8040,7 @@ export class EditorialStore {
    * no longer one this Book's Tasks may list, the item gone — is returned in its code, never read around.
    */
   #readWritingMaterial(bookId: string, source: Pick<WritingMaterialSource, 'materialId' | 'indexDigest'>): WritingMaterialReading {
-    const boundary = { bookId, references: [{ materialId: source.materialId, indexDigest: source.indexDigest }] };
-    const paragraphs: string[] = [];
-    try {
-      for (let from: number | null = 1; from !== null;) {
-        const page = this.readMaterialIndexForTask(boundary, source.materialId, from);
-        for (const segment of page.segments) paragraphs.push(segment.text);
-        from = page.next;
-      }
-    } catch (error) {
-      // Every seam refusal is handed on in its code; the ledger (`WritingTasks.#pinnedMaterial`) alone tells a moved or unavailable
-      // item from a corrupt record, which it throws.
-      if (error instanceof StoreError && /^(?:MATERIAL_|LIBRARY_MATERIAL_)/u.test(error.code)) return { refusal: { code: error.code, message: error.message } };
-      throw error;
-    }
-    return { paragraphs };
+    return writingTaskOperations.internalReadWritingMaterial(this.#writingTaskOperationsHost, bookId, source);
   }
 
   /**
@@ -10732,36 +8051,7 @@ export class EditorialStore {
    * {@link MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES}. Nothing is cut.
    */
   #writingMaterials(bookId: string, materialIds: ReadonlyArray<string>): Array<{ input: WritingMaterialInput; source: WritingMaterialSource }> {
-    requireStore(materialIds.length <= MAX_WRITING_MATERIALS, 'WRITING_MATERIALS_INVALID', WRITING_MATERIALS_TOO_MANY);
-    let total = 0;
-    const found = materialIds.map((materialId) => {
-      const original = this.#libraryCall(() => this.#libraryMaterials.original(materialId));
-      const title = writingWords(original.title, 200);
-      let pin: MaterialReferencePin;
-      try {
-        pin = this.pinMaterialReference(bookId, materialId);
-      } catch (error) {
-        if (error instanceof StoreError) throw new StoreError(error.code, `资料《${title}》：${error.message}`);
-        throw error;
-      }
-      const build = this.#materialIndexCall(() => this.#materialIndex.current(materialId));
-      requireStore(build !== null && build.sha256 === pin.indexDigest, 'MATERIAL_INDEX_MOVED', `资料《${title}》：计划冻结的这份资料的索引版本已不在本机。`);
-      const characters = build.metadata.characters;
-      requireStore(characters <= MAX_WRITING_MATERIAL_GRAPHEMES, 'WRITING_MATERIAL_OVER_BOUND', writingMaterialOverBoundNamed(title, characters));
-      total += characters;
-      return { materialId, title, pin, characters };
-    });
-    requireStore(total <= MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, 'WRITING_MATERIAL_OVER_BOUND', writingMaterialsOverTotal(total));
-    return found.map(({ materialId, title, pin, characters }) => {
-      const read = this.#readWritingMaterial(bookId, pin);
-      if ('refusal' in read) throw new StoreError(read.refusal.code, `资料《${title}》：${read.refusal.message}`);
-      const paragraphs = read.paragraphs.map(writingMaterialParagraph).filter((paragraph) => paragraph.length > 0);
-      requireStore(paragraphs.length > 0, 'MATERIAL_INDEX_NO_TEXT', `资料《${title}》：这份资料没有提取出可分段的文字。`);
-      return {
-        input: { title, paragraphs },
-        source: { materialId, indexDigest: pin.indexDigest, title, characters, sha256: writingMaterialDigest(paragraphs) },
-      };
-    });
+    return writingTaskOperations.internalWritingMaterials(this.#writingTaskOperationsHost, bookId, materialIds);
   }
 
   /**
@@ -10770,39 +8060,12 @@ export class EditorialStore {
    * item longer than one may be is shown, disabled, with why. Live offers require the selected writing rule's material terms.
    */
   #writingMaterialOffer(bookId: string): WritingTaskProjection['references']['materials'] {
-    const launch = this.#baselineAnalysis.launch;
-    const live = launch.live !== null && liveMaterialRule(launch.policy, WRITING_KIND) === null;
-    let indexed: Array<{ materialId: string; title: string; scope: 'book' | 'house'; characters: number; damaged: boolean }>;
-    try {
-      indexed = this.#indexedMaterialOffers(bookId);
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      return { statement: `资料库暂不可用：${error.message}`, items: [], more: 0 };
-    }
-    const shown = indexed.slice(0, MAX_WRITING_MATERIAL_OFFERS);
-    return {
-      statement: live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : indexed.length === 0 ? WRITING_MATERIALS_NONE : WRITING_MATERIALS_STATEMENT,
-      items: shown.map((item) => {
-        const reason = live ? WRITING_MATERIAL_LIVE_UNAVAILABLE : item.damaged ? TASK_MATERIAL_OFFER_DAMAGED
-          : item.characters > MAX_WRITING_MATERIAL_GRAPHEMES ? writingMaterialOverBound(item.characters) : null;
-        return { materialId: item.materialId, title: item.title, characters: item.characters, scope: item.scope, selectable: reason === null, reason };
-      }),
-      more: indexed.length - shown.length,
-    };
+    return writingTaskOperations.internalWritingMaterialOffer(this.#writingTaskOperationsHost, bookId);
   }
 
   /** The Book's metadata as a draft may state it: its title, its people as they read now, and its 书系. */
   #writingBook(bookId: string): WritingBookInput {
-    const book = this.#authority.prepare('SELECT title FROM books WHERE book_id = ?').get(bookId) as SqlRow | undefined;
-    requireStore(book !== undefined, 'BOOK_NOT_FOUND', '图书不存在。');
-    const people = this.#peopleCall(() => this.#bookPeople.current(bookId));
-    const series = this.#seriesCall(() => this.#series.seriesOf(bookId)).memberships.map((membership) => membership.title);
-    return {
-      title: asString(book.title),
-      authors: people.authors.slice(0, 20).map((name) => writingWords(name, 80)),
-      editors: people.editors.slice(0, 20).map((name) => writingWords(name, 80)),
-      series: series.slice(0, 20).map((title) => writingWords(title, 120)),
-    };
+    return writingTaskOperations.internalWritingBook(this.#writingTaskOperationsHost, bookId);
   }
 
   /**
@@ -10810,26 +8073,7 @@ export class EditorialStore {
    * longer than the contract takes — or `null` while the Book has none that wrote a synopsis.
    */
   #writingSynopsis(bookId: string): { input: WritingSynopsisInput; revisionId: string; ordinal: number } | null {
-    const baseline = this.#analysisCall(() => this.#baselineAnalysis.inspect(bookId)) as BaselineAnalysisProjection;
-    const revision = baseline.resultSetRevision;
-    if (revision === null) return null;
-    const synopsis = writingWords(revision.synthesis.synopsis, MAX_WRITING_SYNOPSIS_GRAPHEMES);
-    if (synopsis.length === 0) return null;
-    return {
-      revisionId: revision.revisionId,
-      ordinal: revision.ordinal,
-      input: {
-        text: synopsis,
-        excerpt: graphemeLength(revision.synthesis.synopsis.trim()) > MAX_WRITING_SYNOPSIS_GRAPHEMES,
-        characters: revision.synthesis.entities
-          .filter((entity) => entity.kind === 'person' && writingWords(entity.name, 80).length > 0)
-          .slice(0, MAX_WRITING_CHARACTERS)
-          .map((entity) => {
-            const note = entity.note === null ? '' : writingWords(entity.note, 300);
-            return { name: writingWords(entity.name, 80), note: note.length === 0 ? null : note };
-          }),
-      },
-    };
+    return writingTaskOperations.internalWritingSynopsis(this.#writingTaskOperationsHost, bookId);
   }
 
   /**
@@ -10837,22 +8081,7 @@ export class EditorialStore {
    * market section of the 初评 the version began from (S81b2) — or `null` while no version is 定稿.
    */
   #writingEvaluation(bookId: string): { input: WritingEvaluationInput; recordId: string; ordinal: number } | null {
-    const finalized = this.#evaluationCall(() => this.#evaluations.latestFinalized(bookId));
-    if (finalized === null) return null;
-    const conclusion = finalized.profile.conclusions.find((entry) => entry.conclusion === finalized.content.conclusion);
-    requireStore(conclusion !== undefined, 'WRITING_RECORD_INVALID', '定稿的评估没有结论。');
-    const lines = (list: ReadonlyArray<string>, most: number): string[] =>
-      list.map((entry) => writingWords(entry, 400)).filter((entry) => entry.length > 0).slice(0, most);
-    const market = finalized.initial?.market ?? null;
-    return {
-      recordId: finalized.recordId,
-      ordinal: finalized.ordinal,
-      input: {
-        conclusion: conclusion.label,
-        strengths: lines(finalized.content.strengths, 20),
-        market: market === null ? null : { readers: lines(market.readers, 5), sellingPoints: lines(market.sellingPoints, 5), channels: lines(market.channels, 5) },
-      },
-    };
+    return writingTaskOperations.internalWritingEvaluation(this.#writingTaskOperationsHost, bookId);
   }
 
   /**
@@ -10862,57 +8091,17 @@ export class EditorialStore {
    * contract takes — and the version it is, never copied (the contract's bound refuses a copy).
    */
   #writingExemplars(bookId: string, typeId: string): Array<{ input: WritingExemplarInput; source: WritingExemplarSource }> {
-    return this.#writingExemplarsByType(bookId, [typeId]).found.get(typeId) ?? [];
+    return writingTaskOperations.internalWritingExemplars(this.#writingTaskOperationsHost, bookId, typeId);
   }
 
   /** The same for several types in one pass over 范例's pages, which stops once every type holds its two. */
   #writingExemplarsByType(bookId: string, typeIds: ReadonlyArray<string>): WritingExemplarScan {
-    const damaged = new Map(typeIds.map((typeId) => [typeId, [] as string[]]));
-    const found = new Map(typeIds.map((typeId) => [typeId, [] as Array<{ input: WritingExemplarInput; source: WritingExemplarSource }>]));
-    const full = (): boolean => [...found.values()].every((list) => list.length >= MAX_WRITING_EXEMPLARS);
-    let after: ExemplarBookCursor | null = null;
-    do {
-      // A damaged imported version is named and skipped, never raised (Issue #789): the rest of the Book stays offered.
-      const unread: Array<{ typeId: string; title: string }> = [];
-      const page: ExemplarsProjection = this.inspectExemplars(after, unread);
-      for (const entry of unread) {
-        if (!damaged.has(entry.typeId)) continue;
-        const names = damaged.get(entry.typeId)!;
-        names.push(entry.title);
-      }
-      for (const book of page.books) {
-        if (book.bookId === bookId) continue;
-        for (const [typeId, list] of found) {
-          if (list.length >= MAX_WRITING_EXEMPLARS) continue;
-          const exemplar = book.exemplars.find((entry) => entry.typeId === typeId);
-          if (exemplar === undefined || exemplar.eligibility !== 'house-only') continue;
-          // Its text as the contract takes it, read from its own revision, and the reference that pins it with the facts the
-          // plan names it by.
-          const words = this.#importedCall(() => readWritingExemplarWords(this.#authority, exemplar.revisionId));
-          if (words === null) continue;
-          const input: WritingExemplarInput = { bookTitle: writingWords(book.bookTitle, 200), version: exemplar.version, text: words.text, excerpt: words.excerpt };
-          list.push({
-            input,
-            source: {
-              documentId: exemplar.documentId, revisionId: exemplar.revisionId, bookId: book.bookId,
-              bookTitle: input.bookTitle, version: input.version, excerpt: input.excerpt, sha256: writingExemplarDigest(words.text),
-            },
-          });
-        }
-      }
-      after = page.nextCursor;
-    } while (after !== null && !full());
-    return { found, damaged };
+    return writingTaskOperations.internalWritingExemplarsByType(this.#writingTaskOperationsHost, bookId, typeIds);
   }
 
   /** The editor's own words for one field, as the contract freezes them, or why they cannot be taken. */
   #writingField(value: unknown, most: number, missing: string, field: string): string {
-    requireStore(typeof value === 'string', 'WRITING_INVALID', `${field}无效。`);
-    const words = value.normalize('NFC').trim();
-    requireStore(words.length > 0, 'WRITING_FIELD_REQUIRED', missing);
-    requireStore(words.isWellFormed() && !WRITING_FIELD_CONTROL.test(words) && graphemeLength(words) <= most, 'WRITING_FIELD_INVALID',
-      `${field}最多 ${most} 个字，只能写在一行里。`);
-    return words;
+    return writingTaskOperations.internalWritingField(this.#writingTaskOperationsHost, value, most, missing, field);
   }
 
   /**
@@ -10930,110 +8119,15 @@ export class EditorialStore {
     // Task's 其他要求.
     intentDraft: DraftPromotion | null = null,
   ): AnalysisPreparationResult<WritingProjection> {
-    // 允许参考's 资料库 items the editor ticked (Issue #428): each once, by identity.
-    const materialIds = request.materialIds ?? [];
-    requireStore(Array.isArray(materialIds) && materialIds.every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) &&
-      new Set(materialIds).size === materialIds.length, 'WRITING_INVALID', '写作任务参数无效。');
-    this.#requireWritingMaterialScope(materialIds.length > 0);
-    this.#requireWritingScope();
-    requireStore(UUID_PATTERN.test(bookId), 'WRITING_INVALID', '写作任务参数无效。');
-    const type = productionDocumentType(request.typeId);
-    requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
-    const audience = this.#writingField(request.audience, MAX_WRITING_AUDIENCE_GRAPHEMES, '请写下这份文档的受众。', '受众');
-    const channel = this.#writingField(request.channel, MAX_WRITING_CHANNEL_GRAPHEMES, '请写下这份文档的渠道。', '渠道');
-    const requirements = request.requirements === null || request.requirements.trim().length === 0
-      ? null
-      : this.#writingField(request.requirements, MAX_WRITING_REQUIREMENTS_GRAPHEMES, '', '其他要求');
-    const primary = this.#authority.prepare("SELECT 1 FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(bookId);
-    requireStore(primary !== undefined, 'WRITING_NEEDS_MANUSCRIPT', WRITING_NEEDS_MANUSCRIPT);
-    requireStore(intentDraft?.deliverable !== undefined || this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, type.typeId)) === undefined,
-      'WRITING_DOCUMENT_EXISTS', writingDocumentExists(type.label));
-    requireStore(!this.#documentCall(() => this.#productionDocuments.notForThisBook(bookId, type.typeId)),
-      'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
-    const latest = this.#latestWriting(bookId);
-    requireStore(!runIsActive(latest?.projection.run?.state ?? null), 'WRITING_UNAVAILABLE', activeRunReason(latest?.projection.run?.state ?? null, WRITING_KIND));
-    const synopsis = this.#writingSynopsis(bookId);
-    const evaluation = this.#writingEvaluation(bookId);
-    const exemplars = this.#writingExemplars(bookId, type.typeId);
-    const materials = this.#writingMaterials(bookId, materialIds);
-    const input: WritingContractInput = {
-      type: { typeId: type.typeId, label: type.label },
-      ...(intentDraft?.deliverable === undefined ? {} : { deliverable: intentDraft.deliverable }),
-      // The writing policy retains house-person redaction. Freeze no editor names into a live prompt.
-      book: { ...this.#writingBook(bookId), ...(this.#baselineAnalysis.launch.live === null ? {} : { editors: [] }) },
-      audience,
-      channel,
-      requirements,
-      synopsis: synopsis?.input ?? null,
-      evaluation: evaluation?.input ?? null,
-      exemplars: exemplars.map((exemplar) => exemplar.input),
-      // A Task that lists 资料库 items is `/3`; one that lists none has no `materials` at all and stays `/2` (Issue #428).
-      ...(materials.length === 0 ? {} : { materials: materials.map((material) => material.input) }),
-    };
-    // `/2` for every Task prepared by the product; the suites may prepare one under `/1`, as software before #698 did (#707).
-    const copyRules = this.#control.writingCopyRules ?? WRITING_COPY_RULES;
-    const ledger = this.#writingLedger(input, copyRules, materials.length === 0 ? undefined : materials.map((material) => material.source));
-    const mode = latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again';
-    // The pins are no words of the contract (Issue #428): a prepared Task that froze other builds of the items — one whose build is
-    // gone, say — is never revised in place to these, since its row would keep its own; 改计划重做 makes a Task of its own.
-    const pins = (list: ReadonlyArray<Pick<WritingMaterialSource, 'materialId' | 'indexDigest'>>): string =>
-      list.map((source) => `${source.materialId}:${source.indexDigest}`).join(',');
-    const newTask = latest !== null && pins(latest.task.materials.map((material) => material.source)) !== pins(materials.map((material) => material.source));
-    const recordWritingTask = (taskIntentId: string): void => {
-      this.#writingCall(() => this.#writingTasks.recordTask({
-        taskIntentId, bookId, evaluationRecordId: evaluation?.recordId ?? null, baselineRevisionId: synopsis?.revisionId ?? null,
-        exemplarSources: exemplars.map((exemplar) => exemplar.source), materialSources: materials.map((material) => material.source),
-        contract: input, promptContractSha256: ledger.definition.promptContractDigest, copyRules,
-      }));
-    };
-    const result = this.#analysisCall(() => ledger.prepare({
-      phase: 'start',
-      bookId,
-      goal: intentDraft === null ? WRITING_MODE_GOALS[mode] : intentDraft.goal as typeof WRITING_MODE_GOALS[typeof mode],
-      redoOf,
-      update: mode === 'writing-first' ? null : { mode, selectedRange: null },
-      reconfirm: false,
-      launchPolicy,
-      ...(newTask ? { newTask } : {}),
-      ...(intentDraft === null ? {} : {
-        intentDraft: { ...intentDraft, promoted: (taskIntentId: string) => {
-          recordWritingTask(taskIntentId);
-          intentDraft.promoted({ taskIntentId, reviewRunId: null });
-        } },
-      }),
-    }));
-    // Which type, words and reference set the Task drafts from, recorded once for it and this contract.
-    if (intentDraft === null) {
-      const taskIntentId = this.#writingCall(() => this.#writingTasks.latestTaskIntentId(bookId));
-      requireStore(taskIntentId !== null, 'WRITING_RECORD_INVALID', '写作任务没有准备出来。');
-      this.#transaction(this.#authority, () => recordWritingTask(taskIntentId));
-    }
-    if (result.workId !== null) this.#writingWork.set(result.workId, ledger);
-    return { ...result, projection: result.projection as WritingProjection | null };
+    return writingTaskOperations.createWritingPreparationWork(this.#writingTaskOperationsHost, bookId, request, launchPolicy, redoOf, intentDraft);
   }
 
   advanceWritingPreparationWork(workId: string): AnalysisPreparationResult<WritingProjection> {
-    this.#assertAvailable();
-    const ledger = this.#writingWork.get(workId);
-    requireStore(ledger !== undefined, 'ANALYSIS_PREPARATION_NOT_FOUND', '写作任务的计划准备已不存在。');
-    let result: AnalysisPreparationResult<unknown>;
-    try {
-      result = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId }));
-    } catch (error) {
-      // A preparation that failed is over: nothing holds its work any more (#688 review).
-      this.#writingWork.delete(workId);
-      throw error;
-    }
-    if (result.done) this.#writingWork.delete(workId);
-    return { ...result, projection: result.projection as WritingProjection | null };
+    return writingTaskOperations.advanceWritingPreparationWork(this.#writingTaskOperationsHost, workId);
   }
 
   cancelWritingPreparationWork(workId: string): boolean {
-    const ledger = this.#writingWork.get(workId);
-    if (ledger === undefined) return false;
-    this.#writingWork.delete(workId);
-    this.#analysisCall(() => ledger.prepare({ phase: 'cancel', workId }));
-    return true;
+    return writingTaskOperations.cancelWritingPreparationWork(this.#writingTaskOperationsHost, workId);
   }
 
   /** 开始任务 in the drawer's bar: the Run Authorization and the Run on the ledger of the plan's contract, for the owner. */
@@ -11043,20 +8137,12 @@ export class EditorialStore {
     planEnvelopeDigest: string,
     start: 'now' | 'when-online' | 'idle' = 'now',
   ): { dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore } {
-    this.#requireLedgerKindScope('writing', bookId, taskIntentId);
-    const ledger = this.#ledgerTaskOf('writing', bookId, taskIntentId);
-    const target = this.#writingTaskOf(taskIntentId)?.task.input.deliverable;
-    requireStore(target === undefined || !taskDeliverableStale(this.#authority, bookId, target), 'TASK_INTENT_DRAFT_DELIVERABLE_STALE', '交付物已有新版本；请重新发起任务。');
-    const authorized = this.#analysisCall(() => ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, start));
-    return { dispatchRunRecordId: authorized.dispatchRunRecordId, ledger };
+    return writingTaskOperations.authorizeWriting(this.#writingTaskOperationsHost, bookId, taskIntentId, planEnvelopeDigest, start);
   }
 
   /** Reconcile stranded Runs to their kept continuation points; queued starts still require an explicit new start. */
   reconcileStoppedWritingRuns(): { settled: number } {
-    this.#assertAvailable();
-    const any = this.#writingCall(() => this.#writingTasks.anyTask());
-    if (any === null) return { settled: 0 };
-    return { settled: this.#analysisCall(() => this.#writingLedgerOf(any).reconcileStoppedRuns()).settled };
+    return writingTaskOperations.reconcileStoppedWritingRuns(this.#writingTaskOperationsHost);
   }
 
   /**
@@ -11064,29 +8150,12 @@ export class EditorialStore {
    * wrote no draft — a refused copy of an exemplar — does not hide an older draft that can still be opened (#688 review).
    */
   #writingDrafted(bookId: string): Map<string, { revisionId: string; createdAt: string }> {
-    const drafted = new Map<string, { revisionId: string; createdAt: string }>();
-    for (const revision of this.#writingCall(() => this.#writingTasks.revisions(bookId))) {
-      // Whether a revision holds a draft never changes, so each is read once while the store is open (#688 re-review).
-      let known = this.#writingRevisionDrafts.get(revision.revisionId);
-      if (known === undefined) {
-        const found = this.#writingTaskOf(revision.taskIntentId);
-        if (found === null) continue;
-        const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as WritingProjection;
-        known = { typeId: found.task.typeId, drafted: inspected.inspectedRevision?.revision.writing.draft != null };
-        if (this.#writingRevisionDrafts.size >= 1024) this.#writingRevisionDrafts.clear();
-        this.#writingRevisionDrafts.set(revision.revisionId, known);
-      }
-      if (known.drafted && !drafted.has(known.typeId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
-    }
-    return drafted;
+    return writingTaskOperations.internalWritingDrafted(this.#writingTaskOperationsHost, bookId);
   }
 
   /** Why the Book's latest writing Task wrote no draft: its book-level synthesis's own reason, or `null` when it wrote one. */
   #writingRefusal(projection: WritingProjection): string | null {
-    const revision = projection.resultSetRevision;
-    if (revision === null || projection.taskOutcome === null || projection.taskOutcome.resultSetRevisionId !== revision.revisionId ||
-        revision.writing.draft !== null) return null;
-    return revision.writing.synthesis.reason;
+    return writingTaskOperations.internalWritingRefusal(this.#writingTaskOperationsHost, projection);
   }
 
   /**
@@ -11096,107 +8165,7 @@ export class EditorialStore {
    * 快速开始 starts one under that type's writing 默认执行规则 (S84b), or why not.
    */
   inspectWritingTask(bookId: string): WritingTaskProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
-    const book = this.#writingBook(bookId);
-    const manuscript = this.#authority.prepare(
-      `SELECT count(*) AS blocks FROM working_blocks wb JOIN manuscript_branches mb ON mb.branch_id = wb.branch_id
-       JOIN manuscripts m ON m.manuscript_id = mb.manuscript_id AND m.role = 'primary' WHERE m.book_id = ?`,
-    ).get(bookId) as SqlRow;
-    const blocks = asNumber(manuscript.blocks);
-    let unavailable: string | null = this.#writingLiveUnavailable() ? WRITING_LIVE_UNAVAILABLE
-      : blocks === 0 ? WRITING_NEEDS_MANUSCRIPT : null;
-    let latest: { task: StoredWritingTask; ledger: BaselineAnalysisStore; projection: WritingProjection } | null = null;
-    let drafted = new Map<string, { revisionId: string; createdAt: string }>();
-    try {
-      latest = this.#latestWriting(bookId);
-      drafted = this.#writingDrafted(bookId);
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      unavailable = `写作任务暂不可用：${error.message}`;
-    }
-    // What a draft would reference: a Book whose manuscript no analysis may read, or whose records no longer read, says why.
-    let synopsis: { input: WritingSynopsisInput; revisionId: string; ordinal: number } | null = null;
-    let evaluation: { input: WritingEvaluationInput; recordId: string; ordinal: number } | null = null;
-    try {
-      synopsis = blocks === 0 ? null : this.#writingSynopsis(bookId);
-      evaluation = this.#writingEvaluation(bookId);
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      unavailable ??= `写作任务暂不可用：${error.message}`;
-    }
-    const documents = this.#documentCall(() => this.#productionDocuments.documents(bookId, blocks > 0));
-    const runState = latest?.projection.run?.state ?? null;
-    // The house's 范例 of every type in one pass — read again only when no writing Task is under way; a record that no longer
-    // reads says so, as any other part does.
-    let exemplarsByType: WritingExemplarScan = { found: new Map(), damaged: new Map() };
-    const cached = runIsActive(runState) ? this.#writingExemplarCache.get(bookId) : undefined;
-    if (cached !== undefined) exemplarsByType = cached;
-    else {
-      try {
-        exemplarsByType = this.#writingExemplarsByType(bookId, documents.types.map((type) => type.typeId));
-        if (this.#writingExemplarCache.size >= REVIEW_CATEGORY_CACHE_CAPACITY) this.#writingExemplarCache.clear();
-        this.#writingExemplarCache.set(bookId, exemplarsByType);
-      } catch (error) {
-        if (!(error instanceof StoreError)) throw error;
-        unavailable ??= `写作任务暂不可用：${error.message}`;
-      }
-    }
-    const named = (list: ReadonlyArray<string>, none: string): string => (list.length === 0 ? none : list.join('、'));
-    // What each type's 快速开始 compares its rule with, read once and only when some type has one.
-    let ruleFacts: { facts: MaterialPlanInputsProjection } | { reason: string } | null = null;
-    const facts = () => (ruleFacts ??= this.#writingRuleFacts(bookId, latest));
-    return {
-      bookId,
-      unavailable,
-      references: {
-        synopsis: synopsis === null
-          ? '本书尚无基线分析，本次不参考梗概与人物'
-          : `基线分析第 ${synopsis.ordinal} 版的梗概${synopsis.input.excerpt ? '（节选开头）' : ''}与 ${synopsis.input.characters.length} 位人物`,
-        evaluation: evaluation === null
-          ? '本书尚无定稿的评估，本次不参考评估结论与营销要点'
-          : `第 ${evaluation.ordinal} 版定稿评估的结论「${evaluation.input.conclusion}」、主要优点${evaluation.input.market === null ? '（这一版没有 AI7 初评的市场部分）' : '与营销要点（目标读者、差异化卖点、渠道与策略）'}`,
-        book: `《${book.title}》 · 作者：${named(book.authors, '未填写')} · 责编：${named(book.editors, '未填写')} · 书系：${named(book.series, '不在任何书系中')}`,
-        materials: this.#writingMaterialOffer(bookId),
-      },
-      consequences: {
-        read: blocks === 0 ? '这本书还没有稿件。' : `当前稿件的全部 ${blocks} 个段落，以及上面列出的参考材料`,
-        send: this.#baselineAnalysis.launch.live === null || this.#writingLiveUnavailable() ? WRITING_SEND_CONSEQUENCE : WRITING_LIVE_SEND_CONSEQUENCE,
-        notDo: WRITING_NOT_DO,
-        cost: WRITING_COST_BEFORE_PLAN,
-      },
-      types: documents.types.map((type): WritingTaskTypeProjection => {
-        const exemplars: WritingExemplarInput[] = (exemplarsByType.found.get(type.typeId) ?? []).map((exemplar) => exemplar.input);
-        const unread = exemplarsByType.damaged.get(type.typeId) ?? [];
-        const prepare: WritingTaskTypeProjection['prepare'] =
-          unavailable !== null ? { allowed: false, reason: unavailable }
-          : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
-          : type.notForThisBook ? { allowed: false, reason: writingNotForThisBook(type.label) }
-          : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, WRITING_KIND) }
-          : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again' };
-        return {
-          typeId: type.typeId,
-          label: type.label,
-          prepare,
-          exemplars: { count: exemplars.length, statement: writingExemplarStatement(writingExemplarLine(type.label, exemplars), exemplars.length, unread) },
-          drafted: type.document === null ? drafted.get(type.typeId) ?? null : null,
-          quickStart: this.#writingQuickStart(bookId, type.typeId, prepare, facts),
-        };
-      }),
-      task: latest === null || latest.projection.taskIntent === null ? null : {
-        taskIntentId: latest.projection.taskIntent.taskIntentId,
-        typeId: latest.task.typeId,
-        typeLabel: latest.task.input.type.label,
-        state: latest.projection.state,
-        label: writingTaskStateLabel(latest.projection, latest.task.exemplarsReadable, latest.task.materials),
-        // A Task not yet run whose exemplar — or 资料库 item's pinned build (Issue #428) — is no longer here says it cannot start;
-        // one that ran says why it wrote no draft.
-        refusal: latest.projection.authorization !== null ? this.#writingRefusal(latest.projection)
-          : !latest.task.exemplarsReadable ? WRITING_EXEMPLAR_MOVED
-            : latest.task.materials.find((material) => material.refusal !== null)?.refusal?.message ?? this.#writingRefusal(latest.projection),
-        planEnvelopeDigest: latest.projection.planEnvelope?.digest ?? null,
-      },
-    };
+    return writingTaskOperations.inspectWritingTask(this.#writingTaskOperationsHost, bookId);
   }
 
   // ---- 快速开始 of a writing Task under its 默认执行规则 (Issue #432, plan slice S84b; S75 D1–D9) ------------------------------
@@ -11209,16 +8178,7 @@ export class EditorialStore {
    * 范例 is no longer here cannot set one before starting.
    */
   #writingDefaultRule(projection: WritingProjection, task: StoredWritingTask): TaskPlanDefaultRuleProjection {
-    const envelope = projection.planEnvelope;
-    const version = projection.planVersion;
-    if (projection.taskIntent === null || envelope === null || version === null) return noDefaultRule(QUICK_START_NOT_READY);
-    const startedBy = this.#ruleStartedBy(projection.bookId, 'writing', projection.authorization, writingRulePattern(task.typeId));
-    // A live writing rule requires the selected writing admission, as preparation does.
-    // A rule binds no 资料库 item (Issue #428; TASK-023, TASK-026): a plan that lists one sets none.
-    const kindReason = this.#writingLiveUnavailable() ? SET_RULE_DEVELOPER_LIVE
-      : !task.exemplarsReadable && projection.authorization === null ? WRITING_EXEMPLAR_MOVED
-        : task.materials.length > 0 ? WRITING_RULE_MATERIALS : null;
-    return this.#ruleOffer(projection.bookId, writingRulePattern(task.typeId), { planEnvelope: envelope, planVersion: version, planRevision: projection.planRevision }, kindReason, startedBy);
+    return writingTaskOperations.internalWritingDefaultRule(this.#writingTaskOperationsHost, projection, task);
   }
 
   /**
@@ -11227,26 +8187,7 @@ export class EditorialStore {
    * rule in force, set again, answers with the rule as it is. The standard authorization never sets one.
    */
   #setWritingDefaultRule(bookId: string, taskIntentId: string, planEnvelopeDigest: string): DefaultExecutionRuleProjection {
-    const latest = this.#latestWriting(bookId);
-    const projection = latest?.projection ?? null;
-    requireStore(latest !== null && projection !== null && projection.taskIntent?.taskIntentId === taskIntentId &&
-      projection.planEnvelope?.digest === planEnvelopeDigest && projection.planVersion !== null,
-    'DEFAULT_EXECUTION_RULE_STALE', '这份计划已经变化；请重新打开计划后再设为快速开始默认。');
-    const pattern = writingRulePattern(latest.task.typeId);
-    const offer = this.#writingDefaultRule(projection, latest.task);
-    if (offer.current !== null && offer.current.state === 'active' && offer.current.fromThisPlan) {
-      const same = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
-      if (same !== null) return this.#ruleProjection(same);
-    }
-    requireStore(offer.canSet, 'DEFAULT_EXECUTION_RULE_UNAVAILABLE', offer.reason ?? QUICK_START_NOT_READY);
-    const record = this.#ruleCall(() => this.#rules.set({
-      bookId,
-      pattern,
-      sourceTaskIntentId: taskIntentId,
-      sourcePlanEnvelopeDigest: planEnvelopeDigest,
-      binding: defaultExecutionRuleBindingOf(projection.planVersion!.materialInputs),
-    }));
-    return this.#ruleProjection(record);
+    return writingTaskOperations.internalSetWritingDefaultRule(this.#writingTaskOperationsHost, bookId, taskIntentId, planEnvelopeDigest);
   }
 
   /**
@@ -11255,13 +8196,7 @@ export class EditorialStore {
    * be read. Read once per page, and only when some type has a rule.
    */
   #writingRuleFacts(bookId: string, latest: { ledger: BaselineAnalysisStore } | null): { facts: MaterialPlanInputsProjection } | { reason: string } {
-    if (latest === null) return { reason: QUICK_START_NOT_READY };
-    try {
-      return { facts: latest.ledger.currentRuleFacts(bookId, 'writing-first') };
-    } catch (error) {
-      if (error instanceof AnalysisError) return { reason: error.message };
-      throw error;
-    }
+    return writingTaskOperations.internalWritingRuleFacts(this.#writingTaskOperationsHost, bookId, latest);
   }
 
   /**
@@ -11275,24 +8210,7 @@ export class EditorialStore {
     prepare: WritingTaskTypeProjection['prepare'],
     facts: () => { facts: MaterialPlanInputsProjection } | { reason: string },
   ): BaselineAnalysisQuickStartProjection {
-    const pattern = writingRulePattern(typeId);
-    let rule: DefaultExecutionRuleRecord | null;
-    try {
-      rule = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
-    } catch (error) {
-      if (!(error instanceof StoreError)) throw error;
-      return { available: false, reason: `快速开始暂不可用：${error.message}`, rule: null };
-    }
-    if (rule === null) return { available: false, reason: quickStartNoRuleReason(pattern), rule: null };
-    const reference = defaultExecutionRuleReference(rule, rule.version);
-    if (this.#writingLiveUnavailable()) return { available: false, reason: QUICK_START_DEVELOPER_LIVE, rule: reference };
-    // The page's own terms first — no manuscript, a document of the type, 本书不做, a Run under way — as 先看计划 is held to them.
-    if (!prepare.allowed) return { available: false, reason: prepare.reason, rule: reference };
-    const read = facts();
-    if ('reason' in read) return { available: false, reason: read.reason, rule: reference };
-    const drift = defaultExecutionRuleDrift(rule.version.binding, read.facts);
-    if (drift.length > 0) return { available: false, reason: ruleDriftReason(reference.name, drift), rule: reference };
-    return { available: true, reason: null, rule: reference };
+    return writingTaskOperations.internalWritingQuickStart(this.#writingTaskOperationsHost, bookId, typeId, prepare, facts);
   }
 
   /**
@@ -11310,59 +8228,7 @@ export class EditorialStore {
     ruleVersionId: string,
     runtime: { credentialReadiness: (binding?: ConfiguredProviderBinding | null) => Promise<'present' | 'missing' | null>; connectivity: TaskPlanConnectivity },
   ): Promise<{ outcome: 'started' | 'fell-back'; reasons: ReadonlyArray<string>; dispatchRunRecordId: string | null; ledger: BaselineAnalysisStore | null }> {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(taskIntentId) && DIGEST_PATTERN.test(planEnvelopeDigest) && UUID_PATTERN.test(ruleVersionId),
-      'QUICK_START_INVALID', '快速开始的参数无效。');
-    const plan = await this.inspectTaskPlanWithConnection({ bookId, kind: 'writing', ref: taskIntentId }, runtime.credentialReadiness, runtime.connectivity);
-    const latest = this.#latestWriting(bookId);
-    const projection = latest?.projection ?? null;
-    const envelope = projection?.planEnvelope ?? null;
-    const version = projection?.planVersion ?? null;
-    requireStore(latest !== null && projection !== null && projection.taskIntent?.taskIntentId === taskIntentId && envelope?.digest === planEnvelopeDigest &&
-      version !== null, 'ANALYSIS_AUTHORIZATION_STALE', '任务计划已经变化；无法记录该授权。');
-    if (projection.authorization !== null) {
-      // The same quick start made twice answers as the first did; a Task started any other way is not started again.
-      requireStore(projection.authorization.origin === 'default-execution-rule' && projection.authorization.ruleVersionId === ruleVersionId,
-        'ANALYSIS_AUTHORIZATION_STALE', '这项任务已经开始了。');
-      return { outcome: 'started', reasons: [], dispatchRunRecordId: null, ledger: null };
-    }
-    const fellBack = (reason: string) => ({ outcome: 'fell-back' as const, reasons: [reason], dispatchRunRecordId: null, ledger: null });
-    const pattern = writingRulePattern(latest.task.typeId);
-    // A rule of this Book's other house type never starts this one (TASK-026: no widened source).
-    const named = this.#ruleCall(() => this.#rules.version(ruleVersionId));
-    if (named !== null && named.rule.bookId === bookId && named.rule.taskKind === 'writing' && named.rule.pattern !== pattern) {
-      return fellBack(writingRuleOtherTypeReason(defaultExecutionRuleReference(named.rule, named.version).name, writingRuleTypeLabel(named.rule.pattern),
-        latest.task.input.type.label));
-    }
-    const rule = this.#ruleCall(() => this.#rules.activeFor(bookId, pattern));
-    if (rule === null || rule.version.ruleVersionId !== ruleVersionId) return fellBack(QUICK_START_RULE_CHANGED);
-    if (this.#writingLiveUnavailable()) return fellBack(QUICK_START_DEVELOPER_LIVE);
-    if (!latest.task.exemplarsReadable) return fellBack(WRITING_EXEMPLAR_MOVED);
-    // A rule binds no 资料库 item, so a plan that lists one never starts under it (Issue #428; TASK-026: no widened source).
-    if (latest.task.materials.length > 0) return fellBack(WRITING_QUICK_START_MATERIALS);
-    if (projection.planRevision !== null) return fellBack(QUICK_START_PLAN_CHANGED);
-    const drift = defaultExecutionRuleDrift(rule.version.binding, version.materialInputs);
-    if (drift.length > 0) return fellBack(ruleDriftReason(defaultExecutionRuleReference(rule, rule.version).name, drift));
-    // 结果待确认 (Issue #757; CONT-011): a writing Task that sends again a range whose earlier result could not be known is started
-    // only from its plan, where the editor has read that it will.
-    if (plan.resend !== null) return fellBack(QUICK_START_RESEND);
-    switch (plan.start.readiness) {
-      case 'ready':
-      case 'no-route':
-        break;
-      case 'needs-connection':
-        return fellBack(QUICK_START_NEEDS_CONNECTION);
-      case 'offline':
-        // As the baseline's (Issue #760, S74c; TASK-024): a rule starts only a Run that can begin now, so offline the Task stops
-        // at its plan, whose bar offers 联网后开始任务 — never a wait the editor did not choose there.
-        return fellBack(QUICK_START_OFFLINE);
-      default:
-        return fellBack(QUICK_START_NOT_READY);
-    }
-    if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
-    const authorized = this.#analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
-      { kind: 'default-execution-rule', ruleVersionId }));
-    return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
+    return writingTaskOperations.quickStartWritingTask(this.#writingTaskOperationsHost, bookId, taskIntentId, planEnvelopeDigest, ruleVersionId, runtime);
   }
 
   /**
@@ -11373,99 +8239,7 @@ export class EditorialStore {
    * again here against the contract's bound. Nothing is delivered or sent.
    */
   createWritingDraft(bookId: string, revisionId: string): WritingDraftCreatedProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'WRITING_INVALID', '写作任务参数无效。');
-    const revision = this.#writingCall(() => this.#writingTasks.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
-    requireStore(revision !== undefined, 'WRITING_NOT_FOUND', '这本书没有这一次起草的文档。');
-    const found = this.#writingTaskOf(revision.taskIntentId);
-    requireStore(found !== null, 'WRITING_RECORD_INVALID', '这一次起草没有记下它的类型与参考材料。');
-    const inspected = this.#analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as WritingProjection;
-    const draft = inspected.inspectedRevision?.revision.writing.draft ?? null;
-    requireStore(draft !== null, 'WRITING_NOT_DRAFTED', '这一次起草没有写出文档草稿，不能打开草稿。');
-    const type = productionDocumentType(found.task.typeId);
-    requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
-    // Every revision names a Source Version; a draft's names the manuscript file of the revision the Task read (its export is
-    // written fresh from its own words, never from that file).
-    const source = this.#authority.prepare(
-      `SELECT mr.source_version_id FROM analysis_task_input_checkpoints c JOIN manuscript_revisions mr ON mr.revision_id = c.revision_id
-       WHERE c.task_intent_id = ?`,
-    ).get(revision.taskIntentId) as SqlRow | undefined;
-    requireStore(source !== undefined, 'WRITING_RECORD_INVALID', '写作任务的输入修订版缺失。');
-    const sourceVersionId = asString(source.source_version_id);
-    const blocks = writingDraftBlocks(draft).map((block) => ({
-      ...block,
-      digest: sha256(canonicalJson({ kind: block.kind, level: block.level, text: block.text })),
-      graphemeLength: writingBlockLength(block.text),
-    }));
-    const now = new Date().toISOString();
-    const documentId = randomUUID();
-    const branchId = randomUUID();
-    const draftRevisionId = randomUUID();
-    const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
-    const revisionDigest = WritingTasks.draftRevisionDigest(documentId, revisionId, blocks.map(({ kind, level, text }) => ({ kind, level, text })));
-    this.#documentCall(() => this.#writingCall(() => this.#transaction(this.#authority, () => {
-      // The checks again, inside the transaction that writes: a document of the type made meanwhile refuses this one.
-      requireStore(this.#productionDocuments.documentOfType(bookId, type.typeId) === undefined, 'WRITING_DOCUMENT_EXISTS', writingDocumentExists(type.label));
-      requireStore(!this.#productionDocuments.notForThisBook(bookId, type.typeId), 'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
-      this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
-        .run(documentId, bookId, now);
-      this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
-        .run(branchId, documentId, type.label, now);
-      this.#authority.prepare(
-        `INSERT INTO manuscript_revisions(
-           revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
-           source_version_id, revision_digest, created_at
-         ) VALUES (?, ?, ?, 1, 'r1', NULL, ?, ?, ?)`,
-      ).run(draftRevisionId, documentId, branchId, sourceVersionId, revisionDigest, now);
-      this.#authority.prepare('UPDATE manuscript_branches SET base_revision_id = ? WHERE branch_id = ?').run(draftRevisionId, branchId);
-      const insertBlock = this.#authority.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)');
-      const insertVersion = this.#authority.prepare(
-        `INSERT INTO manuscript_block_versions(
-           revision_id, block_id, position, kind, level, text, digest, start_offset, grapheme_length
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      const insertWorking = this.#authority.prepare(
-        `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      );
-      let offset = 0;
-      blocks.forEach((block, index) => {
-        const position = index + 1;
-        const blockId = `blk_${sha256(`${draftRevisionId}\u0000${position}\u0000${block.digest}`).slice(0, 24)}`;
-        insertBlock.run(blockId, documentId, draftRevisionId);
-        insertVersion.run(draftRevisionId, blockId, position, block.kind, block.level, block.text, block.digest, offset, block.graphemeLength);
-        insertWorking.run(branchId, blockId, position, block.kind, block.level, block.text, block.digest, block.graphemeLength);
-        offset += block.graphemeLength;
-      });
-      this.#authority.prepare(
-        `INSERT INTO branch_working_state(
-           branch_id, manuscript_id, base_revision_id, journal_sequence, working_digest,
-           total_graphemes, history_sequence, last_checkpoint_sequence
-         ) VALUES (?, ?, ?, 0, ?, ?, 0, 0)`,
-      ).run(branchId, documentId, draftRevisionId, revisionDigest, characterCount);
-      requireStore(
-        this.#boundedCall(() => this.#boundedAuthority.initializeImportedBranch(branchId)) === characterCount,
-        'WRITING_INVALID', '文档草稿的索引无法由它的文字精确建立。',
-      );
-      this.#productionDocuments.record({
-        documentId, bookId, typeId: type.typeId, originSourceVersionId: sourceVersionId, parserIdentity: WRITING_DRAFT_PARSER_IDENTITY, createdAt: now,
-      });
-      this.#documentWorkflow.recordInstance(documentId, now);
-      // The draft is the document's 起草 (DELIV-007): the editor's 打开草稿 starts that phase, as 开始 would.
-      this.#documentWorkflow.transition({ bookId, documentId, phaseId: 'drafting', action: 'start', expectedTransitions: 0, reason: null }, now);
-      this.#productionDocuments.recordVersion(documentId, draftRevisionId, revisionDigest, 'created');
-      this.#writingTasks.recordDraft({
-        documentId, bookId, typeId: type.typeId, analysisRevisionId: revisionId, taskIntentId: revision.taskIntentId, recordedAt: now,
-      });
-    })));
-    const row = this.#documentCall(() => this.#productionDocuments.documentById(bookId, documentId));
-    requireStore(row !== undefined, 'WRITING_RECORD_INVALID', '文档草稿没有建立。');
-    return {
-      writing: this.inspectWritingTask(bookId),
-      typeId: type.typeId,
-      typeLabel: type.label,
-      document: this.#documentCall(() => this.#productionDocuments.document(row)),
-    };
+    return writingTaskOperations.createWritingDraft(this.#writingTaskOperationsHost, bookId, revisionId);
   }
 
   // ---- 市场 and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008 to EVAL-010; editor-surfaces §5 ②C) ----------
@@ -11895,112 +8669,40 @@ export class EditorialStore {
    * owner's own decision for the selected policy; each item reads as a Run or the session would read it, without the house's names.
    */
   inspectGlobalAgent(live: (attemptId: string) => LiveAnswer | null = () => null, dialogueAdmitted = false, scopedAdmitted = false): GlobalAgentProjection {
-    return this.#learningCall(() => {
-      const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-      const preference = new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger()).history(operationalScope).at(-1) ?? null;
-      const base = preference === null ? null : { ...preference, lines: preference.governance?.baseLines ?? preference.lines };
-      const directives = new SupervisionDirectives(this.#authority).history(operationalScope);
-      const names = this.#globalOriginalFieldsSelected() ? [] : this.#globalAgentNames(preference);
-      const legacyDirectives = directives.filter((directive) => !directive.targets.some((pin) =>
-        this.#authority.prepare('SELECT 1 FROM global_editorial_memory_items WHERE item_id = ?').get(pin.itemId)));
-      const items = governedMemoryItems(preferenceItems(base), legacyDirectives).map((item) => ({ ...item, text: withoutNames(item.text, names),
-        revisionId: `${item.revisionId}@${directives.at(-1)?.directiveId ?? 'base'}` }));
-      const memories: GlobalAgentSourceCandidate[] = [];
-      const mutableMemories: import('../shared/protocol.js').GlobalMemoryItem[] = [];
-      const learning = this.#learningLedger();
-      for (const entry of this.#editorialMemoryGovernanceHooks().revisions()) {
-        mutableMemories.push({ ...editorialMemoryGovernanceItem(entry, entry.current.editorialDimension), text: withoutNames(entry.current.title, names) });
-        if (entry.usable && entry.current.schema === 'ai7.global-editorial-memory/2') memories.push({ itemId: entry.current.itemId, revisionId: learning.sourcePinRevision(entry.current.itemId, entry.current.versionId), kind: 'memory',
-          title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
-      }
-      for (let itemOffset: number | null = 0; itemOffset !== null;) {
-        const page = learning.inspect({ signalOffset: 0, itemOffset });
-        for (const entry of page.items) {
-          if (entry.current.schema === 'ai7.global-editorial-memory/2') {
-            continue;
-          }
-          if (entry.usable) memories.push({ itemId: entry.current.itemId, revisionId: entry.current.versionId,
-            kind: 'memory', title: withoutNames(entry.current.title, names), text: withoutNames(entry.current.title, names) });
-        }
-        itemOffset = page.nextItemOffset;
-      }
-      const blocked = operationalScope === 'ordinary-production' && this.getConfiguredModelRoleBinding('fast-interaction') === null
-        ? MODEL_SERVICE_SETUP_REQUIRED_REASON : GLOBAL_AGENT_POLICY_BLOCKED;
-      return { operationalScope, dialogueState: dialogueAdmitted ? 'available' : blocked,
-        scopedDialogueState: scopedAdmitted ? 'available' : blocked, procedures: this.#globalAgentProcedures(),
-        explanation: dialogueAdmitted ? '只使用明确勾选的已启用记忆版本，不读取稿件；治理仍须单独操作。'
-          : '此处暂不能调用模型。记忆与学习监督操作仅在本机记录，不读取稿件。',
-        categories: BUILTIN_REVIEW_CATEGORY_CONFIGURATION.categories.map(({ categoryId, label }) => ({ categoryId, label })),
-        books: this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title, book_id').all().map((row) => ({ bookId: String(row.book_id), title: String(row.title) })),
-        items: [...items, ...mutableMemories], sourceCandidates: [
-          ...items.filter((item) => item.state === 'active').map((item) => ({ itemId: item.itemId, revisionId: item.revisionId, kind: item.kind,
-            title: `本社审阅偏好 · ${reviewCategoryEntry(item.categoryId)?.label ?? item.categoryId}`, text: item.text })),
-          ...memories, ...supervisionSourceCandidates(directives).map((entry) => ({ ...entry, text: withoutNames(entry.text, names) })),
-        ], directives, history: this.#globalAgentHistory(live) };
-    });
+    return globalAgentOperations.inspectGlobalAgent(this.#globalAgentOperationsHost, live, dialogueAdmitted, scopedAdmitted);
   }
 
   /** The Book-less dialogues of this launch's scope, newest first, by the same Harness join as a Book dialogue (Issue #1083). */
   #globalAgentHistory(live: (attemptId: string) => LiveAnswer | null): GlobalAgentDialogueProjection[] {
-    const operationalScope = this.#baselineAnalysis.launch.operationalScope;
-    return this.#dialogues.globalTasks().filter((task) => task.operationalScope === operationalScope)
-      .map((task) => globalAgentDialogueProjection(task, this.#dialogues, this.#dialogueHistory, live));
+    return globalAgentOperations.internalGlobalAgentHistory(this.#globalAgentOperationsHost, live);
   }
 
   globalAgentSourcesCurrent(pins: ReadonlyArray<GlobalMemoryPin>): boolean {
-    const items = this.inspectGlobalAgent().sourceCandidates ?? [];
-    return pins.every((pin) => items.some((item) => item.itemId === pin.itemId && item.revisionId === pin.revisionId));
+    return globalAgentOperations.globalAgentSourcesCurrent(this.#globalAgentOperationsHost, pins);
   }
 
   /** The library's current enabled versions (#1171): what the Global Agent view inspects and an editor may list for one turn. */
   #globalAgentProcedures(): GlobalAgentProcedure[] {
-    return this.#authority.prepare('SELECT procedure_id FROM procedure_definitions ORDER BY pre_installed DESC, rowid').all().flatMap((row) => {
-      const { document, pin } = resolveProcedureDefinition(this.#authority, String(row.procedure_id));
-      return procedureStopped(this.#authority, pin) ? [] : [{ ...pin, title: document.title, editorInstruction: document.editorInstruction,
-        stages: document.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })) }];
-    });
+    return globalAgentOperations.internalGlobalAgentProcedures(this.#globalAgentOperationsHost);
   }
 
   /** Pin an explicitly listed scope at ask (#1171): each Book at its primary manuscript's current revision, each procedure exactly. */
   #pinGlobalAgentScope(input: GlobalAgentScopeInput): GlobalAgentScope {
-    requireStore(input.bookIds.length <= 8 && new Set(input.bookIds).size === input.bookIds.length && input.procedures.length <= 8 &&
-      new Set(input.procedures.map((pin) => pin.procedureId)).size === input.procedures.length, 'GLOBAL_AGENT_SCOPE_CHANGED', '对话范围无效，请重新选择。');
-    const books = input.bookIds.map((bookId) => {
-      const row = this.#authority.prepare(`SELECT b.title, m.manuscript_id, mb.branch_id FROM books b JOIN manuscripts m ON m.book_id = b.book_id AND m.role = 'primary'
-        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id AND mb.name = '主分支' WHERE b.book_id = ?`).get(bookId) as SqlRow | undefined;
-      requireStore(row !== undefined, 'GLOBAL_AGENT_SCOPE_CHANGED', '所选图书没有可读取的稿件，请重新选择。');
-      const manuscriptId = asString(row.manuscript_id);
-      return { bookId, title: asString(row.title), manuscriptId, revisionId: this.getManuscriptWindow(manuscriptId, asString(row.branch_id), null).revisionId };
-    });
-    const scope = { books, procedures: input.procedures.map((pin) => ({ ...pin, title: this.globalAgentProcedureDocument(pin).title })) };
-    requireStore(this.globalAgentScopeCurrent(scope), 'GLOBAL_AGENT_SCOPE_CHANGED', '所选图书或工序版本已不可用，请重新选择。');
-    return scope;
+    return globalAgentOperations.internalPinGlobalAgentScope(this.#globalAgentOperationsHost, input);
   }
 
   /** Each pinned Book revision still exists and is not excluded from learning; each procedure version is unchanged and enabled. */
   globalAgentScopeCurrent(scope: GlobalAgentScope): boolean {
-    const excluded = this.#learningLedger().controls().excludedBooks;
-    return scope.books.every((book) => !excluded.has(book.bookId) && this.#authority.prepare(`SELECT 1 FROM manuscript_revisions mr JOIN manuscripts m
-      ON m.manuscript_id = mr.manuscript_id AND m.role = 'primary' WHERE m.book_id = ? AND mr.manuscript_id = ? AND mr.revision_id = ?`)
-      .get(book.bookId, book.manuscriptId, book.revisionId) !== undefined) && scope.procedures.every((pin) => {
-      try {
-        const { document, pin: current } = resolveProcedureDefinition(this.#authority, pin.procedureId, pin.version);
-        return current.digest === pin.digest && document.title === pin.title && !procedureStopped(this.#authority, current);
-      } catch { return false; }
-    });
+    return globalAgentOperations.globalAgentScopeCurrent(this.#globalAgentOperationsHost, scope);
   }
 
   globalAgentProcedureDocument(pin: GlobalAgentProcedurePin): ProcedureDefinitionDocument {
-    const { document, pin: current } = resolveProcedureDefinition(this.#authority, pin.procedureId, pin.version);
-    requireStore(current.digest === pin.digest, 'GLOBAL_AGENT_SCOPE_CHANGED', '工序版本已经变化，请重新选择。');
-    return document;
+    return globalAgentOperations.globalAgentProcedureDocument(this.#globalAgentOperationsHost, pin);
   }
 
   /** The governed item a listed pin names: a preference shares its pin; a memory listing adds its source-state digest. */
   globalAgentGovernancePin(pin: GlobalMemoryPin): GlobalMemoryPin | null {
-    const item = this.inspectGlobalAgent().items.find((entry) => entry.itemId === pin.itemId &&
-      (entry.revisionId === pin.revisionId || pin.revisionId.startsWith(`${entry.revisionId}@`)));
-    return item === undefined ? null : { itemId: item.itemId, revisionId: item.revisionId };
+    return globalAgentOperations.globalAgentGovernancePin(this.#globalAgentOperationsHost, pin);
   }
 
   globalAgentScopedTools(message: DialogueTurnStart['message']): ReturnType<typeof globalAgentScopedTools> {
@@ -12009,149 +8711,54 @@ export class EditorialStore {
 
   /** Internal fixture metadata for the actual local callers, derived from this Store's checked selected launch. */
   localFixtureRuntime(): LocalFixtureRuntimeContext | null {
-    const policy = this.#baselineAnalysis.launch.policy;
-    if (policy?.providerProcessing.version !== 'v29') return null;
-    const selected = selectedPolicyIdentityOf(policy.selectedPolicyIdentity);
-    requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'development-ci' &&
-      selected?.providerProcessingVersion === 'v29', 'LOCAL_FIXTURE_POLICY_INVALID', '本地夹具策略身份无法核实。');
-    this.#localFixtureCatalog ??= LocalFixturePolicyCatalog.read(this.#codeRoot);
-    return { selectedPolicyIdentity: selected, catalog: this.#localFixtureCatalog };
+    return globalAgentOperations.localFixtureRuntime(this.#globalAgentOperationsHost);
   }
 
   #globalOriginalFieldsSelected(): boolean {
-    const policy = this.#baselineAnalysis.launch.policy;
-    if (policy?.providerProcessing.version !== 'v30' && policy?.providerProcessing.version !== 'v31' && (policy?.providerProcessing.version !== 'v32' && policy?.providerProcessing.version !== 'v33')) return false;
-    requireStore(policy.integrityState === 'verified' && policy.operationalScope === 'ordinary-production' &&
-      selectedPolicyIdentityOf(policy.selectedPolicyIdentity)?.providerProcessingVersion === policy.providerProcessing.version,
-    'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略身份无法核实；未发送任何内容。');
-    return true;
+    return globalAgentOperations.internalGlobalOriginalFieldsSelected(this.#globalAgentOperationsHost);
   }
 
   /** Safe existing connection metadata; same-reference credential rotation still changes this exact generation. */
   globalAgentModelConnection(): { binding: ConfiguredProviderBinding; credentialUpdatedAt: string; policy: LaunchPolicyProjection } {
-    const binding = this.getConfiguredModelRoleBinding('fast-interaction');
-    const connection = binding === null ? undefined : this.getModelServiceConnections().find((entry) =>
-      entry.credentialOperationState === 'ready' && entry.credentialReference === binding.credentialReference &&
-      entry.binding.providerId === modelServiceChannelOf(binding.route) && entry.binding.modelId === binding.model && entry.binding.credentialSlot === binding.credentialSlot);
-    requireStore(binding !== null && connection !== undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '模型服务连接已变化；未发送任何内容。');
-    const policy = resolveSourceCheckoutLaunchPolicySync(this.#codeRoot, 'ordinary-production',
-      this.getConfiguredModelRoleBinding('main-editorial'), binding);
-    requireStore(policy.integrityState === 'verified' && (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33')) &&
-      canonicalJson(policy.selectedPolicyIdentity) === canonicalJson(this.#baselineAnalysis.launch.policy?.selectedPolicyIdentity),
-    'GLOBAL_AGENT_POLICY_BLOCKED', '当前策略字节或已选身份无法核实；未发送任何内容。');
-    return { binding, credentialUpdatedAt: connection.credentialUpdatedAt, policy };
+    return globalAgentOperations.globalAgentModelConnection(this.#globalAgentOperationsHost);
   }
 
   /** Re-read a specific immutable predecessor prefix even after its new attempt has entered the governed queue. */
   globalAgentHistory(input: { dialogueId: string; attemptId: string }, kind: 'continue' | 'regenerate'): GlobalAgentTurnHistory {
-    return this.#dialogueCall(() => {
-      const task = this.#dialogues.globalTask(input.dialogueId);
-      requireStore(task?.operationalScope === 'ordinary-production', 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
-      const attempts = this.#dialogues.attempts(input.dialogueId);
-      const through = attempts.findIndex((attempt) => attempt.attemptId === input.attemptId);
-      requireStore(through >= 0, 'DIALOGUE_ATTEMPT_STALE', '回答已经变化，请重新查看。');
-      return readGlobalAgentHistory(task, attempts.slice(0, through + 1), this.#dialogueHistory, kind);
-    });
+    return globalAgentOperations.globalAgentHistory(this.#globalAgentOperationsHost, input, kind);
   }
 
   #requireGlobalQualification(qualification: QualifiedGlobalAttemptMetadata | undefined, message: DialogueTurnStart['message']): void {
-    if (!this.#globalOriginalFieldsSelected()) {
-      requireStore(qualification === undefined, 'GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略不接收原文字段身份。');
-      return;
-    }
-    const metadata = qualifiedGlobalAttemptMetadataOf(qualification);
-    const connection = this.globalAgentModelConnection();
-    requireStore(metadata !== null && metadata.messageSha256 === sha256Hex(buildDialogueMessage(message)) &&
-      canonicalJson({ providerProcessingVersion: metadata.providerProcessingVersion, providerProcessingSha256: metadata.providerProcessingSha256,
-        activePolicySetVersion: metadata.activePolicySetVersion, activePolicySetSha256: metadata.activePolicySetSha256 }) ===
-        canonicalJson(selectedPolicyIdentityOf(this.#baselineAnalysis.launch.policy?.selectedPolicyIdentity)) &&
-      metadata.route === connection.binding.route && metadata.model === connection.binding.model && metadata.credentialSlot === connection.binding.credentialSlot &&
-      metadata.credentialReference === connection.binding.credentialReference && metadata.credentialUpdatedAt === connection.credentialUpdatedAt,
-    'GLOBAL_AGENT_SCOPE_CHANGED', '发送内容或模型服务已经变化；未发送任何内容。');
+    return globalAgentOperations.internalRequireGlobalQualification(this.#globalAgentOperationsHost, qualification, message);
   }
 
   /** Reuse the preference consumer's known-people filter. Notes, roles, examples and manuscript references are never assembled. */
   globalAgentRedact(text: string): string {
-    return withoutNames(text, this.#globalAgentNames(new HouseReviewPreferenceLedger(this.#authority, () => this.#learningLedger())
-      .history(this.#baselineAnalysis.launch.operationalScope).at(-1) ?? null));
+    return globalAgentOperations.globalAgentRedact(this.#globalAgentOperationsHost, text);
   }
 
   /** One name set for listing and the final-gate recheck: the base lines' attributed people and the house's people now. */
   #globalAgentNames(preference: HouseReviewPreferenceVersion | null): string[] {
-    return preferenceNames(preference?.governance?.baseLines ?? preference?.lines ?? [], learningSupervision.housePreferencePeopleNames(this.#learningSupervisionHost));
+    return globalAgentOperations.internalGlobalAgentNames(this.#globalAgentOperationsHost, preference);
   }
 
   /** A disclosure read creates no Task, attempt, log, credential release or transmission. */
   prepareGlobalAgentTurn(input: PrepareGlobalAgentTurnInput): DialogueTurnStart['message'] {
-    if (input.kind !== 'ask') {
-      const turn = this.globalAgentAttempt(input, input.kind, new Date(), true);
-      requireStore(typeof turn !== 'string', 'DIALOGUE_INVALID', '回答标识无效。');
-      return turn.message;
-    }
-    const question = this.#globalOriginalFieldsSelected() ? dialogueQuestion(input.question)
-      : dialogueQuestion(this.globalAgentRedact(dialogueQuestion(input.question)));
-    requireStore(input.sources.length <= 12 && new Set(input.sources.map((pin) => pin.itemId)).size === input.sources.length &&
-      this.globalAgentSourcesCurrent(input.sources), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新选择。');
-    const candidates = this.inspectGlobalAgent().sourceCandidates ?? [];
-    return { kind: 'ask', selection: '', question, kept: null, globalSources: input.sources.map((pin) => ({ ...pin,
-      text: candidates.find((entry) => entry.itemId === pin.itemId && entry.revisionId === pin.revisionId)!.text })),
-      ...(input.scope === undefined ? {} : { globalScope: this.#pinGlobalAgentScope(input.scope) }) };
+    return globalAgentOperations.prepareGlobalAgentTurn(this.#globalAgentOperationsHost, input);
   }
 
   /** Called only after the execution owner admits this exact Book-less policy binding. */
   askGlobalAgent(input: AskGlobalAgentInput, now = new Date(), qualification?: QualifiedGlobalAttemptMetadata): DialogueTurnStart {
-    return this.#dialogueCall(() => {
-      const message = this.prepareGlobalAgentTurn({ ...input, kind: 'ask' });
-      this.#requireGlobalQualification(qualification, message);
-      const { task, attemptId } = this.#transaction(this.#authority, () => this.#dialogues.askGlobal(this.#baselineAnalysis.launch.operationalScope, input.sources, dialogueQuestionDigest(message.question), now, qualification));
-      return { dialogueId: task.dialogueId, attemptId, message, ...(qualification === undefined ? {} : { qualification }) };
-    });
+    return globalAgentOperations.askGlobalAgent(this.#globalAgentOperationsHost, input, now, qualification);
   }
 
   inspectGlobalAgentDialogue(dialogueId: string, live: (attemptId: string) => LiveAnswer | null = () => null): GlobalAgentDialogueProjection {
-    return this.#dialogueCall(() => {
-      const task = this.#dialogues.globalTask(dialogueId);
-      requireStore(task !== null && task.operationalScope === this.#baselineAnalysis.launch.operationalScope, 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
-      return globalAgentDialogueProjection(task, this.#dialogues, this.#dialogueHistory, live);
-    });
+    return globalAgentOperations.inspectGlobalAgentDialogue(this.#globalAgentOperationsHost, dialogueId, live);
   }
 
   globalAgentAttempt(input: GlobalAgentAttemptInput, kind: 'continue' | 'regenerate' | 'stop', now = new Date(), preview = false,
     qualification?: QualifiedGlobalAttemptMetadata): DialogueTurnStart | string {
-    return this.#dialogueCall(() => {
-      const task = this.#dialogues.globalTask(input.dialogueId);
-      requireStore(task !== null && task.operationalScope === this.#baselineAnalysis.launch.operationalScope, 'DIALOGUE_NOT_FOUND', '全域对话不存在。');
-      const attempts = this.#dialogues.attempts(task.dialogueId);
-      const last = attempts.at(-1);
-      requireStore(last?.attemptId === input.attemptId, 'DIALOGUE_ATTEMPT_STALE', '回答已经变化，请重新查看。');
-      if (kind === 'stop') {
-        requireStore(last.outcome === null, 'DIALOGUE_NOT_ANSWERING', '回答已结束。');
-        return last.attemptId;
-      }
-      const pins = input.sources ?? task.sources;
-      requireStore(pins.length <= 12 && new Set(pins.map((pin) => pin.itemId)).size === pins.length &&
-        pins.every((pin) => task.sources.some((original) => original.itemId === pin.itemId && original.revisionId === pin.revisionId)) &&
-        this.globalAgentSourcesCurrent(pins), 'GLOBAL_AGENT_SCOPE_CHANGED', '记忆版本已经变化，请重新提问。');
-      const qualified = this.#globalOriginalFieldsSelected();
-      const resolved = resolveAttempts(attempts, this.#dialogueHistory, () => null);
-      const first = resolved.first;
-      requireStore(first?.globalSources !== undefined, 'DIALOGUE_HISTORY_MISSING', '对话记录无法读取。');
-      const answer = resolved.attempts.at(-1)!;
-      const fragmentCount = answer.fragments.length;
-      requireStore(last.outcome !== null && (kind === 'regenerate' ||
-        (last.outcome.outcome === 'stopped' || last.outcome.outcome === 'interrupted') && fragmentCount > 0), 'DIALOGUE_NOT_STOPPED', '回答尚不能继续。');
-      const prepareText = (text: string): string => qualified ? text : this.globalAgentRedact(text);
-      const message: DialogueTurnStart['message'] = { kind: kind === 'continue' ? 'continue' : 'ask', selection: '',
-        question: prepareText(first.question), globalSources: pins.map((pin) => ({ ...pin,
-          text: prepareText(first.globalSources!.find((source) => source.itemId === pin.itemId && source.revisionId === pin.revisionId)!.text) })),
-        kept: kind === 'continue' ? prepareText(fragmentsText(answer.fragments)) : null,
-        ...(first.globalScope === undefined ? {} : { globalScope: first.globalScope }) };
-      if (!preview) {
-        this.#requireGlobalQualification(qualification, message);
-      }
-      const attemptId = preview ? last.attemptId : this.#transaction(this.#authority, () => this.#dialogues.nextAttempt(task.dialogueId, kind, () => fragmentCount, now, qualification));
-      return { dialogueId: task.dialogueId, attemptId, message, ...(qualification === undefined ? {} : { qualification }) };
-    });
+    return globalAgentOperations.globalAgentAttempt(this.#globalAgentOperationsHost, input, kind, now, preview, qualification);
   }
 
   /** What the 学习监督 operations in house-review-preference.ts reach of the store (Issue #1172), read live. */
@@ -16726,101 +13333,43 @@ export class EditorialStore {
   }
 
   getSearchBackendSettings(): import('../shared/protocol.js').SearchBackendSettingsProjection {
-    return searchBackendSettingsProjection(this.getSearchBackendConnections(), readSearchFallback(this.#authority));
+    return modelSearchSettings.getSearchBackendSettings(this.#modelSearchSettingsHost);
   }
 
-  getSearchBackendConnections(): import('../shared/protocol.js').SearchBackendConnectionProjection[] { return readSearchBackendConnections(this.#authority); }
+  getSearchBackendConnections(): import('../shared/protocol.js').SearchBackendConnectionProjection[] {
+    return modelSearchSettings.getSearchBackendConnections(this.#modelSearchSettingsHost);
+  }
 
   /** The default backend, or (#1226) with `role: 'fallback'` the one 备用来源 — `null` clears it; a new default never stays the fallback. */
   selectSearchBackend(backendId: string | null, role?: 'fallback'): void {
-    requireStore(role === 'fallback' || SEARCH_BACKENDS.some((entry) => entry.shipped && entry.id === backendId), 'SEARCH_BACKEND_NOT_SHIPPED', '该联网检索后端未提供。');
-    this.#authority.exec('BEGIN IMMEDIATE');
-    try {
-      if (role === 'fallback') writeSearchFallback(this.#authority, backendId); else if (readSearchFallback(this.#authority)?.backendId === backendId) writeSearchFallback(this.#authority, null);
-      if (role !== 'fallback') this.#authority.prepare('UPDATE search_backend_connections SET selected = NULL WHERE selected = 1').run();
-      if (role !== 'fallback') this.#authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ? WHERE backend_id = ?').run(new Date().toISOString(), backendId);
-      this.#authority.exec('COMMIT');
-    } catch (error) { this.#authority.exec('ROLLBACK'); throw error; }
+    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role);
   }
 
   saveSearchBackendCredential(backendId: string, reference: string | null, state: import('../shared/protocol.js').ModelCredentialOperationState): import('../shared/protocol.js').SearchBackendConnectionProjection {
-    const current = this.getSearchBackendConnections().find((entry) => entry.backendId === backendId);
-    requireStore(current !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '该联网检索后端未提供。');
-    requireStore(reference === null || reference === current.credentialReference, 'SEARCH_CREDENTIAL_REFERENCE_INVALID', '联网检索凭据引用不属于该连接。');
-    requireStore(['ready', 'missing', 'needs-attention'].includes(state), 'SEARCH_CREDENTIAL_STATE_INVALID', '联网检索凭据状态无效。');
-    const credentialReference = current.credentialReference ?? randomUUID();
-    const firstReady = state === 'ready' && !this.getSearchBackendConnections().some((entry) => entry.credentialOperationState === 'ready');
-    this.#transaction(this.#authority, () => {
-      this.#authority.prepare('UPDATE search_backend_connections SET credential_reference = ?, credential_operation_state = ? WHERE backend_id = ?').run(credentialReference, state, backendId);
-      if (state !== 'ready' && readSearchFallback(this.#authority)?.backendId === backendId) writeSearchFallback(this.#authority, null);
-      if (firstReady) {
-        this.#authority.prepare('UPDATE search_backend_connections SET selected = NULL WHERE selected = 1').run();
-        this.#authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ? WHERE backend_id = ?').run(new Date().toISOString(), backendId);
-      }
-    });
-    return this.getSearchBackendConnections().find((entry) => entry.backendId === backendId)!;
+    return modelSearchSettings.saveSearchBackendCredential(this.#modelSearchSettingsHost, backendId, reference, state);
   }
 
   getModelServiceProxy(): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
-    this.#assertAvailable();
-    return readProxySetting(this.#dataRoot);
+    return modelSearchSettings.getModelServiceProxy(this.#modelSearchSettingsHost);
   }
 
   saveModelServiceProxy(input: import('../shared/protocol.js').ModelServiceProxySetting): Promise<import('../shared/protocol.js').ModelServiceProxySetting> {
-    this.#assertAvailable();
-    return writeProxySetting(this.#dataRoot, input);
+    return modelSearchSettings.saveModelServiceProxy(this.#modelSearchSettingsHost, input);
   }
 
   /** The DeepSeek 开放平台（官方） connection, as Issue #712 has always read it. */
   getModelServiceConnection(): ModelServiceConnectionProjection | null {
-    return this.getModelServiceRouteConnection('deepseek-open-platform');
+    return modelSearchSettings.getModelServiceConnection(this.#modelSearchSettingsHost);
   }
 
   /** One production route's connection (Issue #811), or `null` when that route has none. */
   getModelServiceRouteConnection(route: ModelServiceRouteId): ModelServiceConnectionProjection | null {
-    this.#assertAvailable();
-    const target = { connectionId: MODEL_SERVICE_CONNECTION_IDS[route], binding: MODEL_SERVICE_ROUTE_BINDINGS[route] };
-    requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
-    const row = this.#authority.prepare(
-      `SELECT ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id
-       FROM model_service_connections
-       WHERE connection_id = ?`,
-    ).get(target.connectionId) as SqlRow | undefined;
-    if (row === undefined) return null;
-    const state = asString(row.credential_operation_state);
-    requireStore(
-      state === 'ready' || state === 'missing' || state === 'needs-attention',
-      'STORE_CORRUPT',
-      '模型服务凭据状态无效。',
-    );
-    const credentialReference = asString(row.credential_reference);
-    requireStore(
-      UUID_PATTERN.test(credentialReference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference.toLowerCase()),
-      'STORE_CORRUPT',
-      '模型服务凭据引用无效。',
-    );
-    return {
-      connectionId: target.connectionId,
-      roleId: 'main-editorial',
-      connectionName: asString(row.connection_name),
-      // A connection saved before revision 72 named `deepseek-v4-pro`; the migration moved it to the route's current model.
-      binding: this.modelServiceBinding(route, asString(row.model_id)),
-      fastBinding: this.modelServiceBinding(route, asString(row.fast_model_id) || asString(row.model_id)),
-      credentialReference,
-      credentialOperationState: state,
-      createdAt: asString(row.created_at),
-      updatedAt: asString(row.updated_at),
-      credentialUpdatedAt: asString(row.credential_updated_at),
-      selected: row.selected === 1,
-      fastSelected: row.fast_selected === 1,
-      connectionTest: readModelConnectionTest(row),
-    };
+    return modelSearchSettings.getModelServiceRouteConnection(this.#modelSearchSettingsHost, route);
   }
 
   /** Every route's connection, the default route first (Issue #811). */
   getModelServiceConnections(): ModelServiceConnectionProjection[] {
-    return MODEL_SERVICE_ROUTES.map((route) => this.getModelServiceRouteConnection(route))
-      .filter((connection): connection is ModelServiceConnectionProjection => connection !== null);
+    return modelSearchSettings.getModelServiceConnections(this.#modelSearchSettingsHost);
   }
 
   /**
@@ -16834,53 +13383,7 @@ export class EditorialStore {
     credentialOperationState: 'ready' | 'needs-attention',
     route: ModelServiceRouteId = 'deepseek-open-platform',
   ): ModelServiceConnectionProjection {
-    this.#assertAvailable();
-    const target = { connectionId: MODEL_SERVICE_CONNECTION_IDS[route], binding: MODEL_SERVICE_ROUTE_BINDINGS[route] };
-    requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
-    const connectionName = connectionNameInput.trim();
-    requireStore(
-      connectionName.length > 0 && connectionName.length <= 80 && connectionName.isWellFormed(),
-      'MODEL_SERVICE_CONNECTION_INVALID',
-      '连接名称必须为 1 至 80 个有效字符。',
-    );
-    // A connection's reference is never one a provider document fixes for development (Issue #811).
-    requireStore(credentialReferenceInput === null ||
-      (UUID_PATTERN.test(credentialReferenceInput) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReferenceInput.toLowerCase())),
-    'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
-    const current = this.getModelServiceRouteConnection(route);
-    requireStore(
-      current === null || current.credentialReference === credentialReferenceInput,
-      'MODEL_SERVICE_CONNECTION_CONFLICT',
-      '已存连接的凭据引用不可替换。',
-    );
-    const now = new Date(Math.max(Date.now(), current === null ? 0 : Date.parse(current.credentialUpdatedAt) + 1)).toISOString();
-    this.#transaction(this.#authority, () => {
-      if (current === null) {
-        // Minted here when the caller names none — as main always does — so the reference belongs to this data root alone.
-        let credentialReference = credentialReferenceInput ?? randomUUID();
-        while (DEVELOPMENT_CREDENTIAL_REFERENCES.has(credentialReference)) credentialReference = randomUUID();
-        const anySelected = this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE selected = 1').get() !== undefined;
-        this.#authority.prepare(
-          `INSERT INTO model_service_connections(${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_model_id)
-           VALUES (?, 'main-editorial', ?, ?, ?, 1, 1, '[]', ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(target.connectionId, connectionName, target.binding.providerId, target.binding.modelId, target.binding.credentialSlot,
-          credentialReference, credentialOperationState, now, now, now, anySelected ? null : 1, target.binding.modelId);
-        if (this.#authority.prepare('SELECT 1 FROM model_service_connections WHERE fast_selected = 1').get() === undefined) {
-          this.#authority.prepare('UPDATE model_service_connections SET fast_selected = 1 WHERE connection_id = ?').run(target.connectionId);
-        }
-      } else {
-        requireStore(
-          this.#authority.prepare(
-            `UPDATE model_service_connections
-             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL, cached_models = '[]'
-             WHERE connection_id = ? AND credential_reference = ?`,
-          ).run(connectionName, credentialOperationState, now, now, target.connectionId, current.credentialReference).changes === 1,
-          'MODEL_SERVICE_CONNECTION_CONFLICT',
-          '模型服务连接状态已变化。',
-        );
-      }
-    });
-    return this.getModelServiceRouteConnection(route)!;
+    return modelSearchSettings.saveModelServiceConnection(this.#modelSearchSettingsHost, connectionNameInput, credentialReferenceInput, credentialOperationState, route);
   }
 
   /** One connection's credential state, by its Credential Reference, whichever route it is on. */
@@ -16888,26 +13391,7 @@ export class EditorialStore {
     credentialReference: string,
     credentialOperationState: ModelCredentialOperationState,
   ): ModelServiceConnectionProjection {
-    this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(credentialReference), 'MODEL_SERVICE_CONNECTION_INVALID', '凭据引用无效。');
-    const now = new Date().toISOString();
-    let connectionId = '';
-    this.#transaction(this.#authority, () => {
-      const row = this.#authority.prepare('SELECT connection_id, credential_updated_at FROM model_service_connections WHERE credential_reference = ?')
-        .get(credentialReference) as SqlRow | undefined;
-      requireStore(row !== undefined, 'MODEL_SERVICE_CONNECTION_CONFLICT', '模型服务连接状态已变化。');
-      connectionId = asString(row.connection_id);
-      requireStore(
-        this.#authority.prepare(
-          `UPDATE model_service_connections
-           SET credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL
-           WHERE connection_id = ? AND credential_reference = ?`,
-        ).run(credentialOperationState, now, new Date(Math.max(Date.parse(now), Date.parse(asString(row.credential_updated_at)) + 1)).toISOString(), connectionId, credentialReference).changes === 1,
-        'MODEL_SERVICE_CONNECTION_CONFLICT',
-        '模型服务连接状态已变化。',
-      );
-    });
-    return this.getModelServiceRouteConnection(MODEL_SERVICE_ROUTES.find((route) => MODEL_SERVICE_CONNECTION_IDS[route] === connectionId)!)!;
+    return modelSearchSettings.setModelServiceCredentialState(this.#modelSearchSettingsHost, credentialReference, credentialOperationState);
   }
 
   /**
@@ -16915,117 +13399,45 @@ export class EditorialStore {
    * already planned keeps the binding its plan froze.
    */
   selectModelServiceRoute(route: ModelServiceRouteId): ModelServiceConnectionProjection {
-    this.#assertAvailable();
-    const target = { connectionId: MODEL_SERVICE_CONNECTION_IDS[route] };
-    const current = target.connectionId === undefined ? null : this.getModelServiceRouteConnection(route);
-    requireStore(target.connectionId !== undefined, 'MODEL_SERVICE_CONNECTION_INVALID', '模型服务路线无效。');
-    requireStore(current !== null, 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '这条路线还没有连接；请先保存它的连接名称与凭据。');
-    this.#transaction(this.#authority, () => {
-      this.#authority.prepare('UPDATE model_service_connections SET selected = NULL WHERE selected = 1 AND connection_id != ?').run(target.connectionId);
-      this.#authority.prepare('UPDATE model_service_connections SET selected = 1, updated_at = ? WHERE connection_id = ?')
-        .run(new Date().toISOString(), target.connectionId);
-    });
-    return this.getModelServiceRouteConnection(route)!;
+    return modelSearchSettings.selectModelServiceRoute(this.#modelSearchSettingsHost, route);
   }
 
   /** Exact persisted role selection. A missing chosen key never falls back to another channel. */
   getConfiguredModelRoleBinding(role: 'main-editorial' | 'fast-interaction'): ConfiguredProviderBinding | null {
-    const connections = this.getModelServiceConnections();
-    const chosen = connections.find((connection) => role === 'main-editorial' ? connection.selected : connection.fastSelected);
-    const connection = chosen ?? connections.find((candidate) => candidate.binding.providerId === 'opencode-go' && candidate.credentialOperationState === 'ready');
-    if (connection === undefined || connection.credentialOperationState !== 'ready') return null;
-    // The channel's model takes its reviewed runtime record: the configured route (a Zen model's own Zen route), endpoint and slot.
-    const selectedBinding = role === 'fast-interaction' ? connection.fastBinding ?? connection.binding : connection.binding;
-    const record = modelServiceRuntimeBinding(selectedBinding.providerId, selectedBinding.modelId, role === 'fast-interaction' ? 'fast' : 'main');
-    if (record === undefined) return null;
-    const binding = { route: record.route, model: record.model, credentialSlot: record.credentialSlot, credentialReference: connection.credentialReference, endpoint: record.endpoint };
-    return (role === 'fast-interaction' ? allowedProductionBindingOf(binding, 'fast-interaction') : allowedProductionBindingOf(binding)) === null ? null : binding;
+    return modelSearchSettings.getConfiguredModelRoleBinding(this.#modelSearchSettingsHost, role);
   }
 
   selectFastRoleModel(route: ModelServiceRouteId, modelId: string): void {
-    this.selectRoleModel(route, modelId, 'fast');
+    return modelSearchSettings.selectFastRoleModel(this.#modelSearchSettingsHost, route, modelId);
   }
 
   selectMainRoleModel(route: ModelServiceRouteId, modelId: string): void {
-    this.selectRoleModel(route, modelId, 'main');
+    return modelSearchSettings.selectMainRoleModel(this.#modelSearchSettingsHost, route, modelId);
   }
 
   selectBothRoleModels(route: ModelServiceRouteId, modelId: string): void {
-    this.selectRoleModel(route, modelId, 'both');
+    return modelSearchSettings.selectBothRoleModels(this.#modelSearchSettingsHost, route, modelId);
   }
 
   private selectRoleModel(route: ModelServiceRouteId, modelId: string, role: 'main' | 'fast' | 'both'): void {
-    const connection = this.getModelServiceRouteConnection(route);
-    const roles = role === 'both' ? ['main', 'fast'] as const : [role];
-    requireStore(roles.every((item) => modelServiceRuntimeBinding(route, modelId, item) !== undefined), 'MODEL_CAPABILITY_UNSUPPORTED', '模型 ID 无效或渠道未准入。');
-    requireStore(connection !== null && connection.credentialOperationState === 'ready', 'MODEL_SERVICE_ROUTE_NOT_CONFIGURED', '请先保护并保存凭据。');
-    this.#transaction(this.#authority, () => {
-      for (const item of roles) {
-        const selected = item === 'main' ? 'selected' : 'fast_selected';
-        const model = item === 'main' ? 'model_id' : 'fast_model_id';
-        this.#authority.prepare(`UPDATE model_service_connections SET ${selected} = NULL WHERE ${selected} = 1`).run();
-        this.#authority.prepare(`UPDATE model_service_connections SET ${selected} = 1, ${model} = ?, updated_at = ? WHERE connection_id = ?`)
-          .run(modelId, new Date().toISOString(), connection.connectionId);
-      }
-    });
+    return modelSearchSettings.selectRoleModel(this.#modelSearchSettingsHost, route, modelId, role);
   }
 
   private modelServiceBinding(route: ModelServiceRouteId, modelId: string): import('../shared/protocol.js').ModelServiceBindingProjection {
-    const label = this.getModelServiceModels(route).find((model) => model.modelId === modelId)?.modelLabel ?? modelId;
-    return { ...MODEL_SERVICE_ROUTE_BINDINGS[route], modelId, modelLabel: label, approvedFallbackChain: [] };
+    return modelSearchSettings.modelServiceBinding(this.#modelSearchSettingsHost, route, modelId);
   }
 
   getModelServiceModels(route: ModelServiceRouteId): import('../shared/protocol.js').DiscoveredModel[] {
-    const row = this.#authority.prepare('SELECT cached_models, model_id, fast_model_id FROM model_service_connections WHERE connection_id = ?').get(MODEL_SERVICE_CONNECTION_IDS[route]) as SqlRow | undefined;
-    const cached = row === undefined ? [] : JSON.parse(asString(row.cached_models)) as import('../shared/protocol.js').DiscoveredModel[];
-    const models = cached.length > 0 ? cached : modelServiceModels(route).map(({ modelId, modelLabel }) => ({ modelId, modelLabel }));
-    if (row !== undefined) for (const modelId of [asString(row.model_id), asString(row.fast_model_id)]) {
-      if (modelId && !models.some((model) => model.modelId === modelId)) models.push({ modelId, modelLabel: modelId });
-    }
-    return models;
+    return modelSearchSettings.getModelServiceModels(this.#modelSearchSettingsHost, route);
   }
 
   cacheModelServiceModels(connection: ModelServiceConnectionProjection, models: readonly import('../shared/protocol.js').DiscoveredModel[]): void {
-    requireStore(models.every((model) => validModelServiceModelId(model.modelId) && typeof model.modelLabel === 'string' && model.modelLabel.length <= 200), 'MODEL_CATALOGUE_INVALID', '模型列表无效。');
-    this.#authority.prepare('UPDATE model_service_connections SET cached_models = ? WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = ?')
-      .run(JSON.stringify(models.map(({ modelId, modelLabel }) => ({ modelId, modelLabel }))), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt, 'ready');
+    return modelSearchSettings.cacheModelServiceModels(this.#modelSearchSettingsHost, connection, models);
   }
 
   /** Retain only a closed, sanitized status for the exact credential generation tested. */
   recordModelConnectionTest(connection: ModelServiceConnectionProjection, result: ModelConnectionTestStatus): void {
-    requireStore(result.credentialUpdatedAt === connection.credentialUpdatedAt && validModelServiceModelId(result.modelId) &&
-      ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(result.outcome) && result.verified === 'buffered-text-only' &&
-      (result.code === null || /^[A-Z0-9_]{1,100}$/u.test(result.code)), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
-    const facts = result.provenance;
-    const counts = facts?.usage;
-    requireStore(Number.isFinite(Date.parse(result.testedAt)) && (result.outcome !== 'passed' || facts !== undefined), 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
-    if (facts !== undefined) requireStore(facts.role === 'Fast Interaction Role' && facts.model === result.modelId &&
-      facts.credentialReference === connection.credentialReference && modelServiceChannelOf(facts.route) === connection.binding.providerId &&
-      facts.credentialSlot === connection.binding.credentialSlot && DIGEST_PATTERN.test(facts.bindingDigest) && (facts.policyVersion === 'v25' || facts.policyVersion === 'v26' || facts.policyVersion === 'v27' || facts.policyVersion === 'v30' || facts.policyVersion === 'v31' || (facts.policyVersion === 'v32' || facts.policyVersion === 'v33')) &&
-      allowedProductionBindingOf({ route: facts.route, endpoint: facts.endpoint, model: facts.model, credentialSlot: facts.credentialSlot, credentialReference: facts.credentialReference }, 'fast-interaction') !== null &&
-      (facts.failureCode === null || /^[A-Z0-9_]{1,100}$/u.test(facts.failureCode)) &&
-      (counts == null || [counts.inputTokens, counts.outputTokens, ...(counts.reasoningTokens === undefined ? [] : [counts.reasoningTokens]),
-        ...(counts.cacheReadTokens === undefined ? [] : [counts.cacheReadTokens])].every((count) => Number.isSafeInteger(count) && count >= 0)),
-      'MODEL_CONNECTION_TEST_INVALID', '连接测试来历无效。');
-    // Project the closed status explicitly: no unknown property from an adapter/result can become retained material.
-    const sanitized: ModelConnectionTestStatus = {
-      modelId: result.modelId, credentialUpdatedAt: result.credentialUpdatedAt, testedAt: result.testedAt,
-      outcome: result.outcome, code: result.code, verified: 'buffered-text-only',
-      ...(facts === undefined ? {} : { provenance: {
-        role: facts.role, route: facts.route, model: facts.model, endpoint: facts.endpoint, credentialSlot: facts.credentialSlot,
-        credentialReference: facts.credentialReference, policyVersion: facts.policyVersion, bindingDigest: facts.bindingDigest,
-        ...(facts.credentialUpdatedAt === undefined ? {} : { credentialUpdatedAt: facts.credentialUpdatedAt }),
-        failureCode: facts.failureCode, usage: counts == null ? null : { inputTokens: counts.inputTokens, outputTokens: counts.outputTokens,
-          ...(counts.reasoningTokens === undefined ? {} : { reasoningTokens: counts.reasoningTokens }),
-          ...(counts.cacheReadTokens === undefined ? {} : { cacheReadTokens: counts.cacheReadTokens }) },
-      } }),
-    };
-    readModelConnectionTest({ connection_test: JSON.stringify(sanitized), credential_updated_at: connection.credentialUpdatedAt,
-      provider_id: connection.binding.providerId, credential_slot: connection.binding.credentialSlot, credential_reference: connection.credentialReference });
-    requireStore(this.#authority.prepare(`UPDATE model_service_connections SET connection_test = ?
-      WHERE connection_id = ? AND credential_reference = ? AND credential_updated_at = ? AND credential_operation_state = 'ready'`)
-      .run(JSON.stringify(sanitized), connection.connectionId, connection.credentialReference, connection.credentialUpdatedAt).changes === 1,
-      'MODEL_SERVICE_CONNECTION_CONFLICT', '连接已变化；请重新测试。');
+    return modelSearchSettings.recordModelConnectionTest(this.#modelSearchSettingsHost, connection, result);
   }
 
   getManuscriptWindowAt(

@@ -1,15 +1,44 @@
-import { asDraftRevision105 } from '../support/draft-revisions.js';
-import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
-import { asRevision98 } from '../support/procedure-revisions.js';
-import { asRevision99, asRevision100, asRevision101, asRevision102, asRevision103 } from '../support/structural-revisions.js';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, rm, copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { expect, it, afterEach, beforeEach, describe, vi } from 'vitest';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
+import {
+  FACTUAL_REVIEW_SCHEMA_VERSION,
+  LATEST_SCHEMA_VERSION,
+  ANALYSIS_LEDGER_REVISION_23_SQL,
+  ANALYSIS_LEDGER_REVISION_58_SQL,
+  SCHEDULED_BACKUP_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
+import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
+import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
+import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
+import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
+import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
+import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
+import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
+import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
+import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
+import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
+import { asDraftRevision105 } from '../support/draft-revisions.js';
+import {
+  PROCEDURE_DEFINITION_SCHEMA_SQL,
+  PROCEDURE_DEFINITION_TRIGGER_SQL,
+} from '../../src/service/procedures/definition-store.js';
+import { asRevision98 } from '../support/procedure-revisions.js';
+import {
+  asRevision99,
+  asRevision100,
+  asRevision101,
+  asRevision102,
+  asRevision103,
+} from '../support/structural-revisions.js';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import {
@@ -21,18 +50,21 @@ import {
   writeReplacementIntent,
   type ReplacementIntent,
 } from '../../src/service/database-replacement.js';
-import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_ROW_COLUMNS } from '../../src/service/model-service-connections.js';
-import { ANALYSIS_LEDGER_REVISION_58_SQL, LATEST_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import {
+  MODEL_SERVICE_CONNECTION_REVISION_104_SQL,
+  MODEL_SERVICE_ROW_COLUMNS,
+} from '../../src/service/model-service-connections.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
+import { MAX_DATABASE_REPLACEMENTS_LISTED, FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, composeRevisedDocx } from '../support/composed-fixture.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import {
+  importSample1Book,
+  pinEditorialWorkspaceProfileRevision2,
+  recordMissingCredentialConnection,
+} from '../support/sample1-baseline.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
 /** While set, every write into a file opened under this directory fails as a full disk fails. */
@@ -1150,3 +1182,64 @@ it('validates and advances a historical reader91 package through the existing re
     expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ outcome: 'applied' });
   } finally { await store.close(); }
 });
+
+
+// Revision 20 predates entry positions and kind-coupled review relations. Keep its sole forward-migration fixture here.
+function downgradeToRevision20(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_23_SQL);
+    execPre74Fixture(database, `BEGIN IMMEDIATE;
+      ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      DROP TABLE manuscript_effect_receipts;
+      DROP TABLE manuscript_effect_dispatches;
+      DROP TABLE manuscript_effect_approvals;
+      DROP TABLE manuscript_effect_targets;
+      DROP TABLE manuscript_effect_intents;
+      DROP TABLE proposal_decision_reasons;
+      DROP TABLE proposal_item_decisions;
+      DROP TABLE proposal_change_items;
+      DROP TABLE editorial_mark_replies;
+      DROP TABLE editorial_marks;
+      DROP TABLE manuscript_entry_positions;
+      PRAGMA user_version = ${FACTUAL_REVIEW_SCHEMA_VERSION};
+      COMMIT;`);
+  } finally {
+    database.close();
+  }
+}
+
+it('opens a populated revision-20 predecessor with its Book and manuscript intact (#1262)', async () => {
+  const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let book: Awaited<ReturnType<typeof importSample1Book>>;
+  let blocks: number;
+  try {
+    book = await importSample1Book(first, roots.codeRoot, '旧版样书');
+    const window = first.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    blocks = window.position.totalBlocks;
+    first.recordManuscriptEntryPosition(book.manuscriptId, book.branchId, window.blocks[2]!.blockId, 1);
+    first.markCleanShutdown();
+  } finally { first.close(); }
+  downgradeToRevision20(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(migrated.listBooks(null).items.map(item => item.bookId)).toEqual([book.bookId]);
+    expect(migrated.getManuscriptWindow(book.manuscriptId, book.branchId, null).position.totalBlocks).toBe(blocks);
+    expect(migrated.readManuscriptEntryPosition(book.manuscriptId, book.branchId)).toBeNull();
+    expect(migrated.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
+    migrated.markCleanShutdown();
+  } finally { migrated.close(); }
+}, 300_000);
+
+it('closes the refused unsupported-version database so its data root can be removed immediately (#1262)', async () => {
+  const directory = join(roots.dataRoot, 'store');
+  await mkdir(directory, { recursive: true });
+  const planted = new DatabaseSync(join(directory, 'ai7.sqlite'));
+  planted.exec('PRAGMA user_version = 9999');
+  planted.close();
+  await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_UNSUPPORTED' });
+  await rm(roots.dataRoot, { recursive: true });
+}, 120_000);
