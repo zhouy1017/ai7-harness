@@ -83,17 +83,6 @@ while([DateTime]::UtcNow -lt $deadline){
         Write-Output 'BETA_NATIVE/invoke-unavailable';exit 1
       }
     }else{
-      # Match only the task-owned common dialog and its conventional file-name edit/OK IDs.
-      $handle=[IntPtr]$window.Current.NativeWindowHandle
-      if($handle -ne [IntPtr]::Zero -and [Ai7BetaDialogKeys]::ClassName($handle) -eq '#32770'){
-        if(-not $observed){Write-Output ('BETA_NATIVE_DIALOG:'+(@{class='#32770';controls=@([Ai7BetaDialogKeys]::Controls($handle))} | ConvertTo-Json -Compress));$observed=$true}
-        $fileEdit=[Ai7BetaDialogKeys]::FileEdit($handle);$ok=[Ai7BetaDialogKeys]::GetDlgItem($handle,1)
-        if($fileEdit -ne [IntPtr]::Zero -and $ok -ne [IntPtr]::Zero){
-          [Ai7BetaDialogKeys]::SendMessage($fileEdit,0xC,[IntPtr]::Zero,$FileName) | Out-Null
-          [Ai7BetaDialogKeys]::PostMessage($ok,0xF5,[IntPtr]::Zero,[IntPtr]::Zero) | Out-Null
-          Write-Output 'BETA_NATIVE/file-native-completed';exit 0
-        }
-      }
       $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'1148')
       $edit=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
       if(-not $edit){continue}

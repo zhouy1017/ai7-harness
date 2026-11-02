@@ -52,10 +52,11 @@ async function renderer(browser){
  return {send,evaluate:async(expression)=>{const value=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(value.exceptionDetails)throw Error('renderer-expression');return value.result.value;}};
 }
 const boolean=async(page,expression)=>page.evaluate('Promise.resolve('+expression+').then(Boolean)');
-const click=async(page,label)=>check(await page.evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)});if(!node||node.disabled)return false;node.click();return true})()`),'click-'+label);
-const select=async(page,selector)=>check(await page.evaluate(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node||node.disabled)return false;node.click();return true})()`),'select-'+selector);
+const actionCheck=(condition,operation,target)=>{if(!condition){report.failedAction={operation,target};check(false,'ui-'+operation+'-unavailable');}check(true,operation+'-'+target);};
+const click=async(page,label)=>actionCheck(await page.evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)});if(!node||node.disabled)return false;node.click();return true})()`),'click',label);
+const select=async(page,selector)=>actionCheck(await page.evaluate(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node||node.disabled)return false;node.click();return true})()`),'select',selector);
 const ready=async(page,expression,name,ms=120000)=>wait(()=>boolean(page,expression).catch(()=>false),name,ms);
-const fill=async(page,selector,value)=>check(await page.evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n||n.disabled)return false;n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('input',{bubbles:true}));n.dispatchEvent(new Event('change',{bubbles:true}));return true})()`),'fill-'+selector);
+const fill=async(page,selector,value)=>actionCheck(await page.evaluate(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n||n.disabled)return false;n.value=${JSON.stringify(value)};n.dispatchEvent(new Event('input',{bubbles:true}));n.dispatchEvent(new Event('change',{bubbles:true}));return true})()`),'fill',selector);
 async function cleanupInstallation(path){if(!path)return;const actual=resolve(path);if(!actual.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase())||!actual.endsWith('installed'))throw Error('cleanup-target-refused');if(!existsSync(actual))return;const name=(await readdir(actual)).find(n=>/^Uninstall.*\.exe$/i.test(n));if(name){run(join(actual,name),['/S']);await wait(()=>!existsSync(join(actual,'AI7.exe')),'cleanup-uninstall-timeout');}}
 
 async function seedPriorBook(temp,dataRoot){
@@ -394,8 +395,9 @@ try{
  for(const path of [setup,zip]){const bytes=await readFile(path);report.assets.push({name:path.split(/[\\/]/).at(-1),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});}
  const temp=await realpath(await mkdtemp(join(tmpdir(),'ai7-beta-package-')));report.testRoot=temp;
  const input=join(temp,'public-sample1-objects.docx');
- await composeExportAdmittedDocx(input,{endnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:30,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
+ await composeExportAdmittedDocx(input,{endnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:24,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
  await addReadOnlySourceObjects(input);
+ report.input={source:'sample1.docx',startBlock:1,blocks:24,sha256:createHash('sha256').update(await readFile(input)).digest('hex'),classes:['Word revisions','comments','endnote','table','image']};
  const noteParts=unzipSync(await readFile(input));check(Boolean(noteParts['word/endnotes.xml'])&&strFromU8(noteParts['word/document.xml']).includes('<w:endnoteReference w:id="1"/>')&&strFromU8(noteParts['word/_rels/document.xml.rels']).includes('Target="endnotes.xml"')&&strFromU8(noteParts['[Content_Types].xml']).includes('PartName="/word/endnotes.xml"'),'composed-endnote-archive');
  const installed=join(temp,'installed');const executable=join(installed,'AI7.exe');
  const env=selfCheckEnvironment(executable);env.LOCALAPPDATA=join(temp,'local');await mkdir(env.LOCALAPPDATA,{recursive:true});env.APPDATA=join(temp,'roaming');await mkdir(env.APPDATA,{recursive:true});
