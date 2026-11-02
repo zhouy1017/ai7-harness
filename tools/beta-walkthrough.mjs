@@ -284,6 +284,13 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(await page.evaluate("window.ai7.inspectBaselineAnalysis().then(v=>v.resultSetRevision?.coverage?.state==='complete')"),expectedChannel+'-baseline-complete');
   }
   at(expectedChannel+'-full-review');
+  const retainedReview=resumePrefix?resume.completedReview?.review:null;
+  if(retainedReview){
+   check(resume.completedReview.buildIdentity.sourceCommit===report.buildIdentity.sourceCommit,'resume-review-exact-product');
+   report.retainedReviewEvidence=resume.completedReview;
+   await select(page,'#app-sidebar [data-nav-book-section=review]');
+   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId===${JSON.stringify(retainedReview.runId)}&&v.run.state==='settled')`,'retained-completed-review');
+  }else{
   await select(page,'#app-sidebar [data-nav-destination=knowledge]');
   await ready(page,"document.querySelector('[data-screen=knowledge-base]')",'knowledge-destination');
   await click(page,'工序与规则');
@@ -300,6 +307,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'input[name=review-scope][value=whole]');await select(page,'dialog.review-sheet [data-review-action=start]');
   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&v.run.reviewRunId!==${JSON.stringify(previousReviewRunId)})`,'new-full-review-created');
   await ready(page,"window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&['settled','partial','failed','scope-changed','plan-moved','cancelled'].includes(v.run.state)&&v.run.categories.every(c=>!['prepared','waiting','running'].includes(c.state)))",'full-review-terminal',1800000);
+  }
   const review=await page.evaluate("window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
@@ -309,14 +317,15 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   try{
    const snapshot=JSON.parse(coverageDb.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id=?').get(review.runId).canonical_json);
    memberCoverage=snapshot.categories.map(c=>{
-    if(!c.task)return {categoryId:c.categoryId,local:true};
+    if(!c.task)return {categoryId:c.entry.categoryId,local:true};
     const row=coverageDb.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE task_intent_id=? ORDER BY created_at DESC,ordinal DESC LIMIT 1').get(c.task.taskIntentId);
     const revision=row?JSON.parse(row.canonical_json):null;
-    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result']};
+    return {categoryId:c.entry.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result']};
    });
   }finally{coverageDb.close();}
   report.reviews.at(-1).memberCoverage=memberCoverage;
   check(memberCoverage.every(c=>c.local||(c.coverage?.state==='complete'&&c.gaps.length===0)),expectedChannel+'-full-review-complete-coverage');
+  if(expectedChannel==='windows-installer')report.completedReview={buildIdentity:report.buildIdentity,runnerHead:report.runnerHead,review:report.reviews.at(-1),checks:[...report.checks]};
   at(expectedChannel+'-retained-factual-evidence');
   const factualTaskIntentId=memberCoverage.find(c=>c.categoryId==='factual-review')?.taskIntentId;
   check(Boolean(factualTaskIntentId),'current-factual-task');
@@ -419,7 +428,19 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
 }
 
 try{
- try{const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));if(RESUME_LAST){if(previous.state!=='failed'||!['windows-installer-full-review','windows-installer-launch','await-protected-enrollment-windows-installer'].includes(previous.failedStage)||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');resume=previous;report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};report.priorBook=previous.priorBook;}else await cleanupInstallation(join(previous.testRoot,'installed'));}catch(e){if(e.code!=='ENOENT')throw e;}
+ try{
+  const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));
+  if(RESUME_LAST){
+   const stages=['windows-installer-full-review','windows-installer-retained-factual-evidence','windows-installer-launch','await-protected-enrollment-windows-installer'];
+   if(previous.state!=='failed'||!stages.includes(previous.failedStage)||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');
+   const completedReview=previous.completedReview??(()=>{const review=previous.reviews?.findLast(r=>r.channel==='windows-installer'&&r.state==='settled'&&r.categories?.length===5&&r.categories.every(c=>c.state==='settled'));return review?{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,review,checks:previous.checks}:null;})();
+   if(previous.failedStage==='windows-installer-retained-factual-evidence'&&!completedReview)throw Error('resume-completed-review-missing');
+   resume=previous;
+   resume.completedReview=completedReview;report.completedReview=completedReview;
+   report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};
+   report.priorBook=previous.priorBook;
+  }else await cleanupInstallation(join(previous.testRoot,'installed'));
+ }catch(e){if(e.code!=='ENOENT')throw e;}
  check(process.platform==='win32'&&process.arch==='x64','windows-x64');
  // This runner is invoked by the host guest runner inside the guest's interactive scheduled task.
  check(/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''),'background-test-guest');
