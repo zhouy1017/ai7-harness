@@ -74,6 +74,8 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       captureContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
       captureNavigationContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
       currentWindow: () => options.initialWindow,
+      currentBlockStyle: () => ({ kind: 'paragraph', level: null }),
+      setBlockStyle: vi.fn(),
       isComposing: () => false,
       isOwnScroll: () => false,
       protection: () => null,
