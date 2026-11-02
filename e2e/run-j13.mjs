@@ -2063,7 +2063,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-sheet-problem')?.textContent==='请至少选择一个审阅类别。' && document.querySelector('dialog.review-sheet')?.open===true`, 'series-sheet-nothing-chosen');
     await clickSelector(renderer, 'dialog.review-sheet input[name="review-category"][value="series-consistency"]', 'series-sheet-tick');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')?.dataset.recommendationState==='stale' && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')===null && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;

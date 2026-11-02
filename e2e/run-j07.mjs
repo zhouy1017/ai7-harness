@@ -2708,13 +2708,13 @@ async function main() {
         `《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`,
       ]) &&
       JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个内容块，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
-      JSON.stringify(writingSheet.quick) === JSON.stringify([null, null]), 'writing-sheet-words', writingSheet);
+      writingSheet.quick === null, 'writing-sheet-words', writingSheet);
     // 先看计划 with no type chosen asks for one; choosing 宣传文章 names its 范例 — none in this house.
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-unchosen');
     await readWriting((page) => page.problem === '请选择一类文档。', 'writing-pick-type');
     await assertRenderer(renderer, `(() => { const radio = document.querySelector('[data-screen="book-deliverables"] .writing-task input[name="writing-type"][value=${JSON.stringify(WRITING_REQUEST.typeId)}]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'writing-type-choose');
     await readWriting((page) => page.references[2] === '本社暂无其他图书的宣传文章范例，本次不参考范例' && page.problem === null &&
-      JSON.stringify(page.quick) === JSON.stringify([null, null]), 'writing-type-chosen');
+      page.quick === null, 'writing-type-chosen');
     await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="audience"]', WRITING_REQUEST.audience, 'writing-audience');
     await fill(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-field="channel"]', WRITING_REQUEST.channel, 'writing-channel');
 
