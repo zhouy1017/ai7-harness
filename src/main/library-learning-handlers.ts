@@ -15,6 +15,17 @@ export function registerLibraryLearningHandlers(context: {
   preferences: PreferenceStore;
 }) {
   const { chooseLibraryMaterialFile, requireSender, requireAuthority, service, serializeEffect, preferences } = context;
+
+  // 知识库 › 资料库 (Issue #427, S79c): the renderer names no path — main's picker chooses the file — and names an item and a
+  // decision only in the closed shapes the service checks again.
+  ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterials, (event, input: ServiceOperationMap['inspectLibraryMaterials']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectLibraryMaterials', { after: input?.after ?? null });
+    }),
+  );
+
   ipcMain.handle(IPC_CHANNELS.inspectLibraryMaterial, (event, input: ServiceOperationMap['inspectLibraryMaterial']['input']) =>
     envelope(async () => {
       requireSender(event);
