@@ -451,7 +451,9 @@ const MARK_HELPERS = `(() => {
   const blocks = () => Array.from(editor()?.querySelectorAll(':scope > [data-block-id]') ?? []);
   const nth = (position) => blocks()[position - 1] ?? null;
   const durable = (root) => {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    // Source previews surround the paragraph's model text; their labels/table cells are not editable manuscript text.
+    const content = root.querySelector('.manuscript-table-source-text, .manuscript-image-paragraph') ?? root;
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
     });
     const nodes = [];
