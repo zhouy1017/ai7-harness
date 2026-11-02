@@ -976,7 +976,7 @@ async function main() {
       full.terms['可能发送'] === '不发送任何内容' && full.terms['不会读'] === '其他图书；来源材料（来源版本仅作血缘证据，不属于可读范围）' &&
       JSON.stringify(full.steps) === JSON.stringify(['准备任务输入 → 任务输入修订版 r2', '记录运行（不派发） → 运行记录']) &&
       JSON.stringify(full.participation) === JSON.stringify(['预计无需中途参与']) &&
-      full.terms['模型角色'] === '主编辑角色' && full.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
+      full.terms['模型角色'] === '主编辑角色' && full.terms['提供方'] === 'DeepSeek 开放平台' &&
       full.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；这项任务只记录，不派发' &&
       full.terms['会发送'] === '本环境不连接模型服务，不会发送任何内容' && full.terms['发送内容类别'] === '公开或合成材料' &&
       full.terms['用量上限'] === '不发送，没有模型用量' && full.terms['所需时间'] === '暂无可靠估计' &&
