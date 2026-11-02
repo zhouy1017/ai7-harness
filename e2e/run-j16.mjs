@@ -43,8 +43,8 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // editorial workspace profile is not enabled at Revision 2 opens the screen with the safety state and the one sentence of what
 // opens it; on the Journey's Book it opens the workspace, which records nothing on entering and goes back with 返回. Words of
 // one paragraph and a 修改要求 make one proposal round — one dialogue turn on the J-04 adapter — listed as proposals anchored
-// inside the range, the item outside it dropped; 提交为修改建议 makes them one atomic group of 修改建议, which no member leaves
-// alone: the proposal workspace's 拟采纳 and decision and one batch Apply with its receipt change the manuscript.
+// inside the range, the item outside it dropped; 提交为修改建议 makes independent 修改建议, decided and applied on their
+// manuscript cards. Completed rounds can be refined directly, and the drawer never displays the workspace's JSON.
 // A second round, discarded, records nothing beyond its dialogue turn.
 //
 // The runner writes J-16's unit-hold file, and reads the service's projections through `window.ai7` only to cross-check
@@ -1916,6 +1916,7 @@ async function main() {
     requireJourney(longBlock !== null, 'workspace-long-present');
     await assertRenderer(renderer, `(() => { const node = document.querySelector('[data-agent-workspace-block=${JSON.stringify(longBlock)}]'); const range = document.createRange(); range.setStart(node.firstChild, 1); range.collapse(true); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); node.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); return document.querySelector('.agent-workspace-quote')?.textContent === node.textContent; })()`, 'workspace-long-click');
     await clickSelector(renderer, '[data-agent-workspace-action="back"]', 'workspace-position-back');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-book-id=${JSON.stringify(bookId)}]') !== null`, 'workspace-position-returned');
     await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-position-return');
     await waitFor(renderer, `document.querySelector('[data-agent-workspace-block=${JSON.stringify(longBlock)}]') !== null && document.querySelector('.agent-workspace-quote')?.textContent.length > 500`, 'workspace-position-retained');
     await assertRenderer(renderer, `(() => { const blocks = Array.from(document.querySelectorAll('.agent-workspace-blocks p[data-agent-workspace-block]')); const start = blocks.find((node) => node.nextElementSibling?.matches('p[data-agent-workspace-block]')); if (!start) return false; const end = start.nextElementSibling; const range = document.createRange(); range.setStart(start.firstChild, 1); range.setEnd(end.firstChild, 2); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); end.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })); return document.querySelector('.agent-workspace-quote')?.textContent.includes(String.fromCharCode(10)); })()`, 'workspace-cross-paragraph-pick');
