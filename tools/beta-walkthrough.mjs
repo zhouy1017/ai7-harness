@@ -182,6 +182,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'import-acknowledged');
   await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'manuscript-ready');
   check(await boolean(page,"document.querySelector('.editor-shell')"),expectedChannel+'-manuscript');
+  check(await boolean(page,"document.querySelector('[aria-label^=跳转到尾注]')"),expectedChannel+'-endnote-structure');
 
   check(await boolean(page,"document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)"),expectedChannel+'-source-table-image');
   const bookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
@@ -236,7 +237,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
 
   at(expectedChannel+'-retained-factual-evidence');
-  let factualSources=await page.evaluate(`window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},after:null}).then(v=>({count:v.records.length,next:v.next,translated:v.records.filter(r=>r.translation?.state==='translated'||r.translation?.text?.length>0).length,captured:v.records.filter(r=>r.captureState==='captured').length}))`);
+  let factualSources=await page.evaluate(`window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},after:null}).then(v=>({count:v.records.length,next:v.next,translated:v.records.filter(r=>r.translation?.state==='translated'||r.translation?.text?.length>0).length,captured:v.records.filter(r=>r.captureState==='full-text').length}))`);
   check(factualSources.count>0&&factualSources.captured>0,expectedChannel+'-retained-live-sources');
   report.factualEvidence??=[];report.factualEvidence.push({channel:expectedChannel,...factualSources});
   await select(page,'#app-sidebar [data-nav-book-section=sources]');await ready(page,"document.querySelector('.research-evidence')",'sources-surface');
@@ -273,7 +274,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,`window.ai7.inspectGlobalAgent().then(v=>v.history.some(h=>!${JSON.stringify(beforeHabits)}.includes(h.dialogueId)&&h.attempts.at(-1)?.state==='completed'&&h.attempts.at(-1)?.fragments.length>0))`,'new-habits-completed',300000);
   check(true,expectedChannel+'-habits-new-completed-answer');
   await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'library-after-agents');
-  check(await page.evaluate(`(()=>{const n=[...document.querySelectorAll('[data-book-id] button,button[data-book-id]')].find(n=>n.closest('[data-book-id]')?.dataset.bookId===${JSON.stringify(importedBookId)});if(!n)return false;n.click();return true})()`),'reopen-imported-book');
+  await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(importedBookId)}]`);await ready(page,"document.querySelector('[data-nav-book-section=manuscript]')",'reopened-book-context');
 
   await select(page,'#app-sidebar [data-nav-book-section=manuscript]');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'return-manuscript-milestone');
   check(await page.evaluate(`(()=>{const n=document.querySelector('[data-edge-entry=navigation]');if(n.getAttribute('aria-expanded')!=='true')n.click();document.querySelector('details.milestone-section').open=true;return true})()`),'milestone-form');
