@@ -7,7 +7,7 @@ import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-spa
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
-import { observeSourceImages, sourceBlockDom, sourceNodeKind } from './editor-source.js';
+import { observeSourceImages, sourceBlockDom, sourceBlockView, sourceNodeKind } from './editor-source.js';
 import {
   bufferAdmits,
   bufferReachedLimit,
@@ -997,6 +997,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   view = new EditorView(options.host, {
     state: makeState(),
+    nodeViews: { table: sourceBlockView, image: sourceBlockView },
     editable: isEditable,
     dispatchTransaction(transaction) {
       const nextState = view.state.apply(transaction);

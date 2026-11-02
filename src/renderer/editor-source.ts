@@ -1,4 +1,5 @@
-import type { DOMOutputSpec, Node as ProseMirrorNode } from 'prosemirror-model';
+import { DOMSerializer, type DOMOutputSpec, type Node as ProseMirrorNode } from 'prosemirror-model';
+import type { NodeView } from 'prosemirror-view';
 import type { ManuscriptBlockProjection, ManuscriptSourceDisplay } from '../shared/protocol/manuscript-notes.js';
 import type { RendererApi } from '../shared/protocol.js';
 
@@ -85,4 +86,11 @@ export function sourceBlockDom(node: ProseMirrorNode): DOMOutputSpec {
       ...(table.truncated ? [['p', { class: 'field-note', contenteditable: 'false' }, '当前显示表格预览；完整结构和内容随 DOCX 导出保留。'] as DOMOutputSpec] : []),
     ] : []),
     ...display.images.filter((image) => !image.before).map(imageDom)];
+}
+
+/** The paragraph is editable content; asynchronous image URLs and the source preview remain outside that content. */
+export function sourceBlockView(node: ProseMirrorNode): NodeView {
+  const { dom, contentDOM } = DOMSerializer.renderSpec(document, sourceBlockDom(node));
+  return { dom, contentDOM: contentDOM!,
+    ignoreMutation: (mutation) => mutation.type !== 'selection' && !contentDOM!.contains(mutation.target) };
 }
