@@ -1544,6 +1544,8 @@ async function main() {
       selectionRun.scope.selection?.fromBlockId === taskBlock && selectionRun.scope.selection.toBlockId === taskBlock,
     'selection-task-review-recorded', selectionRun);
     requireJourney((await paragraphText()) === paragraphBefore, 'selection-task-manuscript-unchanged');
+    // Direct start follows the settled marks in place, before any task-card jump could reload them.
+    await waitFor(renderer, `document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-direct-marks-visible', 60_000);
 
     at('selection-task-review-card');
     await openPanel(renderer, 'selection-task-review-panel');
@@ -1570,10 +1572,6 @@ async function main() {
     // The manuscript on screen reads its window again in place once the 审阅 settles (review P2-6): the lead's mark is on the
     // paragraph the editor started from, without leaving it, and the editor names that load.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true && document.querySelector(${JSON.stringify(`[data-screen="editor"] [data-block-id="${taskBlock}"] .editorial-mark[data-mark-source="ai7"]`)}) !== null`, 'selection-task-lead-marked', 60_000);
-    // The window on screen was the window the 审阅 read, so only its marks were set on it — nothing open over the text is closed
-    // (review P2-7); the editor names that in `data-marks-refreshed`.
-    const marksRefreshed = await renderer.evaluate(`document.querySelector('[data-screen="editor"] [data-marks-refreshed]')?.dataset.marksRefreshed ?? ''`);
-    requireJourney(marksRefreshed.split(',').includes('review-settled'), 'selection-task-review-settled-marks', { marksRefreshed, loads: await windowLoads() });
     await assertRenderer(renderer, MARK_HELPERS, 'selection-task-mark-helpers');
 
     at('selection-task-from-mark');
