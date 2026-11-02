@@ -24,7 +24,7 @@ export const CUSTOM_ANALYSIS_RELATIONS = Object.keys(CUSTOM_ANALYSIS_DIMENSION_S
 export const FACTUAL_VERIFICATION_SCHEMA_NAMES = [...Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL), ...Object.keys(FACTUAL_VERIFICATION_TRIGGER_SQL)];
 /** Revision 78's four relations, added empty after a planted predecessor is reopened. */
 export const FACTUAL_VERIFICATION_RELATIONS = Object.keys(FACTUAL_VERIFICATION_SCHEMA_SQL);
-export const RESEARCH_EVIDENCE_RELATIONS = Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL);
+export const RESEARCH_EVIDENCE_RELATIONS = [...Object.keys(RESEARCH_EVIDENCE_SCHEMA_SQL), ...Object.keys(RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL)];
 /** Revision 76's two relations (Issue #892), which a planted predecessor gains empty beside its revision-67 ones. */
 export const MATERIAL_INDEX_LAYER_RELATIONS = Object.keys(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
 /** Revision 77's five relations (Issue #902), which a planted predecessor gains empty. */

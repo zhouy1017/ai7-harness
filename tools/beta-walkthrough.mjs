@@ -97,11 +97,12 @@ async function configureLiveConnections(dataRoot,temp,channel){
   import {EditorialStore} from ${JSON.stringify(join(ROOT,'src/service/store.ts').replaceAll('\\','/'))};
   const store=await EditorialStore.open(${JSON.stringify(dataRoot)},${JSON.stringify(ROOT)});
   try{
-   const model=store.saveModelServiceConnection('Beta available Go account',null,'ready','opencode-go');
+   const existing=store.getModelServiceRouteConnection('opencode-go');
+   const model=store.saveModelServiceConnection('Beta available Go account',existing?.credentialReference??null,'ready','opencode-go');
    store.selectModelServiceRoute('opencode-go');
    store.selectMainRoleModel('opencode-go','deepseek-v4.1-flash');store.selectFastRoleModel('opencode-go','deepseek-v4.1-flash');
    const refs=[{slot:'opencode-go',credentialReference:model.credentialReference}];
-   for(const slot of ['search-brave','search-bochaai']){const saved=store.saveSearchBackendCredential(slot,null,'ready');refs.push({slot,credentialReference:saved.credentialReference});}
+   for(const slot of ['search-brave','search-bochaai']){const current=store.getSearchBackendConnections().find(c=>c.backendId===slot);const saved=store.saveSearchBackendCredential(slot,current?.credentialReference??null,'ready');refs.push({slot,credentialReference:saved.credentialReference});}
    store.selectSearchBackend('search-brave');store.selectSearchBackend('search-bochaai','fallback');
    store.markCleanShutdown();console.log(JSON.stringify(refs));
   }finally{store.close();}
