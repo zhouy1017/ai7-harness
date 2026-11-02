@@ -31,7 +31,10 @@ const report={schema:'ai7.windows-beta-acceptance/1',scope:STARTUP_ONLY?'native-
 const checkpoint=()=>{if(report.testRoot)writeFileSync(join(OUTPUT,'beta-in-progress.json'),JSON.stringify({...report,currentStage:stage},null,2)+'\n');};
 const check=(condition,name)=>{if(!condition)throw Error(name);report.checks.push(name);console.log('BETA_PACKAGE/pass/'+name);checkpoint();};
 const at=(name)=>{stage=name;console.log('BETA_PACKAGE/stage/'+name);checkpoint();};
-const run=(file,args,env=process.env)=>{const result=spawnSync(file,args,{cwd:ROOT,env,windowsHide:true,encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});if(result.status!==0)throw Error('child-failed');return result.stdout;};
+const run=(file,args,env=process.env)=>{const result=spawnSync(file,args,{cwd:ROOT,env,windowsHide:true,encoding:'utf8',timeout:180000,maxBuffer:4*1024*1024});if(result.status!==0){
+ report.childFailures??=[];const error=(result.stderr??'').match(/(?:^|\n)([A-Za-z]+Error)(?: \[([A-Z0-9_/-]+)\])?:/);const code=(result.stderr??'').match(/\bcode:\s*['"]([A-Z0-9_/-]+)['"]/);
+ report.childFailures.push({executable:file.split(/[\\/]/).at(-1),entry:args[0]?.split(/[\\/]/).at(-1),exit:result.status,errorName:error?.[1]??null,code:code?.[1]??error?.[2]??result.error?.code??null});
+ throw Error('child-failed');}return result.stdout;};
 const wait=async(predicate,name,ms=60000)=>{const end=Date.now()+ms;while(Date.now()<end){if(existsSync('C:/ai7/results/beta-cancel.txt'))throw Error('operator-cancelled');if(await predicate())return;await new Promise(r=>setTimeout(r,100));}throw Error(name);};
 const native=(exe,options)=>{
  const result=spawnSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',join(ROOT,'tools','beta-native-dialog.ps1'),'-Executable',exe,...options],{cwd:ROOT,windowsHide:true,encoding:'utf8',timeout:60000});
@@ -395,7 +398,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
 }
 
 try{
- try{const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));if(RESUME_LAST){if(previous.state!=='failed'||previous.failedStage!=='windows-installer-full-review'||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');resume=previous;report.priorEvidence={buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};report.priorBook=previous.priorBook;}else await cleanupInstallation(join(previous.testRoot,'installed'));}catch(e){if(e.code!=='ENOENT')throw e;}
+ try{const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));if(RESUME_LAST){if(previous.state!=='failed'||!['windows-installer-full-review','windows-installer-launch','await-protected-enrollment-windows-installer'].includes(previous.failedStage)||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');resume=previous;report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};report.priorBook=previous.priorBook;}else await cleanupInstallation(join(previous.testRoot,'installed'));}catch(e){if(e.code!=='ENOENT')throw e;}
  check(process.platform==='win32'&&process.arch==='x64','windows-x64');
  // This runner is invoked by the host guest runner inside the guest's interactive scheduled task.
  check(/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''),'background-test-guest');
