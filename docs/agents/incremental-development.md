@@ -1,6 +1,6 @@
 # Incremental development lifecycle
 
-This is the binding implementation loop: add one accepted outcome to the current system while preserving design intent, working behavior, and ownership boundaries.
+This is the default implementation loop under [Orca dispatch](orca-dispatch.md), subject to current Owner/session instructions: add one accepted outcome to the current system while preserving design intent, working behavior, and ownership boundaries.
 
 ## 1. Admit one bounded outcome
 
@@ -29,9 +29,9 @@ Do not add a parallel store, ledger, agent loop, scheduler, policy authority, pr
 
 ## 4. Replacement authorization
 
-The Commander may authorize a bounded internal replacement through a revised Change Brief when user behavior, domain ownership, public interfaces, data meaning, authority, privacy and egress, and process boundaries stay unchanged. Judge replacement by cumulative intent, not Issue size. Changing a framework, the Primary Agent Harness or generic loop, the editor foundation, process topology, storage authority, a public API, the domain data model, platform scope, dependency strategy, the capability or credential boundary, a privacy rule, or outbound-data authority is Foundation Replacement and stops for an Owner decision and, where applicable, an ADR. A replacement request states the exact seam, why extension cannot meet the outcome, preserved behavior, the cutover and rollback path, the obsolete path's deletion point, and the smallest vertical outcome that proves the new path. Big-bang rewrites need explicit Owner authorization.
+The Commander may authorize a bounded internal replacement through a revised Change Brief when user behavior, domain ownership, public interfaces, data meaning, authority, privacy and egress, and process boundaries stay unchanged. Judge replacement by cumulative intent, not Issue size. Changing a framework, the Primary Agent Harness or generic loop, the editor foundation, process topology, storage authority, a public API, the domain data model, platform scope, dependency strategy, the capability or credential boundary, a privacy rule, or outbound-data authority is Foundation Replacement and needs an Owner decision only when outside current scoped authorization; record applicable decisions alongside implementation. A replacement request states the exact seam, why extension cannot meet the outcome, preserved behavior, the cutover and rollback path, the obsolete path's deletion point, and the smallest vertical outcome that proves the new path. Big-bang rewrites need explicit Owner authorization.
 
-## 5. Execute inside the allowed change (no defensive ceremony or test bloat)
+## 5. Execute the bounded outcome (no defensive ceremony or test bloat)
 
 Change only what the outcome requires. Preserve unrelated work in the worktree. Do not rename, move, generalize, format, or clean neighboring code opportunistically. Do not widen a public interface when behavior can stay behind it. One exact dependency pin changes at a time. Keep migrations forward, bounded, and reversible where the domain contract requires it.
 
@@ -43,7 +43,9 @@ Change only what the outcome requires. Preserve unrelated work in the worktree. 
 
 Treat the E2E Gate as a direct consumer: every implementation Issue records either `exact reuse — checked unchanged` or a `synchronized delta` that updates every affected runner, controller location, local `e2e:all` orchestration, hidden cross-Journey pin, and `.github/workflows/e2e.yml` projection in the same pull request. Never defer a required projection delta to a follow-up.
 
-Stop and report `needs-commander` when the brief is wrong, the allowed change must widen, an accepted record conflicts with the implementation, an unauthorized authority, dependency, process, or schema is needed, an external outcome is ambiguous, protected material would be exposed, or the applicable Journey fails for reasons outside the authorized change.
+Hint Paths (including older `Allowed to change` lists) locate the initial owners; they are not an allowlist. Complete necessary upstream/downstream edits, E2E-runner changes and related compile/test repairs without stopping for re-scoping. Under [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279), current Issue/Owner intent resolves historical ADR/UI wording conflicts; update the affected owners with the implementation. F-25 line-count growth does not block a feature or experience slice or require an unrelated extraction in that PR; Wave 23 Stage 4 W23-S9 owns the separate cleanup.
+
+Escalate only a real unresolved outcome/dependency or action beyond current authorization, an ambiguous external result, or a protected-material/secret boundary. Continue independent authorized work while awaiting a decision.
 
 ## 6. Verify the outcome
 
@@ -53,7 +55,7 @@ Research answers one named blocking question; a spike is allowed only when the c
 
 ## 7. Return a finished unit
 
-Record the outcome, planned versus actual change, owners reused or added, migration and authority impact, exact checks and disclosed skips, cleanup and unresolved matters in the existing Issue/PR. [Orca dispatch](orca-dispatch.md) owns Worker-to-Reviewer handoff, Reviewer corrections and slice merge, and Commander cumulative dev integration. Report each state truthfully; a slice in a wave is not yet integrated into dev.
+Record the outcome, planned versus actual change, owners reused or added, migration and authority impact, exact checks and disclosed skips, cleanup and unresolved matters in the existing Issue/PR. [Orca dispatch](orca-dispatch.md) owns the assigned writer and serial slice/final integration. Report each state truthfully; a slice in a wave is not yet integrated into dev.
 
 At completion run the scoped [document lifecycle](document-lifecycle.md) sweep. Keep payloads, secrets and protected material out of reports.
 

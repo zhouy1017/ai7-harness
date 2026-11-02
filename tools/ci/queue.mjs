@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateKind, queueTarget, documentationOnly, receiptCandidate, roleReceipts, sliceClosure, mergeAuthorization, hostedGatePassed, testsPrecedeRelease } from './release-authority.mjs';
+import { queueTarget, documentationOnly, gateResultPassed, hostedGatePassed } from './release-authority.mjs';
 
 // The nightly merge queue of ADR 0081: the scheduled orchestrator lists the candidates, builds the
 // tree each one would land, and merges the ones the full Gate passed. Every pull-request-touching
@@ -59,7 +59,7 @@ export function ownerReservation(files) {
 }
 
 /**
- * The pure filter: open, non-draft, mergeable pull requests against `dev`, ascending, each marked
+ * The pure filter: open, non-draft, mergeable development pull requests, ascending, each marked
  * with whether the queue may merge it. A pull request it may not merge is still tested and
  * reported; `merge: false` is the whole difference (ADR 0081 §4).
  */
@@ -78,7 +78,7 @@ export function selectCandidates(records) {
         number: record.number,
         title: record.title,
         head: record.headRefOid,
-        merge: reservation === null && candidateKind(record) !== null && record.authorization?.allowed === true,
+        merge: reservation === null,
         reserved: reservation,
       };
     })
@@ -228,10 +228,6 @@ export function formatResultComment({ platform, runUrl, attempt, result }) {
 
 /** The two comments that end a candidate before or instead of a merge, worded for the case. */
 export function formatCandidateComment({ reason, dev, devTip, reservedPath }) {
-  if (reason === 'unreleased') return [
-    'Nightly merge queue — the Windows Gate passed, but this candidate has no current role release or changes an Owner-reserved record.',
-    '', 'Green tests alone do not authorize a merge. The Commander must attest the current assignment, completion and exact head/target/base release; Owner reservations still apply.',
-  ];
   if (reason === 'conflict') {
     return [
       `Nightly merge queue — this pull request cannot be squashed onto the current \`${dev}\` tip, so it was skipped before testing.`,
@@ -345,102 +341,10 @@ function pagedApi(repo, suffix) {
   return parseJson(ghOrThrow(['api', '--paginate', '--slurp', `repos/${repo}/${suffix}`]), 'GitHub paginated API').flat();
 }
 
-const trustedLogins = new Map();
-
-/** The one trust test: a maintain/admin collaborator may publish receipts or direct-merge a slice. */
-function trustedLogin(repo, login) {
-  const key = `${repo} ${login}`;
-  if (!trustedLogins.has(key)) {
-    const permission = api(repo, `collaborators/${encodeURIComponent(login)}/permission`);
-    trustedLogins.set(key, ['admin', 'maintain'].includes(permission.role_name ?? permission.permission));
-  }
-  return trustedLogins.get(key);
-}
-
-function receiptsFor(repo, pr) {
-  const comments = pagedApi(repo, `issues/${pr}/comments?per_page=100`);
-  for (const comment of comments) {
-    if (!receiptCandidate(comment.body)) continue;
-    const login = comment.user?.login;
-    if (!login || comment.user.type !== 'User') continue;
-    comment.trusted = trustedLogin(repo, login);
-  }
-  return roleReceipts(comments);
-}
-
-function authorizationFor(repo, record) {
-  try {
-    return mergeAuthorization({ ...record, repo, files: record.files ?? pullRequestFiles(repo, record.number, record) }, receiptsFor(repo, record.number));
-  } catch {
-    return { allowed: false, reason: 'unverifiable-role-receipts' };
-  }
-}
-
 function gateOccurrence(repo, id) {
   const run = api(repo, `actions/runs/${id}`);
   const jobs = pagedApi(repo, `actions/runs/${id}/attempts/${run.run_attempt}/jobs?per_page=100`).flatMap((page) => page.jobs ?? []);
   return { run, jobs };
-}
-
-function verifyHostedRelease(repo, record, authorization) {
-  const files = pullRequestFiles(repo, record.number, record);
-  if (documentationOnly(files)) return true;
-  const release = authorization.release;
-  const { run: gateRun, jobs } = gateOccurrence(repo, release.gateRun);
-  const tested = fetchRef('origin', release.testedCommit, `refs/remotes/origin/nightly/released-test-${record.number}`);
-  const testedTree = runOrThrow('git', ['show', '-s', '--format=%T', tested]).trim();
-  const headTree = runOrThrow('git', ['show', '-s', '--format=%T', record.headRefOid]).trim();
-  if (gateRun.repository?.full_name !== repo || testedTree !== headTree ||
-      !hostedGatePassed({ run: gateRun, jobs, pr: record.number, candidate: tested, head: record.headRefOid, base: record.baseRefOid }) ||
-      !testsPrecedeRelease(jobs, release.at)) {
-    throw new Error('release-precedes-or-mismatches-hosted-tests');
-  }
-  return true;
-}
-
-/**
- * An Owner direct-merged slice is closed by its merge record instead of receipts: merged into the
- * wave branch as the listed commit by a trusted account. Returns the refusal, or null when closed.
- */
-export function directSliceClosure({ record, source, mergeCommit, mergerTrusted, slice }) {
-  if (record.state !== 'MERGED' || record.baseRefName !== source || mergeCommit !== slice.merge) return 'integration-slice-not-merged';
-  return mergerTrusted === true ? null : 'integration-slice-merger-untrusted';
-}
-
-function verifySliceClosures(repo, authorization, waveHead) {
-  if (authorization.assignment.route !== 'integration') return;
-  const mergedSlices = pagedApi(repo, `pulls?state=closed&base=${encodeURIComponent(authorization.assignment.source)}&per_page=100`)
-    .filter((record) => record.merged_at !== null && record.merge_commit_sha &&
-      run('git', ['merge-base', '--is-ancestor', record.merge_commit_sha, waveHead]).status === 0);
-  if (mergedSlices.some((record) => !authorization.complete.slices.some((slice) => slice.pr === record.number))) {
-    throw new Error('integration-unlisted-slice');
-  }
-  for (const slice of authorization.complete.slices) {
-    const record = pullRequest(repo, slice.pr);
-    const { merge_commit_sha: merge, merged_by: merger } = api(repo, `pulls/${slice.pr}`);
-    if (sliceClosure(slice) === 'direct') {
-      const refusal = directSliceClosure({ record, source: authorization.assignment.source, mergeCommit: merge, slice,
-        mergerTrusted: merger?.type === 'User' && trustedLogin(repo, merger.login) });
-      if (refusal !== null) throw new Error(refusal);
-      if (run('git', ['merge-base', '--is-ancestor', slice.merge, waveHead]).status !== 0) throw new Error('integration-slice-not-in-candidate');
-      continue;
-    }
-    if (record.state !== 'MERGED' || record.baseRefName !== authorization.assignment.source || merge !== slice.merge) {
-      throw new Error('integration-slice-not-merged');
-    }
-    const receipts = receiptsFor(repo, slice.pr);
-    const completion = receipts.find((entry) => entry.id === slice.completion);
-    const release = receipts.find((entry) => entry.id === slice.release);
-    if (!completion || !release || release.completion !== completion.id) throw new Error('integration-slice-closure-missing');
-    // Judge the slice exactly as it was released: its completed head/base and that diff.
-    const exact = { ...record, headRefOid: completion.head, baseRefOid: completion.base };
-    const historical = mergeAuthorization({ ...exact, repo, files: pullRequestFiles(repo, slice.pr, exact), state: 'OPEN', isDraft: false }, receipts);
-    if (!historical.allowed || historical.complete.id !== slice.completion || historical.release.id !== slice.release) {
-      throw new Error('integration-slice-closure-invalid');
-    }
-    verifyHostedRelease(repo, exact, historical);
-    if (run('git', ['merge-base', '--is-ancestor', slice.merge, waveHead]).status !== 0) throw new Error('integration-slice-not-in-candidate');
-  }
 }
 
 /**
@@ -505,7 +409,6 @@ function openPullRequests(repo) {
   );
   return listed.filter((record) => queueTarget(record.baseRefName) && !record.isDraft).map((record) => ({
     ...record, files: pullRequestFiles(repo, record.number, record),
-    authorization: authorizationFor(repo, { ...record, state: 'OPEN' }),
   }));
 }
 
@@ -765,17 +668,14 @@ function mergeCommand(options) {
     });
     return 3;
   }
+  if (record.state !== 'OPEN' || record.isDraft) throw new Error('not-ready');
   if (record.headRefOid !== head || record.baseRefOid !== devTip || record.headRepository?.nameWithOwner !== repo) throw new Error('candidate-head-or-base-moved');
-  const authorization = authorizationFor(repo, record);
-  if (!authorization.allowed) throw new Error(`merge-not-authorized/${authorization.reason}`);
   if (ownerReservation(pullRequestFiles(repo, pr, record)) !== null) throw new Error('owner-reserved-candidate');
 
   // The same trailers `prepare` put on the tested commit, read from the same head.
   const headRef = `refs/remotes/origin/nightly/merge-${pr}`;
   if (fetchRef(remote, `refs/pull/${pr}/head`, headRef) !== head) throw new Error('candidate-head-moved');
   if (run('git', ['merge-base', '--is-ancestor', devTip, head]).status !== 0) throw new Error('candidate-needs-current-base');
-  verifyHostedRelease(repo, record, authorization);
-  verifySliceClosures(repo, authorization, head);
   const tested = fetchRef(remote, options.candidate, `refs/remotes/origin/nightly/tested-${pr}`);
   if (tested !== options.candidate) throw new Error('tested-candidate-moved');
   const parents = runOrThrow('git', ['show', '-s', '--format=%P', tested]).trim();
@@ -787,7 +687,7 @@ function mergeCommand(options) {
   if (String(options['gate-run']) === process.env.GITHUB_RUN_ID) {
     candidateRefHead = api(repo, `git/ref/heads/nightly/candidate-${pr}-${options['gate-run']}`).object?.sha;
   }
-  const proofCommit = String(options['gate-run']) === String(authorization.release.gateRun) ? authorization.release.testedCommit : tested;
+  const proofCommit = gateRun.path === '.github/workflows/e2e.yml' ? head : tested;
   if (gateRun.repository?.full_name !== repo || !hostedGatePassed({ run: gateRun, jobs: allJobs, pr, candidate: proofCommit,
     head, base: devTip, docs: documentationOnly(pullRequestFiles(repo, pr, record)),
     currentRun: process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_RUN_ID : undefined, candidateRefHead })) {
@@ -799,13 +699,11 @@ function mergeCommand(options) {
     process.stdout.write(`[dry-run] gh ${args.join(' ')}\n[dry-run] body:\n${body}`);
     return 0;
   }
-  // Re-read authority and both refs after remote evidence inspection, immediately before merge.
+  // Re-read both refs after test-result inspection, immediately before the serial merge.
   const latest = pullRequest(repo, pr);
-  const latestAuthorization = authorizationFor(repo, latest);
   if (latest.headRefOid !== head || latest.baseRefOid !== devTip || latest.isDraft || latest.state !== 'OPEN' ||
-      latest.baseRefName !== dev || !latestAuthorization.allowed ||
-      latestAuthorization.release.id !== authorization.release.id ||
-      fetchRef(remote, `refs/heads/${dev}`, `refs/remotes/origin/${dev}`) !== devTip) throw new Error('release-or-candidate-changed');
+      latest.baseRefName !== dev ||
+      fetchRef(remote, `refs/heads/${dev}`, `refs/remotes/origin/${dev}`) !== devTip) throw new Error('candidate-changed');
   ghOrThrow(args, { input: body });
   process.stdout.write(`queue: #${pr} squashed onto ${dev}@${devTip.slice(0, 12)}\n`);
   if (dev === DEV) closeLinkedIssues(repo, pr, dev);
@@ -814,31 +712,19 @@ function mergeCommand(options) {
 
 // ---- Existing PR Gate projection, executed only by its trusted control jobs -----------------
 
-/** Whether the current candidate is tested and released, or `null` for a target outside the flow. */
+/** Project the trusted workflow's build/test result onto its exact current candidate. */
 function gateDecision(options) {
   const { repo, pr, head, expectedDevTip } = options;
   const record = pullRequest(repo, pr);
   if (!queueTarget(record.baseRefName)) return null;
   const sameCandidate = record.headRefOid === head && record.baseRefOid === expectedDevTip &&
     record.headRepository?.nameWithOwner === repo;
-  const authorization = sameCandidate ? authorizationFor(repo, record) : { allowed: false };
-  let currentTree = false;
-  if (sameCandidate) {
-    const fetchedHead = fetchRef('origin', `refs/pull/${pr}/head`, `refs/remotes/origin/nightly/gate-${pr}`);
-    const fetchedBase = fetchRef('origin', `refs/heads/${record.baseRefName}`, `refs/remotes/origin/${record.baseRefName}`);
-    currentTree = fetchedHead === head && fetchedBase === expectedDevTip &&
-      run('git', ['merge-base', '--is-ancestor', expectedDevTip, head]).status === 0;
-  }
-  const docs = sameCandidate && documentationOnly(pullRequestFiles(repo, pr, record));
-  let proven = false;
-  if (authorization.allowed && currentTree) {
-    try {
-      verifySliceClosures(repo, authorization, head);
-      proven = verifyHostedRelease(repo, record, authorization);
-    } catch { /* Never replace missing proof with a receipt's claim. */ }
-  }
-  const tested = (proven && ['success', 'reused'].includes(options['gate-result'])) || (docs && options['gate-result'] === 'skipped');
-  return sameCandidate && currentTree && authorization.allowed && tested;
+  if (!sameCandidate) return false;
+  const fetchedHead = fetchRef('origin', `refs/pull/${pr}/head`, `refs/remotes/origin/nightly/gate-${pr}`);
+  const fetchedBase = fetchRef('origin', `refs/heads/${record.baseRefName}`, `refs/remotes/origin/${record.baseRefName}`);
+  if (fetchedHead !== head || fetchedBase !== expectedDevTip) return false;
+  const docs = documentationOnly(pullRequestFiles(repo, pr, record));
+  return gateResultPassed(options['gate-result'], docs);
 }
 
 function gateCommand(options) {
@@ -849,34 +735,18 @@ function gateCommand(options) {
     return 0;
   }
   publishGateStatus(repo, head, first);
-  // Results and refreshes run concurrently and a commit status is last-writer-wins. Decide again
-  // after publishing: a receipt, head or base change that a concurrent occurrence saw before this
-  // one published is then reflected here too, in either direction.
+  // A head/base can move while the result is being published. Recheck the exact candidate.
   const settled = gateDecision(options) === true;
   if (settled !== first) publishGateStatus(repo, head, settled);
-  if (!settled) throw new Error('gate-candidate-not-authorized');
-  process.stdout.write('E2E_GATE/current-candidate-released\n');
+  if (!settled) throw new Error('gate-tests-failed-or-candidate-moved');
+  process.stdout.write('E2E_GATE/current-candidate-passed\n');
   return 0;
 }
 
 function publishGateStatus(repo, head, allowed) {
   ghOrThrow(['api', '--method', 'POST', `repos/${repo}/statuses/${head}`,
     '-f', `state=${allowed ? 'success' : 'failure'}`, '-f', 'context=E2E Functional Gate',
-    '-f', `target_url=${runUrl()}`, '-f', `description=${allowed ? 'Current candidate tested and expressly released' : 'Current candidate lacks tests or role release'}`]);
-}
-
-function reuseGateCommand(options) {
-  const record = pullRequest(options.repo, options.pr);
-  const authorization = authorizationFor(options.repo, record);
-  let reuse = false;
-  if (record.headRefOid === options.head && record.baseRefOid === options.expectedDevTip && authorization.allowed) {
-    try {
-      verifySliceClosures(options.repo, authorization, record.headRefOid);
-      reuse = verifyHostedRelease(options.repo, record, authorization);
-    } catch { /* Run the existing tests normally. */ }
-  }
-  if (options.output !== undefined) writeGithubOutput(options.output, { proof_reused: reuse, ...(reuse ? { run_gate: false } : {}) });
-  return 0;
+    '-f', `target_url=${runUrl()}`, '-f', `description=${allowed ? 'Current candidate build and tests passed' : 'Build/tests failed or candidate changed'}`]);
 }
 
 function cleanupCommand(options) {
@@ -903,20 +773,10 @@ function cleanupCommand(options) {
  */
 function reportCommand(options) {
   const { repo, pr, platform, log } = options;
-  let { reason } = options;
-  let reservedPath = options['reserved-path'];
-  if (reason === 'unreleased') {
-    // ADR 0081 §4 still names the Owner-reserved record, whatever the role receipts say.
-    const reservation = ownerReservation(pullRequestFiles(repo, pr));
-    if (reservation !== null) {
-      reason = 'reserved';
-      reservedPath = reservation.path;
-    }
-  }
+  const { reason } = options;
+  const reservedPath = options['reserved-path'];
   const marker =
-    reason === 'unreleased'
-      ? 'this candidate has no current role release'
-      : reason === 'reserved'
+    reason === 'reserved'
       ? 'this pull request is left to the Owner'
       : reason === 'moved'
         ? 'is no longer the tree that would land'
@@ -956,10 +816,9 @@ const USAGE = `usage: node tools/nightly-queue.mjs <command> [options]
   prepare   --pr <n> [--repo <…>] [--remote origin] [--dev <its target>] [--output <github-output file>]
   merge     --pr <n> --head <sha> --expected-dev-tip <target sha> --candidate <prepared sha> --gate-run <id> [--dry-run]
   cleanup   --ref <refs/heads/nightly/candidate-…> [--remote origin] [--dry-run]
-  report    --pr <n> [--platform <label> --log <file> | --reason conflict|moved|reserved|unreleased
+  report    --pr <n> [--platform <label> --log <file> | --reason conflict|moved|reserved
             [--dev <branch> --dev-tip <sha> --reserved-path <path>]] [--dry-run]
-  gate-reuse|gate-status --pr <n> --head <sha> --expected-dev-tip <sha> [--gate-result <result>] [--output <file>]
-  gate-refresh --pr <n>
+  gate-status --pr <n> --head <sha> --expected-dev-tip <sha> [--gate-result <result>] [--output <file>]
 
   The gate-* commands run only in the PR Gate's trusted control jobs. --dev never retargets a pull
   request; it only has to name its actual target. --dry-run prints what would be pushed and merged
@@ -1017,25 +876,13 @@ export function main(argv) {
 
   if (command === 'list') return listCommand(options);
 
-  if (command === 'gate-refresh') {
-    if (options.pr === undefined) throw new Error('gate-refresh needs --pr');
-    const record = pullRequest(options.repo, Number(options.pr));
-    // A comment on a merged or closed pull request has nothing left to authorize.
-    if (record.state !== 'OPEN') {
-      process.stdout.write('E2E_GATE/closed-candidate\n');
-      return 0;
-    }
-    return gateCommand({ ...options, pr: record.number, head: record.headRefOid, expectedDevTip: record.baseRefOid,
-      'gate-result': documentationOnly(pullRequestFiles(options.repo, record.number, record)) ? 'skipped' : 'reused' });
-  }
-
-  if (command === 'gate-status' || command === 'gate-reuse') {
+  if (command === 'gate-status') {
     for (const required of ['pr', 'head', 'expected-dev-tip']) {
       if (options[required] === undefined) throw new Error(`${command} needs --${required}`);
     }
     if (!/^[a-f0-9]{40}$/u.test(options.head) || !/^[a-f0-9]{40}$/u.test(options['expected-dev-tip'])) throw new Error('invalid-gate-candidate');
     const gateOptions = { ...options, pr: Number(options.pr), expectedDevTip: options['expected-dev-tip'] };
-    return command === 'gate-reuse' ? reuseGateCommand(gateOptions) : gateCommand(gateOptions);
+    return gateCommand(gateOptions);
   }
 
   if (command === 'prepare') {
