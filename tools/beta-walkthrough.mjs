@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
 import { composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
@@ -108,8 +108,16 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
  let browser;
  try{
   // Ordinary packaged argv: the pipe only; data location is still resolved by the actual channel.
+  if(expectedChannel==='windows-installer'&&!existsSync(join(expectedDataRoot,'..','startup-data-location.json'))){
+   at('native-first-startup-choice');
+   const initial=spawn(executable,[],{env,windowsHide:true,stdio:'ignore'});
+   native(executable,['-ButtonName','使用默认位置']);
+   await wait(()=>existsSync(join(expectedDataRoot,'..','startup-data-location.json')),'startup-choice-persisted');
+   await new Promise(r=>setTimeout(r,3000));native(executable,['-StopOwnedProcess']);
+   await new Promise(r=>setTimeout(r,1000));initial.unref();
+   check(true,'native-first-run-relaunch');
+  }
   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
-  if(expectedChannel==='windows-installer'){await new Promise(r=>setTimeout(r,2000));const probe=await browser.newBrowserCDPSession();const pages=(await probe.send('Target.getTargets')).targetInfos.filter(t=>t.type==='page');if(pages.length===0){at('native-startup-data-choice');native(executable,['-ButtonName','使用默认位置']);}}
   const page=await renderer(browser);
   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'product-ready');
   check(await boolean(page,"document.querySelector('[data-screen=landing]')"),expectedChannel+'-library');
@@ -121,7 +129,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-settings]');await ready(page,"document.querySelector('[data-screen=settings]')",'settings');
   await click(page,'模型服务');await ready(page,"document.querySelector('.model-service-flow')",'models');
   check(await page.evaluate(`(()=>{const labels=[...document.querySelectorAll('[data-model-channel]')].map(n=>n.textContent);return ['OpenAI','Claude','Gemini','DeepSeek','OpenCode Go'].every(name=>labels.some(label=>label.includes(name)))})()`),expectedChannel+'-model-channels');
-  
+
   await select(page,'input[name=model-service-flow-channel][value=opencode-go]');
   await ready(page,"document.querySelector('[data-flow-channel=opencode-go]')",'go-channel-selected');
   at(expectedChannel+'-live-model-discovery');

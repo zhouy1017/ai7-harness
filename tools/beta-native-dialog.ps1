@@ -1,5 +1,12 @@
-param([Parameter(Mandatory=$true)][string]$Executable,[string]$FileName,[string]$ButtonName)
+param([Parameter(Mandatory=$true)][string]$Executable,[string]$FileName,[string]$ButtonName,[switch]$StopOwnedProcess)
 $ErrorActionPreference='Stop'
+if($StopOwnedProcess){
+  $resolved=[IO.Path]::GetFullPath($Executable)
+  $prefix=[IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) 'ai7-beta-package-'))
+  if(-not $resolved.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)){throw 'BETA_NATIVE/stop-target-refused'}
+  Get-Process -Name AI7 -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $resolved } | Stop-Process -Force
+  Write-Output 'BETA_NATIVE/owned-process-stopped';exit 0
+}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $deadline=[DateTime]::UtcNow.AddSeconds(45)
