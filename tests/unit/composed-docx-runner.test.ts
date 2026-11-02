@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -138,6 +138,16 @@ describe('the runners\' composed-docx helper', () => {
     expect(read.deletions.map((entry) => entry.author)).toEqual([IMPORTED_MARKS_AUTHOR]);
     expect(read.headerReference).toBe(true);
     expect(Object.keys(read.parts).sort()).toEqual(['[Content_Types].xml', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/document.xml', 'word/header1.xml']);
+    const withNote = join(sandbox, 'export-endnote.docx');
+    await composeExportAdmittedDocx(withNote, { ...recipe, endnote: { block: 15, noteSourceBlock: 22 } });
+    const noteBlocks: ParsedDocxBlock[] = [];
+    await parseDocx(withNote, 'export-endnote.docx', (block) => noteBlocks.push(block));
+    expect(noteBlocks.at(-1)?.note).toEqual({ part: 'endnote', noteId: '1', ordinal: 1, referencePosition: 15 });
+    expect(digest(noteBlocks.at(-1)!.text)).toBe(digest(excerpt[21]!));
+    const { unzipSync, strFromU8 } = await import('fflate');
+    const archive = unzipSync(await readFile(withNote));
+    expect(strFromU8(archive['word/_rels/document.xml.rels']!)).toContain('Target="endnotes.xml"');
+    expect(strFromU8(archive['[Content_Types].xml']!)).toContain('PartName="/word/endnotes.xml"');
   });
 
   it('writes a field that needs the decision and a footnote the parser reads as a note block', async () => {

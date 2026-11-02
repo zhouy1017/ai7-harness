@@ -10,9 +10,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { serveGuestEnrollment, storeEnrollment } from './enroll-dev-credential.mjs';
 import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
-import { composeExportAdmittedDocx, addReadOnlySourceObjects, fixedArchiveTime } from '../e2e/composed-docx.mjs';
+import { composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
 import { build } from 'esbuild';
-import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
+import { unzipSync, strFromU8 } from 'fflate';
 
 const ROOT=resolve('.');
 const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only');
@@ -104,7 +104,7 @@ async function configureLiveConnections(dataRoot,temp,channel){
  const refs=JSON.parse(run(process.execPath,[bundle]).trim());
  report.ownedCredentialReferences??=[];report.ownedCredentialReferences.push(...refs);
  const nonce=randomUUID(),probe={slot:'opencode-go',credentialReference:randomUUID(),ephemeral:true};const closeEnrollment=await serveGuestEnrollment(nonce,[...refs,probe],{importKeyring:packagedKeyring});
- await writeFile('C:/ai7/results/beta-enrollment-request.json',JSON.stringify({schema:1,nonce,channel,sourceCommit:report.buildIdentity.sourceCommit,references:refs,probe})+'\n');
+ await writeFile('C:/ai7/results/beta-enrollment-request.json',JSON.stringify({schema:1,nonce,channel,sourceCommit:report.buildIdentity.sourceCommit,runnerHead:report.runnerHead,createdAt:new Date().toISOString(),processId:process.pid,references:refs,probe})+'\n');
  at('await-protected-enrollment-'+channel);
  try{await wait(async()=>{try{if(existsSync('C:/ai7/results/beta-enrollment-cancel.txt'))throw Error('enrollment-cancelled');return (await readFile('C:/ai7/results/beta-enrollment-complete.txt','utf8')).trim()===nonce;}catch(e){if(e.message==='enrollment-cancelled')throw e;return false;}},'protected-enrollment-timeout',1200000);}finally{await closeEnrollment();}
  check(true,channel+'-protected-enrollment');
@@ -210,9 +210,11 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'import-acknowledged');
   await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'manuscript-ready');
   check(await boolean(page,"document.querySelector('.editor-shell')"),expectedChannel+'-manuscript');
-  check(await boolean(page,"document.querySelector('[aria-label^=跳转到尾注]')"),expectedChannel+'-endnote-structure');
+  await ready(page,"document.querySelector('[aria-label^=跳转到尾注]')",'endnote-structure-ready');
+  check(true,expectedChannel+'-endnote-structure');
 
-  check(await boolean(page,"document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)"),expectedChannel+'-source-table-image');
+  await ready(page,"document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)",'source-table-image-ready');
+  check(true,expectedChannel+'-source-table-image');
   const bookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
 
   at(expectedChannel+'-paragraph-editing-and-contextual-dialogue');
@@ -392,9 +394,9 @@ try{
  for(const path of [setup,zip]){const bytes=await readFile(path);report.assets.push({name:path.split(/[\\/]/).at(-1),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});}
  const temp=await realpath(await mkdtemp(join(tmpdir(),'ai7-beta-package-')));report.testRoot=temp;
  const input=join(temp,'public-sample1-objects.docx');
- await composeExportAdmittedDocx(input,{footnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:30,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
+ await composeExportAdmittedDocx(input,{endnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:30,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
  await addReadOnlySourceObjects(input);
- const noteParts=unzipSync(await readFile(input));for(const name of Object.keys(noteParts)){if(name.endsWith('.xml')||name.endsWith('.rels'))noteParts[name]=strToU8(strFromU8(noteParts[name]).replaceAll('footnote','endnote'));}noteParts['word/endnotes.xml']=noteParts['word/footnotes.xml'];delete noteParts['word/footnotes.xml'];await writeFile(input,zipSync(noteParts,{mtime:fixedArchiveTime()}));
+ const noteParts=unzipSync(await readFile(input));check(Boolean(noteParts['word/endnotes.xml'])&&strFromU8(noteParts['word/document.xml']).includes('<w:endnoteReference w:id="1"/>')&&strFromU8(noteParts['word/_rels/document.xml.rels']).includes('Target="endnotes.xml"')&&strFromU8(noteParts['[Content_Types].xml']).includes('PartName="/word/endnotes.xml"'),'composed-endnote-archive');
  const installed=join(temp,'installed');const executable=join(installed,'AI7.exe');
  const env=selfCheckEnvironment(executable);env.LOCALAPPDATA=join(temp,'local');await mkdir(env.LOCALAPPDATA,{recursive:true});env.APPDATA=join(temp,'roaming');await mkdir(env.APPDATA,{recursive:true});
  const priorSetup='C:/ai7/beta-inputs/AI7-0.4.1-win-x64-setup.exe';

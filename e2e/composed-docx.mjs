@@ -397,7 +397,7 @@ const REL = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/rela
  * `replacement.author` of graphemes `[from, to)` of the excerpt's `replacement.block`-th paragraph by the source
  * span `replacement.insert`. Read with every revision rejected it is the excerpt itself.
  */
-export async function composeExportAdmittedDocx(path, { source, startBlock, blocks, title, header, styledRun, comment, replacement }) {
+export async function composeExportAdmittedDocx(path, { source, startBlock, blocks, title, header, styledRun, comment, replacement, endnote }) {
   const { zipSync, strToU8 } = await carriers();
   const available = await admittedBlocks(source);
   const lastBlock = startBlock + blocks - 1;
@@ -411,6 +411,8 @@ export async function composeExportAdmittedDocx(path, { source, startBlock, bloc
     if (!Number.isSafeInteger(position) || position < 1 || position > excerpt.length) throw new Error('composed export content outside the excerpt');
     return graphemes(excerpt[position - 1].text);
   };
+  const noteBlock = endnote === undefined ? undefined : available[endnote.noteSourceBlock - 1];
+  if (endnote !== undefined) { within(endnote.block); if (noteBlock === undefined) throw new Error('composed endnote outside the source'); }
   const commentWords = await admittedSpanText(source, comment.text);
   const insertWords = await admittedSpanText(source, replacement.insert);
   const body = excerpt.map((block, index) => {
@@ -431,18 +433,20 @@ export async function composeExportAdmittedDocx(path, { source, startBlock, bloc
         `<w:del w:id="101" ${identity}><w:r><w:delText xml:space="preserve">${escapeXml(parts.slice(replacement.from, replacement.to).join(''))}</w:delText></w:r></w:del>` +
         `<w:ins w:id="102" ${identity}><w:r><w:t xml:space="preserve">${escapeXml(insertWords)}</w:t></w:r></w:ins>${plainRun(parts.slice(replacement.to).join(''))}`;
     }
+    if (endnote?.block === position) runs += '<w:r><w:endnoteReference w:id="1"/></w:r>';
     return `<w:p>${style}${runs}</w:p>`;
   }).join('');
   const [headerBlock] = available.slice(header.sourceBlock - 1, header.sourceBlock);
   if (headerBlock === undefined) throw new Error('composed header outside the source');
   const archive = zipSync({
-    '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'),
+    '[Content_Types].xml': strToU8('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/><Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>'.replace('</Types>', endnote === undefined ? '</Types>' : '<Override PartName="/word/endnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/></Types>')),
     'docProps/core.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>${escapeXml(title)}</dc:title></cp:coreProperties>`),
     'word/document.xml': strToU8(
       `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ${REL}>` +
       `<w:body>${body}<w:sectPr><w:headerReference w:type="default" r:id="rIdHeader1"/></w:sectPr></w:body></w:document>`,
     ),
-    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdComments1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>'),
+    'word/_rels/document.xml.rels': strToU8('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdHeader1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/><Relationship Id="rIdComments1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="comments.xml"/></Relationships>'.replace('</Relationships>', endnote === undefined ? '</Relationships>' : '<Relationship Id="rIdEndnotes1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" Target="endnotes.xml"/></Relationships>')),
+    ...(endnote === undefined ? {} : { 'word/endnotes.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:endnote w:id="1"><w:p>${plainRun(noteBlock.text)}</w:p></w:endnote></w:endnotes>`) }),
     'word/header1.xml': strToU8(`<?xml version="1.0" encoding="UTF-8"?><w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:p>${plainRun(headerBlock.text)}</w:p></w:hdr>`),
     'word/comments.xml': strToU8(
       `<?xml version="1.0" encoding="UTF-8"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
