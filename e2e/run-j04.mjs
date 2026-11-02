@@ -622,6 +622,10 @@ const PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况�
 const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
+async function clickSelector(renderer, selector, name) {
+  await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false;button.click();return true;})()`, name);
+}
+
 async function click(renderer, label, name) {
   await assertRenderer(
     renderer,
