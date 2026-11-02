@@ -5,6 +5,7 @@ import { delimiter, dirname, isAbsolute, resolve } from 'node:path';
 import { dataVersionStartupRefusal } from '../shared/data-version-labels.js';
 import {
   MAX_FRAME_BYTES,
+  SERVICE_PROTOCOL_VERSION,
   PROVIDER_CACHE_ROOT_ARGUMENT,
   RUN_BUDGET_CEILING_ARGUMENT,
   BACKGROUND_QUIET_ARGUMENT,
@@ -190,7 +191,7 @@ function serviceEnvironment(
 
 function readinessIsExact(value: ServiceReadiness): boolean {
   return (
-    value.protocolVersion === 191 &&
+    value.protocolVersion === SERVICE_PROTOCOL_VERSION &&
     value.state === 'ready' &&
     value.runtime.electron === '43.4.1' &&
     value.runtime.node === '24.18.1' &&

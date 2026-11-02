@@ -11,6 +11,8 @@ export const MODEL_SERVICE_CHANNELS = [
 export type ModelServiceChannelId = (typeof MODEL_SERVICE_CHANNELS)[number];
 /** A production channel the editor saves a credential for and chooses a model on (Issues #811, #1044, #1225). */
 export type ModelServiceRouteId = ModelServiceChannelId;
+/** Account metadata only, never a response or credential. */
+export interface DiscoveredModel { modelId: string; modelLabel: string }
 /** One connection row per route; the first two routes keep the identities Issues #712 and #811 gave them. */
 export type ModelServiceConnectionId = 'main-editorial-deepseek-v4-pro' | 'main-editorial-opencode-go' | Exclude<ModelServiceRouteId, 'opencode-go' | 'deepseek-open-platform'>;
 
@@ -44,7 +46,7 @@ function binding(providerId: ModelServiceRouteId, providerLabel: string, modelId
     adapterRevision: 1, configurationRevision: 1, approvedFallbackChain: [], credentialSlot };
 }
 
-/** Each channel's default model: the first binding Provider Processing v32 lists for it. `modelServiceModels` lists its reviewed choices; no fallback chain. */
+/** Each channel's built-in default, used before account discovery or when its gateway is offline. No fallback chain. */
 export const MODEL_SERVICE_ROUTE_BINDINGS: Readonly<Record<ModelServiceRouteId, ModelServiceBindingProjection>> = {
   'opencode-go': binding('opencode-go', 'OpenCode Go', 'deepseek-v4.1-flash', 'opencode-go'),
   'deepseek-open-platform': binding('deepseek-open-platform', 'DeepSeek 开放平台（官方）', 'deepseek-flash', 'deepseek-api-key'),
@@ -72,7 +74,7 @@ export function validModelServiceModelId(modelId: string): boolean {
   return typeof modelId === 'string' && modelId.length > 0 && modelId.length <= 128 && !/[\s\p{Cc}]/u.test(modelId);
 }
 
-/** Reviewed text choices only: every model the runtime model table records on the channel for either role, the default first. */
+/** Built-in offline defaults, with the channel default first. Account discovery and custom IDs extend these settings. */
 export function modelServiceModels(route: ModelServiceRouteId): readonly ModelServiceBindingProjection[] {
   const rows = [...CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main, ...CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast] as readonly RuntimeBinding[];
   const ids = [...new Set(rows.filter((row) => modelServiceChannelOf(row.route) === route).map((row) => row.model))];
@@ -111,6 +113,6 @@ export interface ModelServiceChannelProjection {
   channelLabel: string;
   /** The Model Service route its credential is saved and tested under; `null` when the channel has none to offer. */
   route: ModelServiceRouteId | null;
-  /** Every model its routes declare, in declaration order. */
+  /** Account models (or offline defaults), including independently selected custom IDs. */
   models: readonly ModelServiceChannelModelProjection[];
 }

@@ -15,6 +15,25 @@ let store: EditorialStore | undefined;
 afterEach(() => { store?.close(); store = undefined; });
 
 describe('the model-service channel catalogue', () => {
+  it('persists independent models on one channel and across channels, and can set both atomically', async () => {
+    const roots = await createServiceTestRoots('ai7-role-models-');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+    store.saveModelServiceConnection('Synthetic Gemini', null, 'ready', 'google-gemini');
+    store.selectMainRoleModel('anthropic-claude', 'account-opus');
+    store.selectFastRoleModel('anthropic-claude', 'account-haiku');
+    const bindings = () => ['main-editorial', 'fast-interaction'].map((role) => store!.getConfiguredModelRoleBinding(role as 'main-editorial' | 'fast-interaction'));
+    expect(bindings()).toMatchObject([{ model: 'account-opus', credentialReference: claude.credentialReference }, { model: 'account-haiku', credentialReference: claude.credentialReference }]);
+    store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
+    store.selectMainRoleModel('google-gemini', 'gemini-custom');
+    expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['google-gemini', 'gemini-custom'], ['anthropic-claude', 'account-haiku']]);
+    store.selectBothRoleModels('anthropic-claude', 'claude-custom');
+    expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['anthropic-claude', 'claude-custom'], ['anthropic-claude', 'claude-custom']]);
+    expect(() => store!.selectBothRoleModels('google-gemini', 'invalid model')).toThrow();
+    expect(bindings().map((binding) => binding?.model)).toEqual(['claude-custom', 'claude-custom']);
+  });
+
   it('offers all catalogue models on admitted channels with protocol capabilities', () => {
     const channels = modelServiceChannels();
     expect(channels.map((channel) => channel.channelId)).toEqual([...MODEL_SERVICE_CHANNELS]);
@@ -91,7 +110,8 @@ describe('the model-service channel catalogue', () => {
     store.selectFastRoleModel('openai-platform', 'account/new-model');
     store.markCleanShutdown(); store.close(); store = undefined;
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: 'account/new-model', route: 'openai-platform', credentialReference: connection.credentialReference });
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account/new-model', route: 'openai-platform', credentialReference: connection.credentialReference });
+    expect(store.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('gpt-5.6-luna');
   });
 
 });

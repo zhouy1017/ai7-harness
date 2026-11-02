@@ -7,7 +7,8 @@ import { consumeSearchCandidateProbeRelease, consumeSearchCredentialRelease, typ
  * The Credential Broker maps (Execution Binding, Model Role, logical slot) to the opaque Credential
  * Reference recorded in the Provider Resolution Plan and releases the secret value only inside the
  * final adapter's transmit step, against a `transmit-remote` ticket the gate issued for the same
- * binding. Values never enter DSH Session content, the Task Ledger, protocol frames, logs, or
+ * binding. Explicit model-settings discovery releases only to its metadata callback without Task content.
+ * Values never enter DSH Session content, the Task Ledger, protocol frames, logs, or
  * diagnostics: the broker hands the value to one consumer callback and retains nothing.
  */
 export interface SecretResolver {
@@ -50,7 +51,7 @@ function requireBinding(binding: CredentialSlotBinding): void {
   }
 }
 
-function requireCurrentBinding(binding: CredentialSlotBinding): void {
+function requireCurrentBinding(binding: Pick<CredentialSlotBinding, 'isCurrent'>): void {
   if (binding.isCurrent?.() === false) {
     throw new CredentialBrokerError('CREDENTIAL_BINDING_STALE', '模型选择或凭据已变化；本次凭据未释放，请重新确认。');
   }
@@ -76,6 +77,20 @@ export class CredentialBroker {
   /** How many times a value has been released to a transmit step; zero for every v1 Run. */
   get releaseCount(): number {
     return this.#releases;
+  }
+
+  /** Explicit model-settings metadata discovery has no Task payload or transmit ticket. Keep its key inside the broker callback. */
+  async releaseForModelDiscovery<T>(binding: Pick<CredentialSlotBinding, 'slot' | 'credentialReference'> & { isCurrent(): boolean }, consume: (value: string) => Promise<T>): Promise<T> {
+    if (!CREDENTIAL_SLOTS.has(binding.slot) || binding.slot.startsWith('search-') || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
+        DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase())) {
+      throw new CredentialBrokerError('CREDENTIAL_BINDING_INVALID', '模型列表凭据绑定无效。');
+    }
+    requireCurrentBinding(binding);
+    const value = await this.#resolver.resolve(binding.credentialReference);
+    requireCurrentBinding(binding);
+    if (!value) throw new CredentialBrokerError('CREDENTIAL_MISSING', '安全凭据库中没有该凭据引用的值。');
+    this.#releases += 1;
+    return consume(value);
   }
 
   /** Readiness only: the value is resolved and discarded inside this call and never returned. */

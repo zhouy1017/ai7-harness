@@ -745,6 +745,13 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('当前处理策略未允许')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
+    await waitFor(primary, `document.querySelector('.compact-model-selector')?.hidden === false`, 'global-agent-model-selector-visible');
+    await assertRenderer(primary, `(() => { const selector=document.querySelector('.compact-model-selector');
+      selector.open=true; document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      if(selector.open)return false;
+      selector.open=true; document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+      return !selector.open;
+    })()`, 'model-selector-outside-escape-dismissal');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });
@@ -1316,7 +1323,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v24.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 191 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 192 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1420,6 +1427,17 @@ async function main() {
       return flow.dataset.flowChannel==='deepseek-open-platform' && model instanceof HTMLInputElement && model.checked && !model.disabled &&
         model.closest('label')?.textContent.includes('当前使用中') && use instanceof HTMLButtonElement && use.disabled && test instanceof HTMLButtonElement && !test.disabled;
     })()`, 'model-service-flow-current-choice');
+    // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
+    await assertRenderer(primary, `(async () => {
+      await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
+      let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
+      const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
+      settings=await window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-fast'});
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-fast')return false;
+      settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
+    })()`, 'independent-role-models-without-test');
     // The Main Editorial Role's connection test (ADR 0096 §3, #1177): the Fast role's explicit test, for the route in use and the
     // Main role's model. Offered, not clicked: this launch admits no live test.
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{

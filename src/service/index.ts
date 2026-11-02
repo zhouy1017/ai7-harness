@@ -1,3 +1,4 @@
+import { refreshModelServiceModels } from './provider/model-discovery.js';
 import { reviewFixtureContractVersion } from './provider/model-fixture.js';
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from './dialogue/global-agent-session.js';
 import { ImportedExemplarError } from './imported-exemplars.js';
@@ -163,6 +164,7 @@ async function dispatch(
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
   probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
+  refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<void> = async () => undefined,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -204,12 +206,20 @@ async function dispatch(
       store.selectFastRoleModel(request.input.route, request.input.modelId);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectMainRoleModel':
+    case 'selectBothRoleModels':
+      store[request.op](request.input.route, request.input.modelId);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'refreshModelServiceModels':
+      await refreshModels(request.input.route);
+      return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'getModelServiceStoredState':
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels() },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
       };
     case 'saveModelServiceProxy':
       return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
@@ -231,7 +241,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels() },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
       };
     }
     case 'setModelServiceCredentialState': {
@@ -2383,7 +2393,8 @@ async function run(): Promise<void> {
         try {
           response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
             serving.dialogues, serving.fastRole, serving.agentWorkspace, request, importControl, launchPolicy, connectivity,
-            serving.background, modelServiceChanged, probeBackend);
+            serving.background, modelServiceChanged, probeBackend,
+            (route) => refreshModelServiceModels(openedStore, production, route, createKeyringSecretResolver()));
         } catch (error) {
           if (error instanceof StoreFatalError) throw error;
           response = failureResponse(request.id, error, StoreError);

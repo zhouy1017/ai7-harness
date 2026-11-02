@@ -629,7 +629,7 @@ function registerRendererHandlers(
   saveModelServiceProxy: (input: ServiceOperationMap['saveModelServiceProxy']['input']) => Promise<ModelServiceSettingsProjection>,
   saveModelServiceCredential: (input: ModelServiceCredentialInput) => Promise<ModelServiceSettingsProjection>,
   removeModelServiceCredential: (input?: { route: ModelServiceRouteId }) => Promise<ModelServiceSettingsProjection>,
-  modelOps: Pick<RendererApi, 'selectFastRoleModel'> & {
+  modelOps: Pick<RendererApi, 'selectFastRoleModel' | 'selectMainRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels'> & {
     startConnectionTest(input: Parameters<RendererApi['testModelServiceConnection']>[0]): Promise<unknown>;
     connectionTestSettings(): Promise<ModelServiceSettingsProjection>;
   },
@@ -2583,12 +2583,16 @@ function registerRendererHandlers(
       return serializeEffect(() => saveModelServiceProxy(input));
     }),
   );
-  for (const op of ['selectFastRoleModel'] as const) {
+  for (const op of ['selectFastRoleModel', 'selectMainRoleModel', 'selectBothRoleModels'] as const) {
     ipcMain.handle(IPC_CHANNELS[op], (event, input: Parameters<RendererApi[typeof op]>[0]) => envelope(async () => {
       requireSender(event); requireAuthority();
       return serializeEffect(() => modelOps[op](input));
     }));
   }
+  ipcMain.handle(IPC_CHANNELS.refreshModelServiceModels, (event, input: { route: ModelServiceRouteId }) => envelope(async () => {
+    requireSender(event); requireAuthority();
+    return serializeEffect(() => modelOps.refreshModelServiceModels(input));
+  }));
   const disposeConnectionTest = registerModelConnectionTestHandler<IpcMainInvokeEvent, ModelServiceSettingsProjection>({
     ipc: ipcMain, requireSender, requireAuthority, serializeEffect, envelope,
     start: modelOps.startConnectionTest, project: modelOps.connectionTestSettings,
@@ -6589,7 +6593,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 104, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 105, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -6953,7 +6957,7 @@ export async function runApplication(): Promise<void> {
       const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
       const fastConnection = connections.find((candidate) => candidate.fastSelected) ?? connectionOf('opencode-go');
       const fastStatus = statusOf(fastConnection);
-      const fastBinding = fastConnection?.binding ?? null;
+      const fastBinding = fastConnection?.fastBinding ?? fastConnection?.binding ?? null;
       const mainStatusDetail = protectedSecretStore === undefined
         ? '当前操作系统安全凭据库不可用；未启用替代存储。'
         : mainStatus === 'available'
@@ -7020,7 +7024,7 @@ export async function runApplication(): Promise<void> {
             return {
               route,
               binding: routeConnection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[route],
-              models: modelServiceModels(route),
+              models: state.channels.find((channel) => channel.route === route)?.models.map(({ modelId, modelLabel }) => ({ ...MODEL_SERVICE_ROUTE_BINDINGS[route], modelId, modelLabel })) ?? modelServiceModels(route),
               isDefault: route === 'opencode-go',
               inUse: route === inUseRoute,
               status,
@@ -7094,6 +7098,7 @@ export async function runApplication(): Promise<void> {
       } catch {
         throw new ServiceCallError('MODEL_SERVICE_STATE_UNCERTAIN', '凭据已受保护，但连接状态需要处理。');
       }
+      await service!.call('refreshModelServiceModels', { route });
       return settingsProjection();
     };
     /** Remove a route's credential — the DeepSeek 开放平台（官方） route's when none is named — keeping its connection 需设置. */
@@ -7167,6 +7172,9 @@ export async function runApplication(): Promise<void> {
       saveModelServiceCredential,
       removeModelServiceCredential,
       {
+        selectMainRoleModel: async (input) => { await service!.call('selectMainRoleModel', input); return settingsProjection(); },
+        selectBothRoleModels: async (input) => { await service!.call('selectBothRoleModels', input); return settingsProjection(); },
+        refreshModelServiceModels: async (input) => { await service!.call('refreshModelServiceModels', input); return settingsProjection(); },
         selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
         startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
         connectionTestSettings: settingsProjection,
