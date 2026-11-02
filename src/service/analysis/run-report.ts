@@ -59,6 +59,16 @@ export type RunReportSuggestion = RunReportSuggestionProjection;
 
 export const RUN_REPORT_NO_USAGE: RunReportUsage = { requests: 0, inputTokens: 0, outputTokens: 0 };
 
+/** Claim turns already charge their model requests/tokens to stages; only their tool counters join the Run's tool stage. */
+export function foldClaimToolCounters(stage: RunReportUsage | null, claims: RunReportUsage): RunReportUsage {
+  const own = stage ?? RUN_REPORT_NO_USAGE;
+  const ids = new Set([...Object.keys(own.searchCalls ?? {}), ...Object.keys(claims.searchCalls ?? {})]);
+  return { ...own,
+    searchCalls: Object.fromEntries([...ids].map((id) => [id, (own.searchCalls?.[id] ?? 0) + (claims.searchCalls?.[id] ?? 0)])),
+    refusedSearchCalls: (own.refusedSearchCalls ?? 0) + (claims.refusedSearchCalls ?? 0),
+    fetchCount: (own.fetchCount ?? 0) + (claims.fetchCount ?? 0), fetchBytes: (own.fetchBytes ?? 0) + (claims.fetchBytes ?? 0) };
+}
+
 /** One measured segment of one stage, as the execution owner's own clock saw it. */
 export interface RunReportSpan {
   readonly startedAt: string;

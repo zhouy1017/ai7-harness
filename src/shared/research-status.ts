@@ -46,5 +46,5 @@ export function researchStatusLine(report: Pick<RunReportProjection, 'webToolsBa
     return `联网核查未完成${suffix} · ${reason}`;
   }
   if (calls === 0) return `未联网核查${suffix} · 本次运行未执行检索`;
-  return `联网核查已完成${suffix} · 已执行检索，事实结论仍需核对来源`;
+  return `联网核查已完成${suffix} · 检索 ${calls} 次 · 事实结论仍需核对来源`;
 }

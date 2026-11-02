@@ -58,6 +58,13 @@ describe('the 生成来源译文 contract', () => {
       '1. 河水上涨。\n2. 无人入睡。',
     ]) expect(readMaterialTranslationAnswer(text, 2)).toBeNull();
   });
+
+  it('reads an aligned JSON answer wrapped in a Markdown code fence', () => {
+    for (const fence of ['```json', '```', '```JSON']) {
+      expect(readMaterialTranslationAnswer(`${fence}\n${answer(['河水上涨。'])}\n\`\`\``, 1)).toEqual(['河水上涨。']);
+    }
+    expect(readMaterialTranslationAnswer(`解释\n\`\`\`json\n${answer(['河水上涨。'])}\n\`\`\``, 1)).toBeNull();
+  });
 });
 
 describe('who may ask for 来源译文', () => {

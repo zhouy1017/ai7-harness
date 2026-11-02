@@ -2,13 +2,13 @@ import { searchBackend, searchBackendCandidateConfigurationDigest } from './sear
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { TicketHostAdmission } from './public-source-fetch.js';
-import { isRecord } from '../analysis/canonical.js';
+import { canonicalJson, sha256Hex, isRecord } from '../analysis/canonical.js';
 import { EgressTicketBook, evaluateSearchCandidateProbe, evaluateSearchServiceCall, redeemEgressTicket, redeemSearchCandidateProbe, releaseSearchCandidateProbe, type SearchCandidateProbeTicket, type SearchServiceTicket } from './egress-gate.js';
 import { deepseekDirectSearchRequest, readDeepseekDirectSearch } from './search-backends/deepseek.js';
 import { toolArgumentsDigest, type PlatformToolArguments, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
 import { anonymousSearchInterface, searchBackendCandidate } from './search-backends.js';
-import type { SearchBackendProbeProjection, SearchCandidateId, SearchCandidateProbeOutcome, SearchConnectionTestPolicy } from '../../shared/protocol.js';
+import type { LaunchPolicyProjection, SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchCandidateId, SearchCandidateProbeOutcome, SearchConnectionTestPolicy } from '../../shared/protocol.js';
 
 /**
  * The `websearch` forwarder (ADR 0080 §7.1, §7.2; Issue #473 S87-f3a). The model emits the call; AI7 composes no query of
@@ -241,6 +241,31 @@ export function searchFailureClass(failure: { readonly status: number } | { read
 
 /** The settings path's only query; it contains no Book or manuscript input. */
 export const SEARCH_BACKEND_PROBE_QUERY = 'UNESCO World Book and Copyright Day April 23';
+
+/** A fixed-public settings action uses the policy's search declaration even before any model is configured. */
+export async function probeConfiguredSearchBackend(input: {
+  backendId: string; policy: LaunchPolicyProjection; connection: SearchBackendConnectionProjection | undefined;
+  developmentReference?: string; broker: CredentialBroker; fetch: PlatformToolFetch; admitHost: TicketHostAdmission;
+}): Promise<SearchBackendProbeProjection> {
+  const { policy } = input;
+  if (policy.integrityState !== 'verified' || (policy.operationalScope !== 'developer-live' && policy.operationalScope !== 'ordinary-production')) {
+    throw new SearchServiceError('SEARCH_PROBE_NOT_ADMITTED', '当前环境不允许测试检索。');
+  }
+  const adapter = searchBackend(input.backendId);
+  const rule = policy.providerProcessing.admittedRules.find((entry) => entry.platformTools !== null);
+  const tools = platformToolsFromProjection(rule ?? { webSearchToolAllowed: true, platformTools: policy.providerProcessing.settingsSearchTools });
+  if (tools === null) throw new SearchServiceError('SEARCH_PROBE_NOT_ADMITTED', '当前策略未准许测试检索。');
+  const reference = policy.operationalScope === 'developer-live' ? input.developmentReference ?? null
+    : input.connection?.credentialOperationState === 'ready' ? input.connection.credentialReference : null;
+  if (reference === null) throw new SearchServiceError('SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
+  return probeSearchBackend({ broker: input.broker, fetch: input.fetch, admitHost: input.admitHost, binding: {
+    bindingDigest: sha256Hex(canonicalJson({ backendId: input.backendId, reference, query: SEARCH_BACKEND_PROBE_QUERY, policy: policy.providerProcessing.version })),
+    route: (rule?.route ?? 'opencode-go') as import('./egress-gate.js').ExecutionRoute, model: rule?.model ?? 'settings-search-probe',
+    systemPrompt: '', admittedUserMessages: new Set(), outboundDataCategory: 'public-or-synthetic',
+    policy: { operationalScope: policy.operationalScope, providerProcessingVersion: policy.providerProcessing.version, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' } as import('./egress-gate.js').EgressPolicyPin,
+    platformTools: tools, searchBackend: { backendId: input.backendId, host: adapter.declaration.host!, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot, credentialReference: reference },
+  } });
+}
 
 export async function probeSearchBackend(input: {
   readonly binding: import('./egress-gate.js').EgressBindingFacts;

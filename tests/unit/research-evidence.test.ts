@@ -158,11 +158,11 @@ describe('来源译文', () => {
     expect(await sourceTranslation({ ...base, captured: CAPTURE, rule: { operationalScope: 'developer-live', sourceTranslationAllowed: true }, translator: null })).toBeNull();
   });
 
-  it('produces none and calls nothing when the rule refuses — every current rule — or no translator is bound', async () => {
+  it('produces none and calls nothing when the rule refuses or no translator is bound', async () => {
     let calls = 0;
     const translator = async (): Promise<{ text: string; route: string; model: string }> => { calls += 1; return { text: '译文', route: 'r', model: 'm' }; };
     expect(await sourceTranslation({ ...base, rule: { operationalScope: 'developer-live' }, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
-    expect(await sourceTranslation({ ...base, rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true }, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
+    expect(await sourceTranslation({ ...base, rule: { operationalScope: 'development-ci', sourceTranslationAllowed: true }, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
     expect(await sourceTranslation({ ...base, rule: null, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
     expect(await sourceTranslation({ ...base, rule: { operationalScope: 'developer-live', sourceTranslationAllowed: true }, translator: null })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE });
     expect(calls).toBe(0);
@@ -170,7 +170,7 @@ describe('来源译文', () => {
 
   it('under an admitting rule labels the Run model’s translation, attributes it to the captured range, and keeps the original beside it', async () => {
     const asked: string[] = [];
-    const translation = await sourceTranslation({ ...base, rule: { operationalScope: 'developer-live', sourceTranslationAllowed: true },
+    const translation = await sourceTranslation({ ...base, rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
       translator: async ({ text }) => { asked.push(text); return { text: '它们由湖北省博物馆收藏。', route: 'opencode-go', model: 'deepseek-v4.1-flash' }; } });
     expect(asked).toEqual(['They are held by the Hubei Provincial Museum.']);
     expect(translation).toEqual({ state: 'translated', label: '来源译文', machine: true, targetLanguage: 'zh-Hans', text: '它们由湖北省博物馆收藏。',

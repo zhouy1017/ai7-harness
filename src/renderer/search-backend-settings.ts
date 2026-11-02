@@ -61,7 +61,7 @@ export function candidateProbeLines(result: SearchBackendProbeProjection): strin
     `只说明这一次请求：${candidate.endpoint} · ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest.slice(0, 12)}`];
 }
 
-function candidateCard(candidate: SearchBackendCandidateProjection, options: SearchBackendSettingsOptions): HTMLElement {
+function candidateCard(candidate: SearchBackendCandidateProjection, options: SearchBackendSettingsOptions, keyed: boolean): HTMLElement {
   const card = element('article', 'model-role-card');
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
@@ -75,9 +75,10 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
       const result = await options.api.probeSearchBackend({ backendId: candidate.backendId, candidateId: candidate.candidateId });
       output.replaceChildren(...candidateProbeLines(result).map((line) => element('p', undefined, line)), resultList(result));
     } catch (error) { output.replaceChildren(element('p', 'attention-note', options.errorMessage(error, '连接测试未完成。'))); }
-    finally { probe.disabled = false; }
+    finally { probe.disabled = !keyed; }
   });
   probe.dataset['action'] = 'probe-search-candidate';
+  probe.disabled = !keyed;
   const actions = element('div', 'button-row');
   actions.append(probe);
   card.append(actions, output);
@@ -97,20 +98,23 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     catch (error) { setStatus(errorMessage(error, '无法保存备用来源。'), 'error'); }
   })();
   for (const backend of projection.searchBackends.backends) {
+    const keyed = backend.connection.credentialOperationState === 'ready';
+    const selected = keyed && backend.backendId === selectedBackendId;
     const card = element('article', 'model-role-card');
     card.dataset['searchBackend'] = backend.backendId;
-    card.dataset['selected'] = String(backend.backendId === selectedBackendId);
+    card.dataset['selected'] = String(selected);
     card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
-    card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${backend.backendId === selectedBackendId ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
-      element('p', 'field-note', `${backend.reachable ? '可达' : '不可达'} · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · ${backend.keyRequired ? '需要密钥' : '无需密钥'}`),
-      element('p', 'field-note', `中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
+    card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${selected ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
+      element('p', 'field-note', keyed ? '密钥已保存；可测试当前连接' : '未配置密钥'),
+      element('p', 'field-note', `评测参考 · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price}`),
+      element('p', 'field-note', `评测参考 · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
     if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
     const actions = element('div', 'button-row');
     const choose = button('选择后端', 'quiet', () => void (async () => {
       try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
       catch (error) { setStatus(errorMessage(error, '无法保存联网检索后端。'), 'error'); }
     })());
-    choose.disabled = backend.backendId === projection.searchBackends.selectedBackendId;
+    choose.disabled = selected || !keyed;
     const output = element('div');
     output.dataset['searchProbe'] = backend.backendId;
     const probe = button('测试检索', 'quiet', () => void (async () => {
@@ -120,9 +124,9 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
         output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}${result.failure === null ? '' : ` · ${result.failure}`}`));
         output.append(resultList(result));
       } catch (error) { output.replaceChildren(element('p', 'attention-note', errorMessage(error, '测试检索未完成。'))); }
-      finally { probe.disabled = false; }
+      finally { probe.disabled = !keyed; }
     })());
-    const keyed = backend.connection.credentialOperationState === 'ready';
+    probe.disabled = !keyed;
     const fallback = button(backend.backendId === fallbackBackendId ? '清除备用来源' : '设为备用来源', 'quiet', () => saveFallback(
       backend.backendId === fallbackBackendId ? null : backend.backendId, backend.backendId === fallbackBackendId ? '备用来源已清除' : '备用来源已保存'));
     fallback.dataset['action'] = backend.backendId === fallbackBackendId ? 'clear-search-fallback' : 'select-search-fallback';
@@ -133,22 +137,38 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       const secret = element('input'); secret.type = 'password'; secret.autocomplete = 'off';
       secret.setAttribute('aria-label', `${backend.name} 密钥`);
       const save = button('保存密钥', 'quiet', () => void (async () => {
+        if (secret.value.trim().length === 0) return;
         const value = secret.value; secret.value = '';
-        try { render(await api.saveSearchBackendCredential({ backendId: backend.backendId, secret: value })); }
+        save.disabled = true;
+        try { render(await api.saveSearchBackendCredential({ backendId: backend.backendId, secret: value })); setStatus('联网检索密钥已保存。', 'success'); }
         catch (error) { setStatus(errorMessage(error, '无法保存联网检索密钥。'), 'error'); }
       })());
       const remove = button('移除密钥', 'quiet', () => void (async () => {
-        try { render(await api.removeSearchBackendCredential({ backendId: backend.backendId })); }
-        catch (error) { setStatus(errorMessage(error, '无法移除联网检索密钥。'), 'error'); }
+        remove.disabled = true;
+        try { render(await api.removeSearchBackendCredential({ backendId: backend.backendId })); setStatus('联网检索密钥已移除。', 'success'); }
+        catch (error) { remove.disabled = !keyed; setStatus(errorMessage(error, '无法移除联网检索密钥。'), 'error'); }
       })());
+      save.disabled = true; remove.disabled = !keyed;
+      secret.addEventListener('input', () => { save.disabled = secret.value.trim().length === 0; });
       card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
       actions.append(save, remove);
+      if (backend.backendId === 'search-deepseek') {
+        const source = projection.routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')?.connection;
+        const reuse = button('复用 DeepSeek 模型凭据', 'secondary', async () => {
+          reuse.disabled = true;
+          try { render(await api.saveSearchBackendCredential({ backendId: 'search-deepseek', reuseModelCredential: true })); setStatus('DeepSeek 凭据已同步到联网检索。', 'success'); }
+          catch (error) { reuse.disabled = source?.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步 DeepSeek 凭据。'), 'error'); }
+        });
+        reuse.dataset['action'] = 'reuse-deepseek-credential'; reuse.disabled = source?.credentialOperationState !== 'ready';
+        actions.append(reuse);
+      }
     }
     card.append(actions, output); section.append(card);
   }
   if (projection.searchBackends.candidates.length > 0) {
     section.append(element('h4', undefined, '候选接口 · 未实测'));
-    for (const candidate of projection.searchBackends.candidates) section.append(candidateCard(candidate, options));
+    for (const candidate of projection.searchBackends.candidates) section.append(candidateCard(candidate, options,
+      projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready')));
   }
   return section;
 }

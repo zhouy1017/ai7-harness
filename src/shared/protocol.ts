@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 192 as const;
+export const SERVICE_PROTOCOL_VERSION = 193 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -3089,6 +3089,8 @@ export interface LaunchPolicyProjection {
       readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
     };
     readonly research?: { readonly searchesPerClaim: number }; readonly searchConnectionTest?: SearchConnectionTestPolicy;
+    /** Fixed-public settings probes use verified search terms independently of model setup. */
+    readonly settingsSearchTools?: AdmittedProviderRule['platformTools'];
     version: ProviderProcessingVersion | null;
     decision: 'deny' | 'eligible-only';
     /** `0` under development-ci; the verbatim token `bounded-by-run` under developer-live. */
@@ -12835,7 +12837,7 @@ export type PickerReselectResult =
 export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
-  saveSearchBackendCredential(input: { backendId: string; secret: string }): Promise<ModelServiceSettingsProjection>;
+  saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: 'search-deepseek'; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
   removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';
   getStartup(): Promise<StartupProjection>;

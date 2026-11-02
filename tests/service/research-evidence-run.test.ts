@@ -8,7 +8,7 @@ import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { SOURCE_TRANSLATION_NOT_ADMITTED } from '../../src/service/analysis/factual-review-evidence.js';
+import { SOURCE_TRANSLATION_UNAVAILABLE } from '../../src/service/analysis/factual-review-evidence.js';
 import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY } from '../../src/service/research-evidence.js';
 import { findingResearchLines, researchUnitLine } from '../../src/renderer/research-evidence-labels.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -211,9 +211,9 @@ describe('a research Run of 事实核查 retains its external evidence', () => {
     // The page AI7 could not get keeps the excerpt the search returned: 来源仅片段, partly matching the quoted words.
     expect(byUrl.get(WIKI)).toMatchObject({ captureState: 'snippet-only', captureLabel: '来源仅片段', pageSha256: null, alignment: 'partial', alignmentLabel: '部分对应',
       saveRefusal: RESEARCH_EVIDENCE_INCOMPLETE });
-    // A non-Chinese source: no translation is produced while no rule names one, and the original is kept as captured.
+    // A non-Chinese source: the rule admits translation, but this isolated owner has no Fast translator; keep the original.
     expect(byUrl.get(ENGLISH)).toMatchObject({ captureState: 'full-text', alignment: 'unaligned', alignmentLabel: '未能对应', anchors: [],
-      translation: { state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED } });
+      translation: { state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE } });
     expect(byUrl.get(ENGLISH)!.passage?.startsWith('The vessel')).toBe(true);
 
     // Every researched unit says how its search ended; unit 1 searched, the others never did.

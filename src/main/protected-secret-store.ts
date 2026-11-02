@@ -15,6 +15,7 @@ type KeyringEntryConstructor = new (service: string, username: string) => Keyrin
 export interface ProtectedSecretStore {
   readonly backend: 'windows-credential-manager' | 'macos-keychain';
   set(credentialReference: string, secret: string): Promise<void>;
+  copy(sourceReference: string, targetReference: string): Promise<void>;
   has(credentialReference: string): Promise<boolean>;
   remove(credentialReference: string): Promise<void>;
 }
@@ -38,6 +39,12 @@ abstract class KeyringProtectedSecretStore implements ProtectedSecretStore {
   async has(credentialReference: string): Promise<boolean> {
     const secret = await this.#entry(credentialReference).getPassword();
     return typeof secret === 'string' && secret.length > 0;
+  }
+
+  async copy(sourceReference: string, targetReference: string): Promise<void> {
+    const secret = await this.#entry(sourceReference).getPassword();
+    if (typeof secret !== 'string' || secret.length === 0) throw new Error('PROTECTED_SECRET_SOURCE_MISSING');
+    await this.set(targetReference, secret);
   }
 
   async remove(credentialReference: string): Promise<void> {

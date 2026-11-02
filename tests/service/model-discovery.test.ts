@@ -14,7 +14,7 @@ describe('account model discovery', () => {
     ['openai-platform', 'https://api.openai.com/v1/models', 'authorization'],
     ['deepseek-open-platform', 'https://api.deepseek.com/models', 'authorization'],
     ['opencode-go', 'https://opencode.ai/zen/go/v1/models', 'authorization'],
-    ['opencode-zen', 'https://opencode.ai/zen/v1/models', 'authorization'],
+    ['opencode-zen', 'https://opencode.ai/inference/v1/models', 'authorization'],
     ['anthropic-claude', 'https://api.anthropic.com/v1/models', 'x-api-key'],
   ] as const)('lists %s at its configured base using its own authentication', async (route, endpoint, header) => {
     const send = vi.fn<typeof fetch>(async () => response({ data: [{ id: 'account/new-model', display_name: 'Account model' }, { id: 'second' }] }));

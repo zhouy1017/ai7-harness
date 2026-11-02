@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BaselineAnalysisExecutionOwner, ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
+import type { SourceTranslator } from '../../src/service/analysis/factual-review-evidence.js';
+import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync, searchFallbackTermsOf } from '../../src/service/launch-policy.js';
 import { ProtocolError, decodeRequest } from '../../src/service/request-frames.js';
 import { ResearchEvidenceLedger } from '../../src/service/research-evidence.js';
@@ -71,7 +73,7 @@ function searchReply(backend: 'primary' | 'fallback', reply: Reply | undefined):
 }
 
 /** The real owners under ordinary-production v32 with TinyFish as the default and, unless `fallback` is null, Brave as the 备用来源. */
-async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { chooseFallback?: boolean } = {}): Promise<void> {
+async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { chooseFallback?: boolean; translate?: SourceTranslator; noClaims?: boolean } = {}): Promise<void> {
   replies = { primary: [...primary], fallback: [...fallback] }; sent = [];
   roots = await createServiceTestRoots('ai7-search-fallback-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -94,14 +96,14 @@ async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { ch
       sent.push({ backend, query: url.searchParams.get('query') ?? url.searchParams.get('q'), at: Date.now() });
       return searchReply(backend, replies[backend].shift());
     }
-    if (url.href === MUSEUM) return new Response(`<html><head><meta charset="utf-8"></head><body><p>这件尊盘出土于1978年。${HELD}，是馆藏重器。</p></body></html>`,
+    if (url.href === MUSEUM) return new Response(`<html><head><meta charset="utf-8"></head><body><p>这件尊盘出土于1978年。${options.translate === undefined ? HELD + '，是馆藏重器。' : 'It is held by the Hubei Provincial Museum. This collection is open to the public.'}</p></body></html>`,
       { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } });
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string | null }> };
     const unit = body.messages.findLast((message) => message.role === 'user')!.content ?? '';
     const header = parseFactualReviewUnitMessageHeader(unit);
     const tools = body.messages.filter((message) => message.role === 'tool').length;
     if (header !== null) {
-      const cited = header.ordinal === 1 ? quoteFrom(unit) : null;
+      const cited = header.ordinal === 1 && !options.noClaims ? quoteFrom(unit) : null;
       return answer({ content: JSON.stringify({ schema: 'ai7.factual-claim-extraction/1', unitOrdinal: header.ordinal, assertions: cited === null ? [] : [{
         quote: cited.quote, blockOrdinal: cited.blockOrdinal, assertionClass: 'real-world-fact', category: '机构', severity: 'A', question: '该器物现藏何处？', basis: '馆藏页。' }] }) });
     }
@@ -119,7 +121,7 @@ async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { ch
   owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.factualReviewLedger, launchPolicy: policy, fixture: null,
     secretResolver: { resolve: async () => SECRET }, production: { scope: 'ordinary-production', nativeFetch }, currentLaunchPolicy: () => policy,
     productionPolicyFor: (frozen) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', frozen),
-    researchEvidence: (input) => { store.recordResearchEvidence(input); } });
+    researchEvidence: (input) => { store.recordResearchEvidence(input); }, ...(options.translate === undefined ? {} : { sourceTranslator: options.translate }) });
 }
 
 afterEach(async () => { await owner?.dispose(); store?.close(); await roots?.dispose(); });
@@ -149,6 +151,35 @@ function claimAllowance(runRecordId: string) {
 }
 
 describe('the 联网检索 备用来源 in the 联网取证 stage (#1226)', () => {
+  it('keeps a configured but never-searched claim Run unverified', async () => {
+    await setup([], [], { chooseFallback: false, noClaims: true });
+    const { report, decision } = await review('未进行检索的报告');
+    expect(sent).toEqual([]);
+    expect(report!.usagePerStage['platform-tools'].searchCalls).toEqual({});
+    expect(decision).toContain('未联网核查');
+    expect(decision).not.toContain('联网核查已完成');
+  }, 60_000);
+
+  it('translates retained English evidence under ordinary production on the supplied Fast role', async () => {
+    const asked: string[] = [];
+    await setup(['ok'], [], { chooseFallback: false, translate: async ({ text }) => {
+      asked.push(text); return { text: '它由湖北省博物馆收藏。', route: 'anthropic-claude', model: 'account-fast-model' };
+    } });
+    const { book } = await review('正式版来源译文');
+    expect(asked.length).toBeGreaterThan(0);
+    const records = store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records;
+    expect(records.some((record) => record.translation?.state === 'translated' && record.translation.model === 'account-fast-model')).toBe(true);
+  }, 60_000);
+
+  it('reports claim searches without a fallback and keeps request/token reconciliation unchanged (#1268)', async () => {
+    await setup(['ok'], [], { chooseFallback: false });
+    const { report, decision, book } = await review('无备用来源的检索报告');
+    expect(sent.map((entry) => entry.backend)).toEqual(['primary']);
+    expect(report!.webToolsBackend?.backendId).toBe(TINYFISH.id);
+    expect(report!.usagePerStage['platform-tools']).toMatchObject({ requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: { [TINYFISH.id]: 1 } });
+    expect(decision).toContain('联网核查已完成 · TinyFish · 检索 1 次');
+    expect(runReportUsageReconciles(report!, store.factualReviewLedger.inspect(book.bookId).resultSetRevision!.usage)).toBe(true);
+  }, 60_000);
   it('freezes the chosen 备用来源 beside the default, which a later settings change does not move', async () => {
     await setup(['ok']);
     const reference = store.getSearchBackendConnections().find((row) => row.backendId === BRAVE.id)!.credentialReference!;
