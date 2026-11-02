@@ -4356,8 +4356,8 @@ async function main() {
     at('completion-visibility-transition');
     await waitFor(
       renderer,
-      `document.querySelector('[data-native-artifact-state]')`,
-      'completion-pre-ack-artifact-inspection-settled',
+      `document.querySelector('[data-screen="imported"] .book-overview') && !document.querySelector('[data-native-artifact-state]')`,
+      'completion-pre-ack-book-shown-without-profile-card',
     );
     await assertRenderer(
       renderer,
