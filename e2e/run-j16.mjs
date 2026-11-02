@@ -922,6 +922,20 @@ async function main() {
     await assertRenderer(renderer, `(() => { const text = document.querySelector('[data-global-agent-text]'); if (!(text instanceof HTMLTextAreaElement)) return false; text.value = '保留作者有意使用的短句。'; text.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`, 'global-agent-memory-written');
     await clickSelector(renderer, '[data-global-agent-save]', 'global-agent-memory-create');
     await waitFor(renderer, `document.querySelector('[data-global-agent-governance]') && [...document.querySelectorAll('[data-global-agent-item]')].length === 1`, 'global-agent-memory-listed');
+    await assertRenderer(renderer, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const checkbox=root?.querySelector('[data-global-agent-item]');
+      const card=checkbox?.closest('.global-agent-source-card');
+      const details=card?.querySelector('details.global-agent-technical');
+      const visible=Array.from(card?.children??[]).filter(node=>node!==details).map(node=>node.textContent).join('');
+      return root instanceof HTMLElement && getComputedStyle(root).display==='grid' &&
+        root.querySelectorAll('input[data-global-agent-item]').length===1 &&
+        root.querySelectorAll('input[data-source-item]').length===1 &&
+        checkbox?.parentElement?.firstElementChild===checkbox &&
+        details instanceof HTMLDetailsElement && !details.open && details.querySelector('summary')?.textContent==='查看技术详情' &&
+        !visible.includes('@base') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/i.test(visible);
+    })()`, 'global-agent-unified-readable-memory');
+
     await assertRenderer(renderer, `(() => { const item = document.querySelector('[data-global-agent-item]'); const operation = document.querySelector('[data-global-agent-operation]'); const effect = document.querySelector('[data-global-agent-effect]'); const text = document.querySelector('[data-global-agent-text]'); if (!(item instanceof HTMLInputElement) || !(operation instanceof HTMLSelectElement) || !(effect instanceof HTMLSelectElement) || !(text instanceof HTMLTextAreaElement)) return false; item.click(); operation.value = 'supervise'; operation.dispatchEvent(new Event('change', { bubbles: true })); effect.value = 'freeze'; text.value = '先冻结这条概括，等更多判断后再归纳。'; return true; })()`, 'global-agent-supervision-written');
     await clickSelector(renderer, '[data-global-agent-save]', 'global-agent-supervision-record');
     await waitFor(renderer, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.directives.length === 2 && state.items.length === 1 && state.items[0].state === 'frozen' && state.history.length === 0; })()`, 'global-agent-governance-local');

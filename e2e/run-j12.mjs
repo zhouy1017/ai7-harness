@@ -793,6 +793,22 @@ async function main() {
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
     await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
+    // Wave 23 #1286: entering the global destination closes the book-only drawer and releases its column.
+    await assertRenderer(primary, `(() => { const entry=document.querySelector('[data-edge-entry="tasks"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return true; })()`, 'global-agent-book-drawer-open');
+    await waitFor(primary, `document.querySelector('#task-drawer')?.hidden===false`, 'global-agent-book-drawer-ready');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-from-book');
+    await waitFor(primary, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const submit=root?.querySelector('[data-global-agent-question-form] button[type="submit"]');
+      return root instanceof HTMLElement && getComputedStyle(root).display==='grid' &&
+        getComputedStyle(root.querySelector('.global-agent-composer')).borderTopStyle==='solid' &&
+        submit?.textContent==='发送问题' && submit.classList.contains('primary') &&
+        document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed' &&
+        getComputedStyle(document.body).paddingRight==='0px';
+    })()`, 'global-agent-styled-drawer-closed');
+    await click(primary, '返回', 'global-agent-back-to-book');
+    await waitFor(primary, `document.querySelector('[data-screen="editor"]') && document.querySelector('#task-drawer')?.hidden===true`, 'global-agent-book-return-closed');
+
 
     at('serialized-newest-route-wins');
     const racedRoutes = await primary.evaluate(`Promise.allSettled([
