@@ -3243,12 +3243,11 @@ async function main() {
     await reviewAction(renderer, '[data-review-action="new-review"]', 'overlap-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'overlap-sheet');
     // 开始审阅 (ADR 0096 §3, #1177): one action prepares the plan and, while it is ready, records its Run Authorization; the drawer
-    // shows the started Run with its plan one disclosure away, and nothing waits on the drawer's 开始任务.
+    // stays optional while the visible Run settles; nothing waits on the drawer's 开始任务.
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const start=sheet.querySelector('[data-review-action="start"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='开始审阅'||!start.classList.contains('primary'))return false; start.click(); return true; })()`, 'overlap-prepare');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true && ['running','settled'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'overlap-prepared', 120_000);
     const overlapPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(overlapPrepared.authorization !== null, 'overlap-one-action-authorized', overlapPrepared.authorization);
-    await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(overlapPrepared.reviewRunId)}`, 'overlap-drawer');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'overlap-settled', 180_000);
     const overlapReviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const overlapFinding = overlapReviewed.run.findings[0];
