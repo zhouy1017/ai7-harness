@@ -13855,11 +13855,7 @@ export class EditorialStore {
       });
       return this.#reviewProjection(snapshot, null, reviewed, false, target, identityFindings, null);
     }
-    requireStore(
-      plan.degradations.length > 0 || !acceptDegradation,
-      'DEGRADATION_ACCEPTANCE_INVALID',
-      '本次导入不需要降级接受。',
-    );
+    // The ordinary import policy also applies to clean files; it records no empty degradation decision.
     const nextVersion = expectedDraftVersion + 1;
     if (word !== null) word.prepared = { ...word.prepared, draftVersion: nextVersion };
     requireStore(
