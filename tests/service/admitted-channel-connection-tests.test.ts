@@ -34,7 +34,7 @@ describe('the connection test on the admitted channels', () => {
       const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK');
       const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
         { route, modelId }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-      expect(status).toMatchObject({ modelId, outcome: 'passed', code: null, verified: 'buffered-text-only', provenance: { route, model: modelId, policyVersion: 'v32' } });
+      expect(status).toMatchObject({ modelId, outcome: 'passed', code: null, verified: 'buffered-text-only', provenance: { route, model: modelId, policyVersion: 'v33' } });
       expect(nativeFetch).toHaveBeenCalledTimes(1);
       expect(String(nativeFetch.mock.calls[0]![0])).toContain(route === 'anthropic-claude' ? 'https://api.anthropic.com/v1/messages' : `/models/${modelId}:generateContent`);
       target.selectModelServiceRoute(route);
