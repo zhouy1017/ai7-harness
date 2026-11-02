@@ -169,12 +169,11 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   at(expectedChannel+'-native-import');
   await click(page,'导入稿件');native(executable,['-FileName',input]);
   await ready(page,"document.querySelector('[data-screen=target]')",'import-target');
-  await select(page,'input[aria-label="新建图书"]');
+  await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
   const importMode=expectedChannel==='windows-installer'?'suggestions':'accepted-baseline';
   await select(page,`input[data-word-import-mode=${importMode}]`);
   if(importMode==='accepted-baseline')await select(page,'[data-word-accepted-baseline-confirmation]');
   report.importModes??=[];report.importModes.push(importMode);
-  await select(page,'input[aria-label="作为首份稿件导入"]');
   check(await page.evaluate(`(()=>{const node=document.querySelector('#book-title');node.value='Beta package compatibility';node.dispatchEvent(new Event('input',{bubbles:true}));return true})()`),'book-title');
   await click(page,'确认书名并复核');await ready(page,"document.querySelector('[data-screen=review]')",'import-review');
   check(await boolean(page,"!document.body.textContent.includes('获取并安装（保持停用）')"),expectedChannel+'-no-workspace-ceremony');
@@ -236,6 +235,19 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
 
+  const coverageDb=new DatabaseSync(join(expectedDataRoot,'store','ai7.sqlite'),{readOnly:true});
+  let memberCoverage;
+  try{
+   const snapshot=JSON.parse(coverageDb.prepare('SELECT canonical_json FROM review_runs WHERE review_run_id=?').get(review.runId).canonical_json);
+   memberCoverage=snapshot.categories.map(c=>{
+    if(!c.task)return {categoryId:c.categoryId,local:true};
+    const row=coverageDb.prepare('SELECT canonical_json FROM analysis_result_set_revisions WHERE task_intent_id=? ORDER BY created_at DESC,ordinal DESC LIMIT 1').get(c.task.taskIntentId);
+    const revision=row?JSON.parse(row.canonical_json):null;
+    return {categoryId:c.categoryId,taskIntentId:c.task.taskIntentId,revisionId:revision?.revisionId,coverage:revision?.coverage??null,gaps:revision?.gaps.map(g=>g.code)??['missing-result']};
+   });
+  }finally{coverageDb.close();}
+  report.reviews.at(-1).memberCoverage=memberCoverage;
+  check(memberCoverage.every(c=>c.local||(c.coverage?.state==='complete'&&c.gaps.length===0)),expectedChannel+'-full-review-complete-coverage');
   at(expectedChannel+'-retained-factual-evidence');
   let factualSources=await page.evaluate(`window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},after:null}).then(v=>({count:v.records.length,next:v.next,translated:v.records.filter(r=>r.translation?.state==='translated'||r.translation?.text?.length>0).length,captured:v.records.filter(r=>r.captureState==='full-text').length}))`);
   check(factualSources.count>0&&factualSources.captured>0,expectedChannel+'-retained-live-sources');
@@ -258,15 +270,20 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"document.querySelector('.agent-workspace-proposal')?.dataset.agentWorkspaceProposal==='ready'",'agent-proposal-ready',300000);
   check(await boolean(page,"!document.querySelector('[data-agent-workspace-field=instruction]')?.disabled"),expectedChannel+'-agent-next-round');
   const agent=await page.evaluate("window.ai7.inspectAgentWorkspace().then(v=>({dialogueId:v.proposal?.dialogueId,count:v.proposal?.candidates.length}))");
+  const firstProposal=await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.proposalSetId)');
+  await fill(page,'[data-agent-workspace-field=instruction]','请复核上一轮结果，只保留能用所选原文证实的必要修改，并撤回仅属风格偏好的建议。');await select(page,'[data-agent-workspace-action=propose]');
+  await ready(page,`window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.state==='ready'&&v.proposal.proposalSetId!==${JSON.stringify(firstProposal)})`,'agent-second-round',300000);check(true,expectedChannel+'-agent-refinement-round');
+  agent.count=await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.candidates.length??0)');
   if(agent.count>0){await select(page,'[data-agent-workspace-action=promote]');await ready(page,"document.querySelector('[data-agent-workspace-promoted]')",'agent-promoted');}
   report.agent??=[];report.agent.push({channel:expectedChannel,...agent});
   at(expectedChannel+'-global-agent-live');
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
-  check(await page.evaluate(`(()=>{const rows=[...document.querySelectorAll('[data-global-agent-scope-book]')];for(const n of rows){if(!n.checked)n.click();}return rows.length>0})()`),'global-book-scope');
+  check(await page.evaluate(`(()=>{const rows=[...document.querySelectorAll('[data-global-agent-scope-book]')];for(const n of rows){if(!n.checked)n.click();}return rows.length>=2})()`),'global-book-scope');
   await fill(page,'[data-global-agent-question]','请使用跨书检索工具 retrieve 查找本次选入公开样书的共同内容，再使用 exact_fetch 读取至少一处精确原文；据此简短说明证据来自哪本书，不推测没有的内容。');
   await select(page,'[data-global-agent-question-form] button[type=submit]');
   await ready(page,"document.querySelector('.global-agent-answer-bubble')?.textContent.length>0&&document.querySelector('[data-global-agent-question-form] button[type=submit]')?.disabled===false",'global-answer',300000);
-  check(await boolean(page,"document.querySelector('.global-agent-tool-card')"),expectedChannel+'-global-real-tools');
+  const globalTurn=await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>{const h=v.history[0];return {dialogueId:h?.dialogueId,state:h?.attempts.at(-1)?.state,fragments:h?.attempts.at(-1)?.fragments.length,tools:h?.toolCalls?.map(c=>({tool:c.tool,outcome:c.outcome}))}})');
+  check(globalTurn.state==='completed'&&globalTurn.fragments>0&&['retrieve','exact_fetch'].every(t=>globalTurn.tools?.some(c=>c.tool===t&&c.outcome==='returned')),expectedChannel+'-global-real-cross-book-tools');report.globalTurns??=[];report.globalTurns.push({channel:expectedChannel,...globalTurn});
   // Habits is another real scoped turn, using the product's ordinary button.
   const beforeHabits=await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>v.history.map(h=>h.dialogueId))');
   await select(page,'[data-global-agent-habits=summary]');
@@ -362,9 +379,12 @@ try{
  await walk(executable,env,'windows-installer',join(env.LOCALAPPDATA,'ai7','production'),input,join(temp,'installed-export.docx'));
  at('reinstall');run(setup,['/S','/D='+installed]);
  const after=JSON.parse(run(executable,['--self-check'],env).trim());check(after.channel==='windows-installer'&&after.store_versions==='readable','same-candidate-reinstall');
- const portable=join(RELEASE,'AI7','app','AI7.exe');
+  const portableRoot=join(temp,'portable');await mkdir(portableRoot);run(join(process.env.SystemRoot,'System32','tar.exe'),['-xf',zip,'-C',portableRoot]);
+ const portable=join(portableRoot,'AI7','app','AI7.exe');
  const portableEnv={...env,...selfCheckEnvironment(portable),LOCALAPPDATA:env.LOCALAPPDATA,APPDATA:env.APPDATA};
- await walk(portable,portableEnv,'windows-portable',join(RELEASE,'AI7','data'),input,join(temp,'portable-export.docx'));
+ await mkdir(join(temp,'portable-prior'));report.portablePriorBook=await seedPriorBook(join(temp,'portable-prior'),join(portableRoot,'AI7','data'));
+ const portableSelfcheck=JSON.parse(run(portable,['--self-check'],portableEnv).trim());check(portableSelfcheck.channel==='windows-portable'&&portableSelfcheck.writable,'extracted-portable-self-check');
+ await walk(portable,portableEnv,'windows-portable',join(portableRoot,'AI7','data'),input,join(temp,'portable-export.docx'));
  at('uninstall');const uninstaller=(await readdir(installed)).find(name=>/^Uninstall.*\.exe$/i.test(name));check(Boolean(uninstaller),'uninstaller-present');
  run(join(installed,uninstaller),['/S']);await wait(()=>!existsSync(executable),'uninstall-timeout');check(existsSync(join(env.LOCALAPPDATA,'ai7','production','store','ai7.sqlite')),'uninstall-keeps-user-data');
  report.state='passed';
