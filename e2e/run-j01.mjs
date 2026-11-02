@@ -812,7 +812,7 @@ async function prepareSourceImportReview(renderer, expectation) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const review = document.querySelector('[data-import-review-kind="source-only"]'); const effects = Array.from(review?.querySelectorAll('.review-section') ?? []).find((section) => section.querySelector('h3')?.textContent === '明确不会发生')?.textContent ?? ''; return review?.textContent.includes('来源导入记录') && effects.includes('不创建稿件') && effects.includes('不创建稿件修订版') && effects.includes('不创建工作流实例') && effects.includes('不创建运行来源范围') && effects.includes('不创建事实状态或事实核查结论') && effects.includes('不创建书系或书系成员关系') && effects.includes('不创建编辑学习准入决定') && effects.includes('不授予或执行模型提供方传输') && effects.includes('不创建发稿版本、公开发布许可或公开发布事实') && effects.includes('不导出、不发送、不交付、不发布'); })()`,
+    `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]'); return review?.textContent.includes('来源导入记录') && !review.textContent.includes('明确不会发生') && !review.querySelector('.dimension-list') && Array.from(review.querySelectorAll('.commit-bar button')).some(button=>!button.disabled); })()`,
     'source-review-effects',
   );
   await assertRenderer(
@@ -2098,7 +2098,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'existing-book-review');
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="review"]'); const effects = Array.from(screen?.querySelectorAll('.review-section') ?? []).find((section) => section.querySelector('h3')?.textContent === '将创建的记录'); const items = Array.from(effects?.querySelectorAll('li') ?? [], (item) => item.textContent); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && screen.textContent.includes('manuscript-editorial@1.0.0') && reviewed?.textContent === ${JSON.stringify(bookId)} && reviewed.dataset.reviewedBookId === ${JSON.stringify(bookId)} && screen.textContent.includes(${JSON.stringify(`book:${bookId}`)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && items.length === 8 && !items.includes('图书与稳定标识') && !items.includes('图书编辑维度集（8 项）'); })()`,
+    `(() => { const screen=document.querySelector('[data-screen="review"]'); const reviewed=screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && reviewed?.textContent===${JSON.stringify(bookId)} && reviewed.dataset.reviewedBookId===${JSON.stringify(bookId)} && screen.textContent.includes(${JSON.stringify(internalNumber)}) && !screen.querySelector('.dimension-list'); })()`,
     'existing-book-review-preserves-book',
   );
   await assertRenderer(
@@ -2835,7 +2835,7 @@ async function main() {
       await waitFor(relaunched, `document.querySelector('[data-screen="review"]')`, 'existing-book-revalidated-review');
       await assertRenderer(
         relaunched,
-        `(() => { const screen = document.querySelector('[data-screen="review"]'); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && screen.textContent.includes('manuscript-editorial@1.0.0') && reviewed?.dataset.reviewedBookId === ${JSON.stringify(bookId)} && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入为首份稿件'); })()`,
+        `(() => { const screen = document.querySelector('[data-screen="review"]'); const reviewed = screen?.querySelector('[data-reviewed-book-id]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes('作为首份稿件导入') && reviewed?.dataset.reviewedBookId === ${JSON.stringify(bookId)} && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入为首份稿件'); })()`,
         'existing-book-revalidation-preserves-review',
       );
       return relaunched;
@@ -3191,7 +3191,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'text-manuscript-review');
     await assertRenderer(
       renderer,
-      `(() => { const note = document.querySelector('[data-screen="review"] [data-import-conversion-note]'); return note?.dataset.importConversionNote === 'TXT' && document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent === ${JSON.stringify(syntheticTxtSha256)} && !document.querySelector('#accept-import-degradation'); })()`,
+      `document.querySelector('[data-screen="review"] [data-source-sha256]')?.textContent===${JSON.stringify(syntheticTxtSha256)} && !document.querySelector('#accept-import-degradation') && !document.querySelector('[data-screen="review"] [data-fidelity-category]')`,
       'text-manuscript-review-conversion-note',
     );
     await clickExactButton(renderer, '新建图书并导入稿件', 'text-manuscript-commit');

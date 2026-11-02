@@ -1276,6 +1276,7 @@ async function main() {
     at('screen-return-origins');
     // Global destinations return to the exact Book subpage that opened them; settings children return to Settings.
     await clickBook(primary, bookA, 'return-book-open');
+    await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'return-book-editor-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('review')), 'return-book-review');
     await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, 'return-book-review-ready');
     for (const [destination, state] of [['knowledge','knowledge-base'], ['quality','quality-learning'], ['series','series-list']]) {

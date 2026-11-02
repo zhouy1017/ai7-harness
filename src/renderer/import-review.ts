@@ -804,24 +804,6 @@ export function createImportReview(options: ImportReviewOptions) {
     ));
     content.append(boundary, provenance, sourceResult);
 
-    const dimensions = element('section', 'review-section');
-    dimensions.append(
-      element('h3', undefined, '图书编辑维度集 · 8 项'),
-      element(
-        'p',
-        'field-note',
-        `${review.editorialDimensionSet.createdWithBook ? '随新图书创建' : '保留现有集合'} · ${review.editorialDimensionSet.name} · 版本 ${review.editorialDimensionSet.profileVersion} · ${review.editorialDimensionSet.weightSemantics}`,
-      ),
-    );
-    const dimensionList = element('ul', 'dimension-list');
-    for (const dimension of review.editorialDimensionSet.dimensions) {
-      dimensionList.append(element('li', undefined, `${dimension.label} · 中性起始权重 ${dimension.weight}`));
-    }
-    dimensions.append(dimensionList);
-    const grid = element('div', 'review-grid');
-    grid.append(dimensions, listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
-    content.append(grid);
-
     const commitBar = element('section', 'commit-bar');
     const explanation = element('div');
     explanation.append(
@@ -1120,7 +1102,7 @@ export function createImportReview(options: ImportReviewOptions) {
     });
 
     const grid = element('div', 'review-grid');
-    grid.append(listSection('将创建的记录', review.recordsToCreate), listSection('明确不会发生', review.namedNonEffects));
+    grid.append(listSection('将创建的记录', review.recordsToCreate));
     content.append(grid);
     const actions = element('div', 'button-row compact-actions');
     const abandon = button('取消导入', 'quiet', () =>
