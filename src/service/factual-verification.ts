@@ -442,22 +442,19 @@ export class FactualVerificationLedger {
 
   /** Claim work is distinct from extraction-unit coverage, including older terminal Runs. */
   claimProgress(runRecordId: string) {
-    const ledger = this.claims(runRecordId);
-    if (ledger === null) return null;
-    const rows = this.#db.prepare(`SELECT s.scope_id, e.canonical_json FROM factual_claim_sessions s
+    if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='factual_claim_ledgers'").get() === undefined) return null;
+    const membership = this.#db.prepare("SELECT json_array_length(canonical_json,'$.claims') total FROM factual_claim_ledgers WHERE run_record_id=?").get(runRecordId);
+    if (membership === undefined) return null;
+    const rows = this.#db.prepare(`SELECT json_extract(e.canonical_json,'$.state') state FROM factual_claim_sessions s
       LEFT JOIN factual_claim_events e ON e.session_id=s.session_id AND e.kind='verification-result'
         AND e.sequence=(SELECT MAX(last.sequence) FROM factual_claim_events last WHERE last.session_id=s.session_id AND last.kind='verification-result')
       WHERE s.run_record_id=? AND s.stage='web-verification'`).all(runRecordId);
-    const byClaim = new Map(rows.map((row) => [String(row.scope_id), row.canonical_json === null ? null : JSON.parse(String(row.canonical_json)) as FactualClaimRound]));
-    const progress = { total: ledger.claims.length, closed: 0, unknown: 0, unfinished: 0, notStarted: 0 };
-    for (const claim of ledger.claims) {
-      if (!byClaim.has(claim.claimId)) progress.notStarted += 1;
-      else {
-        const round = byClaim.get(claim.claimId);
-        if (round?.state === 'closed') progress.closed += 1;
-        else if (round?.state === 'unknown') progress.unknown += 1;
-        else progress.unfinished += 1;
-      }
+    const total = Number(membership.total);
+    const progress = { total, closed: 0, unknown: 0, unfinished: 0, notStarted: total - rows.length };
+    for (const row of rows) {
+      if (row.state === 'closed') progress.closed += 1;
+      else if (row.state === 'unknown') progress.unknown += 1;
+      else progress.unfinished += 1;
     }
     return progress;
   }

@@ -394,7 +394,7 @@ describe('factual claim occurrence ledger', () => {
     expect(kept.unitCheckpoints(runRecordId)).toEqual(checkpoints);
     expect(kept.factualVerification.claimProgress(runRecordId)).toMatchObject({ total: 2, notStarted: 0, closed: 1, unknown: 1 });
     const category = store.inspectReviewWorkspace(book.bookId, stopped.reviewRunId).run!.categories[0]!;
-    expect(category.detail).toContain('已取证 1/2 条断言'); expect(category.detail).toContain('1 条结果待确认');
+    expect(category.detail).toContain('已完成核查 1/2 条断言'); expect(category.detail).toContain('1 条结果待确认');
   });
 
   it('shows not-attempted lineage when cancellation retains other claims from the same unit', async () => {

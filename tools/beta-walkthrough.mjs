@@ -384,7 +384,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   const executionGaps=memberCoverage.filter(c=>!c.local&&(c.executionState!=='completed'||c.synthesis?.state==='gap'||c.claimProgress&&c.claimProgress.closed<c.claimProgress.total));
   report.executionGaps??=[];report.executionGaps.push(...executionGaps.map(c=>({channel:expectedChannel,...c})));
   for(const gap of executionGaps){
-   const status=gap.claimProgress?`已取证 ${gap.claimProgress.closed}/${gap.claimProgress.total} 条断言`:gap.synthesis?.code==='outcome-unknown'?'跨章汇总结果待确认':gap.synthesis?.state==='gap'?'跨章检查尚未完成':'尚未完成';
+   const status=gap.claimProgress?`已完成核查 ${gap.claimProgress.closed}/${gap.claimProgress.total} 条断言`:gap.synthesis?.code==='outcome-unknown'?'跨章汇总结果待确认':gap.synthesis?.state==='gap'?'跨章检查尚未完成':'尚未完成';
    await ready(page,`document.querySelector('.review-progress [data-review-category="${gap.categoryId}"] .review-progress-detail')?.textContent.includes(${JSON.stringify(status)})`,'retained-stage-gap-disclosed');
   }
   if(executionGaps.length)report.limitations.push('Completed unit findings remain usable; retained synthesis or execution gaps are disclosed and unknown paid outcomes are not resent.');
