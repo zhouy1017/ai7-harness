@@ -989,7 +989,6 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         : quickStart?.reason ?? '这种更新没有快速开始；请先看计划。');
       quickNote.id = `analysis-quick-note-${mode}`;
       quickNote.dataset['quickStart'] = quickRule !== null ? 'available' : 'unavailable';
-      quick.setAttribute('aria-describedby', quickNote.id);
       const choice = element('div', 'analysis-update-choice');
       choice.id = `analysis-update-choice-${mode}`;
       choice.hidden = true;

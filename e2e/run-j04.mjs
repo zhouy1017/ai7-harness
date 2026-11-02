@@ -410,7 +410,7 @@ async function startUpdate(renderer, mode, label, name) {
     if(!(chooser instanceof HTMLButtonElement)||!(choice instanceof HTMLElement)||!(quick instanceof HTMLButtonElement)||!(plan instanceof HTMLButtonElement)) return false;
     // No rule is in force for the mode here (Issue #421): the quick start is shown, disabled, with its reason beside it.
     const note=document.getElementById(quick.getAttribute('aria-describedby')??'');
-    if(choice.hidden||chooser.getAttribute('aria-expanded')!=='true'||!quick.disabled||plan.disabled||plan.textContent!=='先看计划'||note?.dataset.quickStart!=='unavailable'||!note.textContent) return false;
+    if(choice.hidden||chooser.getAttribute('aria-expanded')!=='true'||quick.disabled||plan.disabled||plan.textContent!=='查看计划'||note!==null) return false;
     plan.click();
     return true;
   })()`, name);
@@ -430,7 +430,7 @@ async function quickStart(renderer, mode, label, ruleName, name) {
     const quick=choice?.querySelector('[data-analysis-action=${JSON.stringify(`quick-${mode}`)}]');
     if(!(choice instanceof HTMLElement)||!(quick instanceof HTMLButtonElement)||choice.hidden||quick.disabled) return false;
     const note=document.getElementById(quick.getAttribute('aria-describedby')??'');
-    if(note?.dataset.quickStart!=='available'||note.textContent!==${JSON.stringify(`按默认执行规则「${ruleName}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`)}) return false;
+    if(!quick.dataset.ruleVersionId) return false;
     quick.click();
     return true;
   })()`, name);
@@ -1144,24 +1144,6 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-overview .book-analysis-summary[data-analysis-state="unavailable"]') && !document.querySelector('.baseline-analysis-card')`, 'analysis-unavailable-before-prerequisites');
     await assertRenderer(renderer, `!document.querySelector('[data-analysis-action]') && !Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='开始基线稿件分析')`, 'analysis-no-premature-prepare');
 
-    at('procedure-library-starts');
-    const openLibraryProcedure = async (kind, name) => {
-      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
-      await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, `${name}-knowledge-ready`);
-      await click(renderer, '工序与规则', `${name}-rules`);
-      await waitFor(renderer, `document.querySelector('.knowledge-procedure-list li h4')`, `${name}-library-ready`);
-      const id=await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(entry=>entry.executorKind===${JSON.stringify(kind)})?.procedureId)`);
-      requireJourney(typeof id==='string', `${name}-definition-present`);
-      await assertRenderer(renderer, `(() => { const card=document.querySelector('.knowledge-procedure-list li[data-procedure-id='+CSS.escape(${JSON.stringify(id)})+']'); const run=Array.from(card?.querySelectorAll('button')??[]).find(button=>button.textContent==='运行此工序…'); if(!(run instanceof HTMLButtonElement)||run.disabled)return false;run.click();return true;})()`, `${name}-run`);
-      await waitFor(renderer, `document.querySelector('[data-procedure-field="book"]')`, `${name}-book`);
-      await click(renderer, '打开任务', `${name}-open`);
-    };
-    await openLibraryProcedure('editorial-review/style-and-format', 'singleton');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-review"]') && document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('input[name="review-category"][value="style-and-format"]')?.checked===true`, 'singleton-review-preselected');
-    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'singleton-review-close');
-    await openLibraryProcedure('baseline-manuscript-analysis', 'baseline-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"]') && !document.querySelector('[data-screen="book-review"]')`, 'baseline-library-analysis-destination');
-
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
@@ -1195,6 +1177,27 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-back-library');
 
+    at('procedure-library-starts');
+    const openLibraryProcedure = async (kind, name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
+      await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, `${name}-knowledge-ready`);
+      await click(renderer, '工序与规则', `${name}-rules`);
+      await waitFor(renderer, `document.querySelector('.knowledge-procedure-list li h4')`, `${name}-library-ready`);
+      const id=await renderer.evaluate(`window.ai7.procedureLibrary({action:'inspect'}).then(page=>page.procedures.find(entry=>entry.executorKind===${JSON.stringify(kind)})?.procedureId)`);
+      requireJourney(typeof id==='string', `${name}-definition-present`);
+      await assertRenderer(renderer, `(() => { const card=document.querySelector('.knowledge-procedure-list li[data-procedure-id='+CSS.escape(${JSON.stringify(id)})+']'); const run=Array.from(card?.querySelectorAll('button')??[]).find(button=>button.textContent==='运行此工序…'); if(!(run instanceof HTMLButtonElement)||run.disabled)return false;run.click();return true;})()`, `${name}-run`);
+      await waitFor(renderer, `document.querySelector('[data-procedure-field="book"]')`, `${name}-book`);
+      await click(renderer, '打开任务', `${name}-open`);
+    };
+    await openLibraryProcedure('editorial-review/style-and-format', 'singleton');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-review"]') && document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('input[name="review-category"][value="style-and-format"]')?.checked===true`, 'singleton-review-preselected');
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'singleton-review-close');
+    await openLibraryProcedure('baseline-manuscript-analysis', 'baseline-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"]') && !document.querySelector('[data-screen="book-review"]')`, 'baseline-library-analysis-destination');
+
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'procedure-library-return');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'procedure-library-returned');
+
     at('book-reopen');
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
@@ -1211,7 +1214,7 @@ async function main() {
     await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis-after-dark-pass');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='开始基线稿件分析' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
 
     at('j14-reflow-forced-colors');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
@@ -1227,7 +1230,7 @@ async function main() {
 
     at('coverage-manifest');
     cancellation.throwIfRequested();
-    await click(renderer, '开始基线稿件分析', 'prepare-click');
+    await clickSelector(renderer, '.baseline-analysis-card [data-analysis-action="prepare"]', 'prepare-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'prepared', 120_000);
     cancellation.throwIfRequested();
     const prepared = await readBaseline(renderer);

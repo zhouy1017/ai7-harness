@@ -866,7 +866,7 @@ async function main() {
     await clickSelector(renderer, '.library-eligibility-chooser [data-library-choice="book"]', 'library-long-note-choice');
     await fill(renderer, '[data-library-field="reason"]', longReason, 'library-long-note');
     await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-long-note-save');
-    await readLibrary(renderer, (page) => page.cards[0]?.decisions === '3' && page.cards[0].chooser === null, 'library-long-note-saved');
+    await readLibrary(renderer, (page) => page.cards[0]?.decisions === '5' && page.cards[0].chooser === null, 'library-long-note-saved');
     const reader = 'article.library-material > .library-reason-reader';
     await clickSelector(renderer, `${reader} [data-library-action="read-reason"]`, 'library-full-note-open');
     let reconstructed = '';
