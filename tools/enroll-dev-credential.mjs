@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import { createServer, createConnection } from 'node:net';
 import { spawn } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.generated.mjs';
+
 
 /**
  * The developer-host enrollment helper for the development credentials (ADR 0067, ADR 0073 §4).
@@ -97,7 +99,7 @@ export function parseEnrollmentArguments(argv) {
       else remove = true;
       continue;
     }
-    requireEnrollment(['--slot', '--from-file', '--credential-reference', '--to-guest'].includes(key));
+    requireEnrollment(['--slot', '--from-file', '--credential-reference', '--to-guest', '--guest-session'].includes(key));
     const value = argv[index + 1];
     requireEnrollment(typeof value === 'string' && value.length > 0 && !values.has(key));
     values.set(key, value);
@@ -106,6 +108,8 @@ export function parseEnrollmentArguments(argv) {
   const slot = values.get('--slot');
   const named = values.get('--credential-reference');
   const guest = values.get('--to-guest');
+  const guestSession = values.get('--guest-session');
+  requireEnrollment(guestSession === undefined || (typeof named === 'string' && CREDENTIAL_REFERENCE_PATTERN.test(guestSession) && !check && !remove && (guest !== undefined || fromStdin)));
   requireEnrollment(guest === undefined || ['ai7-testbed-01-nat', 'ai7-testbed-02-nat'].includes(guest));
   if (named !== undefined) {
     // The named-reference form: a production connection's own reference, never a development one, and only a store.
@@ -116,7 +120,7 @@ export function parseEnrollmentArguments(argv) {
       CREDENTIAL_REFERENCE_PATTERN.test(named) && !DEVELOPMENT_REFERENCES.has(named.toLowerCase()));
     return { mode: remove ? 'delete-named' : fromStdin ? 'store-stdin' : 'store-named', slot,
       credentialReference: named.toLowerCase(), fromFile: fromFile === undefined ? null : resolve(fromFile),
-      ...(guest === undefined ? {} : { guest }) };
+      ...(guest === undefined ? {} : { guest }), ...(guestSession === undefined ? {} : { guestSession }) };
   }
   requireEnrollment(!fromStdin && !remove && guest === undefined);
   requireEnrollment(typeof slot === 'string' && SLOTS.has(slot));
@@ -204,6 +208,7 @@ async function enrollGuest(request, read = readSecret, start = spawn) {
   const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', request.guest, 'node',
     'C:/ai7/harness/tools/enroll-dev-credential.mjs', '--slot', request.slot,
     '--credential-reference', request.credentialReference, request.mode === 'delete-named' ? '--delete' : '--from-stdin'];
+  if(request.guestSession!==undefined)args.push('--guest-session',request.guestSession);
   const secret = request.mode === 'delete-named' ? null : await read(request.fromFile);
   const child = start('ssh.exe', args, { windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] });
   await new Promise((resolve, reject) => {
@@ -222,9 +227,48 @@ export async function storeEnrollment(argv, deps = {}) {
     await enrollGuest(request, deps.readSecret ?? readSecret, deps.spawn ?? spawn);
     return;
   }
+  if(request.guestSession!==undefined){
+    await forwardGuestEnrollment(request,await (deps.readStdinSecret??readStdinSecret)());return;
+  }
   const entry = await openEntry(request.credentialReference, deps);
   if (request.mode === 'delete-named') await entry.deleteCredential();
   else await entry.setPassword(await (request.mode === 'store-stdin' ? (deps.readStdinSecret ?? readStdinSecret)() : (deps.readSecret ?? readSecret)(request.fromFile)));
+}
+
+
+const guestPipe=(nonce)=>{requireEnrollment(CREDENTIAL_REFERENCE_PATTERN.test(nonce));return String.raw`\\.\pipe\ai7-beta-enrollment-${nonce}`;};
+async function forwardGuestEnrollment(request,secret){
+ requireEnrollment(process.platform==='win32'&&/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''));
+ await new Promise((ok,no)=>{
+  const socket=createConnection(guestPipe(request.guestSession));let reply='';
+  socket.setTimeout(30000,()=>socket.destroy(new EnrollmentError('AI7_ENROLLMENT_INVALID')));
+  socket.on('error',no);socket.on('data',chunk=>{reply+=chunk.toString();if(reply.length>8)socket.destroy(new EnrollmentError('AI7_ENROLLMENT_INVALID'));});
+  socket.on('end',()=>reply==='ok'?ok():no(new EnrollmentError('AI7_ENROLLMENT_INVALID')));
+  socket.on('connect',()=>socket.write(JSON.stringify({slot:request.slot,credentialReference:request.credentialReference,secret})+'\n'));
+ });
+}
+/** Only the Owner-authorized interactive Beta runner opens this nonce-scoped receiver. No credential is persisted outside the OS store. */
+export async function serveGuestEnrollment(nonce,references,deps={}){
+ requireEnrollment(!continuousIntegrationPresent(deps.env)&&process.platform==='win32'&&/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''));
+ const allowed=new Set(references.map(ref=>{parseEnrollmentArguments(['--slot',ref.slot,'--credential-reference',ref.credentialReference,'--from-stdin']);return ref.slot+'/'+ref.credentialReference;}));
+ const ephemeral=new Set(references.filter(ref=>ref.ephemeral===true).map(ref=>ref.slot+'/'+ref.credentialReference));
+ const server=createServer(socket=>{
+  let body='',handled=false;socket.setEncoding('utf8');socket.setTimeout(30000,()=>socket.destroy());
+  socket.on('error',()=>{});socket.on('data',chunk=>{
+   if(handled){socket.destroy();return;}body+=chunk;
+   if(Buffer.byteLength(body,'utf8')>MAX_SECRET_BYTES+1024){socket.destroy();return;}
+   if(!body.endsWith('\n'))return;handled=true;
+   void(async()=>{
+    try{const input=JSON.parse(body);body='';requireEnrollment(allowed.has(input.slot+'/'+input.credentialReference)&&typeof input.secret==='string'&&input.secret.length>0&&Buffer.byteLength(input.secret,'utf8')<=MAX_SECRET_BYTES);
+     await storeEnrollment(['--slot',input.slot,'--credential-reference',input.credentialReference,'--from-stdin'],{...deps,readStdinSecret:async()=>input.secret});input.secret='';
+     if(ephemeral.has(input.slot+'/'+input.credentialReference)){requireEnrollment(await resolveCheckReading(input.credentialReference,deps)==='present');await storeEnrollment(['--slot',input.slot,'--credential-reference',input.credentialReference,'--delete'],deps);requireEnrollment(await resolveCheckReading(input.credentialReference,deps)==='absent');}
+     socket.end('ok');
+    }catch{socket.end('no');}
+   })();
+  });
+ });
+ await new Promise((ok,no)=>{server.once('error',no);server.listen(guestPipe(nonce),()=>{server.removeListener('error',no);ok();});});
+ return async()=>new Promise((ok,no)=>server.close(error=>error?no(error):ok()));
 }
 
 async function main() {

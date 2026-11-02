@@ -27,6 +27,7 @@ type CheckDependencies = {
 };
 
 type Helper = {
+  serveGuestEnrollment: (nonce: string, references: Array<{slot:string;credentialReference:string;ephemeral?:boolean}>, deps: Record<string,unknown>) => Promise<()=>Promise<void>>;
   parseEnrollmentArguments: (argv: string[]) => { mode: 'store' | 'check'; slot: string; credentialReference: string; fromFile: string | null };
   continuousIntegrationPresent: (env?: NodeJS.ProcessEnv) => boolean;
   resolveCheckReading: (credentialReference: string, deps?: CheckDependencies) => Promise<'present' | 'absent' | 'unavailable'>;
@@ -112,6 +113,34 @@ describe('parseEnrollmentArguments', () => {
     }
     expect(() => helper.parseEnrollmentArguments(['--slot', 'search-brave', '--credential-reference',
       CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES['search-brave']!, '--from-file', ABSOLUTE])).toThrow();
+  });
+
+  it('relays a nonce-scoped guest enrollment into the interactive carrier and rejects unrelated references', async () => {
+    if (process.platform !== 'win32') return;
+    const oldGuest=process.env.COMPUTERNAME;
+    process.env.COMPUTERNAME='AI7-TESTBED-02';
+    const nonce=randomUUID(), ref=randomUUID(), probe=randomUUID();
+    const setPassword=vi.fn(async(_value:string)=>{});
+    let close:(()=>Promise<void>)|undefined;
+    try{
+      const values=new Map<string,string>();
+      close=await helper.serveGuestEnrollment(nonce,[{slot:'search-brave',credentialReference:ref},{slot:'opencode-go',credentialReference:probe,ephemeral:true}],{env:{},...SUPPORTED_HOST,
+        importKeyring:async()=>({AsyncEntry:class{
+          constructor(_service:string,private readonly account:string){}
+          async setPassword(value:string){setPassword(value);values.set(this.account,value);}
+          async getPassword(){return values.get(this.account);}
+          async deleteCredential(){values.delete(this.account);}
+        }})});
+      const deps={env:{},...SUPPORTED_HOST,readSecret:vi.fn(),readStdinSecret:async()=>'synthetic-carrier-value',importKeyring:vi.fn()};
+      await helper.storeEnrollment(['--slot','search-brave','--credential-reference',ref,'--from-stdin','--guest-session',nonce],deps);
+      expect(setPassword).toHaveBeenCalledExactlyOnceWith('synthetic-carrier-value');
+      await expect(helper.storeEnrollment(['--slot','search-brave','--credential-reference',randomUUID(),'--from-stdin','--guest-session',nonce],deps)).rejects.toThrow();
+      expect(setPassword).toHaveBeenCalledTimes(1);
+      await helper.storeEnrollment(['--slot','opencode-go','--credential-reference',probe,'--from-stdin','--guest-session',nonce],deps);
+      expect(values.has(protectedSecretEntryName(probe))).toBe(false);
+      expect(values.has(protectedSecretEntryName(ref))).toBe(true);
+      expect(deps.importKeyring).not.toHaveBeenCalled();
+    }finally{await close?.();if(oldGuest===undefined)delete process.env.COMPUTERNAME;else process.env.COMPUTERNAME=oldGuest;}
   });
 
   it('carries a guest enrollment only in encrypted SSH stdin, with output closed', async () => {

@@ -2,10 +2,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { spawn, spawnSync } from 'node:child_process';
+import { serveGuestEnrollment, storeEnrollment } from './enroll-dev-credential.mjs';
 import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
 import { composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
@@ -14,6 +16,7 @@ import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
 
 const ROOT=resolve('.');
 const RELEASE=join(ROOT,'release');
+const packagedKeyring=()=>import(pathToFileURL(join(RELEASE,'AI7','app','resources','app','node_modules','@napi-rs','keyring','index.js')).href);
 let stage='inputs';
 const report={schema:'ai7.windows-beta-acceptance/1',state:'running',checks:[],limitations:[
  'Separate Owner-authorized packaged live acceptance uses available Go and search accounts; other provider accounts remain unconfigured. Ordinary source Journeys and CI are provider-free.',
@@ -36,7 +39,7 @@ async function renderer(browser){
  const send=async(method,params={})=>{const id=sequence++;const answer=new Promise((resolveAnswer,reject)=>{const timer=setTimeout(()=>{pending.delete(sessionId+':'+id);reject(Error('renderer-timeout'));},60000);pending.set(sessionId+':'+id,{resolve:resolveAnswer,reject,timer});});await root.send('Target.sendMessageToTarget',{sessionId,message:JSON.stringify({id,method,params})});return answer;};
  return {send,evaluate:async(expression)=>{const value=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(value.exceptionDetails)throw Error('renderer-expression');return value.result.value;}};
 }
-const boolean=async(page,expression)=>page.evaluate('Boolean('+expression+')');
+const boolean=async(page,expression)=>page.evaluate('Promise.resolve('+expression+').then(Boolean)');
 const click=async(page,label)=>check(await page.evaluate(`(()=>{const node=[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)});if(!node||node.disabled)return false;node.click();return true})()`),'click-'+label);
 const select=async(page,selector)=>check(await page.evaluate(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});if(!node||node.disabled)return false;node.click();return true})()`),'select-'+selector);
 const ready=async(page,expression,name,ms=120000)=>wait(()=>boolean(page,expression).catch(()=>false),name,ms);
@@ -88,16 +91,16 @@ async function configureLiveConnections(dataRoot,temp,channel){
  await build({entryPoints:[entry],outfile:bundle,bundle:true,platform:'node',format:'esm',target:'node24',packages:'external',logLevel:'silent'});
  const refs=JSON.parse(run(process.execPath,[bundle]).trim());
  report.ownedCredentialReferences??=[];report.ownedCredentialReferences.push(...refs);
- const nonce=randomUUID();
- await writeFile('C:/ai7/results/beta-enrollment-request.json',JSON.stringify({schema:1,nonce,channel,sourceCommit:report.buildIdentity.sourceCommit,references:refs})+'\n');
+ const nonce=randomUUID(),probe={slot:'opencode-go',credentialReference:randomUUID(),ephemeral:true};const closeEnrollment=await serveGuestEnrollment(nonce,[...refs,probe],{importKeyring:packagedKeyring});
+ await writeFile('C:/ai7/results/beta-enrollment-request.json',JSON.stringify({schema:1,nonce,channel,sourceCommit:report.buildIdentity.sourceCommit,references:refs,probe})+'\n');
  at('await-protected-enrollment-'+channel);
- await wait(async()=>{try{return (await readFile('C:/ai7/results/beta-enrollment-complete.txt','utf8')).trim()===nonce;}catch{return false;}},'protected-enrollment-timeout',1200000);
+ try{await wait(async()=>{try{if(existsSync('C:/ai7/results/beta-enrollment-cancel.txt'))throw Error('enrollment-cancelled');return (await readFile('C:/ai7/results/beta-enrollment-complete.txt','utf8')).trim()===nonce;}catch(e){if(e.message==='enrollment-cancelled')throw e;return false;}},'protected-enrollment-timeout',1200000);}finally{await closeEnrollment();}
  check(true,channel+'-protected-enrollment');
 }
 
 async function removeOwnedCredentials(){
  for(const ref of report.ownedCredentialReferences??[]){
-  run(process.execPath,[join(ROOT,'tools/enroll-dev-credential.mjs'),'--slot',ref.slot,'--credential-reference',ref.credentialReference,'--delete']);
+  await storeEnrollment(['--slot',ref.slot,'--credential-reference',ref.credentialReference,'--delete'],{importKeyring:packagedKeyring});
  }
  report.credentialCleanup='completed';
 }
@@ -118,8 +121,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    check(true,'native-first-run-relaunch');
   }
   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
-  const page=await renderer(browser);
+  let page=await renderer(browser);
   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'product-ready');
+  check(!await boolean(page,'Promise.resolve(false)')&&await boolean(page,'Promise.resolve(true)'),expectedChannel+'-async-predicate-resolution');
   check(await boolean(page,"document.querySelector('[data-screen=landing]')"),expectedChannel+'-library');
   if(expectedChannel==='windows-installer'){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.priorBook?.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'prior-book-survives-upgrade');
@@ -180,7 +184,33 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(await boolean(page,"document.querySelector('.editor-shell')"),expectedChannel+'-manuscript');
 
   check(await boolean(page,"document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)"),expectedChannel+'-source-table-image');
-  const bookId=await page.evaluate("document.querySelector('[data-nav-book-id]')?.dataset.navBookId??document.querySelector('[data-book-id]')?.dataset.bookId??null");
+  const bookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
+
+  at(expectedChannel+'-paragraph-editing-and-contextual-dialogue');
+  const beforeParagraphs=await page.evaluate("[...document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]')].map(n=>n.textContent)");
+  check(await page.evaluate(`(()=>{const editor=document.querySelector('[data-testid=manuscript-editor]');const p=[...editor.querySelectorAll('p[data-block-id]')].find(n=>n.textContent.length>30&&!n.querySelector('.editorial-mark'));if(!p)return false;editor.focus();const r=document.createRange();r.selectNodeContents(p);r.collapse(false);getSelection().removeAllRanges();getSelection().addRange(r);return true})()`),'paragraph-caret');
+  await new Promise(r=>setTimeout(r,300));
+  const key=async(name,code)=>{await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:name,code:name,windowsVirtualKeyCode:code,...(name==='Enter'?{text:'\r'}:{})});await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:name,code:name,windowsVirtualKeyCode:code});};
+  await key('Enter',13);await key('Enter',13);
+  await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]').length===${beforeParagraphs.length+2}`,'rapid-enter-two-paragraphs');
+  await key('Backspace',8);await key('Backspace',8);
+  await ready(page,`JSON.stringify([...document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]')].map(n=>n.textContent))===${JSON.stringify(JSON.stringify(beforeParagraphs))}`,'backspace-merge-restores-text');
+  check(true,expectedChannel+'-rapid-enter-and-merge');
+  const headingCount=await page.evaluate("document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-kind=heading]').length");
+  await fill(page,'select[aria-label=段落样式]','heading-2');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-kind=heading]').length===${headingCount+1}`,'heading-style-saved');
+  await fill(page,'select[aria-label=段落样式]','paragraph');await ready(page,`document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-kind=heading]').length===${headingCount}`,'paragraph-style-restored');
+  check(true,expectedChannel+'-heading-style-edit');
+  check(await page.evaluate(`(()=>{const p=[...document.querySelectorAll('[data-testid=manuscript-editor] > p[data-block-id]')].find(n=>n.firstChild?.nodeType===3&&n.firstChild.length>30&&!n.querySelector('.editorial-mark'));if(!p)return false;const r=document.createRange();r.setStart(p.firstChild,2);r.setEnd(p.firstChild,22);getSelection().removeAllRanges();getSelection().addRange(r);p.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));const rect=p.getBoundingClientRect();p.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,clientX:rect.x+20,clientY:rect.y+10}));return true})()`),'contextual-selection');
+  await ready(page,"document.querySelector('[data-mark-action=ask-on-selection]')",'context-menu');await select(page,'[data-mark-action=ask-on-selection]');
+  await ready(page,"document.querySelector('[data-mark-composer=ask-about-selection]')",'contextual-question');
+  await fill(page,'[data-mark-field=question]','请用三句话说明这段公开样书的叙述语气，引用所选文字作为依据，不改写正文。');await select(page,'[data-mark-composer=ask-about-selection] [data-mark-action=submit]');
+  await ready(page,"document.querySelector('#task-drawer .dialogue')?.dataset.dialogueLatestState==='completed'",'contextual-answer',300000);
+  const dialogueId=await page.evaluate("document.querySelector('#task-drawer .dialogue').dataset.dialogueId");
+  const beforeFollow=await page.evaluate(`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(dialogueId)},afterFragment:0}).then(v=>({count:v.attempts.length,fragments:v.attempts.at(-1)?.fragments.length}))`);
+  check(beforeFollow.fragments>0,expectedChannel+'-contextual-streamed-fragments');
+  await fill(page,'#task-drawer [data-dialogue-follow-up]','请补充说明其中一处措辞如何支持上述判断，不改变原文。');await select(page,'#task-drawer [data-dialogue-action=follow-up]');
+  await ready(page,`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(dialogueId)},afterFragment:0}).then(v=>v.attempts.length===${beforeFollow.count+1}&&v.attempts.at(-1)?.state==='completed'&&v.attempts.at(-1)?.fragments.length>0)`,'contextual-followup',300000);
+  check(true,expectedChannel+'-right-drawer-followup');await select(page,'#task-drawer [data-task-drawer-control=close]');
   // Baseline and full review are started through their ordinary product controls.
   at(expectedChannel+'-baseline-analysis');
   await select(page,'#app-sidebar [data-nav-book-section=analysis]');
@@ -203,8 +233,18 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"window.ai7.inspectReviewWorkspace().then(v=>v.run?.state==='settled')",'full-review-settled',1800000);
   const review=await page.evaluate("window.ai7.inspectReviewWorkspace().then(v=>({runId:v.run?.reviewRunId,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state})),findings:v.run?.findings.length}))");
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
-  check(review.categories?.length===5,expectedChannel+'-full-review-five-members');
+  check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
+
+  at(expectedChannel+'-retained-factual-evidence');
+  let factualSources=await page.evaluate(`window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},after:null}).then(v=>({count:v.records.length,next:v.next,translated:v.records.filter(r=>r.translation?.state==='translated'||r.translation?.text?.length>0).length,captured:v.records.filter(r=>r.captureState==='captured').length}))`);
+  check(factualSources.count>0&&factualSources.captured>0,expectedChannel+'-retained-live-sources');
+  report.factualEvidence??=[];report.factualEvidence.push({channel:expectedChannel,...factualSources});
+  await select(page,'#app-sidebar [data-nav-book-section=sources]');await ready(page,"document.querySelector('.research-evidence')",'sources-surface');
+  while(!await boolean(page,"document.querySelector('.research-evidence-translated blockquote')?.textContent.length>0")&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
+  check(await boolean(page,"document.querySelector('.research-evidence-translated blockquote')?.textContent.length>0"),expectedChannel+'-foreign-source-translation-visible');
+  await select(page,'#app-sidebar [data-nav-book-section=review]');await ready(page,"document.querySelector('.review-workspace-card')",'review-after-evidence');
   const applicable=await page.evaluate("[...document.querySelectorAll('[data-review-action=accept-apply]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
+  check(Boolean(applicable),expectedChannel+'-applicable-card-required');
   if(applicable){await select(page,`article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]`);await ready(page,`document.querySelector('article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]')?.disabled!==false`,'finding-adopted');check(true,expectedChannel+'-finding-adopted');}
   const reject=await page.evaluate("[...document.querySelectorAll('[data-review-action=ignore]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
   check(Boolean(reject),expectedChannel+'-finding-to-reject');
@@ -227,11 +267,18 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"document.querySelector('.global-agent-answer-bubble')?.textContent.length>0&&document.querySelector('[data-global-agent-question-form] button[type=submit]')?.disabled===false",'global-answer',300000);
   check(await boolean(page,"document.querySelector('.global-agent-tool-card')"),expectedChannel+'-global-real-tools');
   // Habits is another real scoped turn, using the product's ordinary button.
+  const beforeHabits=await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>v.history.map(h=>h.dialogueId))');
   await select(page,'[data-global-agent-habits=summary]');
   await ready(page,"document.querySelector('[data-global-agent-question-form] button[type=submit]')?.disabled===false",'habits-answer',300000);
-  check(await boolean(page,"document.querySelector('.global-agent-answer-bubble')?.textContent.length>0"),expectedChannel+'-habits-answer');
+  await ready(page,`window.ai7.inspectGlobalAgent().then(v=>v.history.some(h=>!${JSON.stringify(beforeHabits)}.includes(h.dialogueId)&&h.attempts.at(-1)?.state==='completed'&&h.attempts.at(-1)?.fragments.length>0))`,'new-habits-completed',300000);
+  check(true,expectedChannel+'-habits-new-completed-answer');
   await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'library-after-agents');
   check(await page.evaluate(`(()=>{const n=[...document.querySelectorAll('[data-book-id] button,button[data-book-id]')].find(n=>n.closest('[data-book-id]')?.dataset.bookId===${JSON.stringify(importedBookId)});if(!n)return false;n.click();return true})()`),'reopen-imported-book');
+
+  await select(page,'#app-sidebar [data-nav-book-section=manuscript]');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'return-manuscript-milestone');
+  check(await page.evaluate(`(()=>{const n=document.querySelector('[data-edge-entry=navigation]');if(n.getAttribute('aria-expanded')!=='true')n.click();document.querySelector('details.milestone-section').open=true;return true})()`),'milestone-form');
+  await fill(page,'#milestone-label','Beta 验收发稿');await select(page,'input[name=milestone-purpose][value=delivery-candidate]');await click(page,'保存里程碑版本');
+  await ready(page,"document.querySelector('#milestone-label')?.value===''",'milestone-saved');
   await select(page,'#app-sidebar [data-nav-book-section=deliverables]');await ready(page,"document.querySelector('[data-screen=book-deliverables]')",'deliverables');
   at(expectedChannel+'-native-docx-export');
   await select(page,'[data-export-action=open][data-export-target=current]');native(executable,['-FileName',output]);
@@ -241,9 +288,40 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(hash(source['word/media/source-preview.png'])===hash(exported['word/media/source-preview.png']),expectedChannel+'-media-fidelity');
   const table=(files)=>strFromU8(files['word/document.xml']).match(/<w:tbl[\s>][\s\S]*?<\/w:tbl>/)?.[0];
   check(table(source)===table(exported),expectedChannel+'-table-fidelity');
+
+  at(expectedChannel+'-delivery-package-export');
+  await select(page,'[data-publication-action=designate]');await ready(page,"document.querySelector('input[name=publication-milestone]')",'publication-designation');
+  await select(page,'input[name=publication-milestone]');await fill(page,'[data-publication-field=scope]','公开样书打包态 Beta 功能验收');await fill(page,'[data-publication-field=basis]','完成本次公开样书交互与导出检查后固定此版本，不代表实际出版或外部 Beta 通过。');
+  await select(page,'[data-publication-action=confirm]');await ready(page,"document.querySelector('form.publication-designate')===null",'publication-recorded');
+  await fill(page,'[data-package-field=purpose]','公开样书 Beta 打包交付验收');await select(page,'[data-package-action=prepare]');
+  await ready(page,"document.querySelector('[data-package-action=export][data-package-version-id]')",'delivery-package-prepared');
+  await select(page,'[data-package-action=export][data-package-version-id]');await select(page,'input[name=package-export-route][value=archive]');
+  await ready(page,"document.querySelector('[data-package-action=export-choose]:not(:disabled)')",'delivery-archive-ready');await select(page,'[data-package-action=export-choose]');
+  const deliveryPath=join(dirname(output),expectedChannel+'-delivery.zip');native(executable,['-FileName',deliveryPath]);
+  await ready(page,"document.querySelector('[data-package-action=export-approve]:not(:disabled)')",'delivery-destination');await select(page,'[data-package-action=export-approve]');
+  await wait(()=>existsSync(deliveryPath),'delivery-archive-created',120000);const delivery=unzipSync(await readFile(deliveryPath));
+  check(Object.keys(delivery).some(name=>name.endsWith('.docx'))&&Object.keys(delivery).some(name=>name.endsWith('.json')),expectedChannel+'-delivery-archive');
   await select(page,'#app-sidebar [data-nav-settings]');await ready(page,"document.querySelector('[data-screen=settings]')",'settings-storage');
   await click(page,'数据与存储');await ready(page,"document.querySelector('.data-storage-summary')",'storage');
   check(await page.evaluate(`(()=>{const node=document.querySelector('.data-storage-summary');return node.dataset.runtimeForm==='packaged'&&node.dataset.channel===${JSON.stringify(expectedChannel)}&&document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(expectedDataRoot)}})()`),expectedChannel+'-data-isolation');
+
+  at(expectedChannel+'-automatic-backup-restore');
+  await ready(page,"document.querySelector('[data-scheduled-backup-switch]')",'backup-switch');await select(page,'[data-scheduled-backup-switch]');
+  await ready(page,"window.ai7.inspectScheduledBackups().then(v=>v.total>0&&!v.backingUp&&v.lastFailure===null)",'automatic-backup-created',120000);
+  const backup=await page.evaluate('window.ai7.inspectScheduledBackups().then(v=>({location:v.location,fileName:v.backups[0].fileName}))');
+  const backupPath=join(backup.location,backup.fileName),backupFiles=unzipSync(await readFile(backupPath));
+  check(Object.keys(backupFiles).some(n=>n.endsWith('.sqlite'))&&!Object.keys(backupFiles).some(n=>/\.key\.txt$/.test(n)),expectedChannel+'-automatic-backup-package');
+  await select(page,'[data-database-import-action=choose]');native(executable,['-FileName',backupPath]);await ready(page,"document.querySelector('input[name=database-import-choice][value=replace]')",'backup-preview');
+  await select(page,'input[name=database-import-choice][value=replace]');await select(page,'[data-database-import-action=confirm]');await ready(page,"document.querySelector('.database-import')?.dataset.pending==='true'",'backup-restore-pending');
+  await browser.close();browser=undefined;await new Promise(r=>setTimeout(r,1000));
+  browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});page=await renderer(browser);
+  await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'backup-restored-startup');
+  check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),expectedChannel+'-backup-restored-book');
+  at(expectedChannel+'-renderer-crash-diagnostics');
+  await page.send('Page.crash').catch(()=>{});await browser.close().catch(()=>{});browser=undefined;await new Promise(r=>setTimeout(r,2000));
+  browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});page=await renderer(browser);await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'post-crash-startup');
+  await select(page,'#app-sidebar [data-nav-settings]');await click(page,'诊断');await ready(page,"document.querySelector('[data-crash-list-ready=true]')",'crash-records-ready');
+  check(await boolean(page,"document.querySelector('[data-crash-list]')?.textContent.includes('界面进程退出')"),expectedChannel+'-real-renderer-crash-record');
   const version=await page.evaluate('window.ai7.inspectDataVersion().then(v=>({dataVersion:v.dataVersion,history:v.history.length}))');
   check(version.dataVersion===1&&version.history>=1,expectedChannel+'-persistent-store');
  }finally{await browser?.close();}
@@ -265,8 +343,9 @@ try{
  for(const path of [setup,zip]){const bytes=await readFile(path);report.assets.push({name:path.split(/[\\/]/).at(-1),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});}
  const temp=await realpath(await mkdtemp(join(tmpdir(),'ai7-beta-package-')));report.testRoot=temp;
  const input=join(temp,'public-sample1-objects.docx');
- await composeExportAdmittedDocx(input,{source:'sample1.docx',startBlock:1,blocks:30,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
+ await composeExportAdmittedDocx(input,{footnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:30,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
  await addReadOnlySourceObjects(input);
+ const noteParts=unzipSync(await readFile(input));for(const name of Object.keys(noteParts)){if(name.endsWith('.xml')||name.endsWith('.rels'))noteParts[name]=strToU8(strFromU8(noteParts[name]).replaceAll('footnote','endnote'));}noteParts['word/endnotes.xml']=noteParts['word/footnotes.xml'];delete noteParts['word/footnotes.xml'];await writeFile(input,zipSync(noteParts));
  const installed=join(temp,'installed');const executable=join(installed,'AI7.exe');
  const env=selfCheckEnvironment(executable);env.LOCALAPPDATA=join(temp,'local');await mkdir(env.LOCALAPPDATA,{recursive:true});env.APPDATA=join(temp,'roaming');await mkdir(env.APPDATA,{recursive:true});
  const priorSetup='C:/ai7/beta-inputs/AI7-0.4.1-win-x64-setup.exe';
