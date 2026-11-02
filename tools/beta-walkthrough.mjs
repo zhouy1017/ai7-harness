@@ -164,7 +164,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    bookId=await page.evaluate("[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes('Beta package compatibility'))?.dataset.navBook");
    check(Boolean(bookId),'resume-existing-public-book');
    await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
-   await select(page,'#app-sidebar [data-nav-book-section=manuscript]');
+   // Opening a populated Book already restores its manuscript. A second section click
+   // races that mount and can destroy the editor whose leave guard navigation is awaiting.
+   await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'resume-book-manuscript');
    await ready(page,"document.querySelector('[aria-label^=跳转到尾注]')&&document.querySelector('.manuscript-source-table td')",'resume-current-source-objects');
   }else{
   if(expectedChannel==='windows-installer'){
@@ -282,7 +284,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(await page.evaluate("window.ai7.inspectBaselineAnalysis().then(v=>v.resultSetRevision?.coverage?.state==='complete')"),expectedChannel+'-baseline-complete');
   }
   at(expectedChannel+'-full-review');
-  await select(page,'#app-sidebar [data-nav-destination=knowledge]');await click(page,'工序与规则');
+  await select(page,'#app-sidebar [data-nav-destination=knowledge]');
+  await ready(page,"document.querySelector('[data-screen=knowledge-base]')",'knowledge-destination');
+  await click(page,'工序与规则');
   await ready(page,"document.querySelector('.procedure-library [data-procedure-id=\"ai7-procedure/full-review\"]')",'procedure-library');
   check(await page.evaluate(`(()=>{const root=document.querySelector('[data-procedure-id="ai7-procedure/full-review"]');const n=[...root.querySelectorAll('button')].find(n=>n.textContent.startsWith('运行此工序'));if(!n||n.disabled)return false;n.click();return true})()`),'full-review-choose');
   await ready(page,"document.querySelector('.procedure-book-chooser select[data-procedure-field=book]')",'procedure-book-chooser');

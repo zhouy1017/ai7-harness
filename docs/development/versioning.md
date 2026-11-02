@@ -23,7 +23,7 @@ Wave 23 targets **0.5.0 Beta** under [#1279](https://github.com/zhouy1017/ai7-ha
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.5.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**106** at this head) and service protocol (**196**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.5.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**107** at this head) and service protocol (**196**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
