@@ -532,11 +532,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // The route new Tasks use (Issues #811, #1225): one of the Model Service routes.
     case 'selectFastRoleModel':
+    case 'selectMainRoleModel':
+    case 'selectBothRoleModels':
     case 'testModelServiceConnection': {
       const input = requireInput(value.input, ['route', 'modelId'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'refreshModelServiceModels':
     case 'selectModelServiceRoute': {
       const input = requireInput(value.input, ['route'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route)) throw new ProtocolError(tentativeId);

@@ -10,16 +10,8 @@ import {
 } from '../shared/protocol.js';
 import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
 
-/**
- * 设置 › 模型服务's one flow for the Main Editorial Role and the Fast Interaction Role together (ADR 0094 §1; Issue #1215):
- * a channel, its protected credential and connection test, then a model the channel declares. A model is offered only when
- * it is eligible for both roles and the channel's credential is ready; every other declared model is listed with its
- * disposition by name and offers nothing to choose. On a channel whose text rests on vendor documentation alone (OpenAI, OpenCode
- * Zen, Claude 官方, Gemini 官方; Issue #1225) a model is chosen only after its own passed connection test on the saved credential.
- * Choosing changes configuration only: the Fast role through its existing model choice, then the Main role through the existing
- * route choice. The per-role cards below stay the advanced settings.
- */
-export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'selectFastRoleModel' | 'testModelServiceConnection'>;
+/** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
+export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
 
 export interface ModelServiceFlowOptions {
   readonly api: ModelServiceFlowApi;
@@ -91,13 +83,9 @@ export function currentModelServiceChoice(projection: ModelServiceSettingsProjec
   return { route: main.providerId, modelId: main.modelId };
 }
 
-/**
- * Both roles onto one choice: the Fast role's model on the channel, which makes it the channel's model, then the Main role's route
- * onto that model — so a tested model is the one the Main role's test rule reads (Issue #1225); the settings that answer the last.
- */
-export async function useForBothRoles(api: Pick<RendererApi, 'saveModelServiceCredential' | 'selectFastRoleModel'>, choice: Pick<ModelServiceChoice, 'route' | 'modelId'>): Promise<ModelServiceSettingsProjection> {
-  await api.selectFastRoleModel({ route: choice.route, modelId: choice.modelId });
-  return api.saveModelServiceCredential({ route: choice.route, select: true });
+/** Persist both role bindings atomically, without changing credentials or requiring a connection test. */
+export function useForBothRoles(api: Pick<RendererApi, 'selectBothRoleModels'>, choice: Pick<ModelServiceChoice, 'route' | 'modelId'>): Promise<ModelServiceSettingsProjection> {
+  return api.selectBothRoleModels({ route: choice.route, modelId: choice.modelId });
 }
 
 /** The id of a route's 连接名称 field in its advanced card (the official route keeps the ids S55a gave it). */
@@ -121,7 +109,7 @@ function initialChannel(projection: ModelServiceSettingsProjection, chosen: Mode
 function credentialStep(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection): HTMLElement {
   const step = el('div', 'model-service-flow-step');
   step.dataset['flowStep'] = 'credential';
-  step.append(el('h4', undefined, '2. 凭据与连接测试'));
+  step.append(el('h4', undefined, '2. 凭据'));
   const option = channel.route === null ? undefined : projection.routeChoice.routes.find((candidate) => candidate.route === channel.route);
   if (option === undefined) {
     step.append(el('p', 'field-note', '此渠道当前没有可选的模型，因此不提供凭据保存；不会向它发送任何内容。'));
@@ -148,7 +136,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const offered = channel.models.filter(bothEligible);
   const current = currentModelServiceChoice(projection);
   const group = el('fieldset', 'model-service-flow-models');
-  group.append(el('legend', undefined, '主编辑与快速交互共用的模型'));
+  group.append(el('legend', undefined, '选择模型，再指定使用角色'));
   let checked: ModelServiceChannelModelProjection | null = null;
   const feedback = el('div', 'model-service-flow-feedback');
   const test = el('button', 'secondary', '测试连接');
@@ -157,9 +145,16 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
   use.type = 'button';
   use.dataset['action'] = 'use-model-for-both-roles';
+  const customLabel = el('label', undefined, '手动输入模型 ID');
+  const custom = el('input');
+  custom.type = 'text'; custom.maxLength = 128; custom.dataset['customModelId'] = 'true';
+  custom.disabled = !ready;
+  customLabel.append(custom);
+  const roleButtons: HTMLButtonElement[] = [];
   const paint = (): void => {
     test.disabled = !ready || checked === null;
     use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId);
+    for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
     feedback.replaceChildren(...(checked === null ? [] : [
@@ -182,6 +177,33 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     group.append(label);
   }
   if (offered.length === 0) group.append(el('p', 'field-note', '此渠道没有两个角色都可选的模型。'));
+  custom.addEventListener('input', () => {
+    const modelId = custom.value.trim();
+    checked = modelId.length === 0 ? null : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
+    for (const radio of Array.from(group.querySelectorAll('input'))) radio.checked = false;
+    paint();
+  });
+  for (const [role, label, select] of [
+    ['main', '用于主编辑角色', options.api.selectMainRoleModel],
+    ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
+  ] as const) {
+    const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
+    button.addEventListener('click', () => void (async () => {
+      if (checked === null || channel.route === null) return;
+      button.disabled = true;
+      try { options.render(await select({ route: channel.route, modelId: checked.modelId })); }
+      catch (error) { paint(); options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
+    })());
+    roleButtons.push(button);
+  }
+  const refresh = el('button', 'secondary', '刷新模型列表'); refresh.type = 'button'; refresh.disabled = !ready;
+  refresh.dataset['action'] = 'refresh-model-list';
+  refresh.addEventListener('click', () => void (async () => {
+    if (channel.route === null) return;
+    refresh.disabled = true;
+    try { options.render(await options.api.refreshModelServiceModels({ route: channel.route })); }
+    catch (error) { refresh.disabled = !ready; options.setStatus(options.errorMessage(error, '无法刷新模型列表。'), 'error'); }
+  })());
   test.addEventListener('click', () => void (async () => {
     if (checked === null || channel.route === null) return;
     test.disabled = true;
@@ -199,8 +221,8 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   })());
   paint();
   const actions = el('div', 'button-row');
-  actions.append(test, use);
-  step.append(group, feedback, el('p', 'field-note', MODEL_CONNECTION_TEST_NOTE), actions);
+  actions.append(refresh, test, ...roleButtons, use);
+  step.append(group, customLabel, feedback, el('p', 'field-note', MODEL_CONNECTION_TEST_NOTE), actions);
   const others = channel.models.filter((model) => !bothEligible(model));
   if (others.length > 0) {
     const details = el('details', 'model-service-flow-ineligible');
@@ -222,7 +244,7 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
   const section = el('section', 'review-section model-service-flow');
   section.dataset['modelServiceFlow'] = 'true';
   section.setAttribute('aria-label', '选择模型');
-  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色使用同一渠道与模型。${MODEL_SERVICE_ROUTE_EFFECT_LABEL}选择模型不授予读取来源、处理、应用或发布的权限。`));
+  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型。${MODEL_SERVICE_ROUTE_EFFECT_LABEL}选择模型不授予读取来源、处理、应用或发布的权限。`));
   const channels = el('fieldset', 'model-service-flow-channels');
   channels.append(el('legend', undefined, '1. 渠道'));
   const steps = el('div');

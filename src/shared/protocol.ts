@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 191 as const;
+export const SERVICE_PROTOCOL_VERSION = 192 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -580,6 +580,9 @@ export const IPC_CHANNELS = {
   revealProductDataLocation: 'ai7:j12:reveal-product-data-location',
   getModelServiceSettings: 'ai7:j12:get-model-service-settings',
   selectFastRoleModel: 'ai7:model-service:select-fast-model',
+  selectMainRoleModel: 'ai7:model-service:select-main-model',
+  selectBothRoleModels: 'ai7:model-service:select-both-models',
+  refreshModelServiceModels: 'ai7:model-service:refresh-models',
   testModelServiceConnection: 'ai7:model-service:test-connection',
   selectSearchBackend: 'ai7:j12:select-search-backend',
   probeSearchBackend: 'ai7:j12:probe-search-backend',
@@ -2376,6 +2379,7 @@ export interface ModelServiceConnectionProjection {
   roleId: 'main-editorial';
   connectionName: string;
   binding: ModelServiceBindingProjection;
+  fastBinding?: ModelServiceBindingProjection;
   credentialReference: string;
   credentialOperationState: ModelCredentialOperationState;
   createdAt: string;
@@ -12750,6 +12754,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     output: HistoricalRevisionProjection;
   };
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
+  selectMainRoleModel: { input: FastModelSelectionInput; output: void };
+  selectBothRoleModels: { input: FastModelSelectionInput; output: void };
+  refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: void };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
     input: Record<string, never>;
@@ -13285,6 +13292,9 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   getProductDataLocation(): Promise<ProductDataLocationProjection>;
   revealProductDataLocation(): Promise<ProductDataLocationRevealProjection>;
   selectFastRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectMainRoleModel(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  selectBothRoleModels(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
+  refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
   saveModelServiceProxy(input: ModelServiceProxySetting): Promise<ModelServiceSettingsProjection>;

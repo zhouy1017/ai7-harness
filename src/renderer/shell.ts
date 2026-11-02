@@ -311,7 +311,7 @@ export interface MountShellOptions {
 }
 
 export interface CompactModelSelectorOptions {
-  readonly api: Pick<RendererApi, 'getModelServiceSettings' | 'saveModelServiceCredential' | 'selectFastRoleModel'>;
+  readonly api: Pick<RendererApi, 'getModelServiceSettings' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels'>;
   /** 设置 › 模型服务, through the window's own way off the screen on show. */
   openModelService(): void;
 }
@@ -327,11 +327,7 @@ export function compactModelSelectionLabel(projection: ModelServiceSettingsProje
   return `主编辑 · ${mainInUse ? words('main-editorial') : '需设置'} · 快速交互 · ${words('fast-interaction')}`;
 }
 
-/**
- * The context header's compact channel / model selector (ADR 0094 §1; Issue #1215): on a Book screen, a disclosure naming
- * what new Tasks use, opening onto the choices both roles can take now — the same one choice as 设置 › 模型服务's flow — and
- * the way to the full settings. It reads the settings each time a Book screen shows; elsewhere it is hidden and empty.
- */
+/** The shared header offers every configured channel's models for either role or both. */
 export function compactModelSelector(options: CompactModelSelectorOptions & Pick<MountShellOptions, 'setStatus' | 'errorMessage'>): {
   readonly element: HTMLDetailsElement; follow(onBook: boolean): void; interrupt(): void;
 } {
@@ -348,7 +344,7 @@ export function compactModelSelector(options: CompactModelSelectorOptions & Pick
     const current = currentModelServiceChoice(projection);
     const choices = modelServiceChoices(projection);
     const group = el('fieldset');
-    group.append(el('legend', undefined, '主编辑与快速交互共用的模型'));
+    group.append(el('legend', undefined, '选择模型，再指定使用角色'));
     let chosen = choices.find((choice) => choice.route === current?.route && choice.modelId === current.modelId) ?? null;
     const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
     use.type = 'button';
@@ -370,6 +366,7 @@ export function compactModelSelector(options: CompactModelSelectorOptions & Pick
       use.disabled = true;
       try {
         paint(await useForBothRoles(options.api, chosen));
+        root.open = false;
         options.setStatus(`之后开始的任务使用 ${chosen.channelLabel} / ${chosen.modelLabel}；已在进行的任务不受影响`, 'success');
       } catch (error) { refreshUse(); options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
     })());
@@ -379,9 +376,30 @@ export function compactModelSelector(options: CompactModelSelectorOptions & Pick
     open.disabled = interrupted;
     open.addEventListener('click', () => { root.open = false; options.openModelService(); });
     const actions = el('div', 'button-row');
+    for (const [role, label, select] of [
+      ['main', '用于主编辑角色', options.api.selectMainRoleModel],
+      ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
+    ] as const) {
+      const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
+      button.disabled = interrupted || chosen === null;
+      group.addEventListener('change', () => { button.disabled = interrupted || chosen === null; });
+      button.addEventListener('click', () => void (async () => {
+        if (chosen === null) return;
+        button.disabled = true;
+        try { paint(await select({ route: chosen.route, modelId: chosen.modelId })); root.open = false; }
+        catch (error) { button.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
+      })());
+      actions.append(button);
+    }
     actions.append(use, open);
     body.replaceChildren(group, el('p', 'field-note', MODEL_SERVICE_ROUTE_EFFECT_LABEL), actions);
   };
+  const outside = (event: PointerEvent): void => {
+    if (root.open && !root.contains(event.target as Node)) root.open = false;
+  };
+  const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape') root.open = false; };
+  document.body.addEventListener('pointerdown', outside);
+  document.body.addEventListener('keydown', escape);
   return {
     element: root,
     follow: (onBook) => {
@@ -397,6 +415,9 @@ export function compactModelSelector(options: CompactModelSelectorOptions & Pick
     },
     interrupt: () => {
       interrupted = true;
+      ++reading;
+      document.body.removeEventListener('pointerdown', outside);
+      document.body.removeEventListener('keydown', escape);
       root.open = false;
       body.replaceChildren();
     },
@@ -813,7 +834,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       paintActive();
       paintBooks(preferences.current);
       if (place !== null) visit(place);
-      modelSelector?.follow(place !== null);
+      modelSelector?.follow(true);
     },
     markSection: (section) => {
       if (book === null) return;

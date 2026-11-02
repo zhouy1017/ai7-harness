@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
 import {
@@ -151,7 +151,7 @@ export function productionBindingRefusal(model: ProviderModelProfile, role: 'mai
 }
 
 /** Catalogue choices inherit protocol capabilities and are eligible on admitted channels, independent of model evidence. */
-export function modelServiceChannels(): ModelServiceChannelProjection[] {
+export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) => readonly import('../shared/protocol.js').DiscoveredModel[]): ModelServiceChannelProjection[] {
   const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
     const refused = productionBindingRefusal(model, role);
     if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'channel-not-admitted-by-selected-policy'>;
@@ -160,18 +160,25 @@ export function modelServiceChannels(): ModelServiceChannelProjection[] {
   };
   return MODEL_SERVICE_CHANNELS.map((channelId) => {
     const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
+    const entries = catalogue?.(channelId) ?? GENERATED_MODEL_PROFILES
+      .filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`))
+      .map((model) => ({ modelId: model.model, modelLabel: model.displayName }));
     return {
       channelId,
       channelLabel: route === null ? CONFIGURED_PROVIDER_LABELS[channelId] : MODEL_SERVICE_ROUTE_BINDINGS[route].providerLabel,
       route,
-      models: GENERATED_MODEL_PROFILES.filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`)).map((declared) => modelProfileFor(declared.route, declared.model)!).map((model) => ({
-        modelId: model.model,
-        modelLabel: model.displayName,
-        family: model.capabilities.requestShape,
-        capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
-        main: disposition(model, 'main'),
-        fast: disposition(model, 'fast'),
-      })).sort((a, b) => Number(b.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId) - Number(a.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId)),
+      models: entries.map((entry) => {
+        const runtime = modelServiceRuntimeBinding(channelId, entry.modelId, 'main');
+        const model = modelProfileFor(runtime?.route ?? channelId, entry.modelId)!;
+        return {
+          modelId: model.model,
+          modelLabel: entry.modelLabel,
+          family: model.capabilities.requestShape,
+          capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
+          main: disposition(model, 'main'),
+          fast: disposition(model, 'fast'),
+        };
+      }).sort((a, b) => Number(b.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId) - Number(a.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId)),
     };
   });
 }

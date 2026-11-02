@@ -162,7 +162,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       models.dataset['fastModelChoice'] = option.route;
       for (const model of option.models ?? [option.binding]) {
         const item = element('option', undefined, model.modelLabel);
-        item.value = model.modelId; item.selected = model.modelId === (option.connection?.connectionTest?.modelId ?? option.binding.modelId);
+        item.value = model.modelId; item.selected = model.modelId === (option.connection?.fastBinding?.modelId ?? option.binding.modelId);
         models.append(item);
       }
       const testState = option.connection.connectionTest;
