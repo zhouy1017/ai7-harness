@@ -136,7 +136,7 @@ import type { PublicSampleBookSourceDigest } from './public-samplebooks.js';
 import { USAGE_EMPTY_LABEL } from './usage-labels.js';
 export { USAGE_EMPTY_LABEL } from './usage-labels.js';
 
-export const SERVICE_PROTOCOL_VERSION = 195 as const;
+export const SERVICE_PROTOCOL_VERSION = 196 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 export interface BookFindingProjection {
@@ -417,6 +417,7 @@ export const IPC_CHANNELS = {
   commitManuscriptReimport: 'ai7:j01:commit-manuscript-reimport',
   acknowledgeImportCompletion: 'ai7:j01:acknowledge-import-completion',
   getManuscriptWindow: 'ai7:j01:get-manuscript-window',
+  readManuscriptImageChunk: 'ai7:manuscript:read-image-chunk',
   flushJournalEdit: 'ai7:j01:flush-journal-edit',
   // J-02 only (Issue #951, T0-1): the preload exposes it as a J-02 global, never as a `window.ai7` member.
   setEditJournalFault: 'ai7:j02:set-edit-journal-fault',
@@ -12496,6 +12497,10 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     output: ManuscriptWindowProjection;
   };
   flushJournalEdit: { input: JournalEditInput; output: JournalAcknowledgement };
+  readManuscriptImageChunk: {
+    input: { manuscriptId: string; branchId: string; sourceVersionId: string; ordinal: number; offset: number };
+    output: { base64: string; totalBytes: number; mime: string };
+  };
   /** Test-only (Issue #951, T0-1): refused unless the launch armed it; see `EDIT_JOURNAL_FAULT_CONTROL_ARGUMENT`. */
   setEditJournalFault: { input: { mode: EditJournalFaultMode }; output: EditJournalFaultProjection };
   /**
@@ -13109,6 +13114,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   commitManuscriptReimport(input: CommitManuscriptReimportRendererInput): Promise<ServiceWireOutput<ServiceJobProjection>>;
   acknowledgeImportCompletion(input: ServiceOperationMap['acknowledgeImportCompletion']['input']): Promise<{ state: 'acknowledged' }>;
   getManuscriptWindow(input: ServiceOperationMap['getManuscriptWindow']['input']): Promise<ManuscriptWindowProjection>;
+  readManuscriptImageChunk(input: ServiceOperationMap['readManuscriptImageChunk']['input']): Promise<ServiceOperationMap['readManuscriptImageChunk']['output']>;
   flushJournalEdit(input: JournalEditInput): Promise<JournalAcknowledgement>;
   createEditorialMark(input: CreateEditorialMarkInput): Promise<EditorialMarkCommandProjection>;
   getEditorialMarkCard(input: ServiceOperationMap['getEditorialMarkCard']['input']): Promise<EditorialMarkCardProjection>;

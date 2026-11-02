@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx } from './composed-docx.mjs';
+import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
 import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
@@ -111,13 +111,13 @@ const NOTE = Object.freeze({ block: 15, from: 2, to: 8, body: '备注：导出�
 const EXPORT_FILE = '发稿旅程甲.docx';
 const CANCELLED_FILE = '取消的导出.docx';
 // The review rows of the current revision with the default options: every class present, and the 备注 left out.
-const EXPORT_ROWS = Object.freeze(['inline-styles:preserved:1', 'annotations:preserved:1', 'change-suggestions:preserved:1', 'editor-notes:excluded:1', 'sections:preserved:1', 'headers-footers:preserved:1']);
+const EXPORT_ROWS = Object.freeze(['inline-styles:preserved:1', 'annotations:preserved:1', 'change-suggestions:preserved:1', 'editor-notes:excluded:1', 'tables:preserved:1', 'images-captions:preserved:1', 'sections:preserved:1', 'headers-footers:preserved:1']);
 // The service's and the card's own words (`src/service/docx-export.ts`, `src/service/manuscript-export.ts`,
 // `src/renderer/manuscript-export-labels.ts`), pinned there by the unit suites.
 const EXPORT_LOCAL_LINE = '导出只写到本机你选择的位置；AI7 不会发送、上传或发布这个文件。';
 // Three paragraphs are written anew — the edited one and the two that carry the file's marks — and the rest restored.
 const EXPORT_RESTORATION_LINE = '未改过、也没有带出标记的 27 段从原文件恢复；其余 3 段按稿件文字重新写出。';
-const EXPORT_ABSENT_LINE = '未检测到：脚注与尾注、表格、图片与图注、文本框、域（目录等）、原文件中的修订。';
+const EXPORT_ABSENT_LINE = '未检测到：脚注与尾注、文本框、域（目录等）、原文件中的修订。';
 const EXPORT_NOTE_EXCLUDED = '备注默认不随导出（稿件上 1 条）；勾选「含备注」后作为批注写出，作者为「备注」。';
 const EXPORT_DESTINATION_UNCHOSEN = '还没有选择保存位置。所选位置已有同名文件时，由系统的保存对话框询问是否替换。';
 const EXPORTED_LABEL = '已导出到所选位置';
@@ -125,7 +125,7 @@ const EXPORTED_LABEL = '已导出到所选位置';
 const PDF_FILE = '发稿旅程甲.pdf';
 const MARKDOWN_FILE = '发稿旅程甲.md';
 // The review of either: every class the file holds beyond the words left behind, the marks kept only as words.
-const TEXT_EXPORT_ROWS = Object.freeze(['inline-styles:unavailable:1', 'annotations:degraded:1', 'change-suggestions:degraded:1', 'editor-notes:excluded:1', 'sections:unavailable:1', 'headers-footers:unavailable:1']);
+const TEXT_EXPORT_ROWS = Object.freeze(['inline-styles:unavailable:1', 'annotations:degraded:1', 'change-suggestions:degraded:1', 'editor-notes:excluded:1', 'tables:unavailable:1', 'images-captions:unavailable:1', 'sections:unavailable:1', 'headers-footers:unavailable:1']);
 // The service's and the card's words for each (`src/service/manuscript-export.ts`, `src/renderer/manuscript-export-labels.ts`),
 // pinned there by the service and unit suites.
 const TEXT_EXPORT_WORDS = Object.freeze({
@@ -142,7 +142,7 @@ const TEXT_EXPORT_WORDS = Object.freeze({
 });
 const EXPORT_CLOSED = '已关闭导出，没有写入任何文件。';
 // The written package: the original's parts, the comments the export writes, and the package relationships it adds.
-const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/commentsExtended.xml', 'word/document.xml', 'word/header1.xml']);
+const EXPORTED_PARTS = Object.freeze(['[Content_Types].xml', '_rels/.rels', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/commentsExtended.xml', 'word/document.xml', 'word/header1.xml', 'word/media/source-preview.png']);
 const ACTUALS_PROMPT = '录入定价与首印 · 尚未录入';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 // 导出's four members (Issue #413): the only renderer members named like an export, and none publishes or sends.
@@ -451,7 +451,9 @@ const MARK_HELPERS = `(() => {
   const blocks = () => Array.from(editor()?.querySelectorAll(':scope > [data-block-id]') ?? []);
   const nth = (position) => blocks()[position - 1] ?? null;
   const durable = (root) => {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    // Source previews surround the paragraph's model text; their labels/table cells are not editable manuscript text.
+    const content = root.querySelector('.manuscript-table-source-text, .manuscript-image-paragraph') ?? root;
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => node.parentElement?.closest('[data-mark-preview]') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
     });
     const nodes = [];
@@ -786,6 +788,12 @@ async function acknowledgedEdit(renderer, text, name) {
   await waitFor(renderer, `(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return (save instanceof HTMLButtonElement && !save.disabled) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
   await renderer.evaluate(`(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); if (save instanceof HTMLButtonElement && !save.disabled) save.click(); return true; })()`);
   await waitFor(renderer, `(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return window.__j07.journal() > ${before} && save instanceof HTMLButtonElement && save.disabled && document.documentElement.dataset.ai7CloseRisk !== 'true' && window.__j07.tone() === 'success'; })()`, `${name}-acknowledged`, 120_000);
+  // Real editor reconciliation must retain the loaded preview while paragraph edits still reach the journal.
+  await waitFor(renderer, `(async()=>{const image=document.querySelector('.manuscript-source-image img');
+    if(!image||image.naturalWidth===0)return false;const source=image.src;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    return image.isConnected && image===document.querySelector('.manuscript-source-image img') && image.src===source && image.naturalWidth>0;
+  })()`, `${name}-source-image-stable`);
 }
 
 async function openDesignateForm(renderer, name) {
@@ -944,6 +952,7 @@ async function main() {
     await mkdir(inputs);
     const manuscript = resolve(inputs, 'publication.docx');
     await composeExportAdmittedDocx(manuscript, { ...EXCERPT, ...EXPORT_INPUT });
+    await addReadOnlySourceObjects(manuscript);
     const draftPath = resolve(inputs, DRAFT_FILE);
     await composeExportAdmittedDocx(draftPath, { ...DRAFT, ...DRAFT_MARKS });
     // Issue #413: the folder the Save dialog's launch control names, beside the data and outside it.
@@ -1060,6 +1069,7 @@ async function main() {
       const restoration = `按「${mode === 'suggestions' ? '转为 AI7 修订建议' : '直接并入正文（作为定稿基线）'}」及之后的稿件文字导出；${expected.length - regenerated} 段恢复可保留的原文件格式，${regenerated} 段重新生成，具体损失见保真审阅。`;
       const rows = ['inline-styles:preserved:1', 'annotations:preserved:1',
         ...(mode === 'suggestions' ? ['change-suggestions:preserved:1'] : []), 'editor-notes:excluded:0',
+        'tables:preserved:1', 'images-captions:preserved:1',
         'sections:preserved:1', 'headers-footers:preserved:1', 'file-revisions:degraded:2'];
       const originalMarkerDetail = `正文来源的 2 处原始修订记号不直接恢复；文字按导入时确认的${mode === 'suggestions' ? '拒绝修订' : '接受修订'}阅读对应，之后的编辑按当前稿件写出。待处理修改建议按本次导出选项处理。`;
       at('export-fidelity-table');
@@ -1402,6 +1412,8 @@ async function main() {
     // The file's own 批注 and 修改建议 stand where the import put them, open and under the author's name; the
     // editor adds one 备注 on a paragraph no stage edits.
     await openManuscript(renderer, 'note');
+    await waitFor(renderer, `document.querySelector('.manuscript-source-table td') && document.querySelector('.manuscript-source-image img')?.naturalWidth > 0`, 'readonly-table-and-image-visible');
+    await assertRenderer(renderer, `document.querySelector('[data-block-kind="table"]')?.getAttribute('contenteditable') === 'false' && document.querySelector('.manuscript-source-label')?.textContent.includes('只读 · 导出时从原文件完整恢复')`, 'readonly-table-not-editable');
     await assertRenderer(renderer, MARK_HELPERS, 'mark-helpers');
     await assertRenderer(renderer, `(() => { const head = window.__j07m.text(${NOTE.block})?.slice(0, ${NOTE.to}) ?? ''; return window.__j07m.blocks().length === ${EXCERPT.blocks} && head.length === ${NOTE.to} && Array.from(new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(head)).length === ${NOTE.to}; })()`, 'note-paragraph-markable');
     await assertRenderer(renderer, `(() => {
@@ -1456,6 +1468,11 @@ async function main() {
     const expectedParagraphs = excerpt.map((text, index) => digestOf(index === 0 ? `${text}${FIRST_EDIT}${SECOND_EDIT}` : text));
     const original = await readExportedDocx(manuscript);
     const exported = await readExportedDocx(exportPath);
+    const inputParts = unzipSync(await readFile(manuscript));
+    const outputParts = unzipSync(written);
+    requireJourney(digestOf(inputParts['word/media/source-preview.png']) === digestOf(outputParts['word/media/source-preview.png']), 'export-readonly-image-bytes');
+    const tableXml = (bytes) => new TextDecoder().decode(bytes).match(/<w:tbl>[\s\S]*?<\/w:tbl>/)?.[0];
+    requireJourney(tableXml(inputParts['word/document.xml']) === tableXml(outputParts['word/document.xml']), 'export-readonly-table-xml');
     requireJourney(JSON.stringify(exported.paragraphs.map((paragraph) => paragraph.digest)) === JSON.stringify(expectedParagraphs), 'export-paragraphs-as-the-manuscript',
       { paragraphs: exported.paragraphs.length, differing: exported.paragraphs.map((paragraph, index) => paragraph.digest === expectedParagraphs[index] ? 0 : index + 1).filter(Boolean) });
     requireJourney(JSON.stringify(exported.paragraphs.map((paragraph, index) => paragraph.bold ? index + 1 : 0).filter(Boolean)) === JSON.stringify([EXPORT_INPUT.styledRun.block]), 'export-keeps-the-styled-run');

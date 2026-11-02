@@ -7,6 +7,7 @@
  */
 export type JournalStructuralEdit =
   | { kind: 'split'; newBlockId: string }
+  | { kind: 'style'; blockKind: 'paragraph' | 'heading' | 'title'; level: number | null }
   | { kind: 'merge'; mergedBlockId: string; mergedBlockDigest: string };
 
 export interface JournalEditInput {

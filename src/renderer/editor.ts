@@ -7,6 +7,7 @@ import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-spa
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
+import { observeSourceImages, sourceBlockDom, sourceBlockView, sourceNodeKind } from './editor-source.js';
 import {
   bufferAdmits,
   bufferReachedLimit,
@@ -45,6 +46,8 @@ interface EditorUiState {
 }
 
 export interface BoundedEditor {
+  setBlockStyle(kind: 'paragraph' | 'heading' | 'title', level: number | null): void;
+  currentBlockStyle(): { kind: 'paragraph' | 'heading' | 'title'; level: number | null } | null;
   focus(): void;
   flush(): Promise<void>;
   captureContinuity(): EditorContinuity;
@@ -113,6 +116,7 @@ interface MountOptions {
   platform: RendererApi['platform'];
   initialWindow: ManuscriptWindowProjection;
   flushJournalEdit: RendererApi['flushJournalEdit'];
+  readManuscriptImageChunk?: RendererApi['readManuscriptImageChunk'];
   onStateChange(state: EditorUiState): void;
   onAnnouncement(message: string, tone: 'busy' | 'success' | 'error'): void;
   onCommand(command: 'search' | 'replace' | 'undo' | 'redo' | 'previous-window' | 'next-window'): void;
@@ -139,6 +143,10 @@ function graphemes(text: string): string[] {
 }
 
 function blockDom(tag: string, node: ProseMirrorNode): DOMOutputSpec {
+  const links = node.attrs['noteLinks'] as ManuscriptBlockProjection['noteLinks'];
+  if (links?.length) return [tag, { 'data-block-id': String(node.attrs['blockId']) }, ['span', {}, 0],
+    ...links.map((link): DOMOutputSpec => ['sup', { contenteditable: 'false', 'data-note-reference': link.blockId, role: 'link', tabindex: '0',
+      'aria-label': `跳转到${link.part === 'footnote' ? '脚注' : '尾注'} ${link.ordinal}` }, String(link.ordinal)])];
   return [tag, { 'data-block-id': String(node.attrs['blockId']) }, 0];
 }
 
@@ -147,6 +155,9 @@ const blockAttrs = {
   position: { validate: 'number' },
   digest: { validate: 'string' },
   level: { default: null, validate: 'number|null' },
+  noteLinks: { default: null },
+  sourceDisplay: { default: null },
+  sourceKind: { default: null },
 };
 
 /** What a note block's label says (Issue #1204): 「脚注 n · 引自第 X 段」, or 「注释」 where the window carries no note record. */
@@ -163,7 +174,7 @@ export function noteLabel(note: ManuscriptBlockProjection['note']): string {
 function noteDom(node: ProseMirrorNode): DOMOutputSpec {
   const reference = node.attrs['noteReference'] as string | null;
   return ['div', { class: 'manuscript-note', 'data-block-kind': 'note' },
-    ['span', { class: 'manuscript-note-label', contenteditable: 'false', ...(reference === null ? {} : { 'data-note-reference': reference, role: 'link', tabindex: '-1' }) },
+    ['span', { class: 'manuscript-note-label', contenteditable: 'false', ...(reference === null ? {} : { 'data-note-reference': reference, role: 'link', tabindex: '0' }) },
       String(node.attrs['noteLabel'])],
     ['p', { 'data-block-id': String(node.attrs['blockId']) }, 0]];
 }
@@ -202,6 +213,8 @@ const ai7Schema = new Schema({
       defining: true,
       toDOM: noteDom,
     },
+    table: { group: 'block', content: 'text*', marks: '', atom: true, isolating: true, attrs: blockAttrs, toDOM: sourceBlockDom },
+    image: { group: 'block', content: 'text*', marks: '', isolating: true, attrs: blockAttrs, toDOM: sourceBlockDom },
     text: { group: 'inline' },
   },
   marks: {},
@@ -285,12 +298,15 @@ function createDocument(blocks: ReadonlyArray<ManuscriptBlockProjection>): Prose
     null,
     blocks.map((block) =>
       ai7Schema.node(
-        block.kind,
+        sourceNodeKind(block),
         {
           blockId: block.blockId,
           position: block.position,
           digest: block.digest,
           level: block.level,
+          sourceDisplay: block.sourceDisplay ?? null,
+          sourceKind: block.kind,
+          noteLinks: block.noteLinks ?? null,
           ...(block.kind === 'note' ? { noteLabel: noteLabel(block.note), noteReference: block.note?.referenceBlockId ?? null } : {}),
         },
         block.text.length > 0 ? ai7Schema.text(block.text) : undefined,
@@ -395,8 +411,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   let saving = false;
   let retryRequired = false;
   let retryPrepared: { input: JournalEditInput } | undefined;
-  // The Enter split or Backspace merge shown and not yet acknowledged (Issue #1175): one at a time.
-  let structure: PendingStructure | undefined;
+  // Optimistic structures in keystroke order. Each records the text it saw, so later typing cannot overtake its journal write.
+  const structures: PendingStructure[] = [];
   let flushPromise: Promise<void> | undefined;
   let autoFlushTimer: number | undefined;
   let compositionWaiters: Array<() => void> = [];
@@ -466,7 +482,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       if (node.textContent !== baselines.get(blockId)?.text) changed.push(blockId);
     });
     // A split or merge not yet acknowledged is unacknowledged work even where no text differs: an empty paragraph merged away.
-    if (structure !== undefined && !changed.includes(structure.blockId)) changed.unshift(structure.blockId);
+    if (structures.length > 0 && !changed.includes(structures[0]!.blockId)) changed.unshift(structures[0]!.blockId);
     return changed;
   };
 
@@ -479,6 +495,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     candidate.forEach((node, _offset, index) => {
       const previous = before.child(index);
       if (node.attrs['blockId'] !== previous.attrs['blockId'] || node.type !== previous.type || node.attrs['level'] !== previous.attrs['level'] ||
+        (node.type.name === 'table' && node.textContent !== previous.textContent) ||
         node.textContent.length > MAX_BLOCK_CODE_UNITS || graphemes(node.textContent).length > MAX_BLOCK_GRAPHEMES) valid = false;
     });
     return valid;
@@ -488,9 +505,9 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     if (!transaction.docChanged) return true;
     if (transaction.getMeta(STRUCTURE_META) === true) return isEditable();
     const candidate = transaction.doc;
-    if (structure !== undefined ? !pendingStructureAdmits(transaction) : candidate.childCount !== baselines.size) return false;
+    if (structures.length > 0 ? !pendingStructureAdmits(transaction) : candidate.childCount !== baselines.size) return false;
     let valid = true;
-    if (structure === undefined) candidate.forEach((node, _offset, index) => {
+    if (structures.length === 0) candidate.forEach((node, _offset, index) => {
       const blockId = String(node.attrs['blockId']);
       const baseline = baselines.get(blockId);
       const expected = windowProjection.blocks[index];
@@ -498,7 +515,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         !baseline ||
         !expected ||
         blockId !== expected.blockId ||
-        node.type.name !== baseline.kind ||
+        node.type.name !== sourceNodeKind(expected) ||
+        (expected.sourceDisplay?.table !== null && expected.sourceDisplay?.table !== undefined && node.textContent !== baseline.text) ||
         Number(node.attrs['position']) !== baseline.position ||
         node.attrs['level'] !== baseline.level ||
         String(node.attrs['digest']) !== baseline.digest ||
@@ -774,8 +792,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   /** The next write: a pending split or merge first — its paragraphs' texts as the key found them, then its own command. */
   const nextPrepared = (blockId: string): { input: JournalEditInput } => {
-    if (structure !== undefined) {
-      const pending = structure;
+    if (structures.length > 0) {
+      const pending = structures[0]!;
       const owed: Array<[string, string | undefined]> = [[pending.blockId, pending.preText]];
       if (pending.kind === 'merge') owed.push([pending.mergedBlockId, pending.mergedPreText]);
       if (pending.held !== null) owed.push([pending.held.blockId, pending.held.text]);
@@ -813,13 +831,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     let index = 0;
     state.doc.forEach((node, _offset, at) => { if (node.attrs['blockId'] === point.blockId) index = at; });
     const previous = index > 0 ? state.doc.child(index - 1) : undefined;
-    if (key === 'Backspace' && (point.grapheme !== 0 || previous?.type.name !== 'paragraph' || found.node.type.name !== 'paragraph')) return false;
-    if (found.node.type.name !== 'paragraph') {
-      options.onAnnouncement(found.node.type.name === 'note' ? '注释不能分段；分段与合并只用于正文段落。' : '标题不能在这里分段；分段与合并只用于正文段落。', 'error');
-      return true;
-    }
-    if (structure !== undefined) {
-      options.onAnnouncement('上一处分段或合并正在写入修订日志，请稍候。', 'busy');
+    const kind = found.node.type.name === 'image' ? String(found.node.attrs['sourceKind']) : found.node.type.name;
+    const previousKind = previous?.type.name === 'image' ? String(previous.attrs['sourceKind']) : previous?.type.name;
+    if (key === 'Backspace' && (point.grapheme !== 0 || previousKind !== 'paragraph' || kind !== 'paragraph')) return false;
+    const headingEnd = key === 'Enter' && ['heading', 'title'].includes(kind) && point.grapheme === graphemes(found.node.textContent).length;
+    if (kind !== 'paragraph' && !headingEnd) {
+      options.onAnnouncement(kind === 'table' ? '表格为只读内容；导出时从原文件完整恢复。'
+        : kind === 'note' ? '注释不能分段；分段与合并只用于正文段落。' : '在标题末尾按 Enter 可新建正文段落。', 'error');
       return true;
     }
     const position = positionAtPoint(state.doc, point);
@@ -844,10 +862,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       transaction.setSelection(TextSelection.create(transaction.doc, findBlockPosition(transaction.doc, newBlockId)!.position + 1))
         .setMeta(STRUCTURE_META, true).scrollIntoView();
       view.dispatch(transaction);
-      structure = {
+      structures.push({
         kind: 'split', blockId: point.blockId, newBlockId, at: point.grapheme, preText: found.node.textContent,
         windowStartBlockId: blockAt(full && last ? 1 : 0), held,
-      };
+      });
     } else {
       try {
         validateText(previous!.textContent + found.node.textContent);
@@ -858,10 +876,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       const transaction = state.tr.join(found.position);
       transaction.setSelection(TextSelection.create(transaction.doc, found.position - 1)).setMeta(STRUCTURE_META, true).scrollIntoView();
       view.dispatch(transaction);
-      structure = {
+      structures.push({
         kind: 'merge', blockId: String(previous!.attrs['blockId']), mergedBlockId: point.blockId, preText: previous!.textContent,
         mergedPreText: found.node.textContent, windowStartBlockId: blockAt(0), held: null,
-      };
+      });
     }
     announceState();
     void flush();
@@ -905,15 +923,17 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
               ack.window.revisionId === prepared.input.baseRevisionId &&
               ack.window.blocks[0]?.blockId === prepared.input.windowStartBlockId,
           );
-          if (prepared.input.structure !== undefined) structure = undefined;
+          if (prepared.input.structure !== undefined) structures.shift();
           await waitForComposition();
           const continuity = captureRenderedContinuity();
           const localText = new Map<string, string>();
           view.state.doc.forEach((node) => localText.set(String(node.attrs['blockId']), node.textContent));
           windowProjection = ack.window;
-          baselines = baselineMap(windowProjection);
+          // A later queued command may still owe text for a block already pushed beyond this acknowledgement's window.
+          if (structures.length > 0) for (const block of windowProjection.blocks) baselines.set(block.blockId, { ...block });
+          else baselines = baselineMap(windowProjection);
           // A paragraph written to its text ahead of a pending split or merge: the document keeps showing that structure.
-          if (structure === undefined) {
+          if (structures.length === 0) {
             const visibleBlocks = windowProjection.blocks.map((block) => ({ ...block, text: localText.get(block.blockId) ?? block.text }));
             const anchored = windowProjection.blocks.some((block) => block.blockId === continuity.scrollAnchor.blockId)
               ? continuity : { ...continuity, scrollAnchor: { blockId: continuity.head.blockId, offset: 0 } };
@@ -977,6 +997,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
 
   view = new EditorView(options.host, {
     state: makeState(),
+    nodeViews: { table: sourceBlockView, image: sourceBlockView },
     editable: isEditable,
     dispatchTransaction(transaction) {
       const nextState = view.state.apply(transaction);
@@ -988,6 +1009,8 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     },
     handleDOMEvents: {
       keydown(currentView, event) {
+        // Reference links own Enter/Space at the surface; they must not split the last text selection first.
+        if ((event.target as Element | null)?.closest('[data-note-reference]')) return true;
         const modifier =
           options.platform === 'darwin'
             ? event.metaKey && !event.ctrlKey
@@ -1109,7 +1132,29 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     restoreContinuity(makeState(), undefined, windowProjection.focusBlockId, windowProjection.focusGrapheme, false);
   }
 
+  const stopSourceImages = options.readManuscriptImageChunk
+    ? observeSourceImages(view.dom, options.readManuscriptImageChunk, () => windowProjection) : () => {};
+
   return {
+    currentBlockStyle() {
+      const point = pointAtPosition(view.state.doc, view.state.selection.head);
+      const node = findBlock(view.state.doc, point.blockId);
+      if (!node) return null;
+      const kind = node.type.name === 'image' ? String(node.attrs['sourceKind']) : node.type.name;
+      return kind === 'paragraph' || kind === 'heading' || kind === 'title' ? { kind, level: node.attrs['level'] as number | null } : null;
+    },
+    setBlockStyle(kind, level) {
+      if (!isEditable()) return;
+      const point = pointAtPosition(view.state.doc, view.state.selection.head);
+      const found = findBlockPosition(view.state.doc, point.blockId);
+      if (!found || !['paragraph', 'heading', 'title', 'image'].includes(found.node.type.name)) return;
+      view.dispatch(view.state.tr.setNodeMarkup(found.position, ai7Schema.nodes[found.node.type.name === 'image' ? 'image' : kind],
+        { ...found.node.attrs, level, sourceKind: kind }).setMeta(STRUCTURE_META, true));
+      structures.push({ kind: 'style', blockId: point.blockId, blockKind: kind, level, preText: found.node.textContent,
+        windowStartBlockId: String(view.state.doc.firstChild!.attrs['blockId']), held: null });
+      announceState();
+      void flush();
+    },
     focus: () => view.focus(),
     flush,
     captureContinuity: () => deferredNavigationContinuity ?? captureRenderedContinuity(),
@@ -1182,9 +1227,14 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       if (selection.empty) return { kind: 'none' };
       const anchor = pointAtPosition(view.state.doc, selection.from);
       const head = pointAtPosition(view.state.doc, selection.to);
-      if (anchor.blockId !== head.blockId) return spanBetween(view.state.doc, baselines, anchor, head, !saving && !retryRequired);
+      if (anchor.blockId !== head.blockId) {
+        let tableSelected = false;
+        view.state.doc.nodesBetween(selection.from, selection.to, (node) => { if (node.type.name === 'table') tableSelected = true; });
+        return tableSelected ? { kind: 'none' } : spanBetween(view.state.doc, baselines, anchor, head, !saving && !retryRequired);
+      }
       const baseline = baselines.get(anchor.blockId);
       const block = findBlock(view.state.doc, anchor.blockId);
+      if (block?.type.name === 'table') return { kind: 'none' };
       if (!baseline || !block || saving || retryRequired || block.textContent !== baseline.text) return { kind: 'unsettled' };
       if (head.grapheme <= anchor.grapheme) return { kind: 'none' };
       return {
@@ -1228,6 +1278,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
     },
     destroy: () => {
+      stopSourceImages();
       destroyed = true;
       if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);
       pendingRestore = undefined;

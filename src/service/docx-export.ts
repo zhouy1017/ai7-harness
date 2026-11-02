@@ -1618,6 +1618,22 @@ function freshParagraphProperties(block: DocxExportBlock, writer: MarkupWriter):
   return `<${writer.w('pPr')}><${writer.w('pStyle')} ${writer.w('val')}="${style}"/></${writer.w('pPr')}>`;
 }
 
+/** A journaled style change replaces just the paragraph style, keeping the source's other paragraph/run formatting. */
+function editedParagraphProperties(paragraph: XmlElement, block: DocxExportBlock, writer: MarkupWriter, selectedWord = false): { paragraph: string; run: string } {
+  const properties = sourceProperties(paragraph, selectedWord);
+  const pPr = paragraph.children.find((child): child is XmlElement => isElement(child) && child.local === 'pPr');
+  const style = pPr?.children.find((child): child is XmlElement => isElement(child) && child.local === 'pStyle');
+  const value = (style === undefined ? '' : attributeOf(style, 'val') ?? '').toLocaleLowerCase('en-US');
+  const heading = /(?:heading|标题)\s*([1-6])/.exec(value);
+  const kind = value === 'title' || value === '标题' ? 'title' : heading ? 'heading' : 'paragraph';
+  const level = kind === 'title' ? 1 : heading ? Number(heading[1]) : null;
+  if (kind === block.kind && level === block.level) return properties;
+  if (block.kind === 'note') return properties;
+  const children = pPr?.children.filter((child) => !isElement(child) || !['pStyle', 'outlineLvl'].includes(child.local)) ?? [];
+  const styleXml = block.kind === 'paragraph' ? '' : `<${writer.w('pStyle')} ${writer.w('val')}="${block.kind === 'title' ? 'Title' : `Heading${block.level ?? 1}`}"/>`;
+  return { ...properties, paragraph: `<${writer.w('pPr')}>${styleXml}${serialize(children)}</${writer.w('pPr')}>` };
+}
+
 interface MappedWalk {
   documentXml: string;
   restoredBlocks: number;
@@ -1698,7 +1714,7 @@ function rewriteDocument(
 
   const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retained = NO_RETENTION, mapping: MappedInline | null = null): string => {
     const w = writer!;
-    const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, w), run: '' } : sourceProperties(paragraph);
+    const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, w), run: '' } : editedParagraphProperties(paragraph, block, w);
     const attributes = paragraph === null ? [] : paragraph.attributes;
     const name = paragraph === null ? w.w('p') : paragraph.name;
     emitted.add(block.blockId);
@@ -1725,6 +1741,13 @@ function rewriteDocument(
     const counts = countClasses(counted.children);
     if (block === undefined || emitted.has(block.blockId)) {
       noteCounts(counts, null, null);
+      if (block === undefined && sourceRow !== undefined) {
+        // A journal merge absorbed this mapped paragraph. Its words now live in the preceding block; retain only source anchors.
+        const retained = paragraphRetention(paragraph);
+        if (retained.anchors.length === 0) return [];
+        const bookmarks = paragraphBookmarks(paragraph);
+        return [{ raw: `${openTag(paragraph.name, paragraph.attributes, false)}${sourceProperties(paragraph).paragraph}${bookmarks.starts}${retained.anchors}${bookmarks.ends}</${paragraph.name}>` }];
+      }
       if (paragraphMarkInserted(paragraph)) {
         const restored = stripped(paragraph);
         return hasContent(restored) ? [restored] : [];
@@ -1967,7 +1990,7 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
     return styles > 0 || fields > 0;
   };
   const regenerate = (block: DocxExportBlock, paragraph: XmlElement | null, retain: ParagraphRetention, mapping: MappedInline | null = null): RawXml => {
-    const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, writer), run: '' } : sourceProperties(paragraph, true);
+    const properties = paragraph === null ? { paragraph: freshParagraphProperties(block, writer), run: '' } : editedParagraphProperties(paragraph, block, writer, true);
     const name = paragraph?.name ?? writer.w('p');
     emitted.add(block.blockId); regeneratedBlocks += 1;
     const bookmarks = paragraph === null ? { starts: '', ends: '' } : paragraphBookmarks(paragraph);

@@ -1596,7 +1596,7 @@ async function runEditorModesJourney(renderer) {
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
   // #1287: the viewport owns the editor height; navigation/analysis never cover text or its mark cards.
-  await assertRenderer(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelectorAll('button')).filter(button=>!button.hidden); const status=document.querySelector('#persistence-status').getBoundingClientRect(); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return !toolbar.querySelector('nav') && new Set(actions.map(button=>Math.round(button.getBoundingClientRect().top))).size===1 && document.documentElement.scrollHeight<=innerHeight+2 && footer.bottom<=status.top+1 && status.bottom<=innerHeight; })()`, 'editor-viewport-and-toolbar');
+  await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelectorAll('button')).filter(button=>!button.hidden); const status=document.querySelector('#persistence-status').getBoundingClientRect(); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=status.top+1, statusOnScreen:status.bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
   await assertRenderer(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); if(panel.hidden)document.querySelector('[data-edge-entry="navigation"]').click(); return !panel.hidden; })()`, 'editor-navigation-layout-open');
   await waitForChecks(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const box=panel.getBoundingClientRect(); const width=document.querySelector('.editor-workspace').clientWidth; return { visible:!panel.hidden && box.width>0 && box.height>0, separate:box.left>=text.right-1 || box.top>=text.bottom-1, readable:width<864 || text.width>=480, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-navigation-no-overlap');
   await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return document.querySelector('#manuscript-navigation-panel').hidden; })()`, 'editor-navigation-layout-close');
@@ -1777,6 +1777,30 @@ async function runStructureJourney(renderer) {
   await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { oneEntry: p.journal === window.__j02Structure.journal + 4, settled: p.closeRisk === 'false' }; })()`, 'structure-merge-written', 30_000);
   const merged = await renderer.evaluate(MANUSCRIPT_TAIL_PROBE);
   requireJourney(merged.blockId === tail.blockId && merged.position === tail.position && merged.totalBlocks === tail.totalBlocks, 'structure-tail-restored');
+
+  at('structure-rapid-queue');
+  await placeStructureCaret(renderer, blockId, 12, 'structure-burst-caret');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02BurstSequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Enter','Enter','Backspace','Backspace','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return !document.querySelector('#persistence-status')?.textContent.includes('上一处分段或合并'); })()`, 'structure-all-keys-accepted-before-ipc');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { whole: p.text === window.__j02Structure.text, ordered: p.journal === window.__j02BurstSequence + 8, settled: p.closeRisk === 'false', bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-burst-durable', 60_000);
+
+  at('structure-queue-retry');
+  requireJourney((await renderer.setJournalFault('fail-next'))?.mode === 'fail-next', 'structure-queue-fault-armed');
+  await placeStructureCaret(renderer, blockId, 12, 'structure-retry-caret');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02RetrySequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return true; })()`, 'structure-queued-through-write-failure');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { whole: p.text === window.__j02Structure.text, exactRetry: p.journal === window.__j02RetrySequence + 4, settled: p.closeRisk === 'false', bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-queue-retry-durable', 60_000);
+
+  at('structure-heading-enter');
+  await placeStructureCaret(renderer, blockId, 0, 'structure-heading-style-caret');
+  await assertRenderer(renderer, `(() => { const style = document.querySelector('select[aria-label="段落样式"]'); style.value = 'heading-2'; style.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`, 'structure-heading-style');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]')?.tagName === 'H3'`, 'structure-heading-written');
+  const headingLength = await renderer.evaluate('window.__j02Structure.text.length');
+  await placeStructureCaret(renderer, blockId, headingLength, 'structure-heading-end');
+  await pressStructureKey(renderer, 'Enter');
+  await waitForChecks(renderer, `(() => { const block = document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]'); return { heading: block?.tagName === 'H3', body: block?.nextElementSibling?.tagName === 'P', empty: block?.nextElementSibling?.textContent === '', settled: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'structure-heading-new-body');
+  await clickButton(renderer, '撤销', 'structure-heading-undo-new-body');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '撤销' && !button.disabled)`, 'structure-heading-undo-body-settled');
+  await clickButton(renderer, '撤销', 'structure-heading-undo-style');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]')?.tagName === 'P'`, 'structure-heading-back-to-body');
 }
 
 async function main() {

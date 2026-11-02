@@ -2188,6 +2188,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'readManuscriptImageChunk': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'sourceVersionId', 'ordinal', 'offset'], tentativeId);
+      if (![input.manuscriptId, input.branchId, input.sourceVersionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) ||
+        !Number.isSafeInteger(input.ordinal) || Number(input.ordinal) < 0 || Number(input.ordinal) >= 100000 ||
+        !Number.isSafeInteger(input.offset) || Number(input.offset) < 0 || Number(input.offset) >= 64 * 1024 * 1024) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'recordManuscriptEntryPosition': {
       const input = requireInput(value.input, ['manuscriptId', 'branchId', 'blockId', 'grapheme'], tentativeId);
       if (
@@ -2490,6 +2497,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (structure !== undefined && !(isRecord(structure) && (
         (structure.kind === 'split' && hasExactKeys(structure, ['kind', 'newBlockId']) && isBoundedString(structure.newBlockId, 28) &&
           /^blk_[0-9a-f]{24}$/.test(structure.newBlockId)) ||
+        (structure.kind === 'style' && hasExactKeys(structure, ['kind', 'blockKind', 'level']) &&
+          ((structure.blockKind === 'paragraph' && structure.level === null) || (structure.blockKind === 'title' && structure.level === 1) ||
+            (structure.blockKind === 'heading' && Number.isSafeInteger(structure.level) && Number(structure.level) >= 1 && Number(structure.level) <= 6))) ||
         (structure.kind === 'merge' && hasExactKeys(structure, ['kind', 'mergedBlockId', 'mergedBlockDigest']) &&
           isBoundedString(structure.mergedBlockId, 28) && /^blk_[0-9a-f]{24}$/.test(structure.mergedBlockId) &&
           isBoundedString(structure.mergedBlockDigest, 64) && HEX_DIGEST_PATTERN.test(structure.mergedBlockDigest))))) {

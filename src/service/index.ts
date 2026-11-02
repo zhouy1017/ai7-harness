@@ -1322,6 +1322,8 @@ async function dispatch(
         op: request.op,
         result: store.getManuscriptWindow(request.input.manuscriptId, request.input.branchId, request.input.cursor),
       };
+    case 'readManuscriptImageChunk':
+      return { id: request.id, ok: true, op: request.op, result: store.readManuscriptImageChunk(request.input) };
     case 'flushJournalEdit':
       // A write the injection refuses never reaches the store (Issue #951, T0-1).
       journalFaultCall(() => editJournalFault?.beforeJournalWrite());

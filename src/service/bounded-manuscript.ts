@@ -25,8 +25,9 @@ import { BoundedStoreError, BoundedStoreFatalError, requireBounded, one, asStrin
   lastWorkingPosition, workingOffsetPrefix, updateWorkingOffsetNodes, transact, stagedBlockLength, UUID_PATTERN, DIGEST_PATTERN, BLOCK_PATTERN,
   HISTORY_BATCH, MIGRATION_BATCH, type OffsetSegment } from './manuscript/bounded-kernel.js';
 import { withNoteReferences } from './manuscript/note-blocks.js';
+import type { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import { historyStale, isStructuralGroup, journalHasStructuralEdits, replayStructuralGroup, verifyStructuralReconstruction, writeStructuralEdit } from './manuscript/structural-edits.js';
-import { blockDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
+import { blockDigest, blockShapeFromDigest, CommandEvidenceReader, recoveryCommandEvidenceDigest, recoveryWorkingDigest, validateCommandHistoryGroup, type CommandEvidenceHeader, type CommandEvidenceMember } from './manuscript/command-history.js';
 export { BoundedStoreError, BoundedStoreFatalError } from './manuscript/bounded-kernel.js';
 export type { CommandEvidenceHeader, CommandEvidenceMember } from './manuscript/command-history.js';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
@@ -3497,7 +3498,7 @@ export class BoundedManuscriptStore {
   readonly #cursorSecret = randomBytes(32);
   readonly #manuscriptCheckpointWork = new Map<string, ManuscriptCheckpointWork>();
 
-  constructor(db: DatabaseSync) {
+  constructor(db: DatabaseSync, readonly sourceObjects?: ManuscriptSourceObjects) {
     this.#db = db;
     transact(this.#db, () => {
       terminalizeOrphanedReplacementPreviews(this.#db);
@@ -4649,7 +4650,7 @@ export class BoundedManuscriptStore {
        FROM working_blocks WHERE branch_id = ? AND position >= ? ORDER BY position LIMIT ?`,
     ).all(branchId, startPosition, MAX_WINDOW_BLOCKS + 1) as SqlRow[];
     const visible = rows.slice(0, MAX_WINDOW_BLOCKS);
-    const blocks = withNoteReferences(this.#db, branchId, visible.map((row) => ({
+    let blocks = withNoteReferences(this.#db, branchId, visible.map((row) => ({
       blockId: asString(row.block_id),
       position: asNumber(row.position),
       kind: asString(row.kind) as ManuscriptBlockProjection['kind'],
@@ -4657,6 +4658,7 @@ export class BoundedManuscriptStore {
       text: asString(row.text),
       digest: asString(row.digest),
     })));
+    blocks = this.sourceObjects?.project(binding.revisionId, blocks, branchId) ?? blocks;
     requireBounded(blocks.length > 0 && blocks.length <= MAX_WINDOW_BLOCKS, 'WINDOW_NOT_FOUND', '稿件窗口为空。');
     const first = visible[0]!;
     const last = visible.at(-1)!;
@@ -4935,6 +4937,9 @@ export class BoundedManuscriptStore {
       this.#requireBranchEditable(input.branchId);
       requireBounded(binding.revisionId === input.baseRevisionId, 'EDIT_BINDING_CHANGED', '编辑绑定已变化。');
       requireBounded(binding.journalSequence === input.expectedJournalSequence, 'EDIT_SEQUENCE_CHANGED', '修订日志已前进，请刷新窗口。');
+      requireBounded(!this.sourceObjects?.isReadOnly(binding.revisionId, input.blockId) &&
+        !(input.structure?.kind === 'merge' && this.sourceObjects?.isReadOnly(binding.revisionId, input.structure.mergedBlockId)),
+      'SOURCE_OBJECT_READ_ONLY', '表格为只读内容，导出时从原文件完整恢复。');
       requireBounded(
         this.#db.prepare('SELECT 1 FROM working_blocks WHERE branch_id = ? AND block_id = ?').get(input.branchId, input.windowStartBlockId) !== undefined,
         'EDIT_BLOCK_CHANGED',
@@ -5403,6 +5408,7 @@ export class BoundedManuscriptStore {
           editPosition += 1;
           const blockId = asString(row.block_id);
           const beforeText = asString(row.text);
+          requireBounded(!this.sourceObjects?.isReadOnly(binding.revisionId, blockId), 'SOURCE_OBJECT_READ_ONLY', '表格为只读内容，导出时从原文件完整恢复。');
           const before = graphemes(beforeText);
           const text = [...before];
           const matches = this.#db.prepare(
@@ -5519,6 +5525,7 @@ export class BoundedManuscriptStore {
       'APPLY_INVALID', '撤销范围必须完整属于同一次应用。');
       const originalRanges = new Map<number, { from: number; to: number }>();
       targets.forEach((target, index) => {
+        requireBounded(!this.sourceObjects?.isReadOnly(binding.revisionId, target.blockId), 'SOURCE_OBJECT_READ_ONLY', '表格为只读内容，导出时从原文件完整恢复。');
         if (target.reversalOf !== undefined) {
           const original = this.#db.prepare(`SELECT t.block_id, t.from_grapheme, t.to_grapheme, t.expected_text_digest, t.replacement_text_digest, i.target_count
             FROM manuscript_effect_targets t JOIN manuscript_effect_intents i ON i.effect_id = t.effect_id AND i.kind = 'apply'
@@ -5838,13 +5845,12 @@ export class BoundedManuscriptStore {
             'SELECT position, kind, level, text, grapheme_length FROM working_blocks WHERE branch_id = ? AND block_id = ?',
           ).get(branchId, asString(row.block_id)) as SqlRow | undefined;
           if (current === undefined) throw historyStale(this.#db, branchId, groupId, [asString(row.block_id)]);
-          const kind = asString(current.kind) as ManuscriptBlockProjection['kind'];
-          const level = current.level === null ? null : asNumber(current.level);
+          const { kind, level } = blockShapeFromDigest(targetText, targetDigest);
           const targetLength = graphemes(targetText).length;
           const delta = targetLength - asNumber(current.grapheme_length);
           const update = this.#db.prepare(
-            'UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
-          ).run(targetText, targetDigest, targetLength, branchId, asString(row.block_id), expectedDigest);
+            'UPDATE working_blocks SET kind = ?, level = ?, text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ? AND digest = ?',
+          ).run(kind, level, targetText, targetDigest, targetLength, branchId, asString(row.block_id), expectedDigest);
           if (update.changes !== 1) throw historyStale(this.#db, branchId, groupId, [asString(row.block_id)]);
           updateWorkingOffsetNodes(this.#db, branchId, asNumber(current.position), delta);
           this.#refreshBlockIndexes(branchId, asString(row.block_id), asNumber(current.position), kind, level, targetText, targetDigest);
@@ -6154,6 +6160,7 @@ export class BoundedManuscriptStore {
   }
 
   #refreshBlockIndexes(branchId: string, blockId: string, position: number, kind: ManuscriptBlockProjection['kind'], level: number | null, text: string, digest: string): void {
+    this.#db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
     this.#db.prepare('DELETE FROM working_block_search WHERE branch_id = ? AND block_id = ?').run(branchId, blockId);
     this.#db.prepare('INSERT INTO working_block_search(branch_id, block_id, text) VALUES (?, ?, ?)').run(branchId, blockId, text);
     if (kind === 'title' || kind === 'heading') {

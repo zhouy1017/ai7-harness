@@ -498,6 +498,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['acknowledgeImportCompletion']['output']>(IPC_CHANNELS.acknowledgeImportCompletion, input),
   getManuscriptWindow: (input: ServiceOperationMap['getManuscriptWindow']['input']) =>
     invoke<ServiceOperationMap['getManuscriptWindow']['output']>(IPC_CHANNELS.getManuscriptWindow, input),
+  readManuscriptImageChunk: (input: ServiceOperationMap['readManuscriptImageChunk']['input']) =>
+    invoke<ServiceOperationMap['readManuscriptImageChunk']['output']>(IPC_CHANNELS.readManuscriptImageChunk, input),
   flushJournalEdit: (input: ServiceOperationMap['flushJournalEdit']['input']) =>
     invoke<ServiceOperationMap['flushJournalEdit']['output']>(IPC_CHANNELS.flushJournalEdit, input),
   listPriorWork: () => invoke<ServiceOperationMap['listPriorWork']['output']>(IPC_CHANNELS.listPriorWork, {}),
