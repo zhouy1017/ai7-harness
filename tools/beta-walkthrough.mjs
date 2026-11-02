@@ -15,10 +15,14 @@ import { build } from 'esbuild';
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
 
 const ROOT=resolve('.');
-const RELEASE=join(ROOT,'release');
+const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only');
+const assetsIndex=args.indexOf('--assets-from');
+const RELEASE=assetsIndex<0?join(ROOT,'release'):resolve(args[assetsIndex+1]??'');
+const OUTPUT=join(ROOT,'release');await mkdir(OUTPUT,{recursive:true});
+if(assetsIndex>=0&&!RELEASE.toLowerCase().startsWith('c:\\ai7\\beta-inputs\\'))throw Error('assets-root-refused');
 const packagedKeyring=()=>import(pathToFileURL(join(RELEASE,'AI7','app','resources','app','node_modules','@napi-rs','keyring','index.js')).href);
 let stage='inputs';
-const report={schema:'ai7.windows-beta-acceptance/1',state:'running',checks:[],limitations:[
+const report={schema:'ai7.windows-beta-acceptance/1',scope:STARTUP_ONLY?'native-startup-probe':'six-flow-packaged-acceptance',state:'running',checks:[],limitations:[
  'Separate Owner-authorized packaged live acceptance uses available Go and search accounts; other provider accounts remain unconfigured. Ordinary source Journeys and CI are provider-free.',
  'Human Beta acceptance and the external editor study remain pending.',
  'The prior-version public Book is seeded through the exact 0.4.1 product store; current import/export use the actual package UI.',
@@ -126,6 +130,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    await new Promise(r=>setTimeout(r,1000));initial.unref();
    check(true,'native-first-run-relaunch');
   }
+  if(STARTUP_ONLY){check(true,expectedChannel+'-native-startup-probe');return;}
   await configureLiveConnections(expectedDataRoot,dirname(input),expectedChannel);
   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
   let page=await renderer(browser);
@@ -151,9 +156,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(accountModels.length>0,expectedChannel+'-account-model-list');report.accountDiscovery??=[];report.accountDiscovery.push({channel:expectedChannel,count:accountModels.length});
   await select(page,'[data-model-choice="deepseek-v4.1-flash"]');
   await select(page,'.model-service-flow [data-action=select-main-role-model]');
-  await ready(page,"document.querySelector('[data-action=select-fast-role-model]')?.disabled===false",'main-role-saved');
+  await ready(page,"document.querySelector('.model-service-flow [data-action=select-fast-role-model]')?.disabled===false",'main-role-saved');
   await select(page,'.model-service-flow [data-action=select-fast-role-model]');
-  await ready(page,"document.querySelector('[data-action=select-main-role-model]')?.disabled===false",'fast-role-saved');
+  await ready(page,"document.querySelector('.model-service-flow [data-action=select-main-role-model]')?.disabled===false",'fast-role-saved');
   check(await page.evaluate(`window.ai7.getModelServiceSettings().then(s=>['main-editorial','fast-interaction'].every(role=>s.roles.some(r=>r.roleId===role&&r.binding?.modelId==='deepseek-v4.1-flash')))`),expectedChannel+'-independent-role-bindings');
   const alternate=accountModels.find(m=>m.modelId!=='deepseek-v4.1-flash')?.modelId;
   if(alternate){
@@ -358,7 +363,9 @@ try{
  // This runner is invoked by the host guest runner inside the guest's interactive scheduled task.
  check(/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''),'background-test-guest');
  const manifest=JSON.parse(await readFile(join(ROOT,'package.json'),'utf8'));
- const identity=JSON.parse(await readFile(join(ROOT,'dist/build-identity.json'),'utf8'));
+ const identity=JSON.parse(await readFile(assetsIndex<0?join(ROOT,'dist/build-identity.json'):join(RELEASE,'build-identity.json'),'utf8'));
+ report.runnerHead=run('git.exe',['rev-parse','HEAD']).trim();
+ if(assetsIndex>=0)check(['src','config','package.json','pnpm-lock.yaml'].every(path=>run('git.exe',['rev-parse',identity.sourceCommit+':'+path]).trim()===run('git.exe',['rev-parse','HEAD:'+path]).trim()),'reused-package-product-tree-equivalent');
  report.buildIdentity=identity;check(identity.softwareVersion===manifest.version&&!identity.dirty,'clean-build-identity');
  const setup=join(RELEASE,`AI7-${manifest.version}-win-x64-setup.exe`),zip=join(RELEASE,`AI7-${manifest.version}-win-x64-portable.zip`);
  const archive=unzipSync(await readFile(zip));const names=Object.keys(archive);
@@ -382,8 +389,10 @@ try{
  check(report.priorBook.softwareVersion==='0.4.1'&&report.priorBook.schemaRevision===104,'prior-public-book-schema');
  at('upgrade-to-beta');run(setup,['/S','/D='+installed]);check(existsSync(executable),'nsis-upgrade-install');
  const selfcheck=JSON.parse(run(executable,['--self-check'],env).trim());
- check(selfcheck.channel==='windows-installer'&&selfcheck.writable&&selfcheck.keyringCarrier==='loaded','installed-self-check');
+ report.installedBuildIdentity=selfcheck.buildIdentity;
+ check(selfcheck.channel==='windows-installer'&&selfcheck.writable&&selfcheck.keyringCarrier==='loaded'&&selfcheck.buildIdentity.sourceCommit===identity.sourceCommit,'installed-self-check');
  await walk(executable,env,'windows-installer',join(env.LOCALAPPDATA,'ai7','production'),input,join(temp,'installed-export.docx'));
+ if(!STARTUP_ONLY){
  at('reinstall');run(setup,['/S','/D='+installed]);
  const after=JSON.parse(run(executable,['--self-check'],env).trim());check(after.channel==='windows-installer'&&after.store_versions==='readable','same-candidate-reinstall');
   const portableRoot=join(temp,'portable');await mkdir(portableRoot);run(join(process.env.SystemRoot,'System32','tar.exe'),['-xf',zip,'-C',portableRoot]);
@@ -394,10 +403,11 @@ try{
  await walk(portable,portableEnv,'windows-portable',join(portableRoot,'AI7','data'),input,join(temp,'portable-export.docx'));
  at('uninstall');const uninstaller=(await readdir(installed)).find(name=>/^Uninstall.*\.exe$/i.test(name));check(Boolean(uninstaller),'uninstaller-present');
  run(join(installed,uninstaller),['/S']);await wait(()=>!existsSync(executable),'uninstall-timeout');check(existsSync(join(env.LOCALAPPDATA,'ai7','production','store','ai7.sqlite')),'uninstall-keeps-user-data');
+ }
  report.state='passed';
 }catch(error){report.state='failed';report.failedStage=stage;report.failureCode=/^[a-z0-9/-]+$/.test(error?.message??'')?error.message:'unclassified';process.exitCode=1;console.error('BETA_PACKAGE/failed/'+stage);}
 try{await cleanupInstallation(report.testRoot?join(report.testRoot,'installed'):null);}catch{report.installationCleanup='failed';report.state='failed';process.exitCode=1;}
 try{await removeOwnedCredentials();}catch{report.credentialCleanup='failed';report.state='failed';process.exitCode=1;}
-await writeFile(join(RELEASE,'beta-acceptance.json'),JSON.stringify(report,null,2)+'\n');
+await writeFile(join(OUTPUT,'beta-acceptance.json'),JSON.stringify(report,null,2)+'\n');
 await writeFile('C:/ai7/results/beta-last-run.json',JSON.stringify(report,null,2)+'\n');
 console.log('BETA_PACKAGE/'+report.state);

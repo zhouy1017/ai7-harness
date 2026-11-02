@@ -13,6 +13,7 @@ if($StopOwnedProcess){
 try{
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class Ai7BetaDialogKeys { [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam); }'
 $deadline=[DateTime]::UtcNow.AddSeconds(45)
 $seenProcess=0;$seenWindow=0;$observed=$false
 while([DateTime]::UtcNow -lt $deadline){
@@ -31,8 +32,13 @@ while([DateTime]::UtcNow -lt $deadline){
       $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$ButtonName)
       $button=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
       if($button -and $button.Current.IsEnabled){
-        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-        Write-Output 'BETA_NATIVE/button-completed';exit 0
+        $invoke=$null
+        if($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)){$invoke.Invoke();Write-Output 'BETA_NATIVE/button-completed';exit 0}
+        if($ButtonName -eq '使用默认位置'){
+          $handle=[IntPtr]$window.Current.NativeWindowHandle
+          if($handle -ne [IntPtr]::Zero){[Ai7BetaDialogKeys]::PostMessage($handle,0x100,[IntPtr]13,[IntPtr]::Zero) | Out-Null;[Ai7BetaDialogKeys]::PostMessage($handle,0x101,[IntPtr]13,[IntPtr]::Zero) | Out-Null;Write-Output 'BETA_NATIVE/default-key-posted';exit 0}
+        }
+        Write-Output 'BETA_NATIVE/invoke-unavailable';exit 1
       }
     }else{
       $condition=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'1148')
