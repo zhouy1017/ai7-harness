@@ -558,7 +558,8 @@ export class BaselineAnalysisStore {
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
   #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
     if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
-    if (mode !== undefined && mode !== 'whole-manuscript' && this.#definition.factualClaims !== undefined) {
+    // A whole-book repeat keeps the admitted claim pipeline; historical range updates retain their frozen contract.
+    if (mode !== undefined && mode !== 'whole-manuscript' && mode !== 'review-again' && this.#definition.factualClaims !== undefined) {
       const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
       return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
         modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };

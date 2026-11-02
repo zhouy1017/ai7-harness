@@ -461,6 +461,23 @@ describe('factual claim occurrence ledger', () => {
     expect(() => store.startFactualRecheck(candidate)).toThrow('变化');
   });
 
+  it('keeps claim stages when a full review follows a completed factual check (#1290)', async () => {
+    await setup({claimStages:true,relations:[{sourceRef:MUSEUM,relation:'支持',excerptRef:HELD,lineage:'original'}]});
+    const book=await newBook('再次全文审校');await review(book);
+    const full=store.procedureLibrary({action:'inspect'}).procedures.find(p=>p.procedureId==='ai7-procedure/full-review')!;
+    const pin={procedureId:full.procedureId,version:full.version,digest:full.digest};
+    store.procedureLibrary({action:'select',bookId:book.bookId,procedure:pin});
+    const local={punctuation:'chinese-prose' as const,numerals:'off' as const,publication:'unknown' as const,numeralRules:[],numeralsConfirmed:false,
+      excludedRanges:[],doubledEllipsisBlockIds:[],tables:{characters:true,variantWords:true,houseWordList:null,bookTerms:[]}};
+    let work=store.createReviewRunPreparationWork(book.bookId,['local-text-check','typos-and-usage','style-and-format','plot-consistency','factual-review'],
+      {kind:'whole',fromChapterBlockId:null,toChapterBlockId:null},policy,null,[],null,null,null,local,undefined,pin);
+    while(!work.done)work=store.advanceReviewRunPreparationWork(work.workId!);
+    const run=work.projection!.run!;
+    expect(run.categories.find(c=>c.categoryId==='factual-review')?.modeLabel).toBe('再次核查');
+    const task=store.inspectTaskPlan({bookId:book.bookId,kind:'review-run',ref:run.reviewRunId});
+    expect(task.start.categoryDigests.map(c=>c.categoryId)).toEqual(['local-text-check','typos-and-usage','style-and-format','plot-consistency','factual-review']);
+  });
+
   it('prepares a separately approved again check and preserves the earlier version', async () => {
     await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('再次核查');
