@@ -806,7 +806,9 @@ async function main() {
         document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed' &&
         getComputedStyle(document.body).paddingRight==='0px';
     })()`, 'global-agent-styled-drawer-closed');
-    await click(primary, '返回', 'global-agent-back-to-book');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-to-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-before-book');
+    await clickBook(primary, bookA, 'global-agent-reopen-book');
     await waitFor(primary, `document.querySelector('[data-screen="editor"]') && document.querySelector('#task-drawer')?.hidden===true`, 'global-agent-book-return-closed');
 
 
