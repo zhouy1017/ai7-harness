@@ -186,6 +186,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
   const entryNoticeTimers = new Set<number>();
+  let viewportObserver: ResizeObserver | undefined;
   /**
    * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
    * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
@@ -1774,7 +1775,26 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   milestoneName.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
   for (const radio of purposeRadios) radio.addEventListener('change', () => syncMilestoneForm(authoritativeMutationBusy()));
   customPurpose.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
+  let viewportWidth = editorWindow.clientWidth;
+  let viewportHeight = editorWindow.clientHeight;
+  let reflowScroll: { top: number } | undefined;
+  const noteViewportResize = (): void => {
+    if (viewportWidth === editorWindow.clientWidth && viewportHeight === editorWindow.clientHeight) return;
+    viewportWidth = editorWindow.clientWidth;
+    viewportHeight = editorWindow.clientHeight;
+    const mark = { top: editorWindow.scrollTop };
+    reflowScroll = mark;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (reflowScroll === mark) reflowScroll = undefined;
+    }));
+  };
+  viewportObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(noteViewportResize);
+  viewportObserver?.observe(editorWindow);
   editorWindow.addEventListener('scroll', () => {
+    // Panel/status reflow can clamp the viewport at an edge. That scroll did not ask to change windows.
+    // Read dimensions here as well: the browser may deliver scroll before its ResizeObserver callback.
+    noteViewportResize();
+    if (reflowScroll?.top === editorWindow.scrollTop) return;
     // Paging at an edge answers the reader's scroll. A position the editor restored itself — after an
     // arrival, a journal acknowledgement or an authoritative refresh — is not that, even when it rests
     // at the pane's top or bottom: the guards below lapse as soon as their operation ends, which can be
@@ -2060,6 +2080,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     for (const timer of entryNoticeTimers) window.clearTimeout(timer);
     entryNoticeTimers.clear();
     if (reviewMarksTimer !== undefined) window.clearTimeout(reviewMarksTimer);
+    viewportObserver?.disconnect();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
     if (milestonePersistenceTimer !== undefined) window.clearTimeout(milestonePersistenceTimer);
     if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);

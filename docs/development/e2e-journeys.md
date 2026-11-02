@@ -24,7 +24,7 @@ Issue #1205 (W22-S4c, ADR 0096 §2) is a synchronized delta that adds the `candi
 
 ## J-02 long-manuscript editing
 
-Issue #1287 (W23-S7) replaces the duplicated toolbar destinations with sidebar navigation. The editor viewport checks one action row, no page scroll, a persistence footer clear of window actions, and a navigation panel in a separate grid cell (below the text at narrow widths); protection still refuses a sidebar departure while edits are at risk.
+Issue #1287 (W23-S7) replaces the duplicated toolbar destinations with sidebar navigation. The editor viewport checks one action row, no page scroll, a persistence footer clear of window actions, and a navigation panel in a separate grid cell (below the text at narrow widths); protection still refuses a sidebar departure while edits are at risk. Layout-induced edge scrolls keep the current text window; the next reader scroll still pages normally.
 
 Issue #1177 (Wave 22 · W22-S6; ADR 0096 §3) is a synchronized delta at one stage. `milestone-search-state-stale` now reads the result set marked stale instead of discarded: its rows stay (`.search-results` keeps them, `data-search-stale="true"`, `data-inclusion-locked="true"`, every row's jump and inclusion control disabled), the replacement preview and `返回查找前位置` are gone, `预览替换` is disabled, and the summary starts `稿件已变化；以下结果已过时，请重新查找。` before the existing `稿件修订版已变化` reason. Every other J-02 stage runs a fresh `查找全稿` before it uses results and is unchanged.
 

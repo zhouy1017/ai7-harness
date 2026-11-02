@@ -72,6 +72,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
     return {
       focus: vi.fn(), flush: vi.fn(async () => undefined), interrupt: vi.fn(), setOperationLocked: vi.fn(), setMarks: vi.fn(),
       captureContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
+      captureNavigationContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
       currentWindow: () => options.initialWindow,
       isComposing: () => false,
       isOwnScroll: () => false,
@@ -103,7 +104,7 @@ const api = new Proxy({ platform: 'win32', recordManuscriptEntryPosition: async 
  * The shell around one screen: its shared persistence status and close risk, and `replaceScreen` as it treats the
  * Manuscript screen on display — read where it was, destroy it, then show the next content.
  */
-function shell() {
+function shell(rendererApi = api) {
   const persistenceStatus = document.createElement('p');
   persistenceStatus.setAttribute('role', 'status');
   const contextView = document.createElement('div');
@@ -119,7 +120,7 @@ function shell() {
     screen.replaceChildren(content);
   };
   const open = (initialWindow: ManuscriptWindowProjection): void => mountManuscriptScreen({
-    api, initialWindow, bookTitle: '合成书', persistenceStatus, contextView,
+    api: rendererApi, initialWindow, bookTitle: '合成书', persistenceStatus, contextView,
     viewPreferences: {} as ScreenOptions['viewPreferences'],
     preferences: { current: { 'analysis.lastViewedRevision': {} }, viewAnalysis: vi.fn() } as unknown as ScreenOptions['preferences'],
     commandDispatcher: { register: () => () => children.destroyed.push('commands') } as unknown as ScreenOptions['commandDispatcher'],
@@ -159,6 +160,25 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
 describe('the Manuscript screen lifecycle', () => {
+  it('keeps a layout-clamped edge in the current window and still pages on the next reader scroll', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const load = vi.fn(() => new Promise<never>(() => undefined));
+    const rendererApi = new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? load : Reflect.get(target, key) });
+    const app = shell(rendererApi);
+    app.open({ ...windowOf('book-one'), nextCursor: 'next-window' });
+    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 1000 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await Promise.resolve();
+    expect(load).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(40);
+    pane.dispatchEvent({ type: 'scroll' });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledWith(expect.objectContaining({ target: { kind: 'cursor', cursor: 'next-window' } }));
+    app.showing?.destroy();
+  });
+
   it('keeps global destinations in the sidebar and editing actions in the toolbar', () => {
     const app = shell();
     app.open(windowOf('book-one'));
