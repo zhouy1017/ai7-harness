@@ -1466,14 +1466,16 @@ async function main() {
     await clickSelector(renderer, '#task-drawer .dialogue-convert [data-dialogue-action="convert-submit"]', 'dialogue-convert-submit');
     await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 · 任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
     const converted = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 })`);
-    const markId = converted?.attempts?.[2]?.convertedMarkIds?.[0] ?? null;
-    requireJourney(UUID_PATTERN.test(markId ?? '') && converted.attempts[2].convertedMarkIds.length === 1 && converted.attempts[0].convertedMarkIds.length === 0, 'dialogue-conversion-recorded', converted);
+    const convertedAttempt = converted?.attempts?.at(-1);
+    const markId = convertedAttempt?.convertedMarkIds?.[0] ?? null;
+    requireJourney(UUID_PATTERN.test(markId ?? '') && convertedAttempt.attemptId === followUpHistory.attempts.at(-1).attemptId &&
+      convertedAttempt.convertedMarkIds.length === 1 && converted.attempts.slice(0, -1).every((attempt) => attempt.convertedMarkIds.length === 0), 'dialogue-conversion-recorded', converted);
     const markCard = await renderer.evaluate(`window.ai7.getEditorialMarkCard({ manuscriptId: ${JSON.stringify(recorded.manuscriptId)}, branchId: ${JSON.stringify(recorded.branchId)}, markId: ${JSON.stringify(markId)} })`);
     requireJourney(markCard?.kind === 'change-suggestion' && markCard.source?.kind === 'ai7' && markCard.source.origin === 'task' && markCard.source.label === '对话回答' &&
       markCard.source.taskId === dialogueId && markCard.suggestion?.currentText === selectedWords && markCard.suggestion.proposedText === DIALOGUE_PROPOSAL &&
       markCard.suggestion.decision === null && markCard.suggestion.application === null, 'dialogue-mark', markCard);
     requireJourney((await workingDigest()) === digestBefore, 'dialogue-manuscript-unchanged');
-    await waitForDialogue(renderer, (dialogue) => dialogue.attempts[4]?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
+    await waitForDialogue(renderer, (dialogue) => dialogue.attempts.at(-1)?.converted === '已从这次回答新建 1 条修改建议。', 'dialogue-converted-line');
 
     at('dialogue-retrieval-anchors');
     // #893: the authored fixture explicitly asks the real registered local tools for a candidate and Exact Fetch.
