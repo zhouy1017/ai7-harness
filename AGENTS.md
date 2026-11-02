@@ -2,10 +2,14 @@
 
 `AGENTS.md` is the mandatory entry point. Root `CLAUDE.md` is exactly `@AGENTS.md`. Each rule has one linked owner; update this router only when routing changes.
 
+## Session instructions and defaults
+
+Owner session instructions, including a delegated Commander dispatch, take precedence over repository dispatch, model, branch, scope and verification conventions without an exemption record. For Wave 23, first read the Owner's [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) intent guide, then the assigned Issue. [Orca dispatch](docs/agents/orca-dispatch.md) owns the defaults; protected material, secrets, provider-free CI and separate `main`/release authority remain intact.
+
 ## Lines and design truth
 
 - `dev` is the implementation-facing integration baseline; `main` advances only through separate exact Owner promotion authorization. Wave and slice branches follow [development lines](docs/agents/development-lines.md).
-- Accepted ADRs, Policy Documents and context definitions own design decisions. Frozen references change only through an ADR naming the affected clauses. [Design authority](docs/agents/design-authority.md) resolves status and conflicts at the intended target.
+- Accepted ADRs, Policy Documents and context definitions supply the design baseline. Current Owner instructions and the assigned Issue govern authorized changes, including removal of historical ADR/UI ceremony; record affected owners with the implementation. [Design authority](docs/agents/design-authority.md) resolves status and conflicts at the intended target.
 - Implementation status lives in [PROGRESS](PROGRESS.md) and [E2E journeys](docs/development/e2e-journeys.md); delivery order lives in the [development plan](docs/development/development-plan.md).
 
 ## Protected material

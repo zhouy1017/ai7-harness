@@ -2,6 +2,10 @@
 
 Read root [AGENTS](../../AGENTS.md), then the assigned Issue. Repository execution always loads [Orca dispatch](orca-dispatch.md); the Commander also reads [PROGRESS](../../PROGRESS.md), the [development plan](../development/development-plan.md) and the [Dispatch Register](dispatch-register.md). Load the smallest task row below.
 
+## Session precedence and Wave 23
+
+First read [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) for Wave 23, then the assigned Issue. Owner session instructions and their delegated Commander dispatch override default dispatch, model, branch, scope and verification conventions without a separate exemption. Continue necessary related-file and E2E-runner edits; [incremental development](incremental-development.md) owns the bounded implementation loop.
+
 ## Design authority
 
 Resolve records at the intended integration target. `dev` is the canonical implementation-facing line; a task branch, prototype, frozen `design-doc` source or archive remains candidate or historical material until its accepted change integrates. [Design authority](design-authority.md) owns the precedence and action-authorization rules.
@@ -30,6 +34,6 @@ Resolve records at the intended integration target. `dev` is the canonical imple
 
 ## Current and historical material
 
-Frozen architecture/UI references, kick-in, contexts and glossary indexes change only through an ADR naming affected clauses. Current rules contain only applicable instructions; obsolete conflicting prose is removed under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md), with Git retaining history. [PROGRESS](../../PROGRESS.md) and [E2E journeys](../development/e2e-journeys.md) own implementation status. Archives are excluded from default search and reading.
+Frozen architecture/UI references, kick-in, contexts and glossary indexes supply baseline design; authorized current Issue/Owner changes take precedence under [design authority](design-authority.md), with affected owners updated alongside implementation. Current rules contain only applicable instructions; obsolete conflicting prose is removed under [ADR 0089](../adr/0089-adopt-orca-dispatch-and-value-first-live-model-delivery.md), with Git retaining history. [PROGRESS](../../PROGRESS.md) and [E2E journeys](../development/e2e-journeys.md) own implementation status. Archives are excluded from default search and reading.
 
 Use `rg -g '!docs/archive/**'` to locate exact symbols or clauses, read their owner and direct consumers, and expand only when that scan fails.
