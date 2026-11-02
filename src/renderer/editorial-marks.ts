@@ -1308,8 +1308,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       ['标记标识', card.markId],
       ['标记时的修订版', `${card.pin.revisionLabel} · ${card.pin.revisionId}`],
       ['标记时的修订日志序号', String(card.pin.journalSequence)],
-      ['标记时的内容块摘要', card.pin.blockDigest],
-      ['内容块', `${card.blockId} · 字素 ${card.fromGrapheme}–${card.toGrapheme}`],
+      ['标记时的段落摘要', card.pin.blockDigest],
+      ['段落', `${card.blockId} · 字素 ${card.fromGrapheme}–${card.toGrapheme}`],
     ];
     if (card.suggestion) identityRows.push(['提案修改项', card.suggestion.itemId]);
     if (card.suggestion?.decision) identityRows.push(['提案决定', card.suggestion.decision.decisionId]);

@@ -46,7 +46,7 @@ const RECORDED_PROMPT_CONTRACT_DIGEST = '4ba25b2f848b99213336f67dc2b7960c942bfbc
 const SAMPLING_CONTRACT_DIGEST = '1bfd29ecb6ba5d9bdbd1e1d097da4de6a0d1c9e6319c5f2318d2ca8c5eeb112c';
 const TASK_GOAL = '对当前书稿执行基线稿件分析，形成覆盖全部结构单元的结果集修订版。';
 const SYNC_GOAL = '将基线稿件分析同步到当前稿件：复用内容一致的兼容单元，仅重算失效闭包，追加一个结果集修订版。';
-const RANGE_GOAL = '重新分析所选范围：绕过所选内容块范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。';
+const RANGE_GOAL = '重新分析所选范围：绕过所选段落范围及其重叠闭包的既有模型结果，复用其余兼容单元，追加一个结果集修订版。';
 const BOOK_GOAL = '重新分析全书：绕过全部既有模型结果，按当前覆盖清单重算每个分析单元，追加一个结果集修订版。';
 const REUSE_PLAN_SCHEMA = 'ai7.baseline-manuscript-analysis.reuse-plan/1';
 /** Every button the settled card may carry: navigation, the three update controls, history, the plan-revision controls, and the hidden cancel. */
@@ -590,7 +590,7 @@ function readSpansLabel(reusePlan, manifest) {
     if (last !== undefined && start <= last[1] + 1) last[1] = Math.max(last[1], end);
     else merged.push([start, end]);
   }
-  return `内容块 ${merged.map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、')}`;
+  return `段落 ${merged.map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、')}`;
 }
 
 async function drawerShowing(renderer, ref, state, name) {
@@ -1314,8 +1314,8 @@ async function main() {
       JSON.stringify(firstFull.columns) === JSON.stringify(['运行中 AI7 可以自己调整', '这些一变就先停下来问你']) &&
       JSON.stringify(firstFull.adaptable) === JSON.stringify([SAFE_RETRY_ADAPTATION]) && JSON.stringify(firstFull.askFirst) === JSON.stringify(LOCKED_BOUNDARY) &&
       firstTechnical.goal === TASK_GOAL && firstTechnical.mode === '首次基线分析 · first-baseline' &&
-      firstTechnical['coverage-manifest'] === `${SAMPLE1_UNITS} 个分析单元 · 1 个结构段 · ${SAMPLE1_BLOCKS} 个内容块 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` &&
-      firstTechnical['manifest-units'] === manifest.units.map((unit) => `单元 ${unit.ordinal} · 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`).join('；') &&
+      firstTechnical['coverage-manifest'] === `${SAMPLE1_UNITS} 个分析单元 · 1 个结构段 · ${SAMPLE1_BLOCKS} 个段落 · ${manifest.totalGraphemes} 字素 · ${manifest.digest}` &&
+      firstTechnical['manifest-units'] === manifest.units.map((unit) => `单元 ${unit.ordinal} · 段落 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`).join('；') &&
       firstTechnical['execution-route'] === `ai7-local-deterministic · ai7-deterministic-fixture · 夹具 ${FIXTURE_IDENTITY} · ${fixtureDigest}` &&
       firstTechnical['provider-binding'] === 'deepseek-open-platform · deepseek-v4-pro · adapter r1 · config r1 · 凭据 missing' &&
       firstTechnical['credential-reference'] === readyConnection.credentialReference &&
@@ -1489,7 +1489,7 @@ async function main() {
       const entity=Array.from(entityList?.children??[]).find((item)=>item.textContent.startsWith(${JSON.stringify(`${provenanceEntity.name}（`)}));
       const entityExact=entityList?.nextElementSibling;
       if(!(entity instanceof HTMLElement) || !(entityExact instanceof HTMLDetailsElement)) return false;
-      return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个内容块`)}) &&
+      return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个段落`)}) &&
         !entity.textContent.includes('person') && entity.textContent.includes('（') &&
         !entityList.textContent.includes('blk_') && !entityExact.open &&
         entityExact.querySelector('dl > dd.technical-identity')!==null &&
@@ -2029,7 +2029,7 @@ async function main() {
       if(!(radio instanceof HTMLInputElement)||!(start instanceof HTMLButtonElement)) return false;
       return radio.checked && radios.filter((item)=>item.checked).length===1 && block.dataset.selectedRange===${JSON.stringify(`${selectedRange.startPosition}-${selectedRange.endPosition}`)} &&
         block.dataset.expectedReused==='5' && block.dataset.expectedRecomputed==='3' && block.dataset.expectedInvalidated==='1' && block.dataset.expectedBypassed==='2' && !start.disabled &&
-        block.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)});
+        block.textContent.includes(${JSON.stringify(`段落 ${selectedRange.startPosition}–${selectedRange.endPosition}`)});
     })()`, 'range-select');
 
     at('reanalyze-range-prepare');
@@ -2062,7 +2062,7 @@ async function main() {
     const rangeSpans = readSpansLabel(rangePlan, rangeManifest);
     requireJourney(rangeDrawer?.chips.position === `第 ${selectedRange.startPosition}–${selectedRange.endPosition} 段` && /^已选 [\d,]+ 字$/u.test(rangeDrawer.chips.selected ?? '') &&
       rangeDrawer.sentence === '重新分析所选范围，其余阅读范围沿用上一份' && rangeDrawer.technical.goal === RANGE_GOAL &&
-      rangeDrawer.technical['selected-range'] === `内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}` &&
+      rangeDrawer.technical['selected-range'] === `段落 ${selectedRange.startPosition}–${selectedRange.endPosition}` &&
       rangeDrawer.technical['reuse-plan'] === reusePlanReading(preparedRange.update.reusePlanDigest, rangePlan) &&
       rangeDrawer.technical['reuse-plan-predecessors'] === predecessorUnitsReading(rangePlan) &&
       predecessorUnitsReading(rangePlan) === '单元 1 reused；单元 2 invalidated；单元 3 bypassed；单元 4 bypassed；单元 5 reused；单元 6 reused；单元 7 reused；单元 8 reused' &&
@@ -2088,7 +2088,7 @@ async function main() {
     requireJourney(JSON.stringify(withoutKey(revision3.units[0], 'lineage')) === JSON.stringify(withoutKey(revision2.units[0], 'lineage')) &&
       revision3.units[2].requestDigest === revision2.units[2].requestDigest && revision3.manuscriptPin.revisionId === revision2.manuscriptPin.revisionId &&
       JSON.stringify(revision3.synthesis) === JSON.stringify(revision2.synthesis), 'range-reused-and-recomputed-content');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='3' && card.dataset.updateMode==='reanalyze-range' && card.dataset.reusedCount==='5' && card.dataset.recomputedCount==='3' && card.dataset.invalidatedCount==='1' && card.dataset.bypassedCount==='2' && card.dataset.freshnessState==='current' && card.querySelector('[data-analysis-unit="1"][data-analysis-unit-lineage="reused"][data-analysis-unit-reused-from="2/1"]')!==null && card.querySelector('[data-analysis-unit="3"][data-analysis-unit-lineage="recomputed"]')!==null && card.textContent.includes(${JSON.stringify(`内容块 ${selectedRange.startPosition}–${selectedRange.endPosition}`)}) && history?.dataset.historyCount==='3' && history.querySelector('[data-history-ordinal="3"][data-history-current="true"][data-history-mode="reanalyze-range"][data-history-predecessor-ordinal="2"]')!==null && history.querySelector('[data-history-ordinal="2"][data-history-current="false"][data-history-freshness="superseded"]')!==null && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'range-overview-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const history=card?.querySelector('.analysis-history'); return card?.dataset.resultRevisionOrdinal==='3' && card.dataset.updateMode==='reanalyze-range' && card.dataset.reusedCount==='5' && card.dataset.recomputedCount==='3' && card.dataset.invalidatedCount==='1' && card.dataset.bypassedCount==='2' && card.dataset.freshnessState==='current' && card.querySelector('[data-analysis-unit="1"][data-analysis-unit-lineage="reused"][data-analysis-unit-reused-from="2/1"]')!==null && card.querySelector('[data-analysis-unit="3"][data-analysis-unit-lineage="recomputed"]')!==null && card.textContent.includes(${JSON.stringify(`段落 ${selectedRange.startPosition}–${selectedRange.endPosition}`)}) && history?.dataset.historyCount==='3' && history.querySelector('[data-history-ordinal="3"][data-history-current="true"][data-history-mode="reanalyze-range"][data-history-predecessor-ordinal="2"]')!==null && history.querySelector('[data-history-ordinal="2"][data-history-current="false"][data-history-freshness="superseded"]')!==null && ${ONLY_ANALYSIS_ACTIONS}; })()`, 'range-overview-surface');
 
     at('reanalyze-book-prepare');
     cancellation.throwIfRequested();
@@ -2564,7 +2564,7 @@ async function main() {
       JSON.stringify(reconfirmed.runSourceScope?.unitScope?.recomputedUnitOrdinals) === JSON.stringify([2, 8]) &&
       reconfirmed.authorization === null && reconfirmed.actions?.canAuthorize === true && reconfirmed.actions?.canReconfirmPlan === false,
     'plan-revision-reconfirmed', { planVersion: reconfirmed?.planVersion, planVersions: reconfirmed?.planVersions, planRevisions: reconfirmed?.planRevisions, update: reconfirmed?.update });
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="authorize"]') && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && card.textContent.includes(${JSON.stringify(`内容块 ${rangeB.startPosition}–${rangeB.endPosition}`)}); })()`, 'plan-revision-version-2-surface');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]'); return card?.dataset.planVersion==='2' && card.dataset.planVersionCount==='2' && card.dataset.planRevisionPending==='false' && card.dataset.planEnvelopeDigest===${JSON.stringify(v2Digest)} && card.dataset.planReused==='6' && card.dataset.planRecomputed==='2' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="superseded"]')!==null && card.querySelector('[data-plan-version-ordinal="2"][data-plan-version-state="current"]')!==null && card.querySelector('.analysis-plan-versions [data-plan-revision-prior="1"][data-plan-revision-next="2"][data-plan-revision-resolved="true"]')!==null && !card.querySelector('.analysis-plan-drift-note, [data-analysis-action="authorize"]') && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && card.textContent.includes(${JSON.stringify(`段落 ${rangeB.startPosition}–${rangeB.endPosition}`)}); })()`, 'plan-revision-version-2-surface');
 
     at('plan-revision-drawer-range');
     // #288's visible half: once version 2 is the plan, the range it names is the one version 2 froze —
@@ -2574,7 +2574,7 @@ async function main() {
     requireJourney(v2Drawer?.version === '2' && v2Drawer.drift === null &&
       v2Drawer.chips.position === `第 ${rangeB.startPosition}–${rangeB.endPosition} 段` && v2Drawer.chips.selected === `已选 ${proposedCount} 字` &&
       v2Drawer.terms['要处理']?.includes(`第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · ${proposedCount} 字 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围（${readSpansLabel(reconfirmed.update.reusePlan, reconfirmed.coverageManifest)}），沿用 ${driftOptionB.expected.reused} 个`) &&
-      v2Drawer.technical['selected-range'] === `内容块 ${rangeB.startPosition}–${rangeB.endPosition}` &&
+      v2Drawer.technical['selected-range'] === `段落 ${rangeB.startPosition}–${rangeB.endPosition}` &&
       v2Drawer.technical['plan-versions'] === `版本 1 · superseded · ${v1Digest}；版本 2 · current · ${v2Digest}` &&
       v2Drawer.technical['plan-envelope'] === v2Digest &&
       // Issue #420 (S74a): version 2 is startable from the bar, whose summary names it.
@@ -3172,7 +3172,6 @@ async function main() {
     at('research-evidence-source-view');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'sources-open-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-manuscript');
-    await assertRenderer(renderer, `(() => { const group=document.querySelector('.editor-shell nav.book-records-group'); const order=Array.from(group?.querySelectorAll('button') ?? []).map((item)=>item.textContent); const open=group?.querySelector('button[data-records-destination="sources"]'); if(JSON.stringify(order)!==JSON.stringify(['分析','来源与证据','返回图书工作概览'])||!(open instanceof HTMLButtonElement)||open.disabled)return false; return true; })()`, 'sources-entry');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('sources')), 'sources-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-sources"] .research-evidence')?.dataset.evidenceCount==='0'`, 'sources-view');
     const sources = await renderer.evaluate(`window.ai7.inspectResearchEvidence({ bookId: ${JSON.stringify(imported.bookId)} })`);
@@ -3340,6 +3339,7 @@ async function main() {
       sourced?.states.factualVerification === '证据不足' && sourced.sourceCounts.checked === 0 && lens.run?.plannedLevel === 'standard' && lens.run.disclosure === null,
     'factual-lens-results', { total: lens?.total, counts: lens?.counts });
     await assertRenderer(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row?.dataset.outcome==='证据不足' && JSON.stringify(Array.from(row.querySelectorAll('[data-state-term]')).map((cell)=>cell.dataset.stateTerm))===JSON.stringify(['引文完整性','断言支持','事实核查']); })()`, 'factual-lens-columns');
+    await assertRenderer(renderer, `(() => { const group=document.querySelector('section.review-group[data-review-category="factual-review"]'); const rows=Array.from(group.querySelectorAll('.fact-lens-row')); return rows.length>0 && group.querySelectorAll(':scope > article.review-finding').length===0 && rows.every(row=>row.querySelectorAll('.review-finding-quote').length===1); })()`, 'factual-results-not-duplicated');
     at('factual-card-evidence');
     // Synchronized delta with Issue #1174 (ADR 0095 §5): the finding's card lists the sources the Evidence Workspace holds for its
     // result, none excluded here — each with its note and, for a web source, its address; a candidate is never quoted. Its mark
@@ -3357,6 +3357,7 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-evidence-lens', 60_000);
     at('factual-evidence-workspace');
     await reviewAction(renderer, `.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}] [data-fact-action="fact-workspace"]`, 'factual-workspace-open');
+    await waitFor(renderer, `(() => { const row=document.querySelector('.fact-lens-row[data-fact-result-id=${JSON.stringify(sourced.resultId)}]'); return row.querySelector('.evidence-workspace')!==null && row.querySelector('.finding-evidence')===null; })()`, 'factual-evidence-not-duplicated');
     const workspaceSelector = `.evidence-workspace[data-result-id=${JSON.stringify(sourced.resultId)}]`;
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} .evidence-card').length===3`, 'factual-workspace-cards');
     // Candidates only: never quoted, never counted, each check a discrete state; the summary labelled 非证据 (EVID-003/004/010).

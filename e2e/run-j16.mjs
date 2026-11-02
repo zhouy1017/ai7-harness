@@ -1216,7 +1216,7 @@ async function main() {
     at('analysis-jump-chip');
     // A jump from another screen leaves the same way back: ②A's 回到稿件范围 on the seventh range opens the manuscript there,
     // and 回到<位置> goes back to where the editor last read it.
-    await clickSelector(renderer, '[data-records-destination="analysis"]', 'analysis-open');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'analysis-open');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'analysis-screen', 60_000);
     await clickSelector(renderer, '[data-screen="book-analysis"] [data-analysis-tab="chapters"]', 'analysis-chapters');
     const rangeBlock = await renderer.evaluate(`document.querySelector('[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="7"] [data-analysis-action="return-to-range"]')?.dataset.analysisBlockId ?? null`);
@@ -1494,7 +1494,7 @@ async function main() {
     requireJourney(Array.isArray(leadAnchors) && leadAnchors.length > 0, 'selection-task-lead-anchors', leadAnchors);
     let taskBlock = null;
     for (const anchor of leadAnchors.slice(0, 6)) {
-      await clickSelector(renderer, '[data-records-destination="analysis"]', 'selection-task-analysis-open');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'selection-task-analysis-open');
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .baseline-analysis-card')`, 'selection-task-analysis-screen', 60_000);
       await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] button[data-analysis-tab="chapters"]') instanceof HTMLButtonElement`, 'selection-task-analysis-chapters-ready', 60_000);
       await clickSelector(renderer, '[data-screen="book-analysis"] button[data-analysis-tab="chapters"]', 'selection-task-analysis-chapters');
@@ -1553,7 +1553,7 @@ async function main() {
     await waitFor(renderer, `window.__j16.composer() === null && window.ai7.inspectReviewWorkspace({reviewRunId:null}).then((page)=>page.run?.state==='settled')`, 'selection-task-review-direct', 120_000);
     const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), modelPlans: workspace.run.categories.every((category) => category.taskIntentId !== null && /^[a-f0-9]{64}$/.test(category.planEnvelopeDigest ?? '')) })`);
     requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'settled' && selectionRun.modelPlans === true && JSON.stringify(selectionRun.categories) === JSON.stringify(['plot-consistency']) &&
-      selectionRun.scope?.kind === 'selection' && selectionRun.scope.label === `当前选区 · 内容块 ${position}–${position}` &&
+      selectionRun.scope?.kind === 'selection' && selectionRun.scope.label === `当前选区 · 段落 ${position}–${position}` &&
       selectionRun.scope.selectedRange?.startPosition === Number(position) && selectionRun.scope.selectedRange.endPosition === Number(position) &&
       selectionRun.scope.selection?.fromBlockId === taskBlock && selectionRun.scope.selection.toBlockId === taskBlock,
     'selection-task-review-recorded', selectionRun);

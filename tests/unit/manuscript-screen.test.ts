@@ -129,12 +129,12 @@ function shell() {
     setContextActions: vi.fn(), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
     errorMessage: (_error, fallback) => fallback, recentlyActivatedControl: () => null, awaitServiceJob: vi.fn(),
     composerRangeOf: vi.fn(), selectionTaskOffer: vi.fn(), selectionProcedureOffer: vi.fn(), prepareSelectionTask: vi.fn(),
-    renderEditorWindow: vi.fn(), renderBookOverview: vi.fn(), renderBookAnalysis: vi.fn(), renderBookSources: vi.fn(),
-    renderBookReview: vi.fn(), renderBookDeliverables: vi.fn(), renderBookEvaluation: vi.fn(), renderBookFindings: vi.fn(),
+    renderEditorWindow: vi.fn(), renderBookAnalysis: vi.fn(),
+    renderBookReview: vi.fn(), renderBookDeliverables: vi.fn(),
     renderProposalConflict: vi.fn(), renderProposalWorkspace: vi.fn(), returnToRecoveryComparison: vi.fn(),
   });
   return {
-    persistenceStatus, open,
+    persistenceStatus, screen, open,
     /** Another screen replaces this one without its leave guard (a recovery return, an owned workbench route) and says so. */
     leave: (status: string): void => { replace(document.createElement('section') as unknown as HTMLElement); setStatus(status); },
     get showing(): ManuscriptScreen | null { return showing; },
@@ -159,6 +159,16 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
 describe('the Manuscript screen lifecycle', () => {
+  it('keeps global destinations in the sidebar and editing actions in the toolbar', () => {
+    const app = shell();
+    app.open(windowOf('book-one'));
+    const toolbar = app.screen.querySelector('.editor-toolbar')!;
+    expect(toolbar.querySelector('nav') === null).toBe(true);
+    expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
+      .toEqual(['撤销', '重做', '保存当前编辑', '重试权威刷新']);
+    app.showing?.destroy();
+  });
+
   it.each(['modes', 'editor'] as const)(
     'leaves a mount that threw after attaching (%s) readable, settleable and destroyed once, and a later mount attaches',
     async (failAt) => {

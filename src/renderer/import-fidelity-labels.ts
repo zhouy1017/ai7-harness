@@ -10,9 +10,12 @@ import type {
 /**
  * Every word of the Import Fidelity Review (④ 保真审阅; V2-UX-IMP-002 to 005, IMP-055; ADR 0086) that the
  * service projection does not already carry. The rows' labels, counts, status labels and details are the
- * service's and are shown as they come; these are the sentences around them. Pure, so the unit suite pins
+ * service's; historical report terminology is translated for display without changing the report bytes. Pure, so the unit suite pins
  * every string byte for byte.
  */
+
+/** #1287: frozen import reports retain their exact bytes; the editor reads natural paragraph wording. */
+export function fidelityDetailText(detail: string): string { return detail.replaceAll('内容块', '段落'); }
 
 /** The class that closes the review as a card rather than a row (ADR 0086 §1). */
 export const ROUND_TRIP_KEY = 'round-trip-export';

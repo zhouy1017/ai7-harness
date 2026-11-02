@@ -123,7 +123,7 @@ export function reviewGenerateReportLabel(latestVersion: number | null): string 
 export function reviewManuscriptLine(manuscript: ReviewWorkspaceProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能审阅。'
-    : `当前稿件：修订版 ${manuscript.revisionLabel} · ${manuscript.totalBlocks} 个内容块`;
+    : `当前稿件：修订版 ${manuscript.revisionLabel} · ${manuscript.totalBlocks} 个段落`;
 }
 
 // ---- state pills: text and shape, never colour alone (editor-surfaces §0.3) ----------------------------
@@ -192,7 +192,7 @@ export function reviewCoverageLastReview(row: Pick<ReviewCoverageRowProjection, 
 
 export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'changedBlocks'>): string {
   if (row.changedBlocks === null) return '—';
-  return row.changedBlocks === 0 ? '没有改动' : `改动了 ${row.changedBlocks} 个内容块`;
+  return row.changedBlocks === 0 ? '没有改动' : `改动了 ${row.changedBlocks} 个段落`;
 }
 
 /**
@@ -244,7 +244,7 @@ export const REVIEW_CHAPTERS_REVERSED = '结束的章不能在开始的章之前
 export const REVIEW_PREPARING_ESCAPE = '正在准备审阅计划；要停止，请点「取消准备」。';
 
 export function reviewChapterOptionLabel(chapter: Pick<ReviewChapterOptionProjection, 'title' | 'position' | 'endPosition'>): string {
-  return `${chapter.title}（内容块 ${chapter.position}–${chapter.endPosition}）`;
+  return `${chapter.title}（段落 ${chapter.position}–${chapter.endPosition}）`;
 }
 
 /** 会读取: what the chosen scope reads, in the manuscript's own terms, before any plan exists. */
@@ -257,11 +257,11 @@ export function reviewReadConsequence(
     case null:
       return '选好范围后显示';
     case 'whole':
-      return manuscript === null ? '这本书还没有稿件。' : `当前稿件（修订版 ${manuscript.revisionLabel}）的全部 ${manuscript.totalBlocks} 个内容块`;
+      return manuscript === null ? '这本书还没有稿件。' : `当前稿件（修订版 ${manuscript.revisionLabel}）的全部 ${manuscript.totalBlocks} 个段落`;
     case 'chapters':
       return chapters.from === null || chapters.to === null
         ? '选好起止的章后显示'
-        : `所选各章：从「${chapters.from.title}」到「${chapters.to.title}」（内容块 ${chapters.from.position}–${chapters.to.endPosition}）`;
+        : `所选各章：从「${chapters.from.title}」到「${chapters.to.title}」（段落 ${chapters.from.position}–${chapters.to.endPosition}）`;
     case 'changed':
       return '每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审';
     case 'selection':
@@ -369,7 +369,7 @@ export const REVIEW_RISK_POINT = '需人工复核的风险点';
 export const REVIEW_ANCHOR_CHANGED = '原文已变，未能在稿件上标出';
 /** Said when a manuscript action is refused for want of the window's manuscript capability. */
 export const REVIEW_CAPABILITY_REASON = '请先打开稿件再处理这条发现。';
-export const REVIEW_BLOCK_GONE = '这段文字所在的内容块已不在当前稿件中。';
+export const REVIEW_BLOCK_GONE = '这段文字所在的段落已不在当前稿件中。';
 export const REVIEW_CANNOT_APPLY = '原文已变，无法应用这条修改建议。';
 export const REVIEW_CANNOT_CONVERT = '原文已变，无法在这段文字上转换。';
 
@@ -391,8 +391,8 @@ export function reviewGroupCountLine(findingsCount: number): string {
 
 /** Where a finding stands in the manuscript now: its chapter and block, or that its block is gone. */
 export function reviewFindingLocation(finding: Pick<ReviewFindingProjection, 'chapterTitle' | 'blockPosition'>): string {
-  if (finding.blockPosition === null) return '所在的内容块已不在当前稿件中';
-  return finding.chapterTitle === null ? `内容块 ${finding.blockPosition}` : `「${finding.chapterTitle}」 · 内容块 ${finding.blockPosition}`;
+  if (finding.blockPosition === null) return '所在的段落已不在当前稿件中';
+  return finding.chapterTitle === null ? `段落 ${finding.blockPosition}` : `「${finding.chapterTitle}」 · 段落 ${finding.blockPosition}`;
 }
 
 export function reviewQuote(quote: string): string {

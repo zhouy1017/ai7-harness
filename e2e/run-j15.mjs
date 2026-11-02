@@ -672,12 +672,12 @@ async function main() {
         technical: Array.from(details?.querySelectorAll(':scope > dl > dt') ?? [], (term) => [term.textContent, term.nextElementSibling?.textContent ?? null]),
       };
     })()`);
-    const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), predecessor: document.querySelector('.procedure-predecessor')?.textContent, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
-    requireJourney(library.stages.length === 17 && library.stages.every((value) => value.length > 0) && library.predecessor?.includes('审阅专用前身') && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
-    await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.preinstalled-procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
+    const library = await renderer.evaluate(`({ stages: Array.from(document.querySelectorAll('.procedure-stages'), (node) => node.textContent), catalogs: document.querySelectorAll('.knowledge-procedure-list').length, baseline: document.querySelector('[data-procedure-id="ai7-procedure/baseline-analysis"]')?.textContent })`);
+    requireJourney(library.stages.length === 17 && library.stages.every((value) => value.length > 0) && library.catalogs === 1 && library.baseline?.includes('跨单元归并与跨章一致性'), 'preinstalled-procedure-library', library);
+    await assertRenderer(renderer, `(() => { const entries=document.querySelectorAll('.procedure-library li[data-procedure-version="2"]'); if(entries.length!==7)return false; return Array.from(entries).every((entry) => { const history=entry.querySelector('details.procedure-previous-versions'); if(!(history instanceof HTMLDetailsElement))return false; history.open=true; const row=history.querySelector('[data-procedure-previous-version="1"]'); return row?.textContent.startsWith('第 1 版 · ') === true && /^[0-9a-f]{64}$/u.test(row.dataset.procedureDigest ?? '') && !/[0-9a-f]{64}/u.test(row.textContent); }); })()`, 'preinstalled-review-v2-with-v1-history');
     await assertRenderer(renderer, `(() => {
       return [['style-and-format', '3', ['1', '2']], ['plot-consistency', '2', ['1']]].every(([category, version, previous]) => {
-        const entry=document.querySelector('.preinstalled-procedure-library [data-procedure-id="ai7-procedure/review-'+category+'"]');
+        const entry=document.querySelector('.procedure-library [data-procedure-id="ai7-procedure/review-'+category+'"]');
         const history=entry?.querySelector('details.procedure-previous-versions');
         if(entry?.dataset.procedureVersion!==version || !(history instanceof HTMLDetailsElement))return false;
         history.open=true;
@@ -707,7 +707,7 @@ async function main() {
     await fill(renderer, '[data-procedure-editor] ol li:first-child textarea', '语境明确时允许省略主语。', 'editable-exemption');
     await assertRenderer(renderer, `(() => { const rows=document.querySelectorAll('[data-procedure-editor] ol li'); rows[0].querySelector('input').value='60'; rows[0].querySelector('input').dispatchEvent(new Event('input')); rows[1].querySelector('input').value='40'; rows[1].querySelector('input').dispatchEvent(new Event('input')); Array.from(rows[0].querySelectorAll('button')).find(b=>b.textContent==='下移').click(); return true; })()`, 'editable-budget-and-order');
     await click(renderer, '保存为新版本', 'editable-incompatible-save');
-    await waitFor(renderer, `document.querySelector('.preinstalled-procedure-library [role=status]')?.textContent.includes('阶段须为')`, 'editable-incompatible-order-named');
+    await waitFor(renderer, `document.querySelector('.procedure-library [role=status]')?.textContent.includes('阶段须为')`, 'editable-incompatible-order-named');
     await assertRenderer(renderer, `(() => { Array.from(document.querySelector('[data-procedure-editor] ol li').querySelectorAll('button')).find(b=>b.textContent==='下移').click(); return true; })()`, 'editable-restore-compatible-order');
     await click(renderer, '保存为新版本', 'editable-save-v1');
     await waitFor(renderer, `Array.from(document.querySelectorAll('.knowledge-procedure-list > li')).some(li=>li.querySelector('h4')?.textContent==='J15 可编辑工序 · 第 1 版')`, 'editable-created-v1');

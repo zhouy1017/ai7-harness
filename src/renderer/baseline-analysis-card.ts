@@ -164,7 +164,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
   }
 
   function rangeText(range: BaselineAnalysisSelectedRange | null): string {
-    return range === null ? '全部内容块' : `内容块 ${range.startPosition}–${range.endPosition}`;
+    return range === null ? '全部段落' : `段落 ${range.startPosition}–${range.endPosition}`;
   }
 
   /** The primary branch the Book's analysis navigates into: the frozen checkpoint's, else the working head's. */
@@ -512,7 +512,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         const manifestUnit = manifestUnits.get(unit.unitOrdinal);
         const title = manifestUnit === undefined
           ? `第 ${unit.unitOrdinal} 个阅读范围`
-          : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
+          : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 段落 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
         item.append(element('h5', undefined, title));
         const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
         if (unit.state === 'closed') {
@@ -546,7 +546,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const item = element('li');
       item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
       item.dataset['analysisGapCode'] = gap.code;
-      item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+      item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 段落 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
       if (gap.firstBlockId !== null) item.append(returnButton(gap.firstBlockId));
       gaps.append(item);
     }
@@ -846,12 +846,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // both readings stay at full rank; the digests that identify them go one step away.
     facts.append(
       element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${controls.target.ordinal} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
-      element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个内容块 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
-      element('dt', undefined, '模型提供方 / 外发 / 预算'), element('dd', undefined, controls.providerConsequence),
+      element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
+      element('dt', undefined, '模型服务与用量'), element('dd', undefined, '沿用本次分析的模型服务、发送范围与预算；复用已有结果不调用模型。'),
       element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
     );
     section.append(facts, technicalDetails(
       'analysis-facts',
+      element('dt', undefined, '模型服务、发送范围与预算'), element('dd', 'technical-identity', controls.providerConsequence),
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
@@ -872,7 +873,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       }
       // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
       // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
-      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning));
+      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
       const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
       block.append(expected, technicalDetails('analysis-facts',
@@ -901,7 +902,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
               selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
               block.dataset['selectedRange'] = radio.value;
               for (const key of ['expectedReused', 'expectedRecomputed', 'expectedInvalidated', 'expectedBypassed']) delete block.dataset[key];
-              expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
+              expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
               expectedExact.textContent = '';
               start.disabled = !action.available;
               try {
@@ -912,7 +913,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
                 block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
                 block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
                 block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
-                expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
+                expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
                 expectedExact.textContent = reuseCountsText(picked.expected);
               } catch {
                 if (!radio.checked || !block.isConnected) return;
@@ -1282,7 +1283,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       records.append(more);
     }
 
-    // §10: 明确不会发生 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
+    // §10: 不会做 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
     // unabridged — are one step away in 查看技术详情.
     const notDo = element('ul', 'analysis-list analysis-not-do');
     for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));

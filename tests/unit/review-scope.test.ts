@@ -63,7 +63,7 @@ describe('the scope a category reads', () => {
     }
     expect(SELECTION_UNAVAILABLE_REASON).toBe('在稿件里选中文字，右键「就这段发起任务…」审阅所选文字。');
     expect(FACTUAL_SELECTION_REASON).toBe('事实核查暂只能核查全书；就所选文字核查随事实核查的更新方式接入。');
-    expect(reviewScopeLabel(SELECTION)).toBe('当前选区 · 内容块 3–3');
+    expect(reviewScopeLabel(SELECTION)).toBe('当前选区 · 段落 3–3');
     // A category the ledger holds a revision of, from 当前选区 Runs only, has reviewed no chapter (Issue #423 review, P1-3).
     expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: false })).toEqual({ kind: 'refused', reason: NEVER_REVIEWED_REASON });
     expect(reviewCategoryScopePlan('review-category-contract', null, CHANGED, { ...STALE, reviewed: true })).toEqual({ kind: 'task', mode: 'review-sync', selectedRange: null });
@@ -113,8 +113,8 @@ describe('the chapters 选章 offers', () => {
       { ordinal: 2, startPosition: 16, endPosition: 25, firstBlockId: 'blk_16' },
     ]);
     expect(chapters).toEqual([
-      { blockId: 'blk_1', title: '第 1 部分 · 内容块 1–15', level: 1, position: 1, endPosition: 15 },
-      { blockId: 'blk_16', title: '第 2 部分 · 内容块 16–25', level: 1, position: 16, endPosition: 25 },
+      { blockId: 'blk_1', title: '第 1 部分 · 段落 1–15', level: 1, position: 1, endPosition: 15 },
+      { blockId: 'blk_16', title: '第 2 部分 · 段落 16–25', level: 1, position: 16, endPosition: 25 },
     ]);
   });
 
@@ -137,6 +137,6 @@ describe('the chapters 选章 offers', () => {
   it('labels a scope by positions only', () => {
     expect(reviewScopeLabel(WHOLE)).toBe('全书');
     expect(reviewScopeLabel(CHANGED)).toBe('只审改动过的章');
-    expect(reviewScopeLabel(CHAPTERS)).toBe('选章 · 内容块 16–43');
+    expect(reviewScopeLabel(CHAPTERS)).toBe('选章 · 段落 16–43');
   });
 });

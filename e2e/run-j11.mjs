@@ -110,7 +110,7 @@ const AI7_ITEM_LINES = [
   ['theme-and-context', 'fair', '主题、价值与社会文化语境：AI7 初评 15 / 20 · 依据充分度 一般（引用 6 个段落，分布在 3 个阅读范围）'],
   ['structure-and-coherence', 'sufficient', '结构、叙事逻辑与连贯：AI7 初评 15.5 / 20 · 依据充分度 充分（引用 16 个段落，分布在 8 个阅读范围）'],
   ['chinese-language', 'sufficient', '中文语言与表达：AI7 初评 14 / 20 · 依据充分度 充分（引用 9 个段落，分布在 7 个阅读范围）'],
-  ['readers-and-market', 'insufficient', '读者与市场潜力：AI7 初评 12 / 20 · 依据充分度 不足（没有引用内容块）'],
+  ['readers-and-market', 'insufficient', '读者与市场潜力：AI7 初评 12 / 20 · 依据充分度 不足（没有引用段落）'],
 ];
 /** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
@@ -1508,8 +1508,7 @@ async function main() {
     // 评估 is one of the manuscript's 工作 destinations (IA-012, editor-surfaces §0.3): from 评估's own 打开稿件, the manuscript's
     // 工作 group reads 审阅 · 评估 · 交付物, and its 评估 opens the version just finalized.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'evaluation-open-manuscript');
-    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"] > [data-block-id]') !== null && document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]') !== null`, 'evaluation-manuscript-ready', 60_000);
-    await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="evaluation"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; return true; })()`, 'evaluation-work-group-entry');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"] > [data-block-id]') !== null && document.querySelector('#app-sidebar [data-nav-book-section="evaluation"]') !== null`, 'evaluation-manuscript-ready', 60_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-work-group-entry');
     const returned = await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.state === 'finalized', 'evaluation-from-manuscript-ready');
     requireJourney(returned.record.heading === '第 1 版 · 定稿' && returned.start === '重新评估' && returned.versions.length === 1, 'evaluation-from-manuscript-words', returned);
@@ -1788,7 +1787,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'evaluation-pages-return');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-pages-library');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-pages-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'evaluation-pages-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"]')`, 'evaluation-pages-manuscript');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-pages-open');
     await readEvaluation(renderer, (page) => page.record?.heading === '第 2 版 · 编辑评分中', 'evaluation-pages-second');
     for (let ordinal = 2; ordinal <= 12; ordinal += 1) {
@@ -1946,7 +1945,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'initial-evaluation-calibration-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'initial-evaluation-back-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'initial-evaluation-back-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'initial-evaluation-back-manuscript', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"]')`, 'initial-evaluation-back-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'initial-evaluation-back-open');
     await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 14 版 · 定稿', 'initial-evaluation-back-ready');
 
@@ -3062,7 +3061,7 @@ async function main() {
     renderer = await launch();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'evaluation-damaged-ready');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${thirdId}"]`, 'evaluation-damaged-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'evaluation-damaged-manuscript', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"]')`, 'evaluation-damaged-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-damaged-open');
     const damagedPage = await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 14 版 · 定稿', 'evaluation-damaged-page');
     requireJourney(damagedPage.unreadable === '第 15 版评估记录已损坏，无法显示；其他版本照常可用。' && damagedPage.start === '从第 14 版重新评估' && damagedPage.startReason === null &&
@@ -3180,7 +3179,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'calibration-off-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'calibration-off-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${calibrationBookId}"]`, 'calibration-off-book');
-    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'calibration-off-manuscript', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"]')`, 'calibration-off-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'calibration-off-open');
     await readEvaluation(renderer, (page) => page.state === 'ready' && page.record?.heading === '第 2 版 · 定稿', 'calibration-off-ready');
     await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', 'calibration-off-start');
@@ -3210,7 +3209,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'profile-editing-library');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(calibrationBookId)}]`, 'profile-editing-book');
     // A Book opens on its manuscript, as calibration-off reads it: 评估 is its work destination there.
-    await waitFor(renderer, `document.querySelector('.editor-shell [data-work-destination="evaluation"]')`, 'profile-editing-manuscript', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell [data-testid="manuscript-editor"]')`, 'profile-editing-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'profile-editing-old-record');
     await waitFor(renderer, `document.querySelector('[data-screen="book-evaluation"] .evaluation-item')`, 'profile-editing-old-ready');
     const keptProfiles = await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then((page)=>JSON.stringify([page.record.profile,page.initial.latest.profile]))`);
@@ -3230,6 +3229,8 @@ async function main() {
     const signalForMemory = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page => ({enabled:page.enabled,items:page.items.length,signal:page.signals.find(signal => signal.currentEligibility === 'house')?.signalId ?? null}))`);
     requireJourney(signalForMemory.enabled && signalForMemory.items === 0 && typeof signalForMemory.signal === 'string', 'editorial-memory-local-signals');
     const signalSelector = `[data-learning-signal="${signalForMemory.signal}"]`;
+    await assertRenderer(renderer, `document.querySelectorAll('${signalSelector} form').length===0`, 'memory-form-closed');
+    await clickSelector(renderer, `${signalSelector} [data-memory-action="new"]`, 'memory-form-open');
     await fill(renderer, `${signalSelector} [name="memory-title"]`, '旅程示例：统一编辑用语', 'editorial-memory-title');
     await fill(renderer, `${signalSelector} [name="memory-dimension"]`, '语言', 'editorial-memory-dimension');
     await clickSelector(renderer, `${signalSelector} button[type="submit"]`, 'editorial-memory-create');
@@ -3299,6 +3300,7 @@ async function main() {
     };
     const createCandidate = async (title, name) => {
       await assertRenderer(renderer, `(() => { for(const id of ${JSON.stringify(memorySources.ids)}) { const checkbox=document.querySelector('[data-memory-source="'+id+'"]'); if(!(checkbox instanceof HTMLInputElement)||checkbox.disabled)return false; if(!checkbox.checked)checkbox.click(); }return true; })()`, `${name}-select`);
+      await clickSelector(renderer, 'details.memory-composer > summary', `${name}-open-composer`);
       await fill(renderer, '[data-memory-candidate-form] [name="candidate-title"]', title, `${name}-title`);
       await clickSelector(renderer, '[data-memory-candidate-form] button[type="submit"]', `${name}-create`);
       await waitFor(renderer, `Array.from(document.querySelectorAll('[data-memory-item]')).some(item=>item.textContent.includes(${JSON.stringify(title)}) && item.textContent.includes('待接受')) && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-proposed`);

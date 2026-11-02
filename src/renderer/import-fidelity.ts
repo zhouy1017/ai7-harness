@@ -8,6 +8,7 @@ import {
   TEXT_BOX_CHOICE_LEGEND,
   TEXT_BOX_CHOICE_OPTIONS,
   conversionNoteText,
+  fidelityDetailText,
   fidelityCountText,
   fidelityPillText,
   fidelityRows,
@@ -90,7 +91,7 @@ function fidelityRow(category: FidelityCategoryProjection, choice: HTMLElement |
   name.append(document.createTextNode(category.label), el('span', 'count', fidelityCountText(category.count)));
   const status = el('div', `status-pill status-${category.status}`, fidelityPillText(category));
   status.setAttribute('role', 'cell');
-  const detail = el('div', 'fidelity-detail', category.detail);
+  const detail = el('div', 'fidelity-detail', fidelityDetailText(category.detail));
   detail.setAttribute('role', 'cell');
   if (choice !== null) detail.append(choice);
   row.append(name, status, detail);
@@ -101,7 +102,7 @@ function fidelityRow(category: FidelityCategoryProjection, choice: HTMLElement |
 function roundTripCardElement(category: FidelityCategoryProjection): HTMLElement {
   const card = el('section', 'roundtrip-card');
   card.dataset['fidelityCategory'] = category.key;
-  card.append(el('h4', undefined, category.label), el('p', 'fidelity-detail', category.detail));
+  card.append(el('h4', undefined, category.label), el('p', 'fidelity-detail', fidelityDetailText(category.detail)));
   return card;
 }
 

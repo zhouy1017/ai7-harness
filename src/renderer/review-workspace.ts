@@ -1380,9 +1380,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     row.dataset['outcome'] = result.states.factualVerification;
     row.dataset['anchor'] = result.anchor.state;
     row.dataset['version'] = String(result.version);
-    const head = el('div', 'fact-lens-row-heading');
-    head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
-    row.append(head);
+    const open = fact.open.get(result.resultId);
+    const finding = run.findings.find((entry) => entry.findingId === result.reviewFindingId);
+    const category = run.categories.find((entry) => entry.categoryId === 'factual-review')!;
+    const card = finding === undefined ? el('article', 'review-finding') : renderFinding(run, category, finding, open === undefined);
+    if (finding === undefined) {
+      const head = el('div', 'fact-lens-row-heading');
+      head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
+      card.append(head);
+    }
+    row.append(card);
     // The three states in their own columns: never one traffic light (FACT-007).
     const states = el('div', 'fact-lens-states');
     for (const [term, value] of factStateLines(result)) {
@@ -1391,10 +1398,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       cell.append(el('span', 'evidence-term', term), el('span', `status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
       states.append(cell);
     }
-    row.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
-    if (result.anchor.label !== null) row.append(el('p', 'fact-lens-anchor', result.anchor.label));
+    card.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
+    if (result.anchor.label !== null) card.append(el('p', 'fact-lens-anchor', result.anchor.label));
     const actions = el('div', 'button-row');
-    const open = fact.open.get(result.resultId);
     const toggle = factButton('fact-workspace', 'quiet', () => {
       const current = fact.open.get(result.resultId);
       if (current !== undefined) {
@@ -1436,9 +1442,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     locate.textContent = '在稿件中查看';
     locate.disabled = working || result.anchor.state === 'stale';
     actions.append(locate);
-    row.append(actions);
+    card.append(actions);
     // The open workspace is the same element across repaints, so what the editor pinned, chose or typed stays.
-    if (open !== undefined) row.append(open.element);
+    if (open !== undefined) card.append(open.element);
     return row;
   }
 
@@ -1457,13 +1463,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       heading.append(batch);
     }
     group.append(heading);
-    if (category.categoryId === 'factual-review' && fact.lens !== null) group.append(renderFactLens(run));
+    const filteredLens = Object.values(fact.filters).some((value) => value !== null);
+    const hasLens = category.categoryId === 'factual-review' && fact.lens !== null && (fact.results.length > 0 || filteredLens);
+    if (hasLens) group.append(renderFactLens(run));
     if (ui.batch?.categoryId === category.categoryId) group.append(renderBatchStrip(run, ui.batch));
-    for (const finding of findings) group.append(renderFinding(run, category, finding));
+    const lensFindings = new Set(fact.results.map((result) => result.reviewFindingId));
+    for (const finding of findings) {
+      // A partial run can retain findings for which no evidence result was produced. Keep their actions available.
+      if (!hasLens || !filteredLens && fact.next === null && !lensFindings.has(finding.findingId)) group.append(renderFinding(run, category, finding));
+    }
     return group;
   }
 
-  function renderFinding(run: ReviewRunProjection, category: ReviewRunCategoryProjection, finding: ReviewFindingProjection): HTMLElement {
+  function renderFinding(run: ReviewRunProjection, category: ReviewRunCategoryProjection, finding: ReviewFindingProjection, showEvidence = true): HTMLElement {
     const article = el('article', 'review-finding');
     article.dataset['findingId'] = finding.findingId;
     article.dataset['severity'] = finding.severity;
@@ -1495,8 +1507,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const retained = research.get(finding.findingId);
     const attached = category.categoryId === 'factual-review' ? evidence.get(finding.findingId) ?? [] : [];
     const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
-    if (attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
-    for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
+    if (showEvidence && attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
+    if (showEvidence) for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
     if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) article.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
@@ -1510,7 +1522,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       'review-facts',
       el('dt', undefined, '发现'), el('dd', 'technical-identity', `${finding.findingId} · 第 ${finding.ordinal} 条`),
       el('dt', undefined, '标记'), el('dd', 'technical-identity', finding.markId === null ? '无（原文已变）' : `${finding.markId} · ${finding.markStatus ?? '—'} · ${finding.anchorState}`),
-      el('dt', undefined, '内容块'), el('dd', 'technical-identity', `${finding.blockId} · 字素 ${finding.fromGrapheme}–${finding.toGrapheme}`),
+      el('dt', undefined, '段落'), el('dd', 'technical-identity', `${finding.blockId} · 字素 ${finding.fromGrapheme}–${finding.toGrapheme}`),
     ));
     return article;
   }

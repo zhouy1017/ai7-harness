@@ -186,7 +186,7 @@ export interface ReviewStructuralUnit {
 export function chapterOptionsFromUnits(units: ReadonlyArray<ReviewStructuralUnit>): ReviewChapterOptionProjection[] {
   return units.map((unit) => ({
     blockId: unit.firstBlockId,
-    title: `第 ${unit.ordinal} 部分 · 内容块 ${unit.startPosition}–${unit.endPosition}`,
+    title: `第 ${unit.ordinal} 部分 · 段落 ${unit.startPosition}–${unit.endPosition}`,
     level: 1,
     position: unit.startPosition,
     endPosition: unit.endPosition,
@@ -224,5 +224,5 @@ export function chapterOfPosition(chapters: ReadonlyArray<ReviewChapterOptionPro
 export function reviewScopeLabel(scope: Pick<ResolvedReviewScope, 'kind' | 'selectedRange'>): string {
   return scope.selectedRange === null
     ? REVIEW_SCOPE_LABELS[scope.kind]
-    : `${REVIEW_SCOPE_LABELS[scope.kind]} · 内容块 ${scope.selectedRange.startPosition}–${scope.selectedRange.endPosition}`;
+    : `${REVIEW_SCOPE_LABELS[scope.kind]} · 段落 ${scope.selectedRange.startPosition}–${scope.selectedRange.endPosition}`;
 }

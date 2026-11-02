@@ -4100,7 +4100,7 @@ export class BaselineAnalysisStore {
       startPosition: unit.startPosition,
       endPosition: unit.endPosition,
       graphemes: unit.graphemes,
-      label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
+      label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 段落 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
       expected: this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
     }));
     const actions = Object.fromEntries(this.#definition.updateModes.map((mode) => {

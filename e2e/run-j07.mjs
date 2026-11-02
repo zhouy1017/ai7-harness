@@ -732,7 +732,6 @@ async function importDraftAsSource(renderer, bookId) {
 
 /** 交付物 from the manuscript: the 工作 group holds 审阅 and then 交付物, and leaving settles the manuscript first. */
 async function openDeliverables(renderer, name) {
-  await assertRenderer(renderer, `(() => { const group = document.querySelector('.editor-shell nav.book-work-group[aria-label="工作"]'); const entries = Array.from(group?.querySelectorAll('button[data-work-destination]') ?? []).map((item) => item.dataset.workDestination + ':' + item.textContent); const open = group?.querySelector('button[data-work-destination="deliverables"]'); if (entries.join('|') !== 'review:审阅|evaluation:评估|deliverables:交付物' || !(open instanceof HTMLButtonElement) || open.disabled) return false; return true; })()`, `${name}-entry`);
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), `${name}-entry`);
   await waitForDeliverables(renderer, name);
 }
@@ -1681,7 +1680,7 @@ async function main() {
         materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
         // Issue #547: how its material was read, standing in the column rather than only in the notice that opened it.
         originMarks: lens?.querySelector('.document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)},
-        work: JSON.stringify(work) === '["deliverables:返回交付物"]',
+        work: work.length === 0 && document.querySelector('#app-sidebar [data-nav-book-section="deliverables"]') !== null,
         noAnalysis: shell?.querySelector('[data-records-destination="analysis"]') === null,
         edge: JSON.stringify(edge) === '["navigation"]',
         noMilestone: shell?.querySelector('details.milestone-section') === null,
@@ -2707,7 +2706,7 @@ async function main() {
         WRITING_MATERIALS_NONE,
         `《${WRITING_TITLE}》 · 作者：未填写 · 责编：未填写 · 书系：不在任何书系中`,
       ]) &&
-      JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个内容块，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
+      JSON.stringify(writingSheet.consequences) === JSON.stringify(['会读取', '当前稿件的全部 97 个段落，以及上面列出的参考材料', '会发送', WRITING_SEND, '不会做', WRITING_NOT_DO, '费用', '先看计划后显示']) &&
       writingSheet.quick === null, 'writing-sheet-words', writingSheet);
     // 先看计划 with no type chosen asks for one; choosing 宣传文章 names its 范例 — none in this house.
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="plan"]', 'writing-plan-unchosen');
