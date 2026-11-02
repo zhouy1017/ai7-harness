@@ -28,7 +28,7 @@ function candidateProjection(candidate: SearchBackendCandidate): SearchBackendCa
       '未实测：AI7 尚未测量这一接口的命中率、延迟与可达性；它不能用于任务，也不能设为默认后端或备用来源。',
       `声明的能力：搜索（${new URL(candidate.search.endpoint).pathname}）与取回（${new URL(candidate.fetch.endpoint).pathname}）；本版本只开放下面的连接测试。`,
       `连接测试只发送一条固定的公开查询“${args.query}”（count ${args.count}，不取正文），不发送书稿或任何书籍材料；使用本页已保存的 DeepSeek 服务端搜索（官方）密钥。`,
-      `计费（DeepSeek 官方指南，${readOn} 读取）：成功的搜索或取回请求每 1,000 次 USD 0.75；空结果、失败与超时不计费。指南所说的免费期只覆盖经 DeepSeek Harness、Claude Code 或 Codex 的服务端工具调用（至北京时间 2026-11-01 00:00），不承诺直连调用免费。`,
+      `计费（DeepSeek 官方指南，${readOn} 读取）：成功的搜索或取回请求每 1,000 次 USD 0.75；空结果、失败与超时不计费。历史评测价格仅供参考，不承诺直连调用免费；以服务商当前价格页为准。`,
       '测试结果只在本页显示，不保存；离开设置或重启 AI7 后清除。',
     ],
   };
@@ -93,7 +93,7 @@ export function searchBackendSettingsProjection(connections: readonly SearchBack
   return { selectedBackendId: connections.find((row) => row.selected)!.backendId, fallbackBackendId: fallback?.backendId ?? null,
     backends: SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => ({
       backendId: entry.id, name: entry.displayName, rank: entry.rank!, host: entry.host!,
-      reachable: entry.profile?.verdict === 'measured', p50Ms: entry.profile?.latencyMs.p50 ?? null,
+      reachable: connections.find((row) => row.backendId === entry.id)?.credentialOperationState === 'ready' && entry.profile?.verdict === 'measured', p50Ms: entry.profile?.latencyMs.p50 ?? null,
       price: priceLine(entry.price, entry.profile?.costPerCallUsd ?? null),
       keyRequired: entry.keyRequired,
       chineseHitRate: entry.profile === null || entry.profile.totals.chinese === 0 ? 0 : entry.profile.hits.chinese / entry.profile.totals.chinese,

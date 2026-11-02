@@ -562,7 +562,7 @@ Open:
 
 | | |
 | --- | --- |
-| Endpoint | `https://opencode.ai/zen/v1/chat/completions` |
+| Endpoint | `https://opencode.ai/inference/openai/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | OpenCode Zen · Chat Completions |
 | Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
@@ -597,14 +597,14 @@ Dispositions (`openai-chat-completions`): text supported for `qwen3.8-max`, `dee
 
 Inert: 18 of 18 (no declared answer channel). Established:
 
-- every model · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
+- every model · `requestShape: openai-chat-completions` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 ### `opencode-zen-messages`
 
 | | |
 | --- | --- |
-| Endpoint | `https://opencode.ai/zen/v1/messages` |
+| Endpoint | `https://opencode.ai/inference/anthropic/v1/messages` |
 | Request shape | `anthropic-messages` |
 | Display name | OpenCode Zen · Messages |
 | Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
@@ -640,14 +640,14 @@ Dispositions (`anthropic-messages`): text supported for `claude-fable-5-1`, `cla
 
 Inert: 19 of 19 (no declared answer channel). Established:
 
-- every model · `requestShape: anthropic-messages` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
+- every model · `requestShape: anthropic-messages` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 ### `opencode-zen-responses`
 
 | | |
 | --- | --- |
-| Endpoint | `https://opencode.ai/zen/v1/responses` |
+| Endpoint | `https://opencode.ai/inference/openai/v1/responses` |
 | Request shape | `openai-responses` |
 | Display name | OpenCode Zen · Responses |
 | Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
@@ -694,19 +694,19 @@ Dispositions (`openai-responses`): text supported for `gpt-6-astra`, `gpt-6-sol`
 
 Inert: 30 of 30 (no declared answer channel). Established:
 
-- every model · `requestShape: openai-responses` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
+- every model · `requestShape: openai-responses` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 Readings:
 
 - `zen-page` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09. The Endpoints table prints each model's id and its endpoint under `https://opencode.ai/zen/v1/`; the API examples send `Authorization: Bearer $OPENCODE_API_KEY`. Zen is pay-as-you-go: charged per request against credits, with auto-reload and a monthly usage limit per workspace and member beyond which Zen is not used — the account limit the route reads a limit-shaped response as, the response's own shape being undocumented. The page names no session header, and mentions no tool, web search or web fetch anywhere: the gateway wire API carries no search tool of its own, as the 2026-09-11 reading of the Go, Zen and Tools pages found (ADR 0080 §3, §5.2).
+- `console-inference-20261102` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02. Console Endpoints and Harnesses Base URLs document the native OpenAI Chat Completions/Responses and Anthropic Messages APIs under /inference. The Models page documents GET https://opencode.ai/inference/v1/models. AI7 uses its implemented protocol-family readers under Wave23 channel admission; no live account check is claimed.
 
 Open:
 
-- The Zen page's Gemini rows are reached at `https://opencode.ai/zen/v1/models/<id>`; whether that path takes the `:generateContent` request the implemented shape appends is not stated, so no route is declared for them.
-- Excluded from this reading: every limited-time free model the page lists (the `-free` ids and Big Pickle), because a trial that ends is not a supported model, and the Jev rows on `/systemone`, which is not a chat shape.
-- The page names no session header for Zen, so no route sends one; whether any model accepts a request at all is settled only by a named live test item under ADR 0067.
-- Text answer untested for every model (Issue #1225): read again on 2026-10-31, https://opencode.ai/docs/zen/ (`/docs/zen.md` now 404) is titled Models under OpenCode Console, lists all twelve v32-bound ids with endpoints under `https://opencode.ai/inference/openai/v1/` and `https://opencode.ai/inference/anthropic/v1/` instead of the `https://opencode.ai/zen/v1/` endpoints this document and Provider Processing v32 bind, says every text model also works through the other APIs, and states no response format, answer field or usage field. No answer channel is declared until a page states it or a named live item records it; the endpoint change is recorded here, not resolved, because the endpoints are policy bindings.
+- Endpoint drift #1267 is repaired under Wave23 #1279/#1283: the three implemented Zen routes use /inference/openai/v1 or /inference/anthropic/v1, and discovery uses /inference/v1/models. Selected policy v33 already admits these hosts, protocol families and credential slots; its bytes and all predecessor identities remain unchanged.
+- Free-tier chat models require OpenCode and may return HTTP403 from third-party clients; account availability is determined by discovery or an explicit connection test. Jev/SystemOne is not an implemented text protocol.
+- No live Zen connection was performed for this repair. Documentary protocol compatibility does not establish account availability, response quality, cost or live model validation.
 
 ## 腾讯混元
 

@@ -16718,7 +16718,15 @@ export class EditorialStore {
     requireStore(reference === null || reference === current.credentialReference, 'SEARCH_CREDENTIAL_REFERENCE_INVALID', '联网检索凭据引用不属于该连接。');
     requireStore(['ready', 'missing', 'needs-attention'].includes(state), 'SEARCH_CREDENTIAL_STATE_INVALID', '联网检索凭据状态无效。');
     const credentialReference = current.credentialReference ?? randomUUID();
-    this.#authority.prepare('UPDATE search_backend_connections SET credential_reference = ?, credential_operation_state = ? WHERE backend_id = ?').run(credentialReference, state, backendId);
+    const firstReady = state === 'ready' && !this.getSearchBackendConnections().some((entry) => entry.credentialOperationState === 'ready');
+    this.#transaction(this.#authority, () => {
+      this.#authority.prepare('UPDATE search_backend_connections SET credential_reference = ?, credential_operation_state = ? WHERE backend_id = ?').run(credentialReference, state, backendId);
+      if (state !== 'ready' && readSearchFallback(this.#authority)?.backendId === backendId) writeSearchFallback(this.#authority, null);
+      if (firstReady) {
+        this.#authority.prepare('UPDATE search_backend_connections SET selected = NULL WHERE selected = 1').run();
+        this.#authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ? WHERE backend_id = ?').run(new Date().toISOString(), backendId);
+      }
+    });
     return this.getSearchBackendConnections().find((entry) => entry.backendId === backendId)!;
   }
 

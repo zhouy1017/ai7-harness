@@ -25,6 +25,7 @@ function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelService
 function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & { getModelServiceSettings: () => Promise<ModelServiceSettingsProjection> } {
   return {
     saveModelServiceCredential: vi.fn(async () => answer),
+    removeModelServiceCredential: vi.fn(async () => answer),
     selectMainRoleModel: vi.fn(async () => answer),
     selectFastRoleModel: vi.fn(async () => answer),
     selectBothRoleModels: vi.fn(async () => answer),
@@ -48,6 +49,27 @@ const pickChannel = (root: MiniElement, channelId: string) => {
 };
 
 describe('the one model-service flow', () => {
+  it('saves and removes credentials inline, including a channel with an empty catalogue', async () => {
+    const projection = settings([], null);
+    const zen = projection.channels.find((channel) => channel.channelId === 'opencode-zen')!;
+    Object.assign(zen, { models: [] });
+    const { node, calls, render } = flow(projection);
+    pickChannel(node, 'opencode-zen');
+    expect(node.querySelectorAll('select')).toHaveLength(0);
+    expect(node.querySelector('[data-action="enter-channel-credential"]')).toBeNull();
+    const secret = node.querySelectorAll('input').find((input) => input.type === 'password')!;
+    const save = button(node, 'save-channel-credential');
+    expect(save.disabled).toBe(true);
+    secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
+    expect(save.disabled).toBe(false);
+    node.querySelector('form')!.dispatchEvent({ type: 'submit', preventDefault: () => undefined });
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    expect(secret.value).toBe('');
+    expect(calls.saveModelServiceCredential).toHaveBeenCalledWith({ route: 'opencode-zen', connectionName: 'OpenCode Zen', secret: 'synthetic-key' });
+    const ready = flow(settings(['opencode-zen']), calls).node;
+    button(ready, 'remove-model-service-credential').click();
+    await vi.waitFor(() => expect(calls.removeModelServiceCredential).toHaveBeenCalledWith({ route: 'opencode-zen' }));
+  });
   it('refreshes the channel catalogue and chooses a custom ID independently for either role', async () => {
     const { node, calls } = flow(settings(['anthropic-claude']));
     const custom = node.querySelector('[data-custom-model-id]')!;
@@ -105,7 +127,7 @@ describe('the one model-service flow', () => {
   it('lists the six channels and offers the in-use channel\'s model to both roles only once its credential is ready', () => {
     const fresh = flow(settings([], null)).node;
     expect(fresh.querySelectorAll('[data-model-channel]').map((label) => label.dataset['modelChannel'])).toEqual(
-      ['opencode-zen', 'opencode-go', 'anthropic-claude', 'google-gemini', 'openai-platform', 'deepseek-open-platform']);
+      ['opencode-go', 'deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen']);
     expect(fresh.dataset['flowChannel']).toBe('opencode-go');
     expect(fresh.querySelector('[data-model-choice="deepseek-v4.1-flash"]')!.disabled).toBe(true);
     expect(button(fresh, 'use-model-for-both-roles').disabled).toBe(true);
@@ -121,7 +143,7 @@ describe('the one model-service flow', () => {
     const choices = node.querySelectorAll('[data-model-choice]');
     expect(choices.length).toBeGreaterThan(0);
     expect(choices.every((choice) => choice.disabled)).toBe(true);
-    expect(node.querySelector('button[data-action="enter-channel-credential"]')!.textContent).toBe('填写凭据');
+    expect(node.querySelector('button[data-action="save-channel-credential"]')!.textContent).toBe('保存并获取模型');
     expect(node.querySelectorAll('.model-service-flow-ineligible li')).toHaveLength(0);
   });
 

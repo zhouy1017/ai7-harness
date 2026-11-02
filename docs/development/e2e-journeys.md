@@ -40,6 +40,8 @@ Issue #1161 updates new-work expectations to selected set21 / ordinary v30 / loc
 
 ## J-12 Book workbench, data location, and Model Service setup
 
+Wave 23 #1283 synchronizes J-12 with protocol 193 (schema 105 unchanged): inline channel credentials and model choices, no legacy role/route cards, default-first channel ordering, preserved channel state after save, disabled empty/keyless actions, distinct historical search measurements, and revised responsive/forced-colors checks. The candidate's no-key button is disabled; its CI refusal and the ranked fixed-public fixture probes remain direct provider-free API checks. J-04 is exact reuse — checked unchanged: its CI fixture has no claim-stage live search, and its report fixture fields/digests remain unchanged. Production claim search folding (including same-backend addition and request/token reconciliation), independent search probing and retained English evidence translation are covered through synthetic transports in the focused service/unit suites. No live Provider validation is claimed.
+
 Wave 23 #1282 synchronizes J-12 with schema revision 105 and service protocol 192. The provider-free Journey verifies independent Main/Fast custom model IDs without connection tests, atomic both-role selection, model-list refresh fallback, and the compact selector's visibility on 全域智能体 plus outside-pointer/Escape dismissal. Live provider HTTP and pagination, cached/offline discovery and credential-generation changes are verified with synthetic transports in `tests/service/model-discovery.test.ts`; no live Provider check is claimed. J-05's existing independent Fast projection and header check are reused unchanged.
 
 

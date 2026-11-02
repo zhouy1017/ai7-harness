@@ -387,7 +387,7 @@ export const SOURCE_TRANSLATION_UNAVAILABLE = '本次运行没有可用的译文
 export type SourceTranslator = (passage: { readonly text: string; readonly url: string }) => Promise<{ readonly text: string; readonly route: string; readonly model: string } | null>;
 
 export function sourceTranslationAdmitted(rule: SourceTranslationRule | null): boolean {
-  return rule !== null && rule.operationalScope === 'developer-live' && rule.sourceTranslationAllowed === true;
+  return rule !== null && ['developer-live', 'ordinary-production'].includes(rule.operationalScope) && rule.sourceTranslationAllowed === true;
 }
 
 /**

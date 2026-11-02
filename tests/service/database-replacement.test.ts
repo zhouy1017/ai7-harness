@@ -300,6 +300,7 @@ describe('导入数据库 over the real store', () => {
       store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks).toEqual(before);
       expect(store.getSearchBackendSettings().fallbackBackendId).toBeNull();
+      store.saveSearchBackendCredential('search-tinyfish', null, 'ready');
       const pending = store.saveSearchBackendCredential('search-brave', null, 'needs-attention');
       store.saveSearchBackendCredential('search-brave', pending.credentialReference, 'ready');
       store.selectSearchBackend('search-brave', 'fallback');

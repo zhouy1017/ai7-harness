@@ -7132,11 +7132,18 @@ export async function runApplication(): Promise<void> {
       async selectSearchBackend(input) { await service!.call('selectSearchBackend', input); return settingsProjection(); },
       probeSearchBackend: (input) => service!.call('probeSearchBackend', input),
       async saveSearchBackendCredential(input) {
-        if (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'backendId,secret' || typeof input.secret !== 'string' ||
-            !input.secret.isWellFormed() || input.secret.length < 1 || input.secret.length > 16_384) throw new ServiceCallError('SEARCH_CREDENTIAL_INVALID', '联网检索凭据输入无效。');
+        const reuse = input !== null && typeof input === 'object' && Object.keys(input).sort().join(',') === 'backendId,reuseModelCredential' &&
+          input.backendId === 'search-deepseek' && 'reuseModelCredential' in input && input.reuseModelCredential === true;
+        if (!reuse && (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'backendId,secret' || !('secret' in input) || typeof input.secret !== 'string' ||
+            !input.secret.isWellFormed() || input.secret.trim().length < 1 || input.secret.length > 16_384)) throw new ServiceCallError('SEARCH_CREDENTIAL_INVALID', '联网检索凭据输入无效。');
         if (protectedSecretStore === undefined) throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
+        const source = reuse ? (await settingsProjection()).routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')?.connection : null;
+        if (reuse && source?.credentialOperationState !== 'ready') throw new ServiceCallError('SEARCH_CREDENTIAL_MISSING', '请先保存 DeepSeek 开放平台（官方）凭据。');
         const pending = await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: null, credentialOperationState: 'needs-attention' });
-        try { await protectedSecretStore.set(pending.credentialReference!, input.secret); }
+        try {
+          if (reuse) await protectedSecretStore.copy(source!.credentialReference, pending.credentialReference!);
+          else if ('secret' in input) await protectedSecretStore.set(pending.credentialReference!, input.secret);
+        }
         catch { throw new ServiceCallError('PROTECTED_SECRET_WRITE_FAILED', '联网检索凭据未能写入操作系统安全凭据库。'); }
         await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: pending.credentialReference, credentialOperationState: 'ready' });
         return settingsProjection();

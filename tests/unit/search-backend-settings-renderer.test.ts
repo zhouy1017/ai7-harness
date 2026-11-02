@@ -12,7 +12,7 @@ afterEach(() => restore());
 
 const SHIPPED = ['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai'];
 const projection = (): ModelServiceSettingsProjection => ({
-  searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId, credentialReference: null, credentialOperationState: 'missing',
+  searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId, credentialReference: '11111111-1111-4111-8111-111111111111', credentialOperationState: 'ready',
     selected: backendId === 'search-tinyfish', selectedAt: '2026-10-29T00:00:00.000Z' }))),
   launchPolicy: { operationalScope: 'development-ci' },
 } as unknown as ModelServiceSettingsProjection);
@@ -31,6 +31,35 @@ function section(probe: SearchBackendSettingsApi['probeSearchBackend']) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the direct-search candidate in 联网检索', () => {
+  it('keeps keyless backends unselected, distinguishes measured references, and disables empty credential actions', () => {
+    const settings = projection();
+    Object.assign(settings, { launchPolicy: { operationalScope: 'ordinary-production' }, routeChoice: { routes: [] } });
+    for (const backend of settings.searchBackends.backends) Object.assign(backend.connection, { credentialOperationState: 'missing', credentialReference: null });
+    const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
+    const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
+    const tiny = node.querySelector('[data-search-backend="search-tinyfish"]')!;
+    expect(tiny.dataset['selected']).toBe('false');
+    expect(tiny.textContent).toContain('未配置密钥'); expect(tiny.textContent).toContain('评测参考');
+    expect(tiny.textContent).not.toContain('已选择'); expect(tiny.textContent).not.toContain('可达');
+    expect(tiny.querySelectorAll('button').filter((button) => ['保存密钥', '移除密钥', '测试检索'].includes(button.textContent)).every((button) => button.disabled)).toBe(true);
+    const save = tiny.querySelectorAll('button').find((button) => button.textContent === '保存密钥')!;
+    const secret = tiny.querySelector('input')!;
+    secret.value = '  '; secret.dispatchEvent({ type: 'input' }); expect(save.disabled).toBe(true);
+    secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' }); expect(save.disabled).toBe(false);
+    expect(node.querySelector('[data-action="probe-search-candidate"]')!.disabled).toBe(true);
+    expect(node.querySelector('[data-search-candidate]')!.textContent).not.toContain('2026-11-01');
+  });
+
+  it('synchronizes the saved official DeepSeek model credential without exposing its value', async () => {
+    const settings = projection();
+    Object.assign(settings, { launchPolicy: { operationalScope: 'ordinary-production' }, routeChoice: { routes: [{ route: 'deepseek-open-platform', connection: { credentialOperationState: 'ready' } }] } });
+    const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(async () => settings), removeSearchBackendCredential: vi.fn() };
+    const setStatus = vi.fn();
+    const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus, errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
+    node.querySelector('[data-action="reuse-deepseek-credential"]')!.click(); await settle();
+    expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-deepseek', reuseModelCredential: true });
+    expect(setStatus).toHaveBeenCalledWith('DeepSeek 凭据已同步到联网检索。', 'success');
+  });
   it('lists it after the five ranked backends, 未实测, with 测试连接 as its only action', () => {
     const { node } = section(async () => SUCCESS);
     expect(node.querySelectorAll('[data-search-backend]').map((card) => card.dataset['searchBackend'])).toEqual(SHIPPED);

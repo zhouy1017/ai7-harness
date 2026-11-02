@@ -1638,8 +1638,10 @@ function readFamilyAdmission(policy: Record<string, unknown>): true {
   const roles = policy['roleBindings'] as Record<string, unknown>;
   const main = allowedBindingsOf(roles['Main Editorial Role']), fast = allowedBindingsOf(roles['Fast Interaction Role']);
   const connectionTest = policy['connectionTest'];
+  // Frozen v32 still names its original Zen paths. Its exact document digest is verified above;
+  // compare channel identity here so current host-admitted v33 can repair paths without rewriting history.
   const channels = (bindings: readonly AllowedRoleBinding[]) => [...new Map(bindings.map(({ route, endpoint, credentialSlot }) =>
-    [route, { route, endpoint, credentialSlot }])).values()];
+    [route, { route, endpointHost: new URL(endpoint).host, credentialSlot }])).values()];
   requirePolicy(sameValue(channels(main), channels(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main)) &&
     sameValue(channels(fast), channels(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast)) && isRecord(connectionTest) &&
     sameValue(channels(allowedBindingsOf(connectionTest)), channels(fast)));
@@ -2497,6 +2499,7 @@ function* verifyLaunchPolicyInputs(
           ...(reading.transport === undefined ? {} : { transport: reading.transport }),
           ...(reading.research === undefined ? {} : { research: reading.research }),
           ...(reading.searchConnectionTest === undefined ? {} : { searchConnectionTest: reading.searchConnectionTest }),
+          settingsSearchTools: reading.rules.find((rule) => rule.platformTools !== null)?.platformTools ?? null,
           ...(reading.backgroundProcessingEnrollment === undefined ? {} : { backgroundProcessingEnrollment: reading.backgroundProcessingEnrollment }),
           ...(reading.subAgents === undefined ? {} : { subAgents: reading.subAgents }),
           decision: 'eligible-only',

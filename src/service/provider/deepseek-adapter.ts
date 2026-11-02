@@ -301,7 +301,8 @@ export function credentialHeaders(profile: ProviderRouteProfile, secret: string)
 
 /** Metadata GET only: the configured channel owns the address and authentication, with no manuscript payload. */
 export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
-  const endpoint = profile.endpoint.replace(/\/(?:chat\/completions|responses|messages)\/?$/u, '/models');
+  const endpoint = profile.route.startsWith('opencode-zen') ? 'https://opencode.ai/inference/v1/models'
+    : profile.endpoint.replace(/\/(?:chat\/completions|responses|messages)\/?$/u, '/models');
   const url = new URL(endpoint);
   const result = new Map<string, DiscoveredModel>();
   const signal = AbortSignal.timeout(10_000);
