@@ -10,7 +10,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { serveGuestEnrollment, storeEnrollment } from './enroll-dev-credential.mjs';
 import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
-import { composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
+import { composeExportAdmittedDocx, addReadOnlySourceObjects, fixedArchiveTime } from '../e2e/composed-docx.mjs';
 import { build } from 'esbuild';
 import { unzipSync, zipSync, strToU8, strFromU8 } from 'fflate';
 
@@ -346,7 +346,7 @@ try{
  const input=join(temp,'public-sample1-objects.docx');
  await composeExportAdmittedDocx(input,{footnote:{block:15,noteSourceBlock:22},source:'sample1.docx',startBlock:1,blocks:30,title:'Beta sample1',header:{sourceBlock:20},styledRun:{block:13},comment:{block:8,from:10,to:20,author:'示例作者',text:{block:14,from:0,to:10}},replacement:{block:10,from:5,to:9,author:'示例作者',date:'2026-09-01T10:02:00Z',insert:{block:14,from:0,to:6}}});
  await addReadOnlySourceObjects(input);
- const noteParts=unzipSync(await readFile(input));for(const name of Object.keys(noteParts)){if(name.endsWith('.xml')||name.endsWith('.rels'))noteParts[name]=strToU8(strFromU8(noteParts[name]).replaceAll('footnote','endnote'));}noteParts['word/endnotes.xml']=noteParts['word/footnotes.xml'];delete noteParts['word/footnotes.xml'];await writeFile(input,zipSync(noteParts));
+ const noteParts=unzipSync(await readFile(input));for(const name of Object.keys(noteParts)){if(name.endsWith('.xml')||name.endsWith('.rels'))noteParts[name]=strToU8(strFromU8(noteParts[name]).replaceAll('footnote','endnote'));}noteParts['word/endnotes.xml']=noteParts['word/footnotes.xml'];delete noteParts['word/footnotes.xml'];await writeFile(input,zipSync(noteParts,{mtime:fixedArchiveTime()}));
  const installed=join(temp,'installed');const executable=join(installed,'AI7.exe');
  const env=selfCheckEnvironment(executable);env.LOCALAPPDATA=join(temp,'local');await mkdir(env.LOCALAPPDATA,{recursive:true});env.APPDATA=join(temp,'roaming');await mkdir(env.APPDATA,{recursive:true});
  const priorSetup='C:/ai7/beta-inputs/AI7-0.4.1-win-x64-setup.exe';
