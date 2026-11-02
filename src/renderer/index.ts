@@ -368,6 +368,7 @@ async function startWholeBookTask(
     if (input.quick === null) {
       await startPreparedTask(window.ai7, 'baseline-analysis', taskIntentId);
       taskSurfaceRefresh['baseline-analysis']?.();
+      globalAttentionReader.refresh();
       setStatus('已开始分析', 'success');
       return null;
     }
@@ -472,7 +473,7 @@ async function prepareSelectionTask(
   return prepareSelectionReview(bookId, [choice.categoryId], anchor, null, returnFocus);
 }
 
-/** 审阅 of 当前选区 prepared on the paragraph — by hand in one category, or pinned to a procedure version — and its plan opened. */
+/** Start selection review from the paragraph, following its marks without requiring the plan drawer. */
 async function prepareSelectionReview(
   bookId: string,
   categoryIds: ReadonlyArray<string>,
@@ -501,6 +502,8 @@ async function prepareSelectionReview(
     setStatus(SELECTION_TASK_STATUS.prepared, 'success');
     await startPreparedTask(window.ai7, 'review-run', result.run.reviewRunId);
     taskSurfaceRefresh['review-run']?.();
+    globalAttentionReader.refresh();
+    manuscriptOnScreen?.followReviewMarks(bookId, result.run.reviewRunId);
     setStatus('已开始审阅', 'success');
     return true;
   } catch (error) {
