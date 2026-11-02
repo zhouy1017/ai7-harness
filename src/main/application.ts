@@ -69,7 +69,7 @@ import {
   type J04ModelAdapterControl,
   type J08RecoveryControl,
   type ModelServiceSettingsProjection,
-  modelServiceModels, modelServiceTestRequired,
+  modelServiceModels,
   type ModelServiceConnectionProjection,
   type ModelServiceCredentialInput,
   type ModelServiceRouteId,
@@ -6893,7 +6893,7 @@ export async function runApplication(): Promise<void> {
       }
       requireDesktop(parent !== undefined && isAbsolute(parent));
       // Read the shipped policy set, never infer its version from the source branch or preferences.
-      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v23.json'), 'utf8')) as { version: string };
+      const policySet = JSON.parse(await readFile(resolve(__dirname, '..', 'docs', 'policies', 'active-policy-set.v24.json'), 'utf8')) as { version: string };
       await writeDiagnosticsBundle(parent, {
         facts: { ...crashFacts(), policySetVersion: policySet.version, node: process.versions.node,
           locale: app.getLocale(), windowCount: ownedWindows.size },
@@ -6948,20 +6948,18 @@ export async function runApplication(): Promise<void> {
       const inUseRoute: ModelServiceRouteId | null = selected?.binding.providerId ??
         (connectionOf('opencode-go')?.credentialOperationState === 'ready' ? 'opencode-go' : null);
       const connection = inUseRoute === null ? null : connectionOf(inUseRoute);
-      // A documentary channel's model serves a role only after its own passed text test on this credential (Issue #1225 revision 3).
-      const untested = (c: ModelServiceConnectionProjection | null | undefined): boolean => c != null && modelServiceTestRequired(c.binding.providerId) && (c.connectionTest?.outcome !== 'passed' || c.connectionTest.modelId !== c.binding.modelId || c.connectionTest.credentialUpdatedAt !== c.credentialUpdatedAt);
-      const mainStatus = untested(connection) && statusOf(connection) === 'available' ? 'needs-attention' as const : statusOf(connection);
+      const mainStatus = statusOf(connection);
       const mainStatusLabel = labelOf(mainStatus);
       const mainBinding = connection?.binding ?? MODEL_SERVICE_ROUTE_BINDINGS[inUseRoute ?? 'opencode-go'];
       const fastConnection = connections.find((candidate) => candidate.fastSelected) ?? connectionOf('opencode-go');
-      const fastStatus = untested(fastConnection) && statusOf(fastConnection) === 'available' ? 'needs-attention' as const : statusOf(fastConnection);
+      const fastStatus = statusOf(fastConnection);
       const fastBinding = fastConnection?.binding ?? null;
       const mainStatusDetail = protectedSecretStore === undefined
         ? '当前操作系统安全凭据库不可用；未启用替代存储。'
         : mainStatus === 'available'
           ? '连接名称与凭据已由操作系统安全凭据库保护。'
           : mainStatus === 'needs-attention'
-            ? untested(connection) ? '请先测试此模型的文本连接；测试通过后才用于新任务。' : '凭据状态无法确认；请重新输入或移除。'
+            ? '凭据状态无法确认；请重新输入或移除。'
             : '请输入连接名称与凭据。';
       const unconfigured = (
         roleId: 'fast-interaction' | 'difficult-escalation' | 'frontier',

@@ -444,7 +444,6 @@ describe('the admitted dialogue route, read from the selected policy', () => {
       [dialogueRule({ outboundDataCategories: ['public-or-synthetic'] })],
       [dialogueRule({ modelRole: 'Frontier Model Role' })],
       [dialogueRule({ endpoint: 'https://example.invalid/v1/chat/completions' })],
-      [dialogueRule({ model: 'undeclared-model' })],
       [dialogueRule({ credentialSlot: 'deepseek-open-platform' })],
       [dialogueRule({ route: 'deepseek-open-platform' })],
       [dialogueRule({ ruleId: '' })],

@@ -64,6 +64,7 @@ const PAGES: Record<string, { status: number; body: string }> = {
 type Relation = { sourceRef: string; relation: string; excerptRef: string | null; lineage: string | null };
 interface Scenario {
   claimStages?: boolean;
+  missingCredential?: 'model' | 'search';
   claimSearches?: number;
   pendingRound?: boolean;
   claimModelUnknown?: boolean;
@@ -192,7 +193,11 @@ async function setup(initial: Scenario): Promise<void> {
   owner = new BaselineAnalysisExecutionOwner({
     requestGovernor,
     ledger: store.factualReviewLedger, launchPolicy: policy, fixture: null,
-    secretResolver: { resolve: async () => 'placeholder-development-key' },
+    secretResolver: { resolve: async (reference) => {
+      const model = store.getConfiguredModelRoleBinding('main-editorial')?.credentialReference;
+      if (scenario.missingCredential === 'model' && reference === model || scenario.missingCredential === 'search' && reference !== model) return null;
+      return 'placeholder-development-key';
+    } },
     // A business Run (no development validation): no live-once cache stands between Books that read the same sample1 units.
     ...(binding === null ? { developerLive: { launch: { runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: initial.maxTotalTokens ?? 500_000 }, providerCacheRoot: join(roots.inputRoot, 'cache'), validation: null }, nativeFetch } }
       : { production: { scope: 'ordinary-production' as const, nativeFetch }, currentLaunchPolicy: () => policy,
@@ -407,6 +412,25 @@ describe('factual claim occurrence ledger', () => {
     owner.startFactualRecheck(store); await owner.whenIdle();
     expect(sends.model).toBe(completed);
     expect(store.nextFactualRecheck()).toBeNull();
+  });
+
+  it.each(['model', 'search'] as const)('leaves onceKey unused when the actual %s credential is absent, then runs after readiness returns', async (missing) => {
+    await setup({ claimStages: true, relations: [] });
+    const book = await newBook('未就绪的后台单条复核');
+    const result = (await review(book)).results[0]!;
+    store.recordVerificationReviewDecision({ bookId: book.bookId, resultId: result.resultId, resultVersion: result.version,
+      disposition: 'request-evidence', ownWords: null, reason: null });
+    enrollFactualRecheck(book.bookId);
+    const candidate = store.nextFactualRecheck()!;
+    const before = sends.model;
+    scenario.missingCredential = missing;
+    owner.setBackgroundIdle(true); owner.startFactualRecheck(store); await owner.whenIdle();
+    expect(store.factualReviewLedger.factualRecheckUsed(candidate.onceKey)).toBe(false);
+    expect(sends.model).toBe(before);
+    delete scenario.missingCredential;
+    expect(store.nextFactualRecheck()?.onceKey).toBe(candidate.onceKey);
+    owner.startFactualRecheck(store); await owner.whenIdle();
+    expect(store.factualReviewLedger.factualRecheckUsed(candidate.onceKey)).toBe(true);
   });
 
   it('keeps an authorized one-claim once key across restart without dispatching it again', async () => {

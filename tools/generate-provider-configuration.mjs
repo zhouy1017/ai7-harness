@@ -154,10 +154,8 @@ export const FAMILY_DISPOSITIONS = Object.freeze(Object.fromEntries(Object.keys(
     aspect === 'providerTools' || (CHAT_ONLY_ASPECTS.has(aspect) && shape !== 'openai-chat-completions') ? 'unsupported' : 'supported'])))])));
 
 /** Whether one resolved model declares a per-model aspect: the same rule `family-dispositions.ts` applies at runtime. */
-function declaresAspect(model, shape, aspect) {
-  if (aspect === 'text') return model.capabilities.answerChannel !== 'none';
-  if (aspect === 'stream') return model.capabilities.streaming === SHAPE_RULES[shape].streaming;
-  return model.capabilities.toolCalling === 'function';
+function declaresAspect(_model, shape, aspect) {
+  return FAMILY_DISPOSITIONS[shape][aspect] === 'supported';
 }
 
 /** Route ids the product owns itself and no document may take. */
@@ -848,7 +846,7 @@ function renderProfiles({ providers }) {
     '/** What the adapter implements for each protocol family (Issue #1180): `supported` or `unsupported`, per aspect. */',
     `export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, FamilyDispositions>> = ${renderValue(FAMILY_DISPOSITIONS, 0)};`,
     '',
-    '/** Per route: its family, and the models each per-model aspect is `supported` for; every other declared model is `untested`. */',
+    '/** Catalogue rows inherit text, stream and functionTools from their implemented protocol family (#1281). */',
     'export const GENERATED_ROUTE_DISPOSITIONS: Readonly<Record<ConfiguredRouteId, RouteDispositions>> = {',
     ...routes.map((route) => `  ${literal(route.profile.route)}: ${renderValue(route.dispositions, 1)},`),
     '};',
@@ -957,7 +955,7 @@ function renderFamilyDispositions() {
   return [
     '## Protocol family dispositions',
     '',
-    'What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven provider-free by the family fixtures under [`tests/fixtures/model/provider-families/`](../../tests/fixtures/model/provider-families/). A declared model is `supported` for text, stream or function tools only where its own capability is declared on evidence and `untested` otherwise; the adapter refuses every demand that is not `supported` by name before any ticket, credential or transport is touched (`src/service/provider/family-dispositions.ts`). A family the selected policy does not admit for a role is refused by name as `family-not-admitted-by-selected-policy`: the selected policy baseline (`policyBaseline` in the runtime model table, which the launch verifier matches against the policy bytes) admits chat completions, Responses, Messages and generateContent for both the Main and the Fast role (Provider Processing v32, ADR 0095 §6), so a model of any declared family reads its own text disposition, and it is chosen only once the runtime model table holds its reviewed `ordinaryProduction` record.',
+    'All four implemented protocol families support text, streaming and function tools, including arbitrary selected model IDs (#1281). Provider-free family fixtures exercise the wire contracts; documentary and live evidence remain historical observations and do not gate runtime capabilities. The selected policy admits channels by route, endpoint host, protocol family and credential slot. Each Run still freezes its exact model, endpoint and credential reference.',
     '',
     `| Aspect | ${shapes.map((shape) => `\`${shape}\``).join(' | ')} |`,
     `| --- | ${shapes.map(() => '---').join(' | ')} |`,
@@ -985,15 +983,15 @@ function renderSupport({ providers, recordedEvidence, searchBackends = [] }) {
     '',
     '## Three senses of "supported"',
     '',
-    'Runtime role choices are reviewed in [`config/providers/runtime-bindings/model-table.json`](../../config/providers/runtime-bindings/model-table.json). The generator resolves their endpoints and credential slots from the provider documents and refuses an unreadable `ordinaryProduction` model or a protocol family outside the role’s declared baseline. `policyBaseline` is exactly the selected policy’s Main/Fast allowed bindings, declared models readable or not, and holds every predecessor’s; `ordinaryProduction` supplies v26 Main/Fast choices, default first. Developer-live still has to match its immutable policy binding exactly. Configuration alone grants no transmission. Settings selector literals remain with F-01; this slice preserves their choices.',
+    'Provider documents and the runtime model table supply catalogue defaults and labels. The selected ordinary-production policy admits channels, rather than individual model IDs (#1281). Unknown model IDs receive a profile from their route protocol; optional context limits and model-specific reasoning or structured-output settings remain unknown unless declared. Developer-live retains its exact approved binding. Live model discovery and role selection are tracked separately in #1282.',
     '',
-    '- **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).',
+    '- **Declared** — catalogue metadata and historical evidence for a model. Runtime text, stream and function tools inherit the implemented route protocol; optional model-specific settings remain recorded separately.',
     '- **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.',
-    '- **Bindable** — a route the selected Provider Processing policy admits for an exact role and operation; a declaration alone grants no authority. [Current runtime selection](../policies/README.md#current-runtime-selection) owns the active pins, scope and evidence requirements. Developer-live remains OpenCode Go `opencode-go` · `deepseek-v4.1-flash` under ADR 0067. Ordinary-production saves Main and Fast independently: Main retains Go or DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash`; Fast additionally admits OpenAI `gpt-5.6-luna` and `gpt-5.6-sol` only for buffered 来源译文 after a successful exact-binding fixed public connection probe. The separate explicit probe grants no editorial authority, tools or native streaming, and declarations are not account availability or live proof (Issue #1044; Provider Processing v25).',
+    '- **Bindable** — a selected policy channel permits its route, endpoint host, protocol family and credential slot. The editor chooses the exact model ID, and each Run freezes that binding. An account can still reject a model; adapter support is not live validation or account availability. CI and ordinary regression use no provider credentials.',
     '',
-    'Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the task declares web research, the [selected policy rule](../policies/README.md#current-runtime-selection) admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The admitted web-bearing kinds are 事实核查 and 学术道德与引用 review, writing, and AI7 初评 evaluation (its market section). 审稿意见 and 按我的评分重写评语 declare no web even where their evaluation policy rule allows tools; 出版政策与风险 is eligible under ordinary-production v26 without web and discloses 未联网核查; developer-live v24 keeps it excluded. Other kinds declare no web. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.',
+    'Task research declarations resolve to `webSearch: true` only when the task declares research, the selected rule admits platform tools, and model/search setup is ready. All four implemented protocol families support AI7 websearch/webfetch and local function tools without per-model live evidence. Existing source scopes, task research declarations, frozen search bindings and final egress checks remain enforced. Provider-free tests establish adapter behavior; they do not claim a live account result.',
     '',
-    'A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page\'s "1M" is read as 1,000,000), and `none` where no page read states one.',
+    'Optional model-specific capabilities a document does not declare remain unknown. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page\'s "1M" is read as 1,000,000), and `none` where no page read states one.',
     '',
     ...renderFamilyDispositions(),
   ];

@@ -2687,7 +2687,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -5947,12 +5947,13 @@ export class BaselineAnalysisStore {
       // a production connection's own Credential Reference — whatever route the editor has configured since.
       const route = providerPlan.executionRoute;
       const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => route.kind === binding.route && 'endpoint' in route &&
-        route.model === binding.model && route.endpoint === binding.endpoint && providerPlan.remoteBinding.credentialSlot === binding.credentialSlot);
+        route.endpoint === binding.endpoint && providerPlan.remoteBinding.credentialSlot === binding.credentialSlot);
       const reference = providerPlan.remoteBinding.credentialReference;
       requireAnalysis(allowed !== undefined && providerPlan.remoteBinding.providerProcessing.operationalScope === 'ordinary-production' &&
         UUID_PATTERN.test(reference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()),
       'ANALYSIS_ROUTE_STALE', '冻结计划不是正式使用下可执行的模型服务路线。');
-      productionBinding = { route: allowed.route, model: allowed.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot };
+      requireAnalysis('model' in route, 'ANALYSIS_ROUTE_STALE', '冻结计划缺少模型。');
+      productionBinding = { route: allowed.route, model: route.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot };
     } else if (live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');

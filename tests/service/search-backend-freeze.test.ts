@@ -15,7 +15,7 @@ describe('a review Run freezes its search backend', () => {
       const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: randomUUID() };
       store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', 'opencode-go');
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      expect(policy.providerProcessing.version).toBe('v32');
+      expect(policy.providerProcessing.version).toBe('v33');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '生产检索密钥回归');
@@ -80,24 +80,22 @@ describe('a review Run freezes its search backend', () => {
     } finally { store.close(); await roots.dispose(); }
   });
 
-  it('freezes no backend and needs no search key for 初评 on a production model without tool evidence', async () => {
+  it('requires search setup for 初评 on official DeepSeek, which inherits protocol function tools', async () => {
     const roots = await createServiceTestRoots();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const official = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!;
-      const configured = { ...official, credentialReference: randomUUID() };
-      store.saveModelServiceConnection('合成 DeepSeek 连接', configured.credentialReference, 'ready', 'deepseek-open-platform');
+      const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => binding.route === 'deepseek-open-platform')!, credentialReference: randomUUID() };
+      store.saveModelServiceConnection('合成官方连接', configured.credentialReference, 'ready', 'deepseek-open-platform');
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
-      expect(policy.providerProcessing.version).toBe('v32');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
-      store.baselineAnalysisLedger.bindLaunch(launch); store.initialEvaluationLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
-      const book = await importSample1Book(store, roots.codeRoot, '无工具证据模型回归');
+      store.baselineAnalysisLedger.bindLaunch(launch); store.initialEvaluationLedger.bindLaunch(launch);
+      const book = await importSample1Book(store, roots.codeRoot, '初评检索凭据就绪');
       await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
-      // The selected TinyFish has no key here: a Task that would freeze it is refused (first case); this one freezes nothing.
-      let progress = store.createInitialEvaluationPreparationWork(book.bookId, policy);
-      while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
-      expect(progress.projection!.providerResolutionPlan).not.toHaveProperty('webToolsBackend');
-      expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'initial-evaluation', ref: progress.projection!.taskIntent!.taskIntentId }).service.provider).not.toContain('联网检索');
+      expect(() => {
+        let progress = store.createInitialEvaluationPreparationWork(book.bookId, policy);
+        while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+      }).toThrow(/密钥|联网检索/u);
     } finally { store.close(); await roots.dispose(); }
   });
+
 });

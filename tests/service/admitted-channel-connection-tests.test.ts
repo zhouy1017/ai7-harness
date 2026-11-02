@@ -34,7 +34,7 @@ describe('the connection test on the admitted channels', () => {
       const nativeFetch = fixtureTransport(family, 'text', 'AI7_OK');
       const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
         { route, modelId }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-      expect(status).toMatchObject({ modelId, outcome: 'passed', code: null, verified: 'buffered-text-only', provenance: { route, model: modelId, policyVersion: 'v32' } });
+      expect(status).toMatchObject({ modelId, outcome: 'passed', code: null, verified: 'buffered-text-only', provenance: { route, model: modelId, policyVersion: 'v33' } });
       expect(nativeFetch).toHaveBeenCalledTimes(1);
       expect(String(nativeFetch.mock.calls[0]![0])).toContain(route === 'anthropic-claude' ? 'https://api.anthropic.com/v1/messages' : `/models/${modelId}:generateContent`);
       target.selectModelServiceRoute(route);
@@ -50,17 +50,18 @@ describe('the connection test on the admitted channels', () => {
         { route, modelId }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
       expect([status.outcome, typeof status.code, nativeFetch.mock.calls.length]).toEqual(['failed', 'string', 1]);
       expect(target.getModelServiceRouteConnection(route)?.connectionTest).toEqual(status);
-      expect(() => target.selectModelServiceRoute(route)).toThrow(expect.objectContaining({ code: 'MODEL_CONNECTION_TEST_REQUIRED' }));
+      expect(() => target.selectModelServiceRoute(route)).not.toThrow();
     });
 
-  it.each([['opencode-zen', 'minimax-m3', 'untested:text'], ['google-gemini', 'gemini-0-unknown', 'not-declared']] as const)(
-    'refuses %s %s by its disposition (%s) before any secret, ticket or transport', async (route, modelId, reason) => {
-      const target = await saved(route);
-      const resolver = { resolve: vi.fn(async () => 'public-placeholder') };
-      const nativeFetch = vi.fn();
-      await expect(testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
-        { route, modelId }, resolver, { requestGovernor })).rejects.toThrow(`（${reason}）`);
-      expect([resolver.resolve.mock.calls.length, nativeFetch.mock.calls.length]).toEqual([0, 0]);
-      expect(target.getModelServiceRouteConnection(route)?.connectionTest).toBeNull();
-    });
+  it('tests a dynamic Gemini model ID through its channel adapter', async () => {
+    const target = await saved('google-gemini');
+    const nativeFetch = fixtureTransport('google-generate-content', 'text', 'AI7_OK');
+    const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
+      { route: 'google-gemini', modelId: 'account-new-model' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
+    expect(status.outcome).toBe('passed');
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+    target.selectFastRoleModel('google-gemini', 'account-new-model');
+    target.selectModelServiceRoute('google-gemini');
+    expect(target.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('account-new-model');
+  });
 });

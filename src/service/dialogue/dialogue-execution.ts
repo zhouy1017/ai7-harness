@@ -231,11 +231,15 @@ export class DialogueExecutionOwner {
   }
 
   requireGlobalReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
+    if (policy.operationalScope === 'ordinary-production' && policy.providerProcessing.bindingState === 'setup-required')
+      throw new DialogueError('GLOBAL_AGENT_MODEL_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     return this.#requireGlobal(admittedGlobalAgentRoute(policy));
   }
 
   /** The scoped tool dialogue's own admission (#1171): a launch that admits only the no-tools rule refuses here, never falls back. */
   requireGlobalScopedReady(policy: LaunchPolicyProjection): AdmittedDialogueRoute {
+    if (policy.operationalScope === 'ordinary-production' && policy.providerProcessing.bindingState === 'setup-required')
+      throw new DialogueError('GLOBAL_AGENT_MODEL_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
     if (this.#deps.records.globalAgentScopedTools === undefined) throw new DialogueError('GLOBAL_AGENT_POLICY_BLOCKED', '当前处理策略未允许');
     return this.#requireGlobal(admittedGlobalAgentScopedRoute(policy));
   }

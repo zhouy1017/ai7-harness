@@ -98,36 +98,41 @@ describe('capability dispositions per family and per model', () => {
         expect(modelDisposition(model, aspect) === 'supported', `${model.key} ${aspect}`).toBe(route.supported[aspect].includes(model.model));
       }
     }
-    // Nothing beyond the recorded evidence is supported: the Claude 官方 and Gemini 官方 rows read text on documentation (#1225), no gateway row does.
-    for (const route of ['opencode-zen', 'opencode-zen-messages', 'opencode-go-messages', 'opencode-zen-responses'] as const) {
-      expect(GENERATED_ROUTE_DISPOSITIONS[route].supported, route).toEqual({ text: [], stream: [], functionTools: [] });
-    }
-    expect(GENERATED_ROUTE_DISPOSITIONS['anthropic-claude'].supported).toEqual({ text: ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'], stream: [], functionTools: [] });
-    expect(GENERATED_ROUTE_DISPOSITIONS['google-gemini'].supported).toEqual({ text: ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'], stream: [], functionTools: [] });
   });
 
-  it('refuses every untested shipped row by name before any ticket, credential or transport', async () => {
-    for (const row of ROWS) {
-      const model = shipped(row.route, row.model);
-      // Every shipped official row reads text on evidence now (#1225), so its first untested demand is the stream.
-      const demand = { stream: true, functionTools: false };
-      const reason = 'untested:stream';
-      expect(providerPreflight(model, demand)).toMatchObject({ code: 'PROVIDER_PREFLIGHT_REFUSED', reason, family: row.family, route: row.route, model: row.model });
-      const { adapter, touched } = harness(model, async () => { throw new Error('never reached'); }, demand.stream);
-      const chunks = await collect(adapter.stream(demand.stream ? dialogue(model) : unit(model)));
-      expect(failureOf(chunks)).toMatchObject({ code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: expect.stringContaining(`${row.family} 不支持本步骤（${reason}）`) });
-      expect(touched).toEqual({ ticket: 0, broker: 0, transport: 0 });
-      expect(adapter.assembledRequestDigests).toHaveLength(0);
+  it('streams an arbitrary model ID through every family without per-model evidence', async () => {
+    for (const row of [...ROWS, { family: 'openai-chat-completions', route: 'deepseek-open-platform' as const, model: 'account-new-model' }]) {
+      const model = modelProfileFor(row.route, 'account-new-model')!;
+      expect(providerPreflight(model, { stream: true, functionTools: true })).toBeNull();
+      const { adapter, touched } = harness(model, async () => sse(frames(row.family, 'text-stream').map((frame) => frame.replaceAll('deepseek-v4.1-flash', 'account-new-model'))), true);
+      const chunks = await collect(adapter.stream(dialogue(model)));
+      expect(failureOf(chunks), row.family).toBeNull();
+      expect(chunks.some((chunk) => chunk.type === 'text-delta')).toBe(true);
+      expect(touched).toEqual({ ticket: 1, broker: 1, transport: 1 });
     }
   });
 
-  it('refuses undeclared function tools by name, and declared ones only where the family implements them', () => {
-    const luna = shipped('openai-platform', 'gpt-5.6-luna');
-    expect(providerPreflight(luna, { stream: false, functionTools: true })?.reason).toBe('untested:functionTools');
-    expect(providerPreflight(luna, { stream: false, functionTools: false })).toBeNull();
-    for (const row of ROWS) expect(providerPreflight(declared(row), { stream: true, functionTools: true }), row.family).toBeNull();
-    // A stream is one family's own: a Messages declaration on a Responses row is not that row's stream.
-    expect(modelDisposition({ ...luna, capabilities: { ...luna.capabilities, streaming: 'messages-sse' } }, 'stream')).toBe('untested');
+  it('completes buffered tool call/result/answer rounds for arbitrary IDs on all four protocols', async () => {
+    for (const row of [...ROWS, { family: 'openai-chat-completions', route: 'deepseek-open-platform' as const }]) {
+      const model = modelProfileFor(row.route, 'account-new-model')!;
+      const cases = (JSON.parse(readFileSync(resolve(FIXTURES, `${row.family}.json`), 'utf8')) as { cases: Array<{ name: string; response: { body: unknown } }> }).cases;
+      let round = 0;
+      const { adapter, touched } = harness(model, async () => { const name = round++ === 0 ? 'tool-calls' : 'tool-history'; return { status: 200, json: async () => cases.find((item) => item.name === name)!.response.body }; }, false);
+      const first = unit(model, [TOOL]);
+      expect(failureOf(await collect(adapter.stream(first))), row.family).toBeNull();
+      const result = adapter.lastCanonicalResult;
+      if (result?.kind !== 'tool-calls') throw new Error('Synthetic tool round did not return calls');
+      const next: GenerateOptions = { ...first, messages: [...first.messages,
+        { id: 'a' as never, role: 'assistant', source: { kind: 'model', provider: model.route, model: model.model }, content: result.calls.map((call) => ({ type: 'tool-call' as const, id: call.id as never, name: call.name, arguments: call.arguments })) },
+        ...result.calls.map((call) => ({ id: call.id as never, role: 'user' as const, source: { kind: 'tool' as const, callId: call.id as never }, content: [{ type: 'tool-result' as const, toolCallId: call.id as never, content: [{ type: 'text' as const, text: '合成工具结果。' }] }] }))] };
+      expect(failureOf(await collect(adapter.stream(next))), row.family).toBeNull();
+      expect(adapter.lastCanonicalResult?.kind, row.family).toBe('answer');
+      expect(touched).toEqual({ ticket: 2, broker: 2, transport: 2 });
+    }
+  });
+
+  it('admits function tools on all implemented protocol families', () => {
+    for (const row of ROWS) expect(providerPreflight(shipped(row.route, row.model), { stream: true, functionTools: true }), row.family).toBeNull();
   });
 
   it('admits all four families for both roles under v32, so a Zen gateway model reads its own untested:text (Issues #1221, #1225)', () => {
@@ -142,7 +147,7 @@ describe('capability dispositions per family and per model', () => {
     expect(new Set(models.map((model) => model.family))).toEqual(new Set(['openai-chat-completions', 'openai-responses', 'anthropic-messages', 'google-generate-content']));
     const claude = channels.find((channel) => channel.channelId === 'anthropic-claude')!.models.find((model) => model.modelId === 'claude-fable-5-1')!;
     const zen = channels.find((channel) => channel.channelId === 'opencode-zen')!.models.find((model) => model.modelId === 'claude-fable-5-1')!;
-    expect([claude.main, claude.fast, zen.main, zen.fast]).toEqual(['eligible', 'eligible', 'untested:text', 'untested:text']);
+    expect([claude.main, claude.fast, zen.main, zen.fast]).toEqual(['eligible', 'eligible', 'eligible', 'eligible']);
     // OpenAI Responses for Main gained its runtime record (W22b-A2 #1225), so it is chosen for both roles.
     const luna = channels.find((channel) => channel.channelId === 'openai-platform')!.models.find((model) => model.modelId === 'gpt-5.6-luna')!;
     expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);

@@ -292,14 +292,14 @@ describe('Messages buffered client functions · synthetic profiles only', () => 
   });
 
   it('requires both offered tools and explicit function capability for reading and writing calls', async () => {
-    for (const [model, options] of [[messagesModel(), offered], [functionModel(), {}], [functionModel(), { toolCallsOffered: true }]] as const) {
+    for (const [model, options] of [[messagesModel({ toolCalling: 'none' }), offered], [functionModel(), {}], [functionModel(), { toolCallsOffered: true }]] as const) {
       expect(normalizeModelResponse(model, toolResponse([{ type: 'text', text: 'prefix' }, toolUse()]), options))
         .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
     }
-    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel(), toolPayload(), context)).toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
+    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ toolCalling: 'none' }), toolPayload(), context)).toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...toolPayload([callMessage(), resultMessage()]), tools: [] }, context))
       .toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-    const { adapter, bodies } = stubToolsAdapter([toolResponse()], messagesModel());
+    const { adapter, bodies } = stubToolsAdapter([toolResponse()], messagesModel({ toolCalling: 'none' }));
     const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error' } });
