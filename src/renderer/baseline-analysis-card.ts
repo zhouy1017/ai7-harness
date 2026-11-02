@@ -1256,10 +1256,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const restartActions = element('div', 'button-row analysis-actions');
       const restartCancel = analysisCancelButton();
       const restartStart = button('开始分析', 'primary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [] }));
-      restartStart.dataset['analysisAction'] = 'prepare';
-      restartActions.append(restartStart, restartCancel);
-      restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以重新开始。开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开。'), restartActions);
+        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [restartPreview] }));
+      restartStart.dataset['analysisAction'] = 'start';
+      const restartPreview = button('查看计划', 'secondary', () =>
+        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartPreview, cancel: restartCancel, others: [restartStart] }, null, true));
+      restartPreview.dataset['analysisAction'] = 'prepare';
+      restartActions.append(restartStart, restartPreview, restartCancel);
+      restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以直接重新开始，也可先查看计划。'), restartActions);
       records.append(restart);
     }
 
