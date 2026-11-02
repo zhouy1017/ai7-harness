@@ -372,7 +372,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   }finally{coverageDb.close();}
   report.reviews.at(-1).memberCoverage=memberCoverage;
   check(memberCoverage.every(c=>c.local||(c.coverage?.state==='complete'&&c.gaps.length===0)),expectedChannel+'-full-review-complete-coverage');
-  if(expectedChannel==='windows-installer')report.completedReview=retainedReview?resume.completedReview:{buildIdentity:report.buildIdentity,runnerHead:report.runnerHead,review:report.reviews.at(-1),checks:[...report.checks]};
+  if(expectedChannel==='windows-installer')report.completedReview=retainedReview?resume.completedReview:{buildIdentity:report.activeReview?.buildIdentity??report.buildIdentity,runnerHead:report.activeReview?.runnerHead??report.runnerHead,review:report.reviews.at(-1),checks:[...report.checks],observedBy:{buildIdentity:report.buildIdentity,runnerHead:report.runnerHead}};
   const executionGaps=memberCoverage.filter(c=>!c.local&&(c.executionState!=='completed'||c.synthesis?.state==='gap'));
   report.executionGaps??=[];report.executionGaps.push(...executionGaps.map(c=>({channel:expectedChannel,...c})));
   for(const gap of executionGaps){
