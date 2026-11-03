@@ -1,11 +1,11 @@
 import { createWriteStream, existsSync, statSync } from 'node:fs';
-import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -1263,6 +1263,10 @@ async function runWorkspaceJourney(renderer, dataRoot) {
       recordDebugDetail('J-02', `search return mismatch ${JSON.stringify(observed)}`);
     }
     throw error;
+  }
+  if (localDebugEnabled()) {
+    const { data } = await renderer.send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(join(localDebugArtifactRoot('J-02'), 'search-return-readable.png'), Buffer.from(data, 'base64'));
   }
   await clickButton(renderer, '下一组结果', 'search-next');
   await waitFor(renderer, `document.querySelectorAll('.search-result').length === 1`, 'search-next-results');
