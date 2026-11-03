@@ -204,6 +204,17 @@ async function searchArrivalWithPendingWrite(jump = true) {
 }
 
 describe('the Manuscript screen lifecycle', () => {
+  it('keeps a long manuscript heading compact while retaining its full position detail', () => {
+    const heading = '长标题'.repeat(100);
+    const full = `${heading} · 全稿 25.000%`;
+    const app = shell();
+    app.open({ ...windowOf('book-one'), position: { label: full, structureLabel: heading, proportion: 0.25 } });
+    const position = app.screen.querySelector('.editor-meta span')!;
+    expect(position.textContent).toBe('长标题长标题长标题长标题长标题长… · 全稿 25.000%');
+    expect(position.getAttribute('title')).toBe(full);
+    app.showing?.destroy();
+  });
+
   it('selects a search match in its arrival window before a slow entry write lets the viewport move on', async () => {
     const { app, pane, load, record, releaseWrite } = await searchArrivalWithPendingWrite();
     await vi.advanceTimersByTimeAsync(40);

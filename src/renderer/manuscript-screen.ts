@@ -256,6 +256,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
   };
+  const positionWords = (windowNow: ManuscriptWindowProjection): string => {
+    const block = windowNow.blocks.find((candidate) => candidate.blockId === windowNow.focusBlockId) ?? windowNow.blocks[0];
+    if (block === undefined) return windowNow.position.label;
+    return `${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${(windowNow.position.proportion * 100).toFixed(3)}%`;
+  };
   title.append(
     element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle} · 主分支`),
     element('h2', undefined, productionDocument !== undefined
@@ -263,7 +268,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       : `稿件修订版 ${initialWindow.revisionLabel}`),
   );
   const meta = element('div', 'editor-meta');
-  const position = element('span', undefined, initialWindow.position.label);
+  const position = element('span', undefined, positionWords(initialWindow));
+  position.setAttribute('title', initialWindow.position.label);
   const revision = element('span', undefined, revisionWords(initialWindow));
   const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
   journal.dataset['editorTechnical'] = 'true';
@@ -832,7 +838,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const updateWindowChrome = (): void => {
     updatePersistenceMenu();
     refreshMilestonePersistence();
-    position.textContent = currentWindow.position.label;
+    position.textContent = positionWords(currentWindow);
+    position.setAttribute('title', currentWindow.position.label);
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
@@ -1180,7 +1187,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // With the guard released a later navigation may already have put its own window on screen; its
       // arrival is then the one to name, and naming this one over it would state a place already left.
       if (!destroyed && currentWindow === next) {
-        setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+        setStatus(`已到达${positionWords(next)}。`, 'success');
       }
       return true;
     } catch (error) {
@@ -1529,7 +1536,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       { kind: 'window-start', blockId: searchReturn.window.blocks[0]!.blockId },
       searchReturn.continuity,
     );
-    if (restored) setStatus(`已返回查找前的精确选择与滚动位置；${currentWindow.position.label}。`, 'success');
+    if (restored) setStatus(`已返回查找前的精确选择与滚动位置；${positionWords(currentWindow)}。`, 'success');
   }
 
   async function loadSearchResults(cursor: string | null, searchId?: string): Promise<void> {
