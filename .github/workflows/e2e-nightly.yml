@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       pr:
-        description: Optional same-repository non-main pull request whose existing required Gate status is published
+        description: Optional same-repository PR targeting a branch other than main; publish its existing required Gate status
         required: false
         default: ''
         type: string
@@ -57,7 +57,7 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      # The Owner explicitly dispatches a reviewed workflow revision. Privileged control never
+      # The authorized integration role explicitly dispatches a reviewed workflow revision. Control never
       # executes the candidate checkout, even while dev still contains an older publisher.
       - name: Check out dispatched control source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6

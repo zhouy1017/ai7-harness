@@ -206,8 +206,8 @@ describe('reviewed manual full Gate status publication', () => {
         }else throw Error('Unexpected command');return{status:0,stdout,stderr:''};};
       syncBuiltinESMExports();const queue=await import(${JSON.stringify(entry)});
       const publish=()=>queue.main(['full-gate-status','--pr','1290','--repo','owner/repo','--head',head,'--expected-dev-tip',base]);
-      if(scenario==='success')assert.equal(publish(),0);else assert.throws(publish);
-      assert.deepEqual(statuses,scenario==='success'?['state=success']:scenario==='wrong-control'?[]:
+      if(['success','main-head'].includes(scenario))assert.equal(publish(),0);else assert.throws(publish);
+      assert.deepEqual(statuses,['success','main-head'].includes(scenario)?['state=success']:scenario==='wrong-control'?[]:
         scenario==='move-after-publish'?['state=success','state=failure']:['state=failure']);
     `;
     const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });

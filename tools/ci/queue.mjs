@@ -717,7 +717,7 @@ function mergeCommand(options) {
 function fullGateCandidate(options) {
   const { repo, pr, head, expectedDevTip } = options;
   const record = pullRequest(repo, pr);
-  if (!queueTarget(record.baseRefName) || !queueTarget(record.headRefName) || record.state !== 'OPEN' || record.isDraft ||
+  if (!queueTarget(record.baseRefName) || record.state !== 'OPEN' || record.isDraft ||
       record.headRepository?.nameWithOwner !== repo || record.headRefOid !== head || record.baseRefOid !== expectedDevTip) return false;
   const fetchedHead = fetchRef('origin', `refs/pull/${pr}/head`, `refs/remotes/origin/nightly/full-gate-${pr}`);
   const fetchedBase = fetchRef('origin', `refs/heads/${record.baseRefName}`, `refs/remotes/origin/${record.baseRefName}`);
