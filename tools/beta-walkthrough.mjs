@@ -72,6 +72,13 @@ const act=async(page,operation,target,lookup,mutation)=>{
 const click=async(page,label)=>act(page,'click',label,`[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)}&&n.getClientRects().length>0)`,'node.click()');
 const select=async(page,selector)=>act(page,'select',selector,`document.querySelector(${JSON.stringify(selector)})`,'node.click()');
 const fill=async(page,selector,value)=>act(page,'fill',selector,`document.querySelector(${JSON.stringify(selector)})`,`node.value=${JSON.stringify(value)};node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}))`);
+async function openRetainedReview(page,runId){
+ await select(page,'#app-sidebar [data-nav-book-section=review]');
+ const item=`.review-runs [data-review-run-id=${JSON.stringify(runId)}]`;
+ await ready(page,`document.querySelector(${JSON.stringify(item)})`,'retained-review-history-row');
+ if(!await boolean(page,`document.querySelector(${JSON.stringify(item)})?.getAttribute('aria-current')==='true'`))await select(page,item+' [data-review-action=open-run]');
+ await ready(page,`document.querySelector(${JSON.stringify(item)})?.getAttribute('aria-current')==='true'`,'retained-review-opened');
+}
 async function followReview(page,dataRoot,runId){
  let previous=null,advancedAt=Date.now();
  for(;;){
@@ -99,6 +106,39 @@ async function followReview(page,dataRoot,runId){
   }
   await new Promise(r=>setTimeout(r,1000));
  }
+}
+async function controlledSourceTranslation(page,bookId,dataRoot,channel){
+ at(channel+'-controlled-english-source');
+ const fact='Apollo 11 landed on the Moon on July 20, 1969. Neil Armstrong became the first person to step onto the lunar surface. NASA describes this mission at https://www.nasa.gov/history/july-20-1969-one-giant-leap-for-mankind/.';
+ const typo='Beta 测试者加入的独立纠错样例：这句话有的的重复字。';
+ report.controlledTranslations??=[];
+ let probe=report.controlledTranslations.find(p=>p.channel===channel&&p.bookId===bookId);
+ if(!probe){probe={scope:'explicit tester edit of admitted sample1; controlled functional stratum, excluded from natural precision and original FullReview coverage',source:'https://www.nasa.gov/history/july-20-1969-one-giant-leap-for-mankind/',factSha256:createHash('sha256').update(fact).digest('hex'),bookId,channel};report.controlledTranslations.push(probe);checkpoint();}
+ await select(page,'#app-sidebar [data-nav-book-section=manuscript]');
+ await ready(page,"document.querySelector('[data-testid=manuscript-editor] p[data-block-id]')",'controlled-editor');
+ const enter=async()=>{await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'});await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});};
+ if(!probe.blockId){
+  check(await page.evaluate(`(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');const p=[...e.querySelectorAll('p[data-block-id]')].find(n=>n.textContent.length>30);if(!p)return false;e.focus();const r=document.createRange();r.selectNodeContents(p);r.collapse(false);getSelection().removeAllRanges();getSelection().addRange(r);return true})()`),'controlled-insertion-caret');
+  await enter();await page.send('Input.insertText',{text:fact});await enter();await page.send('Input.insertText',{text:typo});
+  await ready(page,`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].some(n=>n.textContent===${JSON.stringify(fact)})&&document.querySelector('#persistence-status')?.dataset.tone!=='busy'`,'controlled-public-edit-saved');
+  probe.blockId=await page.evaluate(`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].find(n=>n.textContent===${JSON.stringify(fact)}).dataset.blockId`);checkpoint();
+ }
+ if(!probe.runId){
+  probe.previousRunId=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId??null)');checkpoint();
+  check(await page.evaluate(`(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');const p=e.querySelector('[data-block-id="${probe.blockId}"]');if(!p||p.textContent!==${JSON.stringify(fact)})return false;e.focus();const r=document.createRange();r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));const b=p.getBoundingClientRect();p.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,clientX:b.x+15,clientY:b.y+10}));return true})()`),'controlled-fact-selected');
+  await select(page,'[data-mark-action=task-on-selection]');await ready(page,"document.querySelector('[data-mark-composer=task-on-selection]')",'controlled-selection-task');
+  await fill(page,'[data-mark-composer=task-on-selection] [data-mark-field=procedure]','review:factual-review');
+  await select(page,'[data-mark-composer=task-on-selection] [data-mark-action=submit]');
+  await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&v.run.reviewRunId!==${JSON.stringify(probe.previousRunId)})`,'controlled-factual-started');
+  const started=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run.reviewRunId,taskIntentId:v.run.categories.find(c=>c.categoryId===\'factual-review\').taskIntentId}))');Object.assign(probe,started);probe.startedAt=new Date().toISOString();checkpoint();
+ }
+ await followReview(page,dataRoot,probe.runId);
+ const sources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},taskIntentId:${JSON.stringify(probe.taskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const r=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,target:r?{evidenceId:r.evidenceId,url:r.url,contentSha256:r.contentSha256,attribution:r.translation.attribution}:null};})()`);Object.assign(probe,sources);checkpoint();
+ check(Boolean(probe.target),'controlled-current-foreign-prose-required');
+ await select(page,'#app-sidebar [data-nav-book-section=sources]');await ready(page,"document.querySelector('.research-evidence')",'controlled-source-surface');
+ const selector=`article[data-evidence-id=${JSON.stringify(probe.target.evidenceId)}] .research-evidence-translated blockquote`;
+ while(!await boolean(page,`document.querySelector(${JSON.stringify(selector)})?.textContent.length>0`)&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
+ check(await boolean(page,`document.querySelector(${JSON.stringify(selector)})?.textContent.length>0`),'controlled-foreign-source-translation-visible');probe.completedAt=new Date().toISOString();checkpoint();
 }
 async function cleanupInstallation(path){if(!path)return;const actual=resolve(path);if(!actual.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase())||!actual.endsWith('installed'))throw Error('cleanup-target-refused');if(!existsSync(actual))return;const name=(await readdir(actual)).find(n=>/^Uninstall.*\.exe$/i.test(n));if(name){run(join(actual,name),['/S']);await wait(()=>!existsSync(join(actual,'AI7.exe')),'cleanup-uninstall-timeout');}}
 
@@ -318,19 +358,18 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    // A projection-only successor may inspect this valid historical Run without
    // authorizing the original paid requests again. Keep its original binary identity.
    report.retainedReviewEvidence=resume.completedReview;
-   await select(page,'#app-sidebar [data-nav-book-section=review]');
-   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId===${JSON.stringify(retainedReview.runId)}&&v.run.state==='settled')`,'retained-completed-review');
+   await openRetainedReview(page,retainedReview.runId);
+   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview.runId)}}).then(v=>v.run?.state==='settled')`,'retained-completed-review');
    const expectedTasks=retainedReview.memberCoverage.filter(c=>!c.local).map(c=>({categoryId:c.categoryId,taskIntentId:c.taskIntentId}));
-   check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>${JSON.stringify(expectedTasks)}.every(e=>v.run.categories.some(c=>c.categoryId===e.categoryId&&c.taskIntentId===e.taskIntentId)))`),'retained-review-task-identities');
+   check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview.runId)}}).then(v=>${JSON.stringify(expectedTasks)}.every(e=>v.run.categories.some(c=>c.categoryId===e.categoryId&&c.taskIntentId===e.taskIntentId)))`),'retained-review-task-identities');
   }else if(resumePrefix&&(resume.activeReview||resume.failedStage==='windows-installer-full-review'&&resume.checks.includes('select-dialog.review-sheet [data-review-action=start]'))){
    const db=new DatabaseSync(join(expectedDataRoot,'store','ai7.sqlite'),{readOnly:true});
    let kept;
-   try{const row=db.prepare('SELECT r.canonical_json FROM review_runs r JOIN review_run_authorizations a USING(review_run_id) WHERE r.book_id=? ORDER BY r.ordinal DESC LIMIT 1').get(bookId);kept=row?JSON.parse(row.canonical_json):null;}finally{db.close();}
+   try{const row=resume.activeReview?db.prepare('SELECT r.canonical_json FROM review_runs r JOIN review_run_authorizations a USING(review_run_id) WHERE r.book_id=? AND r.review_run_id=?').get(bookId,resume.activeReview.runId):db.prepare('SELECT r.canonical_json FROM review_runs r JOIN review_run_authorizations a USING(review_run_id) WHERE r.book_id=? ORDER BY r.ordinal DESC LIMIT 1').get(bookId);kept=row?JSON.parse(row.canonical_json):null;}finally{db.close();}
    check(Boolean(kept)&&(!resume.activeReview||kept.reviewRunId===resume.activeReview.runId),'resume-existing-authorized-review');
    report.activeReview=resume.activeReview??{runId:kept.reviewRunId,buildIdentity:resume.buildIdentity,runnerHead:resume.runnerHead,tasks:kept.categories.filter(c=>c.task).map(c=>({categoryId:c.categoryId,taskIntentId:c.task.taskIntentId}))};checkpoint();
-   await select(page,'#app-sidebar [data-nav-book-section=review]');
-   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId===${JSON.stringify(kept.reviewRunId)})`,'existing-review-surface');
-   if(await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run.canContinue)'))await select(page,'[data-review-action=continue]');
+   await openRetainedReview(page,kept.reviewRunId);
+   if(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(kept.reviewRunId)}}).then(v=>v.run.canContinue)`))await select(page,'[data-review-action=continue]');
    await followReview(page,expectedDataRoot,kept.reviewRunId);
   }else{
   check(!RETAINED_REVIEW_ONLY,'retained-review-receipt-required');
@@ -353,7 +392,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.activeReview.buildIdentity=report.buildIdentity;report.activeReview.runnerHead=report.runnerHead;checkpoint();
   await followReview(page,expectedDataRoot,report.activeReview.runId);
   }
-  const review=await page.evaluate("window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state,detail:c.detail})),findings:v.run?.findings.length}))");
+  const review=await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview?.runId??report.activeReview?.runId??null)}}).then(v=>({runId:v.run?.reviewRunId,state:v.run?.state,categories:v.run?.categories.map(c=>({id:c.categoryId,state:c.state,detail:c.detail})),findings:v.run?.findings.length}))`);
   report.reviews??=[];report.reviews.push({channel:expectedChannel,...review});
   check(review.categories?.length===5&&review.categories.every(c=>c.state==='settled'),expectedChannel+'-full-review-five-members');
 
@@ -395,31 +434,39 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   const factualSources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},taskIntentId:${JSON.stringify(factualTaskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const translated=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {taskIntentId:${JSON.stringify(factualTaskIntentId)},count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,captured:records.filter(r=>r.captureState==='full-text').length,target:translated?{evidenceId:translated.evidenceId,url:translated.url,contentSha256:translated.contentSha256,attribution:translated.translation.attribution}:null}})()`);
   check(factualSources.count>0&&factualSources.captured>0,expectedChannel+'-retained-live-sources');
   report.factualEvidence??=[];report.factualEvidence.push({channel:expectedChannel,...factualSources});
-  check(Boolean(factualSources.target),'current-foreign-prose-translation-required');
+  if(factualSources.target){
   const translatedSelector=`article[data-evidence-id=${JSON.stringify(factualSources.target.evidenceId)}] .research-evidence-translated blockquote`;
   await select(page,'#app-sidebar [data-nav-book-section=sources]');await ready(page,"document.querySelector('.research-evidence')",'sources-surface');
   while(!await boolean(page,`document.querySelector(${JSON.stringify(translatedSelector)})?.textContent.length>0`)&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
   check(await boolean(page,`document.querySelector(${JSON.stringify(translatedSelector)})?.textContent.length>0`),expectedChannel+'-foreign-source-translation-visible');
   await select(page,'#app-sidebar [data-nav-book-section=review]');await ready(page,"document.querySelector('.review-workspace-card')",'review-after-evidence');
+  }else report.limitations.push(`${expectedChannel}: original FullReview retained no translated foreign passage; a separately labelled controlled sample1 edit tests the current translation UI without rerunning that FullReview.`);
+  report.findingDispositions??=[];
+  const priorDisposition=report.findingDispositions.find(d=>d.channel===expectedChannel&&d.reviewRunId===review.runId);
+  if(!priorDisposition){
   const applicable=await page.evaluate("[...document.querySelectorAll('[data-review-action=accept-apply]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
   check(Boolean(applicable),expectedChannel+'-applicable-card-required');
   if(applicable){await select(page,`article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]`);await ready(page,`document.querySelector('article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]')?.disabled!==false`,'finding-adopted');check(true,expectedChannel+'-finding-adopted');}
   const reject=await page.evaluate("[...document.querySelectorAll('[data-review-action=ignore]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
   check(Boolean(reject),expectedChannel+'-finding-to-reject');
   await select(page,`article[data-finding-id=${JSON.stringify(reject)}] [data-review-action=ignore]`);await fill(page,'[data-review-field=ignore-reason]','Beta 人工复核：该项不符合本次修改目的。');await select(page,'[data-review-action=ignore-confirm]');
+  report.findingDispositions.push({channel:expectedChannel,reviewRunId:review.runId,accepted:applicable,rejected:reject,at:new Date().toISOString()});checkpoint();
+  }
+  if(!factualSources.target)await controlledSourceTranslation(page,bookId,expectedDataRoot,expectedChannel);
   at(expectedChannel+'-agent-workspace');
   await select(page,'#app-sidebar [data-nav-agent-workspace=row]');await ready(page,"document.querySelector('[data-agent-workspace-block]')",'agent-workspace');
-  check(await page.evaluate(`(()=>{const rows=[...document.querySelectorAll('p[data-agent-workspace-block]')];const start=rows.find(n=>n.firstChild?.nodeType===3&&n.nextElementSibling?.matches('p[data-agent-workspace-block]'));if(!start)return false;const end=start.nextElementSibling;const r=document.createRange();r.setStart(start.firstChild,0);r.setEnd(end.firstChild,Math.min(2,end.firstChild.length));const s=getSelection();s.removeAllRanges();s.addRange(r);end.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));return document.querySelector('.agent-workspace-quote')?.textContent.includes(String.fromCharCode(10));})()`),expectedChannel+'-cross-paragraph-selection');
-  await fill(page,'[data-agent-workspace-field=instruction]','请仅检查所选公开样书文字中明确的错别字和语病，保留历史用语与人物口吻，提出有原文锚点的必要修改；无问题可不修改。');
+  check(await page.evaluate(`(()=>{const rows=[...document.querySelectorAll('p[data-agent-workspace-block]')];const controlled=rows.find(n=>n.textContent.includes('Beta 测试者加入的独立纠错样例'));const start=controlled?.previousElementSibling??rows.find(n=>n.firstChild?.nodeType===3&&n.nextElementSibling?.matches('p[data-agent-workspace-block]'));if(!start)return false;const end=controlled??start.nextElementSibling;const r=document.createRange();r.setStart(start.firstChild,0);r.setEnd(end.firstChild,end.firstChild.length);const s=getSelection();s.removeAllRanges();s.addRange(r);end.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));return document.querySelector('.agent-workspace-quote')?.textContent.includes(String.fromCharCode(10));})()`),expectedChannel+'-cross-paragraph-selection');
+  await fill(page,'[data-agent-workspace-field=instruction]','请仅提出一条必要的原文锚点修改：若所选测试样例含“的的”重复字，只删除一个“的”；不要改变英文事实或其他措辞。');
   await select(page,'[data-agent-workspace-action=propose]');
   await ready(page,"document.querySelector('.agent-workspace-proposal')?.dataset.agentWorkspaceProposal==='ready'",'agent-proposal-ready',300000);
   check(await boolean(page,"!document.querySelector('[data-agent-workspace-field=instruction]')?.disabled"),expectedChannel+'-agent-next-round');
   const agent=await page.evaluate("window.ai7.inspectAgentWorkspace().then(v=>({dialogueId:v.proposal?.dialogueId,count:v.proposal?.candidates.length}))");
   const firstProposal=await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.proposalSetId)');
-  await fill(page,'[data-agent-workspace-field=instruction]','请复核上一轮结果，只保留能用所选原文证实的必要修改，并撤回仅属风格偏好的建议。');await select(page,'[data-agent-workspace-action=propose]');
+  await fill(page,'[data-agent-workspace-field=instruction]','请复核上一轮，只保留删除测试样例中一个重复“的”的那一条候选；不要提出风格修改或改变英文事实。');await select(page,'[data-agent-workspace-action=propose]');
   await ready(page,`window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.state==='ready'&&v.proposal.proposalSetId!==${JSON.stringify(firstProposal)})`,'agent-second-round',300000);check(true,expectedChannel+'-agent-refinement-round');
   agent.count=await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.candidates.length??0)');
-  if(agent.count>0){await select(page,'[data-agent-workspace-action=promote]');await ready(page,"document.querySelector('[data-agent-workspace-promoted]')",'agent-promoted');}
+  if(agent.count===1){await select(page,'[data-agent-workspace-action=promote]');await ready(page,"document.querySelector('[data-agent-workspace-promoted]')?.dataset.agentWorkspacePromoted==='1'",'agent-single-promoted');agent.singleCandidatePromoted=true;}
+  else{agent.singleCandidatePromoted=false;report.limitations.push(`${expectedChannel}: Agent returned ${agent.count} candidates; single-candidate promotion remains unmeasured, with no answer reroll.`);}
   report.agent??=[];report.agent.push({channel:expectedChannel,...agent});
   at(expectedChannel+'-global-agent-live');
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
@@ -493,12 +540,13 @@ try{
  try{
   const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));
   if(RESUME_LAST){
-   const stages=['windows-installer-full-review','windows-installer-retained-factual-evidence','windows-installer-launch','await-protected-enrollment-windows-installer'];
+   const stages=['windows-installer-full-review','windows-installer-retained-factual-evidence','windows-installer-controlled-english-source','windows-installer-launch','await-protected-enrollment-windows-installer'];
    if((RETAINED_REVIEW_ONLY?!['failed','passed'].includes(previous.state):previous.state!=='failed'||!stages.includes(previous.failedStage))||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');
    const completedReview=previous.completedReview??(()=>{const review=previous.reviews?.findLast(r=>r.channel==='windows-installer'&&r.state==='settled'&&r.categories?.length===5&&r.categories.every(c=>c.state==='settled'));return review?{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,review,checks:previous.checks}:null;})();
    if((RETAINED_REVIEW_ONLY||previous.failedStage==='windows-installer-retained-factual-evidence')&&!completedReview)throw Error('resume-completed-review-missing');
    resume=previous;
    report.activeReview=previous.activeReview??null;
+   report.controlledTranslations=previous.controlledTranslations??[];report.findingDispositions=previous.findingDispositions??[];
    resume.completedReview=completedReview;report.completedReview=completedReview;
    report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};
    report.priorBook=previous.priorBook;
