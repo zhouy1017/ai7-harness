@@ -466,8 +466,8 @@ export class PlatformToolSession implements PlatformToolOwner {
         this.usage.searchCalls[id] = (this.usage.searchCalls[id] ?? 0) + 1;
       } else this.usage.fetchCount += 1;
       const result = await call.send(authorized);
-      if (item.kind === 'search-call' && result.status === 403 && searchFailureClass({ status: result.status,
-        backendId: backend?.backendId, body: new TextDecoder().decode(result.bytes) }) === 'quota') failureClass = 'quota';
+      if (item.kind === 'search-call' && result.status === 403 && backend !== undefined && searchFailureClass({ status: result.status,
+        backendId: backend.backendId, body: new TextDecoder().decode(result.bytes) }) === 'quota') failureClass = 'quota';
       if (item.kind === 'fetch') this.usage.fetchBytes += result.bytes.byteLength;
       if (backend?.backendId === 'search-deepseek' && item.kind === 'search-call') {
         try {
