@@ -3132,7 +3132,14 @@ export class BaselineAnalysisStore {
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
     const selectedProcedure = background === null ? selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind) : null;
     const sameProcedure = canonicalJson(latestIntent?.record.procedure ?? null) === canonicalJson(selectedProcedure);
-    const sameTask = sameProcedure && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    // A fresh initiation uses the search selection now, while the earlier Review keeps its frozen Task.
+    // Search is not part of the model material-input comparison; reusing that Task would silently send to its old backend.
+    const priorProvider = existing.providerResolutionPlan;
+    const searchCurrent = priorProvider === null || existing.run !== null || canonicalJson({
+      ...(priorProvider.webToolsBackend === undefined ? {} : { webToolsBackend: priorProvider.webToolsBackend, searchCredentialReference: priorProvider.searchCredentialReference }),
+      ...(priorProvider.webToolsFallback === undefined ? {} : { webToolsFallback: priorProvider.webToolsFallback }),
+    }) === canonicalJson(this.#currentSearchPlan(currentDefinition, latestIntent?.preparedByEnrollmentVersionId ?? null, input.launchPolicy));
+    const sameTask = sameProcedure && (input.reconfirm || searchCurrent) && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -3268,6 +3275,24 @@ export class BaselineAnalysisStore {
       checkpointRecord.json, checkpointRecord.digest, instant);
     this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange,
       planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
+  }
+
+  /** Derive the search pins for both fresh preparation reuse and plan freezing. */
+  #currentSearchPlan(definition: AnalysisKindDefinition, enrollmentVersionId: string | null, policy = this.#launch.policy): {
+    webToolsBackend?: FrozenWebToolsBackend; searchCredentialReference?: string; webToolsFallback?: FrozenWebToolsFallback;
+  } {
+    const admitted = definition.kind === BASELINE_ANALYSIS_KIND || enrollmentVersionId !== null ? null : liveKindRule(this.#launch.policy, definition.kind);
+    if (this.#launch.live === null || admitted === null || !kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration).webSearch) return {};
+    const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
+    const adapter = searchBackend(asString(row.backend_id));
+    const production = this.#launch.live.scope === 'ordinary-production';
+    if (production) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
+      'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
+    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
+    const searchCredentialReference = production ? asString(row.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
+    const webToolsFallback = production ? freezeSearchFallback(this.#db, searchFallbackTermsOf(policy), adapter.declaration.id) : undefined;
+    return { webToolsBackend, searchCredentialReference, ...(webToolsFallback === undefined ? {} : { webToolsFallback }) };
   }
 
   /**
@@ -3413,18 +3438,7 @@ export class BaselineAnalysisStore {
     // A Task a 后台分析登记 prepared declares no research, as before the declaration existed (#744 keeps #887's guard).
     const researchDeclaration = admittedToolRule === null ? { webSearch: false, searchEngine: null } as const
       : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
-    const toolsDeclared = live !== null && researchDeclaration.webSearch;
-    let webToolsBackend: FrozenWebToolsBackend | undefined;
-    let searchCredentialReference: string | undefined; let webToolsFallback: FrozenWebToolsFallback | undefined;
-    if (toolsDeclared) {
-      const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
-      requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
-      const adapter = searchBackend(asString(row.backend_id));
-      if (production !== null) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
-        'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
-      webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
-      searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference); if (production !== null) webToolsFallback = freezeSearchFallback(this.#db, searchFallbackTermsOf(input.policy ?? this.#launch.policy), adapter.declaration.id);
-    }
+    const { webToolsBackend, searchCredentialReference, webToolsFallback } = this.#currentSearchPlan(definition, intent.preparedByEnrollmentVersionId, input.policy);
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
