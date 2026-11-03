@@ -1,4 +1,5 @@
 import { searchBackend, searchBackendCandidateConfigurationDigest } from './search-backends/index.js';
+import { bochaAccountQuotaRejected } from './search-backends/bocha.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
 import type { CredentialBroker } from './credential-broker.js';
 import type { TicketHostAdmission } from './public-source-fetch.js';
@@ -224,13 +225,15 @@ export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: Pl
 /**
  * Why one search submission failed, as a closed class (Issue #1181): a missing key, an authentication or account-balance
  * rejection, a rate limit, a server error, any other rejection, an answer AI7 cannot read, a refusal before sending, or a
- * transport that did not complete. Classes come from the HTTP status or AI7's own error code — never from a provider's body.
+ * transport that did not complete. Generic statuses/codes stay generic; the Bocha adapter recognizes its exact structured
+ * account-quota rejection without exporting the body or changing the observed status.
  */
 export type SearchFailureClass = 'credential-missing' | 'auth' | 'quota' | 'rate' | 'server' | 'rejected' | 'malformed' | 'refused' | 'transport';
 
-export function searchFailureClass(failure: { readonly status: number } | { readonly code: string }): SearchFailureClass {
+export function searchFailureClass(failure: { readonly status: number; readonly backendId?: string; readonly body?: string } | { readonly code: string }): SearchFailureClass {
   if ('status' in failure) {
     const { status } = failure;
+    if (failure.backendId === 'search-bochaai' && failure.body !== undefined && bochaAccountQuotaRejected(status, failure.body)) return 'quota';
     return status === 200 ? 'malformed' : status === 401 || status === 403 ? 'auth' : status === 402 ? 'quota' : status === 429 ? 'rate'
       : status >= 500 && status <= 599 ? 'server' : 'rejected';
   }

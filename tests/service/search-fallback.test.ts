@@ -31,12 +31,13 @@ afterEach(async () => { requestGovernor.close(); await requestGovernor.whenIdle(
 
 const TINYFISH = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
 const BRAVE = SEARCH_BACKENDS.find((entry) => entry.id === 'search-brave')!;
+const BOCHA = SEARCH_BACKENDS.find((entry) => entry.id === 'search-bochaai')!;
 const QUERY = 'public museum collection fact query for the fallback regression';
 const MUSEUM = 'https://museum.example.org/zun';
 const HELD = '它现藏湖北省博物馆';
 const SECRET = 'synthetic-search-key-never-stored';
 /** How one search send ends: answered with results, an HTTP status, a reset before any response byte, or a body that breaks after 200. */
-type Reply = 'ok' | 'reset' | 'broken-body' | 401 | 429 | 503;
+type Reply = 'ok' | 'reset' | 'broken-body' | 'bocha-quota' | 401 | 403 | 429 | 503;
 
 let roots: ServiceTestRoots;
 let store: EditorialStore;
@@ -65,6 +66,8 @@ function quoteFrom(unit: string): { quote: string; blockOrdinal: number } | null
 
 function searchReply(backend: 'primary' | 'fallback', reply: Reply | undefined): Response {
   if (reply === 'reset') throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } });
+  if (reply === 'bocha-quota') return new Response(JSON.stringify({ code: '403', message: 'You do not have enough money or package quota' }),
+    { status: 403, headers: { 'content-type': 'application/json' } });
   if (typeof reply === 'number') return new Response('unavailable', { status: reply, headers: reply === 429 ? { 'retry-after': '1' } : {} });
   if (reply === 'broken-body') return new Response(new ReadableStream({ start: (controller) => controller.error(new Error('stream broke')) }), { status: 200 });
   const hit = { title: '馆藏 - 博物馆', url: MUSEUM };
@@ -73,7 +76,7 @@ function searchReply(backend: 'primary' | 'fallback', reply: Reply | undefined):
 }
 
 /** The real owners under ordinary-production v32 with TinyFish as the default and, unless `fallback` is null, Brave as the 备用来源. */
-async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { chooseFallback?: boolean; translate?: SourceTranslator; noClaims?: boolean } = {}): Promise<void> {
+async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { chooseFallback?: boolean; translate?: SourceTranslator; noClaims?: boolean; bocha?: boolean } = {}): Promise<void> {
   replies = { primary: [...primary], fallback: [...fallback] }; sent = [];
   roots = await createServiceTestRoots('ai7-search-fallback-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -81,8 +84,9 @@ async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { ch
   store.selectModelServiceRoute('opencode-go');
   const binding = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === 'opencode-go')!, credentialReference: connection.credentialReference };
   policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', binding);
-  for (const backend of [TINYFISH, BRAVE]) store.saveSearchBackendCredential(backend.id, store.getSearchBackendConnections().find((row) => row.backendId === backend.id)!.credentialReference, 'ready');
-  store.selectSearchBackend(TINYFISH.id);
+  const primaryBackend = options.bocha === true ? BOCHA : TINYFISH;
+  for (const backend of [primaryBackend, BRAVE]) store.saveSearchBackendCredential(backend.id, store.getSearchBackendConnections().find((row) => row.backendId === backend.id)!.credentialReference, 'ready');
+  store.selectSearchBackend(primaryBackend.id);
   if (options.chooseFallback !== false) store.selectSearchBackend(BRAVE.id, 'fallback');
   const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...binding, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
   store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
@@ -91,9 +95,9 @@ async function setup(primary: Reply[], fallback: Reply[] = ['ok'], options: { ch
     usage: { prompt_tokens: 40, completion_tokens: 20 } }), { status: 200 });
   const nativeFetch: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
-    for (const [backend, declared] of [['primary', TINYFISH], ['fallback', BRAVE]] as const) {
+    for (const [backend, declared] of [['primary', primaryBackend], ['fallback', BRAVE]] as const) {
       if (url.hostname !== declared.host) continue;
-      sent.push({ backend, query: url.searchParams.get('query') ?? url.searchParams.get('q'), at: Date.now() });
+      sent.push({ backend, query: url.searchParams.get('query') ?? url.searchParams.get('q') ?? (init?.body ? (JSON.parse(String(init.body)) as { query: string }).query : null), at: Date.now() });
       return searchReply(backend, replies[backend].shift());
     }
     if (url.href === MUSEUM) return new Response(`<html><head><meta charset="utf-8"></head><body><p>这件尊盘出土于1978年。${options.translate === undefined ? HELD + '，是馆藏重器。' : 'It is held by the Hubei Provincial Museum. This collection is open to the public.'}</p></body></html>`,
@@ -151,6 +155,30 @@ function claimAllowance(runRecordId: string) {
 }
 
 describe('the 联网检索 备用来源 in the 联网取证 stage (#1226)', () => {
+  it('uses the frozen backup once after a precise account-quota rejection, without retrying the exhausted primary', async () => {
+    await setup(['bocha-quota'], ['ok'], { bocha: true });
+    const { facts, report, runRecordId, book, decision } = await review('额度拒绝后使用既定备用来源');
+    expect(sent.map((entry) => [entry.backend, entry.query])).toEqual([['primary', QUERY], ['fallback', QUERY]]);
+    expect(facts.webToolsBackend?.backendId).toBe(BOCHA.id);
+    expect(facts.webToolsFallback?.backendId).toBe(BRAVE.id);
+    expect(report!.usagePerStage['platform-tools']).toMatchObject({ searchCalls: { [BOCHA.id]: 1, [BRAVE.id]: 1 } });
+    expect(decision).toContain('已切换备用来源 Brave 1 次');
+    const ledger = store.executionLedgerForRun(runRecordId).factualVerification;
+    const claim = ledger.claims(runRecordId)!.claims[0]!;
+    const rounds = ledger.claimRounds(ledger.claimSession(runRecordId, 'web-verification', claim.claimId)!.sessionId);
+    expect(rounds[0]!.fallbackSources).toContainEqual([MUSEUM, { backendId: BRAVE.id, fallbackFrom: BOCHA.id, failureClass: 'provider-account-quota' }]);
+    expect(store.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.find((record) => record.url === MUSEUM)?.backendId).toBe(BRAVE.id);
+    expect(claimAllowance(runRecordId).search).toBe(2);
+  }, 60_000);
+
+  it('keeps an unrelated Bocha403 on its original channel without a backup call', async () => {
+    await setup([403], ['ok'], { bocha: true });
+    const { report } = await review('未识别的拒绝不得兜底');
+    expect(sent.map((entry) => entry.backend)).toEqual(['primary']);
+    expect(report!.usagePerStage['platform-tools']).toMatchObject({ searchCalls: { [BOCHA.id]: 1 } });
+    expect(report!.usagePerStage['platform-tools']?.searchCalls).not.toHaveProperty(BRAVE.id);
+  }, 60_000);
+
   it('keeps a configured but never-searched claim Run unverified', async () => {
     await setup([], [], { chooseFallback: false, noClaims: true });
     const { report, decision } = await review('未进行检索的报告');
@@ -256,8 +284,8 @@ describe('the 联网检索 备用来源 in the 联网取证 stage (#1226)', () =
     expect(claimAllowance(baseline.runRecordId).tool - tools).toBe(2);
   }, 90_000);
 
-  it('keeps a Plan without a 备用来源 byte-free of it, and its one failed send unretried', async () => {
-    await setup([503, 'ok'], ['ok'], { chooseFallback: false });
+  it.each([503, 'bocha-quota'] as const)('keeps a Plan without a 备用来源 byte-free of it, and its %s send unretried', async (failure) => {
+    await setup([failure, 'ok'], ['ok'], { chooseFallback: false, bocha: failure === 'bocha-quota' });
     const plain = await review('无备用来源');
     expect(plain.facts.webToolsFallback).toBeUndefined();
     expect(store.factualReviewLedger.inspect(plain.book.bookId).providerResolutionPlan).not.toHaveProperty('webToolsFallback');

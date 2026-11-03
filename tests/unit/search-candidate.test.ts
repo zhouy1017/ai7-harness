@@ -135,10 +135,21 @@ describe('the candidate probe decision and its single credential release', () =>
 });
 
 describe('the closed search failure classes', () => {
-  it('reads a class from the HTTP status or an AI7 error code, never from a body', () => {
+  it('keeps the generic HTTP-status and AI7-code classifications', () => {
     expect([200, 400, 401, 402, 403, 404, 429, 500, 504].map((status) => searchFailureClass({ status })))
       .toEqual(['malformed', 'rejected', 'auth', 'quota', 'auth', 'rejected', 'rate', 'server', 'server']);
     expect(['SEARCH_SERVICE_CREDENTIAL_REQUIRED', 'CREDENTIAL_MISSING', 'PLATFORM_TOOL_TIMEOUT', 'PLATFORM_TOOL_FAILED', 'PLATFORM_TOOL_BODY_TOO_LARGE', 'PLATFORM_TOOL_TICKET_REFUSED']
       .map((code) => searchFailureClass({ code }))).toEqual(['credential-missing', 'credential-missing', 'transport', 'transport', 'malformed', 'refused']);
+  });
+
+  it('recognizes only Bocha\'s structured account-quota rejection without changing its HTTP status', () => {
+    const body = JSON.stringify({ code: '403', message: 'You do not have enough money or package quota' });
+    const failure = { status: 403, backendId: 'search-bochaai', body };
+    expect(searchFailureClass(failure)).toBe('quota');
+    expect(failure.status).toBe(403);
+    expect(searchFailureClass({ ...failure, backendId: 'search-brave' })).toBe('auth');
+    expect(searchFailureClass({ ...failure, body: JSON.stringify({ code: '403', message: 'Access denied' }) })).toBe('auth');
+    expect(searchFailureClass({ ...failure, body: JSON.stringify({ code: '401', message: 'You do not have enough money or package quota' }) })).toBe('auth');
+    expect(searchFailureClass({ ...failure, body: 'not JSON' })).toBe('auth');
   });
 });
