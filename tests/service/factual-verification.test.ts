@@ -358,6 +358,44 @@ function syntheticClaimLedger() {
 }
 
 describe('factual claim occurrence ledger', () => {
+  it('attributes mixed same-unit completion to each claim and corrects historical projections without rewriting results', async () => {
+    await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('同一阅读单元中的独立断言');
+    scenario.atClaimAnswer = () => {
+      delete scenario.atClaimAnswer;
+      throw Object.assign(new Error('synthetic lost claim response'), { code: 'TRANSPORT_FAILED' });
+    };
+    const retained = await review(book);
+    const ledger = store.executionLedgerForRun(retained.results[0]!.runRecordId).factualVerification;
+    const claims = ledger.claims(retained.results[0]!.runRecordId)!;
+    expect(ledger.claimProgress(retained.results[0]!.runRecordId)).toMatchObject({ total: 2, closed: 1, unknown: 1 });
+    const completed = retained.results.find(r => r.findingId === `fnd_${claims.claims[1]!.claimId.slice(0, 24)}`)!;
+    expect(completed.states.factualVerification).toBe('证据支持');
+    expect(completed.limitations).not.toContain('联网核查未完成。');
+    const incomplete = retained.results.find(r => r.findingId === `fnd_${claims.claims[0]!.claimId.slice(0, 24)}`)!;
+    expect(incomplete.states.factualVerification).toBe('无法核实');
+    editRecordedTables(['factual_verification_results'], db => {
+      const row = db.prepare('SELECT canonical_json FROM factual_verification_results WHERE result_id=?').get(completed.resultId)!;
+      const old = JSON.parse(String(row.canonical_json));
+      old.body.research = 'incomplete'; old.body.limitations.push('联网核查未完成。');
+      old.claimSupport = '未核查'; old.factualVerification = '无法核实';
+      const record = canonicalRecord(old);
+      db.prepare('UPDATE factual_verification_results SET canonical_json=?,sha256=?,claim_support=?,factual_verification=? WHERE result_id=?')
+        .run(record.json, record.digest, old.claimSupport, old.factualVerification, completed.resultId);
+    });
+    const before = databaseState();
+    const projected = lens(book, retained.reviewRunId);
+    expect(projected.counts.find(c => c.outcome === '证据支持')!.count).toBe(1);
+    const current = projected.results.find(r => r.resultId === completed.resultId)!;
+    expect(current.states.factualVerification).toBe('证据支持');
+    expect(current.limitations).toContain('当前显示按本条断言的独立核查记录校正；历史结果原文保留在版本记录中。');
+    expect(current.limitations).not.toContain('联网核查未完成。');
+    const workspace = store.inspectEvidenceWorkspace({ bookId: book.bookId, resultId: completed.resultId, sourcesAfter: null });
+    expect(workspace.history.find(h => h.resultId === completed.resultId)!.outcome).toBe('无法核实');
+    expect(workspace.decisionCard.recommendation?.disposition).toBe('accept');
+    expect(databaseState()).toEqual(before);
+  });
+
   it('keeps claim shutdown resumable and continues only unstarted work after ordinary reopen', async () => {
     await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('断言核查正常退出后续行');
