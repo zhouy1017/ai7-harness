@@ -149,7 +149,7 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,ex
   await composeAdmittedDocx(isolatedInput,{source:'sample1.docx',startBlock:1,blocks:1,title:'Beta source translation functional'});
   probe.isolatedInput={source:'sample1.docx',startBlock:1,blocks:1,sha256:createHash('sha256').update(await readFile(isolatedInput)).digest('hex')};checkpoint();
   await click(page,'导入稿件');native(executable,['-FileName',isolatedInput]);await ready(page,"document.querySelector('[data-screen=target]')",'controlled-import-target');
-  await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
+  await select(page,'input[data-import-target-choice=new-book]');await select(page,'input[aria-label="作为首份稿件导入"]');
   await fill(page,'#book-title','Beta source translation functional');await click(page,'确认书名并复核');await ready(page,"document.querySelector('[data-screen=review]')",'controlled-import-review');
   await click(page,'新建图书并导入稿件');await ready(page,"document.querySelector('[data-screen=imported]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'controlled-import-completed');
   await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-import-opened');
@@ -313,7 +313,7 @@ async function preparePortableCarry(executable,env,dataRoot,input){
   let imported=await page.evaluate(`[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes(${JSON.stringify(title)}))?.dataset.navBook??null`);
   if(!imported){
    await click(page,'导入稿件');native(executable,['-FileName',input]);await ready(page,"document.querySelector('[data-screen=target]')",'portable-import-target');
-   await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
+   await select(page,'input[data-import-target-choice=new-book]');await select(page,'input[aria-label="作为首份稿件导入"]');
    await select(page,'input[data-word-import-mode=accepted-baseline]');await select(page,'[data-word-accepted-baseline-confirmation]');await fill(page,'#book-title',title);
    await click(page,'确认书名并复核');await ready(page,"document.querySelector('[data-screen=review]')",'portable-import-review');
    await click(page,'新建图书并导入稿件');await ready(page,"document.querySelector('[data-screen=imported]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'portable-import-finished');
@@ -472,7 +472,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   at(expectedChannel+'-native-import');
   await click(page,'导入稿件');native(executable,['-FileName',input]);
   await ready(page,"document.querySelector('[data-screen=target]')",'import-target');
-  await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
+  await select(page,'input[data-import-target-choice=new-book]');await select(page,'input[aria-label="作为首份稿件导入"]');
   const importMode=expectedChannel==='windows-installer'?'suggestions':'accepted-baseline';
   await select(page,`input[data-word-import-mode=${importMode}]`);
   if(importMode==='accepted-baseline')await select(page,'[data-word-accepted-baseline-confirmation]');
