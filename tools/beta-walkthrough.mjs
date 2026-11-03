@@ -154,7 +154,7 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,ex
   await click(page,'新建图书并导入稿件');await ready(page,"document.querySelector('[data-screen=imported]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'controlled-import-completed');
   await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-import-opened');
   probe.isolatedBookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');checkpoint();
- }else{await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(probe.isolatedBookId)}]`);await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-isolated-book');}
+ }else{await openKnownBook(page,probe.isolatedBookId);}
  if(!probe.isolatedEdited){
   check(await page.evaluate("(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');e.focus();const r=document.createRange();r.selectNodeContents(e);getSelection().removeAllRanges();getSelection().addRange(r);return true})()"),'controlled-isolated-edit-selection');
   await page.send('Input.insertText',{text:fact});
@@ -195,7 +195,7 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,ex
  const sourceShot=await page.send('Page.captureScreenshot',{captureBeyondViewport:false});
  probe.ui.screenshot=join(report.testRoot,'controlled-source-'+channel+'-'+Date.now()+'.png');await writeFile(probe.ui.screenshot,Buffer.from(sourceShot.data,'base64'));checkpoint();
  await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'controlled-return-library');
- await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-return-original-book');
+ await openKnownBook(page,bookId);
 }
 async function cleanupInstallation(path){if(!path)return;const actual=resolve(path);if(!actual.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase())||!actual.endsWith('installed'))throw Error('cleanup-target-refused');if(!existsSync(actual))return;const name=(await readdir(actual)).find(n=>/^Uninstall.*\.exe$/i.test(n));if(name){run(join(actual,name),['/S']);await wait(()=>!existsSync(join(actual,'AI7.exe')),'cleanup-uninstall-timeout');}}
 
@@ -416,7 +416,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   if(resumePrefix){
    bookId=await page.evaluate("[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes('Beta package compatibility'))?.dataset.navBook");
    check(Boolean(bookId),'resume-existing-public-book');
-   await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
+   await openKnownBook(page,bookId);
    // Opening a populated Book already restores its manuscript. A second section click
    // races that mount and can destroy the editor whose leave guard navigation is awaiting.
    await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'resume-book-manuscript');
@@ -734,7 +734,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.habits.push({channel:expectedChannel,completedAt:new Date().toISOString()});checkpoint();
   }
   await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'library-after-agents');
-  await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
+  await openKnownBook(page,bookId);
   await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'return-manuscript-milestone');
   const priorMilestone=await page.evaluate("window.ai7.inspectDeliverables().then(v=>v.publication.milestones.find(m=>m.label==='Beta 验收发稿'&&m.purposeKind==='delivery-candidate'&&!m.changedSince)??null)");
   if(!priorMilestone){
