@@ -1778,6 +1778,7 @@ export class BaselineAnalysisExecutionOwner {
       claimSession?: FactualClaimSession, contextDefinition: AnalysisKindDefinition = definition, claimMessage?: string) => {
       const definition = contextDefinition;
       const promptContractDigest = definition.promptContractDigest;
+      const perUnitSession = claimSession === undefined && (live !== null || facts.localFixtureProfile?.kind === 'rule');
       const webTools = claimSession?.stage === 'web-verification' || (claimSession === undefined && definition.factualClaims === undefined && facts.webToolsBackend !== undefined && definition.evidenceAssuranceLevel !== 'quick');
       const compositionOptions = claimSession === undefined ? facts.compositionOptions : {
         ...facts.compositionOptions, platformTools: webTools, localTools: false,
@@ -1959,7 +1960,7 @@ export class BaselineAnalysisExecutionOwner {
           promptContractDigest,
           // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
           // accumulating Session, so J-04's proven composition is untouched.
-          ...(claimSession !== undefined ? { sessionMode: 'single' as const } : live === null && facts.localFixtureProfile?.kind !== 'rule' ? {} : { sessionMode: 'per-unit' as const }),
+          ...(claimSession !== undefined ? { sessionMode: 'single' as const } : perUnitSession ? { sessionMode: 'per-unit' as const } : {}),
           ...(firstUnitSessionId === undefined ? {} : { nextSessionId: () => nextUnitSessionId! }),
           adapterFactory: (codes) => {
             // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
@@ -2096,7 +2097,7 @@ export class BaselineAnalysisExecutionOwner {
       })();
       const context = {
         harness, retrieval, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage,
-        ceilingState, bind, finish, beginTurn, closeProducer,
+        ceilingState, bind, finish, beginTurn, closeProducer, freshToolSession: childProfile || perUnitSession,
         get currentBindingDigest() { return currentBindingDigest; },
         get bindingFacts() { return bindingFacts; },
         set bindingFacts(value: EgressBindingFacts | null) { bindingFacts = value; },
@@ -2479,7 +2480,9 @@ export class BaselineAnalysisExecutionOwner {
             requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest });
           return true;
         };
-        context.platformSession?.startUnit(childProfile);
+        // A new technical session may legitimately receive the same provider call IDs (including a
+        // cached contract retry). Its tool receipts must start with it; single-session claims retain theirs.
+        context.platformSession?.startUnit(context.freshToolSession);
         let turn: HarnessTurnOutcome;
         try { turn = await harness.submitUnit(message); } finally { context.recoverPreSend = null; }
         if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');

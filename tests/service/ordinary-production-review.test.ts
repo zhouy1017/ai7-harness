@@ -1157,6 +1157,14 @@ it('admits one byte-identical contract retry under v26 and publishes risk points
   expect(risk.every((finding) => finding.riskPoint && finding.stateLine === '未联网核查' && finding.note.includes('未联网核查'))).toBe(true);
 }, 60_000);
 
+it('admits repeated tool-call IDs in a contract retry that starts a fresh technical session', async () => {
+  const result = await productionReview(['style-and-format'], (_category, ordinal, prior) =>
+    ordinal === 1 ? prior === 0 || prior === 2 ? 'tools' : prior === 1 ? 'invalid' : 'valid' : 'valid');
+  expect(result.requests.filter((request) => request.ordinal === 1)).toHaveLength(4);
+  const review = result.store.inspectReviewWorkspace(result.bookId, result.reviewRunId).run!;
+  expect(review.categories.every((category) => category.state === 'settled')).toBe(true);
+}, 60_000);
+
 it('admits a two-tool turn under the verified ordinary-production policy and settles its anchored review', async () => {
   const { store: opened, bookId, reviewRunId, requests } = await productionReview(['typos-and-usage'],
     (_category, ordinal, prior) => ordinal === 1 && prior === 0 ? 'tools' : 'valid');
