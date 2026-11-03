@@ -848,7 +848,7 @@ async function searchSmoke(){
   at(channel+'-search-return');const env={...selfCheckEnvironment(executable),...isolated};
   const selfcheck=JSON.parse(run(executable,['--self-check'],env).trim());
   check(selfcheck.channel===channel&&selfcheck.buildIdentity.sourceCommit===identity.sourceCommit&&selfcheck.writable,channel+'-search-self-check');
-  const countAttempts=()=>{const db=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});try{return db.prepare('SELECT COUNT(*) n FROM analysis_execution_attempts').get().n;}finally{db.close();}};
+  const countAttempts=()=>{const db=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});try{return Object.fromEntries(['analysis_execution_attempts','dialogue_attempts','material_translation_attempts'].map(table=>[table,db.prepare('SELECT COUNT(*) n FROM '+table).get().n]));}finally{db.close();}};
   const before=countAttempts();let browser;
   try{
    browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
@@ -873,7 +873,7 @@ async function searchSmoke(){
    }
    check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.dataVersion===1)`),channel+'-search-retained-store-readable');
   }finally{await browser?.close();}
-  check(countAttempts()===before,channel+'-search-no-new-model-attempts');report.channels.push({channel,bookId,iterations:3,modelAttemptsBefore:before,modelAttemptsAfter:countAttempts()});checkpoint();
+  const after=countAttempts();check(JSON.stringify(after)===JSON.stringify(before),channel+'-search-no-new-execution-attempts');report.channels.push({channel,bookId,iterations:3,executionAttemptsBefore:before,executionAttemptsAfter:after});checkpoint();
  }
  report.state='passed';
 }

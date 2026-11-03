@@ -6,25 +6,37 @@ This is the local verification record for [#1290](https://github.com/zhouy1017/a
 
 Launch worktree: `codex-1290-beta-validation`, branch `codex/1290-beta-validation`, target `codex/integration-23`, exact integrated S0–S9 base `09e57718c5ca29b24906eada1eca7c3a3c2aadf8`. Original wave baseline is `dev@754f1bdc541f69bc5adf573b9d70116004982cb6` (`0.4.1`).
 
-The final product/package source is `537f7365979ca91abe059291967a9ca30c6305ee`: source tree `b71dd8f941258dad0f8bb698dd91f442a1136c92`, tests `ed11f6adc08eaeecccf4a1d4c5326cc6a41dd557`, configuration `8e2693a84422ede7b5eb3515a7f2d9daf81e5d4f`. Later manual runner/documentation changes preserve that product source. Software is **0.5.0**, schema **107** (additive), Data Version **1**, protocol **196**.
+The retained complete six-flow package source is `537f7365979ca91abe059291967a9ca30c6305ee`: source tree `b71dd8f941258dad0f8bb698dd91f442a1136c92`, tests `ed11f6adc08eaeecccf4a1d4c5326cc6a41dd557`, configuration `8e2693a84422ede7b5eb3515a7f2d9daf81e5d4f`. The later search-arrival/return repair creates product candidate `455713ae0f192655eddc276bb78d4211666914b7`, source `e56c09dca9874c93380481577d6ccf568884f989`, tests `616176cd5c4574833bed3112aef1f1b961cefcbb`, with unchanged configuration. Its new artifacts are build576; source537f's paid/native acceptance is preserved under its own identity. Software is **0.5.0**, schema **107** (additive), Data Version **1**, protocol **196**.
 
 | Verification | Exact scope and result |
 | --- | --- |
-| `pnpm run check` | Final product source; documentation/version/type checks pass |
-| `pnpm test` | 4,110 pass / 6 skip, 74.87s at source-equivalent `9617`; same product source and unchanged unit files |
-| `pnpm run test:service` | Final product/test tree, 2,018 pass / 11 skip, 591.01s, bounded four workers |
-| `pnpm run build` | Final product source passes |
+| `pnpm run check` | Product455 and later diagnostic runner1be5: 275 documentation records, version/type checks pass |
+| `pnpm test` | Product455: 4,128 pass / 6 skip, 47.76s; earlier source537f had 4,110 / 6 at source-equivalent9617 |
+| `pnpm run test:service` | Product455: 2,018 pass / 11 skip, 595.89s, four workers; earlier source537f 591.01s and source988b 597.52s have the same counts |
+| `pnpm run build` | Stable clean product455 passes |
 | Full admitted Journeys | Guest01 at `774e04939b80455367d4af58eab81e1917e6d3e8`: doctor/build/package/all 15 pass (30/175/1,369s) |
 | Delivery repair | `fb0bca8c1a1e9d7614f215410202f635f933bebc`: doctor/build/package/J-07 pass (31/174/163s) |
-| Final product changes | Guest01 at `537f7365`: doctor/build/package/J-04/J-13 pass (26/165/60/59s) |
-| Final retained packaged acceptance | Guest02 runner `e17c21008f93f5d2cc85fe2a85e7af2bbd964912`, frozen build563/source537f: doctor/build 25s, walkthrough resume 260s, pass; finished 03:14:48.702Z |
+| Earlier product changes | Guest01 at `537f7365`: doctor/build/package/J-04/J-13 pass (26/165/60/59s) |
+| Retained six-flow packaged acceptance | Guest02 runner `e17c21008f93f5d2cc85fe2a85e7af2bbd964912`, frozen build563/source537f: doctor/build 25s, walkthrough resume 260s, pass; finished 03:14:48.702Z |
+| Search smoke at build573/source988b | Corrected runner292fc75a: guest02 build26s, provider-free installed/Portable smoke37s; three exact range/reversed-selection/scroll returns each, analysis-attempt counts 7 → 7 in each store |
+| Search repair at product455 | Guest01 build29s/package178s, J-02 repeat3 all pass (110/107/105s) |
+| Current diagnostic runner1be5 | Guest02 build30s/debug J-02 110s/build576 packaged search smoke42s, all pass; both channels perform three exact returns including an immediate first return, analysis-attempt counts 7 → 7 |
 | Whitespace | `git diff --check` passes |
 
-All Electron executions used the background guest host runner and build before Journey/walkthrough layers. CI and ordinary source Journeys remain provider-free. A prior hosted occurrence at `774e0493` passed its five functional PR Journeys but failed trusted-source publishing separately; that is **not** an overall green hosted Gate. Earlier failed checks, mixed-test-tree exploratory service output and corrected runner assertions remain in local history, separate from the stable results above.
+All Electron executions used the background guest host runner and build before Journey/walkthrough layers. CI and ordinary source Journeys remain provider-free. A prior hosted occurrence at `774e0493` passed its five functional PR Journeys but failed trusted-source publishing separately. The existing full Gate's exact-PR resolver subsequently passed on01a9, but [run41578290704](https://github.com/zhouy1017/ai7-harness/actions/runs/41578290704) failed J-02 `search-exact-range`; its publisher correctly failed. Neither is an overall green hosted Gate. Earlier failed checks, mixed-test-tree exploratory service output and corrected runner assertions remain in local history, separate from the stable results above.
+
+The existing full workflow now supports reviewed-control manual PR/head/base binding, exact candidate ancestry and same-run full-job proof before publishing the existing status; 108 affected CI tests passed. It adds no Gate, context, provider call or main-promotion authority. Search diagnosis reproduced two races on the actual mounted Manuscript screen: delayed entry-position persistence lets paging move before a late range selection, and an immediate return can be dropped during arrival frames. Both have deterministic red→green regressions. At source988b two J-02 repetitions passed and the third failed exact return; source455 retains independent paging while applying the match under the guard and waiting only for arrival frames before return. Three source455 repetitions, the independent debug run and build576's provider-free immediate-return smoke pass; the earlier hosted occurrence's unrecorded trigger is not claimed as proven. A successful actual full Gate publication remains pending.
 
 ## Windows package and walkthrough
 
-Clean build563 artifacts were independently inspected and retained locally by the Commander:
+The current clean build576/source455 artifacts were independently inspected and retained locally by the Commander, with 2,481 ZIP entries, no excluded development content and no non-directory files under pristine `AI7/data/`:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| NSIS installer | 100,319,520 | `741a89471468016db9cba0e18592177129ecbdbe07b5a2f2e47771ba21e580ec` |
+| Portable | 164,037,730 | `9c428372e503a2c78983c2dde01db6a73e656f86811fd5b7fba7b3139ac5f5a2` |
+
+The retained complete six-flow acceptance uses clean build563/source537f. Those original artifacts also remain available:
 
 | Artifact | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -53,7 +65,7 @@ Native exports preserve source images, source Word comments, exact endnote/heade
 
 The original whole-five-book attempt remains historical and incomplete. Its existing ordinary pause controls drained PID3872 normally at 03:21:47.979Z on 2026-11-03; the queue was empty and sent calls settled. It was not killed, rerolled, relabeled complete or rewritten into the later sampling scope.
 
-The revised deterministic manifest selects level-one content chapters in source order, excluding preface/postface entries, at positions first/lower median/last. It fixes three **disjoint** chapter scopes per book. Source/range/block hashes and actual imported chapter identities are retained locally; the not-yet-imported 儒林 source has parser identities pending ordinary import.
+The revised deterministic manifest selects level-one content chapters in source order, excluding preface/postface entries, at positions first/lower median/last. It fixes three **disjoint** chapter scopes per book. Source/range/block hashes and actual imported chapter identities are retained locally, including the ordinarily imported 儒林 parent Book. All 12 excerpt imports (518 blocks) independently match text, kind, level, graphemes, digests and positions.
 
 | Public SampleBook | Selected content chapters | Source block ranges | Analysis units |
 | --- | --- | --- | ---: |
@@ -62,11 +74,13 @@ The revised deterministic manifest selects level-one content chapters in source 
 | 老残游记 | 1 / 10 / 20回 | 9–35 / 246–275 / 552–590 | 16 |
 | 儒林外史 | 1 / 28 / 56回 | 2–28 / 424–439 / 809–868 | 18 |
 
-The planned sample has 72 units, 648 nine-category unit slots: 150 existing selected closed slots reusable and 498 missing. A new per-chapter FullReview would add 288 model-member unit slots. Extraction closure does not prove factual claim closure; whole-run synthesis remains whole-run context and is not relabeled chapter execution. This manifest is a plan, not completed new measurement.
+The planned sample has 72 units, 648 nine-category unit slots: 150 selected closed slots reused, two original unknown slots held, and 496 remaining new/missing slots. The two held gaps are 朝花 factual unit36 and 呐喊 plot unit6; neither is resent. A new per-chapter FullReview adds 288 model-member unit slots. Extraction closure does not prove factual claim closure; whole-run synthesis remains whole-run context and is not relabeled chapter execution. This manifest is a plan, not completed new measurement.
 
 Ordinary initial factual review does not offer chapter scope; its selected-range update requires an existing claim-bound supplementation decision. The Commander therefore chose separately labelled single-chapter excerpt test Books for missing factual work and FullReview. All 12 ordinary imports preserve source wording/order, with exact parent-source SHA, chapter-range hashes and a block-by-block source-to-import mapping; no bridge context or disjoint chapter concatenation is added. The original Books retain ordinary chapter scopes for other categories where available. Excerpt whole-input completion is never original whole-Book closure. Before the first new call, every source/range/import mapping passed and the original ledger hash was unchanged. The new measurement remains in progress, with a 6,000-new-model-transmission checkpoint and original unknown outcomes retained.
 
 Retained sample1 FullReview `3eb3771a-fc38-4a9e-9525-e37763a804a1` settled all five members and all eight reading units. Its 46 extracted assertions yield 26 eligible claims and 20 exclusions: **23 closed / 3 unfinished / 0 unstarted**. Its original paid window was 22:32:47–23:49:39 UTC under attempt3300 / source `f97414b3bf102c1d0a0f9cac348af6b6afebe5cf`; later observers did not buy replacement results. Exactly 13 inherited claim states were corrected in the read model while all 26 canonical findings/histories stayed unchanged.
+
+The first new chapter attempt drained normally at 04:54:14.499Z. 呐喊 first-chapter publication-risk closes all 14 requested checkpoints, while the ordinary public workspace honestly retains 73 historical unreviewed units outside that request. 朝花 first-excerpt FullReview closes typo6/6, style5/6 with one transport-unknown gap, plot6/6 and factual reading6/6; its 29 eligible claims are 23 closed / 4 unknown / 2 unfinished. Sixteen superseded-task preparation refusals sent zero requests; nine exact old paused intents were then cancelled through ordinary control before retrying those never-sent scopes. The next immutable runner began at sourceaad56 on 05:03:06Z and remains in progress; its service/shared source is unchanged by the subsequent renderer repairs.
 
 Sample1 standalone reading coverage is 70/72 category-units: seven categories close all 8/8 units; typos retains an unknown outcome at unit8 (blocks93–97), academic integrity at unit1 (blocks1–15). These are genuine gaps in a full-input measurement, not omitted sampling or permission to repeat an unknown request. FullReview reading completion does not erase either standalone gap.
 
@@ -82,6 +96,11 @@ AI-assisted examinations below are small separate strata, not the independent hu
 | 呐喊 typos first/middle/last findings | 3 | 0 | 1 | 2 |
 | 呐喊 style first/middle/last findings | 3 | 1 | 1 | 1 |
 | 呐喊 plot first/middle/last findings | 3 | 0 | 3 | 0 |
+| 呐喊 first-chapter publication-risk | 3 | 0 | 2 | 1 |
+| 朝花 first-excerpt typos | 3 | 0 | 0 | 3 |
+| 朝花 first-excerpt style | 3 | 1 | 1 | 1 |
+| 朝花 first-excerpt plot | 3 | 0 | 3 | 0 |
+| 朝花 first-chapter academic integrity | 3 | 0 | 1 | 2 |
 
 The controlled comparison's two useful cards detect the same one planted defect; it is separate from the later Agent duplicate-character functional probe. 呐喊 typo location integrity was 179 located / 180 listed (99.44%); all 179 located quotations/ranges/hashes independently matched. That does not establish semantic correctness. Thirteen real Brave→Bocha fallback rounds have durable lineage; 29 capture pairs with no omitted fetch invocation do not prove recovery from a failed fetch.
 
@@ -92,8 +111,12 @@ The controlled comparison's two useful cards detect the same one planted defect;
 
 The settled original-campaign ledger snapshot has 3,548 model-call rows: 3,515 transmitted, 18 replayed and 15 failed/outcome-unknown; known usage is 26,498,818 input / 4,393,994 output tokens, with 15 unknown usage outcomes. Closed execution windows allocate costs without collisions; composite members are counted once. This includes older attempts and is not a bill for only the revised sample. Wall time includes pauses. No currency estimate is substituted for the account's actual bill.
 
+The first new chapter attempt separately incurred **310 new transmission attempts**: 305 successful/transmitted ledger rows plus five failed/unknown attempts, and one replay with no new send. Known usage is 2,187,503 input / 239,433 output tokens, with five unknown usage outcomes. Failed transmissions count toward the 6,000-new-attempt checkpoint. Its factual confirmation stratum is separate from defect detection: first/middle/last claims yield two useful confirmations and one unevaluable unknown; all sampled anchors/source hashes match, while one relation absent from the retained short CNKI snippet remains unverified.
+
 ## Local retention for possible future mock reuse
 
 Raw data remains outside Git, CI and distributions at the developer's local `ai7-development-evidence/w23-s10` root. `local-recordings/quality-checkpoint-0321` retains 10,596 provider-cache ledger/entry/claim files and 48 execution/source/dialogue tables; `local-recordings/packaged563` retains 96 such tables from installed and Portable stores. Hash inventories accompany both archives. Capture gaps, original synthetic/replay/transmitted labels and unknown outcomes remain explicit. Historical missing HTTP/SSE bytes are not reconstructed and paid calls are not repeated to fill gaps.
+
+The first chapter checkpoint adds 11,570 files including 48 table exports, 242,980,625 bytes and 22,199 rows, independently verified with zero hash mismatches. Its 703 wire records contain 1,863 exact chunks, 507 received / 196 unknown / zero pending. Wire unknowns include consumer cancellation and search/fetch boundaries and are not all failed model calls or claims. Historical records without a termination cause retain that gap; later captures record `eof`, `no-body`, `consumer-cancelled`, `read-error` or `transport-error` separately from outcome.
 
 The [developer workflow owner](../agents/project-constraints.md#local-records-of-real-development-calls) now requires local retention for subsequent authorized real development calls. The manual-only transport recorder preserves available exact request bodies and response/stream bytes with identities, hashes and unknown outcomes, excluding credentials, headers, unrecognized URL query parameters and exception prose. Known public Brave search parameters are retained for future mock input identity; older captures keep their original omissions. Its focused four-case provider-free validation passes. Nothing enables customer telemetry or automatically admits these records as mock fixtures.
