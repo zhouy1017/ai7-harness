@@ -1308,9 +1308,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       outlinePage = page;
       outlineList.replaceChildren();
       for (const entry of page.entries) {
-        const open = button(`${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}${entry.displayTextTruncated ? '（显示已截断）' : ''}`, 'quiet', () =>
+        const label = `${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}${entry.displayTextTruncated ? '（显示已截断）' : ''}`;
+        const open = button(label, 'quiet', () =>
           void navigate({ kind: 'block', blockId: entry.blockId }),
         );
+        open.setAttribute('title', label);
+        open.setAttribute('aria-label', label);
         open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
         open.setAttribute('role', 'listitem');
         outlineList.append(open);

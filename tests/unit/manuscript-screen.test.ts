@@ -204,6 +204,24 @@ async function searchArrivalWithPendingWrite(jump = true) {
 }
 
 describe('the Manuscript screen lifecycle', () => {
+  it('keeps the full long outline heading available to assistive tools and its title', async () => {
+    Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
+    try {
+      const heading = '长'.repeat(200);
+      const rendererApi = new Proxy(api, { get: (target, key) => key === 'getOutline'
+        ? async () => ({ entries: [{ blockId: 'blk_3', kind: 'heading', level: 2, text: heading, displayTextTruncated: false }], previousCursor: null, nextCursor: null })
+        : Reflect.get(target, key) });
+      const app = shell(rendererApi);
+      app.open(windowOf('book-one'));
+      app.screen.querySelector<HTMLButtonElement>('[data-edge-entry="navigation"]')!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      const headingButton = app.screen.querySelector('.outline-list button')!;
+      expect(headingButton.getAttribute('title')).toBe(`层级 2 · ${heading}`);
+      expect(headingButton.getAttribute('aria-label')).toBe(`层级 2 · ${heading}`);
+      app.showing?.destroy();
+    } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
+  });
+
   it('keeps a long manuscript heading compact while retaining its full position detail', () => {
     const heading = '长标题'.repeat(100);
     const full = `${heading} · 全稿 25.000%`;
