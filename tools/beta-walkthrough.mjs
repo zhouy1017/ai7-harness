@@ -842,7 +842,8 @@ async function searchSmoke(){
  report.channels=[];
  for(const [channel,executable,dataRoot,bookId] of [
   ['windows-installer',join(installed,'AI7.exe'),join(isolated.LOCALAPPDATA,'ai7','production'),previous.priorBook.bookId],
-  ['windows-portable',join(portableRoot,'AI7','app','AI7.exe'),join(portableRoot,'AI7','data'),previous.portablePriorBook.bookId],
+  // Full-backup carry replaced Portable's original priorBook with the installer's full Public sample1.
+  ['windows-portable',join(portableRoot,'AI7','app','AI7.exe'),join(portableRoot,'AI7','data'),previous.priorBook.bookId],
  ]){
   at(channel+'-search-return');const env={...selfCheckEnvironment(executable),...isolated};
   const selfcheck=JSON.parse(run(executable,['--self-check'],env).trim());
@@ -852,6 +853,7 @@ async function searchSmoke(){
   try{
    browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
    const page=await renderer(browser);await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'search-product-ready');
+   check(await page.evaluate(`window.ai7.listPriorWork().then(rows=>rows.some(row=>row.bookId===${JSON.stringify(bookId)}))`),channel+'-search-retained-full-public-book');
    await openKnownBook(page,bookId);
    await page.evaluate(`(async()=>{const binding=(await window.ai7.listPriorWork()).find(w=>w.bookId===${JSON.stringify(bookId)});const request={manuscriptId:binding.manuscriptId,branchId:binding.branchId};const first=await window.ai7.getManuscriptWindowAt({...request,target:{kind:'proportion',proportion:0}});const end=await window.ai7.getManuscriptWindowAt({...request,target:{kind:'proportion',proportion:1}});const candidate=[...end.blocks].reverse().find(b=>b.kind==='paragraph'&&/[一-鿿]{12}/u.test(b.text)&&!first.blocks.some(f=>f.blockId===b.blockId));if(!candidate)throw Error('search-disjoint-public-range');globalThis.__ai7PackagedSearch={firstBlockId:first.blocks[0].blockId,query:candidate.text.match(/[一-鿿]{12}/u)[0]};})()`);
    await fill(page,'#manuscript-position','0');
