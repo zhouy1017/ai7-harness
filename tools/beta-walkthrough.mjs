@@ -58,7 +58,14 @@ async function renderer(browser){
 }
 const boolean=async(page,expression)=>page.evaluate('Promise.resolve('+expression+').then(Boolean)');
 const actionCheck=(condition,operation,target)=>{if(!condition){report.failedAction={operation,target};check(false,'ui-'+operation+'-unavailable');}check(true,operation+'-'+target);};
-const ready=async(page,expression,name,ms=120000)=>wait(()=>boolean(page,expression).catch(()=>false),name,ms);
+const ready=async(page,expression,name,ms=120000)=>{
+ try{await wait(()=>boolean(page,expression).catch(()=>false),name,ms);}catch(error){
+  report.failedWait={stage,name};
+  try{report.failedWait.controls=await page.evaluate("({screen:document.querySelector('[data-screen]')?.dataset.screen,buttons:[...document.querySelectorAll('button')].filter(n=>n.getClientRects().length).map(n=>({label:n.textContent,disabled:n.disabled})),selects:[...document.querySelectorAll('select')].filter(n=>n.getClientRects().length).map(n=>({field:n.dataset.markField??n.dataset.reviewField??n.name,value:n.value,options:[...n.options].map(o=>({value:o.value,disabled:o.disabled}))}))})");}catch{}
+  try{if(report.testRoot){const shot=await page.send('Page.captureScreenshot',{captureBeyondViewport:false});const path=join(report.testRoot,'failed-ui-'+Date.now()+'.png');await writeFile(path,Buffer.from(shot.data,'base64'));report.failedWait.screenshot=path;}}catch{}
+  checkpoint();throw error;
+ }
+};
 const actionable="node&&!node.disabled&&node.getAttribute('aria-disabled')!=='true'&&node.getClientRects().length>0";
 const act=async(page,operation,target,lookup,mutation)=>{
  const observe=`(()=>{const node=${lookup};return Boolean(${actionable})})()`;
