@@ -149,6 +149,9 @@ Reuses exact `sample1` and the supported setup paths to install and enable the c
 
 ## J-04 covered baseline manuscript analysis
 
+Wave 23 S10 adds a provider-free production-owner regression for repeated tool-call IDs in a fresh contract-retry session: fresh sessions receive fresh receipt scope, while duplicate IDs within the same session remain refused. J-04 and J-13 both pass on guest02 at `e03882c7edee5a994aff729ee307c088d98948ec` after build/package (62s/60s); actual chapter measurement retains its earlier source identity until an ordinary continuation.
+
+
 Issue #1287 (W23-S7) combines each factual finding and its Lens states in one card, preserving review actions and exact evidence access; opening the Evidence Workspace replaces the inline source preview. The sources destination is reached through the sidebar.
 
 Issue #1221 (Wave 22b · W22b-A1; F-02 #1021, F-01 #1020) is a synchronized delta of active-set literal pins only, with no new stage or step: active set v23 selects ordinary-production v32 and keeps development-ci v1, developer-live v24, fixture-recording v2 and External Export v2. The covered-analysis revision checks (`requireRevisionShape` and `requireSuccessorShape`) expect each revision's development-ci policy pin `{ v1, v23, 0 }`.
