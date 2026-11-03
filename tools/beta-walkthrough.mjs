@@ -71,7 +71,7 @@ const act=async(page,operation,target,lookup,mutation)=>{
 };
 const click=async(page,label)=>act(page,'click',label,`[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)}&&n.getClientRects().length>0)`,'node.click()');
 const select=async(page,selector)=>act(page,'select',selector,`document.querySelector(${JSON.stringify(selector)})`,'node.click()');
-const fill=async(page,selector,value)=>act(page,'fill',selector,`document.querySelector(${JSON.stringify(selector)})`,`node.value=${JSON.stringify(value)};node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}))`);
+const fill=async(page,selector,value)=>act(page,'fill',selector,`document.querySelector(${JSON.stringify(selector)})`,`node.value=${JSON.stringify(value)};if(node.value!==${JSON.stringify(value)})throw Error('field-value-refused');node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}))`);
 async function openRetainedReview(page,runId){
  await select(page,'#app-sidebar [data-nav-book-section=review]');
  const item=`.review-runs [data-review-run-id=${JSON.stringify(runId)}]`;
@@ -107,7 +107,7 @@ async function followReview(page,dataRoot,runId){
   await new Promise(r=>setTimeout(r,1000));
  }
 }
-async function controlledSourceTranslation(page,bookId,dataRoot,channel){
+async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,executable){
  at(channel+'-controlled-english-source');
  const fact='Apollo 11 landed on the Moon on July 20, 1969. Neil Armstrong became the first person to step onto the lunar surface. NASA describes this mission at https://www.nasa.gov/history/july-20-1969-one-giant-leap-for-mankind/.';
  const typo='Beta 测试者加入的独立纠错样例：这句话有的的重复字。';
@@ -123,26 +123,43 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel){
   await ready(page,`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].some(n=>n.textContent===${JSON.stringify(fact)})&&document.querySelector('#persistence-status')?.dataset.tone!=='busy'`,'controlled-public-edit-saved');
   probe.blockId=await page.evaluate(`[...document.querySelectorAll('[data-testid=manuscript-editor] p[data-block-id]')].find(n=>n.textContent===${JSON.stringify(fact)}).dataset.blockId`);checkpoint();
  }
+ // This factual contract does not offer range supplement. Isolate one edited Public SampleBook paragraph,
+ // so its ordinary whole-book review cannot widen into the paid manuscript's original FullReview.
+ await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'controlled-library');
+ if(!probe.isolatedBookId)probe.isolatedBookId=await page.evaluate("[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes('Beta source translation functional'))?.dataset.navBook??null");
+ if(!probe.isolatedBookId){
+  const isolatedInput=join(dirname(input),'controlled-public-sample1-one-paragraph.docx');
+  await composeExportAdmittedDocx(isolatedInput,{source:'sample1.docx',startBlock:1,blocks:1,title:'Beta source translation functional'});
+  probe.isolatedInput={source:'sample1.docx',startBlock:1,blocks:1,sha256:createHash('sha256').update(await readFile(isolatedInput)).digest('hex')};checkpoint();
+  await click(page,'导入稿件');native(executable,['-FileName',isolatedInput]);await ready(page,"document.querySelector('[data-screen=target]')",'controlled-import-target');
+  await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
+  await fill(page,'#book-title','Beta source translation functional');await click(page,'确认书名并复核');await ready(page,"document.querySelector('[data-screen=review]')",'controlled-import-review');
+  await click(page,'新建图书并导入稿件');await ready(page,"document.querySelector('[data-screen=imported]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'controlled-import-completed');
+  await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-import-opened');
+  probe.isolatedBookId=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');checkpoint();
+ }else{await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(probe.isolatedBookId)}]`);await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-isolated-book');}
+ if(!probe.isolatedEdited){
+  check(await page.evaluate("(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');e.focus();const r=document.createRange();r.selectNodeContents(e);getSelection().removeAllRanges();getSelection().addRange(r);return true})()"),'controlled-isolated-edit-selection');
+  await page.send('Input.insertText',{text:fact});
+  await ready(page,`document.querySelector('[data-testid=manuscript-editor]')?.textContent===${JSON.stringify(fact)}&&document.querySelector('#persistence-status')?.dataset.tone!=='busy'`,'controlled-isolated-edit-saved');
+  probe.isolatedEdited=true;checkpoint();
+ }
+ const sourceBookId=probe.isolatedBookId;
  if(!probe.runId){
-  probe.previousRunId=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run?.reviewRunId??null)');checkpoint();
-  check(await page.evaluate(`(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');const p=e.querySelector('[data-block-id="${probe.blockId}"]');if(!p||p.textContent!==${JSON.stringify(fact)})return false;e.focus();const r=document.createRange();r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));return true})()`),'controlled-fact-selected');
-  await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
-  check(await page.evaluate(`(()=>{const p=document.querySelector('[data-testid=manuscript-editor] [data-block-id="${probe.blockId}"]');if(!p||getSelection().toString()!==${JSON.stringify(fact)})return false;const b=p.getBoundingClientRect();const init={bubbles:true,cancelable:true,button:2,buttons:2,clientX:b.x+15,clientY:b.y+10};p.dispatchEvent(new MouseEvent('mousedown',init));p.dispatchEvent(new MouseEvent('mouseup',{...init,buttons:0}));p.dispatchEvent(new MouseEvent('contextmenu',{...init,buttons:0}));return true})()`),'controlled-fact-context-menu');
-  await select(page,'[data-mark-action=task-on-selection]');
-  await ready(page,"document.querySelector('#task-drawer .task-composer[data-task-composer=new]')",'controlled-context-composer');
-  await select(page,'#task-drawer [data-task-composer-action=procedures]');
-  await ready(page,"document.querySelector('[data-mark-composer=task-on-selection]')",'controlled-selection-task');
-  await fill(page,'[data-mark-composer=task-on-selection] [data-mark-field=procedure]','review:factual-review');
-  await select(page,'[data-mark-composer=task-on-selection] [data-mark-action=submit]');
-  await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&v.run.reviewRunId!==${JSON.stringify(probe.previousRunId)})`,'controlled-factual-started');
+  await select(page,'#app-sidebar [data-nav-book-section=review]');await ready(page,"document.querySelector('[data-review-action=new-review]')",'controlled-review-surface');
+  check(await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run===null)'),'controlled-no-previous-paid-run');
+  await select(page,'[data-review-action=new-review]');await ready(page,"document.querySelector('dialog.review-sheet[open]')",'controlled-factual-sheet');
+  check(await page.evaluate("(()=>{const boxes=[...document.querySelectorAll('dialog.review-sheet input[name=review-category]')];const fact=boxes.find(n=>n.value==='factual-review');if(!fact||fact.disabled)return false;for(const n of boxes)if(n.checked!==(n===fact))n.click();return fact.checked})()"),'controlled-only-factual-category');
+  await select(page,'input[name=review-scope][value=whole]');await select(page,'dialog.review-sheet [data-review-action=start]');
+  await ready(page,'window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run!==null)','controlled-factual-started');
   const started=await page.evaluate('window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>({runId:v.run.reviewRunId,taskIntentId:v.run.categories.find(c=>c.categoryId===\'factual-review\').taskIntentId}))');Object.assign(probe,started);probe.startedAt=new Date().toISOString();checkpoint();
  }
  await followReview(page,dataRoot,probe.runId);
- const sources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},taskIntentId:${JSON.stringify(probe.taskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const r=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,target:r?{evidenceId:r.evidenceId,url:r.url,contentSha256:r.contentSha256,attribution:r.translation.attribution}:null};})()`);Object.assign(probe,sources);checkpoint();
+ const sources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(sourceBookId)},taskIntentId:${JSON.stringify(probe.taskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const r=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,target:r?{evidenceId:r.evidenceId,url:r.url,contentSha256:r.contentSha256,attribution:r.translation.attribution}:null};})()`);Object.assign(probe,sources);checkpoint();
  check(Boolean(probe.target),'controlled-current-foreign-prose-required');
  const retainedDb=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});
  try{
-  const row=retainedDb.prepare('SELECT e.canonical_json,e.sha256,c.content_text FROM research_evidence e JOIN research_evidence_contents c USING(content_sha256) JOIN analysis_run_records r USING(run_record_id) WHERE e.evidence_id=? AND e.book_id=? AND r.task_intent_id=?').get(probe.target.evidenceId,bookId,probe.taskIntentId);
+  const row=retainedDb.prepare('SELECT e.canonical_json,e.sha256,c.content_text FROM research_evidence e JOIN research_evidence_contents c USING(content_sha256) JOIN analysis_run_records r USING(run_record_id) WHERE e.evidence_id=? AND e.book_id=? AND r.task_intent_id=?').get(probe.target.evidenceId,sourceBookId,probe.taskIntentId);
   check(Boolean(row)&&createHash('sha256').update(row.canonical_json).digest('hex')===row.sha256,'controlled-retained-record-hash');
   const content=String(row.content_text),attribution=probe.target.attribution;
   check(createHash('sha256').update(content).digest('hex')===probe.target.contentSha256&&attribution.contentSha256===probe.target.contentSha256&&attribution.url===probe.target.url&&attribution.from>=0&&attribution.to>attribution.from&&attribution.to<=content.length,'controlled-original-range-hash');
@@ -154,6 +171,8 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel){
  const selector=`article[data-evidence-id=${JSON.stringify(probe.target.evidenceId)}] .research-evidence-translated blockquote`;
  while(!await boolean(page,`document.querySelector(${JSON.stringify(selector)})?.textContent.length>0`)&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
  check(await boolean(page,`document.querySelector(${JSON.stringify(selector)})?.textContent.length>0`),'controlled-foreign-source-translation-visible');probe.completedAt=new Date().toISOString();checkpoint();
+ await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'controlled-return-library');
+ await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'controlled-return-original-book');
 }
 async function cleanupInstallation(path){if(!path)return;const actual=resolve(path);if(!actual.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase())||!actual.endsWith('installed'))throw Error('cleanup-target-refused');if(!existsSync(actual))return;const name=(await readdir(actual)).find(n=>/^Uninstall.*\.exe$/i.test(n));if(name){run(join(actual,name),['/S']);await wait(()=>!existsSync(join(actual,'AI7.exe')),'cleanup-uninstall-timeout');}}
 
@@ -480,7 +499,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,`document.querySelector('article[data-finding-id=${JSON.stringify(reject)}]')?.dataset.status==='ignored'`,'finding-rejected');
   disposition.rejected=reject;disposition.rejectedAt=new Date().toISOString();checkpoint();
   }
-  if(!factualSources.target)await controlledSourceTranslation(page,bookId,expectedDataRoot,expectedChannel);
+  if(!factualSources.target)await controlledSourceTranslation(page,bookId,expectedDataRoot,expectedChannel,input,executable);
   at(expectedChannel+'-agent-workspace');
   await select(page,'#app-sidebar [data-nav-agent-workspace=row]');await ready(page,"document.querySelector('[data-agent-workspace-block]')",'agent-workspace');
   check(await page.evaluate(`(()=>{const rows=[...document.querySelectorAll('p[data-agent-workspace-block]')];const controlled=rows.find(n=>n.textContent.includes('Beta 测试者加入的独立纠错样例'));const start=controlled?.previousElementSibling??rows.find(n=>n.firstChild?.nodeType===3&&n.nextElementSibling?.matches('p[data-agent-workspace-block]'));if(!start)return false;const end=controlled??start.nextElementSibling;const r=document.createRange();r.setStart(start.firstChild,0);r.setEnd(end.firstChild,end.firstChild.length);const s=getSelection();s.removeAllRanges();s.addRange(r);end.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));return document.querySelector('.agent-workspace-quote')?.textContent.includes(String.fromCharCode(10));})()`),expectedChannel+'-cross-paragraph-selection');
