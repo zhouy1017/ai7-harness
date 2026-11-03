@@ -8,6 +8,33 @@ const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 // including Gemini's credential query, remain omitted rather than guessing which values are safe.
 const PUBLIC_SEARCH_PARAMETERS = new Set(['q', 'count', 'offset', 'safesearch', 'search_lang',
   'country', 'result_filter', 'spellcheck', 'freshness', 'text_decorations', 'extra_snippets']);
+// Exact native enums only: arbitrary error names/codes may themselves contain protected data.
+const NATIVE_ERROR_NAMES = new Set(['Error', 'TypeError', 'AggregateError', 'AbortError', 'TimeoutError',
+  'ConnectTimeoutError', 'HeadersTimeoutError', 'BodyTimeoutError', 'SocketError']);
+const NATIVE_ERROR_CODES = new Set(['ABORT_ERR', 'ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET',
+  'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'EPIPE', 'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_ABORTED', 'UND_ERR_SOCKET']);
+
+function errorProperty(error, property) {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return undefined;
+  try { return error[property]; } catch { return undefined; }
+}
+
+function nativeErrorMetadata(error) {
+  const classified = (value) => {
+    const name = errorProperty(value, 'name'), code = errorProperty(value, 'code');
+    return { name: NATIVE_ERROR_NAMES.has(name) ? name : 'unclassified',
+      code: NATIVE_ERROR_CODES.has(code) ? code : 'unclassified' };
+  };
+  const result = { ...classified(error), causes: [] };
+  // Two cause links, including cycles; never inspect the last node's further cause.
+  for (let depth = 0; depth < 2; depth++) {
+    error = errorProperty(error, 'cause');
+    if (error === undefined || error === null) break;
+    result.causes.push(classified(error));
+  }
+  return result;
+}
 
 /** Resolve links before requiring a durable location outside every Git checkout/worktree. */
 export function externalRecordingDirectory(input) {
@@ -67,7 +94,9 @@ export function recordDevelopmentFetch({ directory, context, fetch: transport })
     let response;
     try { response = await transport(url, init); }
     catch (error) {
-      record({ kind: 'outcome', outcome: 'unknown', cause: 'transport-error', errorClass: error?.name === 'AbortError' ? 'aborted' : 'transport-error' });
+      const nativeError = nativeErrorMetadata(error);
+      record({ kind: 'outcome', outcome: 'unknown', cause: 'transport-error',
+        errorClass: nativeError.name === 'AbortError' ? 'aborted' : 'transport-error', nativeError });
       throw error;
     }
     record({ kind: 'response', status: response.status });
@@ -77,10 +106,11 @@ export function recordDevelopmentFetch({ directory, context, fetch: transport })
     }
     const reader = response.body.getReader(), bodyHash = createHash('sha256');
     let chunks = 0, settled = false;
-    const finish = (outcome, cause) => {
+    const finish = (outcome, cause, error) => {
       if (settled) return;
       settled = true;
-      record({ kind: 'outcome', outcome, cause, chunks, responseBodySha256: bodyHash.digest('hex') });
+      record({ kind: 'outcome', outcome, cause, chunks, responseBodySha256: bodyHash.digest('hex'),
+        ...(cause === 'read-error' ? { nativeError: nativeErrorMetadata(error) } : {}) });
     };
     const body = new ReadableStream({
       async pull(controller) {
@@ -91,7 +121,7 @@ export function recordDevelopmentFetch({ directory, context, fetch: transport })
           record({ kind: 'response-chunk', ordinal: ++chunks,
             bytesBase64: Buffer.from(next.value).toString('base64'), chunkSha256: hash(next.value) });
           controller.enqueue(next.value);
-        } catch (error) { finish('unknown', 'read-error'); controller.error(error); }
+        } catch (error) { finish('unknown', 'read-error', error); controller.error(error); }
       },
       async cancel(reason) { finish('unknown', 'consumer-cancelled'); await reader.cancel(reason); },
     });

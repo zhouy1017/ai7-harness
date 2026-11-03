@@ -54,9 +54,16 @@ test('distinguishes cancellation, read and transport failure without capturing e
   const stream = recordDevelopmentFetch({ directory: cancelled, context: identity,
     fetch: async () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array([1])); } })) });
   const response = await stream('https://example.test');
-  await response.body.cancel();
+  await response.body.cancel({ name: 'CANCEL_SECRET_SENTINEL', code: 'CANCEL_CODE_SECRET_SENTINEL' });
   assert.equal(rows(cancelled).at(-1).outcome, 'unknown');
   assert.equal(rows(cancelled).at(-1).cause, 'consumer-cancelled');
+  assert.equal(rows(cancelled).at(-1).nativeError, undefined);
+  assert.doesNotMatch(JSON.stringify(rows(cancelled)), /CANCEL_.*SENTINEL/);
+  const aborted = temporary(), abort = Object.assign(Error('ABORT_SECRET_SENTINEL'), { name: 'AbortError', code: 'ABORT_ERR' });
+  const abortFetch = recordDevelopmentFetch({ directory: aborted, context: identity, fetch: async () => { throw abort; } });
+  await assert.rejects(abortFetch('https://example.test'), error => error === abort);
+  assert.equal(rows(aborted).at(-1).errorClass, 'aborted');
+  assert.deepEqual(rows(aborted).at(-1).nativeError, { name: 'AbortError', code: 'ABORT_ERR', causes: [] });
   const broken = temporary();
   const streamError = recordDevelopmentFetch({ directory: broken, context: identity,
     fetch: async () => new Response(new ReadableStream({ start(c) { c.error(Error('READ_SECRET_SENTINEL')); } })) });
@@ -73,6 +80,72 @@ test('rejects repository recording and non-admitted input before any send', asyn
     fetch: async () => { calls++; return new Response(''); } });
   await assert.rejects(fetch('https://example.test'), /material-scope/);
   assert.equal(calls, 0);
+});
+
+test('records recognized native transport codes without exception prose and rethrows the same error', async () => {
+  const directory = temporary();
+  const socket = Object.assign(Error('SOCKET_SENTINEL'), { code: 'ECONNRESET' });
+  const cause = Object.assign(Error('CONNECT_SENTINEL', { cause: socket }), { name: 'ConnectTimeoutError', code: 'UND_ERR_CONNECT_TIMEOUT' });
+  const failure = Object.assign(new TypeError('MESSAGE_SENTINEL', { cause }), {
+    stack: 'STACK_SENTINEL', headers: { authorization: 'HEADER_SENTINEL' }, url: 'https://URL_SENTINEL',
+  });
+  const fetch = recordDevelopmentFetch({ directory, context: identity, fetch: async () => { throw failure; } });
+  await assert.rejects(fetch('https://example.test'), error => error === failure);
+  const captured = rows(directory), outcome = captured.at(-1);
+  assert.equal(outcome.outcome, 'unknown');
+  assert.equal(outcome.cause, 'transport-error');
+  assert.equal(outcome.errorClass, 'transport-error');
+  assert.deepEqual(outcome.nativeError, { name: 'TypeError', code: 'unclassified', causes: [
+    { name: 'ConnectTimeoutError', code: 'UND_ERR_CONNECT_TIMEOUT' }, { name: 'Error', code: 'ECONNRESET' },
+  ] });
+  assert.doesNotMatch(JSON.stringify(captured), /SENTINEL|"(?:message|stack|headers|url)"/);
+});
+
+test('classifies unknown values without coercion, bounds causes and keeps hostile errors intact', async () => {
+  const deepest = Object.assign(Error('DEPTH_SENTINEL'), { code: 'ETIMEDOUT' });
+  let beyondLimit = 0;
+  Object.defineProperty(deepest, 'cause', { get() { beyondLimit++; throw Error('TOO_DEEP_SENTINEL'); } });
+  const deep = new TypeError('ROOT_SENTINEL', { cause: Error('CAUSE_SENTINEL', { cause: deepest }) });
+  const hostile = { get name() { throw Error('GETTER_SENTINEL'); },
+    code: { toString() { throw Error('COERCION_SENTINEL'); } }, get cause() { throw Error('CAUSE_GETTER_SENTINEL'); } };
+  const cyclic = { name: 'NAME_SENTINEL', code: 'CODE_SENTINEL' }; cyclic.cause = cyclic;
+  for (const failure of [deep, hostile, cyclic, 'PRIMITIVE_SENTINEL', undefined]) {
+    const directory = temporary();
+    const fetch = recordDevelopmentFetch({ directory, context: identity, fetch: async () => { throw failure; } });
+    await assert.rejects(fetch('https://example.test'), error => error === failure);
+    const metadata = rows(directory).at(-1).nativeError;
+    assert.ok(metadata);
+    assert.ok(metadata.causes.length <= 2);
+    if (failure === deep) assert.deepEqual(metadata.causes.at(-1), { name: 'Error', code: 'ETIMEDOUT' });
+    else assert.deepEqual(metadata, { name: 'unclassified', code: 'unclassified',
+      causes: failure === cyclic ? Array.from({ length: 2 }, () => ({ name: 'unclassified', code: 'unclassified' })) : [] });
+    assert.doesNotMatch(JSON.stringify(rows(directory)), /SENTINEL/);
+  }
+  assert.equal(beyondLimit, 0);
+});
+
+test('retains partial stream hashes and original read error with safe native metadata', async () => {
+  const directory = temporary(), bytes = new TextEncoder().encode('synthetic partial response');
+  const failure = Object.assign(Error('READ_SENTINEL'), { name: 'SocketError', code: 'UND_ERR_SOCKET' });
+  let sent = false, fail;
+  const gate = new Promise(resolve => { fail = resolve; });
+  const fetch = recordDevelopmentFetch({ directory, context: identity, fetch: async () => new Response(
+    new ReadableStream({ pull(controller) {
+      if (!sent) { sent = true; controller.enqueue(bytes); }
+      else return gate.then(() => controller.error(failure));
+    } }), { status: 206 }) });
+  const response = await fetch('https://example.test'), reader = response.body.getReader();
+  assert.deepEqual((await reader.read()).value, bytes);
+  fail();
+  await assert.rejects(reader.read(), error => error === failure);
+  const captured = rows(directory), outcome = captured.at(-1);
+  assert.equal(captured.find(row => row.kind === 'response').status, 206);
+  assert.equal(outcome.outcome, 'unknown');
+  assert.equal(outcome.cause, 'read-error');
+  assert.equal(outcome.chunks, 1);
+  assert.equal(outcome.responseBodySha256, createHash('sha256').update(bytes).digest('hex'));
+  assert.deepEqual(outcome.nativeError, { name: 'SocketError', code: 'UND_ERR_SOCKET', causes: [] });
+  assert.doesNotMatch(JSON.stringify(captured), /READ_SENTINEL/);
 });
 
 test('archives existing replay lineage and execution records while excluding connection/secret owners', () => {
