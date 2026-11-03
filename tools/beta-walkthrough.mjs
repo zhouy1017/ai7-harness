@@ -137,6 +137,16 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel){
  await followReview(page,dataRoot,probe.runId);
  const sources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},taskIntentId:${JSON.stringify(probe.taskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const r=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,target:r?{evidenceId:r.evidenceId,url:r.url,contentSha256:r.contentSha256,attribution:r.translation.attribution}:null};})()`);Object.assign(probe,sources);checkpoint();
  check(Boolean(probe.target),'controlled-current-foreign-prose-required');
+ const retainedDb=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});
+ try{
+  const row=retainedDb.prepare('SELECT e.canonical_json,e.sha256,c.content_text FROM research_evidence e JOIN research_evidence_contents c USING(content_sha256) JOIN analysis_run_records r USING(run_record_id) WHERE e.evidence_id=? AND e.book_id=? AND r.task_intent_id=?').get(probe.target.evidenceId,bookId,probe.taskIntentId);
+  check(Boolean(row)&&createHash('sha256').update(row.canonical_json).digest('hex')===row.sha256,'controlled-retained-record-hash');
+  const content=String(row.content_text),attribution=probe.target.attribution;
+  check(createHash('sha256').update(content).digest('hex')===probe.target.contentSha256&&attribution.contentSha256===probe.target.contentSha256&&attribution.url===probe.target.url&&attribution.from>=0&&attribution.to>attribution.from&&attribution.to<=content.length,'controlled-original-range-hash');
+  const passage=content.slice(attribution.from,attribution.to),translation=JSON.parse(row.canonical_json).translation;
+  check((passage.match(/[A-Za-z]+/g)?.length??0)>=5&&!/PHP\s+(?:Warning|Fatal)|^https?:\/\//i.test(passage.trim()),'controlled-retained-english-prose');
+  probe.retainedOriginal={passageSha256:createHash('sha256').update(passage).digest('hex'),characters:passage.length,route:translation.route,model:translation.model,from:attribution.from,to:attribution.to};checkpoint();
+ }finally{retainedDb.close();}
  await select(page,'#app-sidebar [data-nav-book-section=sources]');await ready(page,"document.querySelector('.research-evidence')",'controlled-source-surface');
  const selector=`article[data-evidence-id=${JSON.stringify(probe.target.evidenceId)}] .research-evidence-translated blockquote`;
  while(!await boolean(page,`document.querySelector(${JSON.stringify(selector)})?.textContent.length>0`)&&await boolean(page,"document.querySelector('[data-evidence-action=more]')")){await select(page,'[data-evidence-action=more]');await new Promise(r=>setTimeout(r,300));}
