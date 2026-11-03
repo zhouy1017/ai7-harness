@@ -532,6 +532,10 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   else{agent.singleCandidatePromoted=false;report.limitations.push(`${expectedChannel}: Agent returned ${agent.count} candidates; single-candidate promotion remains unmeasured, with no answer reroll.`);}
   report.agent.push({channel:expectedChannel,...agent,twoRoundsComplete:true});checkpoint();
   }
+  const recordedAgent=report.agent.find(a=>a.channel===expectedChannel&&a.twoRoundsComplete);
+  const agentDialogue=await page.evaluate(`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(recordedAgent.dialogueId)},afterFragment:0}).then(v=>v.attempts.map(a=>({attemptId:a.attemptId,state:a.state,fragments:a.fragments.length})))`);
+  check(agentDialogue.length>=2&&agentDialogue.slice(-2).every(a=>a.state==='completed'&&a.fragments>0),expectedChannel+'-agent-two-streamed-rounds');
+  recordedAgent.attempts=agentDialogue;checkpoint();
   at(expectedChannel+'-global-agent-live');
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
   report.globalTurns??=[];report.globalAttempts??=[];
