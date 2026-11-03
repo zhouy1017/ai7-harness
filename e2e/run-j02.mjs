@@ -356,6 +356,39 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
   throw journeyCheckFailure('J-02', location);
 }
 
+async function observeSearchJump(renderer) {
+  await renderer.evaluate(`(() => {
+    const trace=[],start=performance.now(),editor=document.querySelector('[data-testid="manuscript-editor"]'),pane=document.querySelector('.editor-window'),host=editor.parentElement;
+    let closed=false,everMatchVisible=false,everDomRange=false,everFrameworkRange=false;
+    const snapshot=(kind)=>{
+      const selection=getSelection(),view=editor.pmViewDesc?.view,state=view?.state,from=state?.selection?.from,to=state?.selection?.to;
+      const matchingBlocks=[...editor.children].filter(block=>block.textContent.includes(${JSON.stringify(SEARCH_TEXT)})).length;
+      const domMatches=selection?.toString()===${JSON.stringify(SEARCH_TEXT)},frameworkMatches=state?state.doc.textBetween(from,to)===${JSON.stringify(SEARCH_TEXT)}:null;
+      everMatchVisible ||= matchingBlocks>0;everDomRange ||= domMatches;everFrameworkRange ||= frameworkMatches===true;
+      return {kind,ms:Math.round(performance.now()-start),matchingBlocks,domMatches,frameworkMatches,selectedCharacters:selection?.toString().length,anchorOffset:selection?.anchorOffset,headOffset:selection?.focusOffset,anchorInEditor:editor.contains(selection?.anchorNode),headInEditor:editor.contains(selection?.focusNode),frameworkFrom:from,frameworkTo:to,documentFocused:document.hasFocus(),editorFocused:editor.contains(document.activeElement),position:Number(document.querySelector('#manuscript-position')?.value),scrollTop:pane.scrollTop,viewportHeight:pane.clientHeight,scrollHeight:pane.scrollHeight,metaLength:document.querySelector('.editor-meta')?.textContent.length,statusLength:document.querySelector('#persistence-status')?.textContent.length,searchError:document.querySelector('#persistence-status')?.textContent==='无法在当前稿件状态中精确定位该匹配。',windowLoads:(host.dataset.windowLoads??'').split(',').map(value=>['navigation-block','navigation-cursor','navigation-window-start','review-settled','unnamed'].includes(value)?value:'other').slice(-12)};
+    };
+    const record=(kind)=>{if(closed)return;trace.push(snapshot(kind));if(trace.length>48)trace.shift();};
+    const selection=()=>record('selection'),scroll=()=>record('scroll'),focus=()=>record('focus'),blur=()=>record('blur');
+    document.addEventListener('selectionchange',selection);pane.addEventListener('scroll',scroll);window.addEventListener('focus',focus);window.addEventListener('blur',blur);
+    const observer=new MutationObserver(()=>record('window'));observer.observe(host,{attributes:true,attributeFilter:['data-window-loads']});
+    globalThis.__ai7SearchJumpObservation={read:()=>({current:snapshot('read'),everMatchVisible,everDomRange,everFrameworkRange,trace:[...trace]}),dispose:()=>{closed=true;observer.disconnect();document.removeEventListener('selectionchange',selection);pane.removeEventListener('scroll',scroll);window.removeEventListener('focus',focus);window.removeEventListener('blur',blur);}};
+    record('start');
+  })()`);
+}
+
+async function waitForExactSearchRange(renderer) {
+  try {
+    await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+  } catch (error) {
+    const observed=await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()').catch(()=>null);
+    if(localDebugEnabled())recordDebugDetail('J-02',`search jump mismatch ${JSON.stringify(observed)}`);
+    const reason=observed===null?'observation-unavailable':!observed.everMatchVisible?'match-never-in-window':observed.everDomRange?'range-lost':observed.current.frameworkMatches?'dom-selection-mismatch':observed.current.searchError?'navigation-refused':!observed.current.documentFocused?'window-unfocused':'match-without-range';
+    throw journeyCheckFailure('J-02',`search-exact-range-${reason}`,{cause:error});
+  } finally {
+    await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.dispose()').catch(()=>undefined);
+  }
+}
+
 async function waitForChecks(renderer, expression, location, timeout = 60_000) {
   const deadline = Date.now() + timeout;
   let failed = ['diagnostic-unavailable'];
@@ -1188,10 +1221,11 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 ${EXPECTED_MATCHES} 处')`, 'search-results', 120_000);
   await assertRenderer(renderer, `document.querySelectorAll('.search-result').length === 24 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结果')?.hidden`, 'search-virtualized');
   await assertRenderer(renderer, `(() => { const encoded = (value) => new TextEncoder().encode(JSON.stringify(value)).length; const rows = Array.from(document.querySelectorAll('.search-result')); const ids = rows.map((row) => row.querySelector('input')?.dataset.matchId); return rows.length === 24 && new Set(ids).size === ids.length && rows.every((row) => { const heading = row.querySelector('.field-note')?.textContent ?? ''; const context = row.querySelector('button')?.textContent ?? ''; return encoded(heading) <= 2048 && encoded(context) <= 2048; }); })()`, 'search-display-frame-bounded-and-identities-unique');
+  await observeSearchJump(renderer);
   await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
-  await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+  await waitForExactSearchRange(renderer);
   await clickButton(renderer, '返回查找前位置', 'search-return');
   try {
     await waitFor(renderer, `(() => { const expected = globalThis.__ai7SearchReturn; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelector('.editor-meta')?.textContent === expected.meta && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'search-return-exact-selection-scroll');
