@@ -17,7 +17,7 @@ import { build } from 'esbuild';
 import { unzipSync, strFromU8 } from 'fflate';
 
 const ROOT=resolve('.');
-const args=process.argv.slice(2),STARTUP_ONLY=args.includes('--startup-only'),RETAINED_REVIEW_ONLY=args.includes('--retained-review-only'),RESUME_LAST=args.includes('--resume-last')||RETAINED_REVIEW_ONLY;
+const args=process.argv.slice(2),SEARCH_ONLY=args.includes('--search-only'),STARTUP_ONLY=args.includes('--startup-only'),RETAINED_REVIEW_ONLY=args.includes('--retained-review-only'),RESUME_LAST=args.includes('--resume-last')||RETAINED_REVIEW_ONLY;
 let resume;
 const assetsIndex=args.indexOf('--assets-from');
 const RELEASE=assetsIndex<0?join(ROOT,'release'):resolve(args[assetsIndex+1]??'');
@@ -25,7 +25,7 @@ const OUTPUT=join(ROOT,'release');await mkdir(OUTPUT,{recursive:true});
 if(assetsIndex>=0&&!RELEASE.toLowerCase().startsWith('c:\\ai7\\beta-inputs\\'))throw Error('assets-root-refused');
 const packagedKeyring=()=>import(pathToFileURL(join(RELEASE,'AI7','app','resources','app','node_modules','@napi-rs','keyring','index.js')).href);
 let stage='inputs';
-const report={schema:'ai7.windows-beta-acceptance/1',scope:STARTUP_ONLY?'native-startup-probe':RETAINED_REVIEW_ONLY?'retained-review-disclosure-probe':'six-flow-packaged-acceptance',state:'running',checks:[],limitations:[
+const report={schema:'ai7.windows-beta-acceptance/1',scope:SEARCH_ONLY?'provider-free-packaged-search-return':STARTUP_ONLY?'native-startup-probe':RETAINED_REVIEW_ONLY?'retained-review-disclosure-probe':'six-flow-packaged-acceptance',state:'running',checks:[],limitations:[
  'Separate Owner-authorized packaged live acceptance uses available Go and search accounts; other provider accounts remain unconfigured. Ordinary source Journeys and CI are provider-free.',
  'Human Beta acceptance and the external editor study remain pending.',
  'The prior-version public Book is seeded through the exact 0.4.1 product store; current import/export use the actual package UI.',
@@ -820,7 +820,63 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
  }finally{await browser?.close();}
 }
 
+async function searchSmoke(){
+ report.limitations=['Provider-free search and exact return smoke on retained admitted Public SampleBooks; earlier paid acceptance keeps its original source and receipt.','Human Beta acceptance and external editorial study remain pending.'];
+ check(process.platform==='win32'&&process.arch==='x64'&&/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''),'search-background-windows-guest');
+ const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));
+ check(previous.state==='passed'&&previous.scope==='six-flow-packaged-acceptance'&&previous.buildIdentity.softwareVersion==='0.5.0','search-retained-acceptance');
+ const temp=await realpath(previous.testRoot);
+ check(temp.toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()),'search-owned-data-root');
+ report.testRoot=temp;report.retainedAcceptance={sourceCommit:previous.buildIdentity.sourceCommit,runnerHead:previous.runnerHead,scope:previous.scope};
+ report.runnerHead=run('git.exe',['rev-parse','HEAD']).trim();
+ const identity=JSON.parse(await readFile(join(RELEASE,assetsIndex<0?'../dist/build-identity.json':'build-identity.json'),'utf8'));
+ report.buildIdentity=identity;
+ check(identity.softwareVersion==='0.5.0'&&!identity.dirty&&['src','config','package.json','pnpm-lock.yaml'].every(path=>run('git.exe',['rev-parse',identity.sourceCommit+':'+path]).trim()===run('git.exe',['rev-parse','HEAD:'+path]).trim()),'search-exact-product-identity');
+ const setup=join(RELEASE,'AI7-0.5.0-win-x64-setup.exe'),zip=join(RELEASE,'AI7-0.5.0-win-x64-portable.zip');
+ const zipBytes=await readFile(zip),members=Object.keys(unzipSync(zipBytes));
+ check(members.every(name=>!/(^|\/)(?:SampleBooks|\.git|test-results)(\/|$)|\.key\.txt$|\.pem$/i.test(name))&&members.filter(name=>name.startsWith('AI7/data/')).every(name=>name.endsWith('/')),'search-pristine-distribution');
+ report.assets=[];for(const path of [setup,zip]){const bytes=await readFile(path);report.assets.push({name:path.split(/[\\/]/).at(-1),bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});}
+ const installed=join(temp,'installed'),portableRoot=join(temp,'portable');
+ at('search-install-current');run(setup,['/S','/D='+installed]);run(join(process.env.SystemRoot,'System32','tar.exe'),['-xf',zip,'-C',portableRoot]);
+ const isolated={LOCALAPPDATA:join(temp,'local'),APPDATA:join(temp,'roaming')};
+ report.channels=[];
+ for(const [channel,executable,dataRoot,bookId] of [
+  ['windows-installer',join(installed,'AI7.exe'),join(isolated.LOCALAPPDATA,'ai7','production'),previous.priorBook.bookId],
+  ['windows-portable',join(portableRoot,'AI7','app','AI7.exe'),join(portableRoot,'AI7','data'),previous.portablePriorBook.bookId],
+ ]){
+  at(channel+'-search-return');const env={...selfCheckEnvironment(executable),...isolated};
+  const selfcheck=JSON.parse(run(executable,['--self-check'],env).trim());
+  check(selfcheck.channel===channel&&selfcheck.buildIdentity.sourceCommit===identity.sourceCommit&&selfcheck.writable,channel+'-search-self-check');
+  const countAttempts=()=>{const db=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});try{return db.prepare('SELECT COUNT(*) n FROM analysis_execution_attempts').get().n;}finally{db.close();}};
+  const before=countAttempts();let browser;
+  try{
+   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});
+   const page=await renderer(browser);await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'search-product-ready');
+   await openKnownBook(page,bookId);
+   await page.evaluate(`(async()=>{const binding=(await window.ai7.listPriorWork()).find(w=>w.bookId===${JSON.stringify(bookId)});const request={manuscriptId:binding.manuscriptId,branchId:binding.branchId};const first=await window.ai7.getManuscriptWindowAt({...request,target:{kind:'proportion',proportion:0}});const end=await window.ai7.getManuscriptWindowAt({...request,target:{kind:'proportion',proportion:1}});const candidate=[...end.blocks].reverse().find(b=>b.kind==='paragraph'&&/[一-鿿]{12}/u.test(b.text)&&!first.blocks.some(f=>f.blockId===b.blockId));if(!candidate)throw Error('search-disjoint-public-range');globalThis.__ai7PackagedSearch={firstBlockId:first.blocks[0].blockId,query:candidate.text.match(/[一-鿿]{12}/u)[0]};})()`);
+   await fill(page,'#manuscript-position','0');
+   await ready(page,"document.querySelector('[data-testid=manuscript-editor] > [data-block-id]')?.dataset.blockId===__ai7PackagedSearch.firstBlockId",'search-start-window');
+   if(await boolean(page,"document.querySelector('#manuscript-navigation-panel')?.hidden"))await select(page,'[data-edge-entry=navigation]');
+   check(await page.evaluate("(()=>{const input=document.querySelector('#manuscript-search');input.value=__ai7PackagedSearch.query;input.dispatchEvent(new Event('input',{bubbles:true}));return input.value.length===12})()"),'search-public-query');
+   await click(page,'查找全稿');await ready(page,"document.querySelector('.search-result button')&&!document.querySelector('#manuscript-search').disabled",'search-results');
+   for(let iteration=0;iteration<3;iteration++){
+    check(await page.evaluate("(()=>{const pane=document.querySelector('.editor-window'),block=document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]')[5],text=block?.firstChild;if(!(text instanceof Text)||text.length<5)return false;block.scrollIntoView({block:'center'});const top=pane.getBoundingClientRect().top,visible=[...document.querySelectorAll('[data-testid=manuscript-editor] > [data-block-id]')].find(b=>b.getBoundingClientRect().bottom>=top);getSelection().setBaseAndExtent(text,4,text,1);__ai7PackagedSearch.return={meta:document.querySelector('.editor-meta').textContent,blockId:block.dataset.blockId,scrollBlockId:visible.dataset.blockId,scrollOffset:visible.getBoundingClientRect().top-top,text:getSelection().toString()};return true})()"),channel+'-search-return-anchor-'+iteration);
+    await select(page,'.search-result button');
+    await ready(page,"document.querySelector('.editor-meta').textContent!==__ai7PackagedSearch.return.meta&&getSelection().toString()===__ai7PackagedSearch.query",'search-exact-range');
+    await new Promise(resolve=>setTimeout(resolve,500));check(await boolean(page,"getSelection().toString()===__ai7PackagedSearch.query"),channel+'-search-range-stable-'+iteration);
+    await click(page,'返回查找前位置');
+    await ready(page,"(()=>{const expected=__ai7PackagedSearch.return,s=getSelection(),pane=document.querySelector('.editor-window'),block=document.querySelector('[data-block-id=\"'+expected.scrollBlockId+'\"]');return document.querySelector('.editor-meta').textContent===expected.meta&&s.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId===expected.blockId&&s.anchorOffset===4&&s.focusOffset===1&&s.toString()===expected.text&&block&&Math.abs(block.getBoundingClientRect().top-pane.getBoundingClientRect().top-expected.scrollOffset)<=3})()",'search-exact-return');
+    check(true,channel+'-search-exact-return-'+iteration);
+   }
+   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.dataVersion===1)`),channel+'-search-retained-store-readable');
+  }finally{await browser?.close();}
+  check(countAttempts()===before,channel+'-search-no-new-model-attempts');report.channels.push({channel,bookId,iterations:3,modelAttemptsBefore:before,modelAttemptsAfter:countAttempts()});checkpoint();
+ }
+ report.state='passed';
+}
+
 try{
+ if(SEARCH_ONLY)await searchSmoke();else{
  try{
   const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));
   if(RESUME_LAST){
@@ -888,11 +944,12 @@ try{
  run(join(installed,uninstaller),['/S']);await wait(()=>!existsSync(executable),'uninstall-timeout');check(existsSync(join(env.LOCALAPPDATA,'ai7','production','store','ai7.sqlite')),'uninstall-keeps-user-data');
  }
  report.state='passed';
+ }
 }catch(error){report.state='failed';report.failedStage=stage;report.failureCode=/^[a-z0-9/-]+$/.test(error?.message??'')?error.message:'unclassified';process.exitCode=1;console.error('BETA_PACKAGE/failed/'+stage);}
 try{await cleanupInstallation(report.testRoot?join(report.testRoot,'installed'):null);}catch{report.installationCleanup='failed';report.state='failed';process.exitCode=1;}
 try{await removeOwnedCredentials();}catch{report.credentialCleanup='failed';report.state='failed';process.exitCode=1;}
-await writeFile(join(OUTPUT,'beta-acceptance.json'),JSON.stringify(report,null,2)+'\n');
+await writeFile(join(OUTPUT,SEARCH_ONLY?'beta-search-smoke.json':'beta-acceptance.json'),JSON.stringify(report,null,2)+'\n');
 await mkdir('C:/ai7/results/beta-receipts',{recursive:true});
 await writeFile(`C:/ai7/results/beta-receipts/${report.runnerHead??'unstarted'}-${Date.now()}.json`,JSON.stringify(report,null,2)+'\n');
-await writeFile('C:/ai7/results/beta-last-run.json',JSON.stringify(report,null,2)+'\n');
+if(!SEARCH_ONLY)await writeFile('C:/ai7/results/beta-last-run.json',JSON.stringify(report,null,2)+'\n');
 console.log('BETA_PACKAGE/'+report.state);
