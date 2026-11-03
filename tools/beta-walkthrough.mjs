@@ -10,7 +10,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { serveGuestEnrollment, storeEnrollment } from './enroll-dev-credential.mjs';
 import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
-import { composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
+import { composeAdmittedDocx, composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
 import { build } from 'esbuild';
 import { unzipSync, strFromU8 } from 'fflate';
 
@@ -129,7 +129,7 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel,input,ex
  if(!probe.isolatedBookId)probe.isolatedBookId=await page.evaluate("[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes('Beta source translation functional'))?.dataset.navBook??null");
  if(!probe.isolatedBookId){
   const isolatedInput=join(dirname(input),'controlled-public-sample1-one-paragraph.docx');
-  await composeExportAdmittedDocx(isolatedInput,{source:'sample1.docx',startBlock:1,blocks:1,title:'Beta source translation functional'});
+  await composeAdmittedDocx(isolatedInput,{source:'sample1.docx',startBlock:1,blocks:1,title:'Beta source translation functional'});
   probe.isolatedInput={source:'sample1.docx',startBlock:1,blocks:1,sha256:createHash('sha256').update(await readFile(isolatedInput)).digest('hex')};checkpoint();
   await click(page,'导入稿件');native(executable,['-FileName',isolatedInput]);await ready(page,"document.querySelector('[data-screen=target]')",'controlled-import-target');
   await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
