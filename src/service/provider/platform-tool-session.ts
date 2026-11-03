@@ -24,6 +24,7 @@ import {
   PlatformToolBreaker,
   canonicalPublicUrl,
   canonicalToolArguments,
+  httpsAddresses as urlsIn,
   toolArgumentsDigest,
   isLocalToolName,
   ruleNamedToolSchemas,
@@ -700,11 +701,4 @@ function refusal(text: string): { readonly text: string; readonly sourceUrl: nul
 }
 
 /** Every absolute `https` URL a search answer names, for the citation set a later `webfetch` is bounded by. */
-export function urlsIn(text: string): string[] {
-  return [...text.matchAll(/https:\/\/[^\s<>"'()[\]{}，。；、）》]+/gu)].map((match) => {
-    // Trailing sentence punctuation is not part of the address; trimmed by one backward walk, never a backtracking pattern.
-    let end = match[0].length;
-    while (end > 0 && '.,;:!?'.includes(match[0][end - 1]!)) end -= 1;
-    return match[0].slice(0, end);
-  });
-}
+export { urlsIn };

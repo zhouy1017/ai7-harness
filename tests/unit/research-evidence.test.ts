@@ -20,6 +20,7 @@ import {
   type UnitResearchFinding,
 } from '../../src/service/analysis/factual-review-evidence.js';
 import type { ResearchSnapshot } from '../../src/service/provider/research-snapshot-cache.js';
+import { urlsIn } from '../../src/service/provider/platform-tool-session.js';
 import {
   findingResearchLines,
   readFindingResearch,
@@ -145,6 +146,11 @@ describe('citations from the model’s basis', () => {
     expect(evidenceCitations([{ ...FINDING, basis: 'https://zh.wikipedia.org/wiki/zun' }], sameSite).map((entry) => entry.url))
       .toEqual(['https://zh.wikipedia.org/wiki/zun']);
     expect(evidenceCitations([{ ...FINDING, basis: '维基百科' }], sameSite)).toEqual([]);
+    const precise = 'https://source.example/wiki/County_(OtherSource)';
+    expect(evidenceCitations([{ ...FINDING, basis: `[source](${precise})` }], [
+      { url: precise, title: 'County', snippet: null, via: 'search' },
+      { url: 'https://other.example/page', title: 'OtherSource', snippet: null, via: 'search' },
+    ]).map((entry) => entry.url)).toEqual([precise]);
   });
 });
 
@@ -272,6 +278,14 @@ function fetchSnapshot(url: string, html: string, contentType = 'text/html; char
 }
 
 describe('reading the Research Snapshot Cache', () => {
+  it('keeps parenthesized citation addresses exact in search answers and Markdown', () => {
+    const url = 'https://source.example/wiki/County_(Province)';
+    expect(urlsIn(`${JSON.stringify([{ url }])} [source](${url}). https://other.example/page?q=(one_(two))。`))
+      .toEqual([url, url, 'https://other.example/page?q=(one_(two))']);
+    const answer = { ...fetchSnapshot('https://s', ''), kind: 'search-call' as const, text: `[{"url":"${url}"` };
+    expect(searchHitsOf(answer)).toEqual([{ url, title: null, snippet: null, via: 'search' }]);
+  });
+
   it('converts a fetched page again from its whole bytes, never from the text the model read', () => {
     const snapshot = fetchSnapshot('https://example.org/p', '<html><body><h1>尊盘</h1><p>现藏湖北省博物馆。</p></body></html>');
     const page = retainedPageOf(snapshot)!;
@@ -300,6 +314,19 @@ describe('retaining one research unit', () => {
     findings: [FINDING, other], sources, pages: new Map<string, RetainedPage>(), searchSnapshotDigest: digest('search'), searchState: 'completed' as const,
     searchCalls: 1, rule: { operationalScope: 'developer-live' }, translator: null, now: () => new Date('2026-10-15T23:30:00.000Z'),
   };
+
+  it('retains the exact parenthesized source already captured without fetching a truncated address', async () => {
+    const url = 'https://source.example/wiki/County_(Province)';
+    const asked: string[] = [];
+    const result = await retainUnitEvidence({ ...input,
+      findings: [{ ...FINDING, basis: `据 ${url}：「现藏湖北省博物馆」。` }],
+      sources: [{ url, title: 'Source', snippet: null, via: 'search' }], pages: new Map([[url, page(url, CAPTURE)]]),
+      fetchAllowed: true, fetch: async (address) => { asked.push(address); return { failed: 'No network in this regression.' }; },
+    });
+    expect(asked).toEqual([]);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence[0]).toMatchObject({ url, captureState: 'full-text', contentSha256: digest(CAPTURE) });
+  });
 
   it('fetches each cited page it has no page of once, keeps the whole text, and counts the finding no source names', async () => {
     const asked: string[] = [];

@@ -16,7 +16,7 @@ export interface SearchBackendSettingsOptions {
 }
 
 export const SEARCH_CANDIDATE_PROBE_LABEL = '测试连接';
-export const SEARCH_FALLBACK_NOTE = '默认后端连接未建立、服务出错或限流时，同一检索先重发一次；仍失败，再改发到备用来源一次。只能选一个已保存密钥的后端；候选接口不能作为备用来源。';
+export const SEARCH_FALLBACK_NOTE = '设置备用来源后，默认来源连接未建立、服务出错或限流时，同一检索最多重试一次；仍失败再切换一次。默认使用博查且明确返回余额或套餐额度不足时，直接切换一次；其他认证错误不会切换。只能选择一个已保存密钥的后端，且不能与默认来源相同；候选接口不能作为备用来源。';
 export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidateProbeOutcome, string>> = Object.freeze({
   succeeded: '连接成功',
   'succeeded-empty': '连接成功 · 没有结果',

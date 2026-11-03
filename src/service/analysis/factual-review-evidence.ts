@@ -12,6 +12,7 @@ import {
 import { htmlToMarkdown } from '../provider/html-to-markdown.js';
 import { declaredCharset, decodeInCharset } from '../provider/public-source-fetch.js';
 import type { ResearchSnapshot } from '../provider/research-snapshot-cache.js';
+import { httpsAddresses, withoutHttpsAddresses } from '../provider/platform-tools.js';
 import { sha256Hex } from './canonical.js';
 
 /**
@@ -276,14 +277,7 @@ export interface EvidenceCitation {
 const QUOTED = /[「“『"]([^」”』"]{2,200})[」”』"]/gu;
 const LABEL_BREAK = /\s[-–—|｜_]\s|[|｜_]/u;
 
-/** Every absolute `https` address in a text, with trailing sentence punctuation trimmed by one backward walk. */
-export function httpsAddresses(text: string): string[] {
-  return [...text.matchAll(/https:\/\/[^\s<>"'()[\]{}，。；、）》」”]+/gu)].map((match) => {
-    let end = match[0].length;
-    while (end > 0 && '.,;:!?'.includes(match[0][end - 1]!)) end -= 1;
-    return match[0].slice(0, end);
-  });
-}
+export { httpsAddresses };
 
 /** The site a result's title names after its separator — 「…… - 维基百科」 names 维基百科 — or `null`. */
 export function titleSiteLabel(title: string | null): string | null {
@@ -320,7 +314,7 @@ export function evidenceCitations(findings: ReadonlyArray<UnitResearchFinding>, 
     for (const address of httpsAddresses(basis)) urls.add(addressKey(address));
     // A precise URL must not also cite every other result from its host. A site name alone can identify a page only when
     // that site contributed exactly one result; otherwise no exact source has been named.
-    const namedText = basis.replace(/https:\/\/[^\s<>"'()[\]{}，。；、）》」”]+/gu, '');
+    const namedText = withoutHttpsAddresses(basis);
     for (const source of sources) {
       let host: string | null = null;
       try { host = new URL(source.url).hostname; } catch { host = null; }
