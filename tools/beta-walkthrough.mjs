@@ -12,6 +12,7 @@ import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
 import { composeAdmittedDocx, composeExportAdmittedDocx, addReadOnlySourceObjects, readExportedDocx } from '../e2e/composed-docx.mjs';
 import { wordTablePresentation } from './beta-docx-fidelity.mjs';
+import { inspectDeliveryArchive } from './beta-archive-fidelity.mjs';
 import { build } from 'esbuild';
 import { unzipSync, strFromU8 } from 'fflate';
 
@@ -341,6 +342,25 @@ async function portableLiveOnce(page,bookId){
  await ready(page,`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(attempt.dialogueId)},afterFragment:0}).then(v=>v.attempts.at(-1)?.state==='completed'&&v.attempts.at(-1)?.fragmentTotal>0)`,'portable-live-once-streamed',300000);
  attempt.completedAt=new Date().toISOString();checkpoint();check(true,'portable-own-keyring-route-streaming');
  await select(page,'#task-drawer [data-task-drawer-control=close]');
+}
+
+async function verifyDeliveryArchive(path,dataRoot,bookId,page,channel){
+ const inspected=inspectDeliveryArchive(await readFile(path)),db=new DatabaseSync(join(dataRoot,'store','ai7.sqlite'),{readOnly:true});
+ let recorded,version;
+ try{
+  const row=db.prepare("SELECT canonical_json,sha256 FROM book_delivery_package_exports WHERE book_id=? AND json_extract(canonical_json,'$.kind')='archive-receipt' AND json_extract(canonical_json,'$.receipt.finalPath')=? ORDER BY created_at DESC LIMIT 1").get(bookId,path);
+  check(Boolean(row)&&createHash('sha256').update(row.canonical_json).digest('hex')===row.sha256,channel+'-delivery-receipt-canonical-hash');
+  recorded=JSON.parse(row.canonical_json);
+  const frozen=db.prepare('SELECT canonical_json,sha256 FROM book_delivery_package_versions WHERE package_version_id=? AND book_id=?').get(recorded.packageVersionId,bookId);
+  check(Boolean(frozen)&&createHash('sha256').update(frozen.canonical_json).digest('hex')===frozen.sha256,channel+'-delivery-frozen-version-hash');
+  version=JSON.parse(frozen.canonical_json);
+ }finally{db.close();}
+ const r=recorded.receipt;
+ check(['created','replaced'].includes(r.outcome)&&r.stopped===null&&r.sha256===inspected.sha256&&r.byteLength===inspected.byteLength,channel+'-delivery-exact-success-receipt');
+ check(r.memberCount===r.members.length&&r.metadata.length===2&&r.members.length+r.metadata.length===inspected.members.length&&[...r.members,...r.metadata].every(m=>inspected.members.some(f=>f.path===m.path&&f.sha256===m.sha256&&(m.byteLength===undefined||m.byteLength===f.byteLength))),channel+'-delivery-all-member-hashes');
+ check(version.contentDigest===inspected.contentDigest&&version.content.limitations.every(l=>inspected.manifest.includes(l)),channel+'-delivery-frozen-manifest-and-limitations');
+ check(await page.evaluate(`window.ai7.inspectBookDeliveryPackage().then(v=>v.versions.some(p=>p.packageVersionId===${JSON.stringify(recorded.packageVersionId)}&&p.exports.some(e=>e.exportId===${JSON.stringify(recorded.parentExportId)}&&e.state==='exported')))`),channel+'-delivery-ordinary-history-receipt');
+ report.deliveryExports??=[];report.deliveryExports.push({channel,path,sha256:inspected.sha256,byteLength:inspected.byteLength,contentDigest:inspected.contentDigest,members:inspected.members,receipt:r,packageVersionId:recorded.packageVersionId,buildIdentity:report.buildIdentity,runnerHead:report.runnerHead});checkpoint();
 }
 
 async function walk(executable,env,expectedChannel,expectedDataRoot,input,output){
@@ -731,6 +751,8 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.nativeExports??=[];report.nativeExports.push({channel:expectedChannel,path:output,receipt:exactExportReceipt,sourceTable,exportTable,untouchedStories});checkpoint();
 
   at(expectedChannel+'-delivery-package-export');
+  const deliveryPath=join(dirname(output),expectedChannel+'-delivery.zip');
+  if(!existsSync(deliveryPath)){
   const currentDesignation=await page.evaluate(`window.ai7.inspectDeliverables().then(v=>v.publication.designations.find(d=>d.current&&d.milestoneId===${JSON.stringify(milestone.milestoneId)})??null)`);
   if(!currentDesignation){
   await select(page,'[data-publication-action=designate]');await ready(page,"document.querySelector('input[name=publication-milestone]')",'publication-designation');
@@ -741,10 +763,11 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"document.querySelector('[data-package-action=export][data-package-version-id]')",'delivery-package-prepared');
   await select(page,'[data-package-action=export][data-package-version-id]');await select(page,'input[name=package-export-route][value=archive]');
   await ready(page,"document.querySelector('[data-package-action=export-choose]:not(:disabled)')",'delivery-archive-ready');await select(page,'[data-package-action=export-choose]');
-  const deliveryPath=join(dirname(output),expectedChannel+'-delivery.zip');native(executable,['-FileName',deliveryPath]);
+  native(executable,['-FileName',deliveryPath]);
   await ready(page,"document.querySelector('[data-package-action=export-approve]:not(:disabled)')",'delivery-destination');await select(page,'[data-package-action=export-approve]');
-  await wait(()=>existsSync(deliveryPath),'delivery-archive-created',120000);const delivery=unzipSync(await readFile(deliveryPath));
-  check(Object.keys(delivery).some(name=>name.endsWith('.docx'))&&Object.keys(delivery).some(name=>name.endsWith('.json')),expectedChannel+'-delivery-archive');
+  await wait(()=>{const db=new DatabaseSync(join(expectedDataRoot,'store','ai7.sqlite'),{readOnly:true});try{return Boolean(db.prepare("SELECT 1 FROM book_delivery_package_exports WHERE book_id=? AND json_extract(canonical_json,'$.kind')='archive-receipt' AND json_extract(canonical_json,'$.receipt.finalPath')=?").get(bookId,deliveryPath));}finally{db.close();}},'delivery-archive-receipted',120000);
+  }else check(true,expectedChannel+'-existing-native-delivery-archive-reused');
+  await verifyDeliveryArchive(deliveryPath,expectedDataRoot,bookId,page,expectedChannel);
   await select(page,'#app-sidebar [data-nav-settings]');await ready(page,"document.querySelector('[data-screen=settings]')",'settings-storage');
   await click(page,'数据与存储');await ready(page,"document.querySelector('.data-storage-summary')",'storage');
   check(await page.evaluate(`(()=>{const node=document.querySelector('.data-storage-summary');return node.dataset.runtimeForm==='packaged'&&node.dataset.channel===${JSON.stringify(expectedChannel)}&&document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(expectedDataRoot)}})()`),expectedChannel+'-data-isolation');
@@ -784,7 +807,7 @@ try{
    resume=previous;
    report.activeReview=previous.activeReview??null;
    report.controlledTranslations=previous.controlledTranslations??[];report.findingDispositions=previous.findingDispositions??[];
-   for(const key of ['agent','agentAttempts','globalTurns','globalAttempts','habits','habitAttempts','storageBackups','nativeExports','milestoneEvidence','portableLiveAttempts','completedChannels'])report[key]=previous[key]??[];
+   for(const key of ['agent','agentAttempts','globalTurns','globalAttempts','habits','habitAttempts','storageBackups','nativeExports','deliveryExports','milestoneEvidence','portableLiveAttempts','completedChannels'])report[key]=previous[key]??[];
    resume.completedReview=completedReview;report.completedReview=completedReview;
    report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};
    report.priorBook=previous.priorBook;report.portablePriorBook=previous.portablePriorBook;report.portableCarry=previous.portableCarry;report.portableImport=previous.portableImport;
