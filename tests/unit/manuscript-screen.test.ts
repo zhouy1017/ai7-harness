@@ -208,7 +208,8 @@ describe('the Manuscript screen lifecycle', () => {
     const heading = '长标题'.repeat(100);
     const full = `${heading} · 全稿 25.000%`;
     const app = shell();
-    app.open({ ...windowOf('book-one'), position: { label: full, structureLabel: heading, proportion: 0.25 } });
+    const initial = windowOf('book-one');
+    app.open({ ...initial, position: { ...initial.position, label: full, structureLabel: heading, proportion: 0.25 } });
     const position = app.screen.querySelector('.editor-meta span')!;
     expect(position.textContent).toBe('长标题长标题长标题长标题长标题长… · 全稿 25.000%');
     expect(position.getAttribute('title')).toBe(full);
