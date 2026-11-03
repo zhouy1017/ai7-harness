@@ -443,7 +443,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   at(expectedChannel+'-retained-factual-evidence');
   const visibleFactLabels=await page.evaluate("[...document.querySelectorAll('.fact-lens-row')].map(n=>({outcome:n.dataset.outcome,legacyStateLines:[...n.querySelectorAll('.review-finding-state')].map(s=>s.textContent)}))");
   report.factualCardLabels??=[];report.factualCardLabels.push({channel:expectedChannel,reviewRunId:review.runId,rows:visibleFactLabels});checkpoint();
-  check(!visibleFactLabels.some(r=>r.legacyStateLines.includes('未外部复核')&&r.outcome!=='待核查'),'factual-card-verdict-consistent');
+  check(visibleFactLabels.length>0&&!visibleFactLabels.some(r=>r.legacyStateLines.includes('未外部复核')&&r.outcome!=='待核查'),'factual-card-verdict-consistent');
   const factualTaskIntentId=memberCoverage.find(c=>c.categoryId==='factual-review')?.taskIntentId;
   check(Boolean(factualTaskIntentId),'current-factual-task');
   const factualSources=await page.evaluate(`(async()=>{const records=[];let after=null;for(let n=0;n<20;n++){const v=await window.ai7.inspectResearchEvidence({bookId:${JSON.stringify(bookId)},taskIntentId:${JSON.stringify(factualTaskIntentId)},after});records.push(...v.records);if(v.next==null)break;after=v.next;}const translated=records.find(r=>r.captureState==='full-text'&&r.translation?.state==='translated'&&r.passage&&(r.passage.match(/\\p{L}+/gu)?.length??0)>=5&&r.translation.text.trim()!==r.passage.trim());return {taskIntentId:${JSON.stringify(factualTaskIntentId)},count:records.length,translated:records.filter(r=>r.translation?.state==='translated').length,captured:records.filter(r=>r.captureState==='full-text').length,target:translated?{evidenceId:translated.evidenceId,url:translated.url,contentSha256:translated.contentSha256,attribution:translated.translation.attribution}:null}})()`);
@@ -457,15 +457,25 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-book-section=review]');await ready(page,"document.querySelector('.review-workspace-card')",'review-after-evidence');
   }else report.limitations.push(`${expectedChannel}: original FullReview retained no translated foreign passage; a separately labelled controlled sample1 edit tests the current translation UI without rerunning that FullReview.`);
   report.findingDispositions??=[];
-  const priorDisposition=report.findingDispositions.find(d=>d.channel===expectedChannel&&d.reviewRunId===review.runId);
-  if(!priorDisposition){
+  let disposition=report.findingDispositions.find(d=>d.channel===expectedChannel&&d.reviewRunId===review.runId);
+  if(!disposition){disposition={channel:expectedChannel,reviewRunId:review.runId,accepted:null,rejected:null};report.findingDispositions.push(disposition);}
+  const priorAccept=resumePrefix&&resume.checks.includes(expectedChannel+'-finding-adopted')?resume.checks.map(c=>/^select-article\[data-finding-id="(rvf_[a-f0-9]+)"\] \[data-review-action=accept-apply\]$/.exec(c)?.[1]).filter(Boolean).at(-1):null;
+  if(!disposition.accepted&&priorAccept){
+   check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(review.runId)}}).then(v=>v.run.findings.some(f=>f.findingId===${JSON.stringify(priorAccept)}&&f.status==='handled'))`),'resume-prior-adoption-committed');
+   disposition.accepted=priorAccept;disposition.recoveredFrom=resume.runnerHead;checkpoint();
+  }
+  if(!disposition.accepted){
   const applicable=await page.evaluate("[...document.querySelectorAll('[data-review-action=accept-apply]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
   check(Boolean(applicable),expectedChannel+'-applicable-card-required');
-  if(applicable){await select(page,`article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]`);await ready(page,`document.querySelector('article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]')?.disabled!==false`,'finding-adopted');check(true,expectedChannel+'-finding-adopted');}
+  if(applicable){await select(page,`article[data-finding-id=${JSON.stringify(applicable)}] [data-review-action=accept-apply]`);await ready(page,`document.querySelector('article[data-finding-id=${JSON.stringify(applicable)}]')?.dataset.status==='handled'`,'finding-adopted');check(true,expectedChannel+'-finding-adopted');disposition.accepted=applicable;disposition.acceptedAt=new Date().toISOString();checkpoint();}
+  }
+  if(!disposition.rejected){
+  await ready(page,"[...document.querySelectorAll('[data-review-action=ignore]')].some(n=>!n.disabled)",'reject-action-settled');
   const reject=await page.evaluate("[...document.querySelectorAll('[data-review-action=ignore]')].find(n=>!n.disabled)?.closest('article')?.dataset.findingId??null");
   check(Boolean(reject),expectedChannel+'-finding-to-reject');
   await select(page,`article[data-finding-id=${JSON.stringify(reject)}] [data-review-action=ignore]`);await fill(page,'[data-review-field=ignore-reason]','Beta 人工复核：该项不符合本次修改目的。');await select(page,'[data-review-action=ignore-confirm]');
-  report.findingDispositions.push({channel:expectedChannel,reviewRunId:review.runId,accepted:applicable,rejected:reject,at:new Date().toISOString()});checkpoint();
+  await ready(page,`document.querySelector('article[data-finding-id=${JSON.stringify(reject)}]')?.dataset.status==='ignored'`,'finding-rejected');
+  disposition.rejected=reject;disposition.rejectedAt=new Date().toISOString();checkpoint();
   }
   if(!factualSources.target)await controlledSourceTranslation(page,bookId,expectedDataRoot,expectedChannel);
   at(expectedChannel+'-agent-workspace');
