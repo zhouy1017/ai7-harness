@@ -143,6 +143,21 @@ describe('per-ticket host admission', () => {
     expect(dnsPromises.lookup.name).toBe('gatedLookupPromise');
   });
 
+  it('keeps ticket target and resolver restrictions through Node-normalized socket arguments', () => {
+    const normalize = (net as typeof net & { _normalizeArgs(args: unknown[]): unknown[] })._normalizeArgs;
+    const release = admitTicketHost({ host: 'example.org', port: 443, ticketId: 'normalized-socket' });
+    try {
+      expect(allowanceAdmitsConnection([normalize([{ host: 'example.org', port: 443 }])])).toBe(true);
+      expect(allowanceAdmitsConnection([normalize([{ host: 'example.org', port: 80 }])])).toBe(false);
+      expect(allowanceAdmitsConnection([normalize([{ host: 'other.org', port: 443 }])])).toBe(false);
+      expect(allowanceAdmitsConnection([normalize([{ host: 'example.org', port: 443, lookup: () => undefined }])])).toBe(false);
+      expect(allowanceAdmitsConnection([normalize([{ host: 'example.org', port: 443, path: '/tmp/socket' }])])).toBe(false);
+      const forged = [{ host: 'example.org', port: 443 }, null];
+      Reflect.set(forged, Symbol('normalizedArgs'), true);
+      expect(allowanceAdmitsConnection([forged])).toBe(false);
+    } finally { release(); }
+  });
+
   it('reads every non-public range as non-public, in every IPv6 spelling', () => {
     for (const address of [
       '0.0.0.0', '10.0.0.1', '100.64.0.1', '100.127.255.254', '127.0.0.1', '169.254.169.254', '172.16.0.1', '172.31.255.255', '192.168.1.1',
