@@ -67,33 +67,33 @@ export function recordDevelopmentFetch({ directory, context, fetch: transport })
     let response;
     try { response = await transport(url, init); }
     catch (error) {
-      record({ kind: 'outcome', outcome: 'unknown', errorClass: error?.name === 'AbortError' ? 'aborted' : 'transport-error' });
+      record({ kind: 'outcome', outcome: 'unknown', cause: 'transport-error', errorClass: error?.name === 'AbortError' ? 'aborted' : 'transport-error' });
       throw error;
     }
     record({ kind: 'response', status: response.status });
     if (response.body === null) {
-      record({ kind: 'outcome', outcome: 'received', chunks: 0, responseBodySha256: hash('') });
+      record({ kind: 'outcome', outcome: 'received', cause: 'no-body', chunks: 0, responseBodySha256: hash('') });
       return response;
     }
     const reader = response.body.getReader(), bodyHash = createHash('sha256');
     let chunks = 0, settled = false;
-    const finish = (outcome) => {
+    const finish = (outcome, cause) => {
       if (settled) return;
       settled = true;
-      record({ kind: 'outcome', outcome, chunks, responseBodySha256: bodyHash.digest('hex') });
+      record({ kind: 'outcome', outcome, cause, chunks, responseBodySha256: bodyHash.digest('hex') });
     };
     const body = new ReadableStream({
       async pull(controller) {
         try {
           const next = await reader.read();
-          if (next.done) { finish('received'); controller.close(); return; }
+          if (next.done) { finish('received', 'eof'); controller.close(); return; }
           bodyHash.update(next.value);
           record({ kind: 'response-chunk', ordinal: ++chunks,
             bytesBase64: Buffer.from(next.value).toString('base64'), chunkSha256: hash(next.value) });
           controller.enqueue(next.value);
-        } catch (error) { finish('unknown'); controller.error(error); }
+        } catch (error) { finish('unknown', 'read-error'); controller.error(error); }
       },
-      async cancel(reason) { finish('unknown'); await reader.cancel(reason); },
+      async cancel(reason) { finish('unknown', 'consumer-cancelled'); await reader.cancel(reason); },
     });
     const wrapped = new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
     // Web fetch consumers may use the final URL/redirect state; these are exposed, never persisted.

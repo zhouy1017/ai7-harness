@@ -30,6 +30,7 @@ test('retains exact synthetic wire chunks/messages and identity, excluding all t
   assert.deepEqual(captured[0].requestQuery, [['q', 'synthetic query']]);
   assert.equal(captured[0].omittedQueryParameters, 1);
   assert.equal(captured.at(-1).outcome, 'received');
+  assert.equal(captured.at(-1).cause, 'eof');
   assert.equal(Buffer.concat(captured.filter(r => r.kind === 'response-chunk').map(r => Buffer.from(r.bytesBase64, 'base64'))).toString(), source.join(''));
   assert.doesNotMatch(raw, /QUERY_SENTINEL|HEADER_SENTINEL|RESPONSE_SENTINEL|Authorization/);
   for (let i = 0; i < captured.length; i++) {
@@ -37,19 +38,32 @@ test('retains exact synthetic wire chunks/messages and identity, excluding all t
     assert.equal(sha256, createHash('sha256').update(JSON.stringify(record)).digest('hex'));
     assert.equal(record.previousSha256, i === 0 ? null : captured[i - 1].sha256);
   }
+  const empty = temporary();
+  const noBody = recordDevelopmentFetch({ directory: empty, context: identity, fetch: async () => new Response(null, { status: 204 }) });
+  await noBody('https://example.test');
+  assert.equal(rows(empty).at(-1).cause, 'no-body');
 });
 
-test('preserves cancellation and transport failure as unknown without capturing exception prose', async () => {
+test('distinguishes cancellation, read and transport failure without capturing exception prose', async () => {
   const failed = temporary(), cancelled = temporary();
   const fetch = recordDevelopmentFetch({ directory: failed, context: identity, fetch: async () => { throw Error('SECRET_SENTINEL'); } });
   await assert.rejects(fetch('https://example.test'), /SECRET_SENTINEL/);
   assert.equal(rows(failed).at(-1).outcome, 'unknown');
+  assert.equal(rows(failed).at(-1).cause, 'transport-error');
   assert.doesNotMatch(JSON.stringify(rows(failed)), /SECRET_SENTINEL/);
   const stream = recordDevelopmentFetch({ directory: cancelled, context: identity,
     fetch: async () => new Response(new ReadableStream({ pull(c) { c.enqueue(new Uint8Array([1])); } })) });
   const response = await stream('https://example.test');
   await response.body.cancel();
   assert.equal(rows(cancelled).at(-1).outcome, 'unknown');
+  assert.equal(rows(cancelled).at(-1).cause, 'consumer-cancelled');
+  const broken = temporary();
+  const streamError = recordDevelopmentFetch({ directory: broken, context: identity,
+    fetch: async () => new Response(new ReadableStream({ start(c) { c.error(Error('READ_SECRET_SENTINEL')); } })) });
+  await assert.rejects((await streamError('https://example.test')).text(), /READ_SECRET_SENTINEL/);
+  assert.equal(rows(broken).at(-1).outcome, 'unknown');
+  assert.equal(rows(broken).at(-1).cause, 'read-error');
+  assert.doesNotMatch(JSON.stringify(rows(broken)), /READ_SECRET_SENTINEL/);
 });
 
 test('rejects repository recording and non-admitted input before any send', async () => {
