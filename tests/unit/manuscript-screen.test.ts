@@ -170,37 +170,42 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
+async function searchArrivalWithPendingWrite() {
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+  const initial = windowOf('book-one');
+  const matchWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'match', text: '星河校准' }], nextCursor: 'next' };
+  const laterWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'later' }] };
+  let releaseWrite = (): void => {};
+  let holdWrite = false;
+  const record = vi.fn(({ blockId }: { blockId: string }) => holdWrite && blockId === 'match'
+    ? new Promise<void>((resolve) => { releaseWrite = resolve; }) : Promise.resolve());
+  const load = vi.fn(async ({ target }: { target: { kind: string } }) => target.kind === 'block' ? matchWindow : target.kind === 'window-start' ? initial : laterWindow);
+  const methods = {
+    recordManuscriptEntryPosition: record, getManuscriptWindowAt: load,
+    startSearch: async () => ({ jobId: 'search-job', state: 'completed', kind: 'search', result: { searchId: 'search' } }),
+    getSearchResults: async () => ({ ...initial, searchId: 'search', query: '星河校准', scopeLabel: '全稿', totalMatches: 1,
+      previousCursor: null, nextCursor: null,
+      results: [{ matchId: 'match-id', blockId: 'match', fromGrapheme: 0, toGrapheme: 4, headingLabel: '第一章', context: '星河校准' }] }),
+  };
+  const rendererApi = new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) });
+  const app = shell(rendererApi);
+  app.open(initial);
+  const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+  Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
+  pane.dispatchEvent({ type: 'scroll' });
+  await vi.advanceTimersByTimeAsync(40);
+  app.screen.querySelector<HTMLInputElement>('[id="manuscript-search"]')!.value = '星河校准';
+  [...app.screen.querySelectorAll('button')].find((button) => button.textContent === '查找全稿')!.click();
+  await vi.advanceTimersByTimeAsync(0);
+  holdWrite = true;
+  expect(app.screen.querySelector('.search-result button'), app.persistenceStatus.textContent).not.toBeNull();
+  app.screen.querySelector<HTMLButtonElement>('.search-result button')!.click();
+  return { app, pane, load, record, initial, releaseWrite: () => releaseWrite() };
+}
+
 describe('the Manuscript screen lifecycle', () => {
   it('selects a search match in its arrival window before a slow entry write lets the viewport move on', async () => {
-    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
-    const initial = windowOf('book-one');
-    const matchWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'match', text: '星河校准' }], nextCursor: 'next' };
-    const laterWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'later' }] };
-    let releaseWrite = (): void => {};
-    let holdWrite = false;
-    const record = vi.fn(({ blockId }: { blockId: string }) => holdWrite && blockId === 'match'
-      ? new Promise<void>((resolve) => { releaseWrite = resolve; }) : Promise.resolve());
-    const load = vi.fn(async ({ target }: { target: { kind: string } }) => target.kind === 'block' ? matchWindow : laterWindow);
-    const methods = {
-      recordManuscriptEntryPosition: record, getManuscriptWindowAt: load,
-      startSearch: async () => ({ jobId: 'search-job', state: 'completed', kind: 'search', result: { searchId: 'search' } }),
-      getSearchResults: async () => ({ ...initial, searchId: 'search', query: '星河校准', scopeLabel: '全稿', totalMatches: 1,
-        previousCursor: null, nextCursor: null,
-        results: [{ matchId: 'match-id', blockId: 'match', fromGrapheme: 0, toGrapheme: 4, headingLabel: '第一章', context: '星河校准' }] }),
-    };
-    const rendererApi = new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) });
-    const app = shell(rendererApi);
-    app.open(initial);
-    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
-    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
-    pane.dispatchEvent({ type: 'scroll' });
-    await vi.advanceTimersByTimeAsync(40);
-    app.screen.querySelector<HTMLInputElement>('[id="manuscript-search"]')!.value = '星河校准';
-    [...app.screen.querySelectorAll('button')].find((button) => button.textContent === '查找全稿')!.click();
-    await vi.advanceTimersByTimeAsync(0);
-    holdWrite = true;
-    expect(app.screen.querySelector('.search-result button'), app.persistenceStatus.textContent).not.toBeNull();
-    app.screen.querySelector<HTMLButtonElement>('.search-result button')!.click();
+    const { app, pane, load, record, releaseWrite } = await searchArrivalWithPendingWrite();
     await vi.advanceTimersByTimeAsync(40);
     expect(record).toHaveBeenCalledTimes(2);
     // A scroll after arrival is admitted while its position write is still in flight (#474).
@@ -213,6 +218,17 @@ describe('the Manuscript screen lifecycle', () => {
     const select = children.editorSurfaces.at(-1)!.selectRange;
     expect(select).toHaveBeenCalledWith('match', 0, 4);
     expect(select.mock.results[0]?.value).toBe(true);
+    app.showing?.destroy();
+  });
+
+  it('honors an immediate search return while arrival frames and its position write are still pending', async () => {
+    const { app, load, initial, releaseWrite } = await searchArrivalWithPendingWrite();
+    [...app.screen.querySelectorAll('button')].find((button) => button.textContent === '返回查找前位置')!.click();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(load.mock.calls[1]?.[0].target).toEqual({ kind: 'window-start', blockId: initial.blocks[0]!.blockId });
+    releaseWrite();
+    await vi.advanceTimersByTimeAsync(0);
     app.showing?.destroy();
   });
 

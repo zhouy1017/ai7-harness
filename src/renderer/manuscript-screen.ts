@@ -1509,6 +1509,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
 
   async function returnToSearchPosition(): Promise<void> {
     if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return;
+    // The match is already visible while its arrival is still settling. An immediate explicit return
+    // waits for those frames, rather than being dropped by navigate's viewport-navigation guard.
+    while (edgeNavigation) {
+      await navigationIdle;
+      if (destroyed) return;
+    }
     if (!searchReturn) return;
     const binding = editor.currentWindow();
     if (
