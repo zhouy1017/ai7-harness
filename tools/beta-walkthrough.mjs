@@ -308,18 +308,25 @@ async function preparePortableCarry(executable,env,dataRoot,input){
   }
   checkpoint();
   at('portable-native-accepted-import');
-  await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'portable-import-library');
+  if(await boolean(page,"document.querySelector('[data-screen=import-recovery]')")){
+   check(await page.evaluate(`document.querySelector('[data-screen=import-recovery] .source-card [data-source-sha256]')?.textContent===${JSON.stringify(report.input.sha256)}`),'portable-recovered-exact-staged-input');
+   await click(page,'继续导入');await ready(page,"document.querySelector('[data-screen=target]')",'portable-recovered-import-target');
+  }
+  const staged=await boolean(page,"document.querySelector('[data-screen=target]')");
+  if(!staged){await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'portable-import-library');}
   const title='Beta portable accepted-baseline';
-  let imported=await page.evaluate(`[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes(${JSON.stringify(title)}))?.dataset.navBook??null`);
+  let imported=report.portableImport?.bookId??await page.evaluate(`[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes(${JSON.stringify(title)}))?.dataset.navBook??null`);
   if(!imported){
-   await click(page,'导入稿件');native(executable,['-FileName',input]);await ready(page,"document.querySelector('[data-screen=target]')",'portable-import-target');
+   if(!staged){await click(page,'导入稿件');native(executable,['-FileName',input]);await ready(page,"document.querySelector('[data-screen=target]')",'portable-import-target');}
+   check(await page.evaluate(`document.querySelector('[data-screen=target] .source-card [data-source-sha256]')?.textContent===${JSON.stringify(report.input.sha256)}`),'portable-exact-staged-native-input');
    await select(page,'input[data-import-target-choice=new-book]');await select(page,'input[aria-label="作为首份稿件导入"]');
    await select(page,'input[data-word-import-mode=accepted-baseline]');await select(page,'[data-word-accepted-baseline-confirmation]');await fill(page,'#book-title',title);
    await click(page,'确认书名并复核');await ready(page,"document.querySelector('[data-screen=review]')",'portable-import-review');
    await click(page,'新建图书并导入稿件');await ready(page,"document.querySelector('[data-screen=imported]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'portable-import-finished');
    await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'portable-import-editor');
    imported=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
-  }else{await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(imported)}]`);}
+  }else{await openKnownBook(page,imported);}
+  report.portableImport={...report.portableImport,bookId:imported,mode:'accepted-baseline',inputSha256:report.input.sha256};checkpoint();
   await ready(page,"document.querySelector('[aria-label^=跳转到尾注]')&&document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)",'portable-fresh-accepted-objects');
   check(true,'portable-fresh-accepted-import-without-workspace-ceremony');
   const output=join(dirname(input),'portable-accepted-export.docx');
