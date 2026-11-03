@@ -553,7 +553,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
   report.globalTurns??=[];report.globalAttempts??=[];
   if(!report.globalTurns.some(t=>t.channel===expectedChannel)){
-  if(resumePrefix&&resume.failureCode==='global-book-scope'&&!resume.checks.includes('select-[data-global-agent-question-form] button[type=submit]')){
+  if(resumePrefix&&report.globalAttempts.some(t=>t.channel===expectedChannel&&t.beforeDialogues===undefined)&&!resume.checks.includes('select-[data-global-agent-question-form] button[type=submit]')){
    check(await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>v.history.length===0)'),'global-prior-unsent-history-empty');
    report.closedUnsentAttempts??=[];report.closedUnsentAttempts.push(...report.globalAttempts.filter(t=>t.channel===expectedChannel).map(t=>({...t,reason:'closed before scope selection or any send; actual global history empty'})));
    report.globalAttempts=report.globalAttempts.filter(t=>t.channel!==expectedChannel);checkpoint();
