@@ -700,7 +700,16 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     salvageExport: 'unavailable',
   };
 
-  const announceState = (): void =>
+  const announceState = (): void => {
+    // Read-only selection coordinates for the same bounded surface as data-window-loads. Keep
+    // manuscript text out of diagnostics; browser checks resolve these pins against rendered blocks.
+    const selection = view.state.selection;
+    view.dom.dataset['selectionSnapshot'] = JSON.stringify({
+      from: selection.from,
+      to: selection.to,
+      anchor: pointAtPosition(view.state.doc, selection.anchor),
+      head: pointAtPosition(view.state.doc, selection.head),
+    });
     options.onStateChange({
       dirty: changedBlocks(view.state.doc).length > 0,
       interrupted,
@@ -712,6 +721,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       operationLocked,
       protection: protectionView(),
     });
+  };
 
   const clearRetryTimer = (): void => {
     if (retryTimer !== undefined) window.clearTimeout(retryTimer);

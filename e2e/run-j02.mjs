@@ -357,13 +357,15 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
 }
 
 async function observeSearchJump(renderer) {
-  await renderer.evaluate(`(() => {
+  const observed=await renderer.evaluate(`(() => {
     const trace=[],start=performance.now(),editor=document.querySelector('[data-testid="manuscript-editor"]'),pane=document.querySelector('.editor-window'),host=editor.parentElement;
     let closed=false,everMatchVisible=false,everDomRange=false,everFrameworkRange=false;
     const snapshot=(kind)=>{
-      const selection=getSelection(),view=editor.pmViewDesc?.view,state=view?.state,from=state?.selection?.from,to=state?.selection?.to;
+      const selection=getSelection(),state=editor.dataset.selectionSnapshot?JSON.parse(editor.dataset.selectionSnapshot):null,from=state?.from,to=state?.to;
       const matchingBlocks=[...editor.children].filter(block=>block.textContent.includes(${JSON.stringify(SEARCH_TEXT)})).length;
-      const domMatches=selection?.toString()===${JSON.stringify(SEARCH_TEXT)},frameworkMatches=state?state.doc.textBetween(from,to)===${JSON.stringify(SEARCH_TEXT)}:null;
+      const selectedBlock=state?[...editor.children].find(block=>block.dataset.blockId===state.anchor.blockId):null;
+      const selectedGraphemes=selectedBlock?[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(selectedBlock.textContent)].map(part=>part.segment):[];
+      const domMatches=selection?.toString()===${JSON.stringify(SEARCH_TEXT)},frameworkMatches=state?state.anchor.blockId===state.head.blockId&&selectedGraphemes.slice(Math.min(state.anchor.grapheme,state.head.grapheme),Math.max(state.anchor.grapheme,state.head.grapheme)).join('')===${JSON.stringify(SEARCH_TEXT)}:null;
       everMatchVisible ||= matchingBlocks>0;everDomRange ||= domMatches;everFrameworkRange ||= frameworkMatches===true;
       return {kind,ms:Math.round(performance.now()-start),matchingBlocks,domMatches,frameworkMatches,selectedCharacters:selection?.toString().length,anchorOffset:selection?.anchorOffset,headOffset:selection?.focusOffset,anchorInEditor:editor.contains(selection?.anchorNode),headInEditor:editor.contains(selection?.focusNode),frameworkFrom:from,frameworkTo:to,documentFocused:document.hasFocus(),editorFocused:editor.contains(document.activeElement),position:Number(document.querySelector('#manuscript-position')?.value),scrollTop:pane.scrollTop,viewportHeight:pane.clientHeight,scrollHeight:pane.scrollHeight,metaLength:document.querySelector('.editor-meta')?.textContent.length,statusLength:document.querySelector('#persistence-status')?.textContent.length,searchError:document.querySelector('#persistence-status')?.textContent==='无法在当前稿件状态中精确定位该匹配。',windowLoads:(host.dataset.windowLoads??'').split(',').map(value=>['navigation-block','navigation-cursor','navigation-window-start','review-settled','unnamed'].includes(value)?value:'other').slice(-12)};
     };
@@ -373,12 +375,15 @@ async function observeSearchJump(renderer) {
     const observer=new MutationObserver(()=>record('window'));observer.observe(host,{attributes:true,attributeFilter:['data-window-loads']});
     globalThis.__ai7SearchJumpObservation={read:()=>({current:snapshot('read'),everMatchVisible,everDomRange,everFrameworkRange,trace:[...trace]}),dispose:()=>{closed=true;observer.disconnect();document.removeEventListener('selectionchange',selection);pane.removeEventListener('scroll',scroll);window.removeEventListener('focus',focus);window.removeEventListener('blur',blur);}};
     record('start');
+    return Boolean(editor.dataset.selectionSnapshot);
   })()`);
+  requireJourney(observed,'search-framework-observer-ready');
 }
 
 async function waitForExactSearchRange(renderer) {
   try {
     await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+    if(localDebugEnabled())recordDebugDetail('J-02',`search jump observed ${JSON.stringify(await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()'))}`);
   } catch (error) {
     const observed=await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()').catch(()=>null);
     if(localDebugEnabled())recordDebugDetail('J-02',`search jump mismatch ${JSON.stringify(observed)}`);
