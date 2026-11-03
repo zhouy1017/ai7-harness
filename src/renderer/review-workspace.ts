@@ -1383,7 +1383,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const open = fact.open.get(result.resultId);
     const finding = run.findings.find((entry) => entry.findingId === result.reviewFindingId);
     const category = run.categories.find((entry) => entry.categoryId === 'factual-review')!;
-    const card = finding === undefined ? el('article', 'review-finding') : renderFinding(run, category, finding, open === undefined);
+    const card = finding === undefined ? el('article', 'review-finding') : renderFinding(run, category, finding, open === undefined, true);
     if (finding === undefined) {
       const head = el('div', 'fact-lens-row-heading');
       head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
@@ -1475,7 +1475,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     return group;
   }
 
-  function renderFinding(run: ReviewRunProjection, category: ReviewRunCategoryProjection, finding: ReviewFindingProjection, showEvidence = true): HTMLElement {
+  function renderFinding(run: ReviewRunProjection, category: ReviewRunCategoryProjection, finding: ReviewFindingProjection, showEvidence = true, hasVerification = false): HTMLElement {
     const article = el('article', 'review-finding');
     article.dataset['findingId'] = finding.findingId;
     article.dataset['severity'] = finding.severity;
@@ -1501,7 +1501,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (referencedRules !== null) article.append(referencedRules);
     if (finding.clauseRefs.length === 0) article.append(el('p', 'review-finding-basis', category.basisStatement));
     for (const clause of finding.clauseRefs) article.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
-    const lines = [finding.stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
+    // Extraction's original non-verdict remains historical; this card's verified result owns the current three states.
+    const stateLine = hasVerification && finding.stateLine === '未外部复核' ? null : finding.stateLine;
+    const lines = [stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
       .filter((line, index, all): line is string => line !== null && all.indexOf(line) === index);
     for (const line of lines) article.append(el('p', 'review-finding-state', line));
     const retained = research.get(finding.findingId);
