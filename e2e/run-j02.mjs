@@ -382,7 +382,13 @@ async function waitForExactSearchRange(renderer) {
   } catch (error) {
     const observed=await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()').catch(()=>null);
     if(localDebugEnabled())recordDebugDetail('J-02',`search jump mismatch ${JSON.stringify(observed)}`);
-    const reason=observed===null?'observation-unavailable':!observed.everMatchVisible?'match-never-in-window':observed.everDomRange?'range-lost':observed.current.frameworkMatches?'dom-selection-mismatch':observed.current.searchError?'navigation-refused':!observed.current.documentFocused?'window-unfocused':'match-without-range';
+    const lostRange=observed?.everDomRange
+      ? observed.current.matchingBlocks===0?'range-lost-window-left'
+        : observed.current.frameworkMatches===false?'range-lost-framework'
+          : observed.current.frameworkMatches===true?'range-lost-dom'
+            :'range-lost-framework-unavailable'
+      :null;
+    const reason=observed===null?'observation-unavailable':!observed.everMatchVisible?'match-never-in-window':lostRange??(observed.current.frameworkMatches?'dom-selection-mismatch':observed.current.searchError?'navigation-refused':!observed.current.documentFocused?'window-unfocused':'match-without-range');
     throw journeyCheckFailure('J-02',`search-exact-range-${reason}`,{cause:error});
   } finally {
     await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.dispose()').catch(()=>undefined);
