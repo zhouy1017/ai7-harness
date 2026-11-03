@@ -530,14 +530,24 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await fill(page,'[data-agent-workspace-field=instruction]','请复核上一轮，只保留删除测试样例中一个重复“的”的那一条候选；不要提出风格修改或改变英文事实。');await select(page,'[data-agent-workspace-action=propose]');
   await ready(page,`window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.state==='ready'&&v.proposal.proposalSetId!==${JSON.stringify(firstProposal)})`,'agent-second-round',300000);check(true,expectedChannel+'-agent-refinement-round');
   agent.count=await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.candidates.length??0)');
-  agentAttempt.second={proposalSetId:await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>v.proposal?.proposalSetId)'),completedAt:new Date().toISOString()};checkpoint();
+  agentAttempt.second={...await page.evaluate('window.ai7.inspectAgentWorkspace().then(v=>({proposalSetId:v.proposal?.proposalSetId,dialogueId:v.proposal?.dialogueId}))'),completedAt:new Date().toISOString()};checkpoint();
   if(agent.count===1){await select(page,'[data-agent-workspace-action=promote]');await ready(page,"document.querySelector('[data-agent-workspace-promoted]')?.dataset.agentWorkspacePromoted==='1'",'agent-single-promoted');agent.singleCandidatePromoted=true;}
   else{agent.singleCandidatePromoted=false;report.limitations.push(`${expectedChannel}: Agent returned ${agent.count} candidates; single-candidate promotion remains unmeasured, with no answer reroll.`);}
   report.agent.push({channel:expectedChannel,...agent,twoRoundsComplete:true});checkpoint();
   }
   const recordedAgent=report.agent.find(a=>a.channel===expectedChannel&&a.twoRoundsComplete);
-  const agentDialogue=await page.evaluate(`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(recordedAgent.dialogueId)},afterFragment:0}).then(v=>v.attempts.map(a=>({attemptId:a.attemptId,state:a.state,fragments:a.fragments.length})))`);
-  check(agentDialogue.length>=2&&agentDialogue.slice(-2).every(a=>a.state==='completed'&&a.fragments>0),expectedChannel+'-agent-two-streamed-rounds');
+  const heldAgent=report.agentAttempts.find(a=>a.channel===expectedChannel);
+  if(!heldAgent.second.dialogueId){
+   const db=new DatabaseSync(join(expectedDataRoot,'store','ai7.sqlite'),{readOnly:true});
+   try{
+    const rows=db.prepare("SELECT dialogue_id,canonical_json,sha256 FROM dialogue_tasks WHERE book_id=? AND json_extract(canonical_json,'$.origin')='agent-workspace' AND asked_at>=? AND asked_at<=? ORDER BY asked_at").all(bookId,heldAgent.intendedAt,heldAgent.second.completedAt);
+    check(rows.length===2&&rows[0].dialogue_id===heldAgent.first.dialogueId&&rows.every(r=>createHash('sha256').update(r.canonical_json).digest('hex')===r.sha256),'agent-exact-two-round-lineage');
+    heldAgent.second.dialogueId=rows[1].dialogue_id;heldAgent.lineageRecoveredFrom='two exact persisted workspace dialogue tasks inside original observed round window';checkpoint();
+   }finally{db.close();}
+  }
+  const agentIds=[heldAgent.first.dialogueId,heldAgent.second.dialogueId];
+  const agentDialogue=await page.evaluate(`Promise.all(${JSON.stringify(agentIds)}.map(async dialogueId=>{const v=await window.ai7.inspectDialogue({dialogueId,afterFragment:0});return {dialogueId,attempts:v.attempts.map(a=>({attemptId:a.attemptId,state:a.state,fragments:a.fragments.length}))};}))`);
+  check(new Set(agentIds).size===2&&agentDialogue.every(d=>d.attempts.length>0&&d.attempts.at(-1).state==='completed'&&d.attempts.at(-1).fragments>0),expectedChannel+'-agent-two-streamed-rounds');
   recordedAgent.attempts=agentDialogue;checkpoint();
   at(expectedChannel+'-global-agent-live');
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
