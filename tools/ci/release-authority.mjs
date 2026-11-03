@@ -2,6 +2,36 @@
 const SHA = /^[a-f0-9]{40}$/u;
 // ADR 0097: the standing Gate runs on Windows only.
 const GATE_PLATFORMS = ['Windows Server 2025 x64 CI'];
+const FULL_JOURNEYS = 'J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 + J-10 + J-11 + J-16 + J-13';
+export const FULL_GATE_RESOLVE_JOB = 'Resolve exact Full Gate pull request';
+export const GATE_PUBLISH_JOB = 'Publish E2E Functional Gate result';
+
+export function fullGateRunTitle(pr, head, base) {
+  return `E2E Nightly Full Gate · ${head} · PR ${pr} · ${base}`;
+}
+
+/**
+ * The existing full Journey job, bound by a manually dispatched reviewed workflow revision to
+ * an exact PR head/base. While publishing, only that same in-progress occurrence may be read;
+ * later consumers require the completed successful occurrence. No candidate output is authority.
+ */
+export function manualFullGatePassed({ run, jobs, pr, head, base, currentRun, controlSha }) {
+  if (!Number.isSafeInteger(pr) || pr <= 0 || !SHA.test(head ?? '') || !SHA.test(base ?? '') ||
+      !SHA.test(run?.head_sha ?? '') || typeof run.head_branch !== 'string' || run.head_branch.trim() === '' ||
+      run.path !== '.github/workflows/e2e-nightly.yml' || run.event !== 'workflow_dispatch' ||
+      run.display_title !== fullGateRunTitle(pr, head, base)) return false;
+  const completed = run.status === 'completed' && run.conclusion === 'success';
+  const publishing = run.status === 'in_progress' && run.conclusion == null &&
+    String(run.id) === String(currentRun) && SHA.test(controlSha ?? '') && run.head_sha === controlSha;
+  if (!completed && !publishing) return false;
+  if (controlSha !== undefined && run.head_sha !== controlSha) return false;
+  if (jobs.some((job) => String(job.run_id) !== String(run.id))) return false;
+  const full = jobs.filter((job) => GATE_PLATFORMS.some((label) => job.name === `${FULL_JOURNEYS} (${label})`));
+  return full.length === GATE_PLATFORMS.length &&
+    GATE_PLATFORMS.every((label) => full.some((job) => job.name === `${FULL_JOURNEYS} (${label})`)) &&
+    jobs.some((job) => job.name === FULL_GATE_RESOLVE_JOB && job.status === 'completed' && job.conclusion === 'success') &&
+    jobs.every((job) => (publishing && job.name === GATE_PUBLISH_JOB) || (job.status === 'completed' && job.conclusion === 'success'));
+}
 
 // Branch names are conventions. Main promotion remains a separately authorized action.
 export function queueTarget(target) {
@@ -29,6 +59,7 @@ export function hostedGatePassed({ run, jobs, pr, candidate, head, base, docs = 
         job.status === 'completed' && (job.conclusion === 'success' || (docs && job.conclusion === 'skipped'))) &&
       jobs.every((job) => job.name === 'Publish E2E Functional Gate result' || ['success', 'skipped'].includes(job.conclusion));
   }
+  if (candidate === head && manualFullGatePassed({ run, jobs, pr, head, base })) return true;
   if (run.head_branch !== 'dev') return false;
   if (run.path === '.github/workflows/e2e-nightly.yml' && run.event === 'workflow_dispatch') {
     const gateJobs = jobs.filter((job) => GATE_PLATFORMS.some((label) => job.name.includes(`(${label})`)));

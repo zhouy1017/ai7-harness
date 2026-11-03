@@ -4,6 +4,8 @@ const release = await import(new URL('../../tools/orca-release.mjs', import.meta
   hostedGatePassed: (input: Record<string, unknown>) => boolean;
   queueTarget: (target: unknown) => boolean;
   gateResultPassed: (result: string, docs: boolean) => boolean;
+  manualFullGatePassed: (input: Record<string, unknown>) => boolean;
+  fullGateRunTitle: (pr: number, head: string, base: string) => string;
 };
 const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
@@ -75,5 +77,42 @@ describe('real hosted Gate results independent of coding-agent conventions', () 
       head: HEAD, base: BASE, docs: true })).toBe(true);
     expect(release.hostedGatePassed({ ...input, run: fast, jobs: fastJobs, head: HEAD, base: CORRECTED })).toBe(false);
     expect(release.hostedGatePassed({ ...input, run: { ...fast, event: 'pull_request' }, jobs: fastJobs, head: HEAD, base: BASE })).toBe(false);
+  });
+});
+
+describe('explicitly dispatched full Gate over an exact development PR', () => {
+  const control = 'd'.repeat(40);
+  const fullName = 'J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 + J-10 + J-11 + J-16 + J-13 (Windows Server 2025 x64 CI)';
+  const run = { id: 200, repository: { full_name: 'owner/repo' }, head_branch: 'owner/reviewed-control', head_sha: control,
+    path: '.github/workflows/e2e-nightly.yml', event: 'workflow_dispatch', status: 'in_progress', conclusion: null,
+    display_title: release.fullGateRunTitle(1290, HEAD, BASE) };
+  const jobs = [{ run_id: 200, name: 'Resolve exact Full Gate pull request', status: 'completed', conclusion: 'success' },
+    { run_id: 200, name: fullName, status: 'completed', conclusion: 'success' },
+    { run_id: 200, name: 'Publish E2E Functional Gate result', status: 'in_progress', conclusion: null }];
+  const input = { run, jobs, pr: 1290, head: HEAD, base: BASE, currentRun: '200', controlSha: control };
+
+  it('uses genuine same-run full tests on reviewed control outside dev, then completed evidence', () => {
+    expect(release.manualFullGatePassed(input)).toBe(true);
+    expect(release.manualFullGatePassed({ ...input, run: { ...run, head_branch: 'main' } })).toBe(true);
+    const completed = { ...run, status: 'completed', conclusion: 'success' };
+    const completedJobs = jobs.map((job) => ({ ...job, status: 'completed', conclusion: 'success' }));
+    expect(release.hostedGatePassed({ run: completed, jobs: completedJobs, pr: 1290, candidate: HEAD, head: HEAD, base: BASE })).toBe(true);
+    expect(release.hostedGatePassed({ run: completed, jobs: completedJobs, pr: 1290, candidate: CORRECTED, head: HEAD, base: BASE })).toBe(false);
+    expect(release.hostedGatePassed({ ...input, candidate: HEAD })).toBe(false);
+  });
+
+  it('rejects wrong head/base, control/run/job identity and incomplete full-job results', () => {
+    for (const changed of [{ head: CORRECTED }, { base: CORRECTED }, { controlSha: CORRECTED }, { currentRun: '201' },
+      { run: { ...run, head_branch: '' } }, { run: { ...run, event: 'pull_request' } },
+      { run: { ...run, path: '.github/workflows/e2e.yml' } }, { jobs: [] },
+      { jobs: [jobs[0], { ...jobs[1], name: 'Another job' }, jobs[2]] },
+      { jobs: [jobs[0], { ...jobs[1], run_id: 201 }, jobs[2]] }]) {
+      expect(release.manualFullGatePassed({ ...input, ...changed })).toBe(false);
+    }
+    for (const conclusion of ['failure', 'cancelled', 'timed_out', 'skipped', null]) {
+      expect(release.manualFullGatePassed({ ...input, jobs: [jobs[0], { ...jobs[1], conclusion }, jobs[2]] })).toBe(false);
+    }
+    expect(release.manualFullGatePassed({ ...input, jobs: [jobs[0], { ...jobs[1], status: 'in_progress' }, jobs[2]] })).toBe(false);
+    expect(release.manualFullGatePassed({ ...input, jobs: [jobs[0], jobs[1], jobs[1], jobs[2]] })).toBe(false);
   });
 });
