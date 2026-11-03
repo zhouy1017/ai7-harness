@@ -546,9 +546,9 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    }finally{db.close();}
   }
   const agentIds=[heldAgent.first.dialogueId,heldAgent.second.dialogueId];
-  const agentDialogue=await page.evaluate(`Promise.all(${JSON.stringify(agentIds)}.map(async dialogueId=>{const v=await window.ai7.inspectDialogue({dialogueId,afterFragment:0});return {dialogueId,attempts:v.attempts.map(a=>({attemptId:a.attemptId,state:a.state,fragments:a.fragments.length}))};}))`);
-  check(new Set(agentIds).size===2&&agentDialogue.every(d=>d.attempts.length>0&&d.attempts.at(-1).state==='completed'&&d.attempts.at(-1).fragments>0),expectedChannel+'-agent-two-streamed-rounds');
-  recordedAgent.attempts=agentDialogue;checkpoint();
+  const agentDialogue=await page.evaluate(`Promise.all(${JSON.stringify(agentIds)}.map(async dialogueId=>{const v=await window.ai7.inspectDialogue({dialogueId,afterFragment:0});return {dialogueId,attempts:v.attempts.map(a=>({attemptId:a.attemptId,state:a.state,streamFragmentTotal:a.fragmentTotal,publicFragments:a.fragments.length}))};}))`);
+  recordedAgent.attempts=agentDialogue;recordedAgent.streamDisclosure='Workspace projection withholds raw proposal JSON fragments but retains its verified stream fragment total.';checkpoint();
+  check(new Set(agentIds).size===2&&agentDialogue.every(d=>d.attempts.length>0&&d.attempts.at(-1).state==='completed'&&d.attempts.at(-1).streamFragmentTotal>0),expectedChannel+'-agent-two-streamed-rounds');
   at(expectedChannel+'-global-agent-live');
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
   report.globalTurns??=[];report.globalAttempts??=[];
@@ -585,7 +585,11 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'library-after-agents');
   await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
   await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'return-manuscript-milestone');
-  check(await page.evaluate(`(()=>{const n=document.querySelector('[data-edge-entry=navigation]');if(n.getAttribute('aria-expanded')!=='true')n.click();document.querySelector('details.milestone-section').open=true;return true})()`),'milestone-form');
+  await ready(page,"document.querySelector('#manuscript-save-menu > summary')",'save-menu-ready');
+  if(!await boolean(page,"document.querySelector('#manuscript-save-menu')?.open"))await select(page,'#manuscript-save-menu > summary');
+  await ready(page,"document.querySelector('details.milestone-section > summary')?.getClientRects().length>0",'milestone-menu-ready');
+  if(!await boolean(page,"document.querySelector('details.milestone-section')?.open"))await select(page,'details.milestone-section > summary');
+  check(await boolean(page,"document.querySelector('#milestone-label')?.getClientRects().length>0"),'milestone-form');
   await fill(page,'#milestone-label','Beta 验收发稿');await select(page,'input[name=milestone-purpose][value=delivery-candidate]');await click(page,'保存里程碑版本');
   await ready(page,"document.querySelector('#milestone-label')?.value===''",'milestone-saved');
   await select(page,'#app-sidebar [data-nav-book-section=deliverables]');await ready(page,"document.querySelector('[data-screen=book-deliverables]')",'deliverables');
