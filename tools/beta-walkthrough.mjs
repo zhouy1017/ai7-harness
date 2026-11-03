@@ -128,7 +128,10 @@ async function controlledSourceTranslation(page,bookId,dataRoot,channel){
   check(await page.evaluate(`(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');const p=e.querySelector('[data-block-id="${probe.blockId}"]');if(!p||p.textContent!==${JSON.stringify(fact)})return false;e.focus();const r=document.createRange();r.selectNodeContents(p);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));return true})()`),'controlled-fact-selected');
   await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   check(await page.evaluate(`(()=>{const p=document.querySelector('[data-testid=manuscript-editor] [data-block-id="${probe.blockId}"]');if(!p||getSelection().toString()!==${JSON.stringify(fact)})return false;const b=p.getBoundingClientRect();const init={bubbles:true,cancelable:true,button:2,buttons:2,clientX:b.x+15,clientY:b.y+10};p.dispatchEvent(new MouseEvent('mousedown',init));p.dispatchEvent(new MouseEvent('mouseup',{...init,buttons:0}));p.dispatchEvent(new MouseEvent('contextmenu',{...init,buttons:0}));return true})()`),'controlled-fact-context-menu');
-  await select(page,'[data-mark-action=task-on-selection]');await ready(page,"document.querySelector('[data-mark-composer=task-on-selection]')",'controlled-selection-task');
+  await select(page,'[data-mark-action=task-on-selection]');
+  await ready(page,"document.querySelector('#task-drawer .task-composer[data-task-composer=new]')",'controlled-context-composer');
+  await select(page,'#task-drawer [data-task-composer-action=procedures]');
+  await ready(page,"document.querySelector('[data-mark-composer=task-on-selection]')",'controlled-selection-task');
   await fill(page,'[data-mark-composer=task-on-selection] [data-mark-field=procedure]','review:factual-review');
   await select(page,'[data-mark-composer=task-on-selection] [data-mark-action=submit]');
   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(v=>v.run&&v.run.reviewRunId!==${JSON.stringify(probe.previousRunId)})`,'controlled-factual-started');
@@ -371,7 +374,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
    // authorizing the original paid requests again. Keep its original binary identity.
    report.retainedReviewEvidence=resume.completedReview;
    await openRetainedReview(page,retainedReview.runId);
-   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview.runId)}}).then(v=>v.run?.state==='settled')`,'retained-completed-review');
+   await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview.runId)}}).then(v=>v.run&&['settled','scope-changed'].includes(v.run.state)&&v.run.categories.every(c=>c.state==='settled'))`,'retained-completed-review');
    const expectedTasks=retainedReview.memberCoverage.filter(c=>!c.local).map(c=>({categoryId:c.categoryId,taskIntentId:c.taskIntentId}));
    check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview.runId)}}).then(v=>${JSON.stringify(expectedTasks)}.every(e=>v.run.categories.some(c=>c.categoryId===e.categoryId&&c.taskIntentId===e.taskIntentId)))`),'retained-review-task-identities');
   }else if(resumePrefix&&(resume.activeReview||resume.failedStage==='windows-installer-full-review'&&resume.checks.includes('select-dialog.review-sheet [data-review-action=start]'))){
