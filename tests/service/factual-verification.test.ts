@@ -375,9 +375,11 @@ describe('factual claim occurrence ledger', () => {
     expect(store.inspectFactualReview(book.bookId).taskIntent).toMatchObject({ mode: 'review-again', modeLabel: '再次核查' });
     expect(store.inspectFactualReview(book.bookId).updateControls).toBeNull();
     expect(lens(book, repeated.reviewRunId).results.map(r => r.findingId)).toEqual(repeated.results.map(r => r.findingId));
-    expect(() => store.factualReviewLedger.prepare({ phase: 'start', bookId: book.bookId, goal: '再次核查当前全书事实，保留此前核查历史。',
-      update: { mode: 'review-again', selectedRange: null }, reconfirm: false, launchPolicy: unconfigured.policy }))
-      .toThrowError(expect.objectContaining({ code: 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED' }));
+    expect(() => {
+      let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'],
+        { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, unconfigured.policy);
+      while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+    }).toThrowError(expect.objectContaining({ code: 'REVIEW_CATEGORY_UNAVAILABLE' }));
     expect(sends).toEqual(before);
   });
 
