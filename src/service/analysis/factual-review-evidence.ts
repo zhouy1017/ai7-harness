@@ -76,6 +76,17 @@ function fold(text: string): FoldedText {
 const SENTENCE_END = new Set(['。', '！', '？', '!', '?', '；', ';', '…']);
 const CLOSERS = new Set(['”', '’', '」', '』', '）', ')', '》', '"', "'", ']', '】']);
 
+/** Keep initials, titles and dotted abbreviations with their following context in the untouched capture. */
+function periodContinues(text: string, index: number): boolean {
+  let next = index + 1;
+  while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+  if (next === text.length) return false;
+  const before = text.slice(Math.max(0, index - 24), index + 1);
+  if (/(?:^|[^\p{L}])(?:[a-z]\.){2,}$/iu.test(before)) return true;
+  return /[\p{L}\p{N}]/u.test(text[next]!) &&
+    (/(?:^|[^\p{L}])[A-Z]\.$/u.test(before) || /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St)\.$/iu.test(before));
+}
+
 /** The captured text's sentences, as [from, to) ranges in order: Chinese and Latin enders, closing quotes kept, blank lines. */
 export function evidenceSentences(text: string): Array<{ from: number; to: number }> {
   const sentences: Array<{ from: number; to: number }> = [];
@@ -94,7 +105,7 @@ export function evidenceSentences(text: string): Array<{ from: number; to: numbe
       push(index + 1);
       continue;
     }
-    const latinStop = character === '.' && (index + 1 === text.length || /\s/u.test(text[index + 1]!)) && index > 0 && /[\p{L}\p{N})"'”]/u.test(text[index - 1]!);
+    const latinStop = character === '.' && (index + 1 === text.length || /\s/u.test(text[index + 1]!)) && index > 0 && /[\p{L}\p{N})"'”]/u.test(text[index - 1]!) && !periodContinues(text, index);
     if (SENTENCE_END.has(character) || latinStop) {
       let end = index + 1;
       while (end < text.length && (CLOSERS.has(text[end]!) || SENTENCE_END.has(text[end]!))) end += 1;

@@ -536,13 +536,20 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-destination=global-agent]');await ready(page,"document.querySelector('[data-global-agent-question-form]')",'global-ready');
   report.globalTurns??=[];report.globalAttempts??=[];
   if(!report.globalTurns.some(t=>t.channel===expectedChannel)){
+  if(resumePrefix&&resume.failureCode==='global-book-scope'&&!resume.checks.includes('select-[data-global-agent-question-form] button[type=submit]')){
+   check(await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>v.history.length===0)'),'global-prior-unsent-history-empty');
+   report.closedUnsentAttempts??=[];report.closedUnsentAttempts.push(...report.globalAttempts.filter(t=>t.channel===expectedChannel).map(t=>({...t,reason:'closed before scope selection or any send; actual global history empty'})));
+   report.globalAttempts=report.globalAttempts.filter(t=>t.channel!==expectedChannel);checkpoint();
+  }
   check(!report.globalAttempts.some(t=>t.channel===expectedChannel),'global-prior-attempt-needs-lineage-reconciliation');
-  report.globalAttempts.push({channel:expectedChannel,intendedAt:new Date().toISOString()});checkpoint();
+  await ready(page,"document.querySelectorAll('[data-global-agent-scope-book]').length>=2",'global-book-scope-loaded');
   check(await page.evaluate(`(()=>{const rows=[...document.querySelectorAll('[data-global-agent-scope-book]')];for(const n of rows){if(!n.checked)n.click();}return rows.length>=2})()`),'global-book-scope');
   await fill(page,'[data-global-agent-question]','请使用跨书检索工具 retrieve 查找本次选入公开样书的共同内容，再使用 exact_fetch 读取至少一处精确原文；据此简短说明证据来自哪本书，不推测没有的内容。');
+  const globalBefore=await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>v.history.map(h=>h.dialogueId))');
+  report.globalAttempts.push({channel:expectedChannel,beforeDialogues:globalBefore,intendedAt:new Date().toISOString()});checkpoint();
   await select(page,'[data-global-agent-question-form] button[type=submit]');
   await ready(page,"document.querySelector('.global-agent-answer-bubble')?.textContent.length>0&&document.querySelector('[data-global-agent-question-form] button[type=submit]')?.disabled===false",'global-answer',300000);
-  const globalTurn=await page.evaluate('window.ai7.inspectGlobalAgent().then(v=>{const h=v.history[0];return {dialogueId:h?.dialogueId,state:h?.attempts.at(-1)?.state,fragments:h?.attempts.at(-1)?.fragments.length,tools:h?.toolCalls?.map(c=>({tool:c.tool,outcome:c.outcome}))}})');
+  const globalTurn=await page.evaluate(`(async()=>{const p=await window.ai7.inspectGlobalAgent();const h=p.history.find(h=>!${JSON.stringify(globalBefore)}.includes(h.dialogueId));if(!h)return {};const v=await window.ai7.inspectGlobalAgentDialogue({dialogueId:h.dialogueId});return {dialogueId:v.dialogueId,state:v.attempts.at(-1)?.state,fragments:v.attempts.at(-1)?.fragments.length,tools:v.toolCalls?.map(c=>({tool:c.tool,outcome:c.outcome}))}})()`);
   check(globalTurn.state==='completed'&&globalTurn.fragments>0&&['retrieve','exact_fetch'].every(t=>globalTurn.tools?.some(c=>c.tool===t&&c.outcome==='returned')),expectedChannel+'-global-real-cross-book-tools');report.globalTurns??=[];report.globalTurns.push({channel:expectedChannel,...globalTurn});
   checkpoint();
   }
@@ -554,7 +561,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.habitAttempts.push({channel:expectedChannel,beforeHabits,intendedAt:new Date().toISOString()});checkpoint();
   await select(page,'[data-global-agent-habits=summary]');
   await ready(page,"document.querySelector('[data-global-agent-question-form] button[type=submit]')?.disabled===false",'habits-answer',300000);
-  await ready(page,`window.ai7.inspectGlobalAgent().then(v=>v.history.some(h=>!${JSON.stringify(beforeHabits)}.includes(h.dialogueId)&&h.attempts.at(-1)?.state==='completed'&&h.attempts.at(-1)?.fragments.length>0))`,'new-habits-completed',300000);
+  await ready(page,`(async()=>{const p=await window.ai7.inspectGlobalAgent();for(const h of p.history.filter(h=>!${JSON.stringify(beforeHabits)}.includes(h.dialogueId))){const v=await window.ai7.inspectGlobalAgentDialogue({dialogueId:h.dialogueId});if(v.attempts.at(-1)?.state==='completed'&&v.attempts.at(-1)?.fragments.length>0)return true;}return false;})()`,'new-habits-completed',300000);
   check(true,expectedChannel+'-habits-new-completed-answer');
   report.habits.push({channel:expectedChannel,completedAt:new Date().toISOString()});checkpoint();
   }

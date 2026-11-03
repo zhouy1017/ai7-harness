@@ -38,6 +38,15 @@ const CAPTURE = '曾侯乙尊盘出土于1978年。它由尊与盘两件器物�
 const instant = (iso: string): string => `本地 ${iso}`;
 
 describe('sentence alignment against the captured text', () => {
+  it.each(['John F. Example', 'Dr. J. R. Example', 'the U.S. team', 'the 9:32 a.m. (local time) event'])('keeps %s inside its complete sentence with exact offsets', (subject) => {
+    const first = `The public archive describes ${subject} and the result of the demonstration.`;
+    const next = 'A separate observation follows.';
+    const captured = `  ${first} ${next}`;
+    const sentences = evidenceSentences(captured);
+    expect(sentences.map(range => captured.slice(range.from, range.to))).toEqual([first, next]);
+    expect(sentences[0]).toEqual({ from: 2, to: first.length + 2 });
+  });
+
   it('splits the capture into sentences at Chinese and Latin stops and at line breaks', () => {
     const sentences = evidenceSentences(CAPTURE).map((range) => CAPTURE.slice(range.from, range.to));
     expect(sentences).toEqual(['曾侯乙尊盘出土于1978年。', '它由尊与盘两件器物组成，现藏湖北省博物馆。', '铸造采用失蜡法，这一说法仍有争议！']);
@@ -152,6 +161,17 @@ describe('staleness', () => {
 describe('来源译文', () => {
   const english = 'The bronze zun and pan were excavated in 1978. They are held by the Hubei Provincial Museum.';
   const base = { captured: english, contentSha256: digest(english), url: 'https://example.org/en', anchors: [{ from: 47, to: 92, sentence: 2 }] };
+  it.each([true, false])('translates complete initial/time context with an anchor=%s, retaining the original hash and range', async (anchored) => {
+    const prose = 'The public archive records John F. Example arriving at 9:32 a.m. (local time) for the demonstration.';
+    const captured = `Public archive\n${prose} Another complete sentence follows.`;
+    const from = captured.indexOf(prose), asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured),
+      anchors: anchored ? [{ from: captured.indexOf('John F.'), to: captured.indexOf('Example') + 'Example'.length, sentence: 2 }] : [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '公开合成译文。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual([prose]);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { contentSha256: digest(captured), from, to: from + prose.length } });
+  });
   it('needs none for a Chinese source', async () => {
     expect(needsSourceTranslation(CAPTURE)).toBe(false);
     expect(needsSourceTranslation(english)).toBe(true);
