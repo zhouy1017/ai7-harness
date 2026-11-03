@@ -10,7 +10,8 @@ import { spawn, spawnSync } from 'node:child_process';
 import { serveGuestEnrollment, storeEnrollment } from './enroll-dev-credential.mjs';
 import { chromium } from 'playwright-core';
 import { selfCheckEnvironment } from '../tools/package.mjs';
-import { composeAdmittedDocx, composeExportAdmittedDocx, addReadOnlySourceObjects } from '../e2e/composed-docx.mjs';
+import { composeAdmittedDocx, composeExportAdmittedDocx, addReadOnlySourceObjects, readExportedDocx } from '../e2e/composed-docx.mjs';
+import { wordTablePresentation } from './beta-docx-fidelity.mjs';
 import { build } from 'esbuild';
 import { unzipSync, strFromU8 } from 'fflate';
 
@@ -585,6 +586,8 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'library-after-agents');
   await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
   await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'return-manuscript-milestone');
+  const priorMilestone=await page.evaluate("window.ai7.inspectDeliverables().then(v=>v.publication.milestones.find(m=>m.label==='Beta 验收发稿'&&m.purposeKind==='delivery-candidate'&&!m.changedSince)??null)");
+  if(!priorMilestone){
   await ready(page,"document.querySelector('#manuscript-save-menu > summary')",'save-menu-ready');
   if(!await boolean(page,"document.querySelector('#manuscript-save-menu')?.open"))await select(page,'#manuscript-save-menu > summary');
   await ready(page,"document.querySelector('details.milestone-section > summary')?.getClientRects().length>0",'milestone-menu-ready');
@@ -592,15 +595,34 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(await boolean(page,"document.querySelector('#milestone-label')?.getClientRects().length>0"),'milestone-form');
   await fill(page,'#milestone-label','Beta 验收发稿');await select(page,'input[name=milestone-purpose][value=delivery-candidate]');await click(page,'保存里程碑版本');
   await ready(page,"document.querySelector('#milestone-label')?.value===''",'milestone-saved');
+  }
+  const milestone=priorMilestone??await page.evaluate("window.ai7.inspectDeliverables().then(v=>v.publication.milestones.find(m=>m.label==='Beta 验收发稿'&&!m.changedSince)??null)");
+  check(Boolean(milestone),'current-delivery-milestone-retained');report.milestoneEvidence??=[];report.milestoneEvidence.push({channel:expectedChannel,...milestone,reused:Boolean(priorMilestone)});checkpoint();
   await select(page,'#app-sidebar [data-nav-book-section=deliverables]');await ready(page,"document.querySelector('[data-screen=book-deliverables]')",'deliverables');
   at(expectedChannel+'-native-docx-export');
-  await select(page,'[data-export-action=open][data-export-target=current]');native(executable,['-FileName',output]);
-  await ready(page,"document.querySelector('.export-receipt')?.dataset.exportOutcome==='created'",'export-created');
+  let exactExportReceipt;
+  if(existsSync(output)){
+   const existingHash=createHash('sha256').update(await readFile(output)).digest('hex');
+   exactExportReceipt=await page.evaluate(`window.ai7.inspectDeliverables().then(v=>v.exports.find(r=>['created','replaced'].includes(r.outcome)&&r.format==='docx'&&r.target.revisionId===v.manuscript.revisionId&&r.technical.fileSha256===${JSON.stringify(existingHash)})??null)`);
+   check(Boolean(exactExportReceipt),'prior-native-export-exact-receipt-and-current-revision');
+  }else{
+   await select(page,'[data-export-action=open][data-export-target=current]');native(executable,['-FileName',output]);
+   await ready(page,"document.querySelector('.export-receipt')?.dataset.exportOutcome==='created'",'export-created');
+   const createdHash=createHash('sha256').update(await readFile(output)).digest('hex');
+   exactExportReceipt=await page.evaluate(`window.ai7.inspectDeliverables().then(v=>v.exports.find(r=>r.technical.fileSha256===${JSON.stringify(createdHash)}&&['created','replaced'].includes(r.outcome))??null)`);
+   check(Boolean(exactExportReceipt),'native-export-durable-receipt');
+  }
   const source=unzipSync(await readFile(input)), exported=unzipSync(await readFile(output));
   const hash=(bytes)=>createHash('sha256').update(bytes).digest('hex');
   check(hash(source['word/media/source-preview.png'])===hash(exported['word/media/source-preview.png']),expectedChannel+'-media-fidelity');
-  const table=(files)=>strFromU8(files['word/document.xml']).match(/<w:tbl[\s>][\s\S]*?<\/w:tbl>/)?.[0];
-  check(table(source)===table(exported),expectedChannel+'-table-fidelity');
+  const sourceTable=wordTablePresentation(source),exportTable=wordTablePresentation(exported);
+  check(sourceTable.count>0&&sourceTable.count===exportTable.count&&sourceTable.presentationSha256===exportTable.presentationSha256,expectedChannel+'-table-fidelity');
+  check(exportTable.commentsResolve,expectedChannel+'-table-comments-resolve');
+  const [originalRead,exportedRead]=await Promise.all([readExportedDocx(input),readExportedDocx(output)]);
+  check(originalRead.comments.every(c=>exportedRead.comments.some(e=>e.author===c.author&&e.digest===c.digest)),expectedChannel+'-source-comments-retained');
+  const untouchedStories=Object.keys(source).filter(n=>/^word\/(?:endnotes|footnotes|header[^/]*)\.xml$/.test(n));
+  check(untouchedStories.length>0&&untouchedStories.every(n=>exported[n]&&hash(source[n])===hash(exported[n])),expectedChannel+'-untouched-note-header-fidelity');
+  report.nativeExports??=[];report.nativeExports.push({channel:expectedChannel,path:output,receipt:exactExportReceipt,sourceTable,exportTable,untouchedStories});checkpoint();
 
   at(expectedChannel+'-delivery-package-export');
   await select(page,'[data-publication-action=designate]');await ready(page,"document.querySelector('input[name=publication-milestone]')",'publication-designation');
