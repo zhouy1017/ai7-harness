@@ -53,7 +53,11 @@ export function externalRecordingDirectory(input) {
 }
 
 /**
- * Decorate the transport already selected by the admitted manual run. Context comes from its
+ * Decorate the captured native fetch before proxyAwareFetch: the proxy still owns admission and
+ * public error sanitization, and invokes this recorder only inside its admitted token.run path.
+ * Wrapping proxyAwareFetch instead observes sanitized errors and cannot recover native causes;
+ * historical outer-proxy captures retain that limitation and are never backfilled.
+ * Context comes from the admitted manual run's
  * existing case/binding owner (source ranges, route/model/protocol, source/config/prompt hashes).
  * Request/response headers, credential resolution and exception prose are deliberately absent.
  * ProviderResultCache remains the owner of exact replay; this records only actual transmissions.
