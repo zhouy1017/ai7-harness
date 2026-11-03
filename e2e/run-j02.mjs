@@ -393,7 +393,8 @@ async function waitForExactSearchRange(renderer) {
           : observed.current.frameworkMatches===true?'range-lost-dom'
             :'range-lost-framework-unavailable'
       :null;
-    const reason=observed===null?'observation-unavailable':!observed.everMatchVisible?'match-never-in-window':lostRange??(observed.current.frameworkMatches?'dom-selection-mismatch':observed.current.searchError?'navigation-refused':!observed.current.documentFocused?'window-unfocused':'match-without-range');
+    const lostCause=lostRange?`${lostRange}-${observed.current.windowLoads.at(-1)??'other'}-${observed.current.documentFocused?'window-focused':'window-unfocused'}-${observed.current.editorFocused?'editor-focused':'editor-unfocused'}`:null;
+    const reason=observed===null?'observation-unavailable':!observed.everMatchVisible?'match-never-in-window':lostCause??(observed.current.frameworkMatches?'dom-selection-mismatch':observed.current.searchError?'navigation-refused':!observed.current.documentFocused?'window-unfocused':'match-without-range');
     throw journeyCheckFailure('J-02',`search-exact-range-${reason}`,{cause:error});
   } finally {
     await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.dispose()').catch(()=>undefined);
