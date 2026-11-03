@@ -488,8 +488,8 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,`window.ai7.inspectGlobalAgent().then(v=>v.history.some(h=>!${JSON.stringify(beforeHabits)}.includes(h.dialogueId)&&h.attempts.at(-1)?.state==='completed'&&h.attempts.at(-1)?.fragments.length>0))`,'new-habits-completed',300000);
   check(true,expectedChannel+'-habits-new-completed-answer');
   await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'library-after-agents');
-  await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(importedBookId)}]`);
-  await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${importedBookId}"] [data-testid=manuscript-editor]')`,'return-manuscript-milestone');
+  await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}]`);
+  await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'return-manuscript-milestone');
   check(await page.evaluate(`(()=>{const n=document.querySelector('[data-edge-entry=navigation]');if(n.getAttribute('aria-expanded')!=='true')n.click();document.querySelector('details.milestone-section').open=true;return true})()`),'milestone-form');
   await fill(page,'#milestone-label','Beta 验收发稿');await select(page,'input[name=milestone-purpose][value=delivery-candidate]');await click(page,'保存里程碑版本');
   await ready(page,"document.querySelector('#milestone-label')?.value===''",'milestone-saved');
