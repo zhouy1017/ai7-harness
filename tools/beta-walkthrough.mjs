@@ -81,6 +81,14 @@ const act=async(page,operation,target,lookup,mutation)=>{
 const click=async(page,label)=>act(page,'click',label,`[...document.querySelectorAll('button')].find(n=>n.textContent===${JSON.stringify(label)}&&n.getClientRects().length>0)`,'node.click()');
 const select=async(page,selector)=>act(page,'select',selector,`document.querySelector(${JSON.stringify(selector)})`,'node.click()');
 const fill=async(page,selector,value)=>act(page,'fill',selector,`document.querySelector(${JSON.stringify(selector)})`,`node.value=${JSON.stringify(value)};if(node.value!==${JSON.stringify(value)})throw Error('field-value-refused');node.dispatchEvent(new Event('input',{bubbles:true}));node.dispatchEvent(new Event('change',{bubbles:true}))`);
+async function openKnownBook(page,bookId){
+ if(await boolean(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`))return;
+ const selector=`#app-sidebar [data-nav-book=${JSON.stringify(bookId)}], [data-screen=landing] button[data-book-id=${JSON.stringify(bookId)}]`;
+ const lookup=`[...document.querySelectorAll(${JSON.stringify(selector)})].find(n=>n.getClientRects().length>0)`;
+ if(!await boolean(page,`(${lookup})`)){await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'known-book-library');}
+ await act(page,'open-book',bookId,lookup,'node.click()');
+ await ready(page,`document.querySelector('[data-screen=editor] [data-book-id="${bookId}"] [data-testid=manuscript-editor]')`,'known-book-manuscript');
+}
 async function openRetainedReview(page,runId){
  await select(page,'#app-sidebar [data-nav-book-section=review]');
  const item=`.review-runs [data-review-run-id=${JSON.stringify(runId)}]`;
@@ -260,6 +268,14 @@ async function preparePortableCarry(executable,env,dataRoot,input){
  try{
   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});let page=await renderer(browser);
   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'portable-local-startup');
+  const originalBook=report.controlledTranslations.find(t=>t.channel==='windows-installer').bookId;
+  const restoredReceipt=await page.evaluate(`window.ai7.inspectDatabaseReplacements().then(v=>v.replacements.find(r=>r.kind==='replace'&&r.outcome==='applied'&&r.packageFileName===${JSON.stringify(backup.path.split(/[\\/]/).at(-1))})??null)`);
+  const restoredBook=restoredReceipt&&await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(originalBook)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated').catch(()=>false)`);
+  if(restoredBook&&!report.portableCarry?.restored){
+   await openKnownBook(page,originalBook);
+   check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(report.completedReview.review.runId)}}).then(v=>v.run?.reviewRunId===${JSON.stringify(report.completedReview.review.runId)})`),'portable-existing-supported-restore-exact-review');
+   report.portableCarry={restored:true,restoredAt:restoredReceipt.recordedAt,method:'ordinary database backup preview/replace/restart UI; recovered applied receipt before any repeat',replacement:restoredReceipt,sourceBackup:backup,fullReviewExecution:report.completedReview.buildIdentity,observedBy:report.buildIdentity,priorMigrationChecks:resume?.checks.filter(c=>c.startsWith('portable-prior-')||c.startsWith('portable-own-upgrade-')||c==='portable-separate-data-before-restore')??[]};checkpoint();
+  }
   if(!report.portableCarry?.restored){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.portablePriorBook.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'portable-prior-book-survives-upgrade');
    check(await page.evaluate("window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))"),'portable-own-upgrade-history');
@@ -274,8 +290,7 @@ async function preparePortableCarry(executable,env,dataRoot,input){
    browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});page=await renderer(browser);
    await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'portable-restored-startup');
    const original=report.completedReview.review.runId;
-   const originalBook=report.controlledTranslations.find(t=>t.channel==='windows-installer').bookId;
-   await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(originalBook)}]`);await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'portable-restored-main-book');
+   await openKnownBook(page,originalBook);
    check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(original)}}).then(v=>v.run?.reviewRunId===${JSON.stringify(original)})`),'portable-restored-exact-review');
    report.portableCarry={restored:true,restoredAt:new Date().toISOString(),method:'ordinary database backup preview/replace/restart UI; no raw store copy',sourceBackup:backup,fullReviewExecution:report.completedReview.buildIdentity,observedBy:report.buildIdentity};checkpoint();
   }
