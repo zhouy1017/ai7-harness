@@ -56,7 +56,7 @@ async function renderer(browser){
  await wait(async()=>{target=(await root.send('Target.getTargets')).targetInfos.find(t=>t.type==='page');return Boolean(target);},'renderer-target');
  const {sessionId}=await root.send('Target.attachToTarget',{targetId:target.targetId,flatten:false});
  const send=async(method,params={})=>{const id=sequence++;const answer=new Promise((resolveAnswer,reject)=>{const timer=setTimeout(()=>{pending.delete(sessionId+':'+id);reject(Error('renderer-timeout'));},60000);pending.set(sessionId+':'+id,{resolve:resolveAnswer,reject,timer});});await root.send('Target.sendMessageToTarget',{sessionId,message:JSON.stringify({id,method,params})});return answer;};
- return {send,evaluate:async(expression)=>{const value=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(value.exceptionDetails)throw Error('renderer-expression');return value.result.value;}};
+ return {send,evaluate:async(expression)=>{const value=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(value.exceptionDetails){const fault=value.exceptionDetails.exception;const code=fault?.value?.code;report.rendererFailure={stage,className:fault?.className??null,code:typeof code==='string'&&/^[A-Z0-9_/-]+$/.test(code)?code:null};checkpoint();throw Error('renderer-expression');}return value.result.value;}};
 }
 const boolean=async(page,expression)=>page.evaluate('Promise.resolve('+expression+').then(Boolean)');
 const actionCheck=(condition,operation,target)=>{if(!condition){report.failedAction={operation,target};check(false,'ui-'+operation+'-unavailable');}check(true,operation+'-'+target);};
@@ -273,6 +273,7 @@ async function preparePortableCarry(executable,env,dataRoot,input){
   const restoredBook=restoredReceipt&&await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(originalBook)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated').catch(()=>false)`);
   if(restoredBook&&!report.portableCarry?.restored){
    await openKnownBook(page,originalBook);
+   await openRetainedReview(page,report.completedReview.review.runId);
    check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(report.completedReview.review.runId)}}).then(v=>v.run?.reviewRunId===${JSON.stringify(report.completedReview.review.runId)})`),'portable-existing-supported-restore-exact-review');
    report.portableCarry={restored:true,restoredAt:restoredReceipt.recordedAt,method:'ordinary database backup preview/replace/restart UI; recovered applied receipt before any repeat',replacement:restoredReceipt,sourceBackup:backup,fullReviewExecution:report.completedReview.buildIdentity,observedBy:report.buildIdentity,priorMigrationChecks:resume?.checks.filter(c=>c.startsWith('portable-prior-')||c.startsWith('portable-own-upgrade-')||c==='portable-separate-data-before-restore')??[]};checkpoint();
   }
@@ -291,6 +292,7 @@ async function preparePortableCarry(executable,env,dataRoot,input){
    await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'portable-restored-startup');
    const original=report.completedReview.review.runId;
    await openKnownBook(page,originalBook);
+   await openRetainedReview(page,original);
    check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(original)}}).then(v=>v.run?.reviewRunId===${JSON.stringify(original)})`),'portable-restored-exact-review');
    report.portableCarry={restored:true,restoredAt:new Date().toISOString(),method:'ordinary database backup preview/replace/restart UI; no raw store copy',sourceBackup:backup,fullReviewExecution:report.completedReview.buildIdentity,observedBy:report.buildIdentity};checkpoint();
   }
