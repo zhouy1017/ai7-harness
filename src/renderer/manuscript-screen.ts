@@ -1124,6 +1124,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     targetOrPrepare: NavigationRequest['target'] | (() => NavigationRequest | undefined),
     continuity?: EditorContinuity,
     preserveOffWindowContinuity = false,
+    onArrival?: () => boolean,
   ): Promise<boolean> {
     if (authoritativeMutationBusy() || edgeNavigation || !editor) return false;
     edgeNavigation = true;
@@ -1163,6 +1164,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
+      // A search range belongs to this loaded window. Apply it before a slow position write releases
+      // the arrival to later paging; otherwise its continuation can select in a window already left.
+      if (onArrival && !onArrival()) return false;
       // The position write starts the moment the window is on screen, and the status that names the
       // arrival still waits for it — the guard does not. `edgeNavigation` covers the window load and
       // the two frames in which the load's own scroll restoration fires `scroll` events this surface
@@ -1586,8 +1590,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       searchReturn = { window: editor.currentWindow(), continuity: editor.captureContinuity() };
       returnFromSearch.hidden = false;
     }
-    await navigate({ kind: 'block', blockId: match.blockId });
-    if (!editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme)) {
+    const selected = await navigate({ kind: 'block', blockId: match.blockId }, undefined, false,
+      () => editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme) === true);
+    if (!selected) {
       setStatus('无法在当前稿件状态中精确定位该匹配。', 'error');
     }
   }

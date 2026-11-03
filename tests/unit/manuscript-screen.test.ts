@@ -16,6 +16,7 @@ const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
   destroyed: [] as string[],
   editors: [] as unknown[],
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
 }));
 
@@ -68,12 +69,16 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
   mountBoundedEditor: (options: EditorOptions) => {
     if (children.failAt === 'editor') throw new Error('editor mount failed');
     const point = { blockId: options.initialWindow.blocks[0]!.blockId, grapheme: 0 };
+    let currentWindow = options.initialWindow;
     children.editors.push(options);
-    return {
+    const surface = {
       focus: vi.fn(), flush: vi.fn(async () => undefined), interrupt: vi.fn(), setOperationLocked: vi.fn(), setMarks: vi.fn(),
       captureContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
       captureNavigationContinuity: () => ({ anchor: point, head: point, direction: 'forward', scrollAnchor: { blockId: point.blockId, offset: 0 }, focused: true }),
-      currentWindow: () => options.initialWindow,
+      currentWindow: () => currentWindow,
+      loadWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
+      loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
+      selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
       currentBlockStyle: () => ({ kind: 'paragraph', level: null }),
       setBlockStyle: vi.fn(),
       isComposing: () => false,
@@ -81,6 +86,8 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       protection: () => null,
       destroy: () => children.destroyed.push('editor'),
     };
+    children.editorSurfaces.push(surface);
+    return surface;
   },
 }));
 
@@ -130,7 +137,7 @@ function shell(rendererApi = api) {
     interrupted: () => false,
     attach: (content, surface) => { replace(content); showing = surface; },
     setContextActions: vi.fn(), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
-    errorMessage: (_error, fallback) => fallback, recentlyActivatedControl: () => null, awaitServiceJob: vi.fn(),
+    errorMessage: (_error, fallback) => fallback, recentlyActivatedControl: () => null, awaitServiceJob: async (job) => job,
     composerRangeOf: vi.fn(), selectionTaskOffer: vi.fn(), selectionProcedureOffer: vi.fn(), prepareSelectionTask: vi.fn(),
     renderEditorWindow: vi.fn(), renderBookAnalysis: vi.fn(),
     renderBookReview: vi.fn(), renderBookDeliverables: vi.fn(),
@@ -153,15 +160,62 @@ beforeEach(() => {
   // The screen listens for the document's selection and passes its root to the protection surface.
   vi.stubGlobal('document', Object.assign(Object.create(miniDocument) as typeof miniDocument, {
     documentElement: new MiniElement('html'), getSelection: () => null, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    createTextNode: (text: string) => { const node = new MiniElement('#text'); node.textContent = text; return node; },
   }));
   children.failAt = null;
   children.destroyed.length = 0;
   children.editors.length = 0;
+  children.editorSurfaces.length = 0;
   children.protections.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
 describe('the Manuscript screen lifecycle', () => {
+  it('selects a search match in its arrival window before a slow entry write lets the viewport move on', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const initial = windowOf('book-one');
+    const matchWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'match', text: '星河校准' }], nextCursor: 'next' };
+    const laterWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'later' }] };
+    let releaseWrite = (): void => {};
+    let holdWrite = false;
+    const record = vi.fn(({ blockId }: { blockId: string }) => holdWrite && blockId === 'match'
+      ? new Promise<void>((resolve) => { releaseWrite = resolve; }) : Promise.resolve());
+    const load = vi.fn(async ({ target }: { target: { kind: string } }) => target.kind === 'block' ? matchWindow : laterWindow);
+    const methods = {
+      recordManuscriptEntryPosition: record, getManuscriptWindowAt: load,
+      startSearch: async () => ({ jobId: 'search-job', state: 'completed', kind: 'search', result: { searchId: 'search' } }),
+      getSearchResults: async () => ({ ...initial, searchId: 'search', query: '星河校准', scopeLabel: '全稿', totalMatches: 1,
+        previousCursor: null, nextCursor: null,
+        results: [{ matchId: 'match-id', blockId: 'match', fromGrapheme: 0, toGrapheme: 4, headingLabel: '第一章', context: '星河校准' }] }),
+    };
+    const rendererApi = new Proxy(api, { get: (target, key) => key in methods ? methods[key as keyof typeof methods] : Reflect.get(target, key) });
+    const app = shell(rendererApi);
+    app.open(initial);
+    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await vi.advanceTimersByTimeAsync(40);
+    app.screen.querySelector<HTMLInputElement>('[id="manuscript-search"]')!.value = '星河校准';
+    [...app.screen.querySelectorAll('button')].find((button) => button.textContent === '查找全稿')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    holdWrite = true;
+    expect(app.screen.querySelector('.search-result button'), app.persistenceStatus.textContent).not.toBeNull();
+    app.screen.querySelector<HTMLButtonElement>('.search-result button')!.click();
+    await vi.advanceTimersByTimeAsync(40);
+    expect(record).toHaveBeenCalledTimes(2);
+    // A scroll after arrival is admitted while its position write is still in flight (#474).
+    Object.assign(pane, { scrollTop: 1000 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await vi.advanceTimersByTimeAsync(40);
+    expect(load).toHaveBeenCalledTimes(2);
+    releaseWrite();
+    await vi.advanceTimersByTimeAsync(0);
+    const select = children.editorSurfaces.at(-1)!.selectRange;
+    expect(select).toHaveBeenCalledWith('match', 0, 4);
+    expect(select.mock.results[0]?.value).toBe(true);
+    app.showing?.destroy();
+  });
+
   it('keeps a layout-clamped edge in the current window and still pages on the next reader scroll', async () => {
     vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
     const load = vi.fn(() => new Promise<never>(() => undefined));

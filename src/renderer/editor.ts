@@ -425,6 +425,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   // left behind while its `scroll` event is still to come.
   let pendingRestore: { frame: number; run: () => void } | undefined;
   let ownScroll: { top: number } | undefined;
+  const markOwnScroll = (): void => {
+    const mark = { top: options.scrollContainer.scrollTop };
+    ownScroll = mark;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (ownScroll === mark) ownScroll = undefined;
+    }));
+  };
   let activeMark: { markId: string; previewText: string | null } | undefined;
   // Focus has just entered the text and the browser's caret reveal, if it makes one, is still to be heard.
   let focusReveal: object | undefined;
@@ -659,11 +666,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       // Where this restore left the pane is the editor's doing, not the reader's. The mark lapses two
       // frames on — past the frame that dispatches its `scroll` event, and past it even when the position
       // did not change and no event comes — so it never swallows the next scroll the reader makes.
-      const mark = { top: options.scrollContainer.scrollTop };
-      ownScroll = mark;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (ownScroll === mark) ownScroll = undefined;
-      }));
+      markOwnScroll();
     };
     pendingRestore = { frame: requestAnimationFrame(run), run };
   };
@@ -1200,12 +1203,14 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         toGrapheme <= fromGrapheme ||
         toGrapheme > text.length
       ) return false;
+      settlePendingRestore();
       deferredNavigationContinuity = undefined;
       applyEditableState();
       const from = found.position + 1 + text.slice(0, fromGrapheme).join('').length;
       const to = found.position + 1 + text.slice(0, toGrapheme).join('').length;
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
       view.focus();
+      markOwnScroll();
       return true;
     },
     currentWindow: () => windowProjection,

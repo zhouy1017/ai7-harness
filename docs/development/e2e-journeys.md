@@ -30,6 +30,8 @@ Issue #1205 (W22-S4c, ADR 0096 §2) is a synchronized delta that adds the `candi
 
 ## J-02 long-manuscript editing
 
+Issue #1290 repairs a reproduced search-arrival race: the exact match is selected while its loaded window still owns the navigation guard, before the entry-position write can wait on disk; its selection scroll is editor-owned. A mounted-screen regression holds that write and admits a later viewport page, proving the range was selected in the arrival window. `search-exact-range` and `search-return-exact-selection-scroll` are exact reuse — checked unchanged; their original assertions remain the Journey acceptance. This reproduces the failure path without claiming the earlier hosted occurrence's unrecorded trigger.
+
 Issue #1287 (W23-S7) replaces the duplicated toolbar destinations with sidebar navigation. The editor viewport checks one action row, no page scroll, a persistence footer clear of window actions, and a navigation panel in a separate grid cell (below the text at narrow widths); protection still refuses a sidebar departure while edits are at risk. Layout-induced edge scrolls keep the current text window; the next reader scroll still pages normally.
 
 Wave 23 #1288 adds `structure-rapid-queue`, `structure-queue-retry`, and `structure-heading-enter`: eight synchronous Enter/Backspace events before IPC acknowledgement produce eight ordered journal entries without dropped keys; a four-key burst survives one refused write without duplicate entries; the editor changes a paragraph to a heading, creates a plain paragraph at its end, and undoes both changes. The window stays within 32 blocks. Service tests cover style undo/redo and unclean-close recovery.
