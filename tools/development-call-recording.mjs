@@ -4,6 +4,10 @@ import { existsSync, mkdirSync, realpathSync, writeFileSync, appendFileSync } fr
 import { dirname, join, resolve } from 'node:path';
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// Brave's public search input is necessary to identify a future mock case. Unknown parameters,
+// including Gemini's credential query, remain omitted rather than guessing which values are safe.
+const PUBLIC_SEARCH_PARAMETERS = new Set(['q', 'count', 'offset', 'safesearch', 'search_lang',
+  'country', 'result_filter', 'spellcheck', 'freshness', 'text_decorations', 'extra_snippets']);
 
 /** Resolve links before requiring a durable location outside every Git checkout/worktree. */
 export function externalRecordingDirectory(input) {
@@ -38,6 +42,8 @@ export function recordDevelopmentFetch({ directory, context, fetch: transport })
       throw Error('DEVELOPMENT_RECORDING/request-body');
     }
     const target = new URL(String(url));
+    const requestQuery = target.hostname === 'api.search.brave.com'
+      ? [...target.searchParams].filter(([name]) => PUBLIC_SEARCH_PARAMETERS.has(name)) : [];
     const id = randomUUID(), path = join(root, id + '.jsonl');
     let previous = null, sequence = 0;
     const record = (event) => {
@@ -54,8 +60,9 @@ export function recordDevelopmentFetch({ directory, context, fetch: transport })
     record({ kind: 'request', transmission: 'newly-transmitted', material: identity.material,
       caseId, sourceRanges, sourceCommit, sourceTree, configurationTree, promptContractDigest,
       route, model, protocol, sourceSha256, replayLineage,
-      // Query strings and URL credentials can contain keys; request bodies/messages retain exact bytes.
+      // Only known public search parameters survive; no complete credential-bearing URL is retained.
       endpoint: target.origin + target.pathname, method: init.method ?? 'GET',
+      requestQuery, omittedQueryParameters: [...target.searchParams].length - requestQuery.length,
       requestBody: init.body ?? null, requestBodySha256: hash(init.body ?? '') });
     let response;
     try { response = await transport(url, init); }

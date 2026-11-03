@@ -21,12 +21,14 @@ test('retains exact synthetic wire chunks/messages and identity, excluding all t
     new ReadableStream({ start(c) { for (const chunk of source) c.enqueue(new TextEncoder().encode(chunk)); c.close(); } }),
     { headers: { 'x-synthetic-secret': 'RESPONSE_SENTINEL' } }) });
   const request = JSON.stringify({ messages: [{ role: 'user', content: 'synthetic container input' }] });
-  const response = await fetch('https://example.test/stream?key=QUERY_SENTINEL', {
+  const response = await fetch('https://api.search.brave.com/res/v1/web/search?q=synthetic+query&key=QUERY_SENTINEL', {
     method: 'POST', body: request, headers: { Authorization: 'HEADER_SENTINEL' } });
   assert.equal(await response.text(), source.join(''));
   const captured = rows(directory), raw = JSON.stringify(captured);
   assert.equal(captured[0].requestBody, request);
   assert.equal(captured[0].caseId, identity().caseId);
+  assert.deepEqual(captured[0].requestQuery, [['q', 'synthetic query']]);
+  assert.equal(captured[0].omittedQueryParameters, 1);
   assert.equal(captured.at(-1).outcome, 'received');
   assert.equal(Buffer.concat(captured.filter(r => r.kind === 'response-chunk').map(r => Buffer.from(r.bytesBase64, 'base64'))).toString(), source.join(''));
   assert.doesNotMatch(raw, /QUERY_SENTINEL|HEADER_SENTINEL|RESPONSE_SENTINEL|Authorization/);
