@@ -1952,7 +1952,7 @@ export class ReviewRunStore {
 
   finishCancelled(bookId: string, reviewRunId: string): void {
     for (const task of this.controlTasks(bookId, reviewRunId)) {
-      const runId = this.#runRecordOf(task.taskIntentId);
+      const runId = this.#events(reviewRunId, task.categoryId).findLast((event) => event.state === 'dispatched')?.runRecordId ?? null;
       if (runId === null || task.ledger.currentRunState(runId) !== 'cancelled') continue;
       this.settle(reviewRunId, task.categoryId);
       if (this.step(reviewRunId, task.categoryId).kind === 'write') this.write(reviewRunId, task.categoryId);
@@ -2482,6 +2482,8 @@ export class ReviewRunStore {
     const rows = this.#db.prepare(`SELECT DISTINCT rr.* FROM review_runs rr
       JOIN json_each(rr.canonical_json, '$.categories') c
       JOIN analysis_run_records r ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId')
+      JOIN review_run_category_events e ON e.review_run_id = rr.review_run_id AND e.run_record_id = r.run_record_id
+        AND e.category_id = 'factual-review' AND e.state = 'dispatched'
       JOIN analysis_task_outcomes o ON o.run_record_id = r.run_record_id
       WHERE json_extract(c.value, '$.partialFactualRetentionVersion') = 1
         AND o.classification IN ('failed', 'interrupted') AND o.result_set_revision_id IS NOT NULL`).all() as SqlRow[];

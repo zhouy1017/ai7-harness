@@ -4713,9 +4713,9 @@ export class EditorialStore {
   }
 
   finishCancelledReviewRun(runRecordId: string): void {
-    for (const row of this.#authority.prepare(`SELECT rr.review_run_id, rr.book_id FROM review_runs rr
-      JOIN json_each(rr.canonical_json, '$.categories') c JOIN analysis_run_records r
-      ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId') WHERE r.run_record_id = ?`).all(runRecordId) as SqlRow[]) {
+    for (const row of this.#authority.prepare(`SELECT DISTINCT rr.review_run_id, rr.book_id FROM review_runs rr
+      JOIN review_run_category_events e ON e.review_run_id = rr.review_run_id
+      WHERE e.run_record_id = ? AND e.state = 'dispatched'`).all(runRecordId) as SqlRow[]) {
       this.#reviewCall(() => this.#reviewRuns.finishCancelled(asString(row.book_id), asString(row.review_run_id)));
       this.materializeFactualVerification(asString(row.review_run_id));
     }

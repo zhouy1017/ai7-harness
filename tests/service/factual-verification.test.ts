@@ -1052,6 +1052,26 @@ describe('Evidence Assurance Levels on 事实核查 (Issue #901)', () => {
     expect(lens(book, reviewRunId).results[0]).toMatchObject({ findingId: finding.findingId, markId: null, anchor: { state: 'stale' } });
   });
 
+  it('retains interrupted factual output only in the Review that dispatched a shared Task on reopen', async () => {
+    await setup({ relations: [], maxTotalTokens: 180 });
+    const book = await newBook('共享准备计划的核查恢复');
+    let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'],
+      { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+    while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+    const original = work.projection!.run!;
+    const stopped = await review(book, undefined, { steps: (steps) => ({ ...steps,
+      settle: () => { throw new Error('synthetic crash before category settlement'); }, fail: () => undefined }) });
+    expect(store.inspectReviewWorkspace(book.bookId, stopped.reviewRunId).run!.categories[0]!.taskIntentId)
+      .toBe(original.categories[0]!.taskIntentId);
+    const untouched = store.inspectReviewWorkspace(book.bookId, original.reviewRunId).run!.categories;
+    const before = structuredClone(sends);
+    await reopen();
+    expect(store.inspectReviewWorkspace(book.bookId, original.reviewRunId).run!.categories).toEqual(untouched);
+    expect(lens(book, original.reviewRunId).results).toHaveLength(0);
+    expect(lens(book, stopped.reviewRunId).results).toHaveLength(1);
+    expect(sends).toEqual(before);
+  });
+
   it('retains an exact failed Task Outcome revision without a successful category event (#1058)', async () => {
     await setup({ relations: [], maxTotalTokens: 180 });
     const book = await newBook('失败终态修订版');
