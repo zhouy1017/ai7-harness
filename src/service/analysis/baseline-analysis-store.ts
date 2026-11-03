@@ -43,7 +43,7 @@ import {
   type AnalysisKindDefinition,
   baselineAnalysisKindDefinition,
 } from './kind-definition.js';
-import { factualClaimKindDefinition } from './factual-claim-contract.js';
+import { factualClaimKindDefinition, FACTUAL_CLAIM_UPDATE_MODES } from './factual-claim-contract.js';
 import {
   FACTUAL_REVIEW_KIND,
   MODEL_SERVICE_CONNECTION_IDS,
@@ -819,7 +819,7 @@ export class BaselineAnalysisStore {
       expectedOutcome: intent.expectedOutcome,
       createdAt: intent.createdAt,
       mode: intent.mode,
-      modeLabel: this.#definition.mode(intent.mode).label,
+      modeLabel: this.#recordedMode(intent.mode).label,
       ...(this.#definition.kind !== BASELINE_ANALYSIS_KIND ? {} : {
         redoOf: intent.redoOfRunRecordId === null
           ? null
@@ -1959,7 +1959,14 @@ export class BaselineAnalysisStore {
 
   /** A mode that starts a Result Set rather than updating one; the kind's definition decides which. */
   #isInitial(mode: AnalysisTaskMode): boolean {
-    return this.#definition.mode(mode).initial;
+    return this.#recordedMode(mode).initial;
+  }
+
+  /** History keeps its intent vocabulary when today's model/policy is unconfigured.
+   * Preparation still uses the current definition's admitted modes and update controls. */
+  #recordedMode(mode: AnalysisTaskMode) {
+    return (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
+      ?? this.#definition.mode(mode);
   }
 
   /**
@@ -1968,7 +1975,7 @@ export class BaselineAnalysisStore {
    * unreviewed. Only a whole first Task carries none — it reads every unit, and there is nothing to plan.
    */
   #carriesPlan(mode: AnalysisTaskMode): boolean {
-    const definition = this.#definition.mode(mode);
+    const definition = this.#recordedMode(mode);
     return !definition.initial || definition.rangeBound;
   }
 
@@ -2026,7 +2033,7 @@ export class BaselineAnalysisStore {
     const intentDraftVersionId = isRecord(record) && typeof record.intentDraftVersionId === 'string' && UUID_PATTERN.test(record.intentDraftVersionId)
       ? record.intentDraftVersionId : null;
     requireAnalysis(isRecord(record) && (record.intentDraftVersionId === undefined || intentDraftVersionId !== null) &&
-      (intentDraftVersionId === null ? goal === this.#definition.mode(mode).goal : isDraftGoal(goal) && record.goal === goal),
+      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal : isDraftGoal(goal) && record.goal === goal),
     'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
@@ -2463,7 +2470,7 @@ export class BaselineAnalysisStore {
       };
     }
     const update = body.update as Omit<BaselineAnalysisRevisionUpdateProjection, 'modeLabel'>;
-    return { ...update, modeLabel: this.#definition.mode(update.mode).label };
+    return { ...update, modeLabel: this.#recordedMode(update.mode).label };
   }
 
   #unitLineage(unit: Record<string, unknown>): AnalysisUnitLineage {
@@ -2803,8 +2810,8 @@ export class BaselineAnalysisStore {
       // re-verify is not that a predecessor is still the latest revision but that there is still none.
       return {
         mode: intent.mode,
-        modeLabel: this.#definition.mode(intent.mode).label,
-        meaning: this.#definition.mode(intent.mode).meaning,
+        modeLabel: this.#recordedMode(intent.mode).label,
+        meaning: this.#recordedMode(intent.mode).meaning,
         predecessor: null,
         predecessorCurrent: latest === null,
         selectedRange: reusePlan === null ? intent.selectedRange : reusePlan.selectedRange,
@@ -2817,8 +2824,8 @@ export class BaselineAnalysisStore {
     const pin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
     return {
       mode: intent.mode as BaselineAnalysisUpdateMode,
-      modeLabel: this.#definition.mode(intent.mode).label,
-      meaning: this.#definition.mode(intent.mode).meaning,
+      modeLabel: this.#recordedMode(intent.mode).label,
+      meaning: this.#recordedMode(intent.mode).meaning,
       predecessor: {
         revisionId: intent.predecessorRevisionId,
         ordinal: asNumber(predecessorRow.ordinal),

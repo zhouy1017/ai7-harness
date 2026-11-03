@@ -358,6 +358,29 @@ function syntheticClaimLedger() {
 }
 
 describe('factual claim occurrence ledger', () => {
+  it('reads repeated factual history without a configured current model or new transmissions', async () => {
+    await setup({ claimStages: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
+    const book = await newBook('无模型配置时读取既有核查');
+    await review(book);
+    const repeated = await review(book);
+    const original = store.inspectReviewWorkspace(book.bookId, repeated.reviewRunId).run!;
+    const before = structuredClone(sends);
+    const unconfigured = { operationalScope: 'ordinary-production' as const, live: null,
+      policy: await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null) };
+    store.baselineAnalysisLedger.bindLaunch(unconfigured);
+    store.factualReviewLedger.bindLaunch(unconfigured);
+    const history = store.inspectReviewWorkspace(book.bookId, repeated.reviewRunId).run!;
+    expect(history.reviewRunId).toBe(original.reviewRunId);
+    expect(history.categories).toEqual(original.categories);
+    expect(store.inspectFactualReview(book.bookId).taskIntent).toMatchObject({ mode: 'review-again', modeLabel: '再次核查' });
+    expect(store.inspectFactualReview(book.bookId).updateControls).toBeNull();
+    expect(lens(book, repeated.reviewRunId).results.map(r => r.findingId)).toEqual(repeated.results.map(r => r.findingId));
+    expect(() => store.factualReviewLedger.prepare({ phase: 'start', bookId: book.bookId, goal: '再次核查当前全书事实，保留此前核查历史。',
+      update: { mode: 'review-again', selectedRange: null }, reconfirm: false, launchPolicy: unconfigured.policy }))
+      .toThrowError(expect.objectContaining({ code: 'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED' }));
+    expect(sends).toEqual(before);
+  });
+
   it('attributes mixed same-unit completion to each claim and corrects historical projections without rewriting results', async () => {
     await setup({ claimStages: true, twoAssertions: true, relations: [{ sourceRef: MUSEUM, relation: '支持', excerptRef: HELD, lineage: 'original' }] });
     const book = await newBook('同一阅读单元中的独立断言');
