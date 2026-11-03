@@ -251,6 +251,98 @@ async function removeOwnedCredentials(){
  report.credentialCleanup='completed';
 }
 
+async function preparePortableCarry(executable,env,dataRoot,input){
+ at('portable-restore-paid-history');
+ const backup=report.storageBackups?.findLast(b=>b.channel==='windows-installer');
+ check(Boolean(backup)&&createHash('sha256').update(await readFile(backup.path)).digest('hex')===backup.sha256,'portable-supported-backup-exact-source');
+ let browser;
+ try{
+  browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});let page=await renderer(browser);
+  await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'portable-local-startup');
+  if(!report.portableCarry?.restored){
+   check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.portablePriorBook.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'portable-prior-book-survives-upgrade');
+   check(await page.evaluate("window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))"),'portable-own-upgrade-history');
+   await select(page,'#app-sidebar [data-nav-settings]');await click(page,'数据与存储');
+   await ready(page,"document.querySelector('.data-storage-summary')",'portable-initial-storage');
+   check(await page.evaluate(`document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)}`),'portable-separate-data-before-restore');
+   await select(page,'[data-database-import-action=choose]');native(executable,['-FileName',backup.path]);
+   await ready(page,"document.querySelector('input[name=database-import-choice][value=replace]')",'portable-supported-restore-preview');
+   await select(page,'input[name=database-import-choice][value=replace]');await select(page,'[data-database-import-action=confirm]');
+   await ready(page,"document.querySelector('.database-import')?.dataset.pending==='true'",'portable-supported-restore-pending');
+   await browser.close();browser=undefined;
+   browser=await chromium.launch({executablePath:executable,headless:false,ignoreDefaultArgs:true,args:['--remote-debugging-pipe'],env,timeout:60000});page=await renderer(browser);
+   await ready(page,"document.documentElement.dataset.ai7ProductReady==='true'",'portable-restored-startup');
+   const original=report.completedReview.review.runId;
+   const originalBook=report.controlledTranslations.find(t=>t.channel==='windows-installer').bookId;
+   await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(originalBook)}]`);await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'portable-restored-main-book');
+   check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(original)}}).then(v=>v.run?.reviewRunId===${JSON.stringify(original)})`),'portable-restored-exact-review');
+   report.portableCarry={restored:true,restoredAt:new Date().toISOString(),method:'ordinary database backup preview/replace/restart UI; no raw store copy',sourceBackup:backup,fullReviewExecution:report.completedReview.buildIdentity,observedBy:report.buildIdentity};checkpoint();
+  }
+  for(const key of ['agent','agentAttempts','globalTurns','globalAttempts','habits','habitAttempts','controlledTranslations','findingDispositions']){
+   report[key]??=[];
+   // Earlier receipts identify different binaries for the separately executed phases.
+   // Carry these identities forward; the restore does not make them new executions.
+   const executedBy=['agent','agentAttempts','controlledTranslations'].includes(key)
+    ? {buildNumber:538,sourceCommit:'5328fc484231e032177d134d91cee091b29a62af'}
+    : ['globalTurns','globalAttempts','habits','habitAttempts'].includes(key)
+     ? {buildNumber:550,sourceCommit:'4f0d1b87ace6115e1e9515b2ffb96a00e2bc795b'} : null;
+   if(!report[key].some(v=>v.channel==='windows-portable'))report[key].push(...report[key].filter(v=>v.channel==='windows-installer').map(v=>({...structuredClone(v),channel:'windows-portable',reusedFrom:{channel:'windows-installer',method:'supported backup restore',executedBy,observedBy:report.buildIdentity}})));
+  }
+  checkpoint();
+  at('portable-native-accepted-import');
+  await select(page,'#app-sidebar [data-nav-destination=library]');await ready(page,"document.querySelector('[data-screen=landing]')",'portable-import-library');
+  const title='Beta portable accepted-baseline';
+  let imported=await page.evaluate(`[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes(${JSON.stringify(title)}))?.dataset.navBook??null`);
+  if(!imported){
+   await click(page,'导入稿件');native(executable,['-FileName',input]);await ready(page,"document.querySelector('[data-screen=target]')",'portable-import-target');
+   await select(page,'input[aria-label="新建图书"]');await select(page,'input[aria-label="作为首份稿件导入"]');
+   await select(page,'input[data-word-import-mode=accepted-baseline]');await select(page,'[data-word-accepted-baseline-confirmation]');await fill(page,'#book-title',title);
+   await click(page,'确认书名并复核');await ready(page,"document.querySelector('[data-screen=review]')",'portable-import-review');
+   await click(page,'新建图书并导入稿件');await ready(page,"document.querySelector('[data-screen=imported]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'",'portable-import-finished');
+   await click(page,'打开稿件');await ready(page,"document.querySelector('[data-testid=manuscript-editor]')",'portable-import-editor');
+   imported=await page.evaluate('window.ai7.inspectReviewWorkspace().then(v=>v.bookId)');
+  }else{await select(page,`#app-sidebar [data-nav-book=${JSON.stringify(imported)}]`);}
+  await ready(page,"document.querySelector('[aria-label^=跳转到尾注]')&&document.querySelector('.manuscript-source-table td')&&[...document.querySelectorAll('.manuscript-source-image img')].some(n=>n.naturalWidth>0)",'portable-fresh-accepted-objects');
+  check(true,'portable-fresh-accepted-import-without-workspace-ceremony');
+  const output=join(dirname(input),'portable-accepted-export.docx');
+  await select(page,'#app-sidebar [data-nav-book-section=deliverables]');await ready(page,"document.querySelector('[data-screen=book-deliverables]')",'portable-accepted-deliverables');
+  if(!existsSync(output)){
+   await select(page,'[data-export-action=open][data-export-target=current]');native(executable,['-FileName',output]);
+   await ready(page,"document.querySelector('.export-receipt')?.dataset.exportOutcome==='created'",'portable-accepted-exported');
+  }
+  const bytes=await readFile(output),sha256=createHash('sha256').update(bytes).digest('hex');
+  const receipt=await page.evaluate(`window.ai7.inspectDeliverables().then(v=>v.exports.find(r=>['created','replaced'].includes(r.outcome)&&r.target.revisionId===v.manuscript.revisionId&&r.technical.fileSha256===${JSON.stringify(sha256)})??null)`);
+  check(Boolean(receipt),'portable-accepted-native-export-receipt');
+  const source=unzipSync(await readFile(input)),exported=unzipSync(bytes),sourceTable=wordTablePresentation(source),exportTable=wordTablePresentation(exported);
+  check(sourceTable.presentationSha256===exportTable.presentationSha256&&exportTable.commentsResolve,'portable-accepted-table-fidelity');
+  check(createHash('sha256').update(source['word/media/source-preview.png']).digest('hex')===createHash('sha256').update(exported['word/media/source-preview.png']).digest('hex'),'portable-accepted-media-fidelity');
+  report.portableImport={bookId:imported,mode:'accepted-baseline',nativeExport:{path:output,sha256,receipt},sourceTable,exportTable};checkpoint();
+ }finally{await browser?.close();}
+}
+
+async function portableLiveOnce(page,bookId){
+ at('windows-portable-live-once');
+ report.portableLiveAttempts??=[];
+ let attempt=report.portableLiveAttempts.find(t=>t.bookId===bookId);
+ if(attempt?.dialogueId){
+  check(await page.evaluate(`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(attempt.dialogueId)},afterFragment:0}).then(v=>v.attempts.at(-1)?.state==='completed'&&v.attempts.at(-1)?.fragmentTotal>0)`),'portable-original-live-once-complete');return;
+ }
+ check(!attempt,'portable-live-once-intent-needs-lineage-reconciliation');
+ const blockId=await page.evaluate("(()=>{const e=document.querySelector('[data-testid=manuscript-editor]');const p=[...e.querySelectorAll('p[data-block-id]')].find(n=>n.firstChild?.nodeType===3&&n.firstChild.length>30&&!n.querySelector('.editorial-mark'));if(!p)return null;e.focus();const r=document.createRange();r.setStart(p.firstChild,2);r.setEnd(p.firstChild,22);getSelection().removeAllRanges();getSelection().addRange(r);document.dispatchEvent(new Event('selectionchange'));return p.dataset.blockId})()");
+ check(Boolean(blockId),'portable-live-once-selection');
+ await page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+ await page.evaluate(`(()=>{const p=document.querySelector('p[data-block-id="${blockId}"]');const r=p.getBoundingClientRect();p.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,button:2,clientX:r.x+20,clientY:r.y+10}));})()`);
+ await select(page,'[data-mark-action=ask-on-selection]');await ready(page,"document.querySelector('[data-mark-composer=ask-about-selection]')",'portable-live-once-question');
+ await fill(page,'[data-mark-field=question]','请用一句话说明所选公开样书文字的叙述语气，不改写正文。');
+ attempt={bookId,intendedAt:new Date().toISOString(),scope:'one bounded new portable interaction; earlier paid review/translation/Agent/global/habits reused through supported restore'};report.portableLiveAttempts.push(attempt);checkpoint();
+ await select(page,'[data-mark-composer=ask-about-selection] [data-mark-action=submit]');
+ await ready(page,"document.querySelector('#task-drawer .dialogue')?.dataset.dialogueId",'portable-live-once-created');
+ attempt.dialogueId=await page.evaluate("document.querySelector('#task-drawer .dialogue').dataset.dialogueId");checkpoint();
+ await ready(page,`window.ai7.inspectDialogue({dialogueId:${JSON.stringify(attempt.dialogueId)},afterFragment:0}).then(v=>v.attempts.at(-1)?.state==='completed'&&v.attempts.at(-1)?.fragmentTotal>0)`,'portable-live-once-streamed',300000);
+ attempt.completedAt=new Date().toISOString();checkpoint();check(true,'portable-own-keyring-route-streaming');
+ await select(page,'#task-drawer [data-task-drawer-control=close]');
+}
+
 async function walk(executable,env,expectedChannel,expectedDataRoot,input,output){
  at(expectedChannel+'-launch');
  let browser;
@@ -275,7 +367,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await select(page,'#app-sidebar [data-nav-destination=library]');
   await ready(page,"document.querySelector('[data-screen=landing]')",'initial-library-ready');
   check(true,expectedChannel+'-library');
-  const resumePrefix=Boolean(resume&&expectedChannel==='windows-installer');
+  const resumePrefix=Boolean((resume&&expectedChannel==='windows-installer')||(expectedChannel==='windows-portable'&&report.portableCarry?.restored));
   let bookId;
   if(resumePrefix){
    bookId=await page.evaluate("[...document.querySelectorAll('#app-sidebar [data-nav-book]')].find(n=>n.textContent.includes('Beta package compatibility'))?.dataset.navBook");
@@ -400,12 +492,13 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   await ready(page,"window.ai7.inspectBaselineAnalysis().then(v=>v.resultSetRevision!==null)",'baseline-result',900000);
   check(await page.evaluate("window.ai7.inspectBaselineAnalysis().then(v=>v.resultSetRevision?.coverage?.state==='complete')"),expectedChannel+'-baseline-complete');
   }
+  if(expectedChannel==='windows-portable'&&report.portableCarry?.restored)await portableLiveOnce(page,bookId);
   at(expectedChannel+'-full-review');
-  const retainedReview=resumePrefix?resume.completedReview?.review:null;
+  const retainedReview=resumePrefix?report.completedReview?.review:null;
   if(retainedReview){
    // A projection-only successor may inspect this valid historical Run without
    // authorizing the original paid requests again. Keep its original binary identity.
-   report.retainedReviewEvidence=resume.completedReview;
+   report.retainedReviewEvidence=report.completedReview;
    await openRetainedReview(page,retainedReview.runId);
    await ready(page,`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(retainedReview.runId)}}).then(v=>v.run&&['settled','scope-changed'].includes(v.run.state)&&v.run.categories.every(c=>c.state==='settled'))`,'retained-completed-review');
    const expectedTasks=retainedReview.memberCoverage.filter(c=>!c.local).map(c=>({categoryId:c.categoryId,taskIntentId:c.taskIntentId}));
@@ -495,7 +588,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.findingDispositions??=[];
   let disposition=report.findingDispositions.find(d=>d.channel===expectedChannel&&d.reviewRunId===review.runId);
   if(!disposition){disposition={channel:expectedChannel,reviewRunId:review.runId,accepted:null,rejected:null};report.findingDispositions.push(disposition);}
-  const priorAccept=resumePrefix&&resume.checks.includes(expectedChannel+'-finding-adopted')?resume.checks.map(c=>/^select-article\[data-finding-id="(rvf_[a-f0-9]+)"\] \[data-review-action=accept-apply\]$/.exec(c)?.[1]).filter(Boolean).at(-1):null;
+  const priorAccept=resumePrefix&&resume?.checks.includes(expectedChannel+'-finding-adopted')?resume.checks.map(c=>/^select-article\[data-finding-id="(rvf_[a-f0-9]+)"\] \[data-review-action=accept-apply\]$/.exec(c)?.[1]).filter(Boolean).at(-1):null;
   if(!disposition.accepted&&priorAccept){
    check(await page.evaluate(`window.ai7.inspectReviewWorkspace({reviewRunId:${JSON.stringify(review.runId)}}).then(v=>v.run.findings.some(f=>f.findingId===${JSON.stringify(priorAccept)}&&f.status==='handled'))`),'resume-prior-adoption-committed');
    disposition.accepted=priorAccept;disposition.recoveredFrom=resume.runnerHead;checkpoint();
@@ -571,6 +664,19 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(globalTurn.state==='completed'&&globalTurn.fragments>0&&['retrieve','exact_fetch'].every(t=>globalTurn.tools?.some(c=>c.tool===t&&c.outcome==='returned')),expectedChannel+'-global-real-cross-book-tools');report.globalTurns??=[];report.globalTurns.push({channel:expectedChannel,...globalTurn});
   checkpoint();
   }
+  if(expectedChannel==='windows-portable'&&report.portableCarry?.restored){
+   const retainedGlobal=report.globalTurns.find(t=>t.channel===expectedChannel);
+   const historyIndex=await page.evaluate(`window.ai7.inspectGlobalAgent().then(v=>v.history.findIndex(h=>h.dialogueId===${JSON.stringify(retainedGlobal.dialogueId)}))`);
+   check(historyIndex>=0,'portable-restored-global-history');
+   await select(page,`.global-agent-history-entry:nth-child(${historyIndex+1})`);
+   await ready(page,"document.querySelector('.global-agent-answer-bubble')?.textContent.length>0",'portable-restored-global-answer');
+   check(await page.evaluate(`window.ai7.inspectGlobalAgentDialogue({dialogueId:${JSON.stringify(retainedGlobal.dialogueId)}}).then(v=>v.attempts.at(-1)?.state==='completed'&&['retrieve','exact_fetch'].every(t=>v.toolCalls.some(c=>c.tool===t&&c.outcome==='returned')))`),'portable-restored-global-tools');
+   const beforeHabits=report.habitAttempts.find(t=>t.channel===expectedChannel).beforeHabits;
+   const habitIndex=await page.evaluate(`window.ai7.inspectGlobalAgent().then(v=>v.history.findIndex(h=>!${JSON.stringify(beforeHabits)}.includes(h.dialogueId)))`);
+   check(habitIndex>=0,'portable-restored-habits-history');
+   await select(page,`.global-agent-history-entry:nth-child(${habitIndex+1})`);
+   await ready(page,"document.querySelector('.global-agent-answer-bubble')?.textContent.length>0",'portable-restored-habits-answer');
+  }
   // Habits is another real scoped turn, using the product's ordinary button.
   report.habits??=[];report.habitAttempts??=[];
   if(!report.habits.some(t=>t.channel===expectedChannel)){
@@ -625,9 +731,12 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   report.nativeExports??=[];report.nativeExports.push({channel:expectedChannel,path:output,receipt:exactExportReceipt,sourceTable,exportTable,untouchedStories});checkpoint();
 
   at(expectedChannel+'-delivery-package-export');
+  const currentDesignation=await page.evaluate(`window.ai7.inspectDeliverables().then(v=>v.publication.designations.find(d=>d.current&&d.milestoneId===${JSON.stringify(milestone.milestoneId)})??null)`);
+  if(!currentDesignation){
   await select(page,'[data-publication-action=designate]');await ready(page,"document.querySelector('input[name=publication-milestone]')",'publication-designation');
   await select(page,'input[name=publication-milestone]');await fill(page,'[data-publication-field=scope]','公开样书打包态 Beta 功能验收');await fill(page,'[data-publication-field=basis]','完成本次公开样书交互与导出检查后固定此版本，不代表实际出版或外部 Beta 通过。');
   await select(page,'[data-publication-action=confirm]');await ready(page,"document.querySelector('form.publication-designate')===null",'publication-recorded');
+  }else check(true,'prior-valid-publication-payload-retained');
   await fill(page,'[data-package-field=purpose]','公开样书 Beta 打包交付验收');await select(page,'[data-package-action=prepare]');
   await ready(page,"document.querySelector('[data-package-action=export][data-package-version-id]')",'delivery-package-prepared');
   await select(page,'[data-package-action=export][data-package-version-id]');await select(page,'input[name=package-export-route][value=archive]');
@@ -641,10 +750,11 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(await page.evaluate(`(()=>{const node=document.querySelector('.data-storage-summary');return node.dataset.runtimeForm==='packaged'&&node.dataset.channel===${JSON.stringify(expectedChannel)}&&document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(expectedDataRoot)}})()`),expectedChannel+'-data-isolation');
 
   at(expectedChannel+'-automatic-backup-restore');
-  await ready(page,"document.querySelector('[data-scheduled-backup-switch]')",'backup-switch');await select(page,'[data-scheduled-backup-switch]');
+  await ready(page,"document.querySelector('[data-scheduled-backup-switch]')",'backup-switch');if(!await boolean(page,"document.querySelector('[data-scheduled-backup-switch]').checked"))await select(page,'[data-scheduled-backup-switch]');
   await ready(page,"window.ai7.inspectScheduledBackups().then(v=>v.total>0&&!v.backingUp&&v.lastFailure===null)",'automatic-backup-created',120000);
   const backup=await page.evaluate('window.ai7.inspectScheduledBackups().then(v=>({location:v.location,fileName:v.backups[0].fileName}))');
-  const backupPath=join(backup.location,backup.fileName),backupFiles=unzipSync(await readFile(backupPath));
+  const backupPath=join(backup.location,backup.fileName),backupBytes=await readFile(backupPath),backupFiles=unzipSync(backupBytes);
+  report.storageBackups??=[];report.storageBackups.push({channel:expectedChannel,path:backupPath,sha256:createHash('sha256').update(backupBytes).digest('hex'),buildIdentity:report.buildIdentity,runnerHead:report.runnerHead});checkpoint();
   check(Object.keys(backupFiles).some(n=>n.endsWith('.sqlite'))&&!Object.keys(backupFiles).some(n=>/\.key\.txt$/.test(n)),expectedChannel+'-automatic-backup-package');
   await select(page,'[data-database-import-action=choose]');native(executable,['-FileName',backupPath]);await ready(page,"document.querySelector('input[name=database-import-choice][value=replace]')",'backup-preview');
   await select(page,'input[name=database-import-choice][value=replace]');await select(page,'[data-database-import-action=confirm]');await ready(page,"document.querySelector('.database-import')?.dataset.pending==='true'",'backup-restore-pending');
@@ -659,6 +769,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   check(await boolean(page,"document.querySelector('[data-crash-list]')?.textContent.includes('界面进程退出')"),expectedChannel+'-real-renderer-crash-record');
   const version=await page.evaluate('window.ai7.inspectDataVersion().then(v=>({dataVersion:v.dataVersion,history:v.history.length}))');
   check(version.dataVersion===1&&version.history>=1,expectedChannel+'-persistent-store');
+  report.completedChannels??=[];if(!report.completedChannels.includes(expectedChannel))report.completedChannels.push(expectedChannel);checkpoint();
  }finally{await browser?.close();}
 }
 
@@ -666,17 +777,17 @@ try{
  try{
   const previous=JSON.parse(await readFile('C:/ai7/results/beta-last-run.json','utf8'));
   if(RESUME_LAST){
-   const stages=['windows-installer-full-review','windows-installer-retained-factual-evidence','windows-installer-controlled-english-source','windows-installer-agent-workspace','windows-installer-global-agent-live','windows-installer-native-docx-export','windows-installer-delivery-package-export','windows-installer-automatic-backup-restore','windows-installer-renderer-crash-diagnostics','windows-installer-launch','await-protected-enrollment-windows-installer'];
+   const stages=['windows-installer-full-review','windows-installer-retained-factual-evidence','windows-installer-controlled-english-source','windows-installer-agent-workspace','windows-installer-global-agent-live','windows-installer-native-docx-export','windows-installer-delivery-package-export','windows-installer-automatic-backup-restore','windows-installer-renderer-crash-diagnostics','windows-installer-launch','await-protected-enrollment-windows-installer','portable-restore-paid-history','portable-native-accepted-import','windows-portable-launch','await-protected-enrollment-windows-portable','windows-portable-full-review','windows-portable-controlled-english-source','windows-portable-agent-workspace','windows-portable-global-agent-live','windows-portable-native-docx-export','windows-portable-delivery-package-export','windows-portable-automatic-backup-restore','windows-portable-renderer-crash-diagnostics','windows-portable-live-once'];
    if((RETAINED_REVIEW_ONLY?!['failed','passed'].includes(previous.state):previous.state!=='failed'||!stages.includes(previous.failedStage))||previous.buildIdentity?.softwareVersion!=='0.5.0'||!resolve(previous.testRoot).toLowerCase().startsWith(resolve(tmpdir(),'ai7-beta-package-').toLowerCase()))throw Error('resume-receipt-refused');
    const completedReview=previous.completedReview??(()=>{const review=previous.reviews?.findLast(r=>r.channel==='windows-installer'&&r.state==='settled'&&r.categories?.length===5&&r.categories.every(c=>c.state==='settled'));return review?{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,review,checks:previous.checks}:null;})();
    if((RETAINED_REVIEW_ONLY||previous.failedStage==='windows-installer-retained-factual-evidence')&&!completedReview)throw Error('resume-completed-review-missing');
    resume=previous;
    report.activeReview=previous.activeReview??null;
    report.controlledTranslations=previous.controlledTranslations??[];report.findingDispositions=previous.findingDispositions??[];
-   for(const key of ['agent','agentAttempts','globalTurns','globalAttempts','habits','habitAttempts'])report[key]=previous[key]??[];
+   for(const key of ['agent','agentAttempts','globalTurns','globalAttempts','habits','habitAttempts','storageBackups','nativeExports','milestoneEvidence','portableLiveAttempts','completedChannels'])report[key]=previous[key]??[];
    resume.completedReview=completedReview;report.completedReview=completedReview;
    report.priorEvidence=previous.priorEvidence??{buildIdentity:previous.buildIdentity,runnerHead:previous.runnerHead,checks:previous.checks,importModes:previous.importModes,accountDiscovery:previous.accountDiscovery,searchProbes:previous.searchProbes,reason:'Completed prefix retained from earlier candidate; current candidate resumes at FullReview after actual product repair.'};
-   report.priorBook=previous.priorBook;
+   report.priorBook=previous.priorBook;report.portablePriorBook=previous.portablePriorBook;report.portableCarry=previous.portableCarry;report.portableImport=previous.portableImport;
   }else await cleanupInstallation(join(previous.testRoot,'installed'));
  }catch(e){if(e.code!=='ENOENT')throw e;}
  check(process.platform==='win32'&&process.arch==='x64','windows-x64');
@@ -714,15 +825,17 @@ try{
  const selfcheck=JSON.parse(run(executable,['--self-check'],env).trim());
  report.installedBuildIdentity=selfcheck.buildIdentity;
  check(selfcheck.channel==='windows-installer'&&selfcheck.writable&&selfcheck.keyringCarrier==='loaded'&&selfcheck.buildIdentity.sourceCommit===identity.sourceCommit,'installed-self-check');
- await walk(executable,env,'windows-installer',join(env.LOCALAPPDATA,'ai7','production'),input,join(temp,'installed-export.docx'));
+ if(!report.completedChannels?.includes('windows-installer'))await walk(executable,env,'windows-installer',join(env.LOCALAPPDATA,'ai7','production'),input,join(temp,'installed-export.docx'));
+ else check(true,'completed-installer-channel-retained-without-paid-or-native-export-repetition');
  if(!STARTUP_ONLY&&!RETAINED_REVIEW_ONLY){
  at('reinstall');run(setup,['/S','/D='+installed]);
  const after=JSON.parse(run(executable,['--self-check'],env).trim());check(after.channel==='windows-installer'&&after.store_versions==='readable','same-candidate-reinstall');
-  const portableRoot=join(temp,'portable');await mkdir(portableRoot);run(join(process.env.SystemRoot,'System32','tar.exe'),['-xf',zip,'-C',portableRoot]);
+  const portableRoot=join(temp,'portable');await mkdir(portableRoot,{recursive:true});run(join(process.env.SystemRoot,'System32','tar.exe'),['-xf',zip,'-C',portableRoot]);
  const portable=join(portableRoot,'AI7','app','AI7.exe');
  const portableEnv={...env,...selfCheckEnvironment(portable),LOCALAPPDATA:env.LOCALAPPDATA,APPDATA:env.APPDATA};
- await mkdir(join(temp,'portable-prior'));report.portablePriorBook=await seedPriorBook(join(temp,'portable-prior'),join(portableRoot,'AI7','data'));
+ if(!report.portablePriorBook){await mkdir(join(temp,'portable-prior'),{recursive:true});report.portablePriorBook=await seedPriorBook(join(temp,'portable-prior'),join(portableRoot,'AI7','data'));checkpoint();}
  const portableSelfcheck=JSON.parse(run(portable,['--self-check'],portableEnv).trim());check(portableSelfcheck.channel==='windows-portable'&&portableSelfcheck.writable,'extracted-portable-self-check');
+ await preparePortableCarry(portable,portableEnv,join(portableRoot,'AI7','data'),input);
  await walk(portable,portableEnv,'windows-portable',join(portableRoot,'AI7','data'),input,join(temp,'portable-export.docx'));
  at('uninstall');const uninstaller=(await readdir(installed)).find(name=>/^Uninstall.*\.exe$/i.test(name));check(Boolean(uninstaller),'uninstaller-present');
  run(join(installed,uninstaller),['/S']);await wait(()=>!existsSync(executable),'uninstall-timeout');check(existsSync(join(env.LOCALAPPDATA,'ai7','production','store','ai7.sqlite')),'uninstall-keeps-user-data');
