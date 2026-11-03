@@ -1596,6 +1596,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       searchReturn = { window: editor.currentWindow(), continuity: editor.captureContinuity() };
       returnFromSearch.hidden = false;
     }
+    // Keep the click's return origin before waiting: a viewport arrival already in flight may land
+    // meanwhile. The explicit search command follows it instead of vanishing behind its guard.
+    while (edgeNavigation) {
+      await navigationIdle;
+      if (destroyed) return;
+    }
+    if (authoritativeMutationBusy() || !editor) return;
+    const arrived = editor.currentWindow();
+    if (!searchPage || arrived.revisionId !== searchPage.revisionId ||
+        arrived.journalSequence !== searchPage.journalSequence || arrived.workingDigest !== searchPage.workingDigest) {
+      setStatus('稿件已变化；请重新查找后再跳转到精确范围。', 'error');
+      return;
+    }
     const selected = await navigate({ kind: 'block', blockId: match.blockId }, undefined, false,
       () => editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme) === true);
     if (!selected) {

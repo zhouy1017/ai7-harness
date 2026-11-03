@@ -357,8 +357,6 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
 }
 
 async function observeSearchJump(renderer) {
-  // [DEBUG-w23-search-cpu8] Temporary local probe; removed before integration.
-  if (localDebugEnabled()) await renderer.send('Emulation.setCPUThrottlingRate', { rate: 8 });
   await renderer.evaluate(`(() => {
     const trace=[],start=performance.now(),editor=document.querySelector('[data-testid="manuscript-editor"]'),pane=document.querySelector('.editor-window'),host=editor.parentElement;
     let closed=false,everMatchVisible=false,everDomRange=false,everFrameworkRange=false;
@@ -388,7 +386,6 @@ async function waitForExactSearchRange(renderer) {
     throw journeyCheckFailure('J-02',`search-exact-range-${reason}`,{cause:error});
   } finally {
     await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.dispose()').catch(()=>undefined);
-    if (localDebugEnabled()) await renderer.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   }
 }
 

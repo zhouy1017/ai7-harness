@@ -170,9 +170,9 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
-async function searchArrivalWithPendingWrite() {
+async function searchArrivalWithPendingWrite(jump = true) {
   vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
-  const initial = windowOf('book-one');
+  const initial = { ...windowOf('book-one'), nextCursor: 'next' };
   const matchWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'match', text: '星河校准' }], nextCursor: 'next' };
   const laterWindow = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'later' }] };
   let releaseWrite = (): void => {};
@@ -199,7 +199,7 @@ async function searchArrivalWithPendingWrite() {
   await vi.advanceTimersByTimeAsync(0);
   holdWrite = true;
   expect(app.screen.querySelector('.search-result button'), app.persistenceStatus.textContent).not.toBeNull();
-  app.screen.querySelector<HTMLButtonElement>('.search-result button')!.click();
+  if (jump) app.screen.querySelector<HTMLButtonElement>('.search-result button')!.click();
   return { app, pane, load, record, initial, releaseWrite: () => releaseWrite() };
 }
 
@@ -227,6 +227,30 @@ describe('the Manuscript screen lifecycle', () => {
     await vi.advanceTimersByTimeAsync(40);
     expect(load).toHaveBeenCalledTimes(2);
     expect(load.mock.calls[1]?.[0].target).toEqual({ kind: 'window-start', blockId: initial.blocks[0]!.blockId });
+    releaseWrite();
+    await vi.advanceTimersByTimeAsync(0);
+    app.showing?.destroy();
+  });
+
+  it('honors a search click during viewport arrival and returns to the click-origin window', async () => {
+    const { app, pane, load, initial, releaseWrite } = await searchArrivalWithPendingWrite(false);
+    const ordinaryLoad = load.getMockImplementation()!;
+    let finishArrival!: (window: Awaited<ReturnType<typeof ordinaryLoad>>) => void;
+    const arrival = new Promise<Awaited<ReturnType<typeof ordinaryLoad>>>((resolve) => { finishArrival = resolve; });
+    load.mockImplementation((input) => input.target.kind === 'cursor' ? arrival : ordinaryLoad(input));
+    Object.assign(pane, { scrollTop: 1000 });
+    pane.dispatchEvent({ type: 'scroll' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(1);
+    app.screen.querySelector<HTMLButtonElement>('.search-result button')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    finishArrival(await ordinaryLoad({ target: { kind: 'cursor' } }));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(children.editorSurfaces.at(-1)!.selectRange.mock.results[0]?.value).toBe(true);
+    [...app.screen.querySelectorAll('button')].find((button) => button.textContent === '返回查找前位置')!.click();
+    await vi.advanceTimersByTimeAsync(80);
+    expect(load.mock.calls.at(-1)?.[0].target).toEqual({ kind: 'window-start', blockId: initial.blocks[0]!.blockId });
     releaseWrite();
     await vi.advanceTimersByTimeAsync(0);
     app.showing?.destroy();
