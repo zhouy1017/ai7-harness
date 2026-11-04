@@ -401,7 +401,7 @@ const PAGE_HELPERS = `(() => {
       const node = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
       return node === undefined ? null : Number((node.textContent ?? '').slice('修订日志序号 '.length));
     },
-    milestoneSave: () => Array.from(document.querySelectorAll('details.milestone-section button')).find((item) => item.textContent === '保存里程碑版本') ?? null,
+    milestoneSave: () => Array.from(document.querySelectorAll('details.milestone-section button')).find((item) => (item.getAttribute('aria-label') ?? item.textContent) === '保存里程碑版本') ?? null,
     decisionText: () => {
       const clone = block()?.cloneNode(true);
       if (!clone) return '';

@@ -693,13 +693,13 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
 
   const reincludeNode = (open: NonNullable<typeof lineage>, panel: Extract<Panel, { kind: 'reinclude' }>): HTMLElement => {
     const fieldset = el('fieldset', 'learning-choices learning-reinclude');
-    fieldset.append(el('legend', undefined, LEARNING_LINEAGE_REINCLUDE_LEGEND));
+    fieldset.append(el('legend', undefined, `${LEARNING_LINEAGE_REINCLUDE_LEGEND} · ${LEARNING_LINEAGE_REINCLUDE_NOTE}`));
     const consequence = el('p', 'field-note learning-consequence');
     consequence.setAttribute('aria-live', 'polite');
     const record = action(LEARNING_RECORD, 'primary', 'reinclude-record', () => void reinclude());
     const show = (): void => {
       consequence.hidden = panel.choice === null;
-      consequence.textContent = panel.choice === null ? '' : `${learningChoiceConsequence(panel.choice, open.projection.bookTitle).replace(/。$/u, '')}；${LEARNING_LINEAGE_REINCLUDE_NOTE}`;
+      consequence.textContent = panel.choice === null ? '' : learningChoiceConsequence(panel.choice, open.projection.bookTitle);
       record.disabled = busy || panel.choice === null;
     };
     for (const entry of LEARNING_CHOICES) {

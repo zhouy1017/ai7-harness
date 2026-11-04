@@ -884,9 +884,9 @@ const READ_HISTORY = `(() => {
   return {
     note: root.querySelector('.feedback-history-note')?.textContent ?? null,
     none: root.querySelector('.feedback-history-none')?.textContent ?? null,
-    books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
+    books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.firstChild?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
     grouping: root.dataset.feedbackGrouping ?? null,
-    groups: Array.from(root.querySelectorAll('.feedback-group'), (group) => [group.querySelector('h3')?.textContent ?? null, group.querySelectorAll('li.feedback-entry').length]),
+    groups: Array.from(root.querySelectorAll('.feedback-group'), (group) => [group.querySelector('h3')?.firstChild?.textContent ?? null, group.querySelectorAll('li.feedback-entry').length]),
     entryBooks: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-book')?.textContent ?? null),
     entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-description')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
     people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
@@ -936,7 +936,7 @@ const READ_AUDIT = `(() => {
     note: root.querySelector('.learning-audit-note')?.textContent ?? null,
     later: root.querySelector('.learning-audit-later')?.textContent ?? null,
     none: root.querySelector('.learning-audit-none')?.textContent ?? null,
-    books: Array.from(root.querySelectorAll('.learning-audit-book'), (book) => book.querySelector('h3')?.textContent ?? null),
+    books: Array.from(root.querySelectorAll('.learning-audit-book'), (book) => book.querySelector('h3')?.firstChild?.textContent ?? null),
     bookOptions: Array.from(root.querySelectorAll('#learning-audit-filter-book option'), (option) => option.textContent),
     standingFilter: root.querySelector('#learning-audit-filter-standing')?.value ?? null,
     rows: Array.from(root.querySelectorAll('li.learning-audit-material'), (item) => [item.dataset.materialKey ?? null, item.dataset.learningStanding ?? null,
@@ -950,7 +950,7 @@ const READ_AUDIT = `(() => {
     lineage: lineage === null ? null : {
       key: lineage.dataset.materialKey ?? null,
       standing: lineage.dataset.learningStanding ?? null,
-      heading: lineage.querySelector('h4')?.textContent ?? null,
+      heading: lineage.querySelector('h4')?.firstChild?.textContent ?? null,
       steps: Array.from(lineage.querySelectorAll('.learning-lineage-step'), (step) => [step.dataset.lineageStep, step.dataset.lineageCount ?? null, step.querySelector('h5')?.textContent ?? null]),
       decisions: Array.from(lineage.querySelectorAll('.learning-lineage-decision'), (item) => [item.dataset.decisionState, item.dataset.decisionVia,
         (item.querySelector('.learning-lineage-decision-line')?.textContent ?? '').split(' · ')[0], item.querySelector('.learning-lineage-decision-status')?.textContent ?? null]),
@@ -969,6 +969,7 @@ const READ_AUDIT = `(() => {
       confirm: enabled(preview.querySelector('[data-learning-audit-action="confirm"]')),
     },
     reinclude: reinclude === null ? null : {
+      boundary: reinclude.querySelector('legend')?.textContent ?? null,
       choices: Array.from(reinclude.querySelectorAll('input'), (input) => [input.value, input.checked]),
       consequence: reinclude.querySelector('.learning-consequence:not([hidden])')?.textContent ?? null,
       record: enabled(reinclude.querySelector('[data-learning-audit-action="reinclude-record"]')),
@@ -993,7 +994,6 @@ async function readAudit(renderer, predicate, name) {
 const auditRow = (key) => `[data-screen="quality-learning"] li.learning-audit-material[data-material-key="${key}"]`;
 // Issue #912: 审阅 Runs read 本社审阅偏好 versions now, so the audit no longer says no Task reads learning material; with no
 // Run having read any in this Journey, every count stays 0 and every empty stage keeps its own words.
-const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
 const AUDIT_WHY_EMPTY = '学习信号来自这条材料参与生成的本社审阅偏好版本，任务是实际参考这些版本的审阅；目前没有编辑撰写的候选或已启用记忆，并非被隐藏，模型自动归纳尚未提供。';
 const AUDIT_STALE = '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。';
 
@@ -2830,7 +2830,7 @@ async function main() {
     await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-tab');
     const auditAll = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 40, 'learning-audit-all');
     requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么；停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
-      auditAll.later === AUDIT_LATER && auditAll.books.length === 1 && auditAll.books[0].startsWith(`《${THIRD.title}》 · `) &&
+      auditAll.later === null && auditAll.books.length === 1 && auditAll.books[0].startsWith(`《${THIRD.title}》 · `) &&
       auditAll.rows.every(([, , , use]) => use === '尚未被任何任务使用') &&
       auditAll.rows.every(([, standing, , , selectable]) => selectable === (standing === 'book' || standing === 'house')) &&
       // The 图书 filter offers every Book of the house, those with no material on this page among them (LAUD-002).
@@ -2952,7 +2952,7 @@ async function main() {
     await readAudit(renderer, (page) => page.lineage?.key === auditFirst, 'learning-audit-reopened');
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'learning-audit-reinclude-open');
     const reincluding = await readAudit(renderer, (page) => page.reinclude !== null, 'learning-audit-reinclude-card');
-    requireJourney(JSON.stringify(reincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) && reincluding.reinclude.record === false &&
+    requireJourney(reincluding.reinclude.boundary === '重新纳入的范围 · 重新纳入会追加一个新的准入决定；之前的排除仍留在记录里，不会被改写。' && JSON.stringify(reincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) && reincluding.reinclude.record === false &&
       reincluding.reinclude.consequence === null, 'learning-audit-reinclude-card-words', reincluding.reinclude);
     await tick(renderer, '.learning-reinclude input[value="book"]', 'learning-audit-reinclude-book');
     const reincludeChosen = await readAudit(renderer, (page) => page.reinclude?.record === true, 'learning-audit-reinclude-chosen');
