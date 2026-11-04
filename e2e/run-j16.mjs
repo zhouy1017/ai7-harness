@@ -450,7 +450,7 @@ async function openPanel(renderer, name) {
 
 /** One card's action, named by the Task's state and the action's key. */
 async function cardAction(renderer, state, action, name) {
-  if (action === 'next') { await clickSelector(renderer, `#task-drawer .task-overview-card[data-task-state=${JSON.stringify(state)}]`, name); return; }
+  if (action === 'next') { await assertRenderer(renderer, `(() => { const card=document.querySelector('#task-drawer .task-overview-card[data-task-state='+${JSON.stringify(JSON.stringify(state))}+']'); if (!(card instanceof HTMLElement)) return false; card.click(); return true; })()`, name); return; }
   if (action === 'answer' && state === 'dialogue-answered') action = 'result';
   await clickSelector(renderer, `#task-drawer .task-panel .task-overview-card[data-task-state=${JSON.stringify(state)}] [data-task-action=${JSON.stringify(action)}]`, name);
 }
@@ -1002,7 +1002,7 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
     // Opt out through the shared sheet so the explicit result-window steps below own their focus.
     await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-result-popup-preference');
-    await clickSelector(renderer, '#task-drawer [data-task-overview-auto-result]', 'panel-result-popup-off');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked; })()`, 'panel-result-popup-off');
     await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
 
     at('panel-prepare');
