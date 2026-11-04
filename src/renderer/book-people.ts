@@ -205,12 +205,16 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
     }
     const row = el('div', 'button-row');
     const save = actionButton('save', 'primary', () => void saveDraft());
-    const why = el('p', 'field-note book-people-reason');
+    const why = el('span', 'book-people-reason');
     why.id = uid('reason');
+    save.setAttribute('aria-label', save.textContent ?? '');
     save.setAttribute('aria-describedby', why.id);
+    const reasonLabel = el('span');
+    reasonLabel.append(' · ', why);
+    save.append(reasonLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeForm());
     cancel.disabled = working;
-    row.append(save, cancel, why);
+    row.append(save, cancel);
     form.append(row);
     form.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || working) return;
@@ -221,6 +225,7 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       const reason = blocker(current);
       why.textContent = reason ?? '';
       why.hidden = reason === null;
+      reasonLabel.hidden = reason === null;
       save.disabled = working || reason !== null;
     }
     sync();

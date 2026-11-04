@@ -359,20 +359,25 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     }
     const row = el('div', 'button-row maintenance-actions');
     const confirm = actionButton('confirmRecord', 'primary', () => void recordCase(designation));
-    const why = el('p', 'field-note maintenance-reason');
+    const why = el('span', 'maintenance-reason');
     why.id = uid('record-reason');
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
+    const reasonLabel = el('span');
+    reasonLabel.append(' · ', why);
+    confirm.append(reasonLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeDraft(true));
     cancel.disabled = working;
     const sync = (): void => {
       const blocker = draftBlocker(current);
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
+      reasonLabel.hidden = blocker === null;
       confirm.disabled = working || blocker !== null;
     };
     reason.addEventListener('input', () => { current.reason = reason.value; current.problem = null; sync(); });
     evidence.addEventListener('input', () => { current.evidence = evidence.value; current.problem = null; sync(); });
-    row.append(confirm, cancel, why);
+    row.append(confirm, cancel);
     form.append(row);
     form.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || working) return;
@@ -498,15 +503,20 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
     const confirm = actionButton(panel === 'errata' ? 'saveErrata' : panel === 'conclude' ? 'confirmConclude' : 'confirmLink', 'primary', () => void takeStep(current, panel));
-    const why = el('p', 'field-note maintenance-reason');
+    const why = el('span', 'maintenance-reason');
     why.id = uid('step-reason');
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
+    const reasonLabel = el('span');
+    reasonLabel.append(' · ', why);
+    confirm.append(reasonLabel);
     const sync = (): void => {
       const emptyChoice = panel === 'link-proposal' && projection.choices.proposals.length === 0 ? MAINTENANCE_NO_PROPOSALS
         : panel === 'link-publication' && projection.choices.publications.length === 0 ? MAINTENANCE_NO_PUBLICATIONS : null;
       const blocker = emptyChoice ?? panelBlocker(current, panel);
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
+      reasonLabel.hidden = blocker === null;
       confirm.disabled = working || blocker !== null;
     };
     const radios = (legend: string, entries: ReadonlyArray<{ value: string; label: string; detail: string | null }>, chosen: string | null, pick: (value: string) => void): HTMLElement => {
@@ -564,7 +574,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const row = el('div', 'button-row maintenance-actions');
     const cancel = actionButton('cancel', 'quiet', () => closePanel(current));
     cancel.disabled = working;
-    row.append(confirm, cancel, why);
+    row.append(confirm, cancel);
     form.append(row);
     sync();
     return form;

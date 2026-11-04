@@ -350,13 +350,18 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const prepare = el('button', 'primary', PACKAGE_PREPARE);
     prepare.type = 'button';
     prepare.dataset['packageAction'] = 'prepare';
-    const reason = el('p', 'field-note package-prepare-reason');
+    const reason = el('span', 'package-prepare-reason');
     reason.id = uid('prepare-reason');
+    prepare.setAttribute('aria-label', prepare.textContent ?? '');
     prepare.setAttribute('aria-describedby', reason.id);
+    const reasonLabel = el('span');
+    reasonLabel.append(' · ', reason);
+    prepare.append(reasonLabel);
     const sync = (): void => {
       const why = blocker(next);
       reason.textContent = why ?? '';
       reason.hidden = why === null;
+      reasonLabel.hidden = why === null;
       prepare.disabled = busy() || why !== null;
     };
     input.addEventListener('input', () => {
@@ -368,7 +373,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     if (problem !== null) form.append(el('p', 'attention-note package-problem', problem));
     const row = el('div', 'button-row compact-actions');
     row.append(prepare);
-    form.append(row, reason);
+    form.append(row);
     sync();
     return form;
   }
@@ -626,14 +631,19 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function renderExportActions(current: ExportState, inFlight: boolean): HTMLElement {
     const row = el('div', 'button-row export-actions');
     const approve = exportButton('approve', 'primary', () => void approveExport());
-    const reason = el('p', 'field-note export-approve-reason', PACKAGE_EXPORT_APPROVE_REASON);
+    const reason = el('span', 'export-approve-reason', PACKAGE_EXPORT_APPROVE_REASON);
     reason.id = uid('export-approve-reason');
     reason.hidden = current.prepared !== null;
     approve.disabled = inFlight || current.prepared === null;
+    approve.setAttribute('aria-label', approve.textContent ?? '');
     approve.setAttribute('aria-describedby', reason.id);
+    const reasonLabel = el('span');
+    reasonLabel.hidden = reason.hidden;
+    reasonLabel.append(' · ', reason);
+    approve.append(reasonLabel);
     const cancel = exportButton('cancel', 'quiet', () => closeExport(true));
     cancel.disabled = inFlight && current.phase !== 'writing';
-    row.append(approve, cancel, reason);
+    row.append(approve, cancel);
     return row;
   }
 
