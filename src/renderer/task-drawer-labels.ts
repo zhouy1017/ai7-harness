@@ -259,7 +259,7 @@ export const TASK_PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序�
  * 先问你 (Issue #422, S76d; PLAN-011, PLAN-012): an adaptation moved into the right column. The Run asks the editor
  * before it makes it, in a Clarification Request, and only the step that waits for the answer stops.
  */
-export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
 export const TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST = '先问你';
 /** The move's control, named for what it does. */
 export function taskPlanEditAskFirst(label: string): string {

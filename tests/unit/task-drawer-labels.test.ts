@@ -761,7 +761,7 @@ describe('the editable plan (S73)', () => {
     expect(TASK_PLAN_EDIT_RESTORE).toBe('恢复');
     expect(TASK_PLAN_EDIT_STEPS_NOTE).toBe('这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。');
     // S76d (Issue #422): the move is offered now, and the note says what it means for the Run.
-    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。');
+    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('这一步暂停等你回答，其他阅读范围继续。');
     expect(TASK_PLAN_FULL_LINK_EDITABLE).toBe('完整计划（6 段）· 可以改步骤与限制');
     expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
     expect(taskPlanEditCount(2)).toBe('你改了 2 处');

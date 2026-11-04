@@ -1089,9 +1089,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     if (next.boundary.adaptable.length === 0 || adaptations.childElementCount === 0) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
     adaptable.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[0]), adaptations);
-    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.movable)) {
-      adaptable.append(el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
-    }
     const askFirst = el('div', 'task-plan-boundary-column');
     askFirst.dataset['taskPlanBoundary'] = 'ask-first';
     const locked = el('ul', 'task-plan-list task-plan-locked');
@@ -1102,7 +1099,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const movedIn = el('ul', 'task-plan-list task-plan-asked');
     movedIn.append(...asked);
-    askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), ...(asked.length === 0 ? [] : [movedIn]), locked);
+    const askFirstHeading = el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]);
+    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.movable)) {
+      askFirstHeading.append(' · ', el('span', 'task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
+    }
+    askFirst.append(askFirstHeading, ...(asked.length === 0 ? [] : [movedIn]), locked);
     section.append(adaptable, askFirst);
     return section;
   }

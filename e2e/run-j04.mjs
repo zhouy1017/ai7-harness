@@ -520,7 +520,7 @@ async function readDrawer(renderer) {
       references:texts('[data-task-plan-term="允许参考"] li'), sections:texts('[data-task-plan-section] > h3'),
       steps:Array.from(drawer.querySelectorAll('.task-plan-steps > li')).map((item)=>item.querySelector('.task-plan-step')?.textContent+' '+item.querySelector('.task-plan-step-result')?.textContent),
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
-      columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
+      columns:Array.from(drawer.querySelectorAll('.task-plan-boundary h4'), (node) => node.firstChild?.textContent ?? ''), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'), footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       actions:drawer.querySelectorAll('[data-analysis-action], [data-review-action], [data-task-authorization-action]').length,
       bar:(() => {
@@ -634,7 +634,7 @@ const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范�
 // leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
 const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
 // Issue #422 (S76d): the move into 先问你 is offered, and the note says what it means for the Run.
-const PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+const PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
 const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
