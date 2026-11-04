@@ -338,15 +338,18 @@ describe('reference-free writing on the Go execution path (#810)', () => {
     expect(cache.lines.filter(isModelCallLine).every((line) => line.itemId.startsWith('S84/'))).toBe(true);
   }, 120_000);
 
-  it('judges the recorded real draft by the copy rules: admitted as it is, withheld when a 范例 or 资料 holds its words', async () => {
+  it('keeps the recorded draft while withholding the paragraph copied from a 范例 or 资料', async () => {
     const recordedWords = recordedDraft(await loadModelFixture(FIXTURES_ROOT, 'sample1-recorded-v41-writing-draft'));
     const input: WritingContractInput = { type: { typeId: 'promotion-article', label: '宣传文章' }, book: { title: '合成图书', authors: [], editors: [], series: [] },
       audience: '读者', channel: '纸面', requirements: null, synopsis: null, evaluation: null, exemplars: [] };
     expect(writingKindDefinition(input).crossUnit!.step!.parse(recordedWords.text, [])).toMatchObject({ ok: true });
     const exemplar = { bookTitle: '合成范例', version: 1, excerpt: false, text: recordedWords.firstParagraph };
-    expect(writingKindDefinition({ ...input, exemplars: [exemplar] }).crossUnit!.step!.parse(recordedWords.text, [])).toMatchObject({ ok: false, code: 'exemplar-copied' });
-    expect(writingKindDefinition({ ...input, materials: [{ title: '合成资料', paragraphs: [recordedWords.firstParagraph] }] }).crossUnit!.step!.parse(recordedWords.text, []))
-      .toMatchObject({ ok: false, code: 'material-copied' });
+    for (const reference of [{ exemplars: [exemplar] }, { materials: [{ title: '合成资料', paragraphs: [recordedWords.firstParagraph] }] }]) {
+      const parsed = writingKindDefinition({ ...input, ...reference }).crossUnit!.step!.parse(recordedWords.text, []);
+      expect(parsed).toMatchObject({ ok: true, result: { withheld: [expect.objectContaining({ paragraph: 0, reason: expect.stringContaining('这一段没有采用') })] } });
+      expect(JSON.stringify(parsed)).not.toContain(recordedWords.firstParagraph);
+      expect(parsed).toMatchObject({ result: { title: recordedWords.title, sections: expect.any(Array) } });
+    }
   });
 
   it('withholds copied real-format synthesis output under the existing exemplar and material rules', () => {
