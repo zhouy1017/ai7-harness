@@ -601,10 +601,11 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const availability = next.publication.designate;
     if (!availability.available) {
       open.disabled = true;
-      const why = el('p', 'field-note publication-unavailable-reason', availability.unavailableReason ?? '');
+      const why = el('span', 'publication-unavailable-reason', availability.unavailableReason ?? '');
       why.id = uid('designate-reason');
+      open.setAttribute('aria-label', open.textContent ?? '');
       open.setAttribute('aria-describedby', why.id);
-      row.append(why);
+      open.append(' · ', why);
       return area;
     }
     open.disabled = working;
@@ -707,12 +708,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     statement.id = uid('statement');
     const problem = el('p', 'publication-problem');
     problem.setAttribute('role', 'alert');
-    const reason = el('p', 'field-note publication-confirm-reason');
+    const reason = el('span', 'publication-confirm-reason');
     reason.id = uid('confirm-reason');
     const confirm = el('button', 'primary', PUBLICATION_ACTION_LABELS.confirm);
     confirm.type = 'button';
     confirm.dataset['publicationAction'] = 'confirm';
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', `${statement.id} ${reason.id}`);
+    const reasonLabel = el('span');
+    reasonLabel.append(' · ', reason);
+    confirm.append(reasonLabel);
     confirm.addEventListener('click', () => void confirmDesignation(state));
     const cancel = el('button', 'quiet', PUBLICATION_ACTION_LABELS.cancel);
     cancel.type = 'button';
@@ -720,7 +725,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     cancel.disabled = working;
     cancel.addEventListener('click', () => closeForm());
     const actions = el('div', 'button-row publication-designate-actions');
-    actions.append(confirm, cancel, reason);
+    actions.append(confirm, cancel);
     node.append(title, choices, summary, scope.wrap, basis.wrap, statement, problem, actions);
 
     const sync = (): void => {
@@ -742,6 +747,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       const why = publicationDesignateReason(publicationDesignateBlockers({ milestoneChosen: chosen !== null, scope: state.scope, basis: state.basis }));
       reason.textContent = why ?? '';
       reason.hidden = why === null;
+      reasonLabel.hidden = why === null;
       confirm.disabled = working || why !== null;
       node.dataset['publicationReady'] = why === null ? 'true' : 'false';
     };
@@ -949,13 +955,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (blocked !== null) {
         // Unavailable, with its reason in words beside it (the pattern of 设为发稿版本's, PUB-002).
         create.disabled = true;
-        const why = el('p', 'field-note document-create-reason', blocked);
+        const why = el('span', 'document-create-reason', blocked);
         why.id = uid('document-create-reason');
+        create.setAttribute('aria-label', create.textContent ?? '');
         create.setAttribute('aria-describedby', why.id);
+        create.append(' · ', why);
         const notForThisBook = documentButton('notForThisBook', type, 'quiet');
         notForThisBook.addEventListener('click', () => void decide(type, true));
         actions.append(create, notForThisBook);
-        item.append(actions, why);
+        item.append(actions);
         return item;
       }
       create.addEventListener('click', () => {
@@ -997,13 +1005,18 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const versions = el('fieldset');
     versions.append(el('legend', undefined, DELIVERY_VERSION_LEGEND));
     const confirm = documentButton('confirmDeliver', type, 'primary');
-    const reason = el('p', 'field-note delivery-reason');
+    const reason = el('span', 'delivery-reason');
     reason.id = uid('delivery-reason');
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', reason.id);
+    const reasonLabel = el('span');
+    reasonLabel.append(' · ', reason);
+    confirm.append(reasonLabel);
     const sync = (): void => {
       const blockers = deliveryBlockers(state);
       reason.textContent = blockers[0] ?? '';
       reason.hidden = blockers.length === 0;
+      reasonLabel.hidden = blockers.length === 0;
       confirm.disabled = working || blockers.length > 0;
     };
     const choices: Array<[string, string]> = documentNow.versions.map((version) => [version.revisionId, `${version.label} · ${localInstantLabel(version.createdAt)}`]);
@@ -1083,7 +1096,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (documentsProjection !== null) drawDocuments(documentsProjection, { typeId: type.typeId, action: documentNow.deliveries.length === 0 ? 'deliver' : 'redeliver' });
     });
     row.append(confirm, cancel);
-    form.append(row, reason);
+    form.append(row);
     sync();
     return form;
   }

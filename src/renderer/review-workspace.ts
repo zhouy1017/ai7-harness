@@ -822,10 +822,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     control.type = 'button';
     control.disabled = true;
     control.dataset['reviewAction'] = action;
-    const why = el('small', 'field-note', reason);
+    const why = el('span', undefined, reason);
     why.id = uid(`${action}-reason`);
+    control.setAttribute('aria-label', label);
     control.setAttribute('aria-describedby', why.id);
-    wrap.append(control, why);
+    control.append(' · ', why);
+    wrap.append(control);
     return wrap;
   };
 
@@ -929,10 +931,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     row.append(start, local);
     if (!next.newReview.available) {
       start.disabled = true;
-      const why = el('p', 'field-note review-unavailable-reason', next.newReview.unavailableReason ?? '');
+      const why = el('span', 'review-unavailable-reason', next.newReview.unavailableReason ?? '');
       why.id = reasonId;
+      start.setAttribute('aria-label', start.textContent ?? '');
       start.setAttribute('aria-describedby', reasonId);
-      row.append(why);
+      start.append(' · ', why);
     } else if (working) {
       start.disabled = true;
     }
