@@ -1285,8 +1285,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const finding of run.excluded ?? []) {
         const item = el('div', 'review-excluded-entry');
         item.setAttribute('style', 'overflow-wrap: anywhere');
-        item.append(el('p', 'field-note', `${finding.categoryLabel} · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`} · ${finding.reasonLabel}${technicalWords(` · ${finding.reasonCode}`)}`),
-          el('p', '', finding.text));
+        item.append(el('strong', undefined, `${finding.categoryLabel} · ${finding.reasonLabel}${technicalWords(` · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`} · ${finding.reasonCode}`)}`),
+          el('blockquote', undefined, finding.text));
         details.append(item);
       }
       if (run.excludedTruncated) {
