@@ -302,6 +302,9 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationRewriteReadingLine(reading)).toBe('AI7 这次重写读了全部 8 个阅读范围。');
     expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重写只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重写的评语。');
     expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重写的评语已采用（记为第 3 次保存），分数没有改动。');
+    setTechnicalLayerVisible(false);
+    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上次重写已采用，分数不变。');
+    setTechnicalLayerVisible(true);
     expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重写的评语已放弃，评语保持原样。');
   });
 

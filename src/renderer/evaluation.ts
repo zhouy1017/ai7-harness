@@ -735,7 +735,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       card.append(actions);
       section.append(card);
     } else if (rewrite.decided !== null) {
-      section.append(el('p', 'field-note evaluation-rewrite-decided', evaluationRewriteDecidedLine(rewrite.decided)));
+      heading.append(' · ', el('span', 'evaluation-rewrite-decided', evaluationRewriteDecidedLine(rewrite.decided)));
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
     if (task !== null && task.state === 'prepared') {

@@ -515,6 +515,6 @@ export function evaluationRewriteReadingLine(reading: NonNullable<EvaluationRewr
 /** The version's last decision on a rewrite. */
 export function evaluationRewriteDecidedLine(decided: NonNullable<EvaluationRewriteWorkspaceProjection['decided']>): string {
   return decided.decision === 'accepted'
-    ? `上一次重写的评语已采用（记为第 ${decided.entryOrdinal} 次保存），分数没有改动。`
+    ? technicalWords(`上一次重写的评语已采用（记为第 ${decided.entryOrdinal} 次保存），分数没有改动。`, '上次重写已采用，分数不变。')
     : '上一次重写的评语已放弃，评语保持原样。';
 }
