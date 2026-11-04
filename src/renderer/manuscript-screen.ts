@@ -395,6 +395,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 0 处。`,
   );
   exclusionSummary.id = 'replacement-exclusion-summary';
+  exclusionSummary.hidden = true;
   exclusionSummary.setAttribute('aria-live', 'polite');
   const searchResults = element('div', 'search-results');
   const resultPaging = element('div', 'button-row');
@@ -794,6 +795,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     return !destroyed;
   };
   const updateExclusionSummary = (): void => {
+    exclusionSummary.hidden = searchPage === undefined || searchPage.totalMatches === 0;
     exclusionSummary.textContent =
       `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处。`;
     exclusionSummary.dataset['excludedCount'] = String(excludedMatchIds.size);
