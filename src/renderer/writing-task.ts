@@ -168,14 +168,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       const line = el('p', 'writing-task-line', writingTaskLine(task));
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
-      const refusal = task.refusal === null ? null : el('p', 'field-note writing-task-refusal', task.refusal);
+      if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', task.refusal));
       const row = el('div', 'button-row');
       // The next step only for a Task that can start: one whose 范例 is gone, or that wrote no draft, is looked at, not started (#698).
       const open = action(WRITING_ACTIONS.openTask, writingOpenTaskTone(task), 'open-task', () => options.openPlan(task.taskIntentId));
       open.setAttribute('aria-controls', 'task-drawer');
       open.disabled = busy;
       row.append(open);
-      section.append(line, ...(refusal === null ? [] : [refusal]), row);
+      section.append(line, row);
     }
     // Each drafted result not yet made its type's document.
     const drafted = page.types.filter((type): type is WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> } => type.drafted !== null);
@@ -232,14 +232,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         state.problem = null;
         paint(`input[name="writing-type"][value="${CSS.escape(type.typeId)}"]`);
       });
-      const label = el('label', undefined, type.label);
+      const label = el('label', undefined, type.label + (type.prepare.allowed ? '' : ' · '));
       label.htmlFor = id;
       wrapper.append(input, label);
       if (!type.prepare.allowed) {
-        const reason = el('span', 'field-note writing-type-reason', type.prepare.reason);
+        const reason = el('span', 'writing-type-reason', type.prepare.reason);
         reason.id = uid('reason');
         input.setAttribute('aria-describedby', reason.id);
-        wrapper.append(reason);
+        label.append(reason);
       }
       types.append(wrapper);
     }
@@ -350,14 +350,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
           state.problem = null;
           paint(`[data-writing-material="${CSS.escape(item.materialId)}"]`);
         });
-        const label = el('label', undefined, writingMaterialLabel(item));
+        const label = el('label', undefined, writingMaterialLabel(item) + (reasonText === null ? '' : ' · '));
         label.htmlFor = id;
         row.append(box, label);
         if (reasonText !== null) {
-          const reason = el('span', 'field-note writing-material-reason', reasonText);
+          const reason = el('span', 'writing-material-reason', reasonText);
           reason.id = uid('material-reason');
           box.setAttribute('aria-describedby', reason.id);
-          row.append(reason);
+          label.append(reason);
         }
         list.append(row);
       }

@@ -252,7 +252,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
         const row = el('tr');
         row.dataset['taskResultFinding'] = finding.findingId;
         const place = el('td', 'task-result-place');
-        place.append(el('span', 'field-note', reviewResultPlaceLine(finding)), ' ', jumpButton(finding.blockPosition === null ? null : finding.blockId, finding.markId));
+        place.append(reviewResultPlaceLine(finding), ' ', jumpButton(finding.blockPosition === null ? null : finding.blockId, finding.markId));
         row.append(el('td', undefined, String(finding.ordinal)), el('td', undefined, finding.categoryLabel), el('td', undefined, reviewResultFindingLine(finding)), place);
         return row;
       })));

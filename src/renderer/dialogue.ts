@@ -165,8 +165,15 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     if (attempt.question !== undefined) section.append(el('p', 'dialogue-question', `追问：${attempt.question}`));
     section.append(head, answer);
     const incomplete = dialogueIncompleteLine(attempt);
-    if (incomplete !== null) section.append(el('p', 'field-note dialogue-incomplete', incomplete));
-    if (attempt.convertedMarkIds.length > 0) section.append(el('p', 'field-note dialogue-converted', dialogueConvertedLine(attempt.convertedMarkIds.length)));
+    if (incomplete !== null || attempt.convertedMarkIds.length > 0) {
+      const status = el('p', 'field-note');
+      if (incomplete !== null) status.append(el('span', 'dialogue-incomplete', incomplete.replace(/。$/u, '')));
+      if (attempt.convertedMarkIds.length > 0) {
+        if (incomplete !== null) status.append('；');
+        status.append(el('span', 'dialogue-converted', dialogueConvertedLine(attempt.convertedMarkIds.length)));
+      }
+      section.append(status);
+    }
     return { section, answer };
   }
 
@@ -177,7 +184,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     element.dataset['dialogueId'] = next.dialogueId;
     const latest = next.attempts.at(-1) ?? null;
     if (next.origin === 'agent-workspace') {
-      context.replaceChildren(el('p', 'field-note', '这轮变更集在 Agent 工作区中查看和提交。'));
+      context.replaceChildren(el('p', 'field-note', '在工作区查看并提交本次修改。'));
       attemptsHost.replaceChildren();
       actions.replaceChildren();
       promoteRow.replaceChildren();
