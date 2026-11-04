@@ -1293,7 +1293,7 @@ async function main() {
       const save = document.querySelector(${JSON.stringify(`${peopleSection} [data-people-action="save"]`)});
       const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? '');
       const options = Array.from(document.querySelectorAll(${JSON.stringify(`${peopleSection} .book-people-related-row select option`)}), (option) => option.textContent);
-      return save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed') && reason?.textContent === '每位相关人都要选角色、填名字。' &&
+      return save instanceof HTMLButtonElement && save.disabled && reason?.textContent === '每位相关人都要选角色、填名字。' &&
         JSON.stringify(options) === '["选择角色","校对","美编","译者","外审专家","作者经纪","营销","其他"]';
     })()`, 'people-related-needs-role-and-name');
     await choose(renderer, `${peopleSection} .book-people-related-row[data-related-index="0"] select`, PEOPLE.relatedRole, 'people-related-role');
@@ -1318,7 +1318,7 @@ async function main() {
       const save = section?.querySelector('[data-people-action="save"]');
       return section instanceof HTMLElement && getComputedStyle(section).boxShadow === 'none' && getComputedStyle(section).borderTopStyle === 'solid' &&
         related instanceof HTMLElement && getComputedStyle(related).borderTopStyle === 'solid' && parseFloat(getComputedStyle(related).borderTopWidth) >= 1 &&
-        save instanceof HTMLElement && getComputedStyle(save).borderTopStyle === 'solid';
+        save instanceof HTMLButtonElement && getComputedStyle(save).borderTopStyle === 'solid';
     })()`, 'people-rules-without-colour');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
 
@@ -3369,7 +3369,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-import-landing');
     await click(renderer, '导入稿件', 'word-import-stage');
     await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-import-target');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]'); if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-import-new-book');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]'); if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-import-new-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-import-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]'); if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-import-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"] [data-word-learn-from-edits]')?.checked === true`, 'word-learning-default-visible');

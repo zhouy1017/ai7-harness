@@ -756,7 +756,7 @@ async function choosePurpose(renderer, kind, name) {
 }
 /** 保存里程碑版本 once the form is filled, answered with `已保存里程碑版本「标签」 · rN`. */
 async function saveMilestone(renderer, milestone, revisionLabel, name) {
-  await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); if (!(save instanceof HTMLElement) || (save.dataset.editorPersistence === 'confirmed')) return false; document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`, `${name}-save`);
+  await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); if (!(save instanceof HTMLButtonElement) || save.disabled) return false; save.click(); return true; })()`, `${name}-save`);
   const completion = `已保存里程碑版本「${milestone.label}」 · ${revisionLabel}`;
   await waitFor(renderer, `window.__j07.status().includes(${JSON.stringify(completion)}) && window.__j07.tone() === 'success'`, `${name}-completion`, 120_000);
 }
@@ -1226,7 +1226,7 @@ async function main() {
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
         radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
-        save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed');
+        save instanceof HTMLButtonElement && save.disabled;
     })()`, 'milestone-form-starts-unselected');
     await fill(renderer, '#milestone-label', FIRST.label, 'first-label');
     await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? ''); return save?.disabled === true && (reason?.textContent ?? '').includes('选择用途'); })()`, 'milestone-save-waits-for-a-purpose');

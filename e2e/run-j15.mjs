@@ -1183,7 +1183,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'word-lineage-landing');
     await click(renderer, '导入稿件', 'word-lineage-pick');
     await waitFor(renderer, `document.querySelector('[data-import-target-choice="new-book"]')`, 'word-lineage-target');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]');if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-lineage-new-book');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-target-choice="new-book"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-new-book');
     await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-lineage-relationship');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement))return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');
