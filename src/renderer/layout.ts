@@ -315,10 +315,8 @@ export function mountRegionSeparator(options: RegionSeparatorOptions): { element
 /** 设置 › 本机 › 外观's density, reading preset, typography and region controls, beside 11b's theme (VIEW-001 to VIEW-009). */
 export function renderViewSettings(view: ViewPreferences, setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void): { element: HTMLElement; destroy(): void } {
   const section = el('div', 'view-settings');
-  const message = el('p', 'field-note');
-  message.setAttribute('role', 'status');
   const saved = (write: Promise<void>, done = VIEW_SETTINGS_SAVED): void => {
-    void write.then(() => { message.textContent = done; }, () => { message.textContent = VIEW_SETTINGS_SAVE_FAILED; setStatus(VIEW_SETTINGS_SAVE_FAILED, 'error'); });
+    void write.then(() => setStatus(done, 'success'), () => setStatus(VIEW_SETTINGS_SAVE_FAILED, 'error'));
   };
   const radios = <Value extends string>(legend: string, name: string, choices: ReadonlyArray<{ value: Value; label: string; description?: string }>, choose: (value: Value) => void) => {
     const set = el('fieldset', 'appearance-choices');
@@ -410,6 +408,6 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
   };
   paint(view.current);
   const unsubscribe = view.subscribe(paint);
-  section.append(el('p', 'field-note', VIEW_SETTINGS_PROMISE), density.set, preset.set, typography, regions, message);
+  section.append(el('p', 'field-note', VIEW_SETTINGS_PROMISE), density.set, preset.set, typography, regions);
   return { element: section, destroy: unsubscribe };
 }

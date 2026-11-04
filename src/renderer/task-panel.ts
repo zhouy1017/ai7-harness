@@ -945,9 +945,10 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
   function resolutionBlock(current: ComposerState, resolution: TaskIntentDraftResolution): HTMLElement {
     const section = el('section', 'task-composer-resolution');
     section.dataset['taskComposerResolution'] = resolution.state;
-    section.append(el('p', 'section-label', TASK_COMPOSER_RESOLUTION_HEADING));
+    const heading = el('p', 'section-label', TASK_COMPOSER_RESOLUTION_HEADING);
+    section.append(heading);
     if (resolution.state !== 'choose') {
-      section.append(el('p', `field-note task-composer-${resolution.state}`, resolution.state === 'unsupported' ? resolution.reason : taskComposerResolutionReady(resolution.option.label)));
+      heading.append(' · ', el('span', `task-composer-${resolution.state}`, resolution.state === 'unsupported' ? resolution.reason : taskComposerResolutionReady(resolution.option.label)));
       if (resolution.state === 'unsupported') return section;
       current.choice = 0;
     } else {
