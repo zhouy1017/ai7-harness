@@ -761,7 +761,7 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
-const showQuietNotice = mountQuietNotice((item) => void leaveThen(async () => { renderTaskOverview(item.itemId); const overview = await window.ai7.inspectTaskOverview(); const task = overview.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId); if (task) await openOverviewResult(task); }));
+const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openTaskNotification(item.itemId, item.target)));
 const observeNotifications = createNotificationObserver({
   api: window.ai7,
   focused: () => document.hasFocus(),
@@ -779,15 +779,12 @@ globalAttentionReader.subscribe((reading) => {
 window.ai7.onNotificationNavigate((target) => {
   void leaveThen(async () => {
     if (target.eventId !== null && target.target !== undefined) {
-      renderTaskOverview(target.eventId);
-      const overview = await window.ai7.inspectTaskOverview();
-      const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === target.eventId);
-      if (task) { if (['completed', 'cancelled', 'stopped'].includes(task.state)) await openOverviewResult(task); else openOverviewTask(task); }
+      await openTaskNotification(target.eventId, target.target);
       return;
     }
     const projection = await window.ai7.inspectGlobalAttention();
     const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === target.eventId && entry.book.bookId === target.bookId);
-    if (item) { renderTaskOverview(item.itemId); const overview = await window.ai7.inspectTaskOverview(); const task = overview.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId); if (task) openOverviewTask(task); }
+    if (item) await openTaskNotification(item.itemId, item.target);
     else await openGlobalAttention(target.bookId);
   });
 });
@@ -1176,6 +1173,18 @@ function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run'
   if (item.target.kind === 'task-intent-draft') taskDrawer.openDraft(item.target.bookId, item.target.draftId, finder);
   else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
   else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo' });
+}
+/** Task notices use the overview; other attention notices retain their existing destination. */
+async function openTaskNotification(itemId: string, target: GlobalAttentionTarget): Promise<void> {
+  if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(target.kind)) {
+    await openGlobalAttentionTarget(target); return;
+  }
+  const overview = await window.ai7.inspectTaskOverview();
+  const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === itemId);
+  if (!task) { await openGlobalAttentionTarget(target); return; }
+  renderTaskOverview(itemId);
+  if (['completed', 'cancelled', 'stopped'].includes(task.state)) await openOverviewResult(task);
+  else openOverviewTask(task);
 }
 async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
   if (!item.bookId) return;
