@@ -343,8 +343,8 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
 }
 
 /**
- * The category's basis in one line, stated once on the sheet and snapshotted into the Review Run
- * (REV-010, REV-012). This states the capability; the producing Run Report supplies the observed research status (#744).
+ * The category's basis fields for mode-specific renderer wording (#1315, REV-010, REV-012).
+ * Historical run snapshots and exported report text keep their original serialization below.
  */
 export function reviewCategoryBasis(entry: ReviewCategoryConfigurationEntry): ReviewCategoryBasis {
   return {

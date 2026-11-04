@@ -1,4 +1,5 @@
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
+import { identityWords } from './technical-layer.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { metadataWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -84,7 +85,7 @@ export const analysisTabChoice = new Map<string, AnalysisTabId>();
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 

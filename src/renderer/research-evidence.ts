@@ -1,3 +1,4 @@
+import { identityWords } from './technical-layer.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
 import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
@@ -37,7 +38,7 @@ export interface MountResearchEvidenceOptions {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 

@@ -1,3 +1,4 @@
+import { identityWords } from './technical-layer.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { metadataWords } from './technical-layer.js';
 import { MAX_BATCH_APPLY_SUGGESTIONS } from '../shared/protocol.js';
@@ -12,7 +13,7 @@ import { proposalIdentityRows, proposalPreparationLine } from './technical-layer
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
 const exclusionLabels = { conflict: '未解决冲突', 'unclassified-stale': '旧基准尚未分类', unloaded: '未加载', 'other-version': '其他版本', 'atomic-group': '原子组需单独处理', applied: '已经应用' } as const;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node;
+  const node = document.createElement(tag); if (text !== undefined) node.textContent = identityWords(text, className); if (className) node.className = className; return node;
 }
 function button(label: string, action: string, run: () => void): HTMLButtonElement {
   const node = el('button', label, 'secondary'); node.type = 'button'; node.dataset['proposalAction'] = action; node.addEventListener('click', run); return node;

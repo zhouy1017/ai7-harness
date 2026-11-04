@@ -1,3 +1,4 @@
+import { identityWords } from './technical-layer.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import { collectTechnicalDisclosures, initializeTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { metadataWords } from './technical-layer.js';
@@ -915,7 +916,7 @@ function rendererErrorMessage(error: unknown, fallback: string): string {
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 
@@ -4737,9 +4738,9 @@ const { renderModelServiceSettings } = createModelServiceSettings({
 
 async function initializeRenderer(): Promise<void> {
   await appearance.ready;
-  const location = await window.ai7.getProductDataLocation();
-  initializeTechnicalLayer(location.channel, window.localStorage);
   try {
+    const [location, settings] = await Promise.all([window.ai7.getProductDataLocation(), window.ai7.getModelServiceSettings()]);
+    initializeTechnicalLayer(location.channel, window.localStorage, settings.launchPolicy.operationalScope);
     const route = await window.ai7.getBookWorkbenchRoute();
     if (route) {
       await renderResolvedBookWorkbenchRoute(route);

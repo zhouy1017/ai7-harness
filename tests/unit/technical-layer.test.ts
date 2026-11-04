@@ -16,6 +16,7 @@ describe('technical layer presentation (#1315)', () => {
       initializeTechnicalLayer(channel, storage); expect(technicalLayerVisible).toBe(false);
     }
     initializeTechnicalLayer('source-checkout', storage); expect(technicalLayerVisible).toBe(true);
+    initializeTechnicalLayer('source-checkout', storage, 'ordinary-production'); expect(technicalLayerVisible).toBe(false);
     saveTechnicalLayerVisible(false, storage);
     initializeTechnicalLayer('source-checkout', storage); expect(technicalLayerVisible).toBe(false);
   });

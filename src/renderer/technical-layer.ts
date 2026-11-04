@@ -1,12 +1,12 @@
-import type { DistributionChannel } from '../shared/protocol.js';
+import type { DistributionChannel, TrustedOperationalScope } from '../shared/protocol.js';
 
 /** Presentation only: never changes a service record, model binding or exported document. */
 export let technicalLayerVisible = true;
 const PREFERENCE = 'ai7.technicalLayerVisible';
 
-export function initializeTechnicalLayer(channel: DistributionChannel, storage: Pick<Storage, 'getItem'>): void {
+export function initializeTechnicalLayer(channel: DistributionChannel, storage: Pick<Storage, 'getItem'>, scope: TrustedOperationalScope | null = 'development-ci'): void {
   const saved = storage.getItem(PREFERENCE);
-  setTechnicalLayerVisible(saved === null ? channel === 'source-checkout' : saved === 'true');
+  setTechnicalLayerVisible(saved === null ? channel === 'source-checkout' && (scope === 'development-ci' || scope === 'developer-live') : saved === 'true');
 }
 
 export function setTechnicalLayerVisible(visible: boolean): void {
@@ -76,4 +76,9 @@ export function collectTechnicalDisclosures(root: HTMLElement): void {
     section.open = true;
     section.hidden = !collection.open;
   }
+}
+
+/** Existing technical-identity spans also occur beside ordinary dates, outside disclosures. */
+export function identityWords(text: string, className?: string): string {
+  return !technicalLayerVisible && className?.split(/\s+/u).includes('technical-identity') ? '' : text;
 }

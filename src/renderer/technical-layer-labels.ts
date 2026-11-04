@@ -2,7 +2,7 @@ import { metadataWords } from './technical-layer.js';
 /**
  * Identifiers live in the technical layer (ADR 0096 §3, ADR 0071 §1; Issue #1177): a Book identifier, a revision or decision
  * identifier, a digest or a raw receipt is never printed inline on 书库 cards, in the proposal workspace, in reimport choices or
- * in model settings; each stays one disclosure away behind 查看技术详情, and the words beside it say what it is.
+ * in model settings. Developer mode alone exposes them through the page disclosure; ordinary mode omits them.
  */
 export const TECHNICAL_IDENTITY_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\b[0-9a-f]{64}\b|blk_[0-9a-f]{24}/iu;
 
