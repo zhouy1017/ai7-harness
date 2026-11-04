@@ -148,7 +148,6 @@ import {
 } from './import-fidelity-labels.js';
 import { mountProposalConflict, type ProposalConflictSurface } from './proposal-conflict.js';
 import {
-  DELIVERABLES_DESTINATION_ACTIONS,
   DELIVERABLES_ENTRY_LABEL,
   DELIVERABLES_STATUS_LINES,
   DELIVERABLES_UNAVAILABLE,
@@ -187,7 +186,6 @@ import {
 import {
   REVIEW_ACTION_LABELS,
   REVIEW_CARD_HEADING,
-  REVIEW_DESTINATION_ACTIONS,
   REVIEW_STATUS_LINES,
   REVIEW_WORKSPACE_UNAVAILABLE,
   reviewOverviewLine,
@@ -811,7 +809,6 @@ const shell = mountShell({
   preferenceNotice: requiredElement('#preferences-notice'),
   preferences: shellPreferences,
   pinLimit: MAX_PINNED_BOOKS,
-  listBooks: (input) => window.ai7.listBooks(input),
   setStatus,
   errorMessage: rendererErrorMessage,
   openDestination: (destination) => {
@@ -1118,9 +1115,6 @@ function renderGlobalAttention(bookId?: string | null): void {
     openNetworkProxySettings: () => renderModelServiceSettings(),
     open: openGlobalAttentionItem,
   });
-  const actions = element('div', 'button-row workbench-actions');
-  actions.append(button(GLOBAL_ATTENTION_ACTIONS[0], 'secondary', () => returnToLibrary()));
-  content.append(actions);
   replaceScreen('global-attention', content);
   globalAttentionSurface = surface;
   surface.start();
@@ -1327,7 +1321,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
 }
 
 function panel(): HTMLElement {
-  return element('section', 'panel');
+  return element('section', 'page-content');
 }
 
 async function returnToRecoveryComparison(attentionId: string): Promise<void> {
@@ -1983,7 +1977,6 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   content.dataset['readOnly'] = 'true';
   content.dataset['blockCount'] = String(projection.blocks.length);
   content.append(
-    element('p', 'section-label', `${projection.bookTitle} · 历史修订版 · 永久只读`),
     element('h2', undefined, `稿件修订版${technicalWords(` ${projection.revisionLabel}`)}`),
     element('p', 'lede', `${projection.position.label}。此窗口不装载编辑器，也不提供写入、修订日志、替换、撤销/重做或里程碑操作。`),
   );
@@ -2504,7 +2497,6 @@ async function renderBookWorkbenchChooser(
     content.classList.add('book-workbench-chooser');
     content.dataset['currentBookId'] = currentOverview.book.bookId;
     content.append(
-      element('p', 'section-label', `${currentOverview.book.title} · 图书工作台`),
       element('h2', undefined, '在另一本图书工作台打开'),
       element('p', 'lede', '选择会创建或显示目标图书已有的工作台；当前图书工作台保持打开。'),
     );
@@ -2554,7 +2546,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   const content = panel();
   content.classList.add('book-findings'); content.dataset['bookId'] = bookId;
   const host = element('div', 'findings-center');
-  content.append(element('p', 'section-label', FINDINGS_CENTER_WORDS.section(bookTitle)), element('h2', undefined, FINDINGS_CENTER_WORDS.heading),
+  content.append(element('h2', undefined, FINDINGS_CENTER_WORDS.heading),
     element('p', 'lede', FINDINGS_CENTER_WORDS.lede), host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
   agentWorkspaceReturns.set(content, () => renderBookFindings(bookId, bookTitle));
@@ -2574,39 +2566,16 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
   content.classList.add('book-analysis');
   content.dataset['bookId'] = bookId;
   content.append(
-    element('p', 'section-label', '资料与记录 · 分析'),
-    element('h2', undefined, bookTitle),
+    element('h2', undefined, '分析'),
     element('p', 'lede', '基线分析是其他任务的底稿：全书梗概、人物与名称、事件、关系、设定和各章。它只读稿件，不改稿件。'),
   );
   const host = element('div');
   host.dataset['analysisBookId'] = bookId;
-  const actions = element('div', 'button-row workbench-actions');
-  const openManuscript = button('打开稿件', 'primary', async () => {
-    openManuscript.disabled = true;
-    setStatus('正在打开稿件…', 'busy');
-    try {
-      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
-    } catch (error) {
-      openManuscript.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
-    }
-  });
-  const openOverview = button('工作概览', 'secondary', async () => {
-    openOverview.disabled = true;
-    setStatus('正在打开图书工作概览…', 'busy');
-    try {
-      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
-    } catch (error) {
-      openOverview.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
-    }
-  });
-  actions.append(openManuscript, openOverview);
   // 后台分析 (Issue #95, S39): the Book's Background Analysis Enrollment, beside the analysis it may start and outside the card,
   // so the card's own follow-ups never redraw it.
   const backgroundHost = element('section');
   backgroundHost.dataset['bookId'] = bookId;
-  content.append(host, backgroundHost, actions);
+  content.append(host, backgroundHost);
   replaceScreen('book-analysis', content, { bookId, title: bookTitle, section: 'analysis' });
   agentWorkspaceReturns.set(content, () => renderBookAnalysis(bookId, bookTitle, target, focus));
   setStatus('分析已打开');
@@ -2671,8 +2640,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
 
 /**
  * ②B 审阅 as its own Book destination under 工作 (editor-surfaces §4, V2-UX-REV-001). The surface is
- * `review-workspace.ts`; this only routes to it and gives it the workbench's persistent way out, appended
- * last for the same reason ②A's is (LAYER-005). `focus` opens a named Review Run with one finding in
+ * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
 function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
@@ -2725,29 +2693,6 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     openLearningLineage: (materialBookId, materialKey, reviewRunId) => void renderQualityLearning('audit', null, false,
       { bookId: materialBookId, materialKey }, () => renderBookReview(bookId, bookTitle, { reviewRunId, findingId: null })),
   });
-  const actions = element('div', 'button-row workbench-actions');
-  const openManuscript = button(REVIEW_DESTINATION_ACTIONS[0], 'primary', async () => {
-    openManuscript.disabled = true;
-    setStatus('正在打开稿件…', 'busy');
-    try {
-      await openBook();
-    } catch (error) {
-      openManuscript.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
-    }
-  });
-  const openOverview = button(REVIEW_DESTINATION_ACTIONS[1], 'secondary', async () => {
-    openOverview.disabled = true;
-    setStatus('正在打开图书工作概览…', 'busy');
-    try {
-      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
-    } catch (error) {
-      openOverview.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
-    }
-  });
-  actions.append(openManuscript, openOverview);
-  content.append(actions);
   replaceScreen('book-review', content, { bookId, title: bookTitle, section: 'review' });
   agentWorkspaceReturns.set(content, () => renderBookReview(bookId, bookTitle, focus, procedureId));
   reviewWorkspace = surface;
@@ -2759,8 +2704,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
 
 /**
  * ⑥ 交付物 as its own Book destination under 工作, beside 审阅 (editor-surfaces §9, IA-006). The surface is
- * `deliverables.ts`; this only routes to it and gives it the workbench's persistent way out, appended last
- * so the sticky region stays on screen for the whole page (V2-UX-LAYER-005).
+ * `deliverables.ts`; destination navigation belongs to the sidebar.
  */
 /**
  * The dedicated Proposal review workspace (Issue #902, V2-UX-PROP-002): offered, never entered by itself. It takes the
@@ -2844,7 +2788,6 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
   content.dataset['bookId'] = bookId;
   const host = element('div', 'evaluation-host');
   content.append(
-    element('p', 'section-label', `${EVALUATION_TITLE} · 《${bookTitle}》`),
     element('h2', undefined, EVALUATION_TITLE),
     element('p', 'field-note', EVALUATION_LEDE),
     host,
@@ -2872,29 +2815,6 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
       renderEditorWindow(opened, bookTitle, undefined, undefined, undefined, undefined, { typeId: draft.typeId, typeLabel: draft.typeLabel, document: draft.document });
     },
   });
-  const actions = element('div', 'button-row workbench-actions');
-  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
-    openManuscript.disabled = true;
-    setStatus('正在打开稿件…', 'busy');
-    try {
-      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
-    } catch (error) {
-      openManuscript.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
-    }
-  });
-  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
-    openOverview.disabled = true;
-    setStatus('正在打开图书工作概览…', 'busy');
-    try {
-      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
-    } catch (error) {
-      openOverview.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
-    }
-  });
-  actions.append(openManuscript, openOverview);
-  content.append(actions);
   replaceScreen('book-evaluation', content, { bookId, title: bookTitle, section: 'evaluation' });
   agentWorkspaceReturns.set(content, () => renderBookEvaluation(bookId, bookTitle, focus));
   taskSurfaceRefresh = { 'initial-evaluation': () => surface.refresh(), 'readers-report': () => surface.refresh(), 'evaluation-rewrite': () => surface.refresh() };
@@ -2925,36 +2845,12 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
   content.dataset['bookId'] = bookId;
   const host = element('div', 'research-evidence-host');
   content.append(
-    element('p', 'section-label', `资料与记录 · ${SOURCES_TITLE} · 《${bookTitle}》`),
     element('h2', undefined, SOURCES_TITLE),
     element('p', 'field-note', SOURCES_LEDE),
     host,
   );
   const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
     ...(focusEvidenceId === undefined ? {} : { focusEvidenceId }) });
-  const actions = element('div', 'button-row workbench-actions');
-  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
-    openManuscript.disabled = true;
-    setStatus('正在打开稿件…', 'busy');
-    try {
-      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
-    } catch (error) {
-      openManuscript.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
-    }
-  });
-  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
-    openOverview.disabled = true;
-    setStatus('正在打开图书工作概览…', 'busy');
-    try {
-      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
-    } catch (error) {
-      openOverview.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
-    }
-  });
-  actions.append(openManuscript, openOverview);
-  content.append(actions);
   replaceScreen('book-sources', content, { bookId, title: bookTitle, section: 'sources' });
   agentWorkspaceReturns.set(content, () => renderBookSources(bookId, bookTitle, focusEvidenceId));
   setStatus(SOURCES_STATUS.loading, 'busy');
@@ -3008,29 +2904,6 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     awaitServiceJob,
     openWritingPlan: (ref, note) => openTaskPlan(bookId, 'writing', ref, note),
   });
-  const actions = element('div', 'button-row workbench-actions');
-  const openManuscript = button(DELIVERABLES_DESTINATION_ACTIONS[0], 'primary', async () => {
-    openManuscript.disabled = true;
-    setStatus('正在打开稿件…', 'busy');
-    try {
-      await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId, bookTitle });
-    } catch (error) {
-      openManuscript.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
-    }
-  });
-  const openOverview = button(DELIVERABLES_DESTINATION_ACTIONS[1], 'secondary', async () => {
-    openOverview.disabled = true;
-    setStatus('正在打开图书工作概览…', 'busy');
-    try {
-      renderBookOverview(await window.ai7.getBookOverview({ bookId, historyCursor: null }));
-    } catch (error) {
-      openOverview.disabled = false;
-      setStatus(rendererErrorMessage(error, '无法打开图书工作概览。'), 'error');
-    }
-  });
-  actions.append(openManuscript, openOverview);
-  content.append(actions);
   replaceScreen('book-deliverables', content, { bookId, title: bookTitle, section: 'deliverables' });
   agentWorkspaceReturns.set(content, () => renderBookDeliverables(bookId, bookTitle, openCase, focusPackageVersionId));
   deliverablesSurface = surface;
@@ -3053,17 +2926,7 @@ function renderBookOverview(
   content.dataset['bookId'] = overview.book.bookId;
   content.dataset['manuscriptState'] = overview.manuscriptState.state;
   if (completion) content.dataset['importCommitId'] = completion.commitId;
-  content.append(
-    element(
-      'p',
-      'section-label',
-      completion
-        ? `${completion.completionLabel} · 图书工作概览`
-        : emptyBookCreated ? '图书已创建 · 图书工作概览' : '图书工作概览',
-    ),
-    element('h2', undefined, overview.book.title),
-    element('p', 'lede', overview.manuscriptState.label),
-  );
+  content.append(element('h2', undefined, '工作概览'), element('p', 'lede', overview.manuscriptState.label));
   if (sourceCompletion) {
     content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
   } else if (completion) {
@@ -3072,9 +2935,7 @@ function renderBookOverview(
   else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
   // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the
   // editor last was, and whether the edits are in the journal — above the Book's own identity and
-  // every record below. Its continuation action is `打开稿件`, the first action of the sticky
-  // `.workbench-actions` region, which V2-UX-LAYER-005 keeps on screen for the whole surface; the
-  // anchor therefore states the three readings and does not repeat the action's label beside them.
+  // every record below. Its continuation action sits with these manuscript readings.
   const anchor = overview.manuscriptAnchor;
   const guidance = element('section', 'onboarding-guidance');
   content.append(guidance);
@@ -3314,7 +3175,7 @@ function renderBookOverview(
   }
 
   const detailHost = element('div');
-  const actions = element('div', 'button-row workbench-actions');
+  const actions = element('div', 'button-row');
   const completionActionButtons: HTMLButtonElement[] = [];
   if (sourceCompletion) {
     const sourceRecord = sourceCompletion.receipt.source;
@@ -3394,10 +3255,7 @@ function renderBookOverview(
       completionActionButtons.push(primaryActionButton);
     }
   }
-  actions.append(
-    button('打开另一本图书', 'secondary', () => renderBookWorkbenchChooser(overview)),
-    button('返回图书列表', 'secondary', () => returnToLibrary()),
-  );
+
 
   const records = element('section', 'review-section record-navigation');
   records.append(element('h3', undefined, '精确记录'));
@@ -3437,13 +3295,11 @@ function renderBookOverview(
     historyNavigation.append(next);
   }
   records.append(historyNavigation);
-  // The actions follow the record navigation so the sticky region stays pinned for the whole page: a
-  // sticky bar releases once its own flow position scrolls into view, so a mid-page one would be
-  // pushed off screen by the record list — exactly what V2-UX-LAYER-005 forbids. This is the slot
-  // `.commit-bar` occupies on the three review surfaces.
-  content.append(records, actions);
+  content.append(records);
+  (content.querySelector('.manuscript-anchor') ?? content).append(actions);
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content, { bookId: overview.book.bookId, title: overview.book.title, section: 'overview' });
+  shell.setContextActions(button('打开另一本图书', 'quiet', () => renderBookWorkbenchChooser(overview)));
   // The drawer's bar started a Task of this Book (Issue #420): J-03's card and the one-line summaries read it again.
   taskSurfaceRefresh = {
     'fixed-task': inspectTaskAuthorization,
@@ -4712,7 +4568,7 @@ function renderEditorWindow(
         await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId);
       });
     },
-    setContextActions: (content) => shell.setContextActions(content),
+    setContextActions: (...content) => shell.setContextActions(...content),
     setStatus, setCloseRisk, errorMessage: rendererErrorMessage, recentlyActivatedControl, awaitServiceJob,
     composerRangeOf, selectionTaskOffer, selectionProcedureOffer, prepareSelectionTask,
     renderEditorWindow, renderBookAnalysis, renderBookReview,

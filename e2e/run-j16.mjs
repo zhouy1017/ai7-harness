@@ -454,7 +454,7 @@ async function cardAction(renderer, state, action, name) {
 }
 
 const blockInView = (blockId) => `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id=${JSON.stringify(blockId)}]') !== null`;
-const CHIP = `document.querySelector('[data-screen="editor"] .return-chip-host [data-return-chip]')`;
+const CHIP = `document.querySelector('#context-header .return-chip-host [data-return-chip]')`;
 /**
  * A window that presents no frames, as J-01 holds them: every animation frame asked for is kept, unrun, until RELEASE_FRAMES
  * restores the page's own and asks each kept one of it, in order; a kept frame cancelled meanwhile is dropped.
@@ -1135,7 +1135,7 @@ async function main() {
       rail.dispatchEvent(new Event('change'));
     })()`);
     // The real navigation sets its guard synchronously, before awaiting the window read.
-    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
+    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'chip-use');
     await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
     try {
       await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
@@ -1193,7 +1193,7 @@ async function main() {
     await waitForRailMarker(renderer, 'annotation', 'mark-rail-replacement-ready');
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
     await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
-    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
+    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'mark-rail-return');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-returned', 60_000);
     // A way out of 查看结果's window leaves the manuscript as its own ways out do (Issue #423 review): words typed a moment
     // before 在分析中打开 are written first, and the manuscript opened again from ②A holds them where they were typed.
@@ -1224,7 +1224,7 @@ async function main() {
     requireJourney(typeof rangeBlock === 'string' && rangeBlock.length > 0, 'analysis-range-block');
     await clickSelector(renderer, '[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="7"] [data-analysis-action="return-to-range"]', 'analysis-return-to-range');
     await waitFor(renderer, `${blockInView(rangeBlock)} && ${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'analysis-jumped', 60_000);
-    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'analysis-chip-use');
+    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'analysis-chip-use');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'analysis-chip-used', 60_000);
 
     at('j14-panel-keyboard');
@@ -1757,7 +1757,7 @@ async function main() {
     // (a reimport re-identifies rewritten paragraphs), so the checks after the reimport tell a return place kept by the refused
     // jump from none (review P3-A).
     if (await renderer.evaluate(`${CHIP} !== null`)) {
-      await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
+      await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
       await waitFor(renderer, `${CHIP} === null && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
     }
     const composedInputs = resolve(runRoot, 'composed-inputs');
@@ -1874,7 +1874,7 @@ async function main() {
     const workspaceRouteBefore = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`);
     await assertRenderer(renderer, AGENT_ROW_CLICK, 'workspace-entry-row');
     await waitFor(renderer, `document.querySelector('[data-screen="agent-workspace"] .agent-workspace[data-agent-workspace-state="available"]')?.dataset.bookId === ${JSON.stringify(bookId)}`, 'workspace-entry-screen');
-    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区' && root.querySelector('.section-label')?.textContent === ${JSON.stringify(`《${BOOK.title}》 · Agent 工作区`)} && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
+    await assertRenderer(renderer, `(() => { const root = document.querySelector('[data-screen="agent-workspace"] .agent-workspace'); const back = root.querySelector('[data-agent-workspace-action="back"]'); return root.querySelector('h2')?.textContent === 'Agent 工作区' && root.querySelector('header .section-label') === null && root.querySelector('[data-agent-workspace-safety]')?.textContent === ${JSON.stringify(WORKSPACE_SAFETY)} && back instanceof HTMLButtonElement && back.textContent === '返回' && back.dataset.shortcutCommand === 'nav.back' && document.querySelector('#context-title')?.textContent === ${JSON.stringify(BOOK.title)} && document.querySelector(${JSON.stringify(AGENT_ROW)})?.getAttribute('aria-current') === 'page'; })()`, 'workspace-entry-words');
     requireJourney(await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`) === workspaceTasksBefore &&
       await renderer.evaluate(`window.ai7.getBookWorkbenchRoute().then((route) => JSON.stringify(route))`) === workspaceRouteBefore, 'workspace-entry-records-nothing');
     // Re-selecting the active row must not replace the original manuscript return with the overview fallback (#90 review).

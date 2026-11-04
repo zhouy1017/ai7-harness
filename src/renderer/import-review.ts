@@ -64,7 +64,7 @@ function button(label: string, className: 'primary' | 'secondary' | 'quiet', act
 }
 
 function panel(): HTMLElement {
-  return element('section', 'panel');
+  return element('section', 'page-content');
 }
 
 /** What the shell lends the import review: its screen changes, status line, recovery return and the routes an import leaves by. */

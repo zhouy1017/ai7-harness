@@ -203,10 +203,10 @@ body { padding-left: var(--sidebar-width); }
 [data-developer-only="true"]::after { content: "开发者"; display: inline-flex; margin-left: .55rem; padding: .08rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .72rem; font-weight: 700; vertical-align: middle; }
 .library-home { display: grid; grid-template-columns: 1.3fr .7fr; gap: 1.5rem 3rem; align-items: center; }
 
-.screen { flex: 1 0 auto; width: min(1280px, calc(100% - 4rem)); margin: 2rem auto 1rem; }
-.panel { background: var(--surface); border: 1px solid var(--boundary); border-radius: 16px; box-shadow: 0 14px 40px var(--shadow); padding: clamp(1.5rem, 3vw, 2.5rem); }
+.screen { flex: 1 0 auto; min-width: 0; padding: 1.1rem 1.6rem; }
+.page-content { min-width: 0; }
 .hero { display: grid; grid-template-columns: 1.3fr .7fr; gap: 3rem; align-items: center; min-height: 420px; }
-.hero h2, .panel h2 { margin: 0 0 .7rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 2rem; }
+.hero h2, .page-content h2 { margin: 0 0 .7rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 2rem; }
 .hero-steps { margin: 1.5rem 0; padding-left: 1.25rem; color: var(--text-subdued); line-height: 1.9; }
 .hero-note { border-left: 3px solid var(--boundary); padding: .9rem 1rem; background: var(--surface-subdued); color: var(--text-subdued); }
 .recent-work { grid-column: 1 / -1; border-top: 1px solid var(--boundary); padding-top: 1.25rem; }
@@ -1639,7 +1639,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
   .hero, .library-home, .review-grid, .recovery-candidate-grid, .model-role-grid { grid-template-columns: 1fr; }
   .fidelity-row { grid-template-columns: 1fr; }
   .export-fidelity-row { grid-template-columns: 1fr; }
-  .screen { width: min(100% - 1.25rem, 900px); margin-top: .75rem; }
+
   .context-header { padding: .6rem 1rem; }
 
 
@@ -1687,7 +1687,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 
 @media (max-width: 560px) {
   .locality { white-space: normal; }
-  .panel { padding: 1rem; }
+  .page-content { padding: 1rem; }
   .editor-shell { padding: 0; }
   .editor-toolbar .button-row { width: 100%; }
   .editor-toolbar .button-row button { flex: 1; }
@@ -1707,7 +1707,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 .appearance-choice .field-note { grid-column: 2; }
 
 @media (forced-colors: active) {
-  :root, body, .panel, .hero-note, .source-card, .review-section, .choice, .commit-bar, .workbench-actions,
+  :root, body, .page-content, .hero-note, .source-card, .review-section, .choice, .commit-bar, .workbench-actions,
   .editor-toolbar, .manuscript-navigator, .manuscript-surface, .editor-window, .editor-identities,
   .search-result, .replacement-review, .recent-work-item, .book-summary-item, .status-bar, .recovery-snapshot-disclosure,
   .recovery-readonly-blocks, .recovered-state-marker, .model-role-card, .native-artifact-card,
@@ -2140,7 +2140,7 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 :root[data-density="compact"] .sidebar-link { padding-block: .2rem; }
 :root[data-density="compact"] .context-header { padding-block: .45rem; }
 :root[data-density="compact"] .screen { margin-top: 1.1rem; }
-:root[data-density="compact"] .panel { padding: clamp(1rem, 2vw, 1.6rem); }
+:root[data-density="compact"] .page-content { padding: clamp(1rem, 2vw, 1.6rem); }
 :root[data-density="compact"] .navigator-section { gap: .35rem; padding: .55rem 0; }
 :root[data-density="compact"] .search-results, :root[data-density="compact"] .settings-rows { gap: .3rem; }
 :root[data-density="compact"] .search-result, :root[data-density="compact"] .settings-row { padding: .35rem .5rem; }
@@ -2192,139 +2192,6 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 /* Only presentation properties interpolate; safety/status visibility remains immediate. */
 body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right .2s cubic-bezier(.22, 1, .36, 1); }
 .app-sidebar { transition: width .2s cubic-bezier(.22, 1, .36, 1), padding .2s cubic-bezier(.22, 1, .36, 1); }
-.sidebar-book-switcher-toggle, .shell-book-picker-option { transition: background-color .15s ease-out, border-color .15s ease-out; }
-.sidebar-books-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: .4rem;
-  padding: 0 .35rem 0 0;
-}
-.shell-book-picker-heading { margin: .35rem .25rem; color: var(--text-subdued); font-size: .76rem; font-weight: 700; }
-.sidebar-book-switcher-toggle {
-  flex: 0 0 auto;
-  min-height: 28px;
-  padding: .2rem .55rem;
-  border: 1px solid var(--boundary);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--action-text);
-  font-size: .76rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-.sidebar-book-switcher-toggle:hover:not(:disabled) {
-  background: var(--surface-subdued);
-  border-color: var(--boundary-strong);
-}
-.sidebar-book-switcher-toggle[aria-expanded="true"] {
-  border-color: var(--selection-boundary);
-  background: var(--selection);
-  color: var(--selection-text);
-}
-.shell-book-picker-popover {
-  position: fixed;
-  z-index: 40;
-  top: 1rem;
-  left: calc(var(--sidebar-width) + .4rem);
-  width: min(24rem, calc(100vw - var(--sidebar-width) - .8rem));
-  max-height: calc(100dvh - 2rem);
-  overflow-y: auto;
-  display: grid;
-  gap: .45rem;
-  margin: 0;
-  padding: .55rem;
-  border: 1px solid var(--boundary-strong);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 10px 28px var(--shadow);
-}
-.shell-book-picker-popover[hidden] {
-  display: none;
-}
-.shell-book-picker-search {
-  width: 100%;
-  min-height: 32px;
-  padding: .3rem .55rem;
-  border: 1px solid var(--boundary);
-  border-radius: 7px;
-  background: var(--manuscript);
-  color: var(--text);
-  font-size: .82rem;
-}
-.shell-book-picker-search::placeholder { color: var(--text-subdued); opacity: 1; }
-.shell-book-picker-list {
-  display: grid;
-  gap: .2rem;
-  max-height: 14rem;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.shell-book-picker-option {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  width: 100%;
-  min-height: 36px;
-  padding: .3rem .45rem;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  cursor: pointer;
-}
-.shell-book-picker-option:hover:not(:disabled) {
-  background: var(--surface-subdued);
-}
-.shell-book-picker-option[aria-current="true"] {
-  border-color: var(--selection-boundary);
-  background: var(--selection);
-  color: var(--selection-text);
-}
-.shell-book-picker-icon {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 1.65rem;
-  height: 1.65rem;
-  border: 1px solid var(--boundary);
-  border-radius: 6px;
-  background: var(--surface-subdued);
-  color: var(--action-text);
-  font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
-  font-size: .85rem;
-  font-weight: 700;
-}
-.shell-book-picker-meta {
-  display: grid;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-.shell-book-picker-title {
-  font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
-  font-size: .86rem;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-.shell-book-picker-state {
-  color: var(--text-subdued);
-  font-size: .74rem;
-}
-.shell-book-picker-library {
-  width: 100%;
-  min-height: 32px;
-  padding: .25rem .4rem;
-  font-size: .78rem;
-  text-align: center;
-}
-:root[data-sidebar="icons"] .sidebar-book-switcher-toggle { width: 100%; padding-inline: .1rem; font-size: 0; }
-:root[data-sidebar="icons"] .sidebar-book-switcher-toggle::before { content: attr(data-nav-icon); font-size: .85rem; }
-.shell-book-picker-popover button, .shell-book-picker-search { border-color: var(--boundary-strong); }
-.shell-book-picker-popover :focus-visible, .sidebar-book-switcher-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .editor-technical-details { font-size: .8rem; color: var(--text-subdued); }
 .editor-technical-details summary { cursor: pointer; }
 :root[data-reduced-motion="true"] *, :root[data-reduced-motion="true"] *::before, :root[data-reduced-motion="true"] *::after {
@@ -2336,23 +2203,6 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
   *, *::before, *::after {
     transition: none !important;
     animation: none !important;
-  }
-}
-@media (forced-colors: active) {
-  .sidebar-book-switcher-toggle,
-  .shell-book-picker-popover,
-  .shell-book-picker-search,
-  .shell-book-picker-option,
-  .shell-book-picker-icon {
-    color: ButtonText;
-    background: ButtonFace;
-    border-color: ButtonText;
-    forced-color-adjust: auto;
-  }
-  .sidebar-book-switcher-toggle[aria-expanded="true"],
-  .shell-book-picker-option[aria-current="true"] {
-    outline: 2px solid Highlight;
-    outline-offset: -2px;
   }
 }
 /* 设置 › 模型服务's one flow and the header's compact channel / model selector (Issue #1215): each wraps to one column at 200%. */
@@ -2444,9 +2294,8 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 :root { --motion-fast: 120ms; --motion-base: 180ms; --motion-slow: 240ms; --motion-ease: cubic-bezier(.2,.8,.2,1); --motion-exit: ease-in; }
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.sidebar-link::before, .sidebar-book-title::before, :root[data-sidebar="icons"] .sidebar-book-switcher-toggle::before { display: none; content: none; }
-.sidebar-link, .sidebar-book-title, .sidebar-book-switcher-toggle, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
-:root[data-sidebar="icons"] .sidebar-book-switcher-toggle { justify-content: center; }
+.sidebar-link::before, .sidebar-book-title::before { display: none; content: none; }
+.sidebar-link, .sidebar-book-title, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
 :root[data-sidebar="icons"] .edge-label { display: none; }
 .btn { display: inline-flex; align-items: center; gap: .35rem; box-sizing: border-box; min-height: 32px; padding: .3rem .8rem; border: 1px solid var(--boundary-strong); border-radius: 7px; font: inherit; line-height: 1.4; cursor: pointer; color: var(--action-text); background: var(--action-secondary); }
 .btn.small, .btn.sidebar-pin { min-height: 26px; padding: .1rem .6rem; font-size: .8rem; }
@@ -2519,3 +2368,41 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 /* #1315: one development disclosure control; disabled technical content has no DOM payload. */
 [data-technical-layer][hidden], [data-technical-layer] > summary[hidden] { display: none !important; }
 .technical-layer-control { position: fixed; right: 1rem; bottom: 3rem; z-index: 90; padding: .6rem .8rem; background: var(--surface); border: 1px solid var(--boundary); border-radius: .4rem; }
+
+/* A5: one-line context and unframed page content (Owner #1314 decisions 6 and 9). */
+.context-header { box-sizing: border-box; height: 48px; min-height: 48px; flex-wrap: nowrap; gap: .65rem; padding: 0 1.6rem; }
+.context-identity { display: flex; align-items: center; gap: .5rem; flex: 1 1 auto; overflow: hidden; white-space: nowrap; }
+.context-title { margin: 0; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-position { flex: 0 0 auto; margin: 0; font-size: .85rem; font-weight: 400; letter-spacing: normal; }
+.context-position::before { content: '› '; }
+.context-status { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85rem; color: var(--text-subdued); }
+.context-actions, .context-view { flex-wrap: nowrap; gap: .4rem; white-space: nowrap; }
+.context-header button, .context-header summary { padding: .25rem .5rem; min-height: 30px; }
+.preferences-notice { position: absolute; top: 48px; right: 1rem; z-index: 10; background: var(--surface); }
+.sidebar-book-row .sidebar-link { flex-wrap: nowrap; }
+.sidebar-book-row .nav-label { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav-state { flex: 0 0 auto; padding: 0; font-size: .7rem; }
+#screen[data-screen="editor"] { width: auto; margin: 0; padding: 1.1rem 1.6rem; }
+@media (max-width: 759.98px) { .context-header { padding-inline: .5rem; gap: .35rem; } .context-position { max-width: 6rem; overflow: hidden; text-overflow: ellipsis; } }
+
+@media (max-width: 1119.98px) {
+  .editor-workspace:has(> .manuscript-navigator:not([hidden])),
+  .editor-workspace.document-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) 3.4rem; grid-template-rows: minmax(0, 1fr); }
+  .editor-workspace > .manuscript-navigator { position: absolute; grid-area: auto; z-index: 8; inset: 0 3.4rem 0 auto; width: min(21rem, calc(100% - 3.4rem)); border: 1px solid var(--boundary); }
+  .editor-workspace > .region-separator { display: none !important; }
+}
+
+/* Only page-card surfaces participate in flattening; card parts and floating dialogs do not.
+   A grouping that contains page cards is an unframed layout section. */
+.content :is(.analysis-feedback-card, .baseline-analysis-card, .custom-dimension-card, .default-rule-card, .document-workflow-card, .evidence-card, .guideline-card, .learning-card, .model-role-card, .native-artifact-card, .onboarding-card, .production-document-card, .research-evidence-card, .review-workspace-card, .roundtrip-card, .source-card, .task-authorization-card, .task-card, .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset) { border-width: 1px; border-radius: 10px; box-shadow: none; }
+.content :is(.analysis-feedback-card, .baseline-analysis-card, .custom-dimension-card, .default-rule-card, .document-workflow-card, .evidence-card, .guideline-card, .learning-card, .model-role-card, .native-artifact-card, .onboarding-card, .production-document-card, .research-evidence-card, .review-workspace-card, .roundtrip-card, .source-card, .task-authorization-card, .task-card, .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset):has(:is(.analysis-feedback-card, .baseline-analysis-card, .custom-dimension-card, .default-rule-card, .document-workflow-card, .evidence-card, .guideline-card, .learning-card, .model-role-card, .native-artifact-card, .onboarding-card, .production-document-card, .research-evidence-card, .review-workspace-card, .roundtrip-card, .source-card, .task-authorization-card, .task-card, .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset)) { border: 0; border-radius: 0; box-shadow: none; background: transparent; padding: 0; }
+
+.context-actions .return-chip-host { margin: 0; min-width: 0; }
+.context-actions .return-chip { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Long milestone names must not widen the single-line header. */
+.context-identity { flex-basis: 12rem; }
+.context-actions { min-width: 0; max-width: 50%; }
+.context-actions .editor-save-menu { flex: 1 1 auto; min-width: 0; }
+.context-actions .editor-save-menu > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-actions .return-chip { max-width: min(12rem, 100%); }

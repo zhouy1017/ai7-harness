@@ -104,7 +104,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   root.dataset['agentWorkspaceState'] = 'loading';
   const header = el('header', 'agent-workspace-header');
   const back = actionButton(words.back, 'back', 'quiet', () => options.back());
-  header.append(el('p', 'section-label', words.section(options.bookTitle)), el('h2', undefined, words.heading), back);
+  header.append(el('h2', undefined, words.heading), back);
   const safety = el('p', 'agent-workspace-safety');
   safety.dataset['agentWorkspaceSafety'] = '';
   const body = el('div', 'agent-workspace-body');

@@ -99,7 +99,7 @@ interface ManuscriptScreenOptions {
   taskDrawer: ReturnType<typeof mountTaskDrawer>;
   interrupted(): boolean;
   attach(content: HTMLElement, surface: ManuscriptScreen): void;
-  setContextActions(content: HTMLElement): void;
+  setContextActions(...content: ReadonlyArray<HTMLElement>): void;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   setCloseRisk(risk: boolean): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -178,7 +178,7 @@ async function copyPlainText(api: RendererApi, text: string): Promise<void> {
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
 const ENTRY_NOTICE_MS = 6_000;
 
-function panel(): HTMLElement { return element('section', 'panel'); }
+function panel(): HTMLElement { return element('section', 'page-content'); }
 
 /** The Manuscript and Production Document screen owns all mutable editor coordination until destruction. */
 export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
@@ -286,7 +286,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;
-  title.append(meta, chipHost);
+  title.append(meta);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
   // The chord comes from the one label source and follows a remap (KEY-011); 保存 keeps its chord, the words are the window's own.
@@ -723,13 +723,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   if (saveMenu !== undefined) {
     saveMenu.element.id = 'manuscript-save-menu';
     saveMenu.update(null, null);
-    options.setContextActions(saveMenu.element);
+    options.setContextActions(chipHost, saveMenu.element);
     persistenceStatus.setAttribute('role', 'button'); persistenceStatus.tabIndex = 0;
     persistenceStatus.setAttribute('aria-controls', saveMenu.element.id);
     saveMenu.element.addEventListener('toggle', () => {
       if (!destroyed) persistenceStatus.setAttribute('aria-expanded', String((saveMenu.element as HTMLDetailsElement).open));
     });
   }
+  if (saveMenu === undefined) options.setContextActions(chipHost);
   if (entryNotice !== undefined) showEntryNotice(content, entryNotice);
 
   let currentWindow = initialWindow;
