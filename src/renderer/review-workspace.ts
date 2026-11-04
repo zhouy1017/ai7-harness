@@ -282,6 +282,7 @@ export interface MountReviewWorkspaceOptions {
   /** 查看计划并开始 (S72 D4, S74a A5): a Review Run's plan opens in the Task Drawer, whose bar approves it. */
   openProposalWorkspace?(input: { manuscriptId: string; branchId: string; resultId: string | null }): void;
   openPlan(reviewRunId: string): void;
+  openSearchSettings?(): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
   /** 开始审阅 recorded this Run's authorization from the sheet, as the drawer's 开始任务 would (ADR 0096 §3). */
@@ -2386,6 +2387,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         renderSheet(workspace, state);
       });
       categories.append(label);
+      if (!entry.available && entry.searchEngine && entry.unavailableReason?.includes('设置 › 联网检索') && options.openSearchSettings !== undefined) {
+        const settings = actionButton('open-search-settings', 'quiet', () => { sheet.close(); options.openSearchSettings!(); });
+        settings.textContent = '设置联网检索'; categories.append(settings);
+      }
       categoryInputs.set(entry.categoryId, { input, label, reason, entry });
     }
     const localOptions = el('fieldset', 'review-local-options');

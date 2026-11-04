@@ -3295,8 +3295,8 @@ export class BaselineAnalysisStore {
     const selected = rows.find((entry) => entry.selected === 1);
     const channel = modelServiceChannelOf(this.#launch.live.route);
     const native = SEARCH_BACKENDS.find((entry) => channel?.startsWith(`${entry.service}-`));
-    const modelReady = production && this.#db.prepare("SELECT 1 FROM model_service_connections WHERE credential_reference = ? AND credential_operation_state = 'ready'").get(this.#launch.live.credentialReference) !== undefined;
-    const usingNative = !readSearchOverride(this.#db) && native?.shipped === true && modelReady;
+    const modelConnection = production ? this.#db.prepare("SELECT credential_updated_at FROM model_service_connections WHERE credential_reference = ? AND credential_operation_state = 'ready'").get(this.#launch.live.credentialReference) : undefined;
+    const usingNative = !readSearchOverride(this.#db) && native?.shipped === true && modelConnection !== undefined;
     const selectedRow = selected !== undefined && (!production || (selected.credential_operation_state === 'ready' && typeof selected.credential_reference === 'string')) ? selected : undefined;
     const configuredRows = rows.filter((entry) => !production || (entry.credential_operation_state === 'ready' && typeof entry.credential_reference === 'string'));
     const row = selectedRow ?? configuredRows[0];
@@ -3306,7 +3306,7 @@ export class BaselineAnalysisStore {
       : '当前模型渠道自带联网搜索，可一键启用；请前往 设置 › 联网检索。');
     const adapter = searchBackend(adapterId);
     const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id),
-      selectedAt: usingNative ? '' : asString(row!.selected_at),
+      selectedAt: usingNative ? asString(modelConnection!.credential_updated_at) : asString(row!.selected_at),
       selectionSource: usingNative ? 'model-channel' as const : 'configured-backend' as const,
       ...(usingNative ? { sourceLabel: channel === null ? native.displayName : MODEL_SERVICE_ROUTE_BINDINGS[channel].providerLabel } : {}) };
     const searchCredentialReference = usingNative ? this.#launch.live.credentialReference

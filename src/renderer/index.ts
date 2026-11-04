@@ -2711,6 +2711,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     },
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
+    openSearchSettings: () => { void leaveThen(async () => { await renderModelServiceSettings(); document.querySelector('[data-search-backends]')?.scrollIntoView(); }); },
     planChanged: () => taskDrawer.refresh('review-run'),
     recorded: (reviewRunId) => { globalAttentionReader.refresh(); manuscriptOnScreen?.followReviewMarks(bookId, reviewRunId); },
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.
