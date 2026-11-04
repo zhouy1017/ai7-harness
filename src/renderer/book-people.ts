@@ -210,7 +210,8 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
     save.setAttribute('aria-label', save.textContent ?? '');
     save.setAttribute('aria-describedby', why.id);
     const reasonLabel = el('span');
-    reasonLabel.append(' · ', why);
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, why);
     save.append(reasonLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeForm());
     cancel.disabled = working;
@@ -226,6 +227,7 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       why.textContent = reason ?? '';
       why.hidden = reason === null;
       reasonLabel.hidden = reason === null;
+      reasonPrefix.textContent = reason === null ? '' : ' · ';
       save.disabled = working || reason !== null;
     }
     sync();

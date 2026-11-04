@@ -716,7 +716,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', `${statement.id} ${reason.id}`);
     const reasonLabel = el('span');
-    reasonLabel.append(' · ', reason);
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, reason);
     confirm.append(reasonLabel);
     confirm.addEventListener('click', () => void confirmDesignation(state));
     const cancel = el('button', 'quiet', PUBLICATION_ACTION_LABELS.cancel);
@@ -748,6 +749,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       reason.textContent = why ?? '';
       reason.hidden = why === null;
       reasonLabel.hidden = why === null;
+      reasonPrefix.textContent = why === null ? '' : ' · ';
       confirm.disabled = working || why !== null;
       node.dataset['publicationReady'] = why === null ? 'true' : 'false';
     };
@@ -1010,13 +1012,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', reason.id);
     const reasonLabel = el('span');
-    reasonLabel.append(' · ', reason);
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, reason);
     confirm.append(reasonLabel);
     const sync = (): void => {
       const blockers = deliveryBlockers(state);
       reason.textContent = blockers[0] ?? '';
       reason.hidden = blockers.length === 0;
       reasonLabel.hidden = blockers.length === 0;
+      reasonPrefix.textContent = blockers.length === 0 ? '' : ' · ';
       confirm.disabled = working || blockers.length > 0;
     };
     const choices: Array<[string, string]> = documentNow.versions.map((version) => [version.revisionId, `${version.label} · ${localInstantLabel(version.createdAt)}`]);

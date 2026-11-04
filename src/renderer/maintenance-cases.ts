@@ -364,7 +364,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
     const blockerLabel = el('span');
-    blockerLabel.append(' · ', why);
+    const blockerPrefix = el('span');
+    blockerLabel.append(blockerPrefix, why);
     confirm.append(blockerLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeDraft(true));
     cancel.disabled = working;
@@ -373,6 +374,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
       blockerLabel.hidden = blocker === null;
+      blockerPrefix.textContent = blocker === null ? '' : ' · ';
       confirm.disabled = working || blocker !== null;
     };
     reason.addEventListener('input', () => { current.reason = reason.value; current.problem = null; sync(); });
@@ -508,7 +510,8 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
     const reasonLabel = el('span');
-    reasonLabel.append(' · ', why);
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, why);
     confirm.append(reasonLabel);
     const sync = (): void => {
       const emptyChoice = panel === 'link-proposal' && projection.choices.proposals.length === 0 ? MAINTENANCE_NO_PROPOSALS
@@ -517,6 +520,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
       reasonLabel.hidden = blocker === null;
+      reasonPrefix.textContent = blocker === null ? '' : ' · ';
       confirm.disabled = working || blocker !== null;
     };
     const radios = (legend: string, entries: ReadonlyArray<{ value: string; label: string; detail: string | null }>, chosen: string | null, pick: (value: string) => void): HTMLElement => {

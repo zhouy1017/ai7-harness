@@ -402,7 +402,8 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     confirm.setAttribute('aria-label', BACKGROUND_CONFIRM);
     confirm.setAttribute('aria-describedby', hint.id);
     const hintLabel = el('span');
-    hintLabel.append(' · ', hint);
+    const hintPrefix = el('span');
+    hintLabel.append(hintPrefix, hint);
     confirm.append(hintLabel);
     const ceilingNow = (): number | null => backgroundCeilingOf(ceilingInput.value, scope.books.length, BACKGROUND_ANALYSIS_CEILING_MAX);
     // 登记 is offered once a starting point is chosen and the ceiling is set; the hint names the first thing still missing.
@@ -413,10 +414,11 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       confirm.disabled = missing !== null;
       hint.hidden = missing === null;
       hintLabel.hidden = missing === null;
+      hintPrefix.textContent = missing === null ? '' : ' · ';
+      hint.textContent = missing ?? '';
       if (missing === null) {
         confirm.removeAttribute('aria-describedby');
       } else {
-        hint.textContent = missing;
         confirm.setAttribute('aria-describedby', hint.id);
       }
     };

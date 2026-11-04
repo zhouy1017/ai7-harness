@@ -166,6 +166,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
   let saveButton: HTMLButtonElement | undefined;
   let saveReason: HTMLElement | undefined;
   let saveReasonLabel: HTMLElement | undefined;
+  let saveReasonPrefix: HTMLElement | undefined;
 
   const button = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement => {
     const control = el('button', tone, label);
@@ -357,6 +358,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
       saveReason.textContent = reason ?? '';
       saveReason.hidden = reason === null;
       if (saveReasonLabel !== undefined) saveReasonLabel.hidden = reason === null;
+      if (saveReasonPrefix !== undefined) saveReasonPrefix.textContent = reason === null ? '' : ' · ';
     }
     paintSaveState();
   }
@@ -674,7 +676,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     saveButton.setAttribute('aria-label', saveButton.textContent ?? '');
     saveButton.setAttribute('aria-describedby', saveReason.id);
     saveReasonLabel = el('span');
-    saveReasonLabel.append(el('span', undefined, ' · '), saveReason);
+    saveReasonPrefix = el('span');
+    saveReasonLabel.append(saveReasonPrefix, saveReason);
     saveButton.append(saveReasonLabel);
     saveRow.append(saveButton);
     section.append(whole, draftStatus, saveRow);

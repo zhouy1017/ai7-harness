@@ -461,7 +461,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   milestoneButton.setAttribute('aria-label', milestoneButton.textContent ?? '');
   milestoneButton.setAttribute('aria-describedby', milestoneReason.id);
   const milestoneReasonLabel = element('span');
-  milestoneReasonLabel.append(' · ', milestoneReason);
+  const milestoneReasonPrefix = element('span');
+  milestoneReasonLabel.append(milestoneReasonPrefix, milestoneReason);
   milestoneButton.append(milestoneReasonLabel);
   const chosenPurpose = (): MilestonePurposeKind | null => {
     const checked = purposeRadios.find((radio) => radio.checked);
@@ -478,6 +479,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     milestoneReason.textContent = reason ?? '';
     milestoneReason.hidden = reason === null;
     milestoneReasonLabel.hidden = reason === null;
+    milestoneReasonPrefix.textContent = reason === null ? '' : ' · ';
     milestoneButton.disabled = busy || reason !== null;
   };
   // Each milestone starts again from an unselected purpose (interaction spec › Milestone rules).

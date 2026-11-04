@@ -355,13 +355,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     prepare.setAttribute('aria-label', prepare.textContent ?? '');
     prepare.setAttribute('aria-describedby', reason.id);
     const reasonLabel = el('span');
-    reasonLabel.append(' · ', reason);
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, reason);
     prepare.append(reasonLabel);
     const sync = (): void => {
       const why = blocker(next);
       reason.textContent = why ?? '';
       reason.hidden = why === null;
       reasonLabel.hidden = why === null;
+      reasonPrefix.textContent = why === null ? '' : ' · ';
       prepare.disabled = busy() || why !== null;
     };
     input.addEventListener('input', () => {
@@ -631,7 +633,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function renderExportActions(current: ExportState, inFlight: boolean): HTMLElement {
     const row = el('div', 'button-row export-actions');
     const approve = exportButton('approve', 'primary', () => void approveExport());
-    const reason = el('span', 'export-approve-reason', PACKAGE_EXPORT_APPROVE_REASON);
+    const reason = el('span', 'export-approve-reason', current.prepared === null ? PACKAGE_EXPORT_APPROVE_REASON : '');
     reason.id = uid('export-approve-reason');
     reason.hidden = current.prepared !== null;
     approve.disabled = inFlight || current.prepared === null;
@@ -639,7 +641,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     approve.setAttribute('aria-describedby', reason.id);
     const reasonLabel = el('span');
     reasonLabel.hidden = reason.hidden;
-    reasonLabel.append(' · ', reason);
+    reasonLabel.append(reason.hidden ? '' : ' · ', reason);
     approve.append(reasonLabel);
     const cancel = exportButton('cancel', 'quiet', () => closeExport(true));
     cancel.disabled = inFlight && current.phase !== 'writing';

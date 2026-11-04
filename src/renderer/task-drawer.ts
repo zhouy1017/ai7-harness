@@ -2461,7 +2461,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     submitWhy.id = uid('clarification-submit');
     submit.setAttribute('aria-label', TASK_PLAN_CLARIFICATION_SUBMIT);
     const submitReason = el('span');
-    submitReason.append(' · ', submitWhy);
+    const submitReasonPrefix = el('span');
+    submitReason.append(submitReasonPrefix, submitWhy);
     submit.append(submitReason);
     // A drawer whose service stopped offers nothing; the card says why it cannot be answered only when the Run says so.
     const blocked = card.answerable.reason ?? (interrupted ? '' : null);
@@ -2469,9 +2470,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const validText = card.origin !== 'model' || draft.optionId !== 'free-text' ||
         (draft.note.trim() !== '' && [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(draft.note)].length <= 500);
       submit.disabled = draft.optionId === null || !validText || working || blocked !== null;
-      submitWhy.textContent = blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON;
+      submitWhy.textContent = submit.disabled ? blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON : '';
       submitWhy.hidden = !submit.disabled;
       submitReason.hidden = !submit.disabled;
+      submitReasonPrefix.textContent = submit.disabled ? ' · ' : '';
       if (submit.disabled) submit.setAttribute('aria-describedby', submitWhy.id);
       else submit.removeAttribute('aria-describedby');
     };
