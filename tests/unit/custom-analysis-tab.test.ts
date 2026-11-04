@@ -113,13 +113,21 @@ describe('②A › 自定义', () => {
     expect(options.jump).toHaveBeenCalledWith(BLOCK);
     expect(rows[1]!.querySelector('button')).toBeNull();
     expect(rows[1]!.textContent).toContain('未定位');
-    expect(section.textContent).toContain(CUSTOM_TAB_FEEDBACK_NOTE);
+    expect(panel.textContent).toContain(CUSTOM_TAB_FEEDBACK_NOTE);
     // A result that still reads the current manuscript is read again whole.
     (panel.querySelector('[data-analysis-action="custom-run"]') as MiniElement).click();
     await settle();
     expect(api.prepareCustomAnalysis).toHaveBeenCalledWith({ dimensionId: DIMENSION, update: { mode: 'reanalyze-book', selectedRange: null } });
     (panel.querySelector('[data-analysis-action="custom-open-plan"]') as MiniElement).click();
     expect(options.openPlan).toHaveBeenLastCalledWith('66666666-6666-4666-8666-666666666666');
+  });
+
+  it('states the feedback limitation once when several dimensions have answers', async () => {
+    const answered = { taskState: null, latest: revision(), unavailableReason: null };
+    const { panel } = mountTab(projection([dimension(answered), dimension(answered)]));
+    await settle();
+    expect(panel.querySelectorAll('.custom-revision')).toHaveLength(2);
+    expect(panel.querySelectorAll('.custom-feedback-note')).toHaveLength(1);
   });
 
   it('withholds 运行 with its reason, and reads again when the tab is shown', async () => {

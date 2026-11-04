@@ -159,7 +159,6 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       rows.append(item);
     }
     section.append(rows);
-    section.append(el('p', 'field-note custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE));
     return section;
   };
 
@@ -213,7 +212,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       }
       return card;
     });
-    panel.replaceChildren(...cards);
+    const hasAnswers = projection.dimensions.some((dimension) => dimension.book?.latest != null);
+    panel.replaceChildren(...(hasAnswers ? [el('p', 'field-note custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE)] : []), ...cards);
   };
 
   let refresh: ReturnType<typeof setTimeout> | null = null;
