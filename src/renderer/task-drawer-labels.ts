@@ -280,7 +280,7 @@ export function taskPlanAssuranceEdited(label: string): string {
 export const TASK_PLAN_BUDGET_NOTE = '用量和费用仍受所选模型服务的账户控制与计费条款约束。';
 export const TASK_PLAN_BUDGET_SET = '设置上限…';
 export const TASK_PLAN_BUDGET_REMOVE = '去掉上限';
-export const TASK_PLAN_BUDGET_INPUT = '预算上限（tokens）';
+export const TASK_PLAN_BUDGET_INPUT = '预算上限 · 词元';
 export const TASK_PLAN_BUDGET_HINT = '这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。';
 export const TASK_PLAN_BUDGET_APPLY = '设定';
 export const TASK_PLAN_BUDGET_CANCEL = '取消';

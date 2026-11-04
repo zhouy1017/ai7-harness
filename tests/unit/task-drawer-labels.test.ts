@@ -838,7 +838,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
     expect(TASK_PLAN_BUDGET_NOTE).toBe('用量和费用仍受所选模型服务的账户控制与计费条款约束。');
     expect(TASK_PLAN_BUDGET_SET).toBe('设置上限…');
     expect(TASK_PLAN_BUDGET_REMOVE).toBe('去掉上限');
-    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限（tokens）');
+    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限 · 词元');
     expect(TASK_PLAN_BUDGET_HINT).toBe('这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。');
     expect(TASK_PLAN_BUDGET_APPLY).toBe('设定');
     expect(TASK_PLAN_BUDGET_CANCEL).toBe('取消');

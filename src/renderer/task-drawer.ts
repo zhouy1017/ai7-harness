@@ -1667,7 +1667,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const shown = assuranceBuffers.get(key) ?? assurance.level;
     const block = el('fieldset', 'task-plan-assurance');
     block.dataset['taskPlanAssurance'] = shown;
-    block.append(el('legend', undefined, TASK_PLAN_ASSURANCE_HEADING), el('p', 'field-note', TASK_PLAN_ASSURANCE_NOTE));
+    block.append(el('legend', undefined, `${TASK_PLAN_ASSURANCE_HEADING} · ${TASK_PLAN_ASSURANCE_NOTE}`));
     const name = uid('assurance');
     for (const option of assurance.options) {
       const label = el('label', 'task-plan-assurance-option');
@@ -1688,7 +1688,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const text = el('span', 'task-plan-assurance-text');
       const consequence = [option.consequence, option.requirement].filter((line): line is string => line !== null)
         .map((line) => line.replace(/。$/u, '')).join('；');
-      text.append(el('strong', undefined, option.label), el('span', 'field-note', `${consequence}。`));
+      text.append(el('strong', undefined, `${option.label} · ${consequence}。`));
       label.append(input, text);
       block.append(label);
     }
@@ -1716,11 +1716,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     input.id = uid('budget-input');
     input.dataset['taskDrawerControl'] = 'budget-input';
     input.value = form.draft;
-    const label = el('label', undefined, TASK_PLAN_BUDGET_INPUT);
+    const label = el('label', undefined, `${TASK_PLAN_BUDGET_INPUT} · ${TASK_PLAN_BUDGET_HINT}`);
     label.htmlFor = input.id;
-    const hint = el('small', 'field-note', TASK_PLAN_BUDGET_HINT);
-    hint.id = uid('budget-hint');
-    const described = [hint.id];
+    const described: string[] = [];
     const error = form.error === null ? null : el('small', 'field-note task-plan-budget-error', form.error);
     if (error !== null) {
       error.id = uid('budget-error');
@@ -1728,7 +1726,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       described.push(error.id);
       input.setAttribute('aria-invalid', 'true');
     }
-    input.setAttribute('aria-describedby', described.join(' '));
+    if (described.length > 0) input.setAttribute('aria-describedby', described.join(' '));
     input.addEventListener('input', () => {
       form.draft = input.value;
     });
@@ -1746,7 +1744,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     apply.addEventListener('click', () => applyBudgetForm(next, form));
     const cancel = control(TASK_PLAN_BUDGET_CANCEL, 'secondary', 'budget-cancel');
     cancel.addEventListener('click', () => closeBudgetForm());
-    group.append(label, input, hint, ...(error === null ? [] : [error]), apply, cancel);
+    group.append(label, input, ...(error === null ? [] : [error]), apply, cancel);
     return group;
   }
 
@@ -2513,15 +2511,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       note.disabled = blocked !== null;
       note.dataset['taskDrawerControl'] = `clarification-note:${id}`;
       note.setAttribute('aria-label', card.note.label);
-      const hint = el('small', 'field-note', card.note.hint);
-      hint.id = uid('clarification-note');
-      note.setAttribute('aria-describedby', hint.id);
+      note.placeholder = card.note.hint;
+      note.setAttribute('aria-description', card.note.hint);
       note.addEventListener('input', () => {
         draft.note = note.value;
         clarificationDrafts.set(id, draft);
         ready();
       });
-      parts.push(note, hint);
+      parts.push(note);
     }
     const defer = control(TASK_PLAN_CLARIFICATION_DEFER, 'secondary', `clarification-defer:${id}`);
     defer.addEventListener('click', () => {
@@ -2546,10 +2543,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const item = el('li');
       item.dataset['taskPlanClarification'] = card.requestId;
       item.dataset['clarificationState'] = card.state;
-      item.append(el('span', undefined, card.question));
-      item.append(el('span', 'field-note task-plan-clarification-answer', card.answer === null
+      const line = el('span', undefined, `${card.question} · `);
+      line.append(el('span', 'task-plan-clarification-answer', card.answer === null
         ? card.answerable.reason ?? ''
-        : `${card.answer.line}（${localInstantLabel(card.answer.answeredAt)}）`));
+        : `${card.answer.line} · ${localInstantLabel(card.answer.answeredAt)}`));
+      item.append(line);
       list.append(item);
     }
     section.append(list);
