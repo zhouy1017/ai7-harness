@@ -8,7 +8,7 @@ export function createButton(): HTMLButtonElement {
   return button;
 }
 
-export type StateTone = 'good' | 'attention' | 'blocked' | 'neutral';
+export type StateTone = 'good' | 'attention' | 'blocked' | 'progress' | 'neutral';
 export function stateTerm(label: string, tone: StateTone = 'neutral'): HTMLSpanElement {
   const term = document.createElement('span');
   term.className = 'state-term';

@@ -2457,8 +2457,8 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 .state-term::before { content: ''; display: inline-block; flex: 0 0 auto; box-sizing: border-box; width: .7em; height: .7em; border: 1.5px solid currentColor; border-radius: 50%; background: linear-gradient(90deg,currentColor 50%,transparent 50%); }
 .state-term[data-pill-tone="good"], .state-term.review-pill-good { color: var(--status-good); background: var(--status-good-surface); }
 .state-term[data-pill-tone="good"]::before, .state-term.review-pill-good::before { width: .4em; height: .7em; border: solid currentColor; border-width: 0 1.8px 1.8px 0; border-radius: 0; background: none; transform: rotate(45deg) translateY(-.08em); }
-.state-term[data-pill-tone="attention"], .state-term.review-pill-attention { color: var(--status-attention); background: var(--status-attention-surface); }
-.state-term[data-pill-tone="attention"]::before, .state-term.review-pill-attention::before { border: 0; border-radius: 0; background: currentColor; clip-path: polygon(50% 0,100% 100%,0 100%); transform: none; }
+.state-term[data-pill-tone="attention"], .state-term[data-pill-tone="warn"], .state-term.review-pill-attention, .state-term.review-pill-warn { color: var(--status-attention); background: var(--status-attention-surface); }
+.state-term[data-pill-tone="attention"]::before, .state-term[data-pill-tone="warn"]::before, .state-term.review-pill-attention::before, .state-term.review-pill-warn::before { border: 0; border-radius: 0; background: currentColor; clip-path: polygon(50% 0,100% 100%,0 100%); transform: none; }
 .state-term[data-pill-tone="blocked"], .state-term.review-pill-blocked { color: var(--status-blocked); background: var(--status-blocked-surface); }
 .state-term[data-pill-tone="blocked"]::before, .state-term.review-pill-blocked::before { border: 0; border-radius: 0; background: currentColor; clip-path: none; transform: none; }
 .tab, [role="tab"].btn { border-radius: 0; border: 0; border-bottom: 2px solid transparent; background: transparent; }
@@ -2501,4 +2501,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
   .rail-marker[data-rail-lane="2"]::before { border-radius: 0; }
   .rail-marker[data-rail-lane="3"]::before { border-radius: 0; transform: translateY(-50%) rotate(45deg); }
 }
+.state-term[data-pill-tone="neutral"], .state-term.review-pill-neutral { color: var(--status-neutral); background: var(--status-neutral-surface); }
+.state-term[data-pill-tone="neutral"]::before { background: transparent; }
+.state-term[data-pill-tone="progress"], .state-term.review-pill-progress { color: var(--status-progress); background: var(--status-progress-surface); }
 /* End A4 shared controls. */
