@@ -928,10 +928,9 @@ export function createImportReview(options: ImportReviewOptions) {
     summary.dataset['comparisonDigest'] = review.comparison.comparisonDigest;
     summary.append(
       element('h3', undefined, '比较摘要'),
-      element('p', undefined, reimportSummaryLine(review)),
-      element('p', 'field-note', review.comparison.changed
-        ? '每处变化由你选择拆分、改写与新增、删除或并入；系统不会预选或模糊匹配。'
-        : '稿件逐块一致；提交只记录未发现变化，不创建空修订版。'),
+      element('p', undefined, `${reimportSummaryLine(review).replace(/。$/u, '')}；${review.comparison.changed
+        ? '每处变化由你选择拆分、改写与新增、删除或并入，系统不会预选或模糊匹配。'
+        : '稿件逐块一致，提交只记录未发现变化，不创建空修订版。'}`),
     );
     summary.dataset['reimportGroups'] = String(review.comparison.groups);
     summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);

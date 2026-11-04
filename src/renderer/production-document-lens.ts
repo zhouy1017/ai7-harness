@@ -83,12 +83,13 @@ export function renderDocumentLens(
   const workflow = renderDocumentWorkflow(context.document.workflow, workflowActions);
   const versions = el('section', 'document-lens-section document-versions');
   const materials = el('section', 'document-lens-section document-materials');
-  materials.append(el('h3', undefined, DOCUMENT_MATERIALS_HEADING));
+  const materialsHeading = el('h3', undefined, DOCUMENT_MATERIALS_HEADING);
+  materials.append(materialsHeading);
   // How the material it was made from was read, for as long as the document exists (Issue #547).
   const notCarried = context.document.origin.marksNotCarried;
-  const materialsState = el('p', 'field-note document-materials-empty', notCarried !== null && notCarried > 0 ? DOCUMENT_MATERIALS_EMPTY.replace(/。$/u, '') : DOCUMENT_MATERIALS_EMPTY);
+  const materialsState = el('span', 'document-materials-empty', notCarried !== null && notCarried > 0 ? DOCUMENT_MATERIALS_EMPTY.replace(/。$/u, '') : DOCUMENT_MATERIALS_EMPTY);
   if (notCarried !== null && notCarried > 0) materialsState.append('；', el('span', 'document-origin-marks', documentOriginMarksLine(notCarried)));
-  materials.append(materialsState);
+  materialsHeading.append(' · ', materialsState);
   aside.append(el('p', 'section-label', DOCUMENT_LENS_LABEL), workflow.element, versions, materials);
   // The document as the service last answered, and the working digest the window holds now.
   let shown = context.document;
