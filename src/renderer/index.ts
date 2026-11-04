@@ -4351,8 +4351,7 @@ function renderLanding(
   const landingActions = element('div', 'button-row');
   landingActions.append(importButton, createBook);
   copy.append(landingActions);
-  const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
-  content.append(copy, note);
+  content.append(copy);
   // The landing always paints first; this supporting card never replaces its normal actions.
   const onboarding = element('section', 'onboarding-card');
   content.append(onboarding);
@@ -4364,8 +4363,8 @@ function renderLanding(
       onboarding.append(element('h3', undefined, labels.title));
       const steps = element('ol', 'onboarding-steps');
       const data = element('li');
-      data.append(element('strong', undefined, labels.dataStep), element('p', 'onboarding-data-location', location.canonicalRoot),
-        element('p', 'field-note', labels.dataNote), button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
+      data.append(element('strong', undefined, labels.dataStep), ...(technicalLayerVisible ? [element('p', 'onboarding-data-location', location.canonicalRoot)] : []),
+        button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
       if (location.dataLocationException !== null) data.append(element('p', 'field-note', location.channelDescription));
       if (location.syncWarning !== null) data.append(element('p', 'field-note', location.syncWarning));
       const model = element('li');
@@ -4388,8 +4387,8 @@ function renderLanding(
             setStatus(rendererErrorMessage(error, labels.sampleFailed), 'error');
           }
         });
-        start.append(sample, element('p', 'field-note', labels.sampleNote));
-      } else start.append(element('p', undefined, labels.sampleUnavailable), element('p', 'field-note', labels.sampleUnavailableNote));
+        start.append(sample);
+      } else start.append(element('p', undefined, labels.sampleUnavailable));
       steps.append(data, model, start);
       const skip = button(labels.skip, 'quiet', async () => {
         skip.disabled = true;

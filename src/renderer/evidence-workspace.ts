@@ -45,9 +45,7 @@ import {
   EVIDENCE_SOURCES_MORE,
   EVIDENCE_SOURCES_NONE,
   EVIDENCE_STATEMENT_LABEL,
-  EVIDENCE_STATEMENT_NOTE,
   EVIDENCE_SUMMARY_HEADING,
-  EVIDENCE_SUMMARY_NOT_EVIDENCE,
   EVIDENCE_UNPIN,
   EVIDENCE_WORDING_LABEL,
   EVIDENCE_WORKSPACE_HEADING,
@@ -220,7 +218,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     const wording = el('div', 'evidence-wording');
     wording.append(el('span', 'evidence-term', EVIDENCE_WORDING_LABEL), el('blockquote', 'evidence-quote', result.quote));
     const statement = el('div', 'evidence-statement');
-    statement.append(el('span', 'evidence-term', EVIDENCE_STATEMENT_LABEL), el('p', undefined, result.normalizedStatement), el('p', 'field-note', EVIDENCE_STATEMENT_NOTE));
+    statement.append(el('span', 'evidence-term', EVIDENCE_STATEMENT_LABEL), el('p', undefined, result.normalizedStatement));
     header.append(wording, statement);
     const states = el('div', 'evidence-states');
     for (const [term, value] of factStateLines(result)) {
@@ -359,7 +357,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderSummary(current: EvidenceWorkspaceProjection): HTMLElement {
     const section = el('section', 'evidence-summary');
     section.dataset['label'] = current.summary.label;
-    section.append(el('h6', undefined, `${EVIDENCE_SUMMARY_HEADING} · ${current.summary.label}`), el('p', 'field-note', EVIDENCE_SUMMARY_NOT_EVIDENCE));
+    section.append(el('h6', undefined, `${EVIDENCE_SUMMARY_HEADING} · 非证据 · ${current.summary.label}`));
     const list = el('ul');
     for (const statement of current.summary.statements) {
       const item = el('li', undefined, statement.text);

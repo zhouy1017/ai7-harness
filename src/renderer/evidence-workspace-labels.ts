@@ -54,7 +54,7 @@ export const EVIDENCE_LIMITATIONS_HEADING = '局限';
 export const EVIDENCE_NO_MUTATION = '证据工作区只用于阅读与比较：它不改稿、不作出提案或审阅决定、不批准任何应用。';
 
 export const DECISION_HEADING = '核查审阅决定';
-export const DECISION_NOTE = '五项都没有预选；记录后不可更改，后续的新结果版本会另行等待你的决定。';
+export const DECISION_NOTE = '决定记录后不可更改，新结果仍由你决定。';
 export const DECISION_RECORD = '记录核查审阅决定';
 export const DECISION_OWN_WORDS_LABEL = '你的结论';
 export const DECISION_REASON_HEADING = '理由（可不填）';
@@ -70,7 +70,7 @@ export const CORRECTION_OWN_EDIT = '自行编辑';
 export const CORRECTION_OWN_TEXT_LABEL = '改为';
 export const CORRECTION_RATIONALE_LABEL = '更正理由';
 export const CORRECTION_RANGES_HEADING = '要更正的位置';
-export const CORRECTION_RANGES_NOTE = '只列出与这段文字完全相同的出现处；默认只改这条发现所在的一处。相似但不相同的文字不会被列入。';
+export const CORRECTION_RANGES_NOTE = '只列出完全相同的文字，默认只改这条发现所在的一处。';
 export const CORRECTION_SAVE = '保存为更正提案';
 export const CORRECTION_SAVED_GO = '在稿件中查看';
 export const CORRECTION_FAILED = '无法保存为更正提案。';
