@@ -141,21 +141,21 @@ export type SettingsRoute = 'model-service' | 'usage' | 'evaluation-calibration'
 export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
   readonly key: 'service' | 'editorial' | 'local';
   readonly label: string;
-  readonly rows: ReadonlyArray<{ readonly route: SettingsRoute; readonly label: string; readonly note: string }>;
+  readonly rows: ReadonlyArray<{ readonly route: SettingsRoute; readonly label: string; readonly note: string; readonly developerOnly?: true }>;
 }> = Object.freeze([
   { key: 'service', label: '服务', rows: [
-    { route: 'model-service', label: '模型服务', note: '连接、四个角色与预算偏好；凭据只能重新输入或移除。' },
-    { route: 'usage', label: '用量', note: '按图书、任务与时间汇总的用量。' },
+    { route: 'model-service', label: '模型服务', note: '渠道、密钥、模型、网络代理与连接测试。' },
+    { route: 'usage', label: '用量', note: '按图书、任务与时间汇总的用量。', developerOnly: true },
   ] },
   { key: 'editorial', label: '编辑工作', rows: [
-    { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。' },
+    { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。', developerOnly: true },
   ] },
   { key: 'local', label: '本机', rows: [
-    { route: 'data-storage', label: '数据与存储', note: '数据位置、版本、导出与导入数据库、定期自动备份。' },
+    { route: 'data-storage', label: '数据与存储', note: '数据位置、定期自动备份、导出与导入数据库。' },
     { route: 'appearance', label: '外观', note: '跟随系统、浅色或深色。' },
-    { route: 'keyboard', label: '键盘与无障碍', note: '快捷键与键盘操作。' },
+    { route: 'keyboard', label: '键盘与无障碍', note: '快捷键列表与减少动效。' },
     { route: 'notifications', label: '通知', note: '窗口不在前台时的系统通知。' },
-    { route: 'diagnostics', label: '诊断', note: '崩溃记录与诊断包。' },
+    { route: 'diagnostics', label: '诊断', note: '崩溃记录与诊断包。', developerOnly: true },
     { route: 'help', label: '帮助', note: '使用说明、隐私与开发者模式。' },
   ] },
 ]);

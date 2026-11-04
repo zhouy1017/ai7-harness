@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { mountEditableProcedureLibrary } from './procedure-library.js';
 import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
@@ -11,8 +11,8 @@ import { mountLearningMaterials } from './quality-learning.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
-import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, type QualityLearningTab } from './quality-learning-labels.js';
-import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_LATER, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, visibleQualityLearningTabs, type QualityLearningTab } from './quality-learning-labels.js';
+import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_LATER, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
 import { mountImportedSkills } from './imported-skills.js';
@@ -58,13 +58,21 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
    */
   async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocused = false, materialId: string | null = null): Promise<void> {
+    if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
+      await renderKnowledgeBase('guidelines');
+      setStatus('该页在开发者模式下显示');
+      return;
+    }
     if (tab === 'rules') {
+      const { content } = knowledgeBasePage(tab, tabFocused);
       setStatus('正在读取工序与规则…', 'busy');
       try {
         const [rules, procedures] = await Promise.all([window.ai7.inspectDefaultExecutionRules(), window.ai7.inspectKnowledgeProcedures()]);
+        if (!content.isConnected || !technicalLayerVisible) return;
         renderKnowledgeBaseProjection(rules, tabFocused, procedures);
         setStatus('工序与规则已打开');
       } catch (error) {
+        if (!content.isConnected || !technicalLayerVisible) return;
         setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
       }
       return;
@@ -280,20 +288,28 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
    * audit of every material's lineage and 停止今后使用.
    */
-  async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false,
+  async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'feedback', bookId: string | null = null, tabFocused = false,
     openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
+    if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
+      await renderQualityLearning('feedback', null);
+      setStatus('该页在开发者模式下显示');
+      return;
+    }
+    const qualityTabs = visibleQualityLearningTabs(technicalLayerVisible);
     const content = panel();
     content.classList.add('quality-learning');
     content.dataset['qualityTab'] = tab;
     const tabs = element('div', 'knowledge-tabs quality-tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', QUALITY_LEARNING_TABS_LABEL);
-    QUALITY_LEARNING_TABS.forEach((entry, index) => {
+    qualityTabs.forEach((entry, index) => {
+      const developerOnly = technicalLayerVisible && entry.developerOnly === true;
       const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
         if (entry.tab !== tab) void renderQualityLearning(entry.tab, null, true);
       });
       node.id = `quality-tab-${entry.tab}`;
       node.dataset['qualityTab'] = entry.tab;
+      if (developerOnly) node.dataset['developerOnly'] = 'true';
       node.setAttribute('role', 'tab');
       node.setAttribute('aria-selected', String(entry.tab === tab));
       node.setAttribute('aria-controls', 'quality-panel');
@@ -302,7 +318,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
         if (step === 0) return;
         event.preventDefault();
-        const next = QUALITY_LEARNING_TABS[(index + step + QUALITY_LEARNING_TABS.length) % QUALITY_LEARNING_TABS.length]!;
+        const next = qualityTabs[(index + step + qualityTabs.length) % qualityTabs.length]!;
         void renderQualityLearning(next.tab, null, true);
       });
       tabs.append(node);
@@ -360,18 +376,21 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    */
   function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { content: HTMLElement; panelNode: HTMLElement } {
     const view = knowledgeBaseTabView(tab);
+    const knowledgeTabs = visibleKnowledgeBaseTabs(technicalLayerVisible);
     const content = panel();
     content.classList.add('knowledge-base');
     content.dataset['knowledgeTab'] = tab;
     const tabs = element('div', 'knowledge-tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', KNOWLEDGE_BASE_TABS_LABEL);
-    KNOWLEDGE_BASE_TAB_VIEWS.forEach((entry, index) => {
+    knowledgeTabs.forEach((entry, index) => {
+      const developerOnly = technicalLayerVisible && entry.developerOnly === true;
       const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
         if (entry.tab !== tab) void renderKnowledgeBase(entry.tab, true);
       });
       node.id = `knowledge-tab-${entry.tab}`;
       node.dataset['knowledgeTab'] = entry.tab;
+      if (developerOnly) node.dataset['developerOnly'] = 'true';
       node.setAttribute('role', 'tab');
       node.setAttribute('aria-selected', String(entry.tab === tab));
       node.setAttribute('aria-controls', 'knowledge-panel');
@@ -380,7 +399,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
         if (step === 0) return;
         event.preventDefault();
-        const next = KNOWLEDGE_BASE_TAB_VIEWS[(index + step + KNOWLEDGE_BASE_TAB_VIEWS.length) % KNOWLEDGE_BASE_TAB_VIEWS.length]!;
+        const next = knowledgeTabs[(index + step + knowledgeTabs.length) % knowledgeTabs.length]!;
         void renderKnowledgeBase(next.tab, true);
       });
       tabs.append(node);

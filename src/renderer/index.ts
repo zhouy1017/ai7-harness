@@ -6,7 +6,7 @@ import { createKnowledgeBase } from './knowledge-base.js';
 import { createDataStorage } from './data-storage.js';
 import { mountManuscriptScreen, documentContextOf, type ManuscriptScreen } from './manuscript-screen.js';
 import { mountGlobalAgent } from './global-agent.js';
-import { createAppearance } from './appearance.js';
+import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
@@ -247,7 +247,7 @@ const taskDrawer = mountTaskDrawer({
   },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
-  openRules: () => void renderKnowledgeBase('rules'),
+  openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
@@ -817,7 +817,7 @@ const shell = mountShell({
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
     else if (destination === 'global-agent') void leaveThen(() => renderGlobalAgent());
     else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
-    else void leaveThen(() => renderQualityLearning('learning', null));
+    else void leaveThen(() => renderQualityLearning());
   },
   openSection: (book, section) => {
     if (authorityInterrupted) return;
@@ -1005,7 +1005,7 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const state = screen.dataset['screen'];
   if (state === 'settings') return renderSettingsHub;
   if (state === 'data-storage') return renderDataAndStorage;
-  if (state === 'quality-learning') return () => renderQualityLearning('learning', null);
+  if (state === 'quality-learning') return () => renderQualityLearning();
   if (state === 'knowledge-base') return () => renderKnowledgeBase();
   if (state === 'model-service') return renderModelServiceSettings;
   if (state === 'series-list' || state === 'series') return () => renderSeriesList(null);
@@ -1305,7 +1305,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
       const content = panel();
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
       const reader = mountWordTrackedEditDetail({ root: content, api: window.ai7, ...target, openSourceVersion: openWordSourceVersion });
-      content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
+      if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
       replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'history' });
       await reader.load();
       return;
@@ -2994,7 +2994,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     setStatus,
     errorMessage: rendererErrorMessage,
     // 录入定价与首印… (Issue #430, S82): 设置 › 评估校准与预测 with this Book's entry open.
-    openActuals: (bookId) => void renderEvaluationCalibration(bookId),
+    ...(technicalLayerVisible ? { openActuals: (bookId: string) => void renderEvaluationCalibration(bookId) } : {}),
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
     openDocument: async (documentNow, type, notice) => {
       const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });
@@ -3767,6 +3767,11 @@ function renderBookCreationForm(): void {
 }
 
 function renderDiagnostics(): void {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const content = panel();
   mountDiagnostics(content, window.ai7, () => void returnToLibrary());
   replaceScreen('diagnostics', content);
@@ -3832,6 +3837,11 @@ async function renderSeries(seriesId: string): Promise<void> {
 }
 
 async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const content = panel();
   content.classList.add('evaluation-calibration-page');
   const host = element('div');
@@ -3908,6 +3918,11 @@ async function renderNotificationSettings(): Promise<void> {
  * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
  */
 async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const origin = screen.firstElementChild;
   try {
     const usage = await window.ai7.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
@@ -3934,6 +3949,11 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
 
 /** 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010). */
 function renderUsage(): void {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const content = panel();
   content.classList.add('usage-screen');
   content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
@@ -3991,18 +4011,21 @@ function renderSettingsHub(): void {
     notifications: () => void renderNotificationSettings(),
   };
   for (const group of SETTINGS_HUB_GROUPS) {
+    const rows = group.rows.filter((row) => technicalLayerVisible || row.developerOnly !== true);
+    if (rows.length === 0) continue;
     const section = element('section', 'settings-group');
     section.dataset['settingsGroup'] = group.key;
     const heading = element('h3', undefined, group.label);
     heading.id = `settings-group-${group.key}`;
     section.setAttribute('aria-labelledby', heading.id);
     const list = element('ul', 'settings-rows');
-    for (const row of group.rows) {
+    for (const row of rows) {
       const item = element('li', 'settings-row');
       item.dataset['settingsEntry'] = row.route;
       const open = pages[row.route];
       const entry = button(row.label, 'secondary', () => open?.());
       entry.dataset['settingsRoute'] = row.route;
+      if (technicalLayerVisible && row.developerOnly === true) entry.dataset['developerOnly'] = 'true';
       const note = element('p', 'field-note', row.note);
       note.id = `settings-note-${row.route}`;
       entry.setAttribute('aria-describedby', note.id);
@@ -4020,7 +4043,7 @@ function renderSettingsHub(): void {
     section.append(heading, list);
     content.append(section);
   }
-  mountLearningAskFrequency(content, window.ai7);
+  if (technicalLayerVisible) mountLearningAskFrequency(content, window.ai7);
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
 }
@@ -4738,6 +4761,7 @@ const { renderModelServiceSettings } = createModelServiceSettings({
 
 async function initializeRenderer(): Promise<void> {
   resetTechnicalLayer();
+  initializeReducedMotion();
   await appearance.ready;
   try {
     const location = await window.ai7.getProductDataLocation();

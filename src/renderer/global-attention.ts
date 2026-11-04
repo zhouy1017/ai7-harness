@@ -1,4 +1,4 @@
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
 import {
   GLOBAL_ATTENTION_FINDINGS_NOTE,
@@ -8,6 +8,7 @@ import {
   GLOBAL_ATTENTION_STATUS_LINES,
   GLOBAL_ATTENTION_TECHNICAL_ITEM,
   globalAttentionEntryView,
+  globalAttentionGroupCounts,
   globalAttentionView,
   type GlobalAttentionGroupView,
   type GlobalAttentionItemView,
@@ -30,6 +31,16 @@ import {
 export const GLOBAL_ATTENTION_POLL_MS = 5_000;
 
 type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention'>;
+
+/** Ordinary attention counts only the reachable items in this bounded reading, like a Book-filtered list. */
+export function visibleGlobalAttention(projection: GlobalAttentionProjection, developerMode: boolean): GlobalAttentionProjection {
+  if (developerMode) return projection;
+  const groups = projection.groups.map((group) => {
+    const items = group.items.filter((item) => item.target.kind !== 'learning-materials');
+    return { ...group, items, total: items.length };
+  });
+  return { ...projection, groups, actionableCount: groups.reduce((count, group) => count + (globalAttentionGroupCounts(group.key) ? group.total : 0), 0) };
+}
 
 export type GlobalAttentionReading =
   | { readonly kind: 'projection'; readonly projection: GlobalAttentionProjection }
@@ -141,7 +152,7 @@ export function mountGlobalAttentionEntry(options: { button: HTMLButtonElement; 
   };
   paint(null);
   options.reader.subscribe((reading) => {
-    if (reading.kind === 'projection') paint(reading.projection.actionableCount);
+    if (reading.kind === 'projection') paint(visibleGlobalAttention(reading.projection, technicalLayerVisible).actionableCount);
   });
   button.addEventListener('click', () => options.open());
 }
@@ -265,7 +276,8 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     return section;
   }
 
-  function paint(projection: GlobalAttentionProjection): void {
+  function paint(reading: GlobalAttentionProjection): void {
+    const projection = visibleGlobalAttention(reading, technicalLayerVisible);
     const key = JSON.stringify(projection);
     if (key === painted) return;
     painted = key;

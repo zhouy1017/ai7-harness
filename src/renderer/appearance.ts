@@ -1,6 +1,22 @@
 import { isThemePreference, type AppearanceRendererApi, type AppearanceState, type ThemePreference } from '../shared/appearance.js';
 import type { PreferencesRendererApi } from '../shared/preferences.js';
 
+const REDUCED_MOTION = 'ai7.reducedMotion';
+
+/** A local display preference, independent of book data and the developer switch. */
+export function reducedMotion(): boolean {
+  return window.localStorage.getItem(REDUCED_MOTION) === 'true';
+}
+
+export function initializeReducedMotion(): void {
+  document.documentElement.dataset['reducedMotion'] = String(reducedMotion());
+}
+
+export function chooseReducedMotion(reduce: boolean): void {
+  window.localStorage.setItem(REDUCED_MOTION, String(reduce));
+  initializeReducedMotion();
+}
+
 /** Only root decoration changes: no screen replacement, focus, selection, scroll or editor transaction. */
 export function applyAppearance(root: Pick<HTMLElement, 'dataset' | 'style'>, state: AppearanceState): void {
   const theme = state.preference === 'system' ? (state.systemDark ? 'dark' : 'light') : state.preference;
