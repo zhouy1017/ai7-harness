@@ -99,7 +99,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         lineage.append(el('p', metadataWords(`图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`)));
       }
       for (const source of sources ?? []) lineage.append(el('p', `来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`));
-      for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
+      for (const version of history) lineage.append(el('p', metadataWords(`v${version.ordinal} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`)));
       if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
         void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
           .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早版本。'; });
@@ -226,7 +226,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   if (projection.current === null || projection.current.lines.length === 0) section.append(el('p', '尚无符合学习准入的审阅反馈。'));
   if (projection.current !== null) {
     const version = projection.current;
-    section.append(el('h4', `本社审阅偏好 v${version.ordinal}`), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`));
+    section.append(el('h4', metadataWords(`本社审阅偏好 v${version.ordinal}`)), el('p', metadataWords(`来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`)));
     const lines = el('ul', '');
     for (const line of version.lines) {
       const item = el('li', line.text);
@@ -250,7 +250,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   }
   const history = el('details', '');
   history.append(el('summary', '版本历史'));
-  for (const version of [...projection.history].reverse()) history.append(el('p', `v${version.ordinal} · ${version.sourceCount} 条反馈 · ${version.recordedAt}`));
+  for (const version of [...projection.history].reverse()) history.append(el('p', metadataWords(`v${version.ordinal} · ${version.sourceCount} 条反馈 · ${version.recordedAt}`)));
   section.append(history);
   root.append(section);
 }

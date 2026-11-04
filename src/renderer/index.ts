@@ -3595,7 +3595,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       projection.actions.canAuthorize);
     open.dataset['taskAuthorizationAction'] = 'view-plan';
     summary.append(
-      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', `任务输入修订版 ${checkpoint.revisionLabel}`, '不发送任何内容'])),
+      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', metadataWords(`任务输入修订版 ${checkpoint.revisionLabel}`), '不发送任何内容'])),
       open,
     );
     card.append(summary);

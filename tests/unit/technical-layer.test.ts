@@ -42,11 +42,12 @@ describe('technical layer presentation (#1315)', () => {
     disclosure.textContent = '查看技术详情 · ordinary-production v33 · abcdef0123456789';
     root.append(technicalDisclosure(disclosure));
     const metadata = document.createElement('p');
-    metadata.textContent = metadataWords('主分支 · Revision 18 · 全稿 0.121%');
+    metadata.textContent = metadataWords('主分支 · Revision 18 · 版本8 · 全稿 0.121%');
     root.append(metadata);
     expectNoTechnicalText(root);
     expect(disclosure.textContent).toBe('');
     expect(metadata.textContent).toContain('全稿 0%');
+    expect(metadata.textContent).not.toContain('版本8');
   });
 
   it('scans recovery and attention identity metadata in ordinary mode', () => {

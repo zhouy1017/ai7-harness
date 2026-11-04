@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import { identityWords } from './technical-layer.js';
 import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -468,7 +469,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         ...fact(DELIVERABLES_TECHNICAL_TERMS.book, next.bookId),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.manuscript, manuscript.manuscriptId),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.branch, manuscript.branchId),
-        ...fact(DELIVERABLES_TECHNICAL_TERMS.revision, `${manuscript.revisionLabel} · ${manuscript.revisionId}`),
+        ...fact(DELIVERABLES_TECHNICAL_TERMS.revision, metadataWords(`${manuscript.revisionLabel} · ${manuscript.revisionId}`)),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.journal, String(manuscript.journalSequence)),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.workingDigest, manuscript.workingDigest),
       ));
@@ -534,7 +535,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.append(options.technicalDetails(
       'deliverables-facts',
       ...fact(DELIVERABLES_TECHNICAL_TERMS.milestone, milestone.milestoneId),
-      ...fact(DELIVERABLES_TECHNICAL_TERMS.revision, `${milestone.revisionLabel} · ${milestone.revisionId}`),
+      ...fact(DELIVERABLES_TECHNICAL_TERMS.revision, metadataWords(`${milestone.revisionLabel} · ${milestone.revisionId}`)),
       ...fact(DELIVERABLES_TECHNICAL_TERMS.milestoneRecord, milestone.technical.signoffRecordId),
       ...fact(DELIVERABLES_TECHNICAL_TERMS.savedAt, milestone.createdAt),
     ));
@@ -578,7 +579,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         'deliverables-facts',
         ...fact(DELIVERABLES_TECHNICAL_TERMS.publicationVersion, designation.publicationVersionId),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.milestone, designation.milestoneId),
-        ...fact(DELIVERABLES_TECHNICAL_TERMS.revision, `${designation.revisionLabel} · ${designation.revisionId}`),
+        ...fact(DELIVERABLES_TECHNICAL_TERMS.revision, metadataWords(`${designation.revisionLabel} · ${designation.revisionId}`)),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.revisionDigest, designation.technical.revisionDigest),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.recordDigest, designation.technical.digest),
         ...fact(DELIVERABLES_TECHNICAL_TERMS.permission, designation.technical.permissionId),

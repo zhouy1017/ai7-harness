@@ -53,8 +53,8 @@ export function exportCardHeading(target: ManuscriptExportTargetProjection | nul
     if (pending.kind === 'report' || pending.kind === 'document') return `导出 · ${pending.label}`;
     return pending.kind === 'current' ? '导出 · 当前修订版' : `导出 · 里程碑版本「${pending.label}」`;
   }
-  if (target.report !== null) return `导出 · ${reportExportLabel(target.report.runLabel, target.report.version)}`;
-  if (target.document !== null) return `导出 · ${target.document.typeLabel} · ${target.document.versionLabel}`;
+  if (target.report !== null) return metadataWords(`导出 · ${reportExportLabel(target.report.runLabel, target.report.version)}`);
+  if (target.document !== null) return metadataWords(`导出 · ${target.document.typeLabel} · ${target.document.versionLabel}`);
   return target.kind === 'current'
     ? metadataWords(`导出 · 当前修订版 ${target.revisionLabel}`)
     : metadataWords(`导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`);
@@ -176,7 +176,7 @@ export function exportReceiptMeta(receipt: Pick<ManuscriptExportReceiptProjectio
 export function exportVersionText(target: ManuscriptExportTargetProjection): string {
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   // A Production Document's version by its type and 版本 N (Issue #415, S66b), never by the revision behind it.
-  if (target.document !== null) return `${target.document.typeLabel} · ${target.document.versionLabel}`;
+  if (target.document !== null) return metadataWords(`${target.document.typeLabel} · ${target.document.versionLabel}`);
   return target.kind === 'current' ? metadataWords(`修订版 ${target.revisionLabel}`) : metadataWords(`里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`);
 }
 

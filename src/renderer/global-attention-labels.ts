@@ -357,7 +357,7 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
         ? `导入 · ${object.sourceDisplayName}`
         : `导入 · ${object.sourceDisplayName} · ${IMPORT_RELATIONSHIP_LABELS[object.relationship]}`;
     case 'recovery':
-      return technicalLayerVisible ? `稿件 · ${object.branchName}` : '稿件';
+      return technicalLayerVisible ? metadataWords(`稿件 · ${object.branchName}`) : '稿件';
     case 'manuscript-conflict':
       return object.conflictKind === 'reversal' ? '已应用的修改建议 · 稿件冲突' : '修改建议 · 稿件冲突';
     case 'analysis':

@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import { identityWords } from './technical-layer.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
@@ -154,7 +155,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         row.append(mergedClauses);
         if (version.clausePages > 1) {
           const controls = el('div', 'button-row');
-          controls.append(el('span', 'field-note', `条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`));
+          controls.append(el('span', 'field-note', metadataWords(`条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`)));
           for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
             const name = `merged-clause-${version.digest}-${step}`;
             const button = action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,

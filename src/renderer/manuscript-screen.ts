@@ -255,6 +255,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
   const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
     if (!isDocument) return metadataWords(`当前修订版 ${windowNow.revisionLabel}`);
+    if (!technicalLayerVisible) return '当前文档';
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
   };
@@ -266,7 +267,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   title.append(
     element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : metadataWords(`${bookTitle} · 主分支`)),
     element('h2', undefined, productionDocument !== undefined
-      ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}`
+      ? technicalLayerVisible ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.typeLabel
       : metadataWords(`稿件修订版 ${initialWindow.revisionLabel}`)),
   );
   const meta = element('div', 'editor-meta');

@@ -140,7 +140,7 @@ export function mountHouseWordList(options: {
       }
       panel.append(button(page?.current === null ? '创建词表' : '编辑当前版本', 'edit', () => void beginDraft()));
       const history = el('details'); history.append(el('summary', '版本历史（只读）'));
-      for (const version of page?.history ?? []) history.append(button(`查看第${version.ordinal}版`, `history-${version.ordinal}`, () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 }))));
+      for (const version of page?.history ?? []) history.append(button(metadataWords(`查看第${version.ordinal}版`), metadataWords(`history-${version.ordinal}`), () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 }))));
       history.append(button('最新历史', 'history-first', () => void run(() => inspect({ ...request, historyOffset: 0 })), request.historyOffset === 0),
         button('更早历史', 'history-next', () => void run(() => inspect({ ...request, historyOffset: page!.nextHistoryOffset! })), page?.nextHistoryOffset === null || page === null)); panel.append(history);
       panel.append(button('查看当前版本', 'current', () => void run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }))));

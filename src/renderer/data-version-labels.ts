@@ -57,7 +57,7 @@ export function storeVersionLine(record: Pick<StoreVersionProjection, 'softwareV
 /** The data root's version marker (Issue #967; ADR 0023): what lets an older AI7 refuse this data rather than open it. */
 export function dataVersionMarkerLine(marker: DataVersionProjection['marker'], instant: (iso: string) => string): string {
   return marker.present && marker.writtenAt !== null && marker.softwareVersion !== null
-    ? `已写入 · 软件 ${marker.softwareVersion} · ${instant(marker.writtenAt)}`
+    ? metadataWords(`已写入 · 软件 ${marker.softwareVersion} · ${instant(marker.writtenAt)}`)
     : '未找到：下次打开这份数据时写入。';
 }
 

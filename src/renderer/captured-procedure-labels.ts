@@ -157,7 +157,7 @@ export function procedureVersionLine(version: Pick<CapturedProcedureVersionProje
 }
 
 export function procedureSourceLine(version: Pick<CapturedProcedureVersionProjection, 'source'>): string {
-  return `来自《${version.source.bookTitle}》${version.source.runLabel}`;
+  return metadataWords(`来自《${version.source.bookTitle}》${version.source.runLabel}`);
 }
 
 /**
@@ -166,7 +166,7 @@ export function procedureSourceLine(version: Pick<CapturedProcedureVersionProjec
  */
 export function procedureRunsLine(version: Pick<CapturedProcedureVersionProjection, 'runCount' | 'preparedRunCount'>): string {
   const ran = version.runCount === 0 ? '还没有审阅按这一版运行过' : `按这一版运行过 ${version.runCount} 次`;
-  return version.preparedRunCount === 0 ? ran : `${ran}；另有 ${version.preparedRunCount} 次已准备、未开始`;
+  return version.preparedRunCount === 0 ? ran : metadataWords(`${ran}；另有 ${version.preparedRunCount} 次已准备、未开始`);
 }
 
 /** One Review Run a version ran (REUSE-031): an exact link, with where it stands now (Issue #66, S31). */
@@ -203,7 +203,7 @@ export function procedurePackagesLine(shown: number, count: number, limit: numbe
 
 /** One 图书交付包 version as an exact link (REUSE-031): it opens that Book's 交付物, where the version is listed. */
 export function procedurePackageLinkLine(link: Pick<CapturedProcedurePackageLinkProjection, 'bookTitle' | 'version'>, at: string): string {
-  return `《${link.bookTitle}》图书交付包 v${link.version} · 准备于 ${at}`;
+  return metadataWords(`《${link.bookTitle}》图书交付包 v${link.version} · 准备于 ${at}`);
 }
 
 /** The mark on the version a new use resolves to now (Issue #66, S31; REUSE-043; interaction-spec `最新可用`). */

@@ -109,7 +109,7 @@ export const DELIVERY_NO_EXPORT = '暂无导出记录';
 
 /** `第 1 次交付 · 宣传部 · 版本 2 · 9月24日 11:00`: never 已交付 (PUB-009's words stay out of 交付物). */
 export function documentDeliveryLine(delivery: Pick<ProductionDocumentDeliveryProjection, 'ordinal' | 'recipient' | 'versionLabel'>, recordedAt: string): string {
-  return `第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${recordedAt}`;
+  return metadataWords(`第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${recordedAt}`);
 }
 
 /** What the delivery's export came to: the file written, or nothing yet. */
@@ -124,7 +124,7 @@ export function documentDeliveredLine(ordinal: number, recipient: string): strin
 
 /** The export card's name for a document version: `新闻稿 · 版本 2`. */
 export function documentExportLabel(typeLabel: string, versionLabel: string): string {
-  return `${typeLabel} · ${versionLabel}`;
+  return metadataWords(`${typeLabel} · ${versionLabel}`);
 }
 
 export const DOCUMENT_STATUS_LINES = {
@@ -246,7 +246,7 @@ export const DOCUMENT_PHASE_MOVE_FAILED = '无法记录这一步。';
 
 /** `基础书稿编辑流程 2.0.0 · 启用于 2026年9月24日 10:30`: the profile the document follows (WORK-002). */
 export function workflowProfileLine(name: string, version: string, activatedAt: string): string {
-  return `${name} ${version} · 启用于 ${activatedAt}`;
+  return metadataWords(`${name} ${version} · 启用于 ${activatedAt}`);
 }
 
 /** An accessible name for a phase's move: `开始「起草」`. */

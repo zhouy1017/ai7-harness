@@ -1083,7 +1083,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             element('dt', undefined, '修订版身份'),
             element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
             element('dt', undefined, '产出 Run 与用量'),
-            element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
+            element('dd', 'technical-identity', metadataWords(`Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`)),
           ),
         );
         item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
@@ -1376,7 +1376,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         projection.taskIntent!.modeLabel,
         range === null ? '全书' : `第 ${range.startPosition}–${range.endPosition} 段`,
         counts === null ? `${projection.listPages['coverageManifest.units']?.total ?? manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
-        `任务输入修订版 ${checkpoint.revisionLabel}`,
+        metadataWords(`任务输入修订版 ${checkpoint.revisionLabel}`),
         projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
       ])),
     );

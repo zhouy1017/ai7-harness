@@ -1050,7 +1050,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     section.dataset['reviewCategories'] = run.categories.map((category) => category.categoryId).join(',');
     section.append(
       el('h5', undefined, REVIEW_PLAN_HEADING),
-      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, `任务输入修订版 ${run.manuscript.revisionLabel}`])),
+      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, metadataWords(`任务输入修订版 ${run.manuscript.revisionLabel}`)])),
     );
     // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
@@ -1887,7 +1887,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         'review-facts',
         el('dt', undefined, '报告'), el('dd', 'technical-identity', metadataWords(`${report.reportId} · 第 ${report.version} 版 · ${report.digest}`)),
         el('dt', undefined, '生成时刻'), el('dd', 'technical-identity', report.generatedAt),
-        el('dt', undefined, '审阅配置'), el('dd', 'technical-identity', `${record.appendix.configuration.schema} · ${record.appendix.configuration.version} · ${record.appendix.configuration.digest}`),
+        el('dt', undefined, '审阅配置'), el('dd', 'technical-identity', metadataWords(`${record.appendix.configuration.schema} · ${record.appendix.configuration.version} · ${record.appendix.configuration.digest}`)),
         ...record.appendix.categories.flatMap((category) => [
           el('dt', undefined, category.label),
           el('dd', 'technical-identity', [

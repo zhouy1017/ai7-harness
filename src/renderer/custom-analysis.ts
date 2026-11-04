@@ -351,8 +351,8 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         item.dataset['versionId'] = version.versionId;
         item.dataset['version'] = String(version.version);
         item.dataset['versionState'] = version.state;
-        item.append(el('span', `status-pill custom-dimension-state-${version.state}`, version.stateLabel),
-          el('span', undefined, ` ${customDimensionVersionLine(version)}`), el('p', 'custom-dimension-template', version.questionTemplate));
+        item.append(el('span', metadataWords(`status-pill custom-dimension-state-${version.state}`), version.stateLabel),
+          el('span', undefined, metadataWords(` ${customDimensionVersionLine(version)}`)), el('p', 'custom-dimension-template', version.questionTemplate));
         const actions = el('div', 'button-row');
         if (version.state === 'pending-validation') {
           actions.append(actionButton(CUSTOM_DIMENSION_ENABLE, 'primary', 'enable', () =>
@@ -375,7 +375,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         el('dt', undefined, '维度'), el('dd', 'technical-identity', `${dimension.dimensionId} · ${dimension.kind}`),
         ...dimension.versions.flatMap((version) => [
           el('dt', undefined, metadataWords(`第 ${version.version} 版`)),
-          el('dd', 'technical-identity', `${version.versionId} · ${version.documentDigest} · ${options.localInstantLabel(version.createdAt)}`),
+          el('dd', 'technical-identity', metadataWords(`${version.versionId} · ${version.documentDigest} · ${options.localInstantLabel(version.createdAt)}`)),
         ])));
       section.append(card);
     }
