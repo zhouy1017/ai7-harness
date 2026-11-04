@@ -166,13 +166,13 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     section.append(head, answer);
     const incomplete = dialogueIncompleteLine(attempt);
     if (incomplete !== null || attempt.convertedMarkIds.length > 0) {
-      const status = el('p', 'field-note');
-      if (incomplete !== null) status.append(el('span', 'dialogue-incomplete', incomplete.replace(/。$/u, '')));
+      const status = el('span');
+      if (incomplete !== null) status.append(el('span', 'dialogue-incomplete', attempt.convertedMarkIds.length > 0 ? incomplete.replace(/。$/u, '') : incomplete));
       if (attempt.convertedMarkIds.length > 0) {
         if (incomplete !== null) status.append('；');
         status.append(el('span', 'dialogue-converted', dialogueConvertedLine(attempt.convertedMarkIds.length)));
       }
-      section.append(status);
+      head.append(status);
     }
     return { section, answer };
   }
