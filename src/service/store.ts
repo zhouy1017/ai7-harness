@@ -4823,7 +4823,8 @@ export class EditorialStore {
         : { units: unconfirmed, stopped: run.state === 'resumable' && ledger.outcomeUnknownOf(run.runRecordId) !== null };
       return {
         unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown,
-        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopReason: run.stopReason, stopAt: run.resumedAt }),
+        ...(run.stopReason === undefined ? {} : { stopReason: run.stopReason }),
+        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopAt: run.resumedAt }),
       };
     });
   }
