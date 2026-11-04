@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   CAPTURE_NOT_SAVED,
@@ -176,6 +177,10 @@ describe('Series material chosen apart, applicability and linked packages (Issue
       '不运行「书系一致性」：这本书不在任何书系中。',
     ]);
     expect(sheetChosenApartLine('书系一致性')).toBe('「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。');
+    setTechnicalLayerVisible(false);
+    expect(sheetProcedureLines(run)).toEqual([sheetChosenApartLine('书系一致性')]);
+    expect(sheetProcedureLines(outside)).toEqual(['不运行「书系一致性」：这本书不在任何书系中。']);
+    setTechnicalLayerVisible(true);
   });
 
   it('says what a Book must have for a version to run there (REUSE-048)', () => {

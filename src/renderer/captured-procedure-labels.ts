@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import {
   CAPTURED_PROCEDURE_SCOPE_LABELS,
   MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN,
@@ -349,13 +349,18 @@ function filledWords(steps: ReadonlyArray<Pick<CapturedProcedureRunStepProjectio
 /** The status once a choice filled the sheet (S31b review P3-5): what it ticked, in the same words as the sheet's own line. */
 export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection): string {
   if (run.resolved === null) return run.unavailableReason ?? '';
-  return `已读取《${run.title}》${technicalWords(`第 ${run.resolved.version} 版`, '版本')}：${filledWords(run.resolved.steps)}。`;
+  return `已读取《${run.title}》${technicalWords(`第 ${run.resolved.version} 版`)}：${filledWords(run.resolved.steps)}。`;
 }
 
 /** What the sheet says once a Captured Procedure filled it (ADR 0087 §4; REUSE-054): the exact version, and what it leaves out. */
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
   if (run.resolved === null) return [run.unavailableReason ?? ''];
   const resolved = run.resolved;
+  if (!technicalLayerVisible) {
+    return resolved.steps.flatMap((step) => !step.available
+      ? [`不运行「${step.label}」：${step.unavailableReason ?? ''}`]
+      : step.chosenApart ? [sheetChosenApartLine(step.label)] : []);
+  }
   const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划可按需查看。`];
   for (const step of resolved.steps) {
     if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
