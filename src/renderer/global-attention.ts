@@ -1,7 +1,6 @@
 import { identityWords } from './technical-layer.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
 import {
-  GLOBAL_ATTENTION_FINDINGS_NOTE,
   GLOBAL_ATTENTION_HEADING,
   GLOBAL_ATTENTION_LEDE,
   GLOBAL_ATTENTION_SECTION_LABEL,
@@ -187,7 +186,6 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     el('p', 'section-label', GLOBAL_ATTENTION_SECTION_LABEL),
     heading,
     el('p', 'lede', GLOBAL_ATTENTION_LEDE),
-    el('p', 'field-note global-attention-findings-note', GLOBAL_ATTENTION_FINDINGS_NOTE),
     host,
   );
 

@@ -138,7 +138,7 @@ export function sourceCardFacts(card: EvidenceSourceCardProjection, instant: (is
     ['来源版本', card.sourceVersion === null ? '未取回' : card.sourceVersion.slice(0, 12)],
     ['发布方', card.publisher ?? '未知'],
     ['获取时间', card.capturedAt === null ? '未取回' : instant(card.capturedAt)],
-    ['新鲜度', card.freshnessLabel],
+    ['状态', card.freshnessLabel],
     ['引文完整性', card.integrityLabel],
     ['来源关系', card.lineageLabel],
     ...(card.reused ? [['取回', '沿用此前运行精确取回的内容'] as const] : []),

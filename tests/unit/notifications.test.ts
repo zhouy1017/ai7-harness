@@ -170,50 +170,29 @@ describe('renderer projection observer', () => {
 });
 
 describe('quiet notice lifetime', () => {
-  it('replaces the one notice, pauses its remaining reading time on hover and focus, and dismisses without touching the record', async () => {
+  it('replaces the notice and dismisses the latest one after 2.5 seconds', () => {
     const restore = installMiniDom();
     vi.useFakeTimers();
-    let hovering = false;
-    vi.stubGlobal('document', {
-      body: miniDocument.body,
-      get activeElement() { return miniDocument.activeElement; },
-      createElement: (tag: string) => Object.assign(miniDocument.createElement(tag), { matches: () => hovering }),
-    });
     try {
       const open = vi.fn();
       const show = mountQuietNotice(open);
       show(item({ group: 'recent', state: 'analysis-completed' }));
-      const host = miniDocument.body.children[0]!;
       vi.advanceTimersByTime(2_000);
-      hovering = true;
-      host.dispatchEvent({ type: 'mouseenter' });
-      vi.advanceTimersByTime(20_000);
-      expect(host.hidden).toBe(false);
-      hovering = false;
-      host.dispatchEvent({ type: 'mouseleave' });
-      vi.advanceTimersByTime(3_999);
+      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
+      show(latest);
+      expect(miniDocument.body.children).toHaveLength(1);
+      const host = miniDocument.body.children[0]!;
+      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
+      vi.advanceTimersByTime(2_499);
       expect(host.hidden).toBe(false);
       vi.advanceTimersByTime(1);
       expect(host.hidden).toBe(true);
-
-      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
-      const original = structuredClone(latest);
-      show(item({ group: 'recent', state: 'analysis-completed' }));
       show(latest);
-      expect(miniDocument.body.children).toHaveLength(1);
-      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
-      const view = host.children[1]!;
-      view.focus();
-      host.dispatchEvent({ type: 'focusin' });
-      vi.advanceTimersByTime(20_000);
-      expect(host.hidden).toBe(false);
-      view.click();
+      host.children[1]!.click();
       expect(host.hidden).toBe(true);
       expect(open).toHaveBeenCalledWith(latest);
-      expect(latest).toEqual(original);
     } finally {
       vi.useRealTimers();
-      vi.unstubAllGlobals();
       restore();
     }
   });

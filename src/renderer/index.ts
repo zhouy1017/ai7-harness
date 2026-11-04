@@ -1480,7 +1480,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
     element('dt', undefined, '格式'),
     sourceFormat,
     element('dt', undefined, '来源'),
-    element('dd', undefined, staged.source.provenanceLabel),
+    element('dd', undefined, technicalWords(staged.source.provenanceLabel, '已选择文件')),
     element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
     sourceBytes,
     // A file the product did not parse detected no blocks, so it says what it retained instead of
@@ -1775,7 +1775,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   const choices = element('fieldset', 'recovery-comparison');
   choices.setAttribute('role', 'radiogroup');
   choices.setAttribute('aria-label', '恢复来源比较');
-  const legend = element('legend', undefined, '选择一个证据来源（默认不选择）');
+  const legend = element('legend', undefined, '选择一个证据来源');
   choices.append(legend);
   const cards = element('div', 'recovery-candidate-grid');
   cards.dataset['eligibleCandidateCount'] = recovery.snapshot.state === 'eligible' ? '3' : '2';
@@ -3065,7 +3065,7 @@ function renderBookOverview(
   if (sourceCompletion) {
     content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
   } else if (completion) {
-    content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
+    content.append(element('p', 'success-note', '稿件已导入。'));
   }
   else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
   // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the

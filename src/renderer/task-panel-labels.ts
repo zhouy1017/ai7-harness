@@ -278,7 +278,7 @@ export function returnChipArrived(place: string): string {
 export const TASK_PANEL_DRAFT_KIND = '任务草稿 · 尚未成为任务';
 /** 发起全书任务's own way to the composer (TASK-001): the editor says what AI7 should do; the procedures below stay for 快速开始. */
 export const TASK_PANEL_COMPOSE_OPEN = '发起全书任务…';
-export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作，先存为任务草稿；下面的全书工序可以直接准备或快速开始。';
+export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作。';
 
 export const TASK_COMPOSER_TITLES = {
   selection: '就这段发起任务',

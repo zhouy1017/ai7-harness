@@ -178,7 +178,7 @@ export function createImportReview(options: ImportReviewOptions) {
     choices.setAttribute('role', 'radiogroup');
     choices.setAttribute('aria-label', '本地文件导入目标');
     choices.dataset['importTargetChoices'] = 'unselected-by-default';
-    choices.append(element('legend', undefined, '图书目标（默认不选择）'));
+    choices.append(element('legend', undefined, '图书目标'));
     for (const targetChoice of staged.targetChoices) {
       const choice = element('label', 'choice');
       const radio = element('input');
@@ -266,7 +266,7 @@ export function createImportReview(options: ImportReviewOptions) {
       relationship.setAttribute('role', 'radiogroup');
       relationship.setAttribute('aria-label', '本地文件与所选图书的关系');
       relationship.dataset['importRelationshipChoices'] = 'unselected-by-default';
-      relationship.append(element('legend', undefined, '导入关系（默认不选择）'));
+      relationship.append(element('legend', undefined, '导入关系'));
       const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> = !staged.editableImport.available
         ? ['source-only']
         : selectedChoice.kind === 'existing-book' && selectedChoice.manuscriptState === 'populated'
@@ -285,7 +285,7 @@ export function createImportReview(options: ImportReviewOptions) {
           radio.setAttribute('aria-label', '作为首份稿件导入');
           copy.append(
             element('strong', undefined, '作为首份稿件导入'),
-            element('small', undefined, '创建主稿件、r1、稿件导入记录与工作流程实例。'),
+            element('small', undefined, '创建主稿件。'),
           );
         } else if (relationshipKind === 'source-only') {
           radio.setAttribute('aria-label', '作为来源材料导入');
@@ -320,7 +320,6 @@ export function createImportReview(options: ImportReviewOptions) {
       title.maxLength = 180;
       title.required = true;
       title.value = staged.titleSuggestion.value;
-      const note = element('span', 'field-note', `建议来源：${staged.titleSuggestion.sourceLabel}。这是可编辑建议，不会自动创建图书。`);
       const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
       const structureView = renderStructureReview(staged.structure);
       const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
@@ -372,7 +371,7 @@ export function createImportReview(options: ImportReviewOptions) {
       });
       const actions = element('div', 'button-row');
       actions.append(confirm, cancelImport);
-      form.append(label, title, note);
+      form.append(label, title);
       if (relationshipSelection === 'first-manuscript') {
         if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
         form.append(...fidelityView.elements, ...structureView.elements);
@@ -788,7 +787,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const acquiredAt = instantValue(review.provenance.acquiredAt);
     acquiredAt.setAttribute('data-acquired-at', review.provenance.acquiredAt);
     provenanceValues.append(
-      element('dt', undefined, '取得方式'), element('dd', undefined, review.provenance.label),
+      element('dt', undefined, '取得方式'), element('dd', undefined, technicalWords(review.provenance.label, '已选择文件')),
       element('dt', undefined, '处理范围'), element('dd', undefined, review.provenance.locality === 'local-provider-free' ? '本地 · 未调用 Provider' : review.provenance.locality),
       element('dt', undefined, '取得时间'), acquiredAt,
     );
@@ -808,11 +807,6 @@ export function createImportReview(options: ImportReviewOptions) {
     content.append(boundary, provenance, sourceResult);
 
     const commitBar = element('section', 'commit-bar');
-    const explanation = element('div');
-    explanation.append(
-      element('strong', undefined, '一次提交，不能部分创建'),
-      element('div', 'field-note', '来源版本结果、当前取得的来源记录与文件专属来源导入记录会原子关联。'),
-    );
     const commitButton = button(
       review.target.kind === 'new-book' ? '新建图书并导入来源材料' : '导入来源材料到所选图书',
       'primary',
@@ -850,7 +844,7 @@ export function createImportReview(options: ImportReviewOptions) {
       button('取消导入', 'quiet', () =>
         abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn)),
     );
-    commitBar.append(explanation, actions);
+    commitBar.append(actions);
     content.append(commitBar);
     appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen('review', content);
@@ -908,7 +902,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
       element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
       element('dt', undefined, technicalLayerVisible ? '暂存来源字节数' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
-      element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel),
+      element('dt', undefined, '暂存来源范围'), element('dd', undefined, technicalWords(review.source.provenanceLabel, '已选择文件')),
     );
     target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
     target.dataset['reimportSourceBytes'] = technicalLayerVisible ? String(review.source.sourceBytes) : '';
@@ -1247,7 +1241,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '本地来源'),
       element('dd', undefined, review.source.displayName),
       element('dt', undefined, '来源边界'),
-      element('dd', undefined, review.source.provenanceLabel),
+      element('dd', undefined, technicalWords(review.source.provenanceLabel, '已选择文件')),
       element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
       sourceBytes,
       element('dt', undefined, '最终动作'),

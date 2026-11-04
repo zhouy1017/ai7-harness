@@ -227,9 +227,9 @@ export function reviewRunsTruncatedLine(listed: number): string {
 // ---- 新建审阅 --------------------------------------------------------------------------------------
 
 export const REVIEW_SHEET_TITLE = '新建审阅';
-export const REVIEW_SHEET_NOTE = '选择审阅类别，默认检查全书。点击开始审阅即可运行，也可按需查看计划；本地文字检查单独运行。';
+export const REVIEW_SHEET_NOTE = '选择审阅类别后即可开始，默认检查全书。';
 export const REVIEW_CATEGORY_LEGEND = '审阅类别（可多选）';
-export const REVIEW_SCOPE_LEGEND = '审阅范围（四选一）';
+export const REVIEW_SCOPE_LEGEND = '审阅范围';
 export const REVIEW_CHAPTER_FROM = '从';
 export const REVIEW_CHAPTER_TO = '到';
 export const REVIEW_CHAPTER_PLACEHOLDER = '请选择';

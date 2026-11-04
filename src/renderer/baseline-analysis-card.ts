@@ -436,7 +436,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       synopsis.append(
         element('h4', undefined, `历史修订版${technicalWords(` Revision ${revision.ordinal}`)}（只读）`),
         element('p', 'attention-note', view.current
-          ? `${technicalWords(`Revision ${revision.ordinal}`, "此修订版")} 是当前最新的结果集修订版；此视图为只读。`
+          ? `${technicalWords(`Revision ${revision.ordinal}`, "此修订版")} 是最新的分析结果；此视图为只读。`
           : `${technicalWords(`Revision ${revision.ordinal}`, "此修订版")} 已被后续修订版取代；它按其原始稿件 pin ${technicalWords(revision.manuscriptPin.revisionLabel, '修订版')} 呈现，不是当前事实，也未被删除。`),
       );
     }
@@ -875,7 +875,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // Freshness and the work an update would cover are what the editor weighs before issuing a Task, so
     // both readings stay at full rank; the digests that identify them go one step away.
     facts.append(
-      element('dt', undefined, '目标修订版'), element('dd', undefined, `${technicalWords(`Revision ${controls.target.ordinal} · `)}绑定 ${technicalWords(controls.target.manuscriptPin.revisionLabel, '修订版')} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
+      element('dt', undefined, '目标修订版'), element('dd', undefined, `${technicalWords(`Revision ${controls.target.ordinal} · `)}绑定 ${technicalWords(controls.target.manuscriptPin.revisionLabel, '修订版')} · 状态 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
       element('dt', undefined, '当前稿件'), element('dd', undefined, `${technicalWords(controls.working.revisionLabel, '修订版')}${technicalWords(` + 修订日志序号 ${controls.working.journalSequence}`)} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
       element('dt', undefined, '模型服务与用量'), element('dd', undefined, '沿用本次分析的模型服务、发送范围与预算；复用已有结果不调用模型。'),
       element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
@@ -1076,7 +1076,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           setStatus(revisionId === null ? '已返回最新修订版。' : '历史修订版已只读打开。', 'success');
         }
       } catch (error) {
-        setStatus(rendererErrorMessage(error, '无法打开该结果集修订版。'), 'error');
+        setStatus(rendererErrorMessage(error, '无法打开该分析结果。'), 'error');
       }
     };
     const list = element('ol', 'analysis-history-list');
@@ -1282,7 +1282,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
       outcome.append(
         element('h4', undefined, projection.taskOutcome.label),
-        element('p', undefined, `安全的下一步：${projection.taskOutcome.safeNextAction}`),
+        element('p', undefined, `${projection.taskOutcome.safeNextAction}`),
         runReportOrReason(projection.taskOutcome.report, projection.taskOutcome.reportAbsentReason),
         technicalDetails('analysis-facts',
           element('dt', undefined, '任务结果'),
@@ -1307,7 +1307,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartPreview, cancel: restartCancel, others: [restartStart] }, null, true));
       restartPreview.dataset['analysisAction'] = 'prepare';
       restartActions.append(restartStart, restartPreview, restartCancel);
-      restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以直接重新开始，也可先查看计划。'), restartActions);
+      restart.append(element('p', 'field-note', '上一次分析没有读完，可以重新开始。'), restartActions);
       records.append(restart);
     }
 

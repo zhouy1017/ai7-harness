@@ -58,7 +58,7 @@ export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null)
 export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPolicyPin | null): string {
   if (!technicalLayerVisible) return '分析结果供编辑参考，不修改稿件。';
   const kind = '一个精确版本化的覆盖式分析种类';
-  const revision = '结果集修订版不修改稿件';
+  const revision = '分析结果不修改稿件';
   if (policy === null) return `${kind}；${revision}。`;
   const version = 'version' in policy ? policy.version : policy.providerProcessingVersion;
   const denied = 'decision' in policy ? policy.decision === 'deny' : policy.liveTransmissions === 0;

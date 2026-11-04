@@ -2,7 +2,7 @@ import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '.
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
-export const QUIET_NOTICE_MS = 6_000;
+export const QUIET_NOTICE_MS = 2_500;
 
 /** Observe the existing attention projection; history and its count remain owned by that projection. */
 export function createNotificationObserver(options: {
@@ -29,7 +29,7 @@ export function createNotificationObserver(options: {
   };
 }
 
-/** One in-app notice. Hover/focus pauses the remaining six-second reading time. */
+/** One in-app notice, replaced by the latest completion and dismissed after 2.5 seconds. */
 export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => void): (item: GlobalAttentionItemProjection) => void {
   const host = document.createElement('aside');
   host.dataset['quietCompletionNotice'] = 'true';
@@ -45,30 +45,11 @@ export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => 
   close.textContent = QUIET_NOTICE_WORDS.close;
   host.append(status, view, close);
   // Reuse shell surface roles without adding another styling owner.
-  host.className = 'panel button-row quiet-completion-notice';
+  host.className = 'panel button-row quiet-completion-notice status-pill';
   document.body.append(host);
   let current: GlobalAttentionItemProjection | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let remaining = QUIET_NOTICE_MS;
-  let since = 0;
-  let paused = false;
   const hide = (): void => { clearTimeout(timer); host.hidden = true; current = null; };
-  const pause = (): void => {
-    if (!paused) remaining = Math.max(0, remaining - (Date.now() - since));
-    paused = true;
-    clearTimeout(timer);
-  };
-  const resume = (): void => {
-    clearTimeout(timer);
-    if (host.hidden || host.matches(':hover') || host.contains(document.activeElement)) return;
-    since = Date.now();
-    paused = false;
-    timer = setTimeout(hide, remaining);
-  };
-  host.addEventListener('mouseenter', pause);
-  host.addEventListener('mouseleave', resume);
-  host.addEventListener('focusin', pause);
-  host.addEventListener('focusout', () => queueMicrotask(resume));
   close.addEventListener('click', hide);
   view.addEventListener('click', () => { const item = current; hide(); if (item) open(item); });
   return (item) => {
@@ -77,9 +58,6 @@ export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => 
     status.textContent = completionLabel(item);
     host.dataset['noticeClass'] = item.state;
     host.hidden = false;
-    remaining = QUIET_NOTICE_MS;
-    since = Date.now();
-    paused = false;
-    resume();
+    timer = setTimeout(hide, QUIET_NOTICE_MS);
   };
 }

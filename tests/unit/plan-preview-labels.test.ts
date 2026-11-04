@@ -34,7 +34,7 @@ import {
  * Drawer (Issue #418), and are pinned where the drawer's projection makes them (tests/unit/task-plan.test.ts).
  */
 const CAPTURED_DEVELOPMENT_CI = {
-  analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。',
+  analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，分析结果不修改稿件。',
   taskAuthorizationDispatchNote: '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。',
   launchPolicyIntegritySentence: '当前开发与持续集成范围保持零次实时传输。',
 } as const;
@@ -86,13 +86,13 @@ describe('analysisKindSubtitle', () => {
   });
 
   it('states an eligible-only binding from either pin shape', () => {
-    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v10 下仅限资格，结果集修订版不修改稿件。';
+    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v10 下仅限资格，分析结果不修改稿件。';
     expect(analysisKindSubtitle(ELIGIBLE_PIN)).toBe(eligible);
     expect(analysisKindSubtitle(ELIGIBLE_POLICY_PIN)).toBe(eligible);
   });
 
   it('drops the binding clause, and only that clause, when neither a plan nor a Revision exists', () => {
-    expect(analysisKindSubtitle(null)).toBe('一个精确版本化的覆盖式分析种类；结果集修订版不修改稿件。');
+    expect(analysisKindSubtitle(null)).toBe('一个精确版本化的覆盖式分析种类；分析结果不修改稿件。');
     expect(analysisKindSubtitle(null)).not.toContain('Provider Processing');
   });
 });

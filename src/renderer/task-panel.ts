@@ -59,7 +59,6 @@ import {
   TASK_PANEL_COMPOSE_ACTIONS,
   TASK_PANEL_COMPOSE_FIELD,
   TASK_PANEL_COMPOSE_OPEN,
-  TASK_PANEL_COMPOSE_OPEN_NOTE,
   taskComposerAddRangeLimit,
   taskComposerAnswerHeading,
   taskComposerBookLine,
@@ -73,7 +72,6 @@ import {
   TASK_PANEL_COMPOSE_FIRST,
   TASK_PANEL_COMPOSE_FIRST_QUICK,
   TASK_PANEL_COMPOSE_HEADING,
-  TASK_PANEL_COMPOSE_LEDE,
   TASK_PANEL_COMPOSE_NONE,
   TASK_PANEL_EMPTY_LINES,
   TASK_PANEL_GROUP_LABELS,
@@ -433,11 +431,10 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     open.disabled = working;
     open.addEventListener('click', () => options.openComposer());
     const opener = el('div', 'task-panel-compose-opener');
-    opener.append(open, el('p', 'field-note', TASK_PANEL_COMPOSE_OPEN_NOTE));
-    const lede = el('p', 'field-note', TASK_PANEL_COMPOSE_LEDE);
+    opener.append(open);
     const choices = analysis === null ? [] : composeOptions(analysis);
     if (choices.length === 0) {
-      compose.replaceChildren(heading, opener, lede, el('p', 'field-note task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
+      compose.replaceChildren(heading, opener, el('p', 'field-note task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
       return;
     }
     if (selected === null || !choices.some((choice) => choice.mode === selected && choice.available)) {
@@ -487,7 +484,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     quick.addEventListener('click', () => void start(chosen, true));
     prepare.addEventListener('click', () => void start(chosen, false));
     row.append(prepare);
-    compose.replaceChildren(heading, opener, lede, fieldset, row, why);
+    compose.replaceChildren(heading, opener, fieldset, row, why);
   }
 
   async function start(choice: ComposeOption, quick: boolean): Promise<void> {
