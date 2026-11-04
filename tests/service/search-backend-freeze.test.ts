@@ -52,6 +52,12 @@ describe('a review Run freezes its search backend', () => {
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '生产检索密钥回归');
       await pinEditorialWorkspaceProfileRevision2(store, book.bookId); recordMissingCredentialConnection(store, '合成连接');
+      const category = store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'factual-review')!;
+      expect(category.available).toBe(false);
+      if (route !== 'opencode-go') {
+        expect(category.unavailableReason).toMatch(/候选接口 · 未实测.*后端列表/u);
+        expect(category.unavailableReason).not.toContain('一键启用');
+      }
       expect(() => {
         let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
         while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);

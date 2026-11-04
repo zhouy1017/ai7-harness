@@ -114,20 +114,26 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
-  it('shows the native model-channel search source in the new-review dialog', async () => {
+  it.each([true, false])('shows truthful native search availability in the new-review dialog (admitted: %s)', async (admitted) => {
     const view = mount();
     const next = workspace();
     const available = { available: true, unavailableReason: null };
     next.newReview = available; next.scopeOptions.whole = available;
+    const reason = '当前模型渠道的原生搜索为候选接口 · 未实测；请前往 设置 › 联网检索 的后端列表，保存一个可用后端的密钥。';
     next.categories = [{ categoryId: 'factual-review', label: '事实核查', description: '核对公开来源', output: 'annotation', riskPointsOnly: false,
       batchApply: false, searchEngine: true, modelFree: false, materialReferencesAllowed: false,
-      basisStatement: '将使用 DeepSeek 开放平台（官方） 自带的联网搜索；是否完成以本次运行的核查状态为准',
-      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, ...available,
+      basisStatement: admitted ? '将使用 DeepSeek 开放平台（官方） 自带的联网搜索；是否完成以本次运行的核查状态为准' : '使用用户所选的联网检索后端',
+      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, available: admitted, unavailableReason: admitted ? null : reason,
       scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
     view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
     Object.assign(view.root.querySelector('dialog')!, { showModal: vi.fn(), close: vi.fn() });
     view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
-    expect(view.root.querySelector('[data-review-category-option="factual-review"] .review-category-basis')!.textContent).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
+    const option = view.root.querySelector('[data-review-category-option="factual-review"]')!;
+    if (admitted) expect(option.querySelector('.review-category-basis')!.textContent).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
+    else {
+      expect(option.querySelector('.review-category-reason')!.textContent).toContain(reason);
+      expect(option.textContent).not.toContain('一键启用');
+    }
   });
 
   it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {
