@@ -98,7 +98,7 @@ export function mountGlobalAgent(options: {
   const effectField = field('监督作用', effect);
   const bookField = field('图书', book);
   form.append(el('h3', '管理所选记忆'), field('操作', operation), field('作用范围', scope), field('审阅类别', category), bookField,
-    field('记忆内容 / 监督指令（最多 200 字）', text), effectField,
+    field('记忆内容 / 监督指令 · 最多 200 字', text), effectField,
     el('p', '勾选上方记忆后管理；只有点击记录才会修改记忆，对话不会自动成为指令。'), save);
   const directives = el('section');
   directives.className = 'global-agent-directives';

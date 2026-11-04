@@ -135,9 +135,9 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
       description.value = item.description;
       description.dataset['profileField'] = 'description';
       description.addEventListener('input', () => { item.description = description.value; });
-      const nameLabel = el('label', undefined, '名称（最多 40 字）');
+      const nameLabel = el('label', undefined, '名称 · 最多 40 字');
       nameLabel.append(name);
-      const descriptionLabel = el('label', undefined, '说明（最多 500 字）');
+      const descriptionLabel = el('label', undefined, '说明 · 最多 500 字');
       descriptionLabel.append(description);
       const remove = button('移除', () => { draft.splice(index, 1); paintItems(); }, 'remove-item');
       remove.disabled = draft.length === 1;

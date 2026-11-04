@@ -1211,7 +1211,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                     name: 'proposedText', label: '编辑建议文本', value: suggestion.proposedText, required: false,
                     hint: inserts ? '填写要在此插入的文字。' : '留空表示删去这段文字。',
                   },
-                  { name: 'reason', label: '为什么这样改？（可选 · 帮助 AI7 学习你的判断）', value: '', required: false },
+                  { name: 'reason', label: '为什么这样改？ · 可选', value: '', required: false },
                 ],
                 submitLabel: '接受修改后的版本并应用',
                 submit: (values) => writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({

@@ -22,7 +22,7 @@ export const EXCLUSIONS_END_OPEN = '停止此排除…';
 export const EXCLUSIONS_KIND_LEGEND = '排除什么';
 export const EXCLUSIONS_TARGET_LEGEND = '选择要排除的对象';
 export const EXCLUSIONS_REASON_LABEL = '排除理由 · 可选';
-export const EXCLUSIONS_REASON_CHANGE_LABEL = '新的排除理由（可以留空）';
+export const EXCLUSIONS_REASON_CHANGE_LABEL = '新的排除理由 · 可留空';
 export const EXCLUSIONS_TARGETS_MORE = '更多…';
 export const EXCLUSIONS_TARGETS_NONE: Readonly<Record<SeriesExclusionTargetKind, string>> = {
   'knowledge-item': '这个书系还没有书系知识条目。',
