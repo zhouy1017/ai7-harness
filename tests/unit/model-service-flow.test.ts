@@ -37,8 +37,9 @@ function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & { getMod
 
 function flow(projection: ModelServiceSettingsProjection, calls = api()) {
   const render = vi.fn();
-  const node = modelServiceFlow(projection, { api: calls, render, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, channel: null, chooseChannel: vi.fn() }) as unknown as MiniElement;
-  return { node, render, calls };
+  const setStatus = vi.fn();
+  const node = modelServiceFlow(projection, { api: calls, render, setStatus, errorMessage: (_error, fallback) => fallback, channel: null, chooseChannel: vi.fn() }) as unknown as MiniElement;
+  return { node, render, calls, setStatus };
 }
 
 const button = (root: MiniElement, action: string) => root.querySelector(`button[data-action="${action}"]`)!;
@@ -81,6 +82,34 @@ describe('the one model-service flow', () => {
     button(node, 'refresh-model-list').click();
     await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalledWith({ route: 'anthropic-claude' }));
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
+  });
+
+  it('shows refresh failure as an error with the discovery reason', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), {
+      modelDiscovery: { status: 'failure', code: 'AI7_PROXY_UNREACHABLE', reason: '代理不可达：请检查网络代理设置' },
+    });
+    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
+    button(node, 'refresh-model-list').click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('代理不可达：请检查网络代理设置', 'error'));
+  });
+
+  it('shows the model count after a successful refresh', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), { modelDiscovery: { status: 'success', modelCount: 7 } });
+    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
+    button(node, 'refresh-model-list').click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('模型列表已刷新，共 7 个可用模型。', 'success'));
+  });
+
+  it('shows saved credentials separately when discovery fails', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), {
+      modelDiscovery: { status: 'failure', code: 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', reason: '模型服务拒绝了凭据' },
+    });
+    const { node, setStatus } = flow(settings([], null), api(responseProjection));
+    pickChannel(node, 'anthropic-claude');
+    const secret = node.querySelectorAll('input').find((input) => input.type === 'password')!;
+    secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
+    node.querySelector('form')!.dispatchEvent({ type: 'submit', preventDefault: () => undefined });
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('凭据已保存，但无法获取模型列表：模型服务拒绝了凭据', 'error'));
   });
 
   it.each([

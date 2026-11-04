@@ -13,6 +13,10 @@ export type ModelServiceChannelId = (typeof MODEL_SERVICE_CHANNELS)[number];
 export type ModelServiceRouteId = ModelServiceChannelId;
 /** Account metadata only, never a response or credential. */
 export interface DiscoveredModel { modelId: string; modelLabel: string }
+export type ModelDiscoveryFailureCode = 'MODEL_SERVICE_UNREACHABLE' | 'AI7_PROXY_UNREACHABLE' | 'MODEL_DISCOVERY_CREDENTIAL_REJECTED' | 'MODEL_DISCOVERY_UNAVAILABLE' | 'MODEL_DISCOVERY_EMPTY' | 'MODEL_DISCOVERY_INVALID';
+export type ModelDiscoveryResult =
+  | { status: 'success'; modelCount: number }
+  | { status: 'failure'; code: ModelDiscoveryFailureCode; reason: string };
 /** One connection row per route; the first two routes keep the identities Issues #712 and #811 gave them. */
 export type ModelServiceConnectionId = 'main-editorial-deepseek-v4-pro' | 'main-editorial-opencode-go' | Exclude<ModelServiceRouteId, 'opencode-go' | 'deepseek-open-platform'>;
 

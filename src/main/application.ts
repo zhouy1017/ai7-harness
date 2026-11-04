@@ -4243,8 +4243,8 @@ export async function runApplication(): Promise<void> {
       } catch {
         throw new ServiceCallError('MODEL_SERVICE_STATE_UNCERTAIN', '凭据已受保护，但连接状态需要处理。');
       }
-      await service!.call('refreshModelServiceModels', { route });
-      return settingsProjection();
+      const modelDiscovery = await service!.call('refreshModelServiceModels', { route });
+      return { ...(await settingsProjection()), modelDiscovery };
     };
     /** Remove a route's credential — the DeepSeek 开放平台（官方） route's when none is named — keeping its connection 需设置. */
     const removeModelServiceCredential = async (input?: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection> => {
@@ -4326,7 +4326,10 @@ export async function runApplication(): Promise<void> {
       {
         selectMainRoleModel: async (input) => { await service!.call('selectMainRoleModel', input); return settingsProjection(); },
         selectBothRoleModels: async (input) => { await service!.call('selectBothRoleModels', input); return settingsProjection(); },
-        refreshModelServiceModels: async (input) => { await service!.call('refreshModelServiceModels', input); return settingsProjection(); },
+        refreshModelServiceModels: async (input) => {
+          const modelDiscovery = await service!.call('refreshModelServiceModels', input);
+          return { ...(await settingsProjection()), modelDiscovery };
+        },
         selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
         startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
         connectionTestSettings: settingsProjection,
