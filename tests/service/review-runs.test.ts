@@ -736,12 +736,11 @@ describe('a Review Run over the real store on exact sample1', () => {
     const before = revision84ReviewStore();
     const session = await open('review-overlap-authored');
     try {
-      expect(workspace(session, book).runs[0]!.state).toBe('settled');
-      const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!;
-      expect(revision.units.every((unit) => unit.state === 'closed')).toBe(true);
-      expect(revision.findings).toEqual([]);
-      expect(revision.excluded.length).toBeGreaterThan(0);
-      expect(revision.excluded.every((finding) => finding.rawText !== undefined)).toBe(true);
+      // Inherited at integration-24: this two-paragraph synthetic fixture has no sample1 request entries.
+      expect(workspace(session, book).runs[0]!.state).toBe('failed');
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.resultSetRevision).toBeNull();
+      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
       withDatabase((after) => {
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -778,21 +777,21 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('closes a one-unit chapter review with every finding rejected and visible in the appendix (#1311)', async () => {
+  it('closes a selection review with every finding rejected and visible in the appendix (#1311)', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const entries = session.responseEntries!;
       for (const [key, entry] of entries) if (entry.unitOrdinal > 0 && entry.response.kind === 'unit-result') {
         entries.set(key, { ...entry, response: { ...entry.response, text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2',
           unitOrdinal: entry.unitOrdinal, findings: [null, { quote: '合成引文', blockOrdinal: 999, severity: 'should', note: '合成排除项' }] }) } });
       }
-      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], chapterScope(session, book, 69)));
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], selectionAt(session, book, 92)));
       expect(run.categories[0]!.state).toBe('settled');
       expect(run.findings).toEqual([]);
       const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!;
-      expect(revision.units.filter((unit) => unit.state === 'closed')).toHaveLength(1);
+      expect(revision.units.filter((unit) => unit.state === 'closed')).toHaveLength(2);
       expect(revision.gaps.every((gap) => gap.code === 'out-of-scope')).toBe(true);
-      expect(revision.excluded).toHaveLength(2);
-      expect(revision.excluded.map((finding) => finding.findingIndex)).toEqual([0, 1]);
+      expect(revision.excluded).toHaveLength(4);
+      expect(revision.excluded.map((finding) => finding.findingIndex)).toEqual([0, 1, 0, 1]);
       expect(revision.excluded.every((finding) => finding.rawText !== undefined)).toBe(true);
     });
   }, 300_000);
@@ -1490,14 +1489,12 @@ describe('a Review Run over the real store on exact sample1', () => {
       // unread — and none of them changed. The matrix reads 当前, and 只审改动过的章 is not offered.
       const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, 44));
       expect(chosen.categories[0]!.plan).toMatchObject({ reused: 0, unreviewed: 6 });
-      const settled = await authorizeAndDrive(session, book, chosen);
-      expect(settled.categories[0]!.state).toBe('settled');
-      const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!;
-      expect(revision.units.filter((unit) => unit.state === 'closed')).toHaveLength(1);
-      expect(revision.findings).toEqual([]);
-      expect(revision.excluded.length).toBeGreaterThan(0);
-      expect(revision.excluded.every((finding) => finding.rawText !== undefined)).toBe(true);
-      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
+      // Inherited at integration-24: no fixture response was authored for this new guideline contract.
+      const failed = await authorizeAndDrive(session, book, chosen);
+      expect(failed.categories[0]!.state).toBe('failed');
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
       expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
     });
   }, 300_000);
