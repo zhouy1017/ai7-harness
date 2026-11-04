@@ -108,7 +108,7 @@ function onEscape(root: HTMLElement, cancel: () => void): void {
 export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions): { load(): Promise<void> } {
   const { root, api } = options;
   root.classList.add('source-card', 'background-analysis');
-  root.replaceChildren(el('h3', undefined, BACKGROUND_HEADING), el('p', 'field-note', BACKGROUND_LOADING));
+  root.replaceChildren(el('h3', undefined, `${BACKGROUND_HEADING} · ${BACKGROUND_LOADING}`));
   let selectedKind = 'baseline-analysis';
   let last: BackgroundAnalysisEnrollmentProjection | null = null;
   let lastJson = '';

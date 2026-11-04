@@ -755,7 +755,7 @@ export function mountBookSeries(options: MountBookSeriesOptions): void {
   const { root } = options;
   root.classList.add('source-card', 'book-series');
   root.dataset['bookId'] = options.bookId;
-  root.replaceChildren(el('h3', undefined, BOOK_SERIES_HEADING), el('p', 'field-note', SERIES_STATUS.loading));
+  root.replaceChildren(el('h3', undefined, `${BOOK_SERIES_HEADING} · ${SERIES_STATUS.loading}`));
   void options.api.inspectBookSeries({ bookId: options.bookId }).then(
     (projection: BookSeriesProjection) => {
       if (!root.isConnected) return;

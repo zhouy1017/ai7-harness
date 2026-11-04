@@ -157,7 +157,7 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     }
   };
 
-  root.replaceChildren(el('h3', undefined, SCHEDULED_BACKUP_HEADING), el('p', 'field-note', SCHEDULED_BACKUP_STATUS_LINES.loading));
+  root.replaceChildren(el('h3', undefined, `${SCHEDULED_BACKUP_HEADING} · ${SCHEDULED_BACKUP_STATUS_LINES.loading}`));
   void api.inspectScheduledBackups().then((loaded) => {
     if (!root.isConnected) return;
     projection = loaded;

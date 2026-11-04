@@ -973,7 +973,7 @@ export function createImportReview(options: ImportReviewOptions) {
 
     const mappingsHost = element('section', 'review-section');
     mappingsHost.dataset['reimportMappings'] = 'loading';
-    mappingsHost.append(element('h3', undefined, '章节对应'), element('p', 'field-note', '正在读取对应关系…'));
+    mappingsHost.append(element('h3', undefined, '章节对应 · 正在读取…'));
     content.append(mappingsHost);
     void Promise.resolve().then(async () => {
       try {

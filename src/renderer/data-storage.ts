@@ -93,7 +93,7 @@ export function createDataStorage(options: DataStorageOptions) {
       actions.append(button('返回', 'quiet', () => void returnToOrigin()));
       // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart, read from the store.
       const versions = element('section', 'source-card data-version');
-      versions.append(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'field-note', '正在读取版本…'));
+      versions.append(element('h3', undefined, `${DATA_VERSION_HEADING} · 正在读取…`));
       // 导出数据库 (Issue #434, S86a; DSTO-017): the one file, through the system's Save dialog and an approval as stated.
       const databaseExport = element('section', 'source-card');
       // 导入数据库 (Issue #434, S86c; DSTO-017): the file previewed whole, then the one choice, never preselected, of what to do.
