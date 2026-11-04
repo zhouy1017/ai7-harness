@@ -752,10 +752,10 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
     await waitFor(primary, `document.querySelectorAll('[data-screen="settings"] [data-settings-entry]').length===6 && !document.querySelector('[data-settings-entry="usage"]') && !document.querySelector('[data-settings-entry="evaluation-calibration"]') && !document.querySelector('[data-settings-entry="diagnostics"]')`, 'ordinary-settings-six-rows');
     await click(primary, '键盘与无障碍', 'ordinary-keyboard-entry');
-    await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
-    await assertRenderer(primary, `(() => { const input=document.querySelector('[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
+    await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
     await waitFor(primary, `document.documentElement.dataset.reducedMotion==='true' && localStorage.getItem('ai7.reducedMotion')==='true'`, 'ordinary-reduced-motion-applied');
-    await assertRenderer(primary, `(() => { const input=document.querySelector('[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
     await click(primary, '模型服务', 'ordinary-model-entry');
