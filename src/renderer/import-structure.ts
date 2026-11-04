@@ -49,7 +49,7 @@ export function renderStructureReview(structure: ImportStructureProjection | und
   const confirmed = new Map(stated?.headings.map((heading) => [heading.position, heading.level]) ?? []);
   const rows: Array<{ checkbox: HTMLInputElement; level: HTMLSelectElement; position: number }> = [];
   if (structure.headings.length > 0) {
-    section.append(el('h3', undefined, STRUCTURE_HEADING_TITLE));
+    section.append(el('h3', undefined, structure.headingsTruncated ? `${STRUCTURE_HEADING_TITLE} · 前 ${structure.headings.length} 个` : STRUCTURE_HEADING_TITLE));
     const list = el('ul', 'structure-candidates');
     for (const candidate of structure.headings) {
       const item = el('li', 'choice');
@@ -71,7 +71,6 @@ export function renderStructureReview(structure: ImportStructureProjection | und
       rows.push({ checkbox, level, position: candidate.position });
     }
     section.append(list);
-    if (structure.headingsTruncated) section.append(el('p', 'field-note', `只列出前 ${structure.headings.length} 个候选。`));
   }
   if (structure.softBreakSplits.length > 0) {
     const splits = el('div', 'structure-splits');

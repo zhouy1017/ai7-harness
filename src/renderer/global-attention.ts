@@ -243,6 +243,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     groupHeading.id = headingId;
     groupHeading.append(el('span', 'global-attention-group-label', view.heading));
     if (view.countLine.length > 0) groupHeading.append(el('span', 'global-attention-group-count', view.countLine));
+    if (view.truncated !== null) groupHeading.append(el('span', 'global-attention-truncated', view.countLine.length > 0 ? view.truncated.replace(/^共 \d+ 项，/u, '') : view.truncated));
     section.setAttribute('aria-labelledby', headingId);
     section.append(groupHeading);
     if (view.empty !== null) {
@@ -255,7 +256,6 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
       if (entry !== undefined) list.append(itemNode(item, entry));
     }
     section.append(list);
-    if (view.truncated !== null) section.append(el('p', 'field-note global-attention-truncated', view.truncated));
     return section;
   }
 
