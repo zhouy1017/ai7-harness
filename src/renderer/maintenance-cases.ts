@@ -363,16 +363,16 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     why.id = uid('record-reason');
     confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
-    const reasonLabel = el('span');
-    reasonLabel.append(' · ', why);
-    confirm.append(reasonLabel);
+    const blockerLabel = el('span');
+    blockerLabel.append(' · ', why);
+    confirm.append(blockerLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeDraft(true));
     cancel.disabled = working;
     const sync = (): void => {
       const blocker = draftBlocker(current);
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
-      reasonLabel.hidden = blocker === null;
+      blockerLabel.hidden = blocker === null;
       confirm.disabled = working || blocker !== null;
     };
     reason.addEventListener('input', () => { current.reason = reason.value; current.problem = null; sync(); });
