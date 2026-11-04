@@ -930,8 +930,8 @@ export function createImportReview(options: ImportReviewOptions) {
       element('h3', undefined, '比较摘要'),
       element('p', undefined, reimportSummaryLine(review)),
       element('p', 'field-note', review.comparison.changed
-        ? '完全一致的段落已自动对应；每一处变化由你选一个动词确定——拆分、改写与新增、删除或并入，系统不预选，也不做模糊匹配。'
-        : '当前主稿件与暂存稿件逐块完全一致；提交只记录“未发现稿件变化”，不会创建空修订版。'),
+        ? '每处变化由你选择拆分、改写与新增、删除或并入；系统不会预选或模糊匹配。'
+        : '稿件逐块一致；提交只记录未发现变化，不创建空修订版。'),
     );
     summary.dataset['reimportGroups'] = String(review.comparison.groups);
     summary.dataset['reimportUnresolvedGroups'] = String(review.comparison.unresolvedGroups);
