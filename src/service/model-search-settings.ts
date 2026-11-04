@@ -176,7 +176,7 @@ export function saveModelServiceConnection(host: ModelSearchSettingsHost, connec
       requireStore(
         host.authority.prepare(
             `UPDATE model_service_connections
-             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL, cached_models = '[]'
+             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL
              WHERE connection_id = ? AND credential_reference = ?`,
         ).run(connectionName, credentialOperationState, now, now, target.connectionId, current.credentialReference).changes === 1,
           'MODEL_SERVICE_CONNECTION_CONFLICT',

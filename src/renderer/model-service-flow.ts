@@ -137,7 +137,15 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     const pending = options.api.saveModelServiceCredential({ route: option.route, connectionName: name.value.trim(), secret: secret.value });
     secret.value = '';
     options.setStatus('正在保存凭据并获取模型…', 'busy');
-    try { options.render(await pending); options.setStatus('凭据已保存；可选择账号模型或手动输入模型 ID。', 'success'); }
+    try {
+      const result = await pending;
+      options.render(result);
+      const discovery = result.modelDiscovery;
+      if (discovery?.status === 'failure') options.setStatus(`凭据已保存，但无法获取模型列表：${discovery.reason}`, 'error');
+      else options.setStatus(discovery?.status === 'success'
+        ? `凭据已保存；已获取 ${discovery.modelCount} 个模型。`
+        : '凭据已保存；可选择账号模型或手动输入模型 ID。', 'success');
+    }
     catch (error) { update(); options.setStatus(options.errorMessage(error, '无法保存模型服务凭据。'), 'error'); }
   })(); });
   const actions = el('div', 'button-row');
@@ -145,7 +153,14 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   const refresh = el('button', 'secondary', '刷新模型列表'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'refresh-model-list';
   refresh.addEventListener('click', () => void (async () => {
     refresh.disabled = true;
-    try { options.render(await options.api.refreshModelServiceModels({ route: option.route })); options.setStatus('模型列表已刷新；可用模型以账号返回为准。', 'success'); }
+    try {
+      const result = await options.api.refreshModelServiceModels({ route: option.route });
+      options.render(result);
+      const discovery = result.modelDiscovery;
+      if (discovery?.status === 'failure') options.setStatus(discovery.reason, 'error');
+      else if (discovery?.status === 'success') options.setStatus(`模型列表已刷新，共 ${discovery.modelCount} 个可用模型。`, 'success');
+      else options.setStatus('无法获取模型列表。', 'error');
+    }
     catch (error) { refresh.disabled = !ready; options.setStatus(options.errorMessage(error, '无法刷新模型列表。'), 'error'); }
   })());
   const remove = el('button', 'quiet', '移除凭据'); remove.type = 'button'; remove.disabled = !ready; remove.dataset['action'] = 'remove-model-service-credential';

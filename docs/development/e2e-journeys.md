@@ -1,5 +1,7 @@
 # E2E journeys: what each admitted runner proves
 
+Issue #1304 synchronizes J-12's model-service save, refresh and restart/replacement checks with typed discovery failures. Development/CI has no production discovery runtime or catalogue stub: the credential remains ready and the existing catalogue remains available, while the banner reports discovery failure with error tone and the code appears in closed technical details. Replacement also verifies the same catalogue and zero provider transmissions; credential/reference persistence, clearing of secret inputs and secret cleanup checks remain.
+
 Issue #1310 is a synchronized delta to J-10: the completed unknown range explanation distinguishes changed text from an unsuccessful reread; the existing unknown request and no-resend assertions remain.
 
 Wave 23 S4 (#1284 / #1279) synchronizes J-01 import degradation, J-03/04/09/10/11/13/15/16 fresh-Book capability entry, J-07 direct file export and writing start, J-13 captured-procedure auto-enablement, and J-15 immediate library reference. J-12 `screen-return-origins` checks Knowledge Base, Quality and Learning and Series returning to the originating Book Review, and the three Settings children returning to Settings. Optional plan-inspection coverage remains; obsolete installation/enablement steps are removed. Exact guest heads and results belong to the slice PR.

@@ -171,7 +171,7 @@ async function dispatch(
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
   probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
-  refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<void> = async () => undefined,
+  refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<import('../shared/protocol.js').ModelDiscoveryResult> = async () => ({ status: 'failure', code: 'MODEL_DISCOVERY_UNAVAILABLE', reason: '模型列表暂不可用' }),
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -219,8 +219,7 @@ async function dispatch(
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'refreshModelServiceModels':
-      await refreshModels(request.input.route);
-      return { id: request.id, ok: true, op: request.op, result: undefined };
+      return { id: request.id, ok: true, op: request.op, result: await refreshModels(request.input.route) };
     case 'getModelServiceStoredState':
       return {
         id: request.id,
