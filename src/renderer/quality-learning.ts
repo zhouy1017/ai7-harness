@@ -210,13 +210,16 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
   const paint = (focus: string | null): void => {
     if (projection === null) return;
     root.dataset['learningBooks'] = String(projection.books.length);
-    const parts: HTMLElement[] = [el('p', 'field-note learning-basis', projection.basis)];
     const books = projection.books.filter((book) => book.materials.length > 0);
+    const basisWords = projection.basis.replace('。明确排除', '；明确排除').replace('。仅本机收集', '；仅本机收集');
+    const basis = el('p', 'field-note');
+    basis.append(el('span', 'learning-basis', books.length === 0 ? basisWords.replace(/。$/u, '') : basisWords));
     if (books.length === 0) {
-      const empty = el('p', 'field-note learning-empty', LEARNING_EMPTY);
+      const empty = el('span', 'learning-empty', LEARNING_EMPTY);
       empty.tabIndex = -1;
-      parts.push(empty);
+      basis.append('；', empty);
     }
+    const parts: HTMLElement[] = [basis];
     for (const book of books) parts.push(bookNode(book));
     if (projection.nextCursor !== null || laterPage) {
       const row = el('div', 'button-row learning-more');
@@ -293,7 +296,6 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     fact(LEARNING_CARD_TERMS.origin, learningOriginLine(material, localInstantLabel), 'origin');
     if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label}${technicalWords(` · ${material.sourceTask.taskIntentId}`)}`, 'task');
     fact(LEARNING_CARD_TERMS.rationale, material.rationale, 'rationale');
-    fact(LEARNING_CARD_TERMS.basis, projection?.basis ?? '', 'basis');
     fact(LEARNING_CARD_TERMS.influence, material.kind === 'word-tracked-edit'
       ? '尚未用于编辑记忆、审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
     fact(LEARNING_CARD_TERMS.decision, learningDecisionLine(material, localInstantLabel), 'decision');

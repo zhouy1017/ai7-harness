@@ -125,7 +125,7 @@ const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
 /** 反馈历史's words (Issue #61, S26c), and the stand-in people the Journey gives 评估旅程丙. */
 const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', laterEditors: '王六' });
-const LEARNING_BASIS = '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料。明确排除或更窄范围立即优先。仅本机收集，不发送内容，也不训练基础模型。';
+const LEARNING_BASIS = '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料；明确排除或更窄范围立即优先；仅本机收集，不发送内容，也不训练基础模型。';
 const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-11', 'browser-close-timeout');
@@ -835,7 +835,7 @@ const READ_LEARNING = `(() => {
     basis: root.querySelector('.learning-basis')?.textContent ?? null,
     books: Array.from(root.querySelectorAll('.learning-book'), (book) => ({
       bookId: book.dataset.bookId ?? null,
-      heading: book.querySelector('h3')?.textContent ?? null,
+      heading: book.querySelector('h3')?.firstChild?.textContent ?? null,
       people: book.querySelector('.learning-people')?.textContent ?? null,
       materials: Array.from(book.querySelectorAll('li.learning-material'), (item) => [
         kindOf(item), item.dataset.learningState ?? null, item.querySelector('.learning-state')?.textContent ?? null,
@@ -2277,7 +2277,7 @@ async function main() {
     const learningCard = await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-card');
     requireJourney(learningCard.card.heading === '修改建议 · 拒绝' && JSON.stringify(learningCard.card.excerptHeads) === JSON.stringify(['原文', '建议', '你的原因']) &&
       learningCard.card.excerptTail === '你的原因：证据不足' && learningCard.card.facts.rationale === '你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。' &&
-      learningCard.card.facts.basis === LEARNING_BASIS && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
+      learningCard.card.facts.basis === undefined && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
       learningCard.card.facts.task === undefined &&
       JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', false, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
       learningCard.card.recommended === 'book' && learningCard.card.seriesReason === '还没有书系：书系接通后，才能把材料纳入书系。' &&
