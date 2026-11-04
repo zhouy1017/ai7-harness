@@ -25,7 +25,6 @@ import {
   USAGE_PRICE_FIELDS,
   USAGE_STATUS_LINES,
   USAGE_UNRECORDED_NOTE,
-  usagePriceNote,
   tokenText,
   usageCostLine,
   usageGroupingLabel,
@@ -258,8 +257,9 @@ export function mountUsage(options: MountUsageOptions): void {
       const input = field(USAGE_PRICE_FIELDS.input, 'inputPerMillion', held === undefined ? '' : String(held.inputPerMillion), 'decimal', 10);
       const output = field(USAGE_PRICE_FIELDS.output, 'outputPerMillion', held === undefined ? '' : String(held.outputPerMillion), 'decimal', 10);
       const currency = field(USAGE_PRICE_FIELDS.currency, 'currency', held?.currency ?? 'CNY', 'text', 5);
-      const note = el('p', 'field-note usage-price-note', held === undefined ? USAGE_PRICE_FIELDS.empty : usagePriceNote(held.currency, held.inputPerMillion, held.outputPerMillion, held.enteredAt));
+      const note = el('span', 'usage-price-note', held === undefined ? USAGE_PRICE_FIELDS.empty : `录入于 ${held.enteredAt}`);
       note.setAttribute('role', 'status');
+      title.append(' · ', note);
       const save = el('button', 'secondary', USAGE_PRICE_FIELDS.save);
       save.type = 'submit';
       const clear = el('button', 'quiet', USAGE_PRICE_FIELDS.clear);
@@ -270,7 +270,7 @@ export function mountUsage(options: MountUsageOptions): void {
       });
       const actions = el('div', 'button-row');
       actions.append(save, clear);
-      form.append(note, actions);
+      form.append(actions);
       form.addEventListener('submit', (event) => {
         event.preventDefault();
         const candidate = parseUnitPrices({
