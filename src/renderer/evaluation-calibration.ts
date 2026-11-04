@@ -123,6 +123,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const offsetNode = el('div', 'calibration-offset');
     offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
     const offsetSummary = el('p', 'field-note');
+    if (!calibration.initialScoresConnected) offsetSummary.append(el('span', 'calibration-waiting', CALIBRATION_WAITING.replace(/。$/u, '')), '；');
     if (calibration.offset === null) {
       offsetSummary.append(el('span', 'calibration-offset-waiting', calibrationOffsetWaiting(calibration.threshold)));
       offsetNode.append(offsetSummary);
@@ -146,8 +147,6 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       el('h3', undefined, CALIBRATION_HEADING),
       progress,
       method,
-      // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
-      ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
       offsetNode,
       // Off: new versions start from the raw 初评, and the switch stays reversible (EVAL-011).
       calibrationSwitch,
