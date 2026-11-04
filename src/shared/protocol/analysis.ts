@@ -258,7 +258,7 @@ export interface AnalysisAssuranceSamplePrecisionProjection {
  * where its turns are recorded. The seed is disclosed so the sample can be redrawn from the manifest
  * and the revision's own findings and checked.
  */
-export interface AnalysisAssuranceSampleProjection {
+export interface AnalysisAssuranceSampleProjection extends SalvagedModelResult {
   readonly parseFailures?: ReadonlyArray<ModelResultParseFailure & { readonly unitOrdinal: number }>;
   state: 'closed' | 'closed-with-gaps' | 'gap' | 'not-run';
   /** The recorded seed the draw is reproducible from; `null` when no sample was drawn. */
@@ -394,7 +394,7 @@ export interface RunReportSuggestionProjection {
  * restates a finding, quotes the manuscript, or proposes an edit — the contract forbids all three.
  */
 export type RunReportIfRedoneProjection =
-  | { state: 'closed'; items: ReadonlyArray<RunReportSuggestionProjection>; reason: null }
+  | ({ state: 'closed'; items: ReadonlyArray<RunReportSuggestionProjection>; reason: null } & SalvagedModelResult)
   | { state: 'not-run' | 'policy-bounded' | 'gap'; items: readonly []; reason: string; parseFailure?: ModelResultParseFailure };
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */

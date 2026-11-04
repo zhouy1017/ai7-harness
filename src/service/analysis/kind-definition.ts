@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, canonicalJson, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, graphemeCount, canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
   BASELINE_ANALYSIS_KIND,
@@ -321,7 +321,7 @@ export interface AnalysisKindDefinition {
   /** Recover the unit identity from a message this kind built; `null` for any other message. */
   parseUnitMessageHeader(text: string): { ordinal: number; total: number; unitDigest: string } | null;
   requestDigest(unitOrdinal: number, unitDigest: string): string;
-  parseUnitResult(text: string, unit: CoverageManifestUnitProjection): UnitResultParseOutcome;
+  parseUnitResult(text: string, unit: CoverageManifestUnitProjection, blocks?: ReadonlyMap<string, Pick<ManifestBlockInput, 'text'>>): UnitResultParseOutcome;
   reduce(input: AnalysisReductionInput): AnalysisReductionResult;
   /** The kind-specific keys one persisted unit result carries, beside the shared identity and lineage. */
   unitRecord(result: unknown): Record<string, unknown>;
@@ -554,7 +554,8 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
     buildUnitMessage,
     parseUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
-    parseUnitResult: (text, unit) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds] }),
+    parseUnitResult: (text, unit, blocks) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds],
+      ...(blocks === undefined ? {} : { blockLengths: new Map([...unit.blockIds, ...unit.overlapBlockIds].map((id) => [id, graphemeCount(blocks.get(id)?.text ?? '')])) }) }),
     reduce: (input) => {
       const reduction = reduceBaselineAnalysis(
         input.manifest,

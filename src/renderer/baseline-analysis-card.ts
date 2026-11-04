@@ -346,6 +346,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         ...(report.ifRedone.state === 'closed' || report.ifRedone.parseFailure === undefined ? [] : [
           element('dt', undefined, '反思解析诊断'), element('dd', 'technical-identity', `${report.ifRedone.parseFailure.code} · ${report.ifRedone.parseFailure.detail}`),
         ]),
+        ...(report.ifRedone.state !== 'closed' ? [] : report.ifRedone.salvaged ?? []).flatMap((entry) => [
+          element('dt', undefined, '反思解析取舍'), element('dd', 'technical-identity', `${entry.section}[${entry.index}] ${entry.reason}`),
+        ]),
         element('dt', undefined, '绑定'), element('dd', 'technical-identity', `Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`),
         element('dt', undefined, '记录时刻'), element('dd', 'technical-identity', report.recordedAt),
         element('dt', undefined, '阶段时刻'), element('dd', 'technical-identity', report.stages.map((stage) => `${stage.stage} ${stage.startedAt ?? '—'} → ${stage.settledAt ?? '—'} · ${stage.wallMs ?? '—'} ms`).join('；')),
@@ -542,6 +545,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             element('dt', undefined, '解析诊断'), element('dd', 'technical-identity', `${unit.gap.parseFailure.code} · ${unit.gap.parseFailure.detail}`),
           ]),
           element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
+          ...(unit.state !== 'closed' || !unit.salvaged?.length ? [] : [
+            element('dt', undefined, '解析取舍'), element('dd', 'technical-identity',
+              `丢弃引用 ${unit.salvaged.filter((entry) => entry.reason === 'range-out-of-unit' || entry.reason === 'retrieval-reference-not-exact-fetched').length} 条 · ${unit.salvaged.map((entry) => `${entry.section}[${entry.index}] ${entry.reason}`).join('；')}`),
+          ]),
           ...(unit.state !== 'closed' ? [] : [
             element('dt', undefined, '单元内计数'),
             element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
@@ -620,6 +627,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       ]),
       ...(revision.assuranceSample.parseFailures ?? []).flatMap((failure) => [
         element('dt', undefined, `抽检单元 ${failure.unitOrdinal} 解析诊断`), element('dd', 'technical-identity', `${failure.code} · ${failure.detail}`),
+      ]),
+      ...[...(revision.crossUnitReduction.salvaged ?? []), ...(revision.assuranceSample.salvaged ?? [])].flatMap((entry) => [
+        element('dt', undefined, '解析取舍'), element('dd', 'technical-identity', `${entry.section}[${entry.index}] ${entry.reason}`),
       ]),
       element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
       element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
