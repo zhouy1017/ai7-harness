@@ -2453,7 +2453,8 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 .list-position { display: flex; align-items: center; gap: .6rem; color: var(--text-subdued); font-size: .85rem; }
 .list-position-rail { appearance: none; width: min(16rem, 40vw); height: 4px; border: 0; border-radius: 2px; background: var(--boundary); accent-color: var(--action-primary); }
 .list-position-rail::-webkit-slider-thumb { appearance: none; width: 12px; height: 18px; border: 1px solid var(--boundary-strong); border-radius: 4px; background: var(--surface); cursor: pointer; }
-.state-term { display: inline-flex; align-items: center; gap: .4em; width: fit-content; padding: .12em .55em; border: 1px solid currentColor; border-radius: 999px; font-size: .82rem; line-height: 1.5; color: var(--status-progress); background: var(--status-progress-surface); }
+:where(.state-term) { border-style: solid; }
+.state-term { display: inline-flex; align-items: center; gap: .4em; width: fit-content; padding: .12em .55em; border-width: 1px; border-color: currentColor; border-radius: 999px; font-size: .82rem; line-height: 1.5; color: var(--status-progress); background: var(--status-progress-surface); }
 .state-term::before { content: ''; display: inline-block; flex: 0 0 auto; box-sizing: border-box; width: .7em; height: .7em; border: 1.5px solid currentColor; border-radius: 50%; background: linear-gradient(90deg,currentColor 50%,transparent 50%); }
 .state-term[data-pill-tone="good"], .state-term.review-pill-good { color: var(--status-good); background: var(--status-good-surface); }
 .state-term[data-pill-tone="good"]::before, .state-term.review-pill-good::before { width: .4em; height: .7em; border: solid currentColor; border-width: 0 1.8px 1.8px 0; border-radius: 0; background: none; transform: rotate(45deg) translateY(-.08em); }
