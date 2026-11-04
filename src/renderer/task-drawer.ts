@@ -860,7 +860,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const lines = el('ul', 'task-plan-list task-plan-unconfirmed-lines');
       lines.id = listId;
       for (const range of listed.ranges) {
-        const line = el('li', undefined, unconfirmedLine({ unitOrdinal: range.unitOrdinal, earlierText: range.earlierText, category: range.category }));
+        const line = el('li', undefined, unconfirmedLine({ unitOrdinal: range.unitOrdinal, earlierText: range.earlierText, rereadFailed: range.rereadFailed === true, category: range.category }));
         line.dataset['unconfirmedUnit'] = String(range.unitOrdinal);
         lines.append(line);
       }

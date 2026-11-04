@@ -2,6 +2,28 @@
 
 Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), adopted as the execution standard for every editor-facing surface by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) on 2026-09-09.** 本文是实现编辑面时的执行标准：它规定每一屏的最终形态、状态、措辞、需要的数据与对应的后端能力。它不是实现证据；实现状态只记在根 `PROGRESS.md` 与 [E2E journeys](../development/e2e-journeys.md)。交付顺序只记在 [development plan](../development/development-plan.md)。
 
+## 2026-11-04 Owner 决定
+
+本节记录 [#1314](https://github.com/zhouy1017/ai7-harness/issues/1314) 对 [主 Issue #1313](https://github.com/zhouy1017/ai7-harness/issues/1313) 的决定；实施 PR 的 Change closure 应回链 #1314。对应实施切片如下：
+
+1. 非 `dev` / `debug` 模式不渲染任何技术层，包括「查看技术详情」、版本号、策略集、渠道 / 模型 ID、分支名、字节数和百分比小数；「设置 › 帮助 › 开发者模式」是唯一开关，生产默认关、开发默认开。由 [#1315](https://github.com/zhouy1017/ai7-harness/issues/1315) 实施。
+2. 新建审阅、新建评估等发起面使用 760px、吸顶 bar、吸底 foot 的非模态 sheet，页面仍可见。由 [#1318](https://github.com/zhouy1017/ai7-harness/issues/1318) 提供 sheet 组件，[#1320](https://github.com/zhouy1017/ai7-harness/issues/1320) 落实审阅发起面。
+3. 勾选项采用「标题 + 一句」；数据表改为几句话或状态药丸。由 [#1316](https://github.com/zhouy1017/ai7-harness/issues/1316) 和 [#1323](https://github.com/zhouy1017/ai7-harness/issues/1323) 实施。
+4. 侧栏使用成套真正图标，先接入 2026-09 原型的 SVG symbol 集，再按相同 ID 替换风格稿。由 [#1318](https://github.com/zhouy1017/ai7-harness/issues/1318) 和 [#1325](https://github.com/zhouy1017/ai7-harness/issues/1325) 实施。
+5. 打包思源黑体与思源宋体（OFL，约 20–30 MB）。由 [#1317](https://github.com/zhouy1017/ai7-harness/issues/1317) 实施。
+6. 删除页底常驻「打开稿件 / 工作概览」按钮条与「切换书稿」按钮，切换并入侧栏书目。由 [#1319](https://github.com/zhouy1017/ai7-harness/issues/1319) 和 [#1325](https://github.com/zhouy1017/ai7-harness/issues/1325) 实施。
+7. 稿件顶栏只留修订版、章节位置、撤销 / 重做；保留头部「已写入修订日志 ▾」菜单。由 [#1322](https://github.com/zhouy1017/ai7-harness/issues/1322) 实施。
+8. 右侧抽屉继续合并承担计划、结果、对话，但大幅减话。由 [#1321](https://github.com/zhouy1017/ai7-harness/issues/1321) 实施。
+9. 修改粒度位于组件级与结构级之间；每屏形态框架不重定，按原型对齐落地。由 A / B / C 组实施切片（[#1315](https://github.com/zhouy1017/ai7-harness/issues/1315)–[#1327](https://github.com/zhouy1017/ai7-harness/issues/1327)）共同落实。
+10. 开始执行前增加「任务总览」页面（跨书队列、位次与预计、详情抽屉、连续发起、通知与历史）。由 [#1328](https://github.com/zhouy1017/ai7-harness/issues/1328) 实施。
+11. 去仪式操作采用默认值并记住上次、主按钮即开始、确认条只用于不可逆、无刷新按钮、卡片直达和 Ctrl+K 命令面板；处置类选项仍不预选。由 [#1330](https://github.com/zhouy1017/ai7-harness/issues/1330) 实施。
+12. 详细配置页按收纳表进入开发者模式；普通模式只保留模型服务、外观、通知、数据与存储、帮助，以及知识库的审阅规范文件 / 范例 / 资料库和质量与学习的反馈历史。由 [#1331](https://github.com/zhouy1017/ai7-harness/issues/1331) 实施。
+13. 按照建议规划的 T1 rev 2、Q1、S1、M1 形态确认并转为 ready-for-agent；三车道顺序以 [#1313 的派发规划](https://github.com/zhouy1017/ai7-harness/issues/1313) 为准，由 [#1328](https://github.com/zhouy1017/ai7-harness/issues/1328)、[#1330](https://github.com/zhouy1017/ai7-harness/issues/1330)、[#1331](https://github.com/zhouy1017/ai7-harness/issues/1331) 和 [#1329](https://github.com/zhouy1017/ai7-harness/issues/1329) 承接。
+
+### LAYER-001～008 的收紧读法
+
+决定 1 收紧本节既有的「决定层 / 技术身份层」分离：生产渠道只渲染编辑可理解的决定层，不渲染技术身份层，也不以「查看技术详情」作为生产模式的替代入口。渠道 / 模型 ID、策略集、版本与分支名、记录标识、摘要、字节数、百分比小数、精确时间和来源标识等，只有在开发者模式中才可按 LAYER-001～008 的原有规则按需展开；开发者模式默认开，生产模式默认关。因而 LAYER-001～004、LAYER-006～008 的「技术层可达」均解释为开发者模式内可达，LAYER-005 的主操作可达性不变；生产模式的 Journey 只断言决定层，开发者模式的 Journey 才同时断言技术身份层的完整值。
+
 ## Wave 23 direct workflows — Owner #1279 / #1284
 
 The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft promotion and mandatory plan-review passages in §§1, 6, 7, 8 and 9. Every Book immediately has analysis, review, evaluation, writing and Agent capabilities. Starting a task prepares and authorizes the exact plan in one action; plan details remain optional. A production document can be the target of a same-type writing task, pinned to its saved manuscript, branch and version; edits require repinning before execution.
@@ -26,7 +48,7 @@ The right dialogue drawer has a persistent follow-up composer for the pinned sel
 ### 0.2 三条总原则（来自 Owner，2026-09-08 / 09）
 
 1. **稿件优先**。「对于中文编辑而言，点开一个稿件，最优先需要被看到的就是上次以工作的稿件本身」——打开有稿件的图书进入稿件上次位置；工作概览是目的地，不是入口（RET-002、IA-012）。
-2. **编辑语言，决定层与技术层分开**。「我现在看到的 UI 依旧不是一个中文编辑应该看到的，它更像程序员、工程师或者运维专家的操作面」——每个面先说编辑要决定的事，精确身份收进一处「查看技术详情」（LAYER-001 ~ 008）。任何处置类选项不预选。
+2. **编辑语言，决定层与技术层分开**。「我现在看到的 UI 依旧不是一个中文编辑应该看到的，它更像程序员、工程师或者运维专家的操作面」——生产渠道只说编辑要决定的事；技术身份层仅在开发者模式中按 LAYER-001 ~ 008 收进「查看技术详情」。任何处置类选项不预选。
 3. **少打扰**。一次性提示用悬浮窗自动消失；不常用的动作收进菜单；任务入口按需呼出；精简模式优先；能自动的（范例归入、索引、备份）不问。
 
 ### 0.3 外壳与视觉
@@ -233,6 +255,8 @@ Wave 23 #1286：主操作为「发送问题」，一次点击完成准备与发�
 
 
 ### 8.6 设置
+
+网络代理（#1308）：占位符为 `http://127.0.0.1:端口`，说明本机代理通常使用 HTTP，只有代理本身提供 TLS 入口才使用 HTTPS。保存后向当前所选渠道的模型列表主机探测代理隧道，不携带凭据或稿件；显示「代理可用」「代理不接受 HTTPS 连接，请改用 http://host:port」「代理不可达：端口没有在监听」或「代理要求认证，当前版本不支持」。其他失败沿用「代理不可达：请检查网络代理设置。」；失败不影响保存，上次结论与时间在本次服务会话内保留，关闭代理时清除。
 
 分组 `服务（模型服务 / 用量）· 编辑工作（评估校准与预测）· 本机（数据与存储 / 外观 / 键盘与无障碍）`。
 

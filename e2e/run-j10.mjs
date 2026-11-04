@@ -1739,6 +1739,8 @@ async function main() {
       completedUnknown.run.adaptations.length === 0,
     'unknown-unit-gap-with-revision-and-outcome');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed h4')?.textContent==='该单元结果未知' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')===null`, 'unknown-unit-ui', 30_000);
+    // #1310: the range explanation separates changed text from a failed reread.
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent.includes('后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。')`, 'unknown-unit-explanation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unknown-unit-view');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed li')?.textContent==='第 4 个阅读范围 · 请求已发出 · 回答没有完整传回'`, 'unknown-unit-listed', 30_000);
     const completedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
