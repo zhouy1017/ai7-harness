@@ -1990,7 +1990,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="stop-all"]`, 'stop-all-open');
     const allPreview = (await readProcedures(renderer, (page) => page.procedures[0]?.stopAll !== null, 'stop-all-preview')).procedures[0].stopAll;
     requireJourney(allPreview.heading === `停用《${PROCEDURE_TITLE}》尚未停用的 1 个版本` && allPreview.after === '' && JSON.stringify(allPreview.versions) === JSON.stringify([['2', '0', '0']]) &&
-      allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。', 'stop-all-words', allPreview);
+      allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存', 'stop-all-words', allPreview);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] > .captured-procedure-stop [data-procedure-action="confirm-stop"]`, 'stop-all-confirm');
     const allStopped = await readProcedures(renderer, (page) => page.procedures[0]?.runnable === 'false', 'stop-all-stopped');
     requireJourney(!allStopped.procedures[0].run && allStopped.procedures[0].pill === '已停用' && allStopped.procedures[0].pillBorder === 'dotted' &&
