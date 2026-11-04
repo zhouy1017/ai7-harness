@@ -4404,10 +4404,14 @@ function renderLanding(
   if (books.items.length > 0 || filter !== null) {
     const library = element('section', 'recent-work');
     library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
-    library.append(element('p', 'section-label', '图书'), element('h3', undefined, SHELL_LABELS.allBooks));
+    library.append(element('h3', undefined, SHELL_LABELS.allBooks));
     library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
-    if (filter !== null) library.append(element('p', 'field-note book-filter-line', bookFilterLine(filter)));
-    if (books.items.length === 0) library.append(element('p', 'field-note book-filter-none', BOOK_FILTER_NONE));
+    if (filter !== null) {
+      const result = element('p', 'field-note');
+      result.append(element('span', 'book-filter-line', bookFilterLine(filter)));
+      if (books.items.length === 0) result.append('；', element('span', 'book-filter-none', BOOK_FILTER_NONE));
+      library.append(result);
+    }
     const list = element('div', 'recent-work-list');
     for (const summary of books.items) {
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
