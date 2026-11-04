@@ -1,3 +1,5 @@
+import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { metadataWords } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
@@ -252,33 +254,33 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const versionOf = (windowNow: ManuscriptWindowProjection): string | undefined =>
     productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
   const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
-    if (!isDocument) return `当前修订版 ${windowNow.revisionLabel}`;
+    if (!isDocument) return metadataWords(`当前修订版 ${windowNow.revisionLabel}`);
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
   };
   const positionWords = (windowNow: ManuscriptWindowProjection): string => {
     const block = windowNow.blocks.find((candidate) => candidate.blockId === windowNow.focusBlockId) ?? windowNow.blocks[0];
     if (block === undefined) return windowNow.position.label;
-    return `${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${(windowNow.position.proportion * 100).toFixed(3)}%`;
+    return metadataWords(`${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${(windowNow.position.proportion * 100).toFixed(3)}%`);
   };
   title.append(
-    element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle} · 主分支`),
+    element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : metadataWords(`${bookTitle} · 主分支`)),
     element('h2', undefined, productionDocument !== undefined
       ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}`
-      : `稿件修订版 ${initialWindow.revisionLabel}`),
+      : metadataWords(`稿件修订版 ${initialWindow.revisionLabel}`)),
   );
   const meta = element('div', 'editor-meta');
   const position = element('span', undefined, positionWords(initialWindow));
   position.setAttribute('title', initialWindow.position.label);
   const revision = element('span', undefined, revisionWords(initialWindow));
-  const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
+  const journal = element('span', undefined, metadataWords(`修订日志序号 ${initialWindow.journalSequence}`));
   journal.dataset['editorTechnical'] = 'true';
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
   const journalDetails = element('details', 'editor-technical-details');
   journalDetails.dataset['editorTechnicalDisclosure'] = 'journal';
   journalDetails.append(element('summary', undefined, '查看技术详情'), journal);
-  meta.append(position, revision, journalDetails, recoveredState);
+  meta.append(position, revision, technicalDisclosure(journalDetails), recoveredState);
   // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;
@@ -645,7 +647,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     element('dd', undefined, initialWindow.revisionLabel),
   );
   identities.append(identityGrid);
-  content.append(toolbar, workspace, identities);
+  content.append(toolbar, workspace, technicalDisclosure(identities));
   if (options.reimportNotice !== undefined) toolbar.after(options.reimportNotice);
   const toggleSaveMenu = (): void => {
     if (saveMenu !== undefined) (saveMenu.element as HTMLDetailsElement).open = !(saveMenu.element as HTMLDetailsElement).open;
@@ -842,10 +844,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     position.setAttribute('title', currentWindow.position.label);
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
-    journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
+    journal.textContent = metadataWords(`修订日志序号 ${currentWindow.journalSequence}`);
     recoveredState.hidden = currentWindow.recoveredStateReview === null;
     positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
-    positionRail.setAttribute('aria-valuetext', `全稿 ${(currentWindow.position.proportion * 100).toFixed(3)}%`);
+    positionRail.setAttribute('aria-valuetext', metadataWords(`全稿 ${(currentWindow.position.proportion * 100).toFixed(3)}%`));
     manuscriptRail?.setPosition(currentWindow.position.proportion);
     previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
     nextWindow.disabled = authoritativeMutationBusy() || currentWindow.nextCursor === null;
@@ -1687,7 +1689,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     replacementReview.replaceChildren(
       element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
       element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
-      element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`),
+      element('p', 'field-note', metadataWords(`范围：${preview.scopeLabel} · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)),
       element('p', 'field-note', `匹配规则：${preview.matchingRule}`),
       element('p', 'field-note', `纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`),
       element('p', 'field-note', '精确纳入清单：本次有序搜索结果中，除下列匹配标识外的全部匹配。'),
@@ -1958,7 +1960,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       editingInterrupted = state.interrupted;
       updatePersistenceMenu();
       save.disabled = authoritativeMutationBusy() || !state.dirty || state.saving || state.interrupted;
-      journal.textContent = `修订日志序号 ${state.journalSequence}`;
+      journal.textContent = metadataWords(`修订日志序号 ${state.journalSequence}`);
       // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
       protectionSurface?.update(state.protection);
       setCloseRisk(closeRisk);

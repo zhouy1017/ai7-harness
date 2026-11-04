@@ -1928,7 +1928,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const before = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
       expect(before.available).toBe(true);
       expect(before.scopes).toMatchObject({ whole: { available: true }, chapters: { available: false, unavailableReason: FACTUAL_CHAPTERS_REASON } });
-      expect(before.basisStatement).toContain('使用用户所选的联网检索后端');
+      expect(before.basis.searchEngine).toBe(true);
 
       const prepared = prepare(session, book, [FACTUAL], WHOLE);
       expect(prepared.categories[0]!.modeLabel).toBe('全书事实核查');

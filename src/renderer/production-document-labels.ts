@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   ProductionDocumentDeliveryProjection,
   ProductionDocumentPhaseAction,
@@ -101,7 +102,7 @@ export const DELIVERY_BLOCKERS = {
 } as const;
 /** The first choice while the text moved past the latest version (DELIV-003): `现在的文字（交付时先保存为版本 3）`. */
 export function documentCurrentTextChoice(nextOrdinal: number): string {
-  return `现在的文字（交付时先保存为版本 ${nextOrdinal}）`;
+  return metadataWords(`现在的文字（交付时先保存为版本 ${nextOrdinal}）`);
 }
 /** What a Delivery Record's export came to, when none has been made yet. */
 export const DELIVERY_NO_EXPORT = '暂无导出记录';

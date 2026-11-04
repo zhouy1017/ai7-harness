@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   DatabaseImportBookProjection,
   DatabaseImportPreviewProjection,
@@ -93,7 +94,7 @@ export function databaseImportVersionLine(preview: Pick<DatabaseImportPreviewPro
     'older-data-version': `比本机的数据版本 ${preview.localDataVersion} 旧，暂不能导入`,
     'newer-schema': '由更新的 AI7 做成，请先更新 AI7',
   }[preview.compatibility];
-  return `数据版本 ${preview.dataVersion} · ${fit} · 软件 ${preview.softwareVersion}`;
+  return metadataWords(`数据版本 ${preview.dataVersion} · ${fit} · 软件 ${preview.softwareVersion}`);
 }
 
 /** The previewed file, as 导入数据库 states it before anything is chosen: file, origin, versions, contents, integrity. */

@@ -1,3 +1,5 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountHelp, type ThirdPartyLicense } from '../../src/renderer/help.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
@@ -105,4 +107,10 @@ describe('the mounted 帮助 screen', () => {
     buttons.find((node) => node.textContent === '返回')!.click();
     expect(back).toHaveBeenCalledTimes(1);
   });
+});
+
+it('scans Help in ordinary mode (#1315)', async () => {
+  setTechnicalLayerVisible(false);
+  try { const view = mounted(); await Promise.resolve(); expectNoTechnicalText(view.root); }
+  finally { setTechnicalLayerVisible(true); }
 });

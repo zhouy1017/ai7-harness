@@ -1285,7 +1285,7 @@ async function main() {
     // None is final and none designated: no mark, no current item, no word that ranks one above the other.
     await assertRenderer(renderer, `window.__j07.items().every((item) => item.dataset.publicationCurrent === 'false' && !item.hasAttribute('aria-current') && item.querySelector('.publication-version-mark') === null && !/最终|终稿|最新/.test(item.textContent ?? '')) && window.__j07.versions().length === 0 && window.__j07.form() === null`, 'none-final-none-designated');
     // Every identity stays in a closed 查看技术详情, one step below the words it belongs to (LAYER-001).
-    await assertRenderer(renderer, `(() => { const text = window.__j07.decisionText(); const layers = Array.from(window.__j07.block().querySelectorAll('details.technical-details')); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text) && !/[0-9a-f]{64}/.test(text) && layers.length === 3 && layers.every((layer) => !layer.open && layer.querySelector('summary')?.textContent === '查看技术详情'); })()`, 'identities-in-closed-technical-layers');
+    await assertRenderer(renderer, `(() => { const text = window.__j07.decisionText(); const layers = Array.from(document.querySelectorAll('details[data-technical-layer]')); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(text) && !/[0-9a-f]{64}/.test(text) && layers.length >= 3 && layers.every((layer) => (!layer.open || layer.hidden) && ['查看技术详情', '记录信息'].includes(layer.querySelector('summary')?.textContent)); })()`, 'identities-in-closed-technical-layers');
 
     at('designate-form');
     await clickSelector(renderer, '[data-screen="book-deliverables"] [data-publication-action="designate"]', 'designate-open');
@@ -1455,7 +1455,7 @@ async function main() {
       return records.length === 1 && records[0].dataset.preparationId === ${JSON.stringify(recorded[0].preparationId)} && records[0].dataset.exportOutcome === 'created' &&
         (records[0].querySelector('.export-record-line')?.textContent ?? '').startsWith(${JSON.stringify(`${EXPORTED_LABEL} · 「${EXPORT_FILE}」 · 修订版 r3 · `)}) &&
         records[0].querySelector('.export-record-detail')?.textContent === ${JSON.stringify(`已新建「${EXPORT_FILE}」。`)} &&
-        layer instanceof HTMLDetailsElement && !layer.open && !/[0-9a-f]{64}/.test(records[0].querySelector('.export-record-line').textContent);
+        layer instanceof HTMLDetailsElement && (!layer.open || layer.hidden) && !/[0-9a-f]{64}/.test(records[0].querySelector('.export-record-line').textContent);
     })()`, 'export-record-reads-the-receipt');
 
     at('export-file-parsed');

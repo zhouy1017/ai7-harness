@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   ExportFidelityRowProjection,
   ExportFidelityStatus,
@@ -55,13 +56,13 @@ export function exportCardHeading(target: ManuscriptExportTargetProjection | nul
   if (target.report !== null) return `导出 · ${reportExportLabel(target.report.runLabel, target.report.version)}`;
   if (target.document !== null) return `导出 · ${target.document.typeLabel} · ${target.document.versionLabel}`;
   return target.kind === 'current'
-    ? `导出 · 当前修订版 ${target.revisionLabel}`
-    : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
+    ? metadataWords(`导出 · 当前修订版 ${target.revisionLabel}`)
+    : metadataWords(`导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`);
 }
 
 /** V2-UX-TASK-040's low ceremony: unsaved edits became a revision for the export, and nothing more. */
 export function exportSavedRevisionLine(revisionLabel: string): string {
-  return `未保存的修改已为导出保存为修订版 ${revisionLabel}；这不是里程碑版本。`;
+  return metadataWords(`未保存的修改已为导出保存为修订版 ${revisionLabel}；这不是里程碑版本。`);
 }
 
 /** V2-UX-EXP-015, EXP-017: the export ends at the chosen local file. */
@@ -176,7 +177,7 @@ export function exportVersionText(target: ManuscriptExportTargetProjection): str
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   // A Production Document's version by its type and 版本 N (Issue #415, S66b), never by the revision behind it.
   if (target.document !== null) return `${target.document.typeLabel} · ${target.document.versionLabel}`;
-  return target.kind === 'current' ? `修订版 ${target.revisionLabel}` : `里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
+  return target.kind === 'current' ? metadataWords(`修订版 ${target.revisionLabel}`) : metadataWords(`里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`);
 }
 
 // ---- the records on 交付物 ------------------------------------------------------------------------------

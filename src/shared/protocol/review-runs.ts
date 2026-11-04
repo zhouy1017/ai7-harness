@@ -1,4 +1,5 @@
 import type { SalvagedModelResult } from './analysis.js';
+import type { ReviewCategoryBasis } from '../review-basis.js';
 import type {
   ReviewExcludedFindingProjection,
   ReviewContractRejectionReason,
@@ -495,7 +496,7 @@ export interface ReviewWorkspaceCategoryProjection {
   searchEngine: boolean;
   /** Whether the category reads without a model and sends nothing: the leads read the baseline analysis. */
   modelFree: boolean;
-  basisStatement: string;
+  basis: ReviewCategoryBasis;
   guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string; clauseCount: number }>;
   procedure: { title: string; version: string };
   available: boolean;
@@ -589,7 +590,7 @@ export interface ReviewRunCategoryProjection {
   output: ReviewCategoryOutputKind;
   riskPointsOnly: boolean;
   batchApply: boolean;
-  basisStatement: string;
+  basis: ReviewCategoryBasis;
   state: ReviewRunCategoryState;
   stateLabel: string;
   detail: string | null;

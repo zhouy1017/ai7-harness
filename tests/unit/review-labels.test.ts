@@ -86,7 +86,7 @@ const third: ReviewChapterOptionProjection = { blockId: 'blk_c', title: '第三�
 function category(overrides: Partial<ReviewRunCategoryProjection>): ReviewRunCategoryProjection {
   return {
     categoryId: 'typos-and-usage', label: '错别字与规范用语', position: 1, output: 'change-suggestion', riskPointsOnly: false, batchApply: true,
-    basisStatement: '依据：…', state: 'waiting', stateLabel: '等待审阅', detail: null, taskIntentId: 'task', planEnvelopeDigest: 'a'.repeat(64),
+    basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } }, state: 'waiting', stateLabel: '等待审阅', detail: null, taskIntentId: 'task', planEnvelopeDigest: 'a'.repeat(64),
     modeLabel: '全书审阅', plan: null, progress: null, findingsCount: 0, excludedCount: 0, ...overrides,
   };
 }

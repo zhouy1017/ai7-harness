@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   BaselineAnalysisUpdateRequest,
   CustomAnalysisDimensionProjection,
@@ -372,7 +373,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       card.append(options.technicalDetails('custom-dimension-facts',
         el('dt', undefined, '维度'), el('dd', 'technical-identity', `${dimension.dimensionId} · ${dimension.kind}`),
         ...dimension.versions.flatMap((version) => [
-          el('dt', undefined, `第 ${version.version} 版`),
+          el('dt', undefined, metadataWords(`第 ${version.version} 版`)),
           el('dd', 'technical-identity', `${version.versionId} · ${version.documentDigest} · ${options.localInstantLabel(version.createdAt)}`),
         ])));
       section.append(card);

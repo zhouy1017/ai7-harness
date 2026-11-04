@@ -1,3 +1,4 @@
+import { technicalReviewBasis, type ReviewCategoryBasis } from '../../shared/review-basis.js';
 import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import type { ReviewCategoryOutputKind, ReviewBaselineSource } from '../../shared/protocol.js';
 import type { ReviewCategoryContractInput } from './review-category-contract.js';
@@ -345,32 +346,18 @@ export function houseGuidelineDocuments(entry: ReviewCategoryConfigurationEntry)
  * The category's basis in one line, stated once on the sheet and snapshotted into the Review Run
  * (REV-010, REV-012). This states the capability; the producing Run Report supplies the observed research status (#744).
  */
-export function reviewCategoryBasisStatement(entry: ReviewCategoryConfigurationEntry): string {
-  const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
-  if (entry.executor === 'local-text-check') return `依据：GB/T 15834-2011、GB/T 15835-2011 的有限条款识别或编辑明确选择的数字约定 · ${procedure} · 本机确定性检查，不调用模型 · 不表示整部标准合规`;
-  if (entry.deliverables !== undefined) {
-    const named = entry.deliverables.participants.map((document) => `${document.typeLabel}《${document.title}》${document.versionLabel}（文档 ${document.documentId} · 修订 ${document.revisionId}）`
-      + (document.laterSaves === 0 ? '' : `；定稿后另有 ${document.laterSaves} 次保存，未参与`)
-      + (document.omittedParagraphs === 0 && !document.paragraphs.some((paragraph) => paragraph.truncated) ? '' : '；仅比较标明的有界片段'));
-    return `依据：所选稿件与${named.length === 0 ? '这本书的编辑交付物' : named.join('、')}`
-      + entry.deliverables.leftOut.map((document) => `；未参与《${document.title}》：${document.reason}`).join('') + ` · ${procedure} · 交付物只读 · 不使用搜索引擎`;
-  }
-  if (entry.executor === 'baseline-leads') return `依据：这本书最新的基线分析结果 · ${procedure} · 不调用模型，不使用搜索引擎`;
-  if (entry.executor === 'unavailable' || entry.executor === 'series-knowledge') {
-    const source = entry.categoryId === 'series-consistency' ? '依据：书系知识' : '依据：这本书的编辑交付物';
-    return `${source} · ${procedure}`;
-  }
-  if (entry.seriesKnowledge !== undefined) {
-    // REV-013: the basis names the exact Series Knowledge revisions used, each Series with the items it gave.
-    const bySeries = new Map<string, string[]>();
-    for (const document of entry.guidelineDocuments) {
-      bySeries.set(document.issuer, [...(bySeries.get(document.issuer) ?? []), `${document.title}第 ${document.version} 版`]);
-    }
-    const knowledge = Array.from(bySeries, ([series, items]) => `${series}的书系知识：${items.join('、')}`).join('；');
-    return `依据：${knowledge} · ${procedure} · 不使用搜索引擎`;
-  }
-  const documents = entry.guidelineDocuments.map((document) => `${document.issuer} · ${document.title}（第 ${document.version} 版）`).join('、');
-  const search = entry.searchEngine ? '使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准' : '不使用搜索引擎 · 未联网核查';
-  const series = entry.seriesScopes?.map((scope) => `允许参考 · 书系《${scope.title}》的知识条目`).join('；');
-  return `依据：${documents} · ${procedure} · ${search}${series === undefined ? '' : `；${series}`}`;
+export function reviewCategoryBasis(entry: ReviewCategoryConfigurationEntry): ReviewCategoryBasis {
+  return {
+    categoryId: entry.categoryId, executor: entry.executor, searchEngine: entry.searchEngine,
+    guidelineDocuments: entry.guidelineDocuments.map(({ documentId, title, issuer, version }) => ({ documentId, title, issuer, version })),
+    procedure: { title: entry.procedure.title, version: entry.procedure.version },
+    ...(entry.seriesKnowledge === undefined ? {} : { seriesKnowledge: true }),
+    ...(entry.seriesScopes === undefined ? {} : { seriesScopes: entry.seriesScopes.map(({ title }) => ({ title })) }),
+    ...(entry.deliverables === undefined ? {} : { deliverables: entry.deliverables }),
+  };
+}
+
+/** Preserve the text and bytes of immutable historical run/report records. */
+export function reviewCategoryBasisRecordText(entry: ReviewCategoryConfigurationEntry): string {
+  return technicalReviewBasis(reviewCategoryBasis(entry));
 }

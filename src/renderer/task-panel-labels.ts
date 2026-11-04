@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   AnalysisGapProjection,
   BaselineAnalysisResultSetRevisionProjection,
@@ -216,7 +217,7 @@ export function taskResultTaskLine(entry: BookTaskItemProjection): string {
 
 /** An analysis read the whole manuscript as it stood at the revision it pins. */
 export function analysisResultReadLine(revision: { units: ReadonlyArray<{ unitOrdinal: number }>; manuscriptPin: BaselineAnalysisResultSetRevisionProjection['manuscriptPin']; unitPage?: { total: number } }): string {
-  return `全书 ${revision.unitPage?.total ?? revision.units.length} 个阅读范围 · 稿件修订版 ${revision.manuscriptPin.revisionLabel}`;
+  return metadataWords(`全书 ${revision.unitPage?.total ?? revision.units.length} 个阅读范围 · 稿件修订版 ${revision.manuscriptPin.revisionLabel}`);
 }
 export const ANALYSIS_RESULT_NOT_DONE = '没有修改稿件：分析只读稿件。';
 
@@ -310,7 +311,7 @@ export function taskComposerBookLine(bookTitle: string): string {
 }
 /** The branch and revision the composer was opened on (TASK-002); `待保存修订版` while edits are newer than it. */
 export function taskComposerRevisionLine(revisionLabel: string, journalSequence: number, pending: boolean): string {
-  return `修订版 ${revisionLabel} · 修订日志序号 ${journalSequence}${pending ? ' · 待保存修订版' : ''}`;
+  return metadataWords(`修订版 ${revisionLabel} · 修订日志序号 ${journalSequence}${pending ? ' · 待保存修订版' : ''}`);
 }
 export const TASK_COMPOSER_NO_RANGES = '没有带所选文字。';
 /** Words pinned while the journal holds edits no revision holds yet (TASK-002, 031). */
@@ -318,7 +319,7 @@ export const TASK_COMPOSER_PENDING_LABEL = '待保存修订版';
 /** Where a range lies: one block, or a span's contiguous blocks (Issue #1176), counted without the breaks between them. */
 export function taskComposerRangeLine(position: number | null, graphemes: number, revisionLabel: string, paragraphs = 1): string {
   const place = position === null ? '段落已不在当前稿件中' : paragraphs > 1 ? `第 ${position}–${position + paragraphs - 1} 段` : `第 ${position} 段`;
-  return `${place} · ${graphemes - (paragraphs - 1)} 字 · 修订版 ${revisionLabel}`;
+  return metadataWords(`${place} · ${graphemes - (paragraphs - 1)} 字 · 修订版 ${revisionLabel}`);
 }
 export const TASK_COMPOSER_RANGE_REMOVE = '移除';
 /** 再选一段加入 lives here, never in the selection menu (TASK-046). */
@@ -343,7 +344,7 @@ export const TASK_COMPOSER_ACTIONS = {
 /** What 准备任务 does (TASK-004): a durable draft, and nothing else. */
 export const TASK_COMPOSER_NOTE = '准备任务只把这些存为任务草稿：不调用模型、不发送任何内容，也不会开始任务；准备计划后它才成为任务，由你开始。';
 export function taskComposerDraftHeading(ordinal: number): string {
-  return `任务意图草稿 · 第 ${ordinal} 版`;
+  return metadataWords(`任务意图草稿 · 第 ${ordinal} 版`);
 }
 export const TASK_COMPOSER_UNSAVED = '有未保存的修改。';
 export const TASK_COMPOSER_PROMOTE_SAVE_FIRST = '先保存修改，再准备计划。';

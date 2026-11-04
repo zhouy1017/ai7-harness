@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type { MaintenanceCaseLinkProjection, MaintenanceCaseRevisionProjection, MaintenanceCaseSummaryProjection } from '../shared/protocol.js';
 import { MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
 
@@ -30,7 +31,7 @@ export type MaintenanceAction = keyof typeof MAINTENANCE_ACTION_LABELS;
 
 /** `记录维护事项…` names the designation it records against, since several stand side by side. */
 export function maintenanceRecordAccessibleName(ordinal: number): string {
-  return `为第 ${ordinal} 次设为发稿版本记录维护事项…`;
+  return metadataWords(`为第 ${ordinal} 次设为发稿版本记录维护事项…`);
 }
 
 export const MAINTENANCE_CLASSIFICATION_LEGEND = '维护类型';
@@ -101,11 +102,11 @@ export function maintenanceEvidenceLine(evidence: string): string {
 export function maintenanceLinkLine(link: MaintenanceCaseLinkProjection): string {
   if (link.kind === 'proposal') return `关联：${link.label} · ${link.stateLabel}`;
   if (link.kind === 'publication-version') return `关联发稿版本：${link.label}`;
-  return `勘误第 ${link.version} 版`;
+  return metadataWords(`勘误第 ${link.version} 版`);
 }
 
 export function maintenanceErrataHeading(version: number): string {
-  return `勘误 · 第 ${version} 版`;
+  return metadataWords(`勘误 · 第 ${version} 版`);
 }
 
 export const MAINTENANCE_NO_PROPOSALS = '这个发稿版本之后，稿件上还没有修改建议：先在稿件中提出修改建议，再回到这里关联。';

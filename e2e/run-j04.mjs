@@ -483,7 +483,7 @@ async function readDrawer(renderer) {
   return renderer.evaluate(`(() => {
     const drawer=document.querySelector('#task-drawer');
     if(!(drawer instanceof HTMLElement))return null;
-    const pairs=(selector,key)=>Object.fromEntries(Array.from(drawer.querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
+    const pairs=(selector,key)=>Object.fromEntries(Array.from((selector.includes('technical') ? document : drawer).querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
     const texts=(selector)=>Array.from(drawer.querySelectorAll(selector)).map((node)=>node.textContent);
     const pill=drawer.querySelector('.task-drawer-pill');
     const drift=drawer.querySelector('[data-task-plan-drift]');
@@ -2184,7 +2184,7 @@ async function main() {
       const firstExact=first.querySelector('details.technical-details');
       if(!(firstExact instanceof HTMLDetailsElement)) return false;
       return !section.querySelector('.field-note.technical-identity') &&
-        section.querySelectorAll(':scope > details.technical-details').length===1 && !setExact.open &&
+        section.querySelectorAll(':scope > details.technical-details').length===1 && (!setExact.open || setExact.hidden) &&
         setExact.textContent.includes(${JSON.stringify(revision.resultSetId)}) && setExact.textContent.includes('baseline-manuscript-analysis') &&
         Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='共 4 份分析 · 最新的是第 4 份') &&
         // Synchronized delta (#406): an entry's two readings speak of 份 and 阅读范围; Revision ordinals,

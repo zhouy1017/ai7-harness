@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import { actualsLine } from './evaluation-calibration-labels.js';
 import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -124,17 +125,17 @@ export function publicationDesignateReason(blockers: ReadonlyArray<string>): str
 
 /** A milestone as the form offers it: its purpose, its exact version and when it was saved. */
 export function publicationMilestoneOptionLine(item: Pick<MilestoneListItemProjection, 'purposeLabel' | 'revisionLabel'>, savedAt: string): string {
-  return `用途：${item.purposeLabel} · 修订版 ${item.revisionLabel} · ${savedAt} 保存`;
+  return metadataWords(`用途：${item.purposeLabel} · 修订版 ${item.revisionLabel} · ${savedAt} 保存`);
 }
 
 /** 里程碑版本 in the summary: the exact label and version, and when it was saved. */
 export function publicationSummaryMilestone(item: Pick<MilestoneListItemProjection, 'label' | 'revisionLabel'>, savedAt: string): string {
-  return `「${item.label}」 · ${item.revisionLabel} · ${savedAt} 保存`;
+  return metadataWords(`「${item.label}」 · ${item.revisionLabel} · ${savedAt} 保存`);
 }
 
 /** 稿件 in the summary: the Deliverable is the Book's primary Manuscript, read as it stands now. */
 export function publicationSummaryManuscript(manuscript: NonNullable<DeliverablesProjection['manuscript']>): string {
-  return `${PUBLICATION_SUMMARY_DELIVERABLE} · 当前修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`;
+  return metadataWords(`${PUBLICATION_SUMMARY_DELIVERABLE} · 当前修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`);
 }
 
 /** 与当前稿件: the current-versus-selected relationship (PUB-004), in the milestone's own words when it changed. */
@@ -148,7 +149,7 @@ export function milestoneRelationLine(item: Pick<MilestoneListItemProjection, 'c
 export function deliverablesManuscriptLine(manuscript: DeliverablesProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能保存里程碑版本。'
-    : `当前稿件：修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`;
+    : metadataWords(`当前稿件：修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`);
 }
 
 export function milestoneLabelText(label: string): string {
@@ -157,7 +158,7 @@ export function milestoneLabelText(label: string): string {
 
 /** One listed milestone's purpose, exact version, actor and time (V2-UX-MILE-008). */
 export function milestoneMetaLine(item: Pick<MilestoneListItemProjection, 'purposeLabel' | 'revisionLabel' | 'actor'>, savedAt: string): string {
-  return `用途：${item.purposeLabel} · 修订版 ${item.revisionLabel} · ${item.actor} · ${savedAt}`;
+  return metadataWords(`用途：${item.purposeLabel} · 修订版 ${item.revisionLabel} · ${item.actor} · ${savedAt}`);
 }
 
 export function milestoneNoteLine(note: string): string {
@@ -170,7 +171,7 @@ export function milestonesTruncatedLine(listed: number): string {
 
 /** 第 N 次 设为发稿版本: the exact milestone and version it designated, which never moves (PUB-007). */
 export function publicationVersionHeading(item: Pick<PublicationVersionProjection, 'ordinal' | 'milestoneLabel' | 'revisionLabel'>): string {
-  return `第 ${item.ordinal} 次设为发稿版本 · 「${item.milestoneLabel}」 · ${item.revisionLabel}`;
+  return metadataWords(`第 ${item.ordinal} 次设为发稿版本 · 「${item.milestoneLabel}」 · ${item.revisionLabel}`);
 }
 
 export function publicationScopeLine(scope: string): string {
@@ -194,7 +195,7 @@ export function publicationsTruncatedLine(listed: number): string {
  * designation keeps its version, and a newer one is a separate designation of a new milestone (PUB-007).
  */
 export function publicationChangeNoticeDetail(notice: NonNullable<DeliverablesProjection['publication']['changeNotice']>): string {
-  return `发稿版本定在 ${notice.revisionLabel}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`;
+  return metadataWords(`发稿版本定在 ${notice.revisionLabel}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`);
 }
 
 /**

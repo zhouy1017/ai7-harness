@@ -1,4 +1,5 @@
-import { researchPlanLine } from '../../shared/research-status.js';
+import { researchBackendName } from '../../shared/research-status.js';
+import type { ReviewCategoryBasis } from '../../shared/review-basis.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
@@ -114,7 +115,8 @@ import {
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
   houseGuidelineDocuments,
-  reviewCategoryBasisStatement,
+  reviewCategoryBasis,
+  reviewCategoryBasisRecordText,
   reviewCategoryConfigurationDigest,
   reviewCategoryEntryForBook,
   type ReviewCategoryConfiguration,
@@ -321,7 +323,7 @@ function localOnly(snapshot: RunSnapshot): boolean {
 }
 
 function localBasisStatement(entry: ReviewCategoryConfigurationEntry, options: LocalCheckOptions): string {
-  return reviewCategoryBasisStatement(entry) + `；标点：${options.punctuation === 'chinese-prose' ? '编辑确认中文正文' : '未启用'}；数字：${numeralBasis(options) === 'editor-convention' ? '编辑约定' : numeralBasis(options) === 'national-standard' ? '编辑声明在适用范围内' : numeralBasis(options) === 'out-of-applicability' ? '不在声明的适用范围内，未检查' : '未启用'}`;
+  return reviewCategoryBasisRecordText(entry) + `；标点：${options.punctuation === 'chinese-prose' ? '编辑确认中文正文' : '未启用'}；数字：${numeralBasis(options) === 'editor-convention' ? '编辑约定' : numeralBasis(options) === 'national-standard' ? '编辑声明在适用范围内' : numeralBasis(options) === 'out-of-applicability' ? '不在声明的适用范围内，未检查' : '未启用'}`;
 }
 /** A refused local plan reaches the editor in its own words, as the Review Run's refusal rather than a failed request. */
 function localRefusal<T>(operation: () => T): T {
@@ -847,7 +849,7 @@ interface BaselineReading {
 
 /** What one category of the configuration can do now, read once per projection or preparation. */
 interface CategoryReading {
-  readonly researchSourceLine?: string;
+  readonly modelChannelSearchLabel?: string;
   readonly entry: ReviewCategoryConfigurationEntry;
   /** Why the category cannot run at all now; `null` when it can. */
   readonly unavailableReason: string | null;
@@ -1023,7 +1025,7 @@ export interface ReviewRunPlanFacts {
     readonly output: ReviewCategoryConfigurationEntry['output'];
     readonly riskPointsOnly: boolean;
     readonly modelFree: boolean;
-    readonly basisStatement: string;
+    readonly basis: ReviewCategoryBasis;
     readonly procedure: { readonly title: string; readonly version: string };
     readonly guidelineDocuments: ReadonlyArray<{ readonly title: string; readonly issuer: string; readonly version: string }>;
     readonly state: ReviewRunCategoryState;
@@ -1623,7 +1625,7 @@ export class ReviewRunStore {
       categoryId: planned.entry.categoryId,
       executor: planned.entry.executor,
       entry: planned.entry,
-      basisStatement: reviewCategoryBasisStatement(planned.entry),
+      basisStatement: reviewCategoryBasisRecordText(planned.entry),
       selectedRange: planned.plan.kind === 'leads' ? planned.plan.selectedRange : null,
       task: projection === null ? null : {
         kind: projection.kind,
@@ -2003,7 +2005,7 @@ export class ReviewRunStore {
         output: category.entry.output,
         riskPointsOnly: category.entry.riskPointsOnly,
         modelFree: category.executor === 'baseline-leads' || category.executor === 'local-text-check',
-        basisStatement: category.basisStatement,
+        basis: reviewCategoryBasis(category.entry),
         procedure: { title: category.entry.procedure.title, version: category.entry.procedure.version },
         guidelineDocuments: category.entry.guidelineDocuments.map((document) => ({ title: document.title, issuer: document.issuer, version: document.version })),
         state: categoryView.state,
@@ -4193,7 +4195,7 @@ export class ReviewRunStore {
       return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
     let projection: AnalysisProjection;
-    let researchSourceLine: string | undefined;
+    let modelChannelSearchLabel: string | undefined;
     let researchUnavailableReason: string | null = null;
     try {
       const ledger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
@@ -4201,7 +4203,7 @@ export class ReviewRunStore {
       if (entry.searchEngine) {
         try {
           const source = ledger.currentResearchBackend();
-          if (source?.selectionSource === 'model-channel') researchSourceLine = researchPlanLine(source);
+          if (source?.selectionSource === 'model-channel') modelChannelSearchLabel = source.sourceLabel ?? researchBackendName(source);
         } catch (error) {
           if (!(error instanceof AnalysisError)) throw error;
           researchUnavailableReason = error.message;
@@ -4249,7 +4251,7 @@ export class ReviewRunStore {
       unavailableReason: researchUnavailableReason ?? (entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null),
       facts,
       projection,
-      ...(researchSourceLine === undefined ? {} : { researchSourceLine }),
+      ...(modelChannelSearchLabel === undefined ? {} : { modelChannelSearchLabel }),
       unread,
     };
   }
@@ -4277,8 +4279,7 @@ export class ReviewRunStore {
       searchEngine: entry.searchEngine,
       modelFree: entry.executor === 'baseline-leads' || entry.executor === 'local-text-check',
       materialReferencesAllowed: entry.executor === 'review-category-contract',
-      basisStatement: reading.researchSourceLine === undefined ? reviewCategoryBasisStatement(entry)
-        : reviewCategoryBasisStatement(entry).replace('使用用户所选的联网检索后端', reading.researchSourceLine),
+      basis: { ...reviewCategoryBasis(entry), ...(reading.modelChannelSearchLabel === undefined ? {} : { modelChannelSearchLabel: reading.modelChannelSearchLabel }) },
       guidelineDocuments: entry.guidelineDocuments.map((document) => ({
         documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauseCount: document.clauses.length,
       })),
@@ -4745,7 +4746,7 @@ export class ReviewRunStore {
         output: category.entry.output,
         riskPointsOnly: category.entry.riskPointsOnly,
         batchApply: category.entry.batchApply,
-        basisStatement: category.basisStatement,
+        basis: reviewCategoryBasis(category.entry),
         state: categoryView.state,
         stateLabel: categoryView.stateLabel,
         detail: categoryView.detail,

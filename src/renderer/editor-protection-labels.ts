@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 /**
  * The words of Editing Protection Mode and its Protective Read-only State (Issue #951, wave 12 slice 12a; V2-UX-DUR-001 to
  * DUR-012, ED-055, ED-056, ED-058). Pure, so the unit suite pins each line. Nothing here says 已保存: until the service
@@ -32,7 +33,7 @@ export type ProtectionCause = 'journal-unavailable' | 'service-stopped' | 'drift
 export type ProtectionReadOnlyReason = 'capacity' | 'service-stopped' | 'drift';
 
 export function lastDurableLine(sequence: number, durableAt: string): string {
-  return `最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${new Date(durableAt).toLocaleString('zh-CN', { hour12: false })}`;
+  return metadataWords(`最后确认写入：修订日志序号 ${sequence.toLocaleString('zh-CN')} · ${new Date(durableAt).toLocaleString('zh-CN', { hour12: false })}`);
 }
 
 /** DUR-004: editor-readable location and character count, never bytes or process detail. */

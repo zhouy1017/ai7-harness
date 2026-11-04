@@ -10,7 +10,7 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
-import { reviewCategoryEntry, reviewCategoryEntryForBook, reviewCategoryContractInput, reviewCategoryBasisStatement } from '../../src/service/review/category-configuration.js';
+import { reviewCategoryEntry, reviewCategoryEntryForBook, reviewCategoryContractInput, reviewCategoryBasis } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
@@ -210,8 +210,8 @@ describe('cross-deliverable participants and revision lineage', () => {
     const input = reviewCategoryContractInput(resolved);
     expect(input.deliverables!.map((participant) => participant.revisionId)).toEqual([pin.revisionId]);
     expect(input.deliverables![0]!.laterSaves).toBe(1);
-    const basis = reviewCategoryBasisStatement(resolved);
-    expect(basis.includes(pin.revisionId) && basis.includes('本书不做') && basis.includes('未参与') && basis.includes('定稿后另有 1 次保存')).toBe(true);
+    const basis = reviewCategoryBasis(resolved);
+    expect(basis.deliverables).toMatchObject({ participants: [expect.objectContaining({ revisionId: pin.revisionId, laterSaves: 1 })], leftOut: expect.arrayContaining([expect.objectContaining({ reason: '本书不做' })]) });
     expect(reviewCategoryKindDefinition(input).systemPrompt.includes('交付物是只读的比对数据')).toBe(true);
   });
 
@@ -247,7 +247,7 @@ describe('cross-deliverable participants and revision lineage', () => {
     await finalize(other.documentId);
     expect(entry().executor).toBe('review-category-contract');
     expect(reading().participants.map((participant) => participant.documentId)).toEqual([other.documentId]);
-    expect(reviewCategoryBasisStatement(entry()).includes('未参与《新闻稿》：定稿版本没有可比对的文字')).toBe(true);
+    expect(reviewCategoryBasis(entry()).deliverables?.leftOut).toContainEqual(expect.objectContaining({ title: '新闻稿', reason: '定稿版本没有可比对的文字' }));
   });
 
   it('refuses a corrupt eligible record with the record reason', async () => {

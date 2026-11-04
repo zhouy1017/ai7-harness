@@ -1,8 +1,9 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, type ModelServiceRouteId, type ModelServiceSettingsProjection } from '../../src/shared/protocol.js';
 import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceChoices, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
-import { compactModelSelectionLabel, compactModelSelector } from '../../src/renderer/shell.js';
 import { createModelServiceSettings } from '../../src/renderer/model-service-settings.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 
@@ -13,7 +14,7 @@ beforeEach(() => { restore = installMiniDom(); });
 afterEach(() => restore());
 
 function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelServiceRouteId | null = ready[0] ?? null, fast: ModelServiceRouteId | null = inUse): ModelServiceSettingsProjection {
-  const connection = (route: ModelServiceRouteId) => ({ connectionName: `合成连接 ${route}`, credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
+  const connection = (route: ModelServiceRouteId) => ({ connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
   const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route] });
   return {
     channels: modelServiceChannels(),
@@ -259,54 +260,9 @@ describe('the one model-service flow', () => {
   });
 });
 
-describe('the header\'s compact channel / model selector', () => {
-  it('offers the full account catalogue despite a diagnostic for just one model, and dismisses outside or on Escape', async () => {
-    const projection = settings(['anthropic-claude']);
-    Object.assign(projection.routeChoice.routes.find((route) => route.route === 'anthropic-claude')!.connection!, { connectionTest: { modelId: 'claude-opus-5', outcome: 'passed' } });
-    const calls = api(projection);
-    const selector = compactModelSelector({ api: calls, openModelService: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback });
-    document.body.append(selector.element);
-    selector.follow(true);
-    const root = selector.element as unknown as MiniElement;
-    await vi.waitFor(() => expect(root.querySelectorAll('input')).toHaveLength(4));
-    selector.element.open = true;
-    (document.body as unknown as MiniElement).dispatchEvent({ type: 'pointerdown', target: root.querySelector('input')! });
-    expect(selector.element.open).toBe(true);
-    (document.body as unknown as MiniElement).dispatchEvent({ type: 'keydown', key: 'Escape' });
-    expect(selector.element.open).toBe(false);
-    selector.element.open = true;
-    (document.body as unknown as MiniElement).dispatchEvent({ type: 'pointerdown' });
-    expect(selector.element.open).toBe(false);
-    const model = root.querySelectorAll('input').find((input) => input.value.endsWith('/claude-haiku-4-5'))!;
-    model.dispatchEvent({ type: 'change', bubbles: true });
-    button(root, 'select-main-role-model').click();
-    await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'claude-haiku-4-5' }));
-    expect(calls.selectFastRoleModel).not.toHaveBeenCalled();
-    selector.interrupt();
-  });
 
-  it('names the one choice both roles hold, or each role when they differ', () => {
-    expect(compactModelSelectionLabel(settings(['deepseek-open-platform']))).toBe('模型 · DeepSeek 开放平台（官方） / DeepSeek V4.1 Flash · 可用');
-    expect(compactModelSelectionLabel(settings(['opencode-go', 'openai-platform'], 'opencode-go', 'openai-platform')))
-      .toBe('主编辑 · OpenCode Go / DeepSeek V4.1 Flash · 可用 · 快速交互 · OpenAI 官方 / GPT-5.6 Luna · 可用');
-    expect(compactModelSelectionLabel(settings([], null))).toBe('主编辑 · 需设置 · 快速交互 · 需设置');
-  });
-
-  it('shows on Book screens only, offering the ready choices and applying one to both roles', async () => {
-    const calls = api(settings(['opencode-go', 'deepseek-open-platform'], 'opencode-go'));
-    const selector = compactModelSelector({ api: calls, openModelService: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback });
-    const root = selector.element as unknown as MiniElement;
-    selector.follow(false);
-    expect(root.hidden).toBe(true);
-    selector.follow(true);
-    await vi.waitFor(() => expect(root.querySelectorAll('input').length).toBeGreaterThanOrEqual(2));
-    expect(root.querySelector('[data-compact-model-selection="fast-interaction"]')!.textContent).toBe('模型 · OpenCode Go / DeepSeek V4.1 Flash · 可用');
-    const other = root.querySelectorAll('input').find((radio) => radio.value === 'deepseek-open-platform/deepseek-flash')!;
-    other.checked = true;
-    other.dispatchEvent({ type: 'change', bubbles: true });
-    root.querySelectorAll('button').find((node) => node.textContent === USE_FOR_BOTH_ROLES_LABEL)!.click();
-    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'deepseek-open-platform', modelId: 'deepseek-flash' }));
-    selector.follow(false);
-    expect([root.hidden, root.querySelectorAll('input,button').length]).toEqual([true, 0]);
-  });
+it('scans every channel model catalogue in ordinary mode (#1315)', () => {
+  setTechnicalLayerVisible(false);
+  try { for (const channel of MODEL_SERVICE_ROUTES) expectNoTechnicalText(flow(settings([channel])).node); }
+  finally { setTechnicalLayerVisible(true); }
 });

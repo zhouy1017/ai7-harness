@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel } from './quality-learning-labels.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
@@ -95,7 +96,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 信心 ${Math.round(current.confidence * 100)}% · ${state === 'proposed' ? current.actor === 'AI7' ? 'AI7 整理，待接受' : '编辑撰写，待接受' : state === 'frozen' ? '已冻结' : state === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
       const lineage = el('details', ''); lineage.append(el('summary', '来源与版本历史'));
       for (const source of [...current.positiveExamples, ...current.negativeExamples]) {
-        lineage.append(el('p', `图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`));
+        lineage.append(el('p', metadataWords(`图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`)));
       }
       for (const source of sources ?? []) lineage.append(el('p', `来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`));
       for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
@@ -160,8 +161,8 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
           void mountWordTrackedEditDetail({ root: detail, api, ...signal.source, openSourceVersion }).load();
         }), detail);
       } else if (signal.kind === 'manual-edit-journal') {
-        row.append(el('p', `手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个段落；不代表采纳建议。`));
-      } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
+        row.append(el('p', metadataWords(`手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个段落；不代表采纳建议。`)));
+      } else row.append(el('p', metadataWords(`决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`)));
       if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.memoryCandidate != null) {
         const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;
         checkbox.addEventListener('change', () => { if (checkbox.checked) selected.set(signal.signalId, signal); else selected.delete(signal.signalId); });

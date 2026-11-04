@@ -1,0 +1,60 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { collectTechnicalDisclosures, initializeTechnicalLayer, metadataWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { reviewBasisWords } from '../../src/renderer/review-basis.js';
+import { installMiniDom } from '../support/mini-dom.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
+
+let restore: () => void;
+beforeEach(() => { restore = installMiniDom(); });
+afterEach(() => { setTechnicalLayerVisible(true); restore(); });
+
+describe('technical layer presentation (#1315)', () => {
+  it('defaults to development only and remembers the explicit renderer preference', () => {
+    let saved: string | null = null;
+    const storage = { getItem: () => saved, setItem: (_key: string, value: string) => { saved = value; } };
+    for (const channel of ['windows-installer', 'windows-portable', 'packaged'] as const) {
+      initializeTechnicalLayer(channel, storage); expect(technicalLayerVisible).toBe(false);
+    }
+    initializeTechnicalLayer('source-checkout', storage); expect(technicalLayerVisible).toBe(true);
+    saveTechnicalLayerVisible(false, storage);
+    initializeTechnicalLayer('source-checkout', storage); expect(technicalLayerVisible).toBe(false);
+  });
+
+  it('renders the structured basis by mode without altering its source fields', () => {
+    const basis = { categoryId: 'review', executor: 'review-category-contract', searchEngine: false,
+      guidelineDocuments: [{ documentId: 'rules', title: '本社规范.txt', issuer: '本社', version: '12' }],
+      procedure: { title: '文字审阅', version: '2' } };
+    setTechnicalLayerVisible(false);
+    expect(reviewBasisWords(basis)).toBe('依据：本社规范.txt · 文字审阅（不联网）');
+    expect(reviewBasisWords({ ...basis, searchEngine: true })).toBe('依据：本社规范.txt · 文字审阅（联网）');
+    expect(basis.procedure.version).toBe('2');
+    setTechnicalLayerVisible(true);
+    expect(reviewBasisWords(basis)).toContain('文字审阅（第 2 版）');
+  });
+
+  it('omits the disclosure payload and formats only metadata in ordinary mode', () => {
+    setTechnicalLayerVisible(false);
+    const root = document.createElement('main');
+    const disclosure = document.createElement('details');
+    disclosure.textContent = '查看技术详情 · ordinary-production v33 · abcdef0123456789';
+    root.append(technicalDisclosure(disclosure));
+    const metadata = document.createElement('p');
+    metadata.textContent = metadataWords('主分支 · Revision 18 · 全稿 0.121%');
+    root.append(metadata);
+    expectNoTechnicalText(root);
+    expect(disclosure.textContent).toBe('');
+    expect(metadata.textContent).toContain('全稿 0%');
+  });
+
+  it('offers one entry including later disclosures and removes records when their page leaves', () => {
+    const root = document.createElement('main');
+    const page = document.createElement('section'); root.append(page);
+    const add = () => { const details = document.createElement('details'); const summary = document.createElement('summary');
+      summary.textContent = '查看技术详情'; details.append(summary); page.append(technicalDisclosure(details)); };
+    add(); add(); collectTechnicalDisclosures(root);
+    add(); collectTechnicalDisclosures(root);
+    expect(root.textContent?.match(/查看技术详情/gu)).toHaveLength(1);
+    page.remove(); collectTechnicalDisclosures(root);
+    expect(root.querySelector('[data-technical-collection]')).toBeNull();
+  });
+});

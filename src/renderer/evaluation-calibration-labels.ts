@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type { EvaluationCalibrationBookProjection, EvaluationCalibrationProjection, PublicationActualsProjection } from '../shared/protocol.js';
 import { formatCalibrationOffset, formatPriceFen } from '../shared/evaluation-calibration.js';
 
@@ -99,6 +100,6 @@ export function actualsLine(actuals: Pick<PublicationActualsProjection, 'priceFe
 export function actualsBookLine(book: Pick<EvaluationCalibrationBookProjection, 'publicationOrdinal' | 'actuals'>): string {
   const version = `第 ${book.publicationOrdinal} 次发稿版本`;
   if (book.actuals === null) return `${version} · 尚未录入`;
-  if (!book.actuals.current) return `${version} · 尚未录入（第 ${book.actuals.publicationOrdinal} 次发稿版本录入过：${actualsLine(book.actuals)}）`;
+  if (!book.actuals.current) return metadataWords(`${version} · 尚未录入（第 ${book.actuals.publicationOrdinal} 次发稿版本录入过：${actualsLine(book.actuals)}）`);
   return `${version} · ${actualsLine(book.actuals)}`;
 }

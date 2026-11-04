@@ -1,3 +1,5 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BookTasksProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
@@ -103,4 +105,10 @@ describe('the 任务 panel as the right co-pilot', () => {
     expect(root.hidden).toBe(true);
     expect(find('[data-task-composer-field="goal"]')?.value).toBe('核对人物称谓');
   });
+});
+
+it('scans the Book task drawer in ordinary mode (#1315)', async () => {
+  setTechnicalLayerVisible(false);
+  try { const view = harness(); view.drawer.openPanel(BOOK, () => null); await view.settle(); expectNoTechnicalText(view.root); view.drawer.close(false); }
+  finally { setTechnicalLayerVisible(true); }
 });

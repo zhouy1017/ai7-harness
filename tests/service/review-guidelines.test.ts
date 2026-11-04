@@ -344,7 +344,7 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect(fourthTask!.taskIntentId).not.toBe(thirdTask!.taskIntentId);
       expect(fourthTask!.planEnvelopeDigest).not.toBe(thirdTask!.planEnvelopeDigest);
       const workspace = store.inspectReviewWorkspace(imported.bookId, null);
-      expect(workspace.categories.find((category) => category.categoryId === TYPOS)!.basisStatement).toContain('本社 · 文字规范条款（第 2 版）');
+      expect(workspace.categories.find((category) => category.categoryId === TYPOS)!.basis.guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: '本社', title: '文字规范条款', version: '2' }));
       // Its Book reads under version 1 until a review under version 2 forms its findings.
       const now = typosDocument(store.inspectReviewGuidelines());
       expect(now.olderVersionBooks).toEqual([{ bookId: imported.bookId, bookTitle: 'L2 审阅规范', ordinal: 1, merged: false }]);
@@ -463,9 +463,9 @@ describe('知识库 › 审阅规范文件 over the real store', () => {
       expect([factual.currentOrdinal, factual.issuer, factual.versions.length]).toEqual([1, 'AI7 内置默认', 1]);
       const creation = rebuilt.store.prepareBookCreation('空图书', null);
       const emptyBookId = rebuilt.store.commitBookCreation({ ...creation.proposed, reviewDigest: creation.reviewDigest }).overview.book.bookId;
-      const basis = (categoryId: string) => rebuilt.store.inspectReviewWorkspace(emptyBookId, null).categories.find((category) => category.categoryId === categoryId)!.basisStatement;
-      expect(basis('factual-review')).toContain('AI7 内置默认 · 事实核查契约（第 1 版）');
-      expect(basis(TYPOS)).toContain('本社 · 文字规范条款（第 2 版）');
+      const basis = (categoryId: string) => rebuilt.store.inspectReviewWorkspace(emptyBookId, null).categories.find((category) => category.categoryId === categoryId)!.basis;
+      expect(basis('factual-review').guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: 'AI7 内置默认', title: '事实核查契约', version: '1' }));
+      expect(basis(TYPOS).guidelineDocuments).toContainEqual(expect.objectContaining({ issuer: '本社', title: '文字规范条款', version: '2' }));
     } finally {
       await close(rebuilt);
     }

@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   EvaluationAdjustmentReasonId,
   EvaluationComparisonProjection,
@@ -39,20 +40,20 @@ export const EVALUATION_START = { first: '开始评估', again: '重新评估' }
  */
 export function evaluationStartLabel(start: Extract<EvaluationWorkspaceProjection['start'], { allowed: true }>): string {
   if (start.skipDamaged === null) return EVALUATION_START[start.kind];
-  return start.skipDamaged.seedOrdinal === null ? '从头重新评估' : `从第 ${start.skipDamaged.seedOrdinal} 版重新评估`;
+  return start.skipDamaged.seedOrdinal === null ? '从头重新评估' : metadataWords(`从第 ${start.skipDamaged.seedOrdinal} 版重新评估`);
 }
 /** What the start that skips a damaged latest version will do (Issue #726), said before it is pressed. */
 export function evaluationSkipDamagedLine(skipDamaged: NonNullable<Extract<EvaluationWorkspaceProjection['start'], { allowed: true }>['skipDamaged']>): string {
   const damaged = `第 ${skipDamaged.skipped.join('、')} 版评估记录已损坏`;
   return skipDamaged.seedOrdinal === null
     ? `${damaged}，没有可以读取的定稿：重新评估将从头开始，新版本会记下跳过了这些版本。`
-    : `${damaged}：重新评估将从第 ${skipDamaged.seedOrdinal} 版定稿开始，新版本会记下跳过了${skipDamaged.skipped.length === 1 ? '它' : '这些版本'}。`;
+    : metadataWords(`${damaged}：重新评估将从第 ${skipDamaged.seedOrdinal} 版定稿开始，新版本会记下跳过了${skipDamaged.skipped.length === 1 ? '它' : '这些版本'}。`);
 }
 /** What a version says of the damaged versions it skipped when it began (Issue #726); `null` for one that skipped none. */
 export function evaluationSkippedRecordsLine(record: Pick<EvaluationRecordProjection, 'skippedRecords' | 'seededFrom'>): string | null {
   if (record.skippedRecords.length === 0) return null;
   const skipped = `这一版跳过了已损坏的第 ${record.skippedRecords.join('、')} 版`;
-  return record.seededFrom === null ? `${skipped}，从头开始评估。` : `${skipped}，从第 ${record.seededFrom} 版定稿重新评估。`;
+  return record.seededFrom === null ? `${skipped}，从头开始评估。` : metadataWords(`${skipped}，从第 ${record.seededFrom} 版定稿重新评估。`);
 }
 export const EVALUATION_SAVE = '保存评估';
 export const EVALUATION_FINALIZE = '定稿';
@@ -111,18 +112,18 @@ export function evaluationScoreFeedback(raw: string, unreadable: boolean, fullMa
  */
 export const EVALUATION_STAY = '留在这一版';
 export function evaluationUnsavedLine(open: number, next: number): string {
-  return `第 ${open} 版有未保存的修改；打开第 ${next} 版会放弃这些修改。`;
+  return metadataWords(`第 ${open} 版有未保存的修改；打开第 ${next} 版会放弃这些修改。`);
 }
 export function evaluationDiscardAndOpen(next: number): string {
-  return `放弃修改并打开第 ${next} 版`;
+  return metadataWords(`放弃修改并打开第 ${next} 版`);
 }
 
 export function evaluationStarted(ordinal: number): string {
-  return `已开始第 ${ordinal} 版评估。`;
+  return metadataWords(`已开始第 ${ordinal} 版评估。`);
 }
 
 export function evaluationFinalized(ordinal: number): string {
-  return `第 ${ordinal} 版评估已定稿。`;
+  return metadataWords(`第 ${ordinal} 版评估已定稿。`);
 }
 
 /** A score as the editor reads it: whole points plainly, a half point as .5. */
@@ -148,12 +149,12 @@ export function evaluationItemLegend(item: { label: string; fullMarks: number })
 }
 
 export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection, 'ordinal' | 'state'>): string {
-  return `第 ${record.ordinal} 版 · ${EVALUATION_STATE_LABELS[record.state]}`;
+  return metadataWords(`第 ${record.ordinal} 版 · ${EVALUATION_STATE_LABELS[record.state]}`);
 }
 
 /** The revision a version evaluated, and whether edits waited in the journal beyond it then. */
 export function evaluationRevisionLine(record: Pick<EvaluationRecordProjection, 'revisionLabel' | 'uncheckpointed'>): string {
-  return `评估的是修订版 ${record.revisionLabel}${record.uncheckpointed ? '（当时另有写入修订日志、尚未保存为修订版的改动）' : ''}`;
+  return metadataWords(`评估的是修订版 ${record.revisionLabel}${record.uncheckpointed ? '（当时另有写入修订日志、尚未保存为修订版的改动）' : ''}`);
 }
 
 /**
@@ -177,7 +178,7 @@ export function evaluationConclusionLabel(profile: Pick<EvaluationProfileProject
 /** One version in the list: its number and state, the revision, the total and — once chosen — the conclusion. */
 export function evaluationVersionLine(profile: Pick<EvaluationProfileProjection, 'bands' | 'conclusions'>, summary: EvaluationRecordSummaryProjection): string {
   const conclusion = summary.conclusion === null ? '' : ` · ${evaluationConclusionLabel(profile, summary.conclusion)}`;
-  return `${evaluationHeading(summary)} · 修订版 ${summary.revisionLabel} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`;
+  return metadataWords(`${evaluationHeading(summary)} · 修订版 ${summary.revisionLabel} · ${evaluationTotalLine(profile, summary.total)}${conclusion}`);
 }
 
 /** The Book's 评估 on 工作概览, in one line. */
@@ -210,13 +211,13 @@ export function evaluationComparisonLines(profile: EvaluationProfileProjection, 
   if (comparison.conclusion.previous !== comparison.conclusion.current) {
     lines.push(`结论：${evaluationConclusionLabel(profile, comparison.conclusion.previous)} → ${evaluationConclusionLabel(profile, comparison.conclusion.current)}`);
   }
-  return { heading: `与第 ${comparison.previousOrdinal} 版相比`, lines };
+  return { heading: metadataWords(`与第 ${comparison.previousOrdinal} 版相比`), lines };
 }
 
 // ---- 知识库 › 评估方案 (Issue #429, S81a; KB-001, EVAL-003, EVAL-005) --------------------------------------------------
 
 export function evaluationProfilePill(profile: Pick<EvaluationProfileProjection, 'version' | 'issuer'>): string {
-  return `第 ${profile.version} 版 · ${profile.issuer}`;
+  return metadataWords(`第 ${profile.version} 版 · ${profile.issuer}`);
 }
 
 /**
@@ -267,7 +268,7 @@ export function evaluationAi7TaskLine(task: NonNullable<EvaluationInitialProject
 export function evaluationAi7LatestLine(profile: Pick<EvaluationProfileProjection, 'bands'>, latest: NonNullable<EvaluationInitialProjection['latest']>): string {
   const total = latest.complete ? evaluationTotalLine(profile, latest.total) : '全书综合没有给出分数';
   const moved = latest.current ? '' : '（稿件此后改过：重新初评后才能从初评开始）';
-  return `第 ${latest.ordinal} 次初评 · 读的是修订版 ${latest.revisionLabel} · ${total}${moved}`;
+  return metadataWords(`第 ${latest.ordinal} 次初评 · 读的是修订版 ${latest.revisionLabel} · ${total}${moved}`);
 }
 
 /** 依据充分度 of one item (EVAL-005), with what it rests on. */
@@ -332,7 +333,7 @@ export function evaluationAi7UnreadLine(draft: Pick<EvaluationInitialDraftProjec
 
 /** What a version begun from AI7's 初评 says it began from. */
 export function evaluationAi7RecordLine(initial: Pick<EvaluationInitialDraftProjection, 'ordinal' | 'revisionLabel'>): string {
-  return `这一版从 AI7 第 ${initial.ordinal} 次初评开始（读的是修订版 ${initial.revisionLabel}）：AI7 的分数列在每一项旁边，记录保存的是你的评分。`;
+  return metadataWords(`这一版从 AI7 第 ${initial.ordinal} 次初评开始（读的是修订版 ${initial.revisionLabel}）：AI7 的分数列在每一项旁边，记录保存的是你的评分。`);
 }
 
 /** The conclusion AI7 would suggest, said as AI7's (EVAL-007). */
@@ -364,7 +365,7 @@ export const READERS_REPORT_STATUS = {
 
 /** The 定稿 version a new 审稿意见 drafts from, or `null` while there is none (the template rows then say why). */
 export function readersReportBasisLine(basis: EvaluationReadersReportProjection['basis']): string | null {
-  return basis === null ? null : `依据第 ${basis.ordinal} 版定稿（评估的是修订版 ${basis.revisionLabel}）`;
+  return basis === null ? null : metadataWords(`依据第 ${basis.ordinal} 版定稿（评估的是修订版 ${basis.revisionLabel}）`);
 }
 
 /** The Book's latest 审稿意见 Task in one line: its template, and its state as the drawer names it. */
@@ -374,13 +375,13 @@ export function readersReportTaskLine(task: NonNullable<EvaluationReadersReportP
 
 /** A drafted result not yet opened: what it was drafted from. */
 export function readersReportDraftedLine(drafted: NonNullable<EvaluationReadersReportProjection['templates'][number]['drafted']>): string {
-  return `AI7 已写出草稿 · 依据第 ${drafted.recordOrdinal} 版定稿 · 打开后在稿件编辑面上修改`;
+  return metadataWords(`AI7 已写出草稿 · 依据第 ${drafted.recordOrdinal} 版定稿 · 打开后在稿件编辑面上修改`);
 }
 
 /** A template's draft document: its latest version, what it was drafted from, and whether the text moved past the version. */
 export function readersReportDraftLine(draft: NonNullable<EvaluationReadersReportProjection['templates'][number]['draft']>): string {
   const latest = draft.document.versions[0]?.label ?? '版本 1';
-  return `草稿 · ${latest} · 依据第 ${draft.recordOrdinal} 版定稿${draft.document.changedSinceVersion ? ' · 有修改尚未保存为版本' : ''}`;
+  return metadataWords(`草稿 · ${latest} · 依据第 ${draft.recordOrdinal} 版定稿${draft.document.changedSinceVersion ? ' · 有修改尚未保存为版本' : ''}`);
 }
 
 // ---- 市场 (Issue #429, plan slice S81b2; V2-UX-EVAL-009, EVAL-010) ------------------------------------------------------
@@ -493,7 +494,7 @@ export const EVALUATION_REWRITE_STALE = '这一版在重写之后又保存过：
 
 /** The Book's latest rewrite Task in one line: the version it rewrites, and its state as the drawer names it. */
 export function evaluationRewriteTaskLine(task: NonNullable<EvaluationRewriteWorkspaceProjection['task']>): string {
-  return `${EVALUATION_REWRITE_HEADING} · 第 ${task.recordOrdinal} 版 · ${task.label}`;
+  return metadataWords(`${EVALUATION_REWRITE_HEADING} · 第 ${task.recordOrdinal} 版 · ${task.label}`);
 }
 
 /** The proposal waiting for the editor: which save it was written from. */

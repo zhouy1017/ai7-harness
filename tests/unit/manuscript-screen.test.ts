@@ -1,3 +1,5 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer/manuscript-screen.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
@@ -361,4 +363,10 @@ describe('the Manuscript screen lifecycle', () => {
     expect(app.persistenceStatus.textContent).toBe('已打开恢复比较。');
     expect(protection.update.mock.calls.length).toBe(updatesAtDeparture);
   });
+});
+
+it('scans the manuscript screen in ordinary mode (#1315)', () => {
+  setTechnicalLayerVisible(false);
+  try { const app = shell(); app.open(windowOf('book-one')); expectNoTechnicalText(app.screen); app.showing?.destroy(); }
+  finally { setTechnicalLayerVisible(true); }
 });

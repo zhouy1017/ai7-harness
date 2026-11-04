@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
-  reviewCategoryBasisStatement,
+  reviewCategoryBasis,
   reviewCategoryConfigurationDigest,
   reviewCategoryContractInput,
   reviewCategoryEntry,
@@ -91,13 +91,13 @@ describe('the built-in review categories', () => {
   });
 
   it('state their basis once, search-engine use included (V2-UX-REV-010, REV-012)', () => {
-    expect(reviewCategoryBasisStatement(entry('typos-and-usage')))
-      .toBe('依据：AI7 内置默认 · 文字规范条款（第 1 版） · 工序：错别字与规范用语审阅工序（第 1 版） · 不使用搜索引擎 · 未联网核查');
-    expect(reviewCategoryBasisStatement(entry('academic-integrity')))
-      .toBe('依据：AI7 内置默认 · 引用与学术规范条款（第 1 版） · 工序：引用风险点标注（第 1 版） · 使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准');
-    expect(reviewCategoryBasisStatement(entry('plot-consistency')))
-      .toContain('第 2 版');
-    expect(reviewCategoryBasisStatement(entry('series-consistency'))).toBe('依据：书系知识 · 工序：书系一致性检查（第 1 版）');
+    expect(reviewCategoryBasis(entry('typos-and-usage'))).toMatchObject({
+      guidelineDocuments: [{ title: '文字规范条款', issuer: 'AI7 内置默认', version: '1' }],
+      procedure: { title: '错别字与规范用语审阅工序', version: '1' }, searchEngine: false,
+    });
+    expect(reviewCategoryBasis(entry('academic-integrity')).searchEngine).toBe(true);
+    expect(reviewCategoryBasis(entry('plot-consistency')).procedure.version).toBe('2');
+    expect(reviewCategoryBasis(entry('series-consistency'))).toMatchObject({ executor: 'series-knowledge', guidelineDocuments: [], procedure: { title: '书系一致性检查', version: '1' } });
   });
 
   it('are digested whole, so a Review Run that snapshots the digest names the exact configuration it used', () => {

@@ -1,3 +1,4 @@
+import { metadataWords } from './technical-layer.js';
 import type {
   RendererApi,
   RunBudgetCeilingState,
@@ -121,14 +122,14 @@ export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): Reado
     { key: 'book', text: chips.book },
     { key: 'position', text: chips.position },
     ...(chips.selectedGraphemes === null ? [] : [{ key: 'selected', text: `已选 ${groupedCount(chips.selectedGraphemes)} 字` }]),
-    { key: 'revision', text: `任务输入修订版 ${chips.taskInputRevision}` },
+    { key: 'revision', text: metadataWords(`任务输入修订版 ${chips.taskInputRevision}`) },
     { key: 'procedure', text: `工序「${chips.procedure}」` },
   ];
 }
 
 /** TASK-039/040's one line: preparing the Task saved a revision, so later editing leaves the Task as it is. */
 export function taskPlanSavedLine(revisionLabel: string): string {
-  return `已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`;
+  return metadataWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`);
 }
 
 /** A count with its thousands grouped, the same text on every host. */
@@ -290,7 +291,7 @@ export function taskPlanEditCountAfterDrift(count: number): string {
 /** The edit that made the version shown, with its time (PLAN-011: recorded with actor and time). */
 export function taskPlanLastEdit(edit: NonNullable<TaskPlanProjection['edit']['lastEdit']>): string {
   const changes = edit.entries.map((entry) => `${entry.label}：${entry.prior} → ${entry.proposed}`).join('；');
-  return `第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`;
+  return metadataWords(`第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`);
 }
 
 // ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------

@@ -489,7 +489,7 @@ async function main() {
       window.__j05FastSelected=role.binding.providerId==='deepseek-open-platform' && role.connection.fastSelected===true;
     })`);
     requireJourney(await renderer.evaluate(`Boolean(window.__j05FastSelected)`), 'selected-fast-exact-recorded-choice');
-    await waitFor(renderer, `document.querySelector('[data-compact-model-selection="fast-interaction"]')?.textContent.includes('DeepSeek')`, 'selected-fast-compact-display');
+    await assertRenderer(renderer, `document.querySelector('#context-header .compact-model-selector')===null`, 'model-selector-settings-only');
     requireJourney(await renderer.evaluate(`window.ai7.listPriorWork().then(async (work)=>{
       const book=work.find((item)=>item.bookTitle===${JSON.stringify(EXCERPT.title)});
       const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});
