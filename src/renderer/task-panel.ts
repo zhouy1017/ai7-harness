@@ -45,7 +45,6 @@ import {
   TASK_COMPOSER_PROMOTE_SAVE_FIRST,
   TASK_COMPOSER_PROMOTED,
   TASK_COMPOSER_RANGE_REMOVE,
-  TASK_COMPOSER_RESOLUTION_CHOOSE,
   TASK_COMPOSER_RESOLUTION_HEADING,
   TASK_COMPOSER_STATUS,
   TASK_COMPOSER_TARGET_LABELS,
@@ -952,7 +951,6 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       current.choice = 0;
       section.append(el('p', 'field-note task-composer-ready', taskComposerResolutionReady(resolution.option.label)));
     } else {
-      section.append(el('p', 'field-note', TASK_COMPOSER_RESOLUTION_CHOOSE));
       const name = uid('choice');
       resolution.options.forEach((option, index) => {
         const label = el('label', 'task-composer-choice');
@@ -968,8 +966,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
           state.choice = index;
           render();
         });
-        label.append(input, el('span', undefined, option.label));
-        if (!option.available && option.reason !== null) label.append(el('small', 'field-note', option.reason));
+        label.append(input, el('span', undefined, !option.available && option.reason !== null ? `${option.label} · ${option.reason}` : option.label));
         section.append(label);
       });
     }

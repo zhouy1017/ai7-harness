@@ -303,8 +303,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     for (const entry of items) {
       const item = el('li');
       item.dataset['itemKind'] = entry.kind;
-      item.append(el('span', 'package-item-label', entry.label));
-      if (entry.detail !== null) item.append(el('span', 'field-note package-item-detail', entry.detail));
+      const label = el('span', 'package-item-label', entry.label);
+      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', entry.detail));
+      item.append(label);
       list.append(item);
     }
     return list;
@@ -392,11 +393,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       open.disabled = busy();
       const actions = el('div', 'button-row compact-actions');
       actions.append(open);
-      item.append(
-        line,
-        el('p', 'field-note package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))),
-        el('p', 'package-version-summary', version.summary),
-      );
+      line.append(' · ', el('span', 'package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))));
+      item.append(line, el('p', 'package-version-summary', version.summary));
       if (version.exports.length > 0) item.append(renderHistory(version));
       item.append(actions);
       if (exporting !== null && exporting.packageVersionId === version.packageVersionId) item.append(renderExport(exporting));
@@ -441,10 +439,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     item.dataset['packageExportId'] = entry.exportId;
     item.dataset['packageExportState'] = entry.state;
     item.dataset['packageExportKind'] = entry.kind ?? 'folder';
-    item.append(
-      el('p', 'package-export-line', packageExportHistoryLine(entry.summary, localInstantLabel(entry.exportedAt))),
-      el('p', 'field-note package-export-folder', entry.folder),
-    );
+    const line = el('p', 'package-export-line', packageExportHistoryLine(entry.summary, localInstantLabel(entry.exportedAt)));
+    line.append(' · ', el('span', 'package-export-folder', entry.folder));
+    item.append(line);
     if (entry.revealPreparationId !== null) {
       const preparationId = entry.revealPreparationId;
       const reveal = el('button', 'quiet', entry.kind === 'archive' ? PACKAGE_ARCHIVE_REVEAL : PACKAGE_EXPORT_ACTION_LABELS.reveal);
@@ -600,10 +597,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         else current.selected.delete(file.key);
         draw('keep');
       });
-      label.append(box, el('span', undefined, `选择：${file.label}`));
+      const name = el('span', 'package-export-file-label', file.label);
+      name.append(' · ', el('span', 'package-export-file-name', packageExportFileName(file.fileName, file.format)));
+      label.append(box, name);
       item.append(label);
+    } else {
+      const name = el('span', 'package-export-file-label', file.label);
+      name.append(' · ', el('span', 'package-export-file-name', packageExportFileName(file.fileName, file.format)));
+      item.append(name);
     }
-    item.append(el('span', 'package-export-file-label', file.label), el('span', 'field-note package-export-file-name', packageExportFileName(file.fileName, file.format)));
     if ('outcome' in file) {
       item.dataset['packageExportOutcome'] = file.outcome;
       item.append(el('span', `status-pill package-export-outcome is-${file.outcome}`, file.outcomeLabel));
