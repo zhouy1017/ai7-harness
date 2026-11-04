@@ -327,7 +327,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         options.redraw();
       });
       const words = el('span', 'maintenance-classification-text');
-      words.append(el('strong', undefined, MAINTENANCE_CLASSIFICATION_LABELS[classification]), el('small', 'field-note', MAINTENANCE_CONSEQUENCES[classification]));
+      words.append(el('strong', undefined, MAINTENANCE_CLASSIFICATION_LABELS[classification]), ` · ${MAINTENANCE_CONSEQUENCES[classification]}`);
       option.append(radio, words);
       choices.append(option);
     }
@@ -416,7 +416,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       line.tabIndex = -1;
       item.append(line);
       if (revision.reason !== null) item.append(el('span', 'maintenance-revision-reason', maintenanceReasonLine(revision.step, revision.reason)));
-      if (revision.evidence !== null) item.append(el('span', 'field-note maintenance-revision-evidence', maintenanceEvidenceLine(revision.evidence)));
+      if (revision.evidence !== null) line.append(' · ', el('span', 'maintenance-revision-evidence', maintenanceEvidenceLine(revision.evidence)));
       if (revision.link?.kind === 'errata') {
         const link = el('button', 'quiet maintenance-revision-link', `查看${maintenanceLinkLine(revision.link)}`);
         link.type = 'button';
@@ -424,7 +424,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         const versionId = revision.link.errataVersionId;
         link.addEventListener('click', () => void inspectPage(current, 'errataVersionId', versionId));
         item.append(link);
-      } else if (revision.link !== null) item.append(el('span', 'field-note maintenance-revision-link', maintenanceLinkLine(revision.link)));
+      } else if (revision.link !== null) line.append(' · ', el('span', 'maintenance-revision-link', maintenanceLinkLine(revision.link)));
       timeline.append(item);
     }
     panel.append(timeline);
@@ -527,7 +527,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         });
         const words = el('span', 'maintenance-choice-text');
         words.append(el('span', undefined, entry.label));
-        if (entry.detail !== null) words.append(el('small', 'field-note', entry.detail));
+        if (entry.detail !== null) words.append(` · ${entry.detail}`);
         option.append(radio, words);
         fieldset.append(option);
       }

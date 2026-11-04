@@ -61,7 +61,8 @@ function resultList(result: SearchBackendProbeProjection): HTMLElement {
     const item = element('li');
     const link = element('a', undefined, hit.title);
     link.href = hit.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    item.append(link, element('span', 'field-note', ` ${hit.url}`)); list.append(item);
+    if (technicalLayerVisible) link.append(` · ${hit.url}`);
+    item.append(link); list.append(item);
   }
   return list;
 }
@@ -81,8 +82,10 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   const card = element('article', 'model-role-card');
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
-  card.append(element('h4', undefined, `${candidate.name} · 未实测`), element('p', 'field-note', technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`));
-  for (const line of candidate.disclosure) card.append(element('p', 'field-note', technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')));
+  card.append(element('h4', undefined, `${candidate.name} · 未实测`));
+  const price = technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`;
+  const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
+  card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
   const probe = button(SEARCH_CANDIDATE_PROBE_LABEL, 'quiet', async () => {
@@ -107,8 +110,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
   section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务优先使用主编辑模型自带搜索，否则使用已配置的检索后端；已开始的运行继续使用原定来源。'),
-    element('p', 'field-note', effectiveSearchSourceLine(projection)),
-    element('p', 'field-note', `备用来源：${SEARCH_FALLBACK_NOTE}`));
+    element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；备用来源：${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
@@ -133,9 +135,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     card.dataset['selected'] = String(selected);
     card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
     card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${selected ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
-      element('p', 'field-note', keyed ? '密钥已保存；可测试当前连接' : '未配置密钥'),
-      element('p', 'field-note', `评测参考 · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price}`),
-      element('p', 'field-note', `评测参考 · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
+      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
     if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
     const actions = element('div', 'button-row');
     const choose = button('选择后端', 'quiet', () => void (async () => {
