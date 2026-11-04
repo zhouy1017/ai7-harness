@@ -460,6 +460,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   title.id = 'task-drawer-title';
   title.tabIndex = -1;
   const pill = el('span', 'status-pill review-pill task-drawer-pill');
+  pill.setAttribute('role', 'status');
   const modes = el('div', 'task-drawer-modes');
   modes.setAttribute('role', 'group');
   modes.setAttribute('aria-label', TASK_DRAWER_MODE_GROUP);
@@ -2666,10 +2667,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       delete root.dataset['taskPlanVersion'];
       delete root.dataset['taskPlanStart'];
       root.dataset['taskPlanState'] = 'loading';
-      pill.hidden = true;
+      pill.textContent = TASK_DRAWER_LOADING;
+      pill.hidden = false;
       questions.replaceChildren();
       questionsPainted = '';
-      body.replaceChildren(questions, el('p', 'field-note task-drawer-loading', TASK_DRAWER_LOADING));
+      body.replaceChildren(questions);
       bar.hidden = true;
       bar.replaceChildren();
       options.onOpen();
