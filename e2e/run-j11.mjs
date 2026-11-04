@@ -3165,7 +3165,7 @@ async function main() {
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
-    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。', [
+    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评', [
       ['literary-quality', '0.5', '文学品质与作者声音：+0.5 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
       ['theme-and-context', '0', '主题、价值与社会文化语境：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
       ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
