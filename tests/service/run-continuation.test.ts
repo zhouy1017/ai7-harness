@@ -311,6 +311,8 @@ describe('暂停 and 续行 over the real store', () => {
       expect(second.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [] });
       const plan = await second.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: taskIntentId }, async () => null, ONLINE, () => null);
       expect(plan).toMatchObject({ state: { key: 'resumable' }, runControl: { resume: { reason: null }, continuation: { unitsSettled: 2 } } });
+      expect(plan.runControl?.stopReason).toBe('shutdown');
+      expect(plan.runControl?.stopAt).toBeUndefined();
       secondOwner.admitAndDispatch(runRecordId, second.baselineAnalysisLedger, { resume: true });
       await secondOwner.whenIdle();
       const settled = second.inspectBaselineAnalysis(bookId, () => null);
@@ -339,6 +341,8 @@ describe('暂停 and 续行 over the real store', () => {
       const cancelling = await run('L2 sample1 遗留取消', ['admitted', 'executing', 'cancelling']);
       expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 2, cancelling: [cancelling.runRecordId] });
       expect(store.inspectBaselineAnalysis(executing.bookId, () => null).run!.transitions.at(-1)).toMatchObject({ state: 'resumable', detail: RECONCILED_RESUMABLE_DETAIL });
+      expect(store.inspectTaskPlan({ bookId: executing.bookId, kind: 'baseline-analysis', ref: executing.taskIntentId }).runControl)
+        .toMatchObject({ stopReason: 'shutdown' });
       expect(store.inspectBaselineAnalysis(pausing.bookId, () => null).run!.transitions.at(-1)).toMatchObject({ state: 'paused', detail: RECONCILED_PAUSED_DETAIL });
       // A second look finds nothing left to settle.
       expect(store.reconcileStoppedBaselineAnalysisRuns()).toEqual({ settled: 0, cancelling: [cancelling.runRecordId] });
