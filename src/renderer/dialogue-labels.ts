@@ -107,7 +107,7 @@ export const DIALOGUE_CONVERT_PROPOSED = '建议改为';
 export const DIALOGUE_CONVERT_RATIONALE = '理由';
 /** The conversion is a separate governed object (DIALOG-016): nothing is applied until the editor decides it. */
 export const DIALOGUE_CONVERT_NOTE = '会在所选文字上新建一条 AI7 修改建议，依据这次回答；它不会自动应用，是否接受由你决定。';
-export const DIALOGUE_CONVERT_SUBMIT = '新建修改建议';
+export const DIALOGUE_CONVERT_SUBMIT = '新建修改建议，待你决定';
 export function dialogueConvertedLine(count: number): string {
   return `已从这次回答新建 ${count} 条修改建议。`;
 }

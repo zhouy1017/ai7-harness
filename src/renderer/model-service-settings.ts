@@ -13,6 +13,13 @@ const proxyProbeMessages = {
   unreachable: '代理不可达：请检查网络代理设置。',
 };
 
+function policyDenial(reason: string | null): string {
+  if (reason === 'launch-scope-not-selectable') return '当前启动方式不允许使用模型服务。';
+  if (reason === 'binding-not-allowed') return '当前模型连接不在允许范围内。';
+  if (reason === 'launch-policy-integrity-denied') return '无法验证当前设置，模型服务不可用。';
+  return '模型服务暂不可用，请检查设置后重试。';
+}
+
 /** The shell's helpers and routes used by 模型服务. */
 export interface ModelServiceSettingsOptions {
   readonly element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
@@ -83,8 +90,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       }
     });
     form.append(mode, input, save);
-    section.append(element('p', 'field-note', '绝大多数本机代理（Clash、v2rayN、ProxyBridge 等）用 http://127.0.0.1:端口；只有代理本身提供 TLS 入口时才用 https://。'));
-    section.append(form, element('p', 'field-note', '仅用于获准的模型服务请求。此设备的网络代理设置不随数据库导入、导出或备份迁移。代理认证将在后续版本提供。'));
+    section.append(form, element('p', 'field-note', '本机代理通常使用 http://127.0.0.1:端口，仅在代理支持 TLS 时使用 https://；代理只用于获准的模型请求，设置不随数据库迁移，暂不支持代理认证。'));
     if (projection.lastProxyProbe) {
       const probe = projection.lastProxyProbe;
       const line = element('p', probe.status === 'available' ? 'success-note' : 'attention-note',
@@ -143,21 +149,22 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       projection.launchPolicy.integrityState === 'verified' ? 'success-note' : 'attention-note',
       projection.launchPolicy.integrityState === 'verified'
         ? launchPolicyIntegritySentence(projection.launchPolicy.providerProcessing.label)
-        : '模型服务暂不可用，请检查设置后重试。',
+        : policyDenial(projection.launchPolicy.denialReason),
     );
     policyIntegrity.dataset['policyIntegrityState'] = projection.launchPolicy.integrityState;
+    const authority = element('p', 'attention-note', projection.authorityStatement);
     policy.append(
       element('h3', undefined, '当前策略边界'),
-      policyIntegrity,
+      ...(technicalLayerVisible ? [policyIntegrity] : []),
       element('p', undefined, projection.launchPolicy.providerProcessing.label),
       element('p', undefined, projection.launchPolicy.externalExport.label),
       element('p', undefined, projection.launchPolicy.publicReleasePermission.label),
-      element('p', 'attention-note', projection.authorityStatement),
+      ...(technicalLayerVisible ? [authority] : []),
     );
     const protectedStore = element(
       'p',
       'field-note',
-      `安全凭据库：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}。未启用文件或命令行替代存储。`,
+      `安全凭据库：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}；未启用文件或命令行替代存储。`,
     );
     const technical = element('details', 'model-service-technical');
     technical.append(element('summary', undefined, '查看技术详情'), unsupported, policy, protectedStore);
@@ -166,8 +173,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       discovery.dataset['modelDiscoveryCode'] = projection.modelDiscovery.code;
       discovery.append(
         element('h3', undefined, '模型列表获取失败'),
-        element('p', undefined, projection.modelDiscovery.reason),
-        element('p', 'field-note', `错误代码：${projection.modelDiscovery.code}`),
+        element('p', undefined, `${projection.modelDiscovery.reason.replace(/。$/u, '')}；错误代码：${projection.modelDiscovery.code}`),
       );
       technical.append(discovery);
     }
@@ -181,7 +187,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       details.append(element('summary', undefined, '网络代理'), proxy);
       content.append(details);
     }
-    content.append(technicalDisclosure(technical), actions);
+    content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
   }
 

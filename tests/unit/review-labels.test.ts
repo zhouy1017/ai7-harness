@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   reviewInfluenceMaterialLine,
@@ -98,6 +99,9 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_DESTINATION_ACTIONS).toEqual(['打开稿件', '工作概览']);
     expect(reviewManuscriptLine(manuscript)).toBe('当前稿件：修订版 r2 · 97 个段落');
     expect(reviewManuscriptLine(null)).toBe('这本书还没有稿件；导入稿件后才能审阅。');
+    setTechnicalLayerVisible(false);
+    expect(reviewManuscriptLine(manuscript)).toBe('当前稿件 · 97 个段落');
+    setTechnicalLayerVisible(true);
   });
 
   it('labels every action with the specification\'s own words', () => {
@@ -186,6 +190,10 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个段落');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: null })).toBe('选好起止的章后显示');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」（段落 1–43）');
+    setTechnicalLayerVisible(false);
+    expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件的全部 97 个段落');
+    expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」 · 第 1–43 段');
+    setTechnicalLayerVisible(true);
     expect(reviewReadConsequence('changed', manuscript, none)).toBe('每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审');
     expect(reviewReadConsequence('selection', manuscript, none)).toBe('稿件里选中的文字');
     expect(reviewSendConsequence([])).toBe('选好类别后显示');
@@ -255,7 +263,7 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('holds 忽略并说明 to a reason the service will take', () => {
-    expect(REVIEW_IGNORE_LABEL).toBe('忽略的原因（必填，最多 500 字）');
+    expect(REVIEW_IGNORE_LABEL).toBe('忽略原因 · 必填，最多 500 字');
     expect(reviewIgnoreReasonProblem('')).toBe(REVIEW_IGNORE_REQUIRED);
     expect(reviewIgnoreReasonProblem('   ')).toBe('忽略一条发现需要说明原因。');
     expect(reviewIgnoreReasonProblem(`  ${'字'.repeat(500)}  `)).toBeNull();

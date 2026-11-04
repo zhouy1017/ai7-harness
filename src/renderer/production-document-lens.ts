@@ -84,11 +84,13 @@ export function renderDocumentLens(
   const workflow = renderDocumentWorkflow(context.document.workflow, workflowActions);
   const versions = el('section', 'document-lens-section document-versions');
   const materials = el('section', 'document-lens-section document-materials');
-  materials.append(el('h3', undefined, DOCUMENT_MATERIALS_HEADING));
+  const materialsHeading = el('h3', undefined, DOCUMENT_MATERIALS_HEADING);
+  materials.append(materialsHeading);
   // How the material it was made from was read, for as long as the document exists (Issue #547).
   const notCarried = context.document.origin.marksNotCarried;
-  if (notCarried !== null && notCarried > 0) materials.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
-  materials.append(el('p', 'field-note document-materials-empty', DOCUMENT_MATERIALS_EMPTY));
+  const materialsState = el('span', 'document-materials-empty', DOCUMENT_MATERIALS_EMPTY);
+  materialsHeading.append(' · ', materialsState);
+  if (notCarried !== null && notCarried > 0) materialsHeading.append(' · ', el('span', 'document-origin-marks', documentOriginMarksLine(notCarried)));
   aside.append(el('p', 'section-label', DOCUMENT_LENS_LABEL), workflow.element, versions, materials);
   // The document as the service last answered, and the working digest the window holds now.
   let shown = context.document;
@@ -114,18 +116,21 @@ export function renderDocumentLens(
       list.append(item);
     }
     versions.replaceChildren(versionsHeading, list);
-    if (shown.versionsTruncated) versions.append(el('p', 'field-note', DOCUMENT_VERSIONS_TRUNCATED));
-    if (standing.changedSinceVersion) versions.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+    if (shown.versionsTruncated || standing.changedSinceVersion) {
+      const status = el('span');
+      if (shown.versionsTruncated) status.append(standing.changedSinceVersion ? DOCUMENT_VERSIONS_TRUNCATED.replace(/。$/u, '') : DOCUMENT_VERSIONS_TRUNCATED);
+      if (standing.changedSinceVersion) status.append(...(shown.versionsTruncated ? ['；'] : []), el('span', 'document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+      versionsHeading.append(' · ', status);
+    }
     if (shown.deliveries.length > 0) {
       versions.append(el('h4', undefined, DOCUMENT_DELIVERIES_HEADING));
       const deliveries = el('ol', 'document-lens-deliveries');
       for (const delivery of shown.deliveries) {
         const item = el('li');
         item.dataset['deliveryId'] = delivery.deliveryId;
-        item.append(
-          el('span', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt))),
-          el('span', 'field-note document-delivery-export', documentDeliveryExportLine(delivery)),
-        );
+        const record = el('span', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt)));
+        record.append(' · ', el('span', 'document-delivery-export', documentDeliveryExportLine(delivery)));
+        item.append(record);
         deliveries.append(item);
       }
       versions.append(deliveries);

@@ -17,7 +17,7 @@ export interface SearchBackendSettingsOptions {
 }
 
 export const SEARCH_CANDIDATE_PROBE_LABEL = '测试连接';
-export const SEARCH_FALLBACK_NOTE = '设置备用来源后，默认来源连接未建立、服务出错或限流时，同一检索最多重试一次；仍失败再切换一次。默认使用博查且明确返回余额或套餐额度不足时，直接切换一次；其他认证错误不会切换。只能选择一个已保存密钥的后端，且不能与默认来源相同；候选接口不能作为备用来源。随模型渠道使用自带搜索时，不会切换到本页的备用来源；开启总是使用选定后端后，按本页配置切换。';
+export const SEARCH_FALLBACK_NOTE = '设置备用来源后，连接或服务出错、限流时最多重试一次再切换；博查明确返回余额或套餐额度不足时，直接切换一次，其他认证错误不会切换；备用只能选一个，须已保存密钥且不同于默认来源，未实测候选不可选；模型自带搜索不切换，始终使用选定后端时按此规则切换。';
 export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidateProbeOutcome, string>> = Object.freeze({
   succeeded: '连接成功',
   'succeeded-empty': '连接成功 · 没有结果',
@@ -36,8 +36,8 @@ export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjec
   if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索`;
   const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
   return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
-    : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}（已开启总是使用选定后端）`
-    : `当前生效来源：兜底 · ${selected.name}（模型渠道没有可用的原生搜索）`;
+    : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}`
+    : `当前生效来源：兜底 · ${selected.name}`;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -62,7 +62,8 @@ function resultList(result: SearchBackendProbeProjection): HTMLElement {
     const item = element('li');
     const link = element('a', undefined, hit.title);
     link.href = hit.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-    item.append(link, element('span', 'field-note', ` ${hit.url}`)); list.append(item);
+    if (technicalLayerVisible) link.append(` · ${hit.url}`);
+    item.append(link); list.append(item);
   }
   return list;
 }
@@ -82,8 +83,10 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   const card = element('article', 'model-role-card');
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
-  card.append(element('h4', undefined, `${candidate.name} · 未实测`), element('p', 'field-note', technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`));
-  for (const line of candidate.disclosure) card.append(element('p', 'field-note', technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')));
+  card.append(element('h4', undefined, `${candidate.name} · 未实测`));
+  const price = technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`;
+  const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
+  card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
   const probe = button(SEARCH_CANDIDATE_PROBE_LABEL, 'quiet', async () => {
@@ -109,9 +112,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.dataset['searchBackends'] = 'true';
   const heading = element('h3', undefined, '联网检索');
   if (technicalLayerVisible) heading.dataset['developerOnly'] = 'true';
-  section.append(heading, element('p', 'field-note', '新任务优先随主编辑模型渠道使用自带搜索；没有可用的自带搜索时使用已配置的检索后端。已开始的运行继续使用冻结的来源。'),
-    element('p', 'field-note', effectiveSearchSourceLine(projection)),
-    element('p', 'field-note', `备用来源：${SEARCH_FALLBACK_NOTE}`));
+  section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
@@ -136,10 +137,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     card.dataset['selected'] = String(selected);
     card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
     card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${selected ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
-      element('p', 'field-note', keyed ? '密钥已保存；可测试当前连接' : '未配置密钥'),
-      element('p', 'field-note', `评测参考 · 延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price}`),
-      element('p', 'field-note', `评测参考 · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
-    if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
+      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%${backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
     const actions = element('div', 'button-row');
     const choose = button('选择后端', 'quiet', () => void (async () => {
       try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
@@ -181,7 +179,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       })());
       save.disabled = true; remove.disabled = !keyed;
       secret.addEventListener('input', () => { save.disabled = secret.value.trim().length === 0; });
-      card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
+      card.append(secret);
       actions.append(save, remove);
       const service = backend.backendId.slice('search-'.length);
       const source = projection.routeChoice.routes.find((route) => route.route.startsWith(`${service}-`))?.connection;

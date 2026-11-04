@@ -778,7 +778,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: suggestion
         ? [
             { name: 'proposedText', label: '改为', value: range.text, required: false, hint: '留空表示删去这段文字。' },
-            { name: 'rationale', label: '修改理由（可选）', value: '', required: false },
+            { name: 'rationale', label: '修改理由 · 可选', value: '', required: false },
           ]
         : [{ name: 'body', label: kind === 'annotation' ? '批注内容' : '备注内容', value: '', required: true }],
       submitLabel: suggestion ? '提出修改建议' : kind === 'annotation' ? '添加批注' : '添加备注',
@@ -850,7 +850,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: suggestion
         ? [
             { name: 'proposedText', label: '改为', value: source.pinnedText, required: false, hint: '留空表示删去这段文字。' },
-            { name: 'rationale', label: '修改理由（可选）', value: source.kind === 'annotation' || source.kind === 'editor-note' ? source.body : '', required: false },
+            { name: 'rationale', label: '修改理由 · 可选', value: source.kind === 'annotation' || source.kind === 'editor-note' ? source.body : '', required: false },
           ]
         : [{ name: 'body', label: target === 'annotation' ? '批注内容' : '备注内容', value: source.body, required: true }],
       submitLabel: CONVERT_LABELS[target],
@@ -1213,7 +1213,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                     name: 'proposedText', label: '编辑建议文本', value: suggestion.proposedText, required: false,
                     hint: inserts ? '填写要在此插入的文字。' : '留空表示删去这段文字。',
                   },
-                  { name: 'reason', label: '为什么这样改？（可选 · 帮助 AI7 学习你的判断）', value: '', required: false },
+                  { name: 'reason', label: '为什么这样改？ · 可选', value: '', required: false },
                 ],
                 submitLabel: '接受修改后的版本并应用',
                 submit: (values) => writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({

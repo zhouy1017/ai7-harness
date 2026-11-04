@@ -54,7 +54,7 @@ export function completionLabel(item: GlobalAttentionItemProjection): string {
 /** 设置 › 本机 › 通知 and the quiet completion notice (Issue #937). */
 export const NOTIFICATION_SETTINGS_WORDS = Object.freeze({
   title: '通知',
-  note: '系统通知仅在 AI7 所有窗口都不在前台时发送。默认只用通用措辞；这些开关不授予任何处理或发布权限。',
+  note: '系统通知仅在 AI7 所有窗口都不在前台时发送，默认只用通用措辞；这些开关不授予任何处理或发布权限。',
   enabled: '系统通知',
   completions: '普通完成提示也发系统通知',
   sound: '通知声音',
@@ -66,7 +66,7 @@ export const NOTIFICATION_SETTINGS_WORDS = Object.freeze({
 });
 
 export const QUIET_NOTICE_WORDS = Object.freeze({
-  region: '最近完成提示',
+  region: '提示',
   view: '查看结果',
   close: '关闭提示',
 });

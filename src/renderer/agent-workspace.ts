@@ -126,11 +126,15 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   pageControls.append(previous, next);
   const chosen = el('p', 'agent-workspace-selection', words.noSelection);
   chosen.dataset['agentWorkspaceSelection'] = 'none';
-  pick.append(el('h3', undefined, words.pick), el('p', 'field-note', words.pickNote), pages, pageControls, chosen);
+  const pickHeading = el('h3', undefined, words.pick);
+  const noManuscript = el('span', undefined, ` · ${words.noManuscript}`);
+  noManuscript.hidden = true;
+  pickHeading.append(noManuscript);
+  pick.append(pickHeading, pages, pageControls, chosen);
 
   const form = el('section', 'agent-workspace-instruction');
   const instructionId = `agent-workspace-instruction-${bookId}`;
-  const label = el('label', undefined, words.instruction);
+  const label = el('label', undefined, `${words.instruction} · ${words.instructionNote}`);
   label.htmlFor = instructionId;
   const instruction = el('textarea');
   instruction.id = instructionId;
@@ -139,7 +143,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   instruction.dataset['agentWorkspaceField'] = 'instruction';
   instruction.value = remembered?.instruction ?? '';
   const propose = actionButton(words.propose, 'propose', 'primary', () => void runPropose());
-  form.append(label, instruction, el('p', 'field-note', words.instructionNote), propose);
+  form.append(label, instruction, propose);
 
   const proposalHost = el('section', 'agent-workspace-proposal');
   proposalHost.hidden = true;
@@ -200,10 +204,13 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       const anchor = (await api.getBookOverview({ bookId, historyCursor: null })).manuscriptAnchor;
       if (destroyed) return;
       if (anchor === null) {
-        pages.replaceChildren(el('p', 'field-note', words.noManuscript));
+        pages.replaceChildren();
+        noManuscript.hidden = false;
         pageControls.hidden = true;
         return;
       }
+      noManuscript.hidden = true;
+      pageControls.hidden = false;
       entryBlockId = anchor.entry?.blockId ?? null;
       const sameEntry = remembered?.entryBlockId === entryBlockId;
       const blockId = restore ? (sameEntry ? remembered?.blockId : undefined) ?? anchor.entry?.blockId : undefined;
@@ -249,10 +256,12 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     proposalHost.hidden = false;
     proposalHost.dataset['agentWorkspaceProposal'] = proposal.state;
     proposalHost.dataset['proposalSetId'] = proposal.proposalSetId;
-    const state = el('p', proposal.state === 'failed' ? 'attention-note' : 'field-note', proposal.label);
+    const state = el('span', proposal.state === 'failed' ? 'attention-note' : undefined, proposal.label);
     state.dataset['agentWorkspaceLabel'] = '';
     state.setAttribute('role', 'status');
-    proposalHost.append(el('h3', undefined, words.proposal), el('p', 'muted', `${words.instruction}：${proposal.instruction}`), state);
+    const heading = el('h3', undefined, words.proposal);
+    heading.append(' · ', state);
+    proposalHost.append(heading, el('p', 'muted', `${words.instruction}：${proposal.instruction}`));
     if (proposal.candidates.length > 0) {
       const list = el('ol', 'agent-workspace-candidates');
       for (const candidate of proposal.candidates) {

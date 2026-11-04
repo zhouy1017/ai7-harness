@@ -63,7 +63,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const FIRST = Object.freeze({ title: '人员旅程甲' });
 const SECOND = Object.freeze({ title: '人员旅程乙' });
 const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', relatedRole: 'proofreader', relatedName: '王四' });
-const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之后反馈与学习记录的归属；它们不是账号，也不决定谁能做什么。';
+const PEOPLE_NOTE = '作者与责编用于标注、查找及反馈与学习归属，不决定操作权限。';
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
 /**
@@ -79,7 +79,7 @@ const MARKET_LISTS = [
   ['sellingPoints', '差异化卖点 AI7 · 据书稿题材推断', ['以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。', '学者之间的对白各具声口，写出学界中人的性情与分寸。']],
   ['channels', '渠道与策略 AI7 · 据书稿题材推断', ['可从书中的考古与青铜器话题切入，面向文史爱好者推介。', '以学术与名利的冲突为话题，组织书评与读书会讨论。']],
 ];
-const MARKET_OFFLINE = '市场部分是否检索外网，以产生这一版的运行报告为准；没有检索记录时为「未联网核查」。市场判断仍需人工核对。';
+const MARKET_OFFLINE = '联网情况以运行报告为准，无检索记录即未联网核查；市场判断仍需人工核对。';
 const MARKET_AWARDS = '有参评文学奖的潜力，但确定性低。（依据：所读部分叙述凝练、意象运用纯熟，并触及学术与权力的主题；没有对比任何获奖作品。）';
 const PRICING_WAITING = '不预测。本社已录入定价与首印的已发稿图书 0 / 30 本；满 30 本后，可在「设置 › 评估校准与预测」里打开预测。';
 /** AI7's 评语 of each item as the authored 初评 writes them, and the words 按我的评分重写评语 writes for 第 15 版 (S81b2). */
@@ -115,7 +115,7 @@ const AI7_ITEM_LINES = [
 /** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
 const SYNOPSIS_REASON = '（旅程示例）少了尾声';
-const METRIC_NOTE = '只统计你明确给出的判断：没有判断的条目不算认可；这是对分析结果的评价，不代表事实核实，也不改变 AI7 的做法。';
+const METRIC_NOTE = '只统计明确判断，没有判断的条目不算认可；评价不代表事实核实，也不改变 AI7 的做法。';
 /** 就地反馈轻问's suggestions and reason (Issue #61): the Journey's own words, never the manuscript's. */
 const SUGGESTION_REJECTED = '（旅程示例一）';
 const SUGGESTION_APPLIED = '（旅程示例二）';
@@ -125,7 +125,7 @@ const LEARNING_NOTE = '（旅程示例）只在这本书里参考';
 /** 反馈历史's words (Issue #61, S26c), and the stand-in people the Journey gives 评估旅程丙. */
 const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
 const THIRD_PEOPLE = Object.freeze({ authors: '冯五', editors: '郑三', laterEditors: '王六' });
-const LEARNING_BASIS = '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料。明确排除或更窄范围立即优先。仅本机收集，不发送内容，也不训练基础模型。';
+const LEARNING_BASIS = '本机学习默认开启：记录符合准入的处理与改写，供以后跨书参考；可随时关闭全局开关，或排除某本书、某条材料；明确排除或更窄范围立即优先；仅本机收集，不发送内容，也不训练基础模型。';
 const LEARNING_INFLUENCE = '纳入以后，它只可能在所选范围内帮 AI7 以后的建议更接近你的判断：不会改动稿件或它来自的记录，不会自动生效为规则，不会启用记忆，也不会被发送出去。';
 const BROWSER_CLOSE_TIMEOUT_MS = 25_000;
 const BROWSER_CLOSE_TIMEOUT = journeyCheckFailure('J-11', 'browser-close-timeout');
@@ -365,7 +365,7 @@ async function backToLibrary(renderer, name) {
 const CARDS = `Array.from(document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item'), (card) => ({
   bookId: card.querySelector('button[data-book-id]')?.dataset.bookId ?? null,
   title: card.querySelector('button[data-book-id]')?.textContent ?? '',
-  people: card.querySelector('.book-people-line')?.textContent ?? null,
+  people: card.querySelector('.book-people-line')?.firstChild?.textContent ?? null,
   related: card.querySelector('.book-related-line')?.textContent ?? null,
 }))`;
 
@@ -417,7 +417,7 @@ const READ_EVALUATION = `(() => {
   return {
     state: host.dataset.evaluation ?? null,
     empty: host.querySelector('.evaluation-empty')?.textContent ?? null,
-    start: host.querySelector('[data-evaluation-action="start"]')?.textContent ?? null,
+    start: host.querySelector('[data-evaluation-action="start"]')?.firstChild?.textContent ?? null,
     startReason: host.querySelector('.evaluation-start-reason')?.textContent ?? null,
     versions: Array.from(host.querySelectorAll('.evaluation-version-list button'), (button) => button.textContent),
     refusal: host.querySelector('.evaluation-refusal')?.textContent ?? null,
@@ -429,9 +429,9 @@ const READ_EVALUATION = `(() => {
       const section = host.querySelector('.evaluation-initial');
       return section === null ? null : {
         state: section.dataset.initialState ?? null,
-        task: section.querySelector('.evaluation-initial-task')?.textContent ?? null,
+        task: section.querySelector('.evaluation-initial-task')?.firstChild?.textContent ?? null,
         none: section.querySelector('.evaluation-initial-none')?.textContent ?? null,
-        latest: section.querySelector('.evaluation-initial-latest')?.textContent ?? null,
+        latest: section.querySelector('.evaluation-initial-latest')?.firstChild?.textContent ?? null,
         items: Array.from(section.querySelectorAll('.evaluation-initial-items li'), (line) => [line.dataset.itemId, line.dataset.sufficiency, line.textContent]),
         conclusion: section.querySelector('.evaluation-initial-conclusion')?.textContent ?? null,
         actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button:not([data-evaluation-action="close-initial-sheet"])'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
@@ -441,7 +441,7 @@ const READ_EVALUATION = `(() => {
     record: record === null ? null : {
       state: record.dataset.evaluationState,
       entries: record.dataset.entries,
-      heading: record.querySelector('h3')?.textContent ?? null,
+      heading: record.querySelector('h3')?.firstChild?.textContent ?? null,
       revision: record.querySelector('.evaluation-revision')?.textContent ?? null,
       finalized: record.querySelector('.evaluation-finalized')?.textContent ?? null,
       ai7: record.querySelector('.evaluation-ai7')?.textContent ?? null,
@@ -453,7 +453,7 @@ const READ_EVALUATION = `(() => {
         : [record.querySelector('.evaluation-comparison h4')?.textContent ?? null, ...Array.from(record.querySelectorAll('.evaluation-comparison li'), (item) => item.textContent)],
       items: Array.from(record.querySelectorAll('.evaluation-item'), (item) => {
         const band = item.querySelector('.evaluation-band');
-        return [item.dataset.itemId, item.querySelector('legend')?.textContent ?? null, item.querySelector('[data-evaluation-field="score"]')?.value ?? null,
+        return [item.dataset.itemId, item.querySelector('legend')?.firstChild?.textContent ?? null, item.querySelector('[data-evaluation-field="score"]')?.value ?? null,
           band instanceof HTMLElement && !band.hidden ? band.textContent : null, item.querySelector('[data-evaluation-field="not-rated"]')?.checked ?? null];
       }),
       conclusions: Array.from(record.querySelectorAll('.evaluation-conclusion [data-conclusion]'), (choice) => [choice.dataset.conclusion, choice.querySelector('input')?.checked ?? null, choice.querySelector('input')?.disabled ?? null]),
@@ -504,7 +504,7 @@ const READ_EVALUATION = `(() => {
         actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
-          line: card.querySelector('.evaluation-rewrite-proposal-line')?.textContent ?? null,
+          line: card.querySelector('.evaluation-rewrite-proposal-line')?.firstChild?.textContent ?? null,
           reading: card.querySelector('.evaluation-rewrite-reading')?.textContent ?? null,
           withheld: Array.from(card.querySelectorAll('.evaluation-rewrite-withheld'), (line) => line.textContent),
           evidence: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd'), (value) => value.querySelectorAll('.evaluation-rewrite-evidence li').length),
@@ -814,7 +814,7 @@ const readAttentionItem = (selector) => `(() => {
     group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null,
     state: item.dataset.attentionState ?? null,
     book: item.querySelector('.global-attention-book')?.textContent ?? null,
-    object: item.querySelector('button.global-attention-open')?.textContent ?? null,
+    object: item.querySelector('.global-attention-object-name')?.textContent ?? null,
     pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
     next: item.querySelector('.global-attention-next')?.textContent ?? null,
   };
@@ -836,7 +836,7 @@ const READ_LEARNING = `(() => {
     basis: root.querySelector('.learning-basis')?.textContent ?? null,
     books: Array.from(root.querySelectorAll('.learning-book'), (book) => ({
       bookId: book.dataset.bookId ?? null,
-      heading: book.querySelector('h3')?.textContent ?? null,
+      heading: book.querySelector('h3')?.firstChild?.textContent ?? null,
       people: book.querySelector('.learning-people')?.textContent ?? null,
       materials: Array.from(book.querySelectorAll('li.learning-material'), (item) => [
         kindOf(item), item.dataset.learningState ?? null, item.querySelector('.learning-state')?.textContent ?? null,
@@ -885,11 +885,11 @@ const READ_HISTORY = `(() => {
   return {
     note: root.querySelector('.feedback-history-note')?.textContent ?? null,
     none: root.querySelector('.feedback-history-none')?.textContent ?? null,
-    books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
+    books: Array.from(root.querySelectorAll('.feedback-book'), (book) => [book.querySelector('h3')?.firstChild?.textContent ?? null, book.querySelector('.feedback-people')?.textContent ?? null]),
     grouping: root.dataset.feedbackGrouping ?? null,
-    groups: Array.from(root.querySelectorAll('.feedback-group'), (group) => [group.querySelector('h3')?.textContent ?? null, group.querySelectorAll('li.feedback-entry').length]),
+    groups: Array.from(root.querySelectorAll('.feedback-group'), (group) => [group.querySelector('h3')?.firstChild?.textContent ?? null, group.querySelectorAll('li.feedback-entry').length]),
     entryBooks: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-book')?.textContent ?? null),
-    entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-line')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
+    entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-description')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
     people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
     loading: root.querySelector('[data-feedback-filter]')?.dataset.disabled === 'true',
     filters: Object.fromEntries(Array.from(root.querySelectorAll('[data-feedback-filter]'), (group) => [group.dataset.feedbackFilter, [group.dataset.value, Array.from(group.querySelectorAll('[data-filter-value]'), (option) => option.textContent)]])),
@@ -937,7 +937,7 @@ const READ_AUDIT = `(() => {
     note: root.querySelector('.learning-audit-note')?.textContent ?? null,
     later: root.querySelector('.learning-audit-later')?.textContent ?? null,
     none: root.querySelector('.learning-audit-none')?.textContent ?? null,
-    books: Array.from(root.querySelectorAll('.learning-audit-book'), (book) => book.querySelector('h3')?.textContent ?? null),
+    books: Array.from(root.querySelectorAll('.learning-audit-book'), (book) => book.querySelector('h3')?.firstChild?.textContent ?? null),
     bookOptions: Array.from(root.querySelectorAll('#learning-audit-filter-book [data-filter-value]'), (option) => option.textContent),
     standingFilter: root.querySelector('#learning-audit-filter-standing')?.dataset.value ?? null,
     rows: Array.from(root.querySelectorAll('li.learning-audit-material'), (item) => [item.dataset.materialKey ?? null, item.dataset.learningStanding ?? null,
@@ -951,7 +951,7 @@ const READ_AUDIT = `(() => {
     lineage: lineage === null ? null : {
       key: lineage.dataset.materialKey ?? null,
       standing: lineage.dataset.learningStanding ?? null,
-      heading: lineage.querySelector('h4')?.textContent ?? null,
+      heading: lineage.querySelector('h4')?.firstChild?.textContent ?? null,
       steps: Array.from(lineage.querySelectorAll('.learning-lineage-step'), (step) => [step.dataset.lineageStep, step.dataset.lineageCount ?? null, step.querySelector('h5')?.textContent ?? null]),
       decisions: Array.from(lineage.querySelectorAll('.learning-lineage-decision'), (item) => [item.dataset.decisionState, item.dataset.decisionVia,
         (item.querySelector('.learning-lineage-decision-line')?.textContent ?? '').split(' · ')[0], item.querySelector('.learning-lineage-decision-status')?.textContent ?? null]),
@@ -970,6 +970,7 @@ const READ_AUDIT = `(() => {
       confirm: enabled(preview.querySelector('[data-learning-audit-action="confirm"]')),
     },
     reinclude: reinclude === null ? null : {
+      boundary: reinclude.querySelector('legend')?.textContent ?? null,
       choices: Array.from(reinclude.querySelectorAll('input'), (input) => [input.value, input.checked]),
       consequence: reinclude.querySelector('.learning-consequence:not([hidden])')?.textContent ?? null,
       record: enabled(reinclude.querySelector('[data-learning-audit-action="reinclude-record"]')),
@@ -994,8 +995,7 @@ async function readAudit(renderer, predicate, name) {
 const auditRow = (key) => `[data-screen="quality-learning"] li.learning-audit-material[data-material-key="${key}"]`;
 // Issue #912: 审阅 Runs read 本社审阅偏好 versions now, so the audit no longer says no Task reads learning material; with no
 // Run having read any in this Journey, every count stays 0 and every empty stage keeps its own words.
-const AUDIT_LATER = '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
-const AUDIT_WHY_EMPTY = '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。';
+const AUDIT_WHY_EMPTY = '学习信号来自这条材料参与生成的本社审阅偏好版本，任务是实际参考这些版本的审阅；目前没有编辑撰写的候选或已启用记忆，并非被隐藏，模型自动归纳尚未提供。';
 const AUDIT_STALE = '预览之后，这些学习材料或它们的准入决定有了变化；请重新查看影响，再决定。';
 
 async function main() {
@@ -1260,7 +1260,7 @@ async function main() {
       const values = Array.from(section.querySelectorAll('dd[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
       return section.querySelector('h3')?.textContent === '人员' && section.dataset.peopleVersion === '0' &&
         JSON.stringify(values) === '["authors:未填写","editors:未填写","related:未填写"]' &&
-        section.querySelector('.book-people-recorded')?.textContent === '尚未填写作者、责编和相关人。' &&
+        section.querySelector('.book-people-recorded')?.textContent === '尚未填写作者、责编和相关人' &&
         section.querySelector('.book-people-note')?.textContent === ${JSON.stringify(PEOPLE_NOTE)} &&
         section.querySelector('[data-people-action="edit"]')?.textContent === '编辑人员…';
     })()`, 'people-empty-section');
@@ -1430,7 +1430,7 @@ async function main() {
     at('evaluation-open');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-open');
     const opened = await readEvaluation(renderer, (page) => page.state === 'ready', 'evaluation-ready');
-    requireJourney(opened.empty === '这本书还没有评估。开始评估后，按本社评估方案逐项打分，定稿后留作记录。' && opened.start === '开始评估' &&
+    requireJourney(opened.empty === '这本书还没有评估。' && opened.start === '开始评估' &&
       opened.versions.length === 0 && opened.record === null, 'evaluation-empty', opened);
 
     at('evaluation-start');
@@ -1438,7 +1438,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
-      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分。' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
       JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
       started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存评估', '定稿']) &&
       started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
@@ -1858,7 +1858,7 @@ async function main() {
     // editor's, no risk and no conclusion chosen for them.
     requireJourney(settledInitial.initial.latest === '第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀' &&
       JSON.stringify(settledInitial.initial.items) === JSON.stringify(AI7_ITEM_LINES) &&
-      settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议（由你选定）' &&
+      settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议' &&
       JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['prepare-initial', '查看计划', false], ['start-initial', '重新初评', false], ['open-initial-task', '查看任务', false]]) &&
       settledInitial.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && settledInitial.startFromInitial === null,
     'initial-evaluation-latest-words', settledInitial.initial);
@@ -1868,7 +1868,7 @@ async function main() {
     requireJourney(closedOpen.startFromInitial === '从 AI7 初评开始' && closedOpen.start === '重新评估', 'initial-evaluation-start-offered', closedOpen);
     await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', 'initial-evaluation-begin');
     const draft = await readEvaluation(renderer, (page) => page.record?.heading === '第 14 版 · AI7 初稿', 'initial-evaluation-begun');
-    requireJourney(draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分。' &&
+    requireJourney(draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分' &&
       JSON.stringify(draft.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '12']) &&
       JSON.stringify(draft.record.ai7Items.map(([itemId, line, offered, ticked]) => [itemId, line, offered, ticked.length])) ===
         JSON.stringify(AI7_ITEM_LINES.map(([itemId, , line]) => [itemId, line.slice(line.indexOf('：') + 1), false, 0])) &&
@@ -1876,14 +1876,14 @@ async function main() {
       JSON.stringify(draft.record.ai7Evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
       draft.record.ai7Unread === null &&
       JSON.stringify(draft.record.suggested) === JSON.stringify([null, 'AI7 建议', null, null]) &&
-      draft.record.ai7Conclusion === 'AI7 建议的结论：修改后再议（由你选定）' && JSON.stringify(draft.record.actions) === JSON.stringify(['保存评估', '定稿']) && draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100'),
+      draft.record.ai7Conclusion === null && JSON.stringify(draft.record.actions) === JSON.stringify(['保存评估', '定稿']) && draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100'),
     'initial-evaluation-draft-words', draft.record);
 
     at('evaluation-market');
     // The market section of 第 14 版 (Issue #429, S81b2; EVAL-009, EVAL-010): AI7's three lists from the 初评 it began from, marked as
     // AI7's and as resting on the Book alone — 未联网核查 — no 书系 comparable for a Book in none and no other house's book, and the
     // 预测 · 低确定性 block: 市场回报 暂无法预测, 评奖可能性 with its in-book basis, and 定价与首印 waiting for thirty published Books.
-    requireJourney(draft.market !== null && draft.market.ai7 === 'true' && draft.market.basis === MARKET_OFFLINE && draft.market.none === null &&
+    requireJourney(draft.market !== null && draft.market.ai7 === 'true' && draft.market.basis === MARKET_OFFLINE.replace(/。$/u, '') && draft.market.none === null &&
       JSON.stringify(draft.market.lists) === JSON.stringify(MARKET_LISTS) && draft.market.withheld.length === 0 &&
       JSON.stringify(draft.market.comparables) === JSON.stringify([]) &&
       draft.market.comparablesNone === '这本书不在任何书系中，没有可以列出的同书系图书。' && draft.market.comparablesWeb === '外网检索尚未接通：不列他社同类书。' &&
@@ -1941,7 +1941,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
     await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-waiting') === null`, 'initial-evaluation-calibration-connected');
     // The offset's waiting line names the same gate as the progress line above it (#741 review P1).
-    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。'`, 'initial-evaluation-calibration-waiting-gate');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。'`, 'initial-evaluation-calibration-waiting-gate');
     const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
     requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
     // Back to 评估 by the manuscript's 工作 group, where the Journey goes on.
@@ -2262,7 +2262,7 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(learningSelector)}) !== null`, 'learning-attention-listed', 30_000);
     const learningListed = await renderer.evaluate(readAttentionItem(learningSelector));
     requireJourney(learningListed?.group === 'decisions' && learningListed.state === 'learning-materials-pending' && learningListed.book === `《${THIRD.title}》` &&
-      learningListed.object === '学习材料 · 2 条待定' && learningListed.pill === '学习准入待处理' && learningListed.next === '安全的下一步：定学习准入…',
+      learningListed.object === '学习材料 · 2 条待定' && learningListed.pill === '学习准入待处理' && learningListed.next === '定学习准入…',
     'learning-attention-words', learningListed);
     await clickSelector(renderer, `${learningSelector} button.global-attention-open`, 'learning-attention-open');
     const learningOpened = await readLearning(renderer, (page) => page.books.length === 1, 'learning-opened');
@@ -2280,7 +2280,7 @@ async function main() {
     const learningCard = await readLearning(renderer, (page) => page.card?.material === 'proposal-decision', 'learning-card');
     requireJourney(learningCard.card.heading === '修改建议 · 拒绝' && JSON.stringify(learningCard.card.excerptHeads) === JSON.stringify(['原文', '建议', '你的原因']) &&
       learningCard.card.excerptTail === '你的原因：证据不足' && learningCard.card.facts.rationale === '你说明了为什么这样处理：它可以帮 AI7 以后的建议更接近你的判断。' &&
-      learningCard.card.facts.basis === LEARNING_BASIS && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
+      learningCard.card.facts.basis === undefined && learningCard.card.facts.influence === LEARNING_INFLUENCE && learningCard.card.facts.decision === '还没有决定。' &&
       learningCard.card.facts.task === undefined &&
       JSON.stringify(learningCard.card.choices) === JSON.stringify([['book', false, false], ['series', false, true], ['house', false, false], ['excluded', false, false], ['deferred', false, false]]) &&
       learningCard.card.recommended === 'book' && learningCard.card.seriesReason === '还没有书系：书系接通后，才能把材料纳入书系。' &&
@@ -2832,8 +2832,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-quality');
     await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-tab');
     const auditAll = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 40, 'learning-audit-all');
-    requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么。停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
-      auditAll.later === AUDIT_LATER && auditAll.books.length === 1 && auditAll.books[0].startsWith(`《${THIRD.title}》 · `) &&
+    requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么；停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
+      auditAll.later === null && auditAll.books.length === 1 && auditAll.books[0].startsWith(`《${THIRD.title}》 · `) &&
       auditAll.rows.every(([, , , use]) => use === '尚未被任何任务使用') &&
       auditAll.rows.every(([, standing, , , selectable]) => selectable === (standing === 'book' || standing === 'house')) &&
       // The 图书 filter offers every Book of the house, those with no material on this page among them (LAUD-002).
@@ -2955,7 +2955,7 @@ async function main() {
     await readAudit(renderer, (page) => page.lineage?.key === auditFirst, 'learning-audit-reopened');
     await clickSelector(renderer, '.learning-lineage [data-learning-audit-action="reinclude"]', 'learning-audit-reinclude-open');
     const reincluding = await readAudit(renderer, (page) => page.reinclude !== null, 'learning-audit-reinclude-card');
-    requireJourney(JSON.stringify(reincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) && reincluding.reinclude.record === false &&
+    requireJourney(reincluding.reinclude.boundary === '重新纳入的范围 · 重新纳入会追加一个新的准入决定；之前的排除仍留在记录里，不会被改写。' && JSON.stringify(reincluding.reinclude.choices) === JSON.stringify([['book', false], ['house', false]]) && reincluding.reinclude.record === false &&
       reincluding.reinclude.consequence === null, 'learning-audit-reinclude-card-words', reincluding.reinclude);
     await tick(renderer, '.learning-reinclude input[value="book"]', 'learning-audit-reinclude-book');
     const reincludeChosen = await readAudit(renderer, (page) => page.reinclude?.record === true, 'learning-audit-reinclude-chosen');
@@ -3077,7 +3077,7 @@ async function main() {
     // 第 16 版 is seeded from 第 14 版定稿 — its scores, not its conclusion — says in its own words which version it skipped, compares
     // with 第 14 版, and the list keeps 第 15 版 named among the unreadable.
     const skippedVersion = await readEvaluation(renderer, (page) => page.record?.heading === '第 16 版 · 编辑评分中', 'evaluation-damaged-skipped');
-    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分。' &&
+    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' &&
       skippedVersion.record.comparison?.[0] === '与第 14 版相比' && JSON.stringify(skippedVersion.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '10']) &&
       skippedVersion.record.conclusions.every(([, checked]) => checked === false) &&
       skippedVersion.unreadable === '第 15 版评估记录已损坏，无法显示；其他版本照常可用。' && skippedVersion.startReason === '第 16 版还没有定稿；定稿后才能重新评估。',
@@ -3147,7 +3147,7 @@ async function main() {
     const calibratedLine = (index, after) => ai7Line(index).replace(' · 依据充分度', ` · 校准后 ${after} / 20 · 依据充分度`);
     requireJourney(JSON.stringify(calibratedDraft.record.items.map(([, , score]) => score)) === JSON.stringify(['17', '15', '15.5', '14', '10']) &&
       calibratedDraft.record.total === '总分 71.5 / 100 · 优秀' &&
-      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。' &&
+      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分' &&
       calibratedDraft.record.ai7Items[0][1] === calibratedLine(0, '17') && calibratedDraft.record.ai7Items[4][1] === calibratedLine(4, '10') &&
       calibratedDraft.record.ai7Items[1][1] === ai7Line(1) && calibratedDraft.record.ai7Items[3][1] === ai7Line(3) &&
       JSON.stringify(calibratedDraft.record.ai7Items.map(([, , offered]) => offered)) === JSON.stringify([false, false, false, false, false]) &&
@@ -3169,17 +3169,17 @@ async function main() {
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
-    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。', [
-      ['literary-quality', '0.5', '文学品质与作者声音：+0.5（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['theme-and-context', '0', '主题、价值与社会文化语境：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['chinese-language', '0', '中文语言与表达：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['readers-and-market', '-2', '读者与市场潜力：−2（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
+    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评', [
+      ['literary-quality', '0.5', '文学品质与作者声音：+0.5 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['theme-and-context', '0', '主题、价值与社会文化语境：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['chinese-language', '0', '中文语言与表达：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['readers-and-market', '-2', '读者与市场潜力：−2 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
     ], null, '其中 1 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。']), 'calibration-disclosed-words', disclosed);
     const disclosedService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.threshold, answer.calibration.unreadableBooks, answer.calibration.active, answer.calibration.offset.basisBooks, answer.calibration.offset.booksWithoutBasis, answer.calibration.offset.items.map((entry) => [entry.itemId, entry.offset, entry.books])]))`);
     requireJourney(disclosedService === JSON.stringify([2, 2, 0, true, 1, 1, [['literary-quality', 0.5, 1], ['theme-and-context', 0, 1], ['structure-and-coherence', 0, 1], ['chinese-language', 0, 1], ['readers-and-market', -2, 1]]]), 'calibration-disclosed-service', disclosedService);
     await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled || !input.checked) return false; input.click(); return true; })()`, 'calibration-off-click');
-    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
+    await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已关闭' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-off-effect')?.textContent === '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。' && document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset')?.dataset.calibrationOffset === 'computed'`, 'calibration-off');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'calibration-off-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'calibration-off-landing');
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id="${calibrationBookId}"]`, 'calibration-off-book');
@@ -3434,7 +3434,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
     const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
     // An explicit house re-inclusion is a human decision; the standing line must not call it the default.
-    const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习。') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
+    const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
     const wordRestored = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.reinclude === null, 'word-audit-reincluded');
     requireJourney(wordRestored.lineage.standing === 'house' && JSON.stringify(wordRestored.lineage.decisions.map(([state, , choice]) => [state, choice])) === wordHistory,
       'word-audit-reincluded-history', wordRestored.lineage);

@@ -3,6 +3,9 @@ import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '.
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
+export const QUIET_NOTICE_MS = 2_500;
+export function showTransientNotice(message: string): void { showToast(message); }
+
 /** Persistent status and transient notices share the same renderer entry point. */
 export function createStatusSurface(surface: HTMLElement): (message: string, tone?: 'busy' | 'success' | 'error') => void {
   let error: string | null = null;

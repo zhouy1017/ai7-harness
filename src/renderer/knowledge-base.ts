@@ -12,7 +12,7 @@ import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
 import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, visibleQualityLearningTabs, type QualityLearningTab } from './quality-learning-labels.js';
-import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_LATER, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
 import { mountImportedSkills } from './imported-skills.js';
@@ -155,8 +155,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         renderExemplars(root, next);
       },
     };
-    root.append(exemplarImportButton(surface));
-    if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
+    const importRow = element('div', 'button-row');
+    if (projection.books.length === 0) importRow.append(element('span', 'exemplars-empty', EXEMPLARS_EMPTY));
+    importRow.append(exemplarImportButton(surface));
+    root.append(importRow);
     const list = element('div', 'exemplar-list');
     const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
       list.replaceChildren();
@@ -169,13 +171,14 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const heading = element('h3', undefined, `《${book.bookTitle}》`);
         heading.tabIndex = -1;
         first ??= heading;
-        card.append(
-          heading,
-          element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
-          element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
-        );
+        const context = element('p', 'field-note');
         const skipped = book.skipped ?? [];
-        if (book.exemplars.length === 0 && skipped.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+        const hasExtra = book.exemplars.length === 0 || skipped.length > 0;
+        context.append(element('span', 'exemplar-attribution', exemplarAttribution(book).replace(/。$/u, '')), '；',
+          element('span', 'exemplar-designation', hasExtra ? exemplarDesignation(book, localInstantLabel).replace(/。$/u, '') : exemplarDesignation(book, localInstantLabel)));
+        if (book.exemplars.length === 0 && skipped.length === 0) context.append(`；${EXEMPLARS_NONE_DELIVERED}`);
+        if (skipped.length > 0) context.append('；', element('span', 'exemplars-skipped', exemplarSkippedNote(skipped)));
+        card.append(heading, context);
         const items = element('ul', 'exemplar-items');
         for (const exemplar of book.exemplars) {
           const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
@@ -187,7 +190,6 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         }
         if (book.exemplars.length > 0) card.append(items);
         // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
-        if (skipped.length > 0) card.append(element('p', 'field-note exemplars-skipped', exemplarSkippedNote(skipped)));
         card.append(readersReportExemplars(book));
         if (book.imported) card.append(exemplarImportButton(surface, book));
         list.append(card);
@@ -234,12 +236,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     };
     more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
     firstPage.addEventListener('click', () => void turn(null));
-    root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
+    root.append(list, moreRow);
   }
 
   /**
    * A published Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one line per template with a draft, at the version 图书交付包
-   * pins, each with `归入范例（仅本社）` until the editor admits that exact version. Admitting replaces only this list, from the Book
+   * pins, each with `归入本社范例` until the editor admits that exact version. Admitting replaces only this list, from the Book
    * the service answers with, and focus lands on the line admitted.
    */
   function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
@@ -508,10 +510,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         if (custom.isConnected) custom.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取自定义分析维度。')));
       });
     }
-    panelNode.append(element('p', 'field-note', projection.statement));
-    if (projection.rules.length === 0) {
-      panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析或写作任务的完整计划里点「设为快速开始默认…」就能设定。'));
-    }
+    const ruleContext = element('p', 'field-note', projection.rules.length === 0 ? projection.statement.replace(/。$/u, '') : projection.statement);
+    if (projection.rules.length === 0) ruleContext.append('；', element('span', 'default-rule-empty', '还没有默认执行规则，可在分析或写作任务计划中设置。'));
+    panelNode.append(ruleContext);
     const list = element('div', 'default-rule-list');
     for (const rule of projection.rules) {
       const card = element('article', 'default-rule-card');
@@ -537,7 +538,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
         element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
-      card.append(heading, element('p', undefined, rule.does), element('p', 'field-note', set), view);
+      heading.append(element('span', undefined, set));
+      card.append(heading, element('p', undefined, rule.does), view);
       if (rule.state === 'active') {
         const off = button('停用', 'secondary', async () => {
           off.disabled = true;

@@ -4,8 +4,18 @@ import { knowledgeItemLine, knowledgeProvenanceLine, knowledgeRevisionLine, know
 import { guidelinePreviewHeading } from '../../src/renderer/knowledge-base-labels.js';
 import { importedSkillUpdateSourceFileLine } from '../../src/renderer/imported-skill-labels.js';
 import { reviewBasisWords } from '../../src/renderer/review-basis.js';
+import { retryLine } from '../../src/renderer/editor-protection-labels.js';
+import { taskPageMore } from '../../src/renderer/analysis-paging-labels.js';
+import { dialogueIncompleteLine } from '../../src/renderer/dialogue-labels.js';
 
 afterEach(() => setTechnicalLayerVisible(true));
+
+it('keeps retry, paging and incomplete-answer facts without parenthetical asides in production', () => {
+  setTechnicalLayerVisible(false);
+  expect(retryLine('journal-unavailable', true, 2, null)).toBe('自动重试：正在重试写入 · 已重试 2 次');
+  expect(taskPageMore('计划变化', 1, 3)).toBe('继续读取计划变化 · 已显示 1 / 3');
+  expect(dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答未完成；没有收到可保留的文字。');
+});
 
 it('starts closed before channel and preference initialization', async () => {
   vi.resetModules();

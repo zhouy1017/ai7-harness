@@ -1,3 +1,4 @@
+import { showTransientNotice } from './notifications.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
@@ -27,7 +28,6 @@ import {
   DOCUMENT_CHANGED_SINCE_VERSION,
   DOCUMENT_CURRENT_VERSION,
   DOCUMENT_STATUS_LINES,
-  DOCUMENT_SURFACE_LABEL,
   documentVersionSavedLine,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
@@ -176,8 +176,6 @@ async function copyPlainText(api: RendererApi, text: string): Promise<void> {
 }
 
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
-const ENTRY_NOTICE_MS = 6_000;
-
 function panel(): HTMLElement { return element('section', 'page-content'); }
 
 /** The Manuscript and Production Document screen owns all mutable editor coordination until destruction. */
@@ -188,23 +186,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     prepareSelectionTask, renderEditorWindow, renderBookAnalysis, renderBookReview, renderBookDeliverables,
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
-  const entryNoticeTimers = new Set<number>();
   let viewportObserver: ResizeObserver | undefined;
-  /**
-   * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
-   * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
-   * nothing and writes nothing, so an editor who never looks at it loses no decision. It is announced
-   * politely rather than asserted, so a screen reader hears it without being interrupted.
-   */
-  function showEntryNotice(host: HTMLElement, message: string): void {
-    if (destroyed) return;
-    const notice = element('p', 'entry-notice', message);
-    notice.setAttribute('role', 'status');
-    notice.dataset['entryNotice'] = 'visible';
-    host.append(notice);
-    const timer = window.setTimeout(() => { notice.remove(); entryNoticeTimers.delete(timer); }, ENTRY_NOTICE_MS);
-    entryNoticeTimers.add(timer);
-  }
 
   let destroyed = false;
   let editor: BoundedEditor | undefined;
@@ -266,10 +248,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     return `${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${technicalLayerVisible ? (windowNow.position.proportion * 100).toFixed(3) : Math.round(windowNow.position.proportion * 100)}%`;
   };
   title.append(
-    element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle}${technicalWords(` · 主分支`)}`),
     element('h2', undefined, productionDocument !== undefined
       ? technicalLayerVisible ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.typeLabel
-      : `稿件修订版${technicalWords(` ${initialWindow.revisionLabel}`)}`),
+      : '稿件'),
   );
   const meta = element('div', 'editor-meta');
   const position = element('span', undefined, positionWords(initialWindow));
@@ -408,7 +389,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   prepareReplacementButton.disabled = true;
   const searchActions = element('div', 'button-row');
   searchActions.append(searchButton, prepareReplacementButton, cancelJob);
-  const searchSummary = element('p', 'field-note', '范围：全稿。结果会记录查找时的稿件版本。');
+  const searchSummary = element('p', 'field-note', '查找范围：全稿。');
   searchSummary.setAttribute('aria-live', 'polite');
   const exclusionSummary = element(
     'p',
@@ -416,6 +397,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 0 处。`,
   );
   exclusionSummary.id = 'replacement-exclusion-summary';
+  exclusionSummary.hidden = true;
   exclusionSummary.setAttribute('aria-live', 'polite');
   const searchResults = element('div', 'search-results');
   const resultPaging = element('div', 'button-row');
@@ -453,7 +435,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   milestoneName.id = 'milestone-label';
   milestoneName.maxLength = 80;
   const purposeOptions = element('fieldset', 'milestone-purpose-options');
-  purposeOptions.append(element('legend', undefined, MILESTONE_FORM_WORDS.purpose));
+  purposeOptions.append(element('legend', undefined, `${MILESTONE_FORM_WORDS.purpose} · ${MILESTONE_PURPOSE_NOTE}`));
   const purposeRadios = MILESTONE_PURPOSE_KINDS.map((kind) => {
     const option = element('label', 'milestone-purpose-option');
     option.dataset['purposeKind'] = kind;
@@ -465,7 +447,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     purposeOptions.append(option);
     return radio;
   });
-  const purposeNote = element('small', 'field-note milestone-purpose-note', MILESTONE_PURPOSE_NOTE);
   const customPurposeLabel = element('label', undefined, MILESTONE_FORM_WORDS.customPurpose);
   customPurposeLabel.htmlFor = 'milestone-purpose-custom';
   const customPurpose = element('input');
@@ -477,9 +458,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   note.id = 'milestone-note';
   note.maxLength = 500;
   const milestoneButton = button(MILESTONE_FORM_WORDS.save, 'secondary', () => void saveMilestone());
-  const milestoneReason = element('small', 'field-note milestone-save-reason');
+  const milestoneReason = element('span', 'milestone-save-reason');
   milestoneReason.id = 'milestone-save-reason';
+  milestoneButton.setAttribute('aria-label', milestoneButton.textContent ?? '');
   milestoneButton.setAttribute('aria-describedby', milestoneReason.id);
+  const milestoneReasonLabel = element('span');
+  const milestoneReasonPrefix = element('span');
+  milestoneReasonLabel.append(milestoneReasonPrefix, milestoneReason);
+  milestoneButton.append(milestoneReasonLabel);
   const chosenPurpose = (): MilestonePurposeKind | null => {
     const checked = purposeRadios.find((radio) => radio.checked);
     return checked === undefined ? null : checked.value as MilestonePurposeKind;
@@ -494,6 +480,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const reason = milestoneSaveReason(milestoneBlockers());
     milestoneReason.textContent = reason ?? '';
     milestoneReason.hidden = reason === null;
+    milestoneReasonLabel.hidden = reason === null;
+    milestoneReasonPrefix.textContent = reason === null ? '' : ' · ';
     milestoneButton.disabled = busy || reason !== null;
   };
   // Each milestone starts again from an unselected purpose (interaction spec › Milestone rules).
@@ -510,13 +498,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     milestoneLabel,
     milestoneName,
     purposeOptions,
-    purposeNote,
     customPurposeLabel,
     customPurpose,
     noteLabel,
     note,
     milestoneButton,
-    milestoneReason,
   );
   navigator.append(outlineSection, searchSection);
   const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
@@ -731,7 +717,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     });
   }
   if (saveMenu === undefined) options.setContextActions(chipHost);
-  if (entryNotice !== undefined) showEntryNotice(content, entryNotice);
 
   let currentWindow = initialWindow;
   if (!isDocument) {
@@ -750,7 +735,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       },
       lastViewed: () => preferences.current['analysis.lastViewedRevision'][initialWindow.bookId]?.ordinal ?? 0,
       viewed: (revision) => preferences.viewAnalysis(initialWindow.bookId, revision),
-      notice: () => showEntryNotice(content, PARAGRAPH_ANALYSIS_WORDS.hint),
+      notice: () => showTransientNotice(PARAGRAPH_ANALYSIS_WORDS.hint),
       beforeOpen: () => { setNavigationOpen(false); taskDrawer.close(false); },
       openItem: (item: ParagraphAnalysisProjection['items'][number], revisionId: string) => {
         void (async () => {
@@ -823,6 +808,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     return !destroyed;
   };
   const updateExclusionSummary = (): void => {
+    exclusionSummary.hidden = searchPage === undefined || searchPage.totalMatches === 0;
     exclusionSummary.textContent =
       `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处。`;
     exclusionSummary.dataset['excludedCount'] = String(excludedMatchIds.size);
@@ -1567,7 +1553,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     searchSummary.textContent = `“${page.query}” · 范围：${page.scopeLabel} · 共 ${page.totalMatches.toLocaleString('zh-CN')} 处`;
     for (const match of page.results) {
       const row = element('article', 'search-result');
-      const open = button(match.context, 'quiet', () => void jumpToSearchMatch(match));
+      const open = button('', 'quiet', () => void jumpToSearchMatch(match));
+      open.append(element('span', 'search-result-heading', match.headingLabel), ' · ', element('span', 'search-result-context', match.context));
       open.setAttribute('aria-label', `${match.headingLabel}：${match.context}`);
       const includeLabel = element('label', 'match-inclusion');
       const include = element('input');
@@ -1594,7 +1581,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         updateExclusionSummary();
       });
       includeLabel.append(include, document.createTextNode(' 纳入替换'));
-      row.append(element('p', 'field-note', match.headingLabel), open, includeLabel);
+      row.append(open, includeLabel);
       searchResults.append(row);
     }
     previousResults.hidden = page.previousCursor === null;
@@ -1694,18 +1681,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     updateExclusionSummary();
     setInclusionControlsLocked(true);
     replacementReview.hidden = false;
+    const scope = element('p', 'field-note', `范围：${preview.scopeLabel}${technicalWords(` · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)} · ${preview.matchingRule} · 纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}；`);
+    scope.append(element('span', 'inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结，纳入控件保持锁定。' : '当前预览的纳入控件已锁定，取消预览后可重新选择。'));
     replacementReview.replaceChildren(
       element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
-      element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
-      element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版${technicalWords(` ${preview.revisionLabel}`)}${technicalWords(` · 修订日志序号 ${preview.journalSequence}`)}`),
-      element('p', 'field-note', `匹配规则：${preview.matchingRule}`),
-      element('p', 'field-note', `纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`),
-      element('p', 'field-note', '精确纳入清单：本次有序搜索结果中，除下列匹配标识外的全部匹配。'),
-      element('p', 'field-note inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结；纳入控件保持锁定。' : '当前预览的纳入控件已锁定；取消预览后可重新选择。'),
+      element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`), scope,
     );
     const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');
     exclusions.setAttribute('aria-label', '精确排除匹配标识清单');
-    replacementReview.append(exclusions, element('p', 'field-note', '以下仅显示已纳入匹配的代表性上下文。'));
+    if (technicalLayerVisible) replacementReview.append(exclusions);
     const contexts = element('ul');
     for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
     replacementReview.append(contexts);
@@ -2136,6 +2120,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // product never reaches an exit this surface can see, and the entry is what should answer then.
   void rememberEntryPosition();
   setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
+  if (entryNotice !== undefined) showTransientNotice(entryNotice);
   // 审阅's 回到原文 arrives at a finding's mark: its card opens as a click on it would.
   if (openMarkId !== undefined) void editorialMarks.openMark(openMarkId);
 
@@ -2143,8 +2128,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (destroyed) return;
     destroyed = true;
     reviewMarksFollower += 1;
-    for (const timer of entryNoticeTimers) window.clearTimeout(timer);
-    entryNoticeTimers.clear();
     if (reviewMarksTimer !== undefined) window.clearTimeout(reviewMarksTimer);
     viewportObserver?.disconnect();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);

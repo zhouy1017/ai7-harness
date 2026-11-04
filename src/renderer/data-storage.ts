@@ -42,7 +42,7 @@ export function createDataStorage(options: DataStorageOptions) {
       content.append(
         element('p', 'section-label', '设置 · 数据与存储'),
         element('h2', undefined, '数据与存储摘要'),
-        element('p', 'lede', '这里显示当前运行实例实际使用的本机产品数据位置。查看位置不会更改存储、导出内容或授予文件系统权限。'),
+        element('p', 'lede', '查看位置不会更改存储、导出内容或授予文件系统权限。'),
       );
       const summary = element('section', 'source-card');
       const values = element('dl');
@@ -60,15 +60,17 @@ export function createDataStorage(options: DataStorageOptions) {
         element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
       );
       // The shell's own file stays on this machine (Issue #934): it is not a record and 导出数据库 does not carry it.
-      summary.append(element('h3', undefined, '产品数据位置'), values, element('p', 'field-note preferences-local-line', PREFERENCES_LOCAL_LINE));
-      summary.append(element('p', 'field-note', projection.channelDescription));
+      summary.append(element('h3', undefined, '产品数据位置'), values);
+      const locationNote = projection.syncWarning === null ? projection.channelDescription
+        : `${projection.channelDescription.replace(/。$/u, '')}；${projection.syncWarning}`;
+      const locationContext = element('p', 'field-note');
+      locationContext.append(element('span', 'preferences-local-line', PREFERENCES_LOCAL_LINE.replace('（侧栏收起状态、置顶与最近打开的图书等）', '').replace(/。$/u, '')), '；', locationNote);
+      summary.append(locationContext);
       if (projection.dataLocationException !== null) summary.dataset['dataLocationException'] = projection.dataLocationException;
-      if (projection.syncWarning !== null) summary.append(element('p', 'field-note', projection.syncWarning));
       const credentials = element('section', 'review-section');
       credentials.append(
         element('h3', undefined, '凭据与产品数据分开'),
-        element('p', undefined, projection.separationLabel),
-        element('p', 'field-note', `当前系统保护位置：${projection.protectedSecretStoreLabel}。复制产品数据不会复制模型服务凭据。`),
+        element('p', undefined, `${projection.separationLabel.replace(/。$/u, '')}；系统保护位置：${projection.protectedSecretStoreLabel}。`),
       );
       const reveal = button('查看数据位置', 'secondary', async () => {
         reveal.disabled = true;
@@ -93,7 +95,7 @@ export function createDataStorage(options: DataStorageOptions) {
       actions.append(button('返回', 'quiet', () => void returnToOrigin()));
       // 版本 (Issue #433, S85a; DSTO-016): the software version and the Data Version apart, read from the store.
       const versions = element('section', 'source-card data-version');
-      versions.append(element('h3', undefined, DATA_VERSION_HEADING), element('p', 'field-note', '正在读取版本…'));
+      versions.append(element('h3', undefined, `${DATA_VERSION_HEADING} · 正在读取…`));
       // 导出数据库 (Issue #434, S86a; DSTO-017): the one file, through the system's Save dialog and an approval as stated.
       const databaseExport = element('section', 'source-card');
       // 导入数据库 (Issue #434, S86c; DSTO-017): the file previewed whole, then the one choice, never preselected, of what to do.
@@ -124,10 +126,7 @@ export function createDataStorage(options: DataStorageOptions) {
         const upgraded = version.upgrades[0];
         if (upgraded !== undefined) {
           const lines = element('dd', 'data-version-upgrade');
-          lines.append(
-            element('p', undefined, dataVersionUpgradeLine(upgraded, localInstantLabel)),
-            element('p', 'field-note', dataVersionUpgradeBackupLine(upgraded)),
-          );
+          lines.append(element('p', undefined, `${dataVersionUpgradeLine(upgraded, localInstantLabel).replace(/。$/u, '')}；${dataVersionUpgradeBackupLine(upgraded)}`));
           // Going back uses the earlier complete backup when this upgrade began from an unfinished one's middle state, so the steps
           // stand while that backup does, whatever became of this upgrade's own (Issue #433 review).
           if (upgraded.rollback?.backupPresent ?? upgraded.backupPresent) {

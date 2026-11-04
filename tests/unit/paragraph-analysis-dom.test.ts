@@ -2,10 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountParagraphAnalysis } from '../../src/renderer/paragraph-analysis.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import type { ParagraphAnalysisProjection } from '../../src/shared/protocol.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
 let restore: () => void;
 beforeEach(() => {
   restore = installMiniDom(); vi.useFakeTimers();
+  setTechnicalLayerVisible(true);
   vi.stubGlobal('window', {
     setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout,
     setInterval: globalThis.setInterval, clearInterval: globalThis.clearInterval,
@@ -33,6 +36,18 @@ function mounted(bookId: string, notice = vi.fn(), viewed = vi.fn(async () => un
 }
 
 describe('mounted paragraph analysis', () => {
+  it('renders an editorial status in production without technical freshness labels', async () => {
+    setTechnicalLayerVisible(false);
+    const view = mounted('production-book');
+    const result = reading('production-book');
+    result.revision!.freshness.label = '精确修订版新鲜度：已过期 · 绑定 r1';
+    view.read.mockResolvedValue(result);
+    view.panel.toggle();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(view.root.textContent).toContain('稿件已更新，分析待更新');
+    expectNoTechnicalText(view.root);
+    view.panel.destroy();
+  });
   it('shows one notice across closing and remounting, and writes viewed preference only after an actual panel read', async () => {
     const notice = vi.fn(); const viewed = vi.fn(async () => undefined);
     const first = mounted('once-book', notice, viewed);

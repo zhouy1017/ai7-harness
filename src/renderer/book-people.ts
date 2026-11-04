@@ -115,12 +115,10 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       el('dt', undefined, BOOK_PEOPLE_FIELD_LABELS.editors), value('editors', bookPeopleNamesLine(people.editors)),
       el('dt', undefined, BOOK_PEOPLE_FIELD_LABELS.related), value('related', bookPeopleRelatedLine(people.related)),
     );
-    view.append(
-      heading,
-      values,
-      el('p', 'field-note book-people-recorded', bookPeopleRecordedLine(people, people.recordedAt === null ? null : localInstantLabel(people.recordedAt))),
-      el('p', 'field-note book-people-note', BOOK_PEOPLE_NOTE),
-    );
+    const context = el('p', 'field-note');
+    context.append(el('span', 'book-people-recorded', bookPeopleRecordedLine(people, people.recordedAt === null ? null : localInstantLabel(people.recordedAt)).replace(/。$/u, '')), '；',
+      el('span', 'book-people-note', BOOK_PEOPLE_NOTE));
+    view.append(heading, values, context);
     if (draft === null) {
       const row = el('div', 'button-row compact-actions');
       const edit = actionButton('edit', 'secondary', () => openForm());
@@ -140,8 +138,6 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
     const form = el('form', 'book-people-form');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
-    const hint = el('small', 'field-note', BOOK_PEOPLE_NAMES_HINT);
-    hint.id = uid('names-hint');
     const field = (key: 'authors' | 'editors'): HTMLElement => {
       const label = el('label', 'book-people-field');
       const input = el('input');
@@ -149,15 +145,17 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       input.value = current[key];
       input.disabled = working;
       input.dataset['peopleField'] = key;
-      input.setAttribute('aria-describedby', hint.id);
+      input.placeholder = '多个名字用、分隔';
+      input.setAttribute('aria-description', BOOK_PEOPLE_NAMES_HINT);
       input.addEventListener('input', () => { current[key] = input.value; current.problem = null; sync(); });
       label.append(el('span', undefined, BOOK_PEOPLE_FIELD_LABELS[key]), input);
       return label;
     };
-    form.append(field('authors'), field('editors'), hint);
+    form.append(field('authors'), field('editors'));
     const related = el('fieldset', 'book-people-related');
-    related.append(el('legend', undefined, BOOK_PEOPLE_FIELD_LABELS.related));
-    if (current.related.length === 0) related.append(el('p', 'field-note', BOOK_PEOPLE_RELATED_NONE));
+    const relatedHeading = el('legend', undefined, BOOK_PEOPLE_FIELD_LABELS.related);
+    if (current.related.length === 0) relatedHeading.append(` · ${BOOK_PEOPLE_RELATED_NONE}`);
+    related.append(relatedHeading);
     current.related.forEach((person, index) => {
       const row = el('div', 'book-people-related-row');
       row.dataset['relatedIndex'] = String(index);
@@ -208,12 +206,17 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
     }
     const row = el('div', 'button-row');
     const save = actionButton('save', 'primary', () => void saveDraft());
-    const why = el('p', 'field-note book-people-reason');
+    const why = el('span', 'book-people-reason');
     why.id = uid('reason');
+    save.setAttribute('aria-label', save.textContent ?? '');
     save.setAttribute('aria-describedby', why.id);
+    const reasonLabel = el('span');
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, why);
+    save.append(reasonLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeForm());
     cancel.disabled = working;
-    row.append(save, cancel, why);
+    row.append(save, cancel);
     form.append(row);
     form.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || working) return;
@@ -224,6 +227,8 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       const reason = blocker(current);
       why.textContent = reason ?? '';
       why.hidden = reason === null;
+      reasonLabel.hidden = reason === null;
+      reasonPrefix.textContent = reason === null ? '' : ' · ';
       save.disabled = working || reason !== null;
     }
     sync();

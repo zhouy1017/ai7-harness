@@ -23,7 +23,7 @@ export const SELECTION_TASK_PREPARE = '发起任务';
  * What the Task is given, said before anything is prepared (TASK-002, TASK-003): the paragraph and nothing around it, read the
  * way every range Task reads it, with the plan seen before the start and no quick start.
  */
-export const SELECTION_TASK_NOTE = '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。';
+export const SELECTION_TASK_NOTE = '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。';
 /**
  * The exact context the composer carries (TASK-002; Issue #423 review, P3-6): the Book, the revision and journal position the
  * manuscript stands at — 准备任务 saves the Task's own revision from it — how much is selected, and which paragraph it is in.
@@ -35,7 +35,7 @@ export function selectionTaskContextLine(context: {
   readonly graphemes: number;
   readonly position: number;
 }): string {
-  return `《${context.bookTitle}》 · 修订版${technicalWords(` ${context.revisionLabel}`)} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 段`;
+  return `《${context.bookTitle}》${technicalWords(` · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence}`)} · 已选 ${context.graphemes} 字 · 第 ${context.position} 段`;
 }
 
 export const SELECTION_TASK_REANALYZE = '重新分析这段';

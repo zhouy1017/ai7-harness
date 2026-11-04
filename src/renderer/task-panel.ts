@@ -30,7 +30,6 @@ import {
   TASK_COMPOSER_ADD_RANGE_SAME,
   TASK_COMPOSER_ANSWER_NOTE,
   TASK_COMPOSER_ANSWER_TRUNCATED,
-  TASK_COMPOSER_BOOK_TARGET_NOTE,
   TASK_COMPOSER_CONTEXT_HEADING,
   TASK_COMPOSER_COPY_RANGES_DROPPED,
   TASK_COMPOSER_GOAL_LABEL,
@@ -46,7 +45,6 @@ import {
   TASK_COMPOSER_PROMOTE_SAVE_FIRST,
   TASK_COMPOSER_PROMOTED,
   TASK_COMPOSER_RANGE_REMOVE,
-  TASK_COMPOSER_RESOLUTION_CHOOSE,
   TASK_COMPOSER_RESOLUTION_HEADING,
   TASK_COMPOSER_STATUS,
   TASK_COMPOSER_TARGET_LABELS,
@@ -59,12 +57,10 @@ import {
   TASK_PANEL_COMPOSE_ACTIONS,
   TASK_PANEL_COMPOSE_FIELD,
   TASK_PANEL_COMPOSE_OPEN,
-  TASK_PANEL_COMPOSE_OPEN_NOTE,
   taskComposerAddRangeLimit,
   taskComposerAnswerHeading,
   taskComposerBookLine,
   taskComposerDraftHeading,
-  taskComposerGoalCount,
   taskComposerParkedLine,
   taskComposerPinLine,
   taskComposerRangeLine,
@@ -73,7 +69,6 @@ import {
   TASK_PANEL_COMPOSE_FIRST,
   TASK_PANEL_COMPOSE_FIRST_QUICK,
   TASK_PANEL_COMPOSE_HEADING,
-  TASK_PANEL_COMPOSE_LEDE,
   TASK_PANEL_COMPOSE_NONE,
   TASK_PANEL_NOTE,
   TASK_PANEL_STATUS_LINES,
@@ -190,12 +185,11 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   const element = el('section', 'task-panel');
   element.dataset['taskPanel'] = 'loading';
   const scope = el('p', 'section-label task-panel-scope');
-  const note = el('p', 'field-note task-panel-note', TASK_PANEL_NOTE);
   // An unfinished draft another Book holds (TASK-006): said once, with 返回继续.
   const parkedHost = el('div', 'task-panel-parked');
   const compose = el('section', 'task-panel-compose');
   const groups = el('div', 'task-panel-groups');
-  element.append(scope, parkedHost, compose, groups, note);
+  element.append(scope, parkedHost, compose, groups);
 
   let bookId: string | null = null;
   let tasks: BookTasksProjection | null = null;
@@ -307,11 +301,11 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     open.disabled = working;
     open.addEventListener('click', () => options.openComposer());
     const opener = el('div', 'task-panel-compose-opener');
-    opener.append(open, el('p', 'field-note', TASK_PANEL_COMPOSE_OPEN_NOTE));
-    const lede = el('p', 'field-note', TASK_PANEL_COMPOSE_LEDE);
+    opener.append(open);
     const choices = analysis === null ? [] : composeOptions(analysis);
     if (choices.length === 0) {
-      compose.replaceChildren(heading, opener, lede, el('p', 'field-note task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
+      heading.append(' · ', el('span', 'task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
+      compose.replaceChildren(heading, opener);
       return;
     }
     if (selected === null || !choices.some((choice) => choice.mode === selected && choice.available)) {
@@ -319,6 +313,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     }
     const fieldset = el('fieldset', 'task-panel-modes');
     fieldset.append(el('legend', undefined, TASK_PANEL_COMPOSE_FIELD));
+    let selectedReason: HTMLElement | null = null;
     for (const choice of choices) {
       const label = el('label', 'task-panel-mode');
       label.dataset['taskComposeMode'] = choice.mode;
@@ -335,7 +330,12 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
         paint();
       });
       const words = el('span', 'task-panel-mode-words');
-      words.append(el('strong', undefined, choice.label), el('small', 'field-note', choice.available ? choice.meaning : choice.reason ?? choice.meaning));
+      words.append(el('strong', undefined, choice.label));
+      if (!choice.available && choice.reason !== null) {
+        const reason = el('span', choice.mode === selected ? 'task-panel-compose-why' : undefined, choice.reason);
+        words.append(' · ', reason);
+        if (choice.mode === selected) { reason.id = uid('compose-why'); selectedReason = reason; }
+      }
       label.append(input, words);
       fieldset.append(label);
     }
@@ -349,19 +349,14 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     prepare.dataset['taskComposeAction'] = 'prepare';
     prepare.disabled = working || !chosen.available;
     quick.disabled = working || chosen.quick.rule === null;
-    const why = el('p', 'field-note task-panel-compose-why');
-    why.id = uid('compose-why');
-    const reason = !chosen.available ? chosen.reason : null;
-    why.textContent = reason ?? '';
-    why.hidden = reason === null;
-    if (reason !== null) {
-      prepare.setAttribute('aria-describedby', why.id);
-      quick.setAttribute('aria-describedby', why.id);
+    if (selectedReason !== null) {
+      prepare.setAttribute('aria-describedby', selectedReason.id);
+      quick.setAttribute('aria-describedby', selectedReason.id);
     }
     quick.addEventListener('click', () => void start(chosen, true));
     prepare.addEventListener('click', () => void start(chosen, false));
     row.append(prepare);
-    compose.replaceChildren(heading, opener, lede, fieldset, row, why);
+    compose.replaceChildren(heading, opener, fieldset, row);
   }
 
   async function start(choice: ComposeOption, quick: boolean): Promise<void> {
@@ -394,9 +389,9 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       painted = '';
       working = false;
       element.dataset['taskPanel'] = 'loading';
-      scope.textContent = '';
+      scope.textContent = TASK_PANEL_STATUS_LINES.loading;
       compose.replaceChildren();
-      groups.replaceChildren(el('p', 'field-note task-panel-loading', TASK_PANEL_STATUS_LINES.loading));
+      groups.replaceChildren();
       overview?.destroy();
       overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus,
         onChanged: () => { options.onRecorded(next); read(true); },
@@ -673,16 +668,14 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       target.append(label);
     }
     context.append(target);
-    if (current.target === 'book') context.append(el('p', 'field-note task-composer-book-note', TASK_COMPOSER_BOOK_TARGET_NOTE));
     const ranges = el('ul', 'task-composer-ranges');
-    if (current.ranges.length === 0) ranges.append(el('li', 'field-note task-composer-no-ranges', TASK_COMPOSER_NO_RANGES));
     for (const range of current.ranges) {
       const item = el('li', 'task-composer-range');
       item.dataset['taskComposerRange'] = range.key;
       item.dataset['rangeState'] = range.state;
-      const words = el('blockquote', 'editorial-mark-quote task-composer-range-text', range.text);
-      const where = el('small', 'field-note', taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1));
-      item.append(words, where);
+      const words = el('blockquote', 'editorial-mark-quote task-composer-range-text');
+      words.append(el('span', 'task-composer-range-quote', range.text), el('footer', undefined, taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1)));
+      item.append(words);
       if (range.stateLabel !== null) {
         const label = el('span', `state-term status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
         label.dataset['rangeStateLabel'] = range.state;
@@ -704,15 +697,18 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       }
       ranges.append(item);
     }
-    context.append(ranges);
+    if (current.ranges.length > 0) context.append(ranges);
+    const rangeActions = el('div', 'button-row');
+    if (current.ranges.length === 0) rangeActions.append(el('span', 'task-composer-no-ranges', TASK_COMPOSER_NO_RANGES));
     if (editable) {
       const add = el('button', 'quiet task-composer-add-range', TASK_COMPOSER_ADD_RANGE);
       add.type = 'button';
       add.dataset['taskComposerAction'] = 'add-range';
       add.disabled = working;
       add.addEventListener('click', () => void addRange());
-      context.append(add);
+      rangeActions.append(add);
     }
+    if (current.ranges.length === 0 || editable) context.append(rangeActions);
     if (current.note !== null) context.append(el('p', 'field-note task-composer-seed-note', current.note));
     parts.push(context);
 
@@ -722,16 +718,15 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     const goal = el('textarea');
     goal.rows = 3;
     goal.maxLength = MAX_TASK_INTENT_GOAL_LENGTH;
-    goal.placeholder = TASK_COMPOSER_GOAL_PLACEHOLDER;
+    goal.placeholder = `${TASK_COMPOSER_GOAL_PLACEHOLDER} 最多 ${MAX_TASK_INTENT_GOAL_LENGTH} 字`;
+    goal.setAttribute('aria-description', `最多 ${MAX_TASK_INTENT_GOAL_LENGTH} 字`);
     goal.value = current.goal;
     goal.readOnly = !editable;
     goal.dataset['taskComposerField'] = 'goal';
-    const count = el('small', 'field-note task-composer-count', taskComposerGoalCount([...current.goal].length, MAX_TASK_INTENT_GOAL_LENGTH));
     goal.addEventListener('input', () => {
       if (state === null) return;
       state.goal = goal.value;
       state.dirty = true;
-      count.textContent = taskComposerGoalCount([...goal.value].length, MAX_TASK_INTENT_GOAL_LENGTH);
       syncSlot();
       syncActions();
     });
@@ -743,7 +738,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       if (mode() === 'new') void prepare(true);
       else if (mode() === 'draft') void save();
     });
-    goalLabel.append(goalCaption, goal, count);
+    goalLabel.append(goalCaption, goal);
     parts.push(goalLabel);
 
     // Slice 7c's slot (#423 rev 6), right under the goal, and the 工序 its events picked.
@@ -807,8 +802,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       } else {
         answer.append(el('p', 'task-composer-answer-text', current.answer.text));
       }
-      if (current.answer.truncated) answer.append(el('p', 'field-note', TASK_COMPOSER_ANSWER_TRUNCATED));
-      answer.append(el('p', 'field-note', TASK_COMPOSER_ANSWER_NOTE));
+      answer.append(el('p', 'field-note', current.answer.truncated ? `${TASK_COMPOSER_ANSWER_TRUNCATED.replace(/。$/u, '')}；${TASK_COMPOSER_ANSWER_NOTE}` : TASK_COMPOSER_ANSWER_NOTE));
       parts.push(answer);
     }
 
@@ -816,14 +810,15 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     if (kind === 'draft' && current.resolution !== null) parts.push(resolutionBlock(current, current.resolution));
     if (kind === 'promoted') parts.push(el('p', 'attention-note task-composer-promoted', TASK_COMPOSER_PROMOTED));
 
-    parts.push(el('p', 'field-note task-composer-note', TASK_COMPOSER_NOTE));
+    const contextNote = el('p', 'field-note');
+    const basis = el('span', 'task-composer-note', TASK_COMPOSER_NOTE);
+    const unsaved = el('span', 'task-composer-unsaved', `；${TASK_COMPOSER_UNSAVED}`);
+    contextNote.append(basis, unsaved);
+    parts.push(contextNote);
     const problemLine = el('p', 'attention-note task-composer-problem');
     problemLine.setAttribute('role', 'alert');
     problemLine.hidden = true;
     parts.push(problemLine);
-    const unsaved = el('p', 'field-note task-composer-unsaved', TASK_COMPOSER_UNSAVED);
-    unsaved.hidden = !(kind === 'draft' && current.dirty);
-    parts.push(unsaved);
     parts.push(actionRow(kind));
     element.replaceChildren(...parts);
     if (active !== null) {
@@ -836,16 +831,13 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
   function resolutionBlock(current: ComposerState, resolution: TaskIntentDraftResolution): HTMLElement {
     const section = el('section', 'task-composer-resolution');
     section.dataset['taskComposerResolution'] = resolution.state;
-    section.append(el('p', 'section-label', TASK_COMPOSER_RESOLUTION_HEADING));
-    if (resolution.state === 'unsupported') {
-      section.append(el('p', 'field-note task-composer-unsupported', resolution.reason));
-      return section;
-    }
-    if (resolution.state === 'ready') {
+    const heading = el('p', 'section-label', TASK_COMPOSER_RESOLUTION_HEADING);
+    section.append(heading);
+    if (resolution.state !== 'choose') {
+      heading.append(' · ', el('span', `task-composer-${resolution.state}`, resolution.state === 'unsupported' ? resolution.reason : taskComposerResolutionReady(resolution.option.label)));
+      if (resolution.state === 'unsupported') return section;
       current.choice = 0;
-      section.append(el('p', 'field-note task-composer-ready', taskComposerResolutionReady(resolution.option.label)));
     } else {
-      section.append(el('p', 'field-note', TASK_COMPOSER_RESOLUTION_CHOOSE));
       const name = uid('choice');
       resolution.options.forEach((option, index) => {
         const label = el('label', 'task-composer-choice');
@@ -861,8 +853,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
           state.choice = index;
           render();
         });
-        label.append(input, el('span', undefined, option.label));
-        if (!option.available && option.reason !== null) label.append(el('small', 'field-note', option.reason));
+        label.append(input, el('span', undefined, !option.available && option.reason !== null ? `${option.label} · ${option.reason}` : option.label));
         section.append(label);
       });
     }
@@ -956,7 +947,11 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
         (action === 'promote' && (empty || (!current.dirty && current.resolution?.state === 'unsupported')));
     }
     const unsaved = element.querySelector<HTMLElement>('.task-composer-unsaved');
-    if (unsaved !== null) unsaved.hidden = !(mode() === 'draft' && current.dirty);
+    if (unsaved !== null) {
+      unsaved.hidden = !(mode() === 'draft' && current.dirty);
+      const basis = element.querySelector<HTMLElement>('.task-composer-note');
+      if (basis !== null) basis.textContent = unsaved.hidden ? TASK_COMPOSER_NOTE : TASK_COMPOSER_NOTE.replace(/。$/u, '');
+    }
   }
 
   function finish(): void {
@@ -1164,6 +1159,14 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     render();
   }
 
+  const showComposerLoading = (title: string): void => {
+    element.dataset['taskComposer'] = 'loading';
+    const heading = el('h3', 'task-composer-title', `${title} · ${TASK_COMPOSER_STATUS.reading}`);
+    heading.id = uid('composer');
+    element.setAttribute('aria-labelledby', heading.id);
+    element.replaceChildren(heading);
+  };
+
   return {
     element,
     openNew(seed) {
@@ -1196,8 +1199,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       };
       const mine = ticket;
       const opened = state;
-      element.dataset['taskComposer'] = 'loading';
-      element.replaceChildren(el('p', 'field-note', TASK_COMPOSER_STATUS.reading));
+      showComposerLoading(seed.origin === 'composer-selection' ? TASK_COMPOSER_TITLES.selection : TASK_COMPOSER_TITLES.book);
       // The manuscript as it stands now (TASK-002): words pinned while the journal holds edits no revision holds are 待保存修订版.
       void api.inspectTaskIntentDrafts({ draftId: null }).then((read) => {
         if (mine !== ticket || state !== opened || read.manuscript === null) return;
@@ -1217,8 +1219,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       composing = false;
       if (state?.draftId !== draftId) freshSlot();
       const manuscript = state?.bookId === bookId ? state.manuscript : null;
-      element.dataset['taskComposer'] = 'loading';
-      element.replaceChildren(el('p', 'field-note', TASK_COMPOSER_STATUS.reading));
+      showComposerLoading(TASK_COMPOSER_TITLES.draft);
       void api.inspectTaskIntentDrafts({ draftId }).then((read) => {
         if (mine !== ticket) return;
         const draft = read.drafts[0];

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
 import {
@@ -328,6 +329,9 @@ describe('精简 and 完整 (D6)', () => {
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中，由这份计划设定）');
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中）');
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'deactivated', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（已停用）');
+    setTechnicalLayerVisible(false);
+    expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认规则：开始同步 · 第 2 版 · 使用中 · 由这份计划设定');
+    setTechnicalLayerVisible(true);
     expect(taskPlanQuickStarted('开始同步 · 第 2 版')).toBe('已按默认执行规则「开始同步 · 第 2 版」快速开始');
     expect(TASK_PLAN_VIEW_RULES).toBe('查看规则');
     expect(taskPlanQuickStartFellBack(['离线：这台设备现在没有网络。'])).toBe('快速开始没有开始这项任务：离线：这台设备现在没有网络。');
@@ -726,7 +730,7 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:05.000Z'))).toBe(false);
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:11.000Z'))).toBe(true);
     expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
-    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
+    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('任务在上次关闭时未结束，目前没有运行；可以取消并重新准备。');
   });
 
   it('shows every governed unit and starts stale timing at that request admission (#1131)', () => {
@@ -761,7 +765,7 @@ describe('the editable plan (S73)', () => {
     expect(TASK_PLAN_EDIT_RESTORE).toBe('恢复');
     expect(TASK_PLAN_EDIT_STEPS_NOTE).toBe('这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。');
     // S76d (Issue #422): the move is offered now, and the note says what it means for the Run.
-    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。');
+    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('这一步暂停等你回答，其他阅读范围继续。');
     expect(TASK_PLAN_FULL_LINK_EDITABLE).toBe('完整计划（6 段）· 可以改步骤与限制');
     expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
     expect(taskPlanEditCount(2)).toBe('你改了 2 处');
@@ -838,7 +842,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
     expect(TASK_PLAN_BUDGET_NOTE).toBe('用量和费用仍受所选模型服务的账户控制与计费条款约束。');
     expect(TASK_PLAN_BUDGET_SET).toBe('设置上限…');
     expect(TASK_PLAN_BUDGET_REMOVE).toBe('去掉上限');
-    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限（tokens）');
+    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限 · 词元');
     expect(TASK_PLAN_BUDGET_HINT).toBe('这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。');
     expect(TASK_PLAN_BUDGET_APPLY).toBe('设定');
     expect(TASK_PLAN_BUDGET_CANCEL).toBe('取消');

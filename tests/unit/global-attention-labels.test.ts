@@ -11,7 +11,6 @@ import {
   GLOBAL_ATTENTION_LEDE,
   GLOBAL_ATTENTION_MATERIAL_GROUPS,
   GLOBAL_ATTENTION_NEXT_STEP_LABELS,
-  GLOBAL_ATTENTION_NEXT_STEP_PREFIX,
   GLOBAL_ATTENTION_NO_BOOK,
   GLOBAL_ATTENTION_STATE_LABELS,
   GLOBAL_ATTENTION_STATE_PILLS,
@@ -58,7 +57,6 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 // The Manuscript screen owns its toolbar, so the recovery return's button is read there (Issue #1127).
 const MANUSCRIPT_SCREEN = readFileSync(fileURLToPath(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url)), 'utf8');
 // ②A's baseline-analysis card owns its Task outcome's next step (Issue #1172).
-const BASELINE_ANALYSIS_CARD = readFileSync(fileURLToPath(new URL('../../src/renderer/baseline-analysis-card.ts', import.meta.url)), 'utf8');
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
@@ -339,8 +337,7 @@ describe('each item', () => {
     expect(MANUSCRIPT_SCREEN).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['return-to-recovery']}'`);
     expect(RENDERER).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['retry-abandon-cleanup']}'`);
     expect(RENDERER).toContain(`${GLOBAL_ATTENTION_NEXT_STEP_LABELS['await-local-check']}；不要重复导入`);
-    expect(BASELINE_ANALYSIS_CARD).toContain(`\`${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}\${`);
-    expect(globalAttentionNextStepLine('reconfirm-plan')).toBe('安全的下一步：重新确认计划');
+    expect(globalAttentionNextStepLine('reconfirm-plan')).toBe('重新确认计划');
     // No step grants anything, and none says 授权.
     for (const label of Object.values(GLOBAL_ATTENTION_NEXT_STEP_LABELS)) expect(label).not.toMatch(/授权|批准|待审批/u);
   });
@@ -463,7 +460,7 @@ describe('each item', () => {
       'recovery-deferred': '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。',
       'manuscript-conflict': '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。',
       'manuscript-conflict-deferred': '撤销这次应用时遇到冲突：应用后的文字又改过；在解决之前不能撤销这次应用。已记下暂不处理，这处冲突仍未解决。',
-      'analysis-failed': '运行失败，没有形成新的结果集修订版。',
+      'analysis-failed': '运行失败，没有形成新的分析结果。',
       'analysis-interrupted': '运行已在派发后中断；已完成单元的结果与缺口均已保留。',
       'analysis-budget-reached': '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。',
       'analysis-account-limit': '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。',
@@ -554,7 +551,7 @@ describe('each item', () => {
       stateLabel: '派发前已阻止',
       pill: { tone: 'blocked', shape: 'diamond' },
       reason: '授权已记录，派发前阻止：当前启动没有可执行的路由。',
-      nextStep: '安全的下一步：查看运行',
+      nextStep: '查看运行',
       time: `记录于 ${localInstantLabel(AT)}`,
       openName: '《待我处理旅程甲》 · 基线分析 · 首次基线分析',
     }]);

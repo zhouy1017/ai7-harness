@@ -227,11 +227,11 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const actions = el('div', 'button-row library-actions');
     const add = action(LIBRARY_ADD, 'secondary', 'add', () => void choose());
     add.disabled = busy || preview !== null || chooser !== null;
+    if (listed.length === 0 && preview === null) actions.append(el('span', 'library-empty', LIBRARY_EMPTY));
     actions.append(add);
     const parts: HTMLElement[] = [actions];
     if (refusal !== null && refusal.materialId === null && preview === null) parts.push(alert(refusal.message));
     if (preview !== null) parts.push(previewSection(preview));
-    if (listed.length === 0 && preview === null) parts.push(el('p', 'field-note library-empty', LIBRARY_EMPTY));
     const list = el('div', 'library-list');
     for (const material of listed) list.append(card(material));
     parts.push(list);
@@ -304,7 +304,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const section = el('section', 'library-preview');
     const heading = el('h3', undefined, libraryPreviewHeading(shown));
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note library-preview-facts', libraryPreviewFacts(shown)));
+    heading.append(' · ', el('span', 'library-preview-facts', libraryPreviewFacts(shown)));
+    section.append(heading);
     const confirm = action(LIBRARY_ADD_CONFIRM, 'primary', 'confirm-add', () => void commit());
     const cancel = action(LIBRARY_CANCEL, 'quiet', 'cancel-add', () => {
       preview = null;
@@ -389,7 +390,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const title = el('h3', undefined, material.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
-    node.append(heading, el('p', 'field-note library-source', librarySourceLine(material, localInstantLabel)));
+    heading.append(el('span', 'library-source', ` · ${librarySourceLine(material, localInstantLabel)}`));
+    node.append(heading);
     const facts = el('dl', 'library-facts');
     facts.append(
       el('dt', undefined, LIBRARY_ATTRIBUTION_TERM), el('dd', 'library-attribution', libraryAttributionLine(material)),
@@ -412,12 +414,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       eligibility.disabled = busy || preview !== null || chooser !== null || material.attribution === null;
       row.append(attribute, eligibility);
       node.append(row);
-      if (material.attribution === null) {
-        const note = el('p', 'field-note library-needs-attribution', LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION);
-        note.id = `library-needs-${material.materialId}`;
-        eligibility.setAttribute('aria-describedby', note.id);
-        node.append(note);
-      }
+      if (material.attribution === null) eligibility.textContent = `${LIBRARY_ELIGIBILITY} · ${LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION}`;
     }
     // Every decision on record, oldest first, and the exact identities one step below.
     const history = el('details', 'library-decisions');
@@ -469,7 +466,6 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   const indexActions = (material: LibraryMaterialProjection): HTMLElement | null => {
     const { vectors, translation } = material.index;
     const row = el('div', 'button-row material-index-actions');
-    const notes: HTMLElement[] = [];
     if (vectors !== null && (vectors.state === 'not-built' || vectors.state === 'building')) {
       const build = action(MATERIAL_VECTORS_BUILD, 'secondary', 'build-vectors', () => void layerRequest(material, 'vectors'));
       build.disabled = busy || vectors.state === 'building';
@@ -480,15 +476,15 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       request.disabled = busy || !translation.request.available;
       row.append(request);
       if (!translation.request.available && translation.request.reason !== null) {
-        const note = el('p', 'field-note material-translation-note', translation.request.reason);
+        const note = el('span', 'material-translation-note', translation.request.reason);
         note.id = `material-translation-note-${material.materialId}`;
         request.setAttribute('aria-describedby', note.id);
-        notes.push(note);
+        row.append(note);
       }
     }
     if (row.childElementCount === 0) return null;
     const wrapper = el('div', 'material-index-layer-actions');
-    wrapper.append(row, ...notes);
+    wrapper.append(row);
     return wrapper;
   };
 
@@ -534,6 +530,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const fieldId = `material-vector-query-${material.materialId}`;
     const label = el('label', undefined, MATERIAL_VECTORS_SEARCH_LABEL);
     label.htmlFor = fieldId;
+    label.append(' · ', el('span', 'material-vector-note', MATERIAL_VECTORS_SEARCH_NOTE));
     const input = el('input');
     input.type = 'search';
     input.id = fieldId;
@@ -586,7 +583,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     });
     const row = el('div', 'button-row');
     row.append(input, run);
-    section.append(label, row, el('p', 'field-note material-vector-note', MATERIAL_VECTORS_SEARCH_NOTE), results);
+    section.append(label, row, results);
     return section;
   };
 
@@ -706,11 +703,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       first.disabled = busy;
       fieldset.append(first);
     }
-    fieldset.append(
-      choice(name, 'series', LIBRARY_SERIES, false, true, chosen),
-      el('p', 'field-note library-choice-note', LIBRARY_SERIES_UNAVAILABLE),
-      choice(name, 'house', LIBRARY_HOUSE, state.choice === 'house', busy, chosen),
-    );
+    const series = choice(name, 'series', LIBRARY_SERIES, false, true, chosen);
+    series.append(' · ', el('span', 'library-choice-note', LIBRARY_SERIES_UNAVAILABLE));
+    fieldset.append(series, choice(name, 'house', LIBRARY_HOUSE, state.choice === 'house', busy, chosen));
     section.append(fieldset);
     confirm = chooserActions(section, material, LIBRARY_ATTRIBUTE_CONFIRM, 'confirm-attribution', () => {
       const value = state.choice;
@@ -732,7 +727,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   const eligibilityChooser = (material: LibraryMaterialProjection, state: Extract<Chooser, { kind: 'eligibility' }>): HTMLElement => {
     const section = el('section', 'library-chooser library-eligibility-chooser');
     const fieldset = el('fieldset');
-    fieldset.append(el('legend', undefined, `${LIBRARY_ELIGIBILITY_TERM}：「${material.title}」`));
+    const legend = el('legend', undefined, `${LIBRARY_ELIGIBILITY_TERM}：「${material.title}」`);
+    legend.append(' · ', el('span', 'library-eligibility-boundary', LIBRARY_ELIGIBILITY_BOUNDARY));
+    fieldset.append(legend);
     const name = `library-eligibility-${material.materialId}`;
     const bookTitle = material.attribution?.scope === 'book' ? material.attribution.bookTitle : null;
     const consequence = el('p', 'attention-note library-house-consequence', LIBRARY_HOUSE_CONSEQUENCE);
@@ -746,8 +743,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (bookTitle !== null) {
       const own = choice(name, 'book', eligibilityChoiceLabel('book', bookTitle), state.choice === 'book', busy, chosen);
       own.append(el('span', 'status-pill library-recommended', LIBRARY_RECOMMENDED));
-      fieldset.append(own, choice(name, 'series', LIBRARY_SERIES_ELIGIBILITY, false, true, chosen),
-        el('p', 'field-note library-choice-note', LIBRARY_SERIES_ELIGIBILITY_UNAVAILABLE));
+      const series = choice(name, 'series', LIBRARY_SERIES_ELIGIBILITY, false, true, chosen);
+      series.append(' · ', el('span', 'library-choice-note', LIBRARY_SERIES_ELIGIBILITY_UNAVAILABLE));
+      fieldset.append(own, series);
     }
     fieldset.append(
       choice(name, 'house', eligibilityChoiceLabel('house', null), state.choice === 'house', busy, chosen),
@@ -764,7 +762,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       state.reason = text.value;
     });
     reason.append(el('span', undefined, LIBRARY_REASON_LABEL), text);
-    section.append(fieldset, reason, el('p', 'field-note library-eligibility-boundary', LIBRARY_ELIGIBILITY_BOUNDARY));
+    section.append(fieldset, reason);
     confirm = chooserActions(section, material, LIBRARY_ELIGIBILITY_CONFIRM, 'confirm-eligibility', () => {
       const value = state.choice;
       if (value === null) return;

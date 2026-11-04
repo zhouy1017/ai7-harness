@@ -12,13 +12,13 @@ import type {
  */
 
 export const SERIES_TITLE = '书系';
-export const SERIES_LEDE = '书系把相关的图书放在一起。加入书系只让以后的任务可以明确选用书系的范围：不会让一本书读到另一本书的原文，也不会自动授权任何任务。';
+export const SERIES_LEDE = '书系归集相关图书，供以后任务明确选择范围；加入书系不会让一本书读到另一本书的原文，也不会自动授权任务。';
 export const SERIES_EMPTY = '还没有书系。';
 export const SERIES_CREATE_OPEN = '新建书系…';
 export const SERIES_CREATE = '新建书系';
 export const SERIES_CANCEL = '取消';
 export const SERIES_NAME_LABEL = '书系名称';
-export const SERIES_NOTE_LABEL = '说明（可选）';
+export const SERIES_NOTE_LABEL = '说明 · 可选';
 export const SERIES_MEMBERS_HEADING = '成员与共享范围';
 /** SER-001: membership is a scope for later explicit selection, and the page is no reader of the members' manuscripts. */
 export const SERIES_SCOPE_NOTE = '成员只表示以后的任务可以明确选用这个书系的范围；这里不汇总、也不打开成员图书的原文。';

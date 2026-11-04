@@ -130,7 +130,7 @@ export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): Reado
 
 /** TASK-039/040's one line: preparing the Task saved a revision, so later editing leaves the Task as it is. */
 export function taskPlanSavedLine(revisionLabel: string): string {
-  return `已为任务保存修订版${technicalWords(` ${revisionLabel}`)}，之后的编辑不影响这项任务。`;
+  return technicalWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`, '已为任务保存当前稿件，之后的编辑不影响这项任务。');
 }
 
 /** A count with its thousands grouped, the same text on every host. */
@@ -215,8 +215,8 @@ export function taskPlanDefaultRuleSet(name: string): string {
 }
 /** The Book's rule for this plan's pattern, beside the action. */
 export function taskPlanDefaultRuleCurrent(current: NonNullable<TaskPlanProjection['defaultRule']['current']>): string {
-  if (current.state === 'deactivated') return `这本书的默认执行规则：${current.name}（已停用）`;
-  return `这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`;
+  if (current.state === 'deactivated') return technicalWords(`这本书的默认执行规则：${current.name}（已停用）`, `这本书的默认规则：${current.name} · 已停用`);
+  return technicalWords(`这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`, `这本书的默认规则：${current.name} · 使用中${current.fromThisPlan ? ' · 由这份计划设定' : ''}`);
 }
 /** 快速开始后 (S75 D5): the quiet notice on a Task quick start started, and the way to the rule. */
 export function taskPlanQuickStarted(name: string): string {
@@ -259,7 +259,7 @@ export const TASK_PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序�
  * 先问你 (Issue #422, S76d; PLAN-011, PLAN-012): an adaptation moved into the right column. The Run asks the editor
  * before it makes it, in a Clarification Request, and only the step that waits for the answer stops.
  */
-export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
 export const TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST = '先问你';
 /** The move's control, named for what it does. */
 export function taskPlanEditAskFirst(label: string): string {
@@ -269,7 +269,7 @@ export function taskPlanEditAskFirst(label: string): string {
 
 /** The selector's words: what a level is and is not, said beside the three options of a 事实核查 Task's plan. */
 export const TASK_PLAN_ASSURANCE_HEADING = '证据保证级别';
-export const TASK_PLAN_ASSURANCE_NOTE = '级别决定这次核查做多少证据工作、能记录什么结论；它不是模型、服务或权限的选择。开始任务时如果本机未联网，会自动降为快速整理并在结果里说明。';
+export const TASK_PLAN_ASSURANCE_NOTE = '级别决定核查深度，开始时未联网会自动改为快速整理并在结果中说明。';
 export function taskPlanAssuranceEdited(label: string): string {
   return `改成${label}`;
 }
@@ -280,7 +280,7 @@ export function taskPlanAssuranceEdited(label: string): string {
 export const TASK_PLAN_BUDGET_NOTE = '用量和费用仍受所选模型服务的账户控制与计费条款约束。';
 export const TASK_PLAN_BUDGET_SET = '设置上限…';
 export const TASK_PLAN_BUDGET_REMOVE = '去掉上限';
-export const TASK_PLAN_BUDGET_INPUT = '预算上限（tokens）';
+export const TASK_PLAN_BUDGET_INPUT = '预算上限 · 词元';
 export const TASK_PLAN_BUDGET_HINT = '这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。';
 export const TASK_PLAN_BUDGET_APPLY = '设定';
 export const TASK_PLAN_BUDGET_CANCEL = '取消';
@@ -306,7 +306,7 @@ export function taskPlanEditCountAfterDrift(count: number): string {
 /** The edit that made the version shown, with its time (PLAN-011: recorded with actor and time). */
 export function taskPlanLastEdit(edit: NonNullable<TaskPlanProjection['edit']['lastEdit']>): string {
   const changes = edit.entries.map((entry) => `${entry.label}：${entry.prior} → ${entry.proposed}`).join('；');
-  return `${technicalWords(`第 ${edit.ordinal} 版`, '版本')}由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`;
+  return technicalWords(`第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`, `你修改了计划 · ${localInstantLabel(edit.recordedAt)}：${changes}`);
 }
 
 // ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------
@@ -1066,7 +1066,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
 
 export const TASK_PLAN_ACTIVITY_TITLE = '运行动态';
 /** A Run no execution of this service holds: AI7 closed while it ran, so nothing reports where it is. */
-export const TASK_PLAN_ACTIVITY_UNREPORTED = '这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。';
+export const TASK_PLAN_ACTIVITY_UNREPORTED = '任务在上次关闭时未结束，目前没有运行；可以取消并重新准备。';
 /** LIVE-003's words, kept as they are (ADR 0077): over this Run's own bar, the step says so and claims nothing more. */
 export const TASK_PLAN_ACTIVITY_STALE = '本步骤用时已超过通常水平';
 

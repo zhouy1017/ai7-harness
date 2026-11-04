@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import {
   EVIDENCE_ASSURANCE_LEVEL_LABELS,
   FACTUAL_ACTION_NEED_LABELS,
@@ -17,7 +17,7 @@ import {
  * a candidate is always said to be unchecked.
  */
 export const FACT_LENS_HEADING = '事实核查 · 核查结果';
-export const FACT_LENS_NOTE = '每条断言的三项状态分开显示：引文完整性、断言支持、事实核查。核查结果是证据评估，不是事实定论，也不构成审阅决定。';
+export const FACT_LENS_NOTE = '分别显示引文、支持与核查状态；证据评估不构成事实定论或审阅决定。';
 export const FACT_LENS_MORE = '显示更多核查结果';
 export const FACT_LENS_EMPTY_FILTERED = '没有符合筛选的核查结果。';
 export const FACT_LENS_FILTER_LABELS = {
@@ -54,10 +54,10 @@ export const EVIDENCE_LIMITATIONS_HEADING = '局限';
 export const EVIDENCE_NO_MUTATION = '证据工作区只用于阅读与比较：它不改稿、不作出提案或审阅决定、不批准任何应用。';
 
 export const DECISION_HEADING = '核查审阅决定';
-export const DECISION_NOTE = '五项都没有预选；记录后不可更改，后续的新结果版本会另行等待你的决定。';
+export const DECISION_NOTE = '决定记录后不可更改，新结果仍由你决定。';
 export const DECISION_RECORD = '记录核查审阅决定';
 export const DECISION_OWN_WORDS_LABEL = '你的结论';
-export const DECISION_REASON_HEADING = '理由（可不填）';
+export const DECISION_REASON_HEADING = '理由 · 可不填';
 export const DECISION_REASON_FREE = '自己写理由';
 export const DECISION_REASON_FIELD = '理由';
 export const DECISION_RECORDED = '已记录核查审阅决定。';
@@ -70,7 +70,7 @@ export const CORRECTION_OWN_EDIT = '自行编辑';
 export const CORRECTION_OWN_TEXT_LABEL = '改为';
 export const CORRECTION_RATIONALE_LABEL = '更正理由';
 export const CORRECTION_RANGES_HEADING = '要更正的位置';
-export const CORRECTION_RANGES_NOTE = '只列出与这段文字完全相同的出现处；默认只改这条发现所在的一处。相似但不相同的文字不会被列入。';
+export const CORRECTION_RANGES_NOTE = '只列出完全相同的文字，默认只改这条发现所在的一处。';
 export const CORRECTION_SAVE = '保存为更正提案';
 export const CORRECTION_SAVED_GO = '在稿件中查看';
 export const CORRECTION_FAILED = '无法保存为更正提案。';
@@ -135,10 +135,10 @@ export function sourceCardFacts(card: EvidenceSourceCardProjection, instant: (is
   return [
     ['核对状态', card.checkLabel],
     ['与断言的关系', card.relation],
-    ['来源版本', card.sourceVersion === null ? '未取回' : card.sourceVersion.slice(0, 12)],
+    ...(technicalLayerVisible ? [['来源版本', card.sourceVersion === null ? '未取回' : card.sourceVersion.slice(0, 12)] as const] : []),
     ['发布方', card.publisher ?? '未知'],
     ['获取时间', card.capturedAt === null ? '未取回' : instant(card.capturedAt)],
-    ['新鲜度', card.freshnessLabel],
+    ['状态', card.freshnessLabel],
     ['引文完整性', card.integrityLabel],
     ['来源关系', card.lineageLabel],
     ...(card.reused ? [['取回', '沿用此前运行精确取回的内容'] as const] : []),

@@ -55,9 +55,9 @@ describe('the import fidelity review words', () => {
     ]);
   });
   it('offers the two tracked-change modes by ADR 0094 §5 names, recommending the suggestions default', () => {
-    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修订建议', 'accepted-baseline': '直接并入正文（作为定稿基线）' });
+    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修订建议', 'accepted-baseline': '直接并入正文 · 定稿基线' });
     expect(['suggestions', 'accepted-baseline'].map((mode) => wordImportModeOption(mode as 'suggestions' | 'accepted-baseline')))
-      .toEqual(['转为 AI7 修订建议（推荐）', '直接并入正文（作为定稿基线）']);
+      .toEqual(['转为 AI7 修订建议 · 推荐', '直接并入正文 · 定稿基线']);
   });
   it('gives every status its own shape beside its text', () => {
     expect(['preserved', 'retained', 'degraded', 'unsupported'].map((status) => fidelityStatusShape(status as never)))
@@ -123,7 +123,7 @@ describe('the import fidelity review words', () => {
   it('offers the text-box choice, 保留为文本框 first and preselected, only for a natively read file with a box', () => {
     expect(TEXT_BOX_CHOICE_LEGEND).toBe('文本框怎样进来');
     expect(TEXT_BOX_CHOICE_OPTIONS.map((option) => [option.disposition, option.label])).toEqual([
-      ['retain', '保留为文本框（默认）'],
+      ['retain', '保留为文本框'],
       ['merge', '并入正文'],
     ]);
     expect(offersTextBoxChoice(WITH_BOX, null)).toBe(true);
@@ -138,8 +138,8 @@ describe('the import fidelity review words', () => {
   });
 
   it('states true consequences around the review, and nothing about a round trip it does not make', () => {
-    expect(commitNote(false)).toBe('本次导入不创建导入降级决定；原文件随来源版本完整保留，导入不修改它。');
-    expect(commitNote(true)).toBe('已接受的完整降级集合、保真审阅、降级决定和稿件导入记录会原子关联；原文件随来源版本完整保留，导入不修改它。');
+    expect(commitNote(false)).toBe('原文件保持不变。');
+    expect(commitNote(true)).toBe('按已接受的格式处理导入，原文件保持不变。');
     expect(fidelityOutcomeLabel('clean-import-no-round-trip')).toBe('完整保留 · 原文件随来源版本保留');
     expect(fidelityOutcomeLabel('degraded-import-no-round-trip')).toBe('含已接受的降级 · 原文件随来源版本保留');
     expect(conversionNoteText({ converterIdentity: 'ai7-text-to-docx/1', sourceFormat: 'MD' }))

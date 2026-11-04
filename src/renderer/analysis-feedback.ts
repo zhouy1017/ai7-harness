@@ -96,7 +96,7 @@ export function learningReasonAskCard(ask: LearningReasonAskProjection, api: Pic
   let choice: string | null = null;
   const text = el('textarea'); text.rows = 2; text.maxLength = 2_048;
   text.dataset['learningAskText'] = '';
-  const own = el('label', undefined, '补充说明（可选）'); own.append(text);
+  const own = el('label', undefined, '补充说明 · 可选'); own.append(text);
   const status = el('p', 'field-note'); status.setAttribute('role', 'status');
   const save = el('button', 'button secondary', '记下原因'); save.type = 'button'; save.dataset['learningAskAnswer'] = ''; save.disabled = true;
   const update = () => { save.disabled = choice === null && text.value.trim().length === 0; };
@@ -114,7 +114,8 @@ export function learningReasonAskCard(ask: LearningReasonAskProjection, api: Pic
     saving = true; save.disabled = true;
     void api.recordLearningReasonAsk({ action: 'answer', askId: ask.askId, choice, text: text.value.trim() || null }).then(() => {
       card.dataset['learningAskState'] = 'answered';
-      card.replaceChildren(el('p', 'field-note', '已记下你的原因。'));
+      status.textContent = '已记下你的原因。';
+      card.replaceChildren(status);
     }, () => { saving = false; update(); status.textContent = '原因未能记录，可以稍后再试。'; });
   });
   dismiss.addEventListener('click', () => {
@@ -337,12 +338,12 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
 
   return {
     async load(): Promise<void> {
-      metric.replaceChildren(el('p', 'field-note', ANALYSIS_FEEDBACK_STATUS.loading));
+      metric.replaceChildren(el('h5', undefined, `${ANALYSIS_FEEDBACK_HEADING} · ${ANALYSIS_FEEDBACK_STATUS.loading}`));
       try {
         projection = await api.inspectAnalysisFeedback({ revisionId });
         paint(null);
       } catch (error) {
-        const note = el('p', 'field-note analysis-feedback-unavailable', errorMessage(error, ANALYSIS_FEEDBACK_STATUS.unavailable));
+        const note = el('h5', 'analysis-feedback-unavailable', `${ANALYSIS_FEEDBACK_HEADING} · ${errorMessage(error, ANALYSIS_FEEDBACK_STATUS.unavailable)}`);
         note.setAttribute('role', 'status');
         metric.replaceChildren(note);
       }

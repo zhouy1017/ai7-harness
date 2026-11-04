@@ -10,7 +10,7 @@ describe('the words of 人员', () => {
     expect(labels.BOOK_PEOPLE_HEADING).toBe('人员');
     expect(labels.BOOK_PEOPLE_FIELD_LABELS).toEqual({ authors: '作者', editors: '责编', related: '相关人' });
     expect(labels.BOOK_PEOPLE_EMPTY).toBe('未填写');
-    expect(labels.BOOK_PEOPLE_NOTE).toBe('作者与责编用于标注和查找这本书，也是之后反馈与学习记录的归属；它们不是账号，也不决定谁能做什么。');
+    expect(labels.BOOK_PEOPLE_NOTE).toBe('作者与责编用于标注、查找及反馈与学习归属，不决定操作权限。');
     expect(labels.BOOK_PEOPLE_ACTION_LABELS).toEqual({ edit: '编辑人员…', save: '保存人员', cancel: '取消', addRelated: '添加相关人', removeRelated: '移除' });
     expect(labels.BOOK_PEOPLE_NAMES_HINT).toBe('多个名字用「、」隔开；每个名字最多 40 个字。');
     expect([labels.BOOK_PEOPLE_ROLE_LABEL, labels.BOOK_PEOPLE_NAME_LABEL, labels.BOOK_PEOPLE_RELATED_NONE]).toEqual(['角色', '名字', '还没有相关人。']);

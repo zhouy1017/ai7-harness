@@ -1,7 +1,6 @@
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
 import {
-  GLOBAL_ATTENTION_FINDINGS_NOTE,
   GLOBAL_ATTENTION_HEADING,
   GLOBAL_ATTENTION_LEDE,
   GLOBAL_ATTENTION_SECTION_LABEL,
@@ -194,13 +193,14 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   heading.id = uid('title');
   const host = el('div', 'global-attention-host');
   host.setAttribute('aria-busy', 'true');
-  host.append(el('p', 'field-note global-attention-loading', GLOBAL_ATTENTION_STATUS_LINES.loading));
+  const loading = el('span', 'global-attention-loading', ` · ${GLOBAL_ATTENTION_STATUS_LINES.loading}`);
+  loading.setAttribute('role', 'status');
+  heading.append(loading);
   options.root.setAttribute('aria-labelledby', heading.id);
   options.root.append(
     el('p', 'section-label', GLOBAL_ATTENTION_SECTION_LABEL),
     heading,
     el('p', 'lede', GLOBAL_ATTENTION_LEDE),
-    el('p', 'field-note global-attention-findings-note', GLOBAL_ATTENTION_FINDINGS_NOTE),
     host,
   );
 
@@ -216,16 +216,15 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     node.dataset['attentionTarget'] = projection.target.kind;
     if (projection.book.bookId !== null) node.dataset['bookId'] = projection.book.bookId;
     const reasonId = uid('reason');
-    const nextId = uid('next');
     const stateId = uid('state');
-    const open = el('button', 'global-attention-open', view.object);
+    const open = el('button', 'global-attention-open global-attention-next', view.nextStep);
     open.type = 'button';
     open.dataset['attentionOpen'] = view.itemId;
-    open.setAttribute('aria-label', view.openName);
-    open.setAttribute('aria-describedby', `${stateId} ${reasonId} ${nextId}`);
+    open.setAttribute('aria-label', `${view.nextStep} · ${view.openName}`);
+    open.setAttribute('aria-describedby', `${stateId} ${reasonId}`);
     open.addEventListener('click', () => void openItem(view.itemId, open));
     const title = el('h4', 'global-attention-object');
-    title.append(open);
+    title.append(el('span', 'global-attention-book', view.book), ' · ', el('span', 'global-attention-object-name', view.object));
     const pill = el('span', `state-term status-pill review-pill review-pill-${view.pill.tone} global-attention-pill`, view.stateLabel);
     pill.id = stateId;
     pill.dataset['pillTone'] = view.pill.tone;
@@ -234,14 +233,11 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     stateLine.append(pill, el('span', 'global-attention-time', view.time));
     const reason = el('p', 'global-attention-reason', view.reason);
     reason.id = reasonId;
-    const next = el('p', 'global-attention-next', view.nextStep);
-    next.id = nextId;
     node.append(
-      el('p', 'global-attention-book', view.book),
       title,
       stateLine,
       reason,
-      next,
+      open,
       options.technicalDetails(
         'global-attention-facts',
         ...fact(GLOBAL_ATTENTION_TECHNICAL_ITEM, view.itemId),
@@ -262,6 +258,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     groupHeading.id = headingId;
     groupHeading.append(el('span', 'global-attention-group-label', view.heading));
     if (view.countLine.length > 0) groupHeading.append(el('span', 'global-attention-group-count', view.countLine));
+    if (view.truncated !== null) groupHeading.append(el('span', 'global-attention-truncated', view.countLine.length > 0 ? view.truncated.replace(/^共 \d+ 项，/u, '') : view.truncated));
     section.setAttribute('aria-labelledby', headingId);
     section.append(groupHeading);
     if (view.empty !== null) {
@@ -275,7 +272,6 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     }
     section.append(list);
     if (view.key === 'active') { const all = el('button', 'quiet', '在任务总览里看全部'); all.addEventListener('click', () => options.openTasks?.()); section.append(all); }
-    if (view.truncated !== null) section.append(el('p', 'field-note global-attention-truncated', view.truncated));
     return section;
   }
 
@@ -291,6 +287,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     host.dataset['attentionCount'] = String(projection.actionableCount);
     host.dataset['attentionRunning'] = projection.running ? 'true' : 'false';
     host.removeAttribute('aria-busy');
+    loading.remove();
     host.replaceChildren(...globalAttentionView(projection).map((view) => groupNode(view, projection)));
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
     if (restore !== null) {
@@ -305,6 +302,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
       return;
     }
     host.removeAttribute('aria-busy');
+    loading.remove();
     host.replaceChildren(el('p', 'attention-note global-attention-unavailable', options.errorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable)));
   }
 

@@ -520,7 +520,7 @@ async function readDrawer(renderer) {
       references:texts('[data-task-plan-term="允许参考"] li'), sections:texts('[data-task-plan-section] > h3'),
       steps:Array.from(drawer.querySelectorAll('.task-plan-steps > li')).map((item)=>item.querySelector('.task-plan-step')?.textContent+' '+item.querySelector('.task-plan-step-result')?.textContent),
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
-      columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
+      columns:Array.from(drawer.querySelectorAll('.task-plan-boundary h4'), (node) => node.firstChild?.textContent ?? ''), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'), footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       actions:drawer.querySelectorAll('[data-analysis-action], [data-review-action], [data-task-authorization-action]').length,
       bar:(() => {
@@ -533,7 +533,7 @@ async function readDrawer(renderer) {
           status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
           actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
             const described=node.getAttribute('aria-describedby');
-            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+            return { name:node.dataset.taskDrawerControl, text:node.getAttribute('aria-label')??node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
           }),
         };
       })(),
@@ -634,7 +634,7 @@ const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范�
 // leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
 const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
 // Issue #422 (S76d): the move into 先问你 is offered, and the note says what it means for the Run.
-const PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+const PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
 const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
@@ -1456,7 +1456,7 @@ async function main() {
         sentence('reducer-closure').includes('没有读成的范围不在其中') &&
         sentence('assurance').startsWith(${JSON.stringify(ASSURANCE_STATEMENT)}) &&
         sentence('assurance').includes(${JSON.stringify(`另有 ${leads} 处前后不一致的线索、${revision.assurance.unresolvedItemCount} 项未决事项，归入审阅的「情节逻辑与前后一致」`)}) &&
-        axes.every((axis)=>axis.querySelector('.analysis-axis-next')?.textContent.startsWith('下一步：')) &&
+        axes.every((axis)=>!axis.querySelector('.analysis-axis-next')) &&
         decision.querySelector('.analysis-synopsis')?.textContent===${JSON.stringify(revision.synthesis.synopsis)} &&
         !/blk_|[0-9a-f]{64}/u.test(decision.textContent) && !/单元|Revision|归约|reducer|摘要/u.test(axes.map((axis)=>axis.textContent).join('')) &&
         !decision.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
@@ -2191,11 +2191,11 @@ async function main() {
       return !section.querySelector('.field-note.technical-identity') &&
         section.querySelectorAll(':scope > details.technical-details').length===1 && (!setExact.open || setExact.hidden) &&
         setExact.textContent.includes(${JSON.stringify(revision.resultSetId)}) && setExact.textContent.includes('baseline-manuscript-analysis') &&
-        Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='共 4 份分析 · 最新的是第 4 份') &&
+        section.querySelector(':scope > h4')?.textContent==='历次分析 · 共 4 份 · 最新第 4 份' &&
         // Synchronized delta (#406): an entry's two readings speak of 份 and 阅读范围; Revision ordinals,
         // lineage counts and the exact creation instant are in the entry's own disclosure.
-        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent+lines[1].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
-        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===2) &&
+        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
+        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===1) &&
         // Synchronized delta (#406): each entry also opens the report of the Run that produced it — its
         // own Run's, bound to its own revision, closed by default — so the entry's own identity
         // disclosure is counted as a direct child and the report's is its own.
@@ -2223,7 +2223,7 @@ async function main() {
         card.querySelectorAll('[data-analysis-axis]').length===4 && axis('freshness')==='superseded' && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' && axis('assurance')==='qualified-with-open-conflicts' &&
         card.querySelectorAll('[data-analysis-unit]').length===8 && card.querySelectorAll('[data-analysis-unit-lineage="recomputed"]').length===8 &&
         card.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement &&
-        card.textContent.includes('历史修订版 Revision 1（只读）') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
+        card.textContent.includes('历史分析结果 · Revision 1 · 只读') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
         card.querySelector('[data-analysis-action="close-revision"]') instanceof HTMLButtonElement &&
         card.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="1"]')?.disabled===true && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'history-open-surface');
@@ -2603,7 +2603,7 @@ async function main() {
       { id: 'reduction', removed: false, tag: null, control: null, name: null },
       { id: 'assurance-sampling', removed: false, tag: null, control: 'remove', name: '去掉这一步：核对与抽检' },
       { id: 'safe-retry', removed: false, tag: null, control: 'remove', name: `不允许：${SAFE_RETRY_ADAPTATION}` },
-    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_STEPS_NOTE, PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
+    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
     'plan-edit-controls', editable);
     // The glyph is the style sheet's: the column still reads as the adaptation's words alone.
     const openDrawer = await readDrawer(renderer);
@@ -3132,7 +3132,7 @@ async function main() {
     // Issue #1174 (ADR 0095 §5): a /2 record adds 章节与类别统计 and 发现详单 between 必须处理的事项 and 各类别摘要.
     await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
-    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLButtonElement && !exporter.disabled && exporter.textContent==='导出…' && exporter.dataset.reportVersion==='1'; })()`, 'review-report-parts');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLButtonElement && !exporter.disabled && exporter.textContent==='导出…' && exporter.dataset.reportVersion==='1'; })()`, 'review-report-parts');
 
     at('review-report-export');
     // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
@@ -3317,7 +3317,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer fieldset.task-plan-assurance') !== null`, 'factual-selector-shown');
     // One compact selector: three levels, 标准核查 by default, each with its consequence, none disabled while the policy names no
     // minimum (EASSURE-001, EASSURE-008); it names no model, provider or quality ladder (EASSURE-013).
-    const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.field-note')?.textContent ?? '' })) }; })()`);
+    const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.task-plan-assurance-consequence')?.textContent ?? '' })) }; })()`);
     requireJourney(selector?.shown === 'standard' && JSON.stringify(selector.options.map((option) => [option.level, option.label, option.checked, option.disabled])) ===
       JSON.stringify([['quick', '快速整理', false, false], ['standard', '标准核查', true, false], ['strict', '严格核查', false, false]]) &&
       selector.options.every((option) => option.consequence.length > 0 && !/更正确|模型/u.test(option.consequence)), 'factual-level-selector', selector);
@@ -3401,7 +3401,7 @@ async function main() {
     // EASSURE-012).
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
-    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent==='证据核查未完成' && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
+    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'factual-correction-choose');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="save-correction"]')?.disabled===false`, 'factual-correction-ready');
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="save-correction"]`, 'factual-correction-save');
@@ -3483,8 +3483,8 @@ async function main() {
         coverage:section?.dataset.coverage, freshness:section?.dataset.freshness,
         anchors:Array.from(card?.querySelectorAll('.custom-row') ?? [], (row)=>[row.dataset.unitOrdinal, row.dataset.anchorState]),
         links:card?.querySelectorAll('.custom-row [data-analysis-action="custom-jump"]').length ?? 0,
-        counts:section?.querySelector('.custom-counts')?.textContent ?? null,
-        feedback:section?.querySelector('.custom-feedback-note')?.textContent ?? null,
+        counts:section?.querySelector('.custom-counts')?.firstChild?.textContent ?? null,
+        feedback:document.querySelector('.custom-feedback-note')?.textContent ?? null,
         judged:card?.querySelectorAll('[data-analysis-action="open-feedback"]').length ?? 0,
         state:card?.querySelector('.custom-task-state')?.dataset.taskState ?? null,
       };

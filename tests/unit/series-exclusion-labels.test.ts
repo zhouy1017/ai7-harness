@@ -22,7 +22,7 @@ describe('书系检索排除 on a Series\' page', () => {
   it('states an immediate restriction of this Series\' retrieval and nothing more', () => {
     expect(EXCLUSIONS_NOTE).toContain('记录后立即生效');
     expect(EXCLUSIONS_NOTE).toContain('不删除、不隐藏图书或稿件');
-    expect(EXCLUSIONS_UNREAD_NOTE).toBe('现在还没有哪项书系检索读取来源版本；这条排除先记下，以后读取来源版本的检索都要遵守。');
+    expect(EXCLUSIONS_UNREAD_NOTE).toBe('尚无书系检索读取来源文件，未来检索会遵守此排除。');
     expect(EXCLUSION_KIND_CHOICES.map((choice) => choice.label)).toEqual(['书系知识条目', '知识类别', '成员图书', '来源版本']);
   });
 

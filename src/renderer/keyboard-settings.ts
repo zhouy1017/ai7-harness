@@ -242,9 +242,8 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       const label = el('kbd');
       label.dataset['shortcutCommand'] = command.id;
       label.dataset['shortcutText'] = 'true';
-      label.textContent = shortcutLabel(command.id) ?? '';
+      label.textContent = `${shortcutLabel(command.id) ?? ''}${isCustomized(command.id, bindings, platform) ? ` · ${KEYBOARD_CUSTOM_MARK}` : ''}`;
       chord.append(label);
-      if (isCustomized(command.id, bindings, platform)) chord.append(el('span', 'field-note keyboard-custom', ` ${KEYBOARD_CUSTOM_MARK}`));
       const actions = el('td');
       const change = el('button', 'secondary', KEYBOARD_CHANGE);
       change.type = 'button';
@@ -320,8 +319,8 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
   reduce.dataset['reducedMotion'] = 'true';
   reduce.addEventListener('change', () => chooseReducedMotion(reduce.checked));
   motion.append(reduce, ' 减少动效');
-  root.append(motion, el('p', 'field-note keyboard-always-on', KEYBOARD_ALWAYS_ON), heading,
-    ...(technicalLayerVisible ? [el('p', 'field-note', KEYBOARD_LEDE), actions] : []), table);
+  root.append(motion, el('p', 'field-note keyboard-always-on', technicalLayerVisible ? `${KEYBOARD_ALWAYS_ON.replace(/。$/u, '')}；${KEYBOARD_LEDE}` : KEYBOARD_ALWAYS_ON), heading,
+    ...(technicalLayerVisible ? [actions] : []), table);
   void (async () => {
     setStatus(KEYBOARD_STATUS_LINES.loading, 'busy');
     try {

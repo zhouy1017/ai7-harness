@@ -251,7 +251,7 @@ async function runSettingsPages(renderer, cancellation) {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, modifiers, windowsVirtualKeyCode });
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, modifiers, windowsVirtualKeyCode });
   };
-  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent`;
+  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent?.split(' · ')[0]`;
   const bindings = `window.ai7.getPreferences().then((preferences)=>JSON.stringify(preferences.values['keyboard.bindings']))`;
   const libraryDefault = darwin ? 'Command+Option+2' : 'Alt+2';
   const seriesDefault = darwin ? 'Command+Option+3' : 'Alt+3';
@@ -334,6 +334,8 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'series-back');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'series-back-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen');
+  await waitFor(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-reopen-screen');
+  await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-reopen-preference');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-remap-persisted');
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-one');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-one-restored');
@@ -424,7 +426,7 @@ async function readDrawer(renderer) {
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
       columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'),
-      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
+      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.closest('.task-plan-unavailable')?(node.getAttribute('aria-label')??node.textContent):node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
       footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       bar:(() => {
         const bar=drawer.querySelector('.task-drawer-bar');
@@ -436,7 +438,7 @@ async function readDrawer(renderer) {
           status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
           actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
             const described=node.getAttribute('aria-describedby');
-            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+            return { name:node.dataset.taskDrawerControl, text:node.getAttribute('aria-label')??node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
           }),
         };
       })(),

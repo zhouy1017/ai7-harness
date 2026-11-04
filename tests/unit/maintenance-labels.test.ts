@@ -40,7 +40,7 @@ describe('the words of 维护事项', () => {
     });
     expect(labels.maintenanceRecordAccessibleName(2)).toBe('为第 2 次设为发稿版本记录维护事项…');
     expect([labels.MAINTENANCE_CLASSIFICATION_LEGEND, labels.MAINTENANCE_REASON_LABEL, labels.MAINTENANCE_EVIDENCE_LABEL, labels.MAINTENANCE_EVIDENCE_HINT])
-      .toEqual(['维护类型', '原因', '依据（可选）', '例如读者来信、质检单或核对记录。']);
+      .toEqual(['维护类型', '原因', '依据 · 可选', '例如读者来信、质检单或核对记录。']);
     expect(labels.maintenanceDraftTargetLine('第 1 次 · 「一审稿」 · r1 · 纸质版首印')).toBe('维护事项绑定到：第 1 次 · 「一审稿」 · r1 · 纸质版首印');
     expect(labels.MAINTENANCE_BLOCKERS).toEqual({
       classification: '先选择维护类型。', reason: '请写明原因（1–500 个字）。', evidence: '依据最多 500 个字；不填写时请留空。', choice: '先选择一项。',

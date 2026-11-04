@@ -8,7 +8,6 @@ import {
   SOURCES_STATUS,
   SOURCE_ORIGINAL_LABEL,
   SOURCE_SAVE_ACTION,
-  SOURCE_SAVE_NOTE,
   SOURCE_TRANSLATION_MACHINE,
   SOURCE_UNITS_HEADING,
   researchUnitLine,
@@ -60,18 +59,25 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
     article.append(el('p', 'research-evidence-capture', sourceCaptureLine(record, localInstantLabel)));
     const stale = sourceStalenessLine(record, staleAfterDays, localInstantLabel);
     if (stale !== null) article.append(el('p', 'research-evidence-stale', stale));
-    article.append(el('p', 'research-evidence-alignment', sourceAlignmentLine(record)));
     const translation = sourceTranslationView(record);
+    const statuses: Array<{ className?: string; text: string }> = [{ text: sourceAlignmentLine(record) }];
+    if (translation !== null && 'refused' in translation) statuses.push({ className: 'research-evidence-translation-refused', text: translation.refused });
+    if (record.saveRefusal !== null) statuses.push({ className: 'research-evidence-save-refusal', text: record.saveRefusal });
+    const status = el('p', 'research-evidence-alignment');
+    statuses.forEach((entry, index) => {
+      if (index > 0) status.append('；');
+      status.append(el('span', entry.className, index === statuses.length - 1 ? entry.text : entry.text.replace(/。$/u, '')));
+    });
+    article.append(status);
     if (translation !== null && 'refused' in translation) {
       if (record.passage !== null) article.append(el('blockquote', 'research-evidence-passage', record.passage));
-      article.append(el('p', 'field-note research-evidence-translation-refused', translation.refused));
     } else if (translation !== null) {
       // The original and its 来源译文 side by side: the translation is labelled and never replaces the original (SRC-013).
       const pair = el('div', 'research-evidence-translation');
       const original = el('figure', 'research-evidence-original');
       original.append(el('figcaption', undefined, SOURCE_ORIGINAL_LABEL), el('blockquote', undefined, translation.original));
       const translated = el('figure', 'research-evidence-translated');
-      translated.append(el('figcaption', undefined, translation.label), el('blockquote', undefined, translation.text), el('p', 'field-note', translation.note));
+      translated.append(el('figcaption', undefined, `${translation.label} · ${translation.note}`), el('blockquote', undefined, translation.text));
       pair.append(original, translated);
       article.append(pair);
     } else if (record.passage !== null) {
@@ -85,9 +91,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
       save.disabled = saving !== null;
       save.addEventListener('click', () => void saveAsMaterial(record));
       actions.append(save);
-      article.append(actions, el('p', 'field-note', SOURCE_SAVE_NOTE));
-    } else {
-      article.append(el('p', 'field-note research-evidence-save-refusal', record.saveRefusal));
+      article.append(actions);
     }
     const facts = el('details', 'technical-details');
     facts.append(el('summary', undefined, '查看技术详情'));
@@ -106,7 +110,9 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
 
   const draw = (): void => {
     if (last === null) return;
-    const children: HTMLElement[] = [el('p', 'field-note research-evidence-statement', last.statement)];
+    const canSave = records.some((record) => record.saveRefusal === null);
+    const children: HTMLElement[] = [el('p', 'field-note research-evidence-statement', canSave
+      ? `${last.statement.replace(/。$/u, '')}；保存到本机资料库不会发送或授予任务读取。` : last.statement)];
     if (last.units.length > 0) {
       const units = el('section', 'research-evidence-units');
       units.append(el('h3', undefined, SOURCE_UNITS_HEADING));
@@ -181,13 +187,14 @@ export function findingEvidenceList(sources: ReadonlyArray<ReviewEvidenceSource>
   for (const source of sources) {
     const item = el('li', 'finding-evidence-source');
     item.dataset['evidenceId'] = source.evidenceId ?? '';
-    item.append(el('strong', 'finding-evidence-name', source.name));
+    const heading = el('p', 'finding-evidence-source-heading');
+    heading.append(el('strong', 'finding-evidence-name', source.name), ' · ', el('span', 'finding-evidence-note', source.note));
+    item.append(heading);
     if (source.url !== null) item.append(el('p', 'finding-evidence-url research-evidence-url technical-identity', source.url));
-    item.append(el('p', 'field-note finding-evidence-note', source.note));
     if (source.snippet !== null) item.append(el('blockquote', 'finding-evidence-snippet research-evidence-passage', source.snippet));
     if (source.translation !== null) {
       const translated = el('figure', 'finding-evidence-translation');
-      translated.append(el('figcaption', undefined, SOURCE_TRANSLATION_LABEL), el('blockquote', 'research-evidence-passage', source.translation), el('p', 'field-note', SOURCE_TRANSLATION_MACHINE));
+      translated.append(el('figcaption', undefined, `${SOURCE_TRANSLATION_LABEL} · ${SOURCE_TRANSLATION_MACHINE}`), el('blockquote', 'research-evidence-passage', source.translation));
       item.append(translated);
     }
     if (source.evidenceId !== null && openSource !== undefined) {

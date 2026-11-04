@@ -395,7 +395,7 @@ const READ_PANEL = `(() => {
     scope: text(panel.querySelector('.task-panel-scope')),
     note: text(panel.querySelector('.task-panel-note')),
     compose: {
-      heading: text(panel.querySelector('.task-panel-compose h3')),
+      heading: panel.querySelector('.task-panel-compose h3')?.firstChild?.textContent ?? null,
       modes: Array.from(panel.querySelectorAll('.task-panel-compose input[name="task-panel-mode"]')).map((input) => [input.value, input.checked, input.disabled]),
       none: text(panel.querySelector('.task-panel-compose-none')),
       quick: state('[data-task-compose-action="quick"]'),
@@ -637,7 +637,7 @@ const READ_COMPOSER = `(() => {
     title: text(composer.querySelector('h3')),
     book: text(composer.querySelector('.task-composer-book')),
     revision: text(composer.querySelector('.task-composer-revision')),
-    ranges: Array.from(composer.querySelectorAll('li.task-composer-range'), (item) => [text(item.querySelector('blockquote')), item.dataset.rangeState ?? null]),
+    ranges: Array.from(composer.querySelectorAll('li.task-composer-range'), (item) => [text(item.querySelector('.task-composer-range-quote')), item.dataset.rangeState ?? null]),
     target: Array.from(composer.querySelectorAll('[data-task-composer-field^="target-"]')).find((input) => input.checked)?.value ?? null,
     goalLabel: text(composer.querySelector('.task-composer-goal span')),
     prepare: disabled('prepare'),
@@ -993,7 +993,7 @@ async function main() {
     await runJ14DarkPass({ renderer, journey: 'J-16', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-dark-pass', 120_000);
     const opened = await openPanel(renderer, 'panel-open');
-    requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.note === PANEL_NOTE && opened.compose.heading === '发起全书任务' &&
+    requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
       opened.compose.quick === null && opened.compose.why === null &&
       JSON.stringify(['waiting', 'running', 'recent'].map((key) => [opened.groups[key]?.heading, opened.groups[key]?.count, opened.groups[key]?.empty, opened.groups[key]?.cards.length])) ===
@@ -1554,7 +1554,7 @@ async function main() {
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
       composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
       offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '发起任务' &&
-      composer.note === '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。',
+      composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
     // Nothing is prepared before a Task is chosen.
     await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-submit-empty');

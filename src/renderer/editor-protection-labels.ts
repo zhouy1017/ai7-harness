@@ -19,9 +19,9 @@ export const PROTECTION_COPY_FAILED = '无法复制受影响内容，请在稿�
 /** DUR-012: the line the status returns to — the normal completion label, nothing celebratory and no record. */
 export const PROTECTION_CLEARED = '已写入修订日志';
 /** DUR-011: what a forced termination keeps. */
-export const PROTECTION_RESTART_PROMISE = '如果 AI7 被强制关闭，重新打开后只能恢复到「最后确认写入」处；之后的内容只在本窗口中，无法保证保留。';
+export const PROTECTION_RESTART_PROMISE = '强制关闭后只能恢复到最后确认写入处，之后的内容可能丢失。';
 /** DUR-009: exact local salvage export appears only when the service can reconstruct and receipt the payload. */
-export const PROTECTION_SALVAGE_UNAVAILABLE = '本地业务服务目前无法重建并出具回执，暂不提供导出受影响内容；请先复制受影响内容。';
+export const PROTECTION_SALVAGE_UNAVAILABLE = '本机服务暂不能导出，请先复制受影响内容。';
 /** An input that would take the buffer past its safe capacity is not taken (DUR-002). */
 export const PROTECTION_BUFFER_REFUSED = '未确认内容已接近安全上限，这次输入未被接收；请先重试写入，或复制受影响内容。';
 export const PENDING_BUFFER_REFUSED = '尚待确认的编辑已达到单次安全上限，这次输入未被接收；请等待写入确认后分段输入。';
@@ -50,9 +50,10 @@ export function atRiskLocation(structureLabel: string | null, firstBlockPosition
 export function retryLine(cause: ProtectionCause, retrying: boolean, attempts: number, secondsUntilNext: number | null): string {
   if (cause === 'service-stopped') return '自动重试：本地业务服务已停止，无法自动重试';
   if (cause === 'drift') return '自动重试：已停止——稿件在中断期间已变化，不能按原顺序写入';
-  if (retrying) return `自动重试：正在重试写入（已重试 ${attempts} 次）`;
-  if (secondsUntilNext !== null) return `自动重试：${secondsUntilNext} 秒后重试（已重试 ${attempts} 次）`;
-  return `自动重试：等待中（已重试 ${attempts} 次）`;
+  const count = technicalWords(`（已重试 ${attempts} 次）`, ` · 已重试 ${attempts} 次`);
+  if (retrying) return `自动重试：正在重试写入${count}`;
+  if (secondsUntilNext !== null) return `自动重试：${secondsUntilNext} 秒后重试${count}`;
+  return `自动重试：等待中${count}`;
 }
 
 export function readOnlyLine(reason: ProtectionReadOnlyReason): string {

@@ -86,7 +86,7 @@ import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { mountEvaluation } from './evaluation.js';
 import { mountResearchEvidence } from './research-evidence.js';
-import { SOURCES_LEDE, SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
+import { SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
@@ -108,7 +108,7 @@ import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
 import { mountUsage } from './usage.js';
 import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
-import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
+import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -1369,12 +1369,12 @@ async function openWordSourceVersion(bookId: string, sourceVersionId: string): P
     let overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
     while (!overview.records.some((record) => record.kind === 'source' && record.sourceVersionId === sourceVersionId)) {
       const cursor = overview.historyPage.nextCursor;
-      if (cursor === null) throw new Error('保留的 Word 来源版本不在这本图书的历史中。');
+      if (cursor === null) throw new Error('保留的 Word 原文件不在这本图书的历史中。');
       overview = await window.ai7.getBookOverview({ bookId, historyCursor: cursor });
     }
     renderBookOverview(overview);
     const source = screen.querySelector<HTMLButtonElement>(`[data-record-kind="source"][data-record-id="${CSS.escape(sourceVersionId)}"]`);
-    if (source === null) throw new Error('原始来源版本的精确记录暂时无法打开。');
+    if (source === null) throw new Error('原文件记录暂时无法打开。');
     source.click();
   });
 }
@@ -1437,16 +1437,14 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
 }
 
 /**
- * The one transient notice an entry shows (V2-UX-COPY-015). It names where the manuscript opened and
- * it is the only place a `nearest-anchor` resolution is spoken: a position whose block the current
- * Revision no longer holds is said to have moved, never presented as the position the editor left.
+ * The transient notice names a fallback when the saved position no longer exists (V2-UX-COPY-015).
  */
 function manuscriptEntryNotice(anchor: BookManuscriptAnchorProjection): string {
   if (anchor.entry === null) return '从稿件开头打开；这本图书还没有记录上次位置。';
   if (anchor.entry.state === 'nearest-anchor') {
-    return `上次位置所在的段落已不在当前修订版，已回到最近的位置 · ${anchor.entry.label}`;
+    return '上次位置所在的段落已不在稿件中，已回到最近的位置。';
   }
-  return `回到上次位置 · ${anchor.entry.label}`;
+  return '回到上次位置。';
 }
 
 /**
@@ -1561,7 +1559,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
     element('dt', undefined, '格式'),
     sourceFormat,
     element('dt', undefined, '来源'),
-    element('dd', undefined, staged.source.provenanceLabel),
+    element('dd', undefined, technicalWords(staged.source.provenanceLabel, '已选择文件')),
     element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
     sourceBytes,
     // A file the product did not parse detected no blocks, so it says what it retained instead of
@@ -1856,7 +1854,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   const choices = element('fieldset', 'recovery-comparison');
   choices.setAttribute('role', 'radiogroup');
   choices.setAttribute('aria-label', '恢复来源比较');
-  const legend = element('legend', undefined, '选择一个证据来源（默认不选择）');
+  const legend = element('legend', undefined, '选择一个证据来源');
   choices.append(legend);
   const cards = element('div', 'recovery-candidate-grid');
   cards.dataset['eligibleCandidateCount'] = recovery.snapshot.state === 'eligible' ? '3' : '2';
@@ -1960,11 +1958,10 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   if (recovery.snapshot.state !== 'eligible') {
     const unavailable = element('section', 'recovery-snapshot-disclosure');
     unavailable.dataset['snapshotState'] = recovery.snapshot.state;
-    unavailable.append(
-      element('strong', undefined, '独立恢复快照不可作为本次选择'),
-      element('p', undefined, recovery.snapshot.state === 'none' ? recovery.snapshot.limitation : recovery.snapshot.verification),
-      element('p', 'field-note', recovery.snapshot.limitation),
-    );
+    const snapshotWords = recovery.snapshot.state === 'none' || recovery.snapshot.verification === recovery.snapshot.limitation
+      ? recovery.snapshot.limitation
+      : `${recovery.snapshot.verification.replace(/。$/u, '')}；${recovery.snapshot.limitation}`;
+    unavailable.append(element('strong', undefined, '独立恢复快照不可作为本次选择'), element('p', undefined, snapshotWords));
     content.append(unavailable);
   }
   content.append(consequence);
@@ -2259,8 +2256,8 @@ function renderImportRecovery(
     const support = element('section', 'uncertain-support');
     support.append(
       element('h3', undefined, '安全清理状态'),
-      element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`),
-      element('p', 'field-note', '此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。'),
+      ...(technicalLayerVisible ? [element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`)] : []),
+      element('p', 'field-note', technicalWords('此状态不包含暂存正文或原始文件路径，请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。', '清理尚未完成，请保留 AI7 数据并重试；重试会继续原操作，不会重复导入或放弃。')),
     );
     const actions = element('div', 'button-row recovery-actions');
     actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery, recoveryReturn)));
@@ -2287,10 +2284,12 @@ function renderImportRecovery(
     const support = element('section', 'uncertain-support');
     support.append(
       element('h3', undefined, '本地恢复与支持信息'),
-      element('p', undefined, `草稿标识：${recovery.draftId}`),
-      element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
-      element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
-      element('p', 'field-note', '这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求。请保留 Agent Data Root，等待本地核对；不要重复导入或手动删除暂存文件。'),
+      ...(technicalLayerVisible ? [
+        element('p', undefined, `草稿标识：${recovery.draftId}`),
+        element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
+        element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
+      ] : []),
+      element('p', 'field-note', technicalWords('这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求，请保留 Agent Data Root 等待本地核对；不要重复导入或手动删除暂存文件。', '无法确认清理状态，请保留 AI7 数据等待核对，不要重复导入或删除暂存文件。')),
     );
     content.append(support);
     appendRecoveryReturnAction(content, recoveryReturn);
@@ -2349,6 +2348,7 @@ function renderImportRecovery(
 }
 
 function appendRecordField(values: HTMLElement, label: string, value: string | null, technical = false): void {
+  if (technical && !technicalLayerVisible) return;
   values.append(
     element('dt', undefined, label),
     element('dd', technical ? 'technical-identity' : undefined, value ?? '—'),
@@ -2364,10 +2364,24 @@ function appendRecordInstant(values: HTMLElement, label: string, iso: string): v
   values.append(element('dt', undefined, label), instantValue(iso));
 }
 
+function editorialRecordLabel(record: BookRecordPresentation): string {
+  if (technicalLayerVisible) return record.label;
+  switch (record.kind) {
+    case 'source': return '来源文件';
+    case 'import-record': return '稿件导入记录';
+    case 'source-import-record': return '资料导入记录';
+    case 'manuscript-reimport-record': return '重新导入记录';
+    case 'book': return '图书';
+    case 'manuscript': return '稿件';
+    case 'revision': return '稿件版本';
+    case 'workflow': return '工作进度';
+  }
+}
+
 function recordPresentation(record: BookRecordPresentation): HTMLElement {
   const detail = element('section', 'source-card record-detail');
   detail.dataset['recordKind'] = record.kind;
-  detail.append(element('h3', undefined, record.label));
+  detail.append(element('h3', undefined, editorialRecordLabel(record)));
   const values = element('dl');
   switch (record.kind) {
     case 'book':
@@ -2406,15 +2420,15 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       if (record.parserIdentity !== null) {
         appendRecordField(values, '内容摘要', record.contentDigest, true);
         appendRecordField(values, '结构摘要', record.structureDigest, true);
-        appendRecordField(values, '解析器', record.parserIdentity);
+        appendRecordField(values, '解析器', record.parserIdentity, true);
       }
       // An original the product read through a converted DOCX names that object and its converter,
       // beside — never instead of — the original's own identity above (ADR 0072 §2).
       if (record.converterIdentity !== null) {
         appendRecordField(values, '工作表示 SHA-256', record.workingObjectDigest, true);
-        appendRecordField(values, '转换器', record.converterIdentity);
+        appendRecordField(values, '转换器', record.converterIdentity, true);
       }
-      appendRecordField(values, '取得方式', '本机文件选择器');
+      appendRecordField(values, '取得方式', '本机文件选择器', true);
       appendRecordField(values, '处理边界', '本地 · 未调用 Provider');
       break;
     case 'workflow':
@@ -2454,14 +2468,14 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '目标类型', record.targetKind === 'new-book' ? '新建图书' : '现有图书');
       appendRecordField(
         values,
-        '来源版本结果',
-        record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
+        technicalWords('来源版本结果', '来源文件'),
+        technicalWords(record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本', record.sourceVersionDisposition === 'reused-same-book' ? '使用已导入的文件' : '导入新文件'),
       );
       // The boundary claims a parse only where one happened, and says so when a converter did it (ADR 0072 §2; Issue #583).
       appendRecordField(values, '保留边界', record.retainedBoundary.label.replace(/^保留/, ''));
       appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
       appendRecordField(values, '保留格式', record.retainedBoundary.format);
-      appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));
+      appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes), true);
       appendRecordField(values, '保留文件 SHA-256', record.retainedBoundary.sourceSha256, true);
       if (record.retainedBoundary.contentDigest !== null && record.retainedBoundary.structureDigest !== null) {
         appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
@@ -2501,8 +2515,10 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       row.dataset['reimportGroupVerb'] = group.verb;
       rows.append(row);
     }
-    detail.append(element('h4', undefined, `章节对应 · ${record.groups.count} 处`), rows);
-    detail.append(element('p', 'field-note', `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随。`));
+    const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;
+    const groupsHeading = element('h4', undefined, `章节对应 · ${record.groups.count} 处`);
+    groupsHeading.append(' · ', element('span', undefined, `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
+    detail.append(groupsHeading, rows);
     // Each mark that could not follow, as the landing notice listed it: set aside for good, so the record is where it is read later.
     if (record.markOutcomes.items.length > 0) {
       const unfollowed = element('ul', 'degradation-list reimport-record-unfollowed');
@@ -2512,9 +2528,6 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         unfollowed.append(entry);
       }
       detail.append(unfollowed);
-    }
-    if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
-      detail.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条未列出。`));
     }
   }
   if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
@@ -2531,9 +2544,8 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
     fidelity.append(categories);
     detail.append(fidelity);
     if (record.degradationDecision) {
-      detail.append(element('p', 'field-note', record.degradationDecision.summaryLabel));
       const acceptedDisclosure = element('details', 'degradation-disclosure');
-      acceptedDisclosure.append(element('summary', undefined, '查看受影响类别、示例与导出后果'));
+      acceptedDisclosure.append(element('summary', undefined, `${record.degradationDecision.summaryLabel} · 查看受影响类别、示例与导出后果`));
       const accepted = element('ul', 'degradation-list');
       for (const item of record.degradationDecision.acceptedItems) {
         const category = record.fidelityCategories.find((candidate) => candidate.key === item.categoryKey);
@@ -2581,8 +2593,9 @@ async function renderBookWorkbenchChooser(
     const content = panel();
     content.classList.add('book-workbench-chooser');
     content.dataset['currentBookId'] = currentOverview.book.bookId;
+    const heading = element('h2', undefined, '在另一本图书工作台打开');
     content.append(
-      element('h2', undefined, '在另一本图书工作台打开'),
+      heading,
       element('p', 'lede', '选择会创建或显示目标图书已有的工作台；当前图书工作台保持打开。'),
     );
     const list = element('div', 'recent-work-list');
@@ -2590,12 +2603,12 @@ async function renderBookWorkbenchChooser(
       if (summary.bookId === currentOverview.book.bookId) continue;
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
         open.disabled = true;
-        setStatus('正在打开精确图书工作台…', 'busy');
+        setStatus('正在打开图书…', 'busy');
         try {
           await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId });
         } catch (error) {
           open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
         }
       });
       open.dataset['bookId'] = summary.bookId;
@@ -2604,7 +2617,7 @@ async function renderBookWorkbenchChooser(
       list.append(row);
     }
     if (list.childElementCount === 0) {
-      list.append(element('p', 'field-note', '没有其他图书可打开。'));
+      heading.append(' · 没有其他图书可打开。');
     }
     content.append(list);
     const actions = element('div', 'button-row');
@@ -2931,7 +2944,6 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
   const host = element('div', 'research-evidence-host');
   content.append(
     element('h2', undefined, SOURCES_TITLE),
-    element('p', 'field-note', SOURCES_LEDE),
     host,
   );
   const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
@@ -3011,11 +3023,14 @@ function renderBookOverview(
   content.dataset['bookId'] = overview.book.bookId;
   content.dataset['manuscriptState'] = overview.manuscriptState.state;
   if (completion) content.dataset['importCommitId'] = completion.commitId;
-  content.append(element('h2', undefined, '工作概览'), element('p', 'lede', overview.manuscriptState.label));
+  content.append(
+    element('h2', undefined, '工作概览'),
+    element('p', 'lede', overview.manuscriptState.label),
+  );
   if (sourceCompletion) {
-    content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
+    content.append(element('p', 'success-note', '来源材料已导入。'));
   } else if (completion) {
-    content.append(element('p', 'success-note', '稿件已导入；以下为这本图书的精确结果记录。'));
+    content.append(element('p', 'success-note', '稿件已导入。'));
   }
   else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
   // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the
@@ -3032,7 +3047,7 @@ function renderBookOverview(
         () => window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
       if (!guidance.isConnected || !visible) return;
       guidance.dataset['onboardingGuidance'] = 'sample-book';
-      guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title), element('p', 'field-note', SAMPLE_GUIDANCE_LABELS.note));
+      guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title));
       const links = element('div', 'button-row');
       const book = { bookId: overview.book.bookId, title: overview.book.title };
       for (const { label, section } of SAMPLE_GUIDANCE_LABELS.steps) {
@@ -3048,12 +3063,12 @@ function renderBookOverview(
     anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
     const anchorValues = element('dl');
     anchorValues.append(
-      element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel),
+      element('dt', undefined, '稿件'), element('dd', undefined, technicalWords(anchor.revisionLabel, '当前稿件')),
       element('dt', undefined, '上次位置'),
       element('dd', undefined, anchor.entry === null
         ? '尚未记录；打开稿件时从稿件开头开始'
         : anchor.entry.state === 'nearest-anchor'
-          ? `${anchor.entry.label}（上次位置所在的段落已不在当前修订版，落到最近的位置）`
+          ? `${anchor.entry.label} · 原位置已不存在，将从最近的位置打开`
           : anchor.entry.label),
       element('dt', undefined, '保存状态'), element('dd', undefined, anchor.journalLabel),
     );
@@ -3074,7 +3089,6 @@ function renderBookOverview(
   const identityValues = element('dl');
   identityValues.append(
     element('dt', undefined, '内部编号'), element('dd', undefined, overview.book.internalNumber ?? '未设置'),
-    element('dt', undefined, '稿件状态'), element('dd', undefined, overview.manuscriptState.label),
   );
   identity.append(element('h3', undefined, '图书'), identityValues, technicalDetails(
     undefined,
@@ -3343,10 +3357,11 @@ function renderBookOverview(
 
 
   const records = element('section', 'review-section record-navigation');
-  records.append(element('h3', undefined, '精确记录'));
+  records.append(element('h3', undefined, technicalWords('精确记录', '导入记录')));
   const recordButtons = element('div', 'button-row');
   for (const record of overview.records) {
-    const open = button(record.label, 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
+    if (!technicalLayerVisible && ['book', 'manuscript', 'revision', 'workflow'].includes(record.kind)) continue;
+    const open = button(editorialRecordLabel(record), 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
     open.dataset['recordKind'] = record.kind;
     if (record.kind === 'book') open.dataset['recordId'] = record.bookId;
     else if (record.kind === 'manuscript') open.dataset['recordId'] = record.manuscriptId;
@@ -3527,7 +3542,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     });
     cancel.hidden = true;
     actions.append(prepare, cancel);
-    form.append(label, goal, element('p', 'field-note', '目标由当前 J-03 工作流固定；不会构造模型请求。'), actions);
+    form.append(label, goal, element('p', 'field-note', technicalWords('目标由当前 J-03 工作流固定；不会构造模型请求。', '目标已确定，本次不会调用模型。')), actions);
     card.append(form);
   } else {
     const checkpoint = projection.checkpoint!;
@@ -3553,7 +3568,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       const actions = element('div', 'button-row task-authorization-actions');
       const boundaryHost = element('div');
       boundaryHost.setAttribute('aria-live', 'polite');
-      const inspectBoundary = button('核对前台执行边界（不派发）', 'secondary', async () => {
+      const inspectBoundary = button(technicalWords('核对前台执行边界（不派发）', '核对执行边界 · 不派发'), 'secondary', async () => {
         inspectBoundary.disabled = true;
         setStatus('正在核对前台执行边界…', 'busy');
         try {
@@ -3581,8 +3596,7 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '新建图书 · 复核'),
-    element('h2', undefined, '复核空图书创建'),
-    element('p', 'lede', '本次提交只创建图书身份与编辑维度集。'),
+    element('h2', undefined, '新建空图书'),
   );
   const identity = element('section', 'source-card');
   const values = element('dl');
@@ -3595,26 +3609,15 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
     element('dt', undefined, '拟用图书 ID'), element('dd', 'technical-identity', review.proposed.bookId),
     element('dt', undefined, '拟用稳定标识'), element('dd', 'technical-identity', review.proposed.stableIdentity),
   ));
-  content.append(
-    identity,
-    listSection('将创建的记录', review.recordsToCreate),
-    listSection('不会做', review.nonEffects),
-  );
-  const dimensions = element('section', 'review-section');
-  dimensions.append(
-    element('h3', undefined, '图书编辑维度集 · 8 项'),
-    element('p', 'field-note', `${review.editorialDimensionSet.name} · ${review.editorialDimensionSet.weightSemantics}`),
-  );
-  const list = element('ul', 'dimension-list');
-  for (const item of review.editorialDimensionSet.dimensions) {
-    list.append(element('li', undefined, `${item.label} · 中性起始权重 ${item.weight}`));
-  }
-  dimensions.append(list);
-  content.append(dimensions);
+  content.append(identity);
+  if (technicalLayerVisible) content.append(listSection('将创建的记录', review.recordsToCreate));
+  content.append(listSection('不会做', technicalLayerVisible ? review.nonEffects : [
+    '不创建稿件、来源文件或导入记录，也不创建或加入书系；不决定学习准入或授权模型传输；不发稿、导出、发送、交付、发布或授予发布权限。',
+  ]));
   const actions = element('div', 'button-row');
   const commit = button('新建图书', 'primary', async () => {
     commit.disabled = true;
-    setStatus('正在原子创建空图书…', 'busy');
+    setStatus('正在创建图书…', 'busy');
     try {
       const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
       setStatus(result.completionLabel, 'success');
@@ -3645,7 +3648,7 @@ function renderBookCreationForm(): void {
   const titleError = element('p', 'field-error');
   titleError.id = 'empty-book-title-error';
   titleError.hidden = true;
-  const numberLabel = element('label', undefined, '内部编号（可选）');
+  const numberLabel = element('label', undefined, '内部编号 · 可选');
   numberLabel.htmlFor = 'empty-book-number';
   const internalNumber = element('input');
   internalNumber.id = 'empty-book-number';
@@ -3735,7 +3738,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('p', 'section-label', SERIES_TITLE), element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
+  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
   replaceScreen('series-list', content);
   setStatus(SERIES_STATUS.loading, 'busy');
   const surface = mountSeriesList({
@@ -3760,11 +3763,12 @@ async function renderSeries(seriesId: string): Promise<void> {
   content.classList.add('series-screen');
   content.dataset['seriesId'] = seriesId;
   const heading = element('h2', undefined, SERIES_TITLE);
-  const note = element('p', 'field-note series-note');
+  const note = element('blockquote', 'series-note');
+  note.setAttribute('aria-label', '书系说明');
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button(SERIES_BACK_TO_LIST, 'quiet', () => void renderSeriesList(seriesId)));
-  content.append(element('p', 'section-label', SERIES_TITLE), heading, note, host, back);
+  content.append(heading, note, host, back);
   replaceScreen('series', content);
   setStatus(SERIES_STATUS.loading, 'busy');
   const surface = mountSeries({ root: host, seriesId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
@@ -3793,7 +3797,6 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   content.append(
     element('p', 'section-label', `设置 · ${CALIBRATION_PAGE_GROUP}`),
     element('h2', undefined, CALIBRATION_PAGE_TITLE),
-    element('p', 'field-note', CALIBRATION_PAGE_LEDE),
     host,
     back,
   );
@@ -4241,8 +4244,6 @@ function renderAppearance(): void {
     element('p', 'lede', APPEARANCE_LEDE));
   const choices = element('fieldset', 'appearance-choices');
   choices.append(element('legend', undefined, APPEARANCE_LEGEND));
-  const message = element('p', 'field-note');
-  message.setAttribute('role', 'status');
   const radios: HTMLInputElement[] = [];
   for (const choice of APPEARANCE_CHOICES) {
     const label = element('label', 'appearance-choice');
@@ -4253,13 +4254,13 @@ function renderAppearance(): void {
     // The radios stay enabled while saving: disabling the focused one would drop keyboard focus (KEY-013).
     input.addEventListener('change', () => {
       if (!input.checked) return;
-      void appearance.choose(choice.value).then(() => { message.textContent = APPEARANCE_SAVED; }, () => {
+      void appearance.choose(choice.value).then(() => { setStatus(APPEARANCE_SAVED, 'success'); }, () => {
         for (const radio of radios) radio.checked = radio.value === appearance.preference;
-        message.textContent = APPEARANCE_SAVE_FAILED;
+        setStatus(APPEARANCE_SAVE_FAILED, 'error');
       });
     });
     radios.push(input);
-    label.append(input, element('strong', undefined, choice.label), element('span', 'field-note', choice.description));
+    label.append(input, element('strong', undefined, choice.label));
     choices.append(label);
   }
   const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });
@@ -4271,7 +4272,7 @@ function renderAppearance(): void {
   const viewSettings = renderViewSettings(viewPreferences, setStatus);
   const viewObserver = new MutationObserver(() => { if (!content.isConnected) { viewSettings.destroy(); viewObserver.disconnect(); } });
   viewObserver.observe(screen, { childList: true });
-  content.append(choices, message, viewSettings.element, actions);
+  content.append(choices, viewSettings.element, actions);
   replaceScreen('appearance', content);
   setStatus(APPEARANCE_STATUS);
 }
@@ -4325,8 +4326,7 @@ function renderLanding(
   const landingActions = element('div', 'button-row');
   landingActions.append(importButton, createBook);
   copy.append(landingActions);
-  const note = element('aside', 'hero-note', '所有导入都要求先明确选择图书目标；系统不会自动选择已有图书或稿件关系。');
-  content.append(copy, note);
+  content.append(copy);
   // The landing always paints first; this supporting card never replaces its normal actions.
   const onboarding = element('section', 'onboarding-card');
   content.append(onboarding);
@@ -4338,10 +4338,10 @@ function renderLanding(
       onboarding.append(element('h3', undefined, labels.title));
       const steps = element('ol', 'onboarding-steps');
       const data = element('li');
-      data.append(element('strong', undefined, labels.dataStep), element('p', 'onboarding-data-location', location.canonicalRoot),
-        element('p', 'field-note', labels.dataNote), button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
-      if (location.dataLocationException !== null) data.append(element('p', 'field-note', location.channelDescription));
-      if (location.syncWarning !== null) data.append(element('p', 'field-note', location.syncWarning));
+      data.append(element('strong', undefined, labels.dataStep), ...(technicalLayerVisible ? [element('p', 'onboarding-data-location', location.canonicalRoot)] : []),
+        button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
+      const warnings = [location.dataLocationException === null ? null : location.channelDescription, location.syncWarning].filter((line): line is string => line !== null);
+      if (warnings.length > 0) data.append(element('p', 'field-note', `${warnings.map((line) => line.replace(/。$/u, '')).join('；')}。`));
       const model = element('li');
       model.append(element('strong', undefined, labels.modelStep), element('p', undefined, labels.modelNote),
         button(labels.modelOpen, 'secondary', () => void renderModelServiceSettings()));
@@ -4362,8 +4362,8 @@ function renderLanding(
             setStatus(rendererErrorMessage(error, labels.sampleFailed), 'error');
           }
         });
-        start.append(sample, element('p', 'field-note', labels.sampleNote));
-      } else start.append(element('p', undefined, labels.sampleUnavailable), element('p', 'field-note', labels.sampleUnavailableNote));
+        start.append(sample);
+      } else start.append(element('p', undefined, labels.sampleUnavailable));
       steps.append(data, model, start);
       const skip = button(labels.skip, 'quiet', async () => {
         skip.disabled = true;
@@ -4382,20 +4382,24 @@ function renderLanding(
   if (books.items.length > 0 || filter !== null) {
     const library = element('section', 'recent-work');
     library.dataset['bookFilter'] = filter === null ? 'none' : filter.field;
-    library.append(element('p', 'section-label', '图书'), element('h3', undefined, SHELL_LABELS.allBooks));
+    library.append(element('h3', undefined, SHELL_LABELS.allBooks));
     library.append(renderBookFilter(priorWork, activeRecoveryReturn, filter));
-    if (filter !== null) library.append(element('p', 'field-note book-filter-line', bookFilterLine(filter)));
-    if (books.items.length === 0) library.append(element('p', 'field-note book-filter-none', BOOK_FILTER_NONE));
+    if (filter !== null) {
+      const result = element('p', 'field-note');
+      result.append(element('span', 'book-filter-line', bookFilterLine(filter)));
+      if (books.items.length === 0) result.append('；', element('span', 'book-filter-none', BOOK_FILTER_NONE));
+      library.append(result);
+    }
     const list = element('div', 'recent-work-list');
     for (const summary of books.items) {
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
         open.disabled = true;
-        setStatus('正在打开精确图书工作台…', 'busy');
+        setStatus('正在打开图书…', 'busy');
         try {
           await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn);
         } catch (error) {
           open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
         }
       });
       open.dataset['bookId'] = summary.bookId;
@@ -4403,10 +4407,12 @@ function renderLanding(
       row.append(open);
       // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
       const peopleLine = bookCardPeopleLine(summary.people);
-      if (peopleLine !== null) row.append(element('p', 'book-people-line', peopleLine));
       const relatedLine = bookCardRelatedLine(summary.people);
-      if (relatedLine !== null) row.append(element('p', 'field-note book-related-line', relatedLine));
-      if (summary.internalNumber !== null) row.append(element('p', 'field-note', `内部编号 ${summary.internalNumber}`));
+      const facts = element('p', 'book-people-line');
+      if (peopleLine !== null) facts.append(peopleLine);
+      if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
+      if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
+      if (facts.childNodes.length > 0) row.append(facts);
       row.append(bookIdentityDisclosure(summary));
       list.append(row);
     }
@@ -4437,14 +4443,12 @@ function renderLanding(
   }
   if (priorWork.length > 0) {
     const recent = element('section', 'recent-work');
-    recent.append(element('p', 'section-label', '继续已有工作'), element('h3', undefined, '最近稿件'));
+    recent.append(element('h3', undefined, '最近稿件'));
     const list = element('div', 'recent-work-list');
     for (const item of priorWork) {
-      const open = button(
-        item.recoveryAttention
-          ? `${item.bookTitle} · 恢复待确认状态`
-          : `${item.bookTitle} · ${item.revisionLabel}`,
-        'secondary', async () => {
+      const title = item.recoveryAttention ? `${item.bookTitle} · 恢复待确认状态` : `${item.bookTitle} · 当前稿件 ${item.revisionLabel}`;
+      const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
+      const open = button(`${title} · ${context}`, 'secondary', async () => {
         open.disabled = true;
         setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
         try {
@@ -4466,13 +4470,6 @@ function renderLanding(
       row.append(
         open,
         ...(item.recoveryAttention ? [element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。')] : []),
-        element(
-          'p',
-          'field-note',
-          `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${
-            item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''
-          }`,
-        ),
       );
       list.append(row);
     }
@@ -4538,8 +4535,9 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
       : '新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。'),
   );
   if (record.markOutcomes.unfollowed > 0) {
+    const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;
     section.append(element('p', 'attention-note',
-      `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留。`));
+      `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
     const list = element('ul', 'reimport-unfollowed');
     for (const item of record.markOutcomes.items) {
       const entry = element('li', undefined, reimportUnfollowedLine(item));
@@ -4547,10 +4545,6 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
       list.append(entry);
     }
     section.append(list);
-    // The record lists the same marks, bounded alike: what neither lists is counted, never pointed elsewhere.
-    if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
-      section.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条未列出。`));
-    }
   }
   const detail = element('div', 'reimport-landing-record');
   const actions = element('div', 'button-row compact-actions');

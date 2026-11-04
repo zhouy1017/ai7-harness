@@ -6,7 +6,7 @@ import {
 } from './evaluation-labels.js';
 
 export const PROFILE_PROSPECTIVE = '新版本只用于之后准备的初评和新建的评估，已有记录保留当时的方案。';
-export const PROFILE_CALIBRATION = '改名或修改说明保留该项的校准依据；移除的项不再用于新评估，新增的项等待自己的调分依据。项数变化时，原有项的校准偏移按新的满分折算。';
+export const PROFILE_CALIBRATION = '改名或修改说明保留该项的校准依据；移除的项不再用于新评估，新增的项等待自己的调分依据；项数变化时原有项的校准偏移按新的满分折算。';
 export const PROFILE_ITEM_COUNT = '评分项数需要能把 100 分平均分成整数：1、2、4、5 或 10 项。';
 export function profileEditInput(profile: EvaluationProfileProjection): SaveEvaluationProfileInput {
   return { expectedSha256: profile.sha256, items: profile.items.map((item) => ({ itemId: item.itemId, label: item.label, description: item.description ?? '' })), readiness: [...profile.readiness ?? []] };
@@ -52,15 +52,16 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
     heading.append(el('h3', undefined, unknown ? EVALUATION_PROFILE_UNKNOWN_LABEL : profile.title));
     if (!unknown) heading.append(el('span', 'status-pill evaluation-profile-pill', evaluationProfilePill(profile)));
     if (current) heading.append(el('span', 'state-term status-pill', '当前使用'));
+    heading.append(el('span', 'evaluation-profile-use', evaluationProfileUse(profile)));
     if (unknown) {
-      card.append(heading, el('p', 'field-note evaluation-profile-use', evaluationProfileUse(profile)), el('p', 'field-note', EVALUATION_PROFILE_UNKNOWN_NOTE));
+      card.append(heading, el('p', 'field-note', EVALUATION_PROFILE_UNKNOWN_NOTE));
       root.append(card);
       continue;
     }
     const items = el('ul', 'evaluation-profile-items');
     for (const item of profile.items) {
       const li = el('li', undefined, evaluationItemLegend(item));
-      if (item.description) li.append(el('p', 'field-note', item.description));
+      if (item.description) li.append(` · ${item.description}`);
       items.append(li);
     }
     const bands = el('ul', 'evaluation-profile-bands');
@@ -71,12 +72,12 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
     const facts = el('dl', 'evaluation-profile-facts');
     facts.append(el('dt', undefined, '评估方案摘要'), el('dd', 'technical-identity', profile.sha256));
     details.append(el('summary', undefined, '查看技术详情'), facts);
-    card.append(heading, el('p', 'field-note evaluation-profile-use', evaluationProfileUse(profile)),
+    card.append(heading,
       el('h4', undefined, `评分项 · 总分 ${profile.total}`), items,
       el('h4', undefined, '档位'), bands,
-      el('h4', undefined, '风险项（低 / 中 / 高，不计入总分）'), el('p', 'evaluation-profile-risks', profile.risks.map((risk) => risk.label).join('、')),
+      el('h4', undefined, '风险项 · 低 / 中 / 高，不计入总分'), el('p', 'evaluation-profile-risks', profile.risks.map((risk) => risk.label).join('、')),
       el('h4', undefined, '结论'), el('p', 'evaluation-profile-conclusions', profile.conclusions.map((entry) => entry.label).join(' · ')),
-      el('h4', undefined, '就绪清单'), readiness, ...(readiness.childElementCount === 0 ? [el('p', 'field-note', '尚未设置默认就绪清单。')] : []), technicalDisclosure(details));
+      el('h4', undefined, readiness.childElementCount === 0 ? '就绪清单 · 尚未设置' : '就绪清单'), readiness, technicalDisclosure(details));
     if (current) {
       const start = button('新建版本', () => {
         start.disabled = true;
@@ -109,9 +110,11 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
   const draft = initial.items.map((item) => ({ ...item }));
   const form = el('form', 'evaluation-profile-form');
   form.dataset['profileEdit'] = '';
-  form.append(el('h4', undefined, '新建评估方案版本'), el('p', 'field-note', PROFILE_PROSPECTIVE), el('p', 'field-note', PROFILE_CALIBRATION));
+  const heading = el('h4', undefined, '新建评估方案版本');
+  form.append(heading, el('p', 'field-note', PROFILE_CALIBRATION));
   const fields = el('div', 'evaluation-profile-fields');
-  const count = el('p', 'field-note');
+  const count = el('span');
+  heading.append(' · ', count);
   const refusal = el('p', 'attention-note');
   refusal.setAttribute('role', 'alert');
   const saveButton = button('保存为新版本', () => undefined, 'save');
@@ -135,9 +138,9 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
       description.value = item.description;
       description.dataset['profileField'] = 'description';
       description.addEventListener('input', () => { item.description = description.value; });
-      const nameLabel = el('label', undefined, '名称（最多 40 字）');
+      const nameLabel = el('label', undefined, '名称 · 最多 40 字');
       nameLabel.append(name);
-      const descriptionLabel = el('label', undefined, '说明（最多 500 字）');
+      const descriptionLabel = el('label', undefined, '说明 · 最多 500 字');
       descriptionLabel.append(description);
       const remove = button('移除', () => { draft.splice(index, 1); paintItems(); }, 'remove-item');
       remove.disabled = draft.length === 1;
@@ -151,7 +154,7 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
     paintItems();
     fields.querySelectorAll('input').item(draft.length - 1)?.focus();
   }, 'add-item');
-  const readinessLabel = el('label', undefined, '就绪清单（每行一项，最多 20 项，每项最多 200 字）');
+  const readinessLabel = el('label', undefined, '就绪清单 · 每行一项，最多 20 项，每项最多 200 字');
   const readiness = el('textarea');
   readiness.dataset['profileField'] = 'readiness';
   readiness.rows = 5;
@@ -159,7 +162,7 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
   readinessLabel.append(readiness);
   const actions = el('div', 'button-row');
   actions.append(saveButton, button('取消', cancel, 'cancel'));
-  form.append(count, fields, add, readinessLabel, refusal, actions);
+  form.append(fields, add, readinessLabel, refusal, actions);
   paintItems();
   form.addEventListener('submit', (event) => {
     event.preventDefault();

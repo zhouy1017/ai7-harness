@@ -812,7 +812,7 @@ async function prepareSourceImportReview(renderer, expectation) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]'); return review?.textContent.includes('来源导入记录') && !review.textContent.includes('明确不会发生') && !review.querySelector('.dimension-list') && Array.from(review.querySelectorAll('.commit-bar button')).some(button=>!button.disabled); })()`,
+    `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]'); return review?.textContent.includes('来源材料记录') && !review.textContent.includes('明确不会发生') && !review.querySelector('.dimension-list') && Array.from(review.querySelectorAll('.commit-bar button')).some(button=>!button.disabled); })()`,
     'source-review-effects',
   );
   await assertRenderer(
@@ -1606,13 +1606,13 @@ async function runJourney(
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'target-title');
   await assertRenderer(
     renderer,
-    `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：')) && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && document.querySelectorAll('[data-fidelity-category]').length === 10`,
+    `document.querySelector('#book-title')?.value.length > 0 && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && document.querySelectorAll('[data-fidelity-category]').length === 10`,
     'title-contract',
   );
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
-      `(() => { const title = document.querySelector('#book-title'); if (!title) return false; title.value = title.value + '（不同作品）'; title.dispatchEvent(new Event('input', { bubbles: true })); return title.value.endsWith('（不同作品）') && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：') && note.textContent.includes('可编辑建议')); })()`,
+      `(() => { const title = document.querySelector('#book-title'); if (!title) return false; title.value = title.value + '（不同作品）'; title.dispatchEvent(new Event('input', { bubbles: true })); return title.value.endsWith('（不同作品）'); })()`,
       'distinct-work-title-edited',
     );
   }
@@ -1881,19 +1881,19 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
       prepare.disabled === ${Boolean(allInserted)} && !document.querySelector('[data-word-reviewed-mode]');
   })()`, 'word-preview-never-selects-accepted-baseline');
   // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
-  const previewLabel = `当前暂存预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}。这只是预览，尚未选择稿件基线。`;
-  const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文（作为定稿基线）」。'
+  const previewLabel = `当前预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}；尚未选择稿件基线。`;
+  const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
     : '最终保真、导入方式及本机保留范围会在下一步复核。';
   await assertRenderer(renderer, `(() => {
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
-    return option('suggestions') === '转为 AI7 修订建议（推荐）' && option('accepted-baseline') === '直接并入正文（作为定稿基线）' &&
-      Array.from(controls.querySelectorAll('p')).some(line => line.textContent === ${JSON.stringify(previewLabel)}) &&
+    return option('suggestions') === '转为 AI7 修订建议 · 推荐' && option('accepted-baseline') === '直接并入正文 · 定稿基线' &&
+      controls.querySelector('legend')?.textContent.includes(${JSON.stringify(previewLabel)}) &&
       controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
   })()`, 'word-preview-label-and-reading-reason');
   if (mode === 'accepted-baseline') {
     await assertRenderer(renderer, `(() => { document.querySelector('[data-word-import-mode="accepted-baseline"]').click(); const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); const prepare = Array.from(document.querySelectorAll('button')).find(button => button.textContent === ${JSON.stringify(prepareLabel)}); return !confirmation.checked && !confirmation.disabled && prepare.disabled; })()`, 'word-accepted-needs-separate-confirmation');
-    await assertRenderer(renderer, `document.querySelector('[data-word-reading-availability]').textContent === '请单独确认「直接并入正文（作为定稿基线）」，再准备导入。'`, 'word-accepted-confirmation-notice');
+    await assertRenderer(renderer, `document.querySelector('[data-word-reading-availability]').textContent === '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'`, 'word-accepted-confirmation-notice');
     await assertRenderer(renderer, `(() => { const confirmation = document.querySelector('[data-word-accepted-baseline-confirmation]'); confirmation.click(); return confirmation.checked; })()`, 'word-accepted-confirmed');
   }
   if (!learnFromEdits) await assertRenderer(renderer, `(() => { const learning = document.querySelector('[data-word-learn-from-edits]'); learning.click(); return !learning.checked; })()`, 'word-learning-opt-out');
@@ -2003,7 +2003,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-book-review');
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="book-create-review"]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && screen.textContent.includes('拟用稳定标识') && screen.textContent.includes('图书编辑维度集 · 8 项') && screen.textContent.includes('不创建稿件、来源、修订版、工作流实例或导入记录'); })()`,
+    `(() => { const screen = document.querySelector('[data-screen="book-create-review"]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && screen.textContent.includes('拟用稳定标识') && !screen.querySelector('.dimension-list') && screen.textContent.includes('不创建稿件、来源、修订版、工作流实例或导入记录'); })()`,
     'empty-book-review-contract',
   );
   await clickExactButton(renderer, '新建图书', 'empty-book-commit');
@@ -3847,7 +3847,7 @@ async function main() {
     });
     await assertRenderer(
       renderer,
-      `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const page = review?.querySelector('[data-reimport-mappings="ready"]'); const rows = page?.querySelectorAll('article.reimport-group') ?? []; const row = rows[0]; const verbs = Array.from(row?.querySelectorAll('[data-reimport-verb-choice]') ?? [], (choice) => choice.dataset.reimportVerbChoice); const excerpts = (side) => row?.querySelectorAll('[data-reimport-side="' + side + '"] [data-reimport-excerpt-position]').length ?? 0; return review?.textContent.includes('1 处变化 · 1 处待你确定 · 0 段完全一致') && Number(page?.dataset.reimportPageItemCount) === 1 && rows.length === 1 && row.dataset.reimportGroupShape === '260:261' && JSON.stringify(verbs) === '["rewrite","delete"]' && excerpts('当前') === 3 && excerpts('新文件') === 3 && row.textContent.includes('另有 257 段。') && row.textContent.includes('另有 258 段。'); })()`,
+      `(() => { const review = document.querySelector('[data-import-review-kind="reimport"]'); const page = review?.querySelector('[data-reimport-mappings="ready"]'); const rows = page?.querySelectorAll('article.reimport-group') ?? []; const row = rows[0]; const verbs = Array.from(row?.querySelectorAll('[data-reimport-verb-choice]') ?? [], (choice) => choice.dataset.reimportVerbChoice); const excerpts = (side) => row?.querySelectorAll('[data-reimport-side="' + side + '"] [data-reimport-excerpt-position]').length ?? 0; return review?.textContent.includes('1 处变化 · 1 处待你确定 · 0 段完全一致') && Number(page?.dataset.reimportPageItemCount) === 1 && rows.length === 1 && row.dataset.reimportGroupShape === '260:261' && JSON.stringify(verbs) === '["rewrite","delete"]' && excerpts('当前') === 3 && excerpts('新文件') === 3 && row.textContent.includes('另有 257 段') && row.textContent.includes('另有 258 段'); })()`,
       'reimport-repeated-cooperative-one-bounded-row',
     );
     await closeProduct();

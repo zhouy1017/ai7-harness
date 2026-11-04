@@ -94,7 +94,7 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
     expect(labels.DOCUMENT_MATERIALS_HEADING).toBe('这份文档的材料');
-    expect(labels.DOCUMENT_MATERIALS_EMPTY).toBe('暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。');
+    expect(labels.DOCUMENT_MATERIALS_EMPTY).toBe('暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。');
     for (const words of surface) {
       expect(words).not.toMatch(/里程碑|签发|发稿/u);
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(words).not.toContain(forbidden);
@@ -139,11 +139,11 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DELIVERY_FORM_HEADING).toBe('交付');
     expect(labels.DELIVERY_VERSION_LEGEND).toBe('交付哪一版');
     expect(labels.DELIVERY_UNSAVED_NOTE).toBe('有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。');
-    expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字（交付时先保存为版本 3）');
+    expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字 · 交付时先保存为版本 3');
     expect(labels.DELIVERY_RECIPIENT_LEGEND).toBe('交给谁');
     expect(labels.DELIVERY_CUSTOM_RECIPIENT).toBe('自行输入');
-    expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁（自行输入）');
-    expect(labels.DELIVERY_NOTE_LABEL).toBe('备注（可不填）');
+    expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁 · 自行输入');
+    expect(labels.DELIVERY_NOTE_LABEL).toBe('备注 · 可不填');
     expect(labels.DELIVERY_STATEMENT).toBe('交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。');
     expect(labels.DELIVERY_BLOCKERS).toEqual({ version: '先选择要交付的版本', recipient: '先选择交给谁', custom: '请写明交给谁' });
     expect(labels.DOCUMENT_STATUS_LINES.delivering).toBe('正在记录交付…');

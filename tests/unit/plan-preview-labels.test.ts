@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type {
   AnalysisConflictProjection,
   ProviderProcessingPin,
@@ -34,7 +35,7 @@ import {
  * Drawer (Issue #418), and are pinned where the drawer's projection makes them (tests/unit/task-plan.test.ts).
  */
 const CAPTURED_DEVELOPMENT_CI = {
-  analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，结果集修订版不修改稿件。',
+  analysisKindSubtitle: '一个精确版本化的覆盖式分析种类；远程绑定被 Provider Processing v1 拒绝，分析结果不修改稿件。',
   taskAuthorizationDispatchNote: '本流程只冻结并记录本次标准直接授权；Provider Processing v1 固定拒绝派发。',
   launchPolicyIntegritySentence: '当前开发与持续集成范围保持零次实时传输。',
 } as const;
@@ -61,6 +62,13 @@ describe('runBudgetCeilingLabel', () => {
 });
 
 describe('taskAuthorizationDispatchNote', () => {
+  it('keeps the actual provider decision visible in editorial language', () => {
+    setTechnicalLayerVisible(false);
+    expect(taskAuthorizationDispatchNote(null)).toBe('这里只会记录本次授权，计划尚未确定发送方式。');
+    expect(taskAuthorizationDispatchNote(DENIED_PIN)).toBe('这里只会记录本次授权；当前设置不允许向模型服务发送内容。');
+    expect(taskAuthorizationDispatchNote(ELIGIBLE_PIN)).toBe('这里只会记录本次授权；模型服务只能接收本次计划范围内的内容。');
+    setTechnicalLayerVisible(true);
+  });
   it('reproduces the development-ci bytes the note rendered as a fixed string', () => {
     expect(taskAuthorizationDispatchNote(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.taskAuthorizationDispatchNote);
   });
@@ -77,6 +85,15 @@ describe('taskAuthorizationDispatchNote', () => {
 });
 
 describe('analysisKindSubtitle', () => {
+  it('keeps the recorded provider boundary in ordinary mode', () => {
+    setTechnicalLayerVisible(false);
+    expect(analysisKindSubtitle(DENIED_PIN)).toContain('不允许向模型服务发送内容');
+    expect(analysisKindSubtitle(DENIED_POLICY_PIN)).toContain('不允许向模型服务发送内容');
+    expect(analysisKindSubtitle(ELIGIBLE_PIN)).toContain('仅在满足条件时可按计划');
+    expect(analysisKindSubtitle(ELIGIBLE_POLICY_PIN)).toContain('仅在满足条件时可按计划');
+    expect(analysisKindSubtitle(null)).toBe('分析结果供编辑参考，不修改稿件。');
+    setTechnicalLayerVisible(true);
+  });
   it('reproduces the development-ci bytes the analysis card rendered as a fixed string', () => {
     expect(analysisKindSubtitle(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.analysisKindSubtitle);
   });
@@ -86,18 +103,26 @@ describe('analysisKindSubtitle', () => {
   });
 
   it('states an eligible-only binding from either pin shape', () => {
-    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v10 下仅限资格，结果集修订版不修改稿件。';
+    const eligible = '一个精确版本化的覆盖式分析种类；远程绑定在 Provider Processing v10 下仅限资格，分析结果不修改稿件。';
     expect(analysisKindSubtitle(ELIGIBLE_PIN)).toBe(eligible);
     expect(analysisKindSubtitle(ELIGIBLE_POLICY_PIN)).toBe(eligible);
   });
 
   it('drops the binding clause, and only that clause, when neither a plan nor a Revision exists', () => {
-    expect(analysisKindSubtitle(null)).toBe('一个精确版本化的覆盖式分析种类；结果集修订版不修改稿件。');
+    expect(analysisKindSubtitle(null)).toBe('一个精确版本化的覆盖式分析种类；分析结果不修改稿件。');
     expect(analysisKindSubtitle(null)).not.toContain('Provider Processing');
   });
 });
 
 describe('launchPolicyIntegritySentence', () => {
+  it('states the current transmission boundary in ordinary mode', () => {
+    setTechnicalLayerVisible(false);
+    expect(launchPolicyIntegritySentence('开发与持续集成：零次实时传输')).toBe('当前设置不允许向模型服务发送内容。');
+    expect(launchPolicyIntegritySentence('开发者实时：实时传输受运行边界约束')).toBe('向模型服务发送内容受每次任务计划的范围约束。');
+    expect(launchPolicyIntegritySentence('本机生产：需先设置模型服务，当前不会传输')).toBe('尚未设置模型服务，当前不会发送内容。');
+    expect(launchPolicyIntegritySentence('本机生产：实时传输受运行边界约束')).toBe('向模型服务发送内容受每次任务计划的范围约束。');
+    setTechnicalLayerVisible(true);
+  });
   it('reproduces the development-ci bytes J-12 pins, from the label alone', () => {
     expect(launchPolicyIntegritySentence('开发与持续集成：零次实时传输'))
       .toBe(CAPTURED_DEVELOPMENT_CI.launchPolicyIntegritySentence);

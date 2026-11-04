@@ -1,7 +1,7 @@
+import { identityWords, technicalWords } from './technical-layer.js';
 import { filterChoices } from './components/controls.js';
 import { windowStep } from './components/controls.js';
 import { createButton } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
 import type {
   LearningEligibilityChoice,
   LearningMaterialProjection,
@@ -98,14 +98,15 @@ export function mountWordTrackedEditDetail(options: {
   const itemNode = (item: WordSampleDetailItemProjection): HTMLElement => {
     const entry = el('article', 'word-detail-item');
     entry.dataset['wordDetailSection'] = item.section; entry.dataset['wordDetailOrdinal'] = String(item.entryOrdinal);
-    entry.append(el('h5', undefined, `${sections[item.section]} · ${item.entryOrdinal + 1}`));
+    const heading = el('h5', undefined, `${sections[item.section]} · ${item.entryOrdinal + 1}`);
+    entry.append(heading);
     if (item.kind === 'text') {
       entry.dataset['wordDetailField'] = item.field;
       entry.dataset['wordDetailStart'] = String(item.startCodeUnit);
       entry.dataset['wordDetailEnd'] = String(item.endCodeUnit);
       entry.dataset['wordDetailComplete'] = String(item.complete);
-      entry.append(el('p', 'field-note', `${fields[item.field]} · UTF-16 ${item.startCodeUnit}–${item.endCodeUnit} / ${item.totalCodeUnits}${item.complete ? '' : ' · 后续页继续'}`));
-      const text = el('pre', 'word-detail-text', item.text === null ? '（属性未提供）' : item.text === '' ? '（空字符串）' : item.text);
+      heading.append(` · ${fields[item.field]}${technicalWords(` · UTF-16 ${item.startCodeUnit}–${item.endCodeUnit} / ${item.totalCodeUnits}`)}${item.complete ? '' : ' · 后续页继续'}`);
+      const text = el('pre', 'word-detail-text', item.text === null ? '未提供' : item.text === '' ? '空内容' : item.text);
       text.style.whiteSpace = 'pre-wrap'; text.style.overflowWrap = 'anywhere'; entry.append(text);
       if (item.sha256 !== null || item.fragment !== null) {
         const provenance = el('details'); provenance.append(el('summary', undefined, '原始位置与摘要'),
@@ -137,7 +138,7 @@ export function mountWordTrackedEditDetail(options: {
     }), 'after', "向后浏览修改详情"); next.disabled = busy || page?.nextCursor == null;
     const source = action('查看保留的原始来源版本', 'secondary', 'word-detail-source', () => {
       if (busy || page === null) return;
-      void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原始来源版本。'; });
+      void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原文件。'; });
     }); source.disabled = busy || page === null;
     navigation.append(back, next, source);
   };
@@ -213,13 +214,16 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
   const paint = (focus: string | null): void => {
     if (projection === null) return;
     root.dataset['learningBooks'] = String(projection.books.length);
-    const parts: HTMLElement[] = [el('p', 'field-note learning-basis', projection.basis)];
     const books = projection.books.filter((book) => book.materials.length > 0);
+    const basisWords = projection.basis.replace('。明确排除', '；明确排除').replace('。仅本机收集', '；仅本机收集');
+    const basis = el('p', 'field-note');
+    basis.append(el('span', 'learning-basis', books.length === 0 ? basisWords.replace(/。$/u, '') : basisWords));
     if (books.length === 0) {
-      const empty = el('p', 'field-note learning-empty', LEARNING_EMPTY);
+      const empty = el('span', 'learning-empty', LEARNING_EMPTY);
       empty.tabIndex = -1;
-      parts.push(empty);
+      basis.append('；', empty);
     }
+    const parts: HTMLElement[] = [basis];
     for (const book of books) parts.push(bookNode(book));
     if (projection.nextCursor !== null || laterPage) {
       const row = el('div', 'button-row learning-more');
@@ -243,7 +247,9 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
   const bookNode = (book: LearningMaterialsBookProjection): HTMLElement => {
     const section = el('section', 'learning-book');
     section.dataset['bookId'] = book.bookId;
-    section.append(el('h3', undefined, learningBookHeading(book)), el('p', 'field-note learning-people', learningPeopleLine(book)));
+    const heading = el('h3', undefined, learningBookHeading(book));
+    heading.append(' · ', el('span', 'learning-people', learningPeopleLine(book)));
+    section.append(heading);
     const list = el('ul', 'learning-material-list');
     for (const material of book.materials) list.append(materialNode(book, material));
     section.append(list);
@@ -292,9 +298,8 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     };
     fact(LEARNING_CARD_TERMS.excerpt, excerpt, 'excerpt');
     fact(LEARNING_CARD_TERMS.origin, learningOriginLine(material, localInstantLabel), 'origin');
-    if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label} · ${material.sourceTask.taskIntentId}`, 'task');
+    if (material.sourceTask !== null) fact('来源任务', `${material.sourceTask.label}${technicalWords(` · ${material.sourceTask.taskIntentId}`)}`, 'task');
     fact(LEARNING_CARD_TERMS.rationale, material.rationale, 'rationale');
-    fact(LEARNING_CARD_TERMS.basis, projection?.basis ?? '', 'basis');
     fact(LEARNING_CARD_TERMS.influence, material.kind === 'word-tracked-edit'
       ? '尚未用于编辑记忆、审阅偏好或模型任务。' : LEARNING_INFLUENCE, 'influence');
     fact(LEARNING_CARD_TERMS.decision, learningDecisionLine(material, localInstantLabel), 'decision');
@@ -303,11 +308,11 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
       const target = material.target;
       if (material.wordCurrentEligibility !== undefined) card.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null)));
       const detail = el('div');
-      const view = action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
+      const view = action('查看本机 Word 修改对', 'secondary', 'word-detail', () => {
         detail.replaceChildren();
         void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
       });
-      card.append(el('p', 'field-note', '原始修改对保留在本机，尚未用于编辑记忆、审阅偏好或模型任务。'), view, detail);
+      card.append(view, detail);
     }
     if (material.target.kind === 'mark' && material.target.detached) {
       card.append(el('p', 'field-note', '来源修改建议所在的段落已不在稿件中。'));
@@ -500,12 +505,12 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     body.textContent = `建议保留率：${metric.applied === 0 ? '暂无已应用的判定' : `${metric.surviving}/${metric.applied}（${Math.round(metric.surviving / metric.applied * 100)}%）`} · 按类别加权的改写量：${metric.editVolume} 字符单位`;
     body.dataset['lineageDigest'] = metric.lineageDigest;
     adoption.replaceChildren(el('h4', undefined, '已参考规则的采纳率'));
-    const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings}（${Math.round(count.rate * 100)}%）`;
+    const share = (count: { accepted: number; findings: number; rate: number | null }) => count.rate === null ? '暂无发现' : `${count.accepted}/${count.findings} · ${Math.round(count.rate * 100)}%`;
     if (!adoptionRows.length) adoption.append(el('p', 'field-note', '尚无可比较的审阅发现。'));
     for (const row of adoptionRows) {
-      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好 v${row.ordinal} · ${row.versionId}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? ' · 参考后的发现多数被拒绝，请复核这条规则。' : ''}`));
+      adoption.append(el('p', 'field-note', `${row.bookTitle} · ${row.versionId === null ? '全部规则' : `本社审阅偏好${technicalWords(` v${row.ordinal} · ${row.versionId}`)}`}：已参考 ${share(row.referenced)}；未参考 ${share(row.unreferenced)}${row.mostlyRejected ? '；参考后的发现多数被拒绝，请复核这条规则。' : '。'}`));
     }
-    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用；分母包含尚未处理的发现。此比较不证明规则导致采纳。'));
+    adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用，分母包含尚未处理的发现；此比较不证明规则导致采纳。'));
   };
   adoptionMore.addEventListener('click', () => void load(false).catch(() => { adoptionMore.disabled = false; body.textContent = '无法读取更多规则采纳率。'; }));
   paintBooks();

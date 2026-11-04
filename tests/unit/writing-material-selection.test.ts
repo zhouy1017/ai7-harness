@@ -104,15 +104,15 @@ describe('writing material controls', () => {
     view.tick('c');
     view.refresh([item('a'), { ...item('c', 0), selectable: false, reason: '索引记录已损坏 · 不可选' }]);
     expect(view.state.materialIds).toEqual(['a']);
-    expect(view.removals()).toEqual(['《c》已从所选中去掉：索引记录已损坏 · 不可选']);
+    expect(view.removals()).toEqual(['《c》已移除：索引记录已损坏 · 不可选']);
     expect(view.box('c').checked).toBe(false);
     view.refresh([item('a')]);
-    expect(view.removals()).toEqual(['《c》已从所选中去掉：索引记录已损坏 · 不可选']);
+    expect(view.removals()).toEqual(['《c》已移除：索引记录已损坏 · 不可选']);
     view.tick('a', false);
     expect(view.removals()).toEqual([]);
     view.tick('a');
     view.refresh([]);
-    expect(view.removals()).toEqual(['《a》已不在可参考的清单中，已从所选中去掉。']);
+    expect(view.removals()).toEqual(['《a》已不在清单，已移除。']);
   });
 
   it('disables a fifth tick with the service wording and enables it again after unticking', () => {

@@ -50,7 +50,6 @@ import {
   PUBLICATION_ACTUALS_ACTIONS,
   publicationBasisLine,
   publicationChangeNoticeDetail,
-  publicationCountLine,
   publicationDesignateBlockers,
   publicationDesignateReason,
   publicationEventsLine,
@@ -75,16 +74,13 @@ import {
   DELIVERY_NOTE_LABEL,
   DELIVERY_RECIPIENT_LEGEND,
   DELIVERY_STATEMENT,
-  DELIVERY_UNSAVED_NOTE,
   DELIVERY_VERSION_LEGEND,
   DOCUMENT_ACTION_LABELS,
   DOCUMENT_CHANGED_SINCE_DELIVERY,
   DOCUMENT_CHANGED_SINCE_VERSION,
   DOCUMENT_DELIVERIES_HEADING,
   DOCUMENT_NOT_DELIVERED,
-  DOCUMENT_KEPT_NOTE,
   DOCUMENT_NO_SOURCES,
-  DOCUMENT_SOURCE_HINT,
   DOCUMENT_SOURCE_LEGEND,
   DOCUMENT_STATE_NONE,
   DOCUMENT_STATE_NOT_FOR_THIS_BOOK,
@@ -430,7 +426,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const heading = el('h3', undefined, DELIVERABLES_PUBLICATION_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'field-note deliverables-manuscript-line', deliverablesManuscriptLine(next.manuscript)));
+    heading.append(' · ', el('span', 'deliverables-manuscript-line', deliverablesManuscriptLine(next.manuscript)));
+    section.append(heading);
     // 导出… of the current revision (Issue #413): a dirty working state is saved as a revision for it first.
     if (next.manuscript !== null) {
       const row = el('div', 'button-row export-open-row');
@@ -501,16 +498,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   /** V2-UX-MILE-008: label, purpose, exact version, author and time, note, and whether the manuscript changed since. */
   function renderMilestones(next: DeliverablesProjection): HTMLElement {
     const section = el('section', 'milestone-list-section');
-    section.append(el('h4', undefined, MILESTONE_LIST_HEADING));
     const milestones = next.publication.milestones;
+    const heading = el('h4', undefined, `${MILESTONE_LIST_HEADING}${next.publication.milestonesTruncated ? ` · ${milestonesTruncatedLine(milestones.length)}` : ''}`);
+    section.append(heading);
     if (milestones.length === 0) {
-      section.append(el('p', 'field-note milestone-list-empty', MILESTONE_LIST_EMPTY));
+      heading.append(' · ', el('span', 'milestone-list-empty', MILESTONE_LIST_EMPTY));
       return section;
     }
     const list = el('ol', 'milestone-list');
     for (const milestone of milestones) list.append(renderMilestone(milestone));
     section.append(list);
-    if (next.publication.milestonesTruncated) section.append(el('p', 'field-note', milestonesTruncatedLine(milestones.length)));
     return section;
   }
 
@@ -544,16 +541,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   /** Every designation newest first (PUB-003, PUB-007): append-only, the newest current, the older ones as they were. */
   function renderHistory(next: DeliverablesProjection): HTMLElement {
     const section = el('section', 'publication-versions-section');
-    section.append(el('h4', undefined, PUBLICATION_HISTORY_HEADING));
     const designations = next.publication.designations;
+    const heading = el('h4', undefined, `${PUBLICATION_HISTORY_HEADING}${next.publication.designationsTruncated ? ` · ${publicationsTruncatedLine(designations.length)}` : ''}`);
+    section.append(heading);
     if (designations.length === 0) {
-      section.append(el('p', 'field-note publication-versions-empty', PUBLICATION_HISTORY_EMPTY));
+      heading.append(' · ', el('span', 'publication-versions-empty', PUBLICATION_HISTORY_EMPTY));
       return section;
     }
     const list = el('ol', 'publication-versions');
     for (const designation of designations) list.append(renderDesignation(designation));
     section.append(list);
-    if (next.publication.designationsTruncated) section.append(el('p', 'field-note', publicationsTruncatedLine(designations.length)));
     const outside = maintenance.renderOutsideHistory(designations);
     if (outside !== null) section.append(outside);
     return section;
@@ -604,10 +601,11 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const availability = next.publication.designate;
     if (!availability.available) {
       open.disabled = true;
-      const why = el('p', 'field-note publication-unavailable-reason', availability.unavailableReason ?? '');
+      const why = el('span', 'publication-unavailable-reason', availability.unavailableReason ?? '');
       why.id = uid('designate-reason');
+      open.setAttribute('aria-label', open.textContent ?? '');
       open.setAttribute('aria-describedby', why.id);
-      row.append(why);
+      open.append(' · ', why);
       return area;
     }
     open.disabled = working;
@@ -690,20 +688,17 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       input.required = true;
       input.disabled = working;
       input.dataset['publicationField'] = name;
-      const note = el('small', 'field-note', hint);
-      note.id = uid(`${name}-hint`);
-      const count = el('small', 'field-note publication-field-count');
-      count.id = uid(`${name}-count`);
+      input.placeholder = hint;
       const problem = el('p', 'publication-field-problem');
       problem.id = uid(`${name}-problem`);
-      input.setAttribute('aria-describedby', `${note.id} ${count.id} ${problem.id}`);
+      input.setAttribute('aria-describedby', problem.id);
       input.addEventListener('input', () => {
         update(input.value);
         state.problem = null;
         sync();
       });
-      wrap.append(input, note, count, problem);
-      return { wrap, input, count, problem };
+      wrap.append(input, problem);
+      return { wrap, input, problem };
     };
     const scope = field('scope', PUBLICATION_SCOPE_LABEL, PUBLICATION_SCOPE_HINT, state.scope, (text) => { state.scope = text; });
     const basis = field('basis', PUBLICATION_BASIS_LABEL, PUBLICATION_BASIS_HINT, state.basis, (text) => { state.basis = text; });
@@ -713,12 +708,17 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     statement.id = uid('statement');
     const problem = el('p', 'publication-problem');
     problem.setAttribute('role', 'alert');
-    const reason = el('p', 'field-note publication-confirm-reason');
+    const reason = el('span', 'publication-confirm-reason');
     reason.id = uid('confirm-reason');
     const confirm = el('button', 'primary', PUBLICATION_ACTION_LABELS.confirm);
     confirm.type = 'button';
     confirm.dataset['publicationAction'] = 'confirm';
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', `${statement.id} ${reason.id}`);
+    const reasonLabel = el('span');
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, reason);
+    confirm.append(reasonLabel);
     confirm.addEventListener('click', () => void confirmDesignation(state));
     const cancel = el('button', 'quiet', PUBLICATION_ACTION_LABELS.cancel);
     cancel.type = 'button';
@@ -726,7 +726,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     cancel.disabled = working;
     cancel.addEventListener('click', () => closeForm());
     const actions = el('div', 'button-row publication-designate-actions');
-    actions.append(confirm, cancel, reason);
+    actions.append(confirm, cancel);
     node.append(title, choices, summary, scope.wrap, basis.wrap, statement, problem, actions);
 
     const sync = (): void => {
@@ -738,7 +738,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         [basis, PUBLICATION_BASIS_LABEL, state.basis, MAX_PUBLICATION_BASIS_CHARACTERS],
       ] as const;
       for (const [control, label, value, maximum] of fields) {
-        control.count.textContent = publicationCountLine(value, maximum);
         const fieldProblem = publicationFieldProblem(label, value, maximum);
         control.problem.textContent = fieldProblem ?? '';
         control.problem.hidden = fieldProblem === null;
@@ -749,6 +748,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       const why = publicationDesignateReason(publicationDesignateBlockers({ milestoneChosen: chosen !== null, scope: state.scope, basis: state.basis }));
       reason.textContent = why ?? '';
       reason.hidden = why === null;
+      reasonLabel.hidden = why === null;
+      reasonPrefix.textContent = why === null ? '' : ' · ';
       confirm.disabled = working || why !== null;
       node.dataset['publicationReady'] = why === null ? 'true' : 'false';
     };
@@ -849,10 +850,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const heading = el('h3', undefined, DOCUMENTS_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'field-note', DOCUMENTS_LEDE));
-    if (documents.unavailableReason !== null) {
-      section.append(el('p', 'attention-note documents-unavailable', documents.unavailableReason));
-    }
+    section.append(heading, el('p', documents.unavailableReason === null ? 'field-note' : 'attention-note documents-unavailable',
+      documents.unavailableReason ?? DOCUMENTS_LEDE));
     const list = el('ol', 'production-document-cards');
     for (const type of documents.types) list.append(renderDocumentCard(next, type));
     section.append(list);
@@ -909,15 +908,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentId'] = documentNow.documentId;
       item.dataset['documentVersion'] = String(documentNow.versions[0]?.ordinal ?? 0);
       item.dataset['documentChanged'] = String(documentNow.changedSinceVersion);
-      item.append(el('p', 'document-card-line', documentCardLine(documentNow)));
+      const context = el('p', 'document-card-context');
+      context.append(el('span', 'document-card-line', documentCardLine(documentNow)));
       // What the material's reading left behind, said as long as the document exists (Issue #547).
       const notCarried = documentNow.origin.marksNotCarried;
-      if (notCarried !== null && notCarried > 0) item.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
-      if (documentNow.changedSinceVersion) item.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+      if (notCarried !== null && notCarried > 0) context.append(' · ', el('span', 'document-origin-marks', documentOriginMarksLine(notCarried)));
+      if (documentNow.changedSinceVersion) context.append(' · ', el('span', 'document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+      item.append(context);
     }
     if (type.notForThisBook) {
-      item.append(el('p', 'document-not-for-this-book', DOCUMENT_STATE_NOT_FOR_THIS_BOOK));
-      if (type.document !== null) item.append(el('p', 'field-note', DOCUMENT_KEPT_NOTE));
+      item.append(el('p', 'document-not-for-this-book', type.document === null ? DOCUMENT_STATE_NOT_FOR_THIS_BOOK : `${DOCUMENT_STATE_NOT_FOR_THIS_BOOK} · 文档与版本保留`));
       const restore = documentButton('restore', type, 'secondary');
       restore.addEventListener('click', () => void decide(type, false));
       actions.append(restore);
@@ -957,13 +957,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (blocked !== null) {
         // Unavailable, with its reason in words beside it (the pattern of 设为发稿版本's, PUB-002).
         create.disabled = true;
-        const why = el('p', 'field-note document-create-reason', blocked);
+        const why = el('span', 'document-create-reason', blocked);
         why.id = uid('document-create-reason');
+        create.setAttribute('aria-label', create.textContent ?? '');
         create.setAttribute('aria-describedby', why.id);
+        create.append(' · ', why);
         const notForThisBook = documentButton('notForThisBook', type, 'quiet');
         notForThisBook.addEventListener('click', () => void decide(type, true));
         actions.append(create, notForThisBook);
-        item.append(actions, why);
+        item.append(actions);
         return item;
       }
       create.addEventListener('click', () => {
@@ -1004,15 +1006,21 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     form.append(el('h5', undefined, DELIVERY_FORM_HEADING));
     const versions = el('fieldset');
     versions.append(el('legend', undefined, DELIVERY_VERSION_LEGEND));
-    if (documentNow.changedSinceVersion) versions.append(el('p', 'field-note delivery-unsaved', DELIVERY_UNSAVED_NOTE));
     const confirm = documentButton('confirmDeliver', type, 'primary');
-    const reason = el('p', 'field-note delivery-reason');
+    const reason = el('span', 'delivery-reason');
     reason.id = uid('delivery-reason');
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', reason.id);
+    const reasonLabel = el('span');
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, reason);
+    confirm.append(reasonLabel);
     const sync = (): void => {
       const blockers = deliveryBlockers(state);
       reason.textContent = blockers[0] ?? '';
       reason.hidden = blockers.length === 0;
+      reasonLabel.hidden = blockers.length === 0;
+      reasonPrefix.textContent = blockers.length === 0 ? '' : ' · ';
       confirm.disabled = working || blockers.length > 0;
     };
     const choices: Array<[string, string]> = documentNow.versions.map((version) => [version.revisionId, `${version.label} · ${localInstantLabel(version.createdAt)}`]);
@@ -1092,7 +1100,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (documentsProjection !== null) drawDocuments(documentsProjection, { typeId: type.typeId, action: documentNow.deliveries.length === 0 ? 'deliver' : 'redeliver' });
     });
     row.append(confirm, cancel);
-    form.append(row, reason);
+    form.append(row);
     sync();
     return form;
   }
@@ -1113,8 +1121,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.dataset['revisionId'] = delivery.revisionId;
     item.dataset['deliveryOrdinal'] = String(delivery.ordinal);
     item.dataset['deliveryExport'] = delivery.export === null ? 'none' : delivery.export.outcome;
-    item.append(el('p', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt))));
-    if (delivery.note !== null) item.append(el('p', 'field-note document-delivery-note', delivery.note));
+    const record = el('p', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt)));
+    if (delivery.note !== null) record.append(' · ', el('span', 'document-delivery-note', delivery.note));
+    item.append(record);
     item.append(el('p', 'document-delivery-export', documentDeliveryExportLine(delivery)));
     const label = documentExportLabel(type.label, delivery.versionLabel);
     const open = el('button', 'secondary', EXPORT_ACTION_LABELS.open);
@@ -1188,10 +1197,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
     const fieldset = el('fieldset');
-    fieldset.append(el('legend', undefined, DOCUMENT_SOURCE_LEGEND));
-    const hint = el('p', 'field-note', DOCUMENT_SOURCE_HINT);
-    hint.id = uid('document-source-hint');
-    fieldset.append(hint);
+    fieldset.append(el('legend', undefined, `${DOCUMENT_SOURCE_LEGEND} · 文档从材料创建，材料本身不变`));
     for (const source of next.sources) {
       const label = el('label', 'choice-row');
       const input = el('input');
@@ -1200,7 +1206,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       input.value = source.sourceVersionId;
       input.checked = state.sourceVersionId === source.sourceVersionId;
       input.disabled = working;
-      input.setAttribute('aria-describedby', hint.id);
       input.addEventListener('change', () => {
         state.sourceVersionId = source.sourceVersionId;
         state.problem = null;

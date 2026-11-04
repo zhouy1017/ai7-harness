@@ -84,17 +84,15 @@ function impactGroup(group: SeriesExclusionImpactGroupProjection, heading: 'h5' 
   box.dataset['impactGroup'] = group.key;
   box.append(el(heading, undefined, group.title));
   const changes = el('div', 'series-impact-changes');
-  changes.append(el('p', 'series-impact-label', SERIES_CHANGES_LABEL));
-  if (group.changes.length === 0) changes.append(el('p', 'field-note', SERIES_NO_CHANGE));
-  else {
+  changes.append(el('p', 'series-impact-label', group.changes.length === 0 ? `${SERIES_CHANGES_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_CHANGES_LABEL));
+  if (group.changes.length > 0) {
     const list = el('ul');
     for (const line of group.changes) list.append(el('li', undefined, line));
     changes.append(list);
   }
   const unchanged = el('div', 'series-impact-unchanged');
-  unchanged.append(el('p', 'series-impact-label', SERIES_UNCHANGED_LABEL));
-  if (group.unchanged.length === 0) unchanged.append(el('p', 'field-note', SERIES_NO_CHANGE));
-  else {
+  unchanged.append(el('p', 'series-impact-label', group.unchanged.length === 0 ? `${SERIES_UNCHANGED_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_UNCHANGED_LABEL));
+  if (group.unchanged.length > 0) {
     const list = el('ul');
     for (const line of group.unchanged) list.append(el('li', undefined, line));
     unchanged.append(list);
@@ -143,21 +141,22 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     const heading = el('h3', 'exclusions-heading', EXCLUSIONS_HEADING);
     if (technicalLayerVisible) heading.dataset['developerOnly'] = 'true';
     heading.tabIndex = -1;
-    const nodes: HTMLElement[] = [heading, el('p', 'field-note exclusions-note', EXCLUSIONS_NOTE)];
-    if (exclusions.effective.length === 0) nodes.push(el('p', 'field-note exclusions-empty', EXCLUSIONS_EMPTY));
-    else {
+    const note = el('p', 'field-note');
+    note.append(el('span', 'exclusions-note', exclusions.effective.length === 0 ? EXCLUSIONS_NOTE.replace(/。$/u, '') : EXCLUSIONS_NOTE));
+    if (exclusions.effective.length === 0) note.append('；', el('span', 'exclusions-empty', EXCLUSIONS_EMPTY));
+    const nodes: HTMLElement[] = [heading, note];
+    if (exclusions.effective.length > 0) {
       const list = el('ul', 'series-exclusion-list');
       for (const exclusion of exclusions.effective) {
         const item = el('li', 'series-exclusion');
         item.dataset['exclusionId'] = exclusion.exclusionId;
         item.dataset['targetKind'] = exclusion.target.kind;
         item.dataset['targetId'] = exclusion.target.id;
-        item.append(
-          el('p', 'series-exclusion-line', exclusionLine(exclusion, localInstantLabel)),
-          el('p', 'field-note series-exclusion-reason', exclusionReasonLine(exclusion.reason)),
-          el('p', 'field-note series-exclusion-continuing', exclusion.target.continuing),
-        );
-        if (!exclusion.target.read) item.append(el('p', 'field-note series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
+        const context = el('p', 'series-exclusion-line');
+        context.append(exclusionLine(exclusion, localInstantLabel).replace(/。$/u, ''), ' · ', el('span', 'series-exclusion-reason', exclusionReasonLine(exclusion.reason).replace(/。$/u, '')), '；',
+          el('span', 'series-exclusion-continuing', exclusion.target.read ? exclusion.target.continuing : exclusion.target.continuing.replace(/。$/u, '')));
+        if (!exclusion.target.read) context.append('；', el('span', 'series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
+        item.append(context);
         const buttons = el('div', 'button-row');
         const edit = action(EXCLUSIONS_CHANGE_OPEN, 'quiet', 'change-open', () => {
           if (busy) return;
@@ -261,9 +260,10 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     box.append(kinds);
     if (open.kind !== null) {
       const targets = el('div', 'series-exclusion-targets');
-      targets.append(el('p', 'series-exclusion-targets-legend', EXCLUSIONS_TARGET_LEGEND));
-      if (open.targets === null) targets.append(el('p', 'field-note', EXCLUSIONS_STATUS.loading));
-      else if (open.targets.length === 0) targets.append(el('p', 'field-note series-exclusion-targets-none', EXCLUSIONS_TARGETS_NONE[open.kind]));
+      const heading = el('p', 'series-exclusion-targets-legend', EXCLUSIONS_TARGET_LEGEND);
+      if (open.targets === null) heading.append(` · ${EXCLUSIONS_STATUS.loading}`);
+      else if (open.targets.length === 0) heading.append(' · ', el('span', 'series-exclusion-targets-none', EXCLUSIONS_TARGETS_NONE[open.kind]));
+      targets.append(heading);
       const visible = [...(open.targets ?? [])];
       const selected = open.selected;
       if (selected !== null && !visible.some((entry) => entry.id === selected.id)) visible.push({ ...selected, excluded: false });
@@ -324,8 +324,8 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
       heading.tabIndex = -1;
       const rows = el('dl', 'series-exclusion-preview-identity');
       for (const [term, value] of exclusionPreviewRows(preview)) rows.append(el('dt', undefined, term), el('dd', undefined, value));
+      if (!preview.target.read) rows.append(el('dt', undefined, '读取情况'), el('dd', 'series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
       box.append(heading, rows);
-      if (!preview.target.read) box.append(el('p', 'field-note series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
       box.append(...preview.groups.map((group) => impactGroup(group, 'h5')));
     }
     if (refusal !== null) {
@@ -367,7 +367,7 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     heading.tabIndex = -1;
     section.append(heading);
     const shown = exclusions!;
-    if (shown.history.length === 0) section.append(el('p', 'field-note', EXCLUSIONS_HISTORY_EMPTY));
+    if (shown.history.length === 0) heading.append(` · ${EXCLUSIONS_HISTORY_EMPTY}`);
     else {
       const list = el('ol', 'series-exclusion-revisions');
       for (const revision of shown.history) list.append(revisionNode(revision));
@@ -393,8 +393,9 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     item.dataset['action'] = revision.action;
     const details = el('details', 'series-change-impact');
     details.append(el('summary', undefined, EXCLUSIONS_HISTORY_IMPACT), ...revision.impact.map((group) => impactGroup(group, 'h6')));
-    item.append(el('p', 'series-exclusion-revision-line', exclusionRevisionLine(revision)),
-      el('p', 'field-note', exclusionRevisionByline(revision, localInstantLabel)), details);
+    const line = el('p', 'series-exclusion-revision-line', exclusionRevisionLine(revision));
+    line.append(` · ${exclusionRevisionByline(revision, localInstantLabel)}`);
+    item.append(line, details);
     return item;
   };
 

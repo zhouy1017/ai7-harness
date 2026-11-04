@@ -12,7 +12,6 @@ import {
   guidelineFixedStatement,
   guidelineImported,
   guidelineMergedVersionLine,
-  guidelineMergedVersionsMore,
   guidelineMergedVersionsSummary,
   guidelineOlderBooks,
   guidelinePreviewChanges,
@@ -90,7 +89,8 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     const title = el('h3', undefined, document.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill guideline-version-pill', guidelineVersionPill(document)));
-    node.append(heading, el('p', 'field-note guideline-applied', guidelineAppliedBy(document)));
+    heading.append(el('span', 'guideline-applied', guidelineAppliedBy(document)));
+    node.append(heading);
     const older = guidelineOlderBooks(document);
     if (older !== null) {
       const note = el('p', 'attention-note guideline-older', older);
@@ -99,7 +99,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     }
     // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
     const fixed = guidelineFixedStatement(document);
-    if (fixed !== null) node.append(el('p', 'field-note guideline-fixed', fixed));
+    if (fixed !== null) heading.append(el('span', 'guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
     clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauseCount)));
@@ -141,7 +141,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     // review; ADR 0079 §1.5).
     if (document.mergedVersionCount > 0) {
       const merged = el('details', 'guideline-merged-versions');
-      merged.append(el('summary', undefined, guidelineMergedVersionsSummary(document.mergedVersionCount)));
+      merged.append(el('summary', undefined, `${guidelineMergedVersionsSummary(document.mergedVersionCount)}${document.mergedVersionCount > document.mergedVersions.length ? ` · 已列 ${document.mergedVersions.length} 个` : ''}`));
       const mergedRows = el('ul', 'guideline-version-list');
       for (const version of document.mergedVersions) {
         const row = el('li', undefined, guidelineMergedVersionLine(version));
@@ -156,7 +156,6 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         row.append(mergedClauses);
         if (version.clausePages > 1) {
           const controls = el('div', 'button-row');
-          controls.append(el('span', 'field-note', `条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`));
           for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
             const name = `merged-clause-${version.digest}-${step}`;
             const button = windowStep(action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
@@ -179,9 +178,6 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
           controls.append(button);
         }
         merged.append(controls);
-      }
-      if (document.mergedVersionCount > document.mergedVersions.length) {
-        merged.append(el('p', 'field-note', guidelineMergedVersionsMore(document.mergedVersions.length, document.mergedVersionCount)));
       }
       node.append(merged);
     }
@@ -222,14 +218,14 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     confirm.disabled = busy;
     cancel.disabled = busy;
     actions.append(confirm, cancel);
-    section.append(heading, el('p', 'field-note guideline-preview-changes', guidelinePreviewChanges(shown)), list, actions);
+    heading.append(' · ', el('span', 'guideline-preview-changes', guidelinePreviewChanges(shown)));
+    section.append(heading, list, actions);
     if (shown.clausePages > 1) section.insertBefore(clauseControls(shown, true), actions);
     return section;
   };
 
   const clauseControls = (shown: ReviewGuidelineDocumentProjection | ReviewGuidelinePreviewProjection, isPreview: boolean): HTMLElement => {
     const row = el('div', 'button-row');
-    row.append(el('span', 'field-note', `第 ${shown.clausePage + 1} / ${shown.clausePages} 页；较长条款分段显示。`));
     for (const [step, label, name] of [[-1, '上一页', 'clauses-previous'], [1, '下一页', 'clauses-next']] as const) {
       const button = windowStep(action(label, 'secondary', name, () => {
         if (isPreview && 'previewId' in shown) void turnPreview(shown, shown.clausePage + step, name);

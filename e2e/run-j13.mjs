@@ -43,7 +43,7 @@ const SECOND = '星河之二';
 const OUTSIDE = '书系之外';
 const SERIES = '星河三部曲';
 const NOTE = '同一个宇宙里的三部长篇。';
-const SERIES_LEDE = '书系把相关的图书放在一起。加入书系只让以后的任务可以明确选用书系的范围：不会让一本书读到另一本书的原文，也不会自动授权任何任务。';
+const SERIES_LEDE = '书系归集相关图书，供以后任务明确选择范围；加入书系不会让一本书读到另一本书的原文，也不会自动授权任务。';
 const SCOPE_NOTE = '成员只表示以后的任务可以明确选用这个书系的范围；这里不汇总、也不打开成员图书的原文。';
 const STALE = '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。';
 const GROUPS = [['future-tasks', '未来任务'], ['runs', '已授权或正在运行'], ['knowledge-learning', '书系知识与学习'], ['history', '历史记录']];
@@ -288,7 +288,7 @@ const READ_SERIES_LIST = `(() => {
   return {
     lede: screen.querySelector('.series-lede')?.textContent ?? null,
     empty: root.querySelector('.series-empty')?.textContent ?? null,
-    items: Array.from(root.querySelectorAll('li.series-item'), (item) => [item.dataset.seriesId ?? null, item.querySelector('[data-series-action="open"]')?.textContent ?? null, item.querySelector('.series-item-note')?.textContent ?? null]),
+    items: Array.from(root.querySelectorAll('li.series-item'), (item) => [item.dataset.seriesId ?? null, item.querySelector('[data-series-action="open"]')?.firstChild?.textContent ?? null, item.querySelector('.series-item-note')?.textContent ?? null]),
     form: root.querySelector('form.series-create-form') !== null,
     createDisabled: create instanceof HTMLButtonElement ? create.disabled : null,
     refusal: root.querySelector('.series-refusal')?.textContent ?? null,
@@ -327,7 +327,7 @@ const READ_SERIES = `(() => {
     },
     refusal: root.querySelector('.series-refusal')?.textContent ?? null,
     historyEmpty: root.querySelector('.series-history-empty')?.textContent ?? null,
-    history: Array.from(root.querySelectorAll('ol.series-history > li'), (item) => [item.dataset.changeKind ?? null, item.dataset.bookId ?? null, item.querySelector('.series-change-line')?.textContent ?? null, item.querySelectorAll('.series-impact-group').length]),
+    history: Array.from(root.querySelectorAll('ol.series-history > li'), (item) => [item.dataset.changeKind ?? null, item.dataset.bookId ?? null, item.querySelector('.series-change-line')?.firstChild?.textContent ?? null, item.querySelectorAll('.series-impact-group').length]),
     focus: root.contains(document.activeElement) ? ${FOCUS} : null,
   };
 })()`;
@@ -341,7 +341,7 @@ const READ_BOOK_SERIES = `(() => {
     none: section.querySelector('.book-series-none')?.textContent ?? null,
     memberships: Array.from(section.querySelectorAll('.book-series-membership'), (line) => [line.dataset.seriesId ?? null, line.textContent ?? '']),
     summary: section.querySelector('details.book-series-history > summary')?.textContent ?? null,
-    history: Array.from(section.querySelectorAll('details.book-series-history li.series-change'), (item) => [item.dataset.changeKind ?? null, item.querySelector('.series-change-line')?.textContent ?? null]),
+    history: Array.from(section.querySelectorAll('details.book-series-history li.series-change'), (item) => [item.dataset.changeKind ?? null, item.querySelector('.series-change-line')?.firstChild?.textContent ?? null]),
   };
 })()`;
 
@@ -506,7 +506,7 @@ const READ_KNOWLEDGE = `(() => {
     items: Array.from(root.querySelectorAll('li.knowledge-item'), (item) => [item.dataset.itemId ?? null, text(item.querySelector('.knowledge-item-title')), text(item.querySelector('.knowledge-item-content')),
       text(item.querySelector('.knowledge-item-provenance')), text(item.querySelector('.knowledge-item-reuse')), text(item.querySelector('.knowledge-item-conflicts')), text(item.querySelector('details.knowledge-item-history > summary'))]),
     itemsEmpty: text(root.querySelector('.knowledge-items-empty')),
-    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, text(item.querySelector('.knowledge-candidate-target')),
+    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, item.querySelector('.knowledge-candidate-target')?.firstChild?.textContent ?? null,
       text(item.querySelector('.knowledge-candidate-provenance')), item.querySelector('.knowledge-candidate-conflict') !== null]),
     candidatesEmpty: text(root.querySelector('.knowledge-candidates-empty')),
     form: form === null ? null : {
@@ -515,7 +515,7 @@ const READ_KNOWLEDGE = `(() => {
     },
     review: review === null ? null : {
       candidateId: review.dataset.candidateId ?? null,
-      identity: text(review.querySelector('.knowledge-review-identity')),
+      identity: review.querySelector('.knowledge-review-identity')?.firstChild?.textContent ?? null,
       provenance: text(review.querySelector('.knowledge-review-provenance')),
       superseded: text(review.querySelector('.knowledge-review-superseded')),
       conflictLabel: text(review.querySelector('.knowledge-conflict-label')),
@@ -592,7 +592,7 @@ const READ_CAPTURE = `(() => {
   return {
     kind: dialog.dataset.captureKind ?? null,
     kept: dialog.dataset.captureKept ?? null,
-    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.textContent ?? null]),
+    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.firstChild?.textContent ?? null]),
     kinds: Array.from(dialog.querySelectorAll('[data-capture-kind]'), (label) => [label.dataset.captureKind, label.querySelector('input')?.disabled ?? null, label.querySelector('input')?.checked ?? null]),
     why: dialog.querySelector('.procedure-capture-why p')?.textContent ?? null,
     extract: Array.from(dialog.querySelectorAll('.procedure-capture-extract li'), (item) => item.textContent),
@@ -885,7 +885,7 @@ async function main() {
     // 成员与共享范围: what membership means, no member yet, 加入书系… and no change recorded.
     await clickSelector(renderer, `[data-series-id="${seriesId}"] [data-series-action="open"]`, 'series-open-entry');
     const page = await readSeries(renderer, (read) => read.seriesId === seriesId, 'series-page');
-    requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE && page.membersEmpty === '书系里还没有图书。' &&
+    requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE.replace(/。$/u, '') && page.membersEmpty === '书系里还没有图书。' &&
       page.members.length === 0 && page.addOpen === true && page.historyEmpty === '还没有成员变更。' && page.history.length === 0 && page.preview === null, 'series-page-words', page);
 
     at('membership-add-preview');
@@ -979,10 +979,10 @@ async function main() {
     const firstSide = await bookSide(renderer, first, 'first-side');
     requireJourney(firstSide.none === null && firstSide.memberships.length === 1 && firstSide.memberships[0][0] === seriesId &&
       firstSide.memberships[0][1].startsWith(`书系「${SERIES}」 · `) && firstSide.memberships[0][1].endsWith(' 加入') &&
-      firstSide.summary === '书系成员变更记录（1）' && JSON.stringify(firstSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`]]), 'first-side-words', firstSide);
+      firstSide.summary === '书系成员变更记录 · 1' && JSON.stringify(firstSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`]]), 'first-side-words', firstSide);
     await backToLibrary(renderer, 'first-side');
     const secondSide = await bookSide(renderer, second, 'second-side');
-    requireJourney(secondSide.memberships.length === 1 && secondSide.summary === '书系成员变更记录（3）' &&
+    requireJourney(secondSide.memberships.length === 1 && secondSide.summary === '书系成员变更记录 · 3' &&
       JSON.stringify(secondSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`], ['remove', `移出书系「${SERIES}」`], ['add', `加入书系「${SERIES}」`]]), 'second-side-words', secondSide);
     await backToLibrary(renderer, 'second-side');
     const outsideSide = await bookSide(renderer, outside, 'outside-side');
@@ -1020,7 +1020,7 @@ async function main() {
     'restart-series-words', after);
     await leaveSeries(renderer, 'restart-series');
     const firstAfter = await bookSide(renderer, first, 'restart-first');
-    requireJourney(firstAfter.none === '不在任何书系中。' && firstAfter.summary === '书系成员变更记录（2）' &&
+    requireJourney(firstAfter.none === '不在任何书系中。' && firstAfter.summary === '书系成员变更记录 · 2' &&
       JSON.stringify(firstAfter.history.map(([kind]) => kind)) === JSON.stringify(['remove', 'add']), 'restart-first-words', firstAfter);
     await backToLibrary(renderer, 'restart-first');
 
@@ -1155,7 +1155,7 @@ async function main() {
     requireJourney(stillWaits.review.promote[1] === true, 'knowledge-still-waits', stillWaits);
     await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-preserve');
     const kept = await readKnowledge(renderer, (read) => read.review?.preserved !== null && read.review?.preserved !== undefined, 'knowledge-preserved');
-    requireJourney(kept.review.preserved === '已选择保留已披露冲突：冲突会随这一版一起记录，不代表核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
+    requireJourney(kept.review.preserved === '冲突会一并记录，未经核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
       'knowledge-preserved-words', kept);
     await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-promote');
     await waitFor(renderer, `${notice} === '书系知识已纳入'`, 'knowledge-promoted-status');
@@ -1424,7 +1424,7 @@ async function main() {
     // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
     await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
-    await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent === ${JSON.stringify(MARKER)} && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
+    await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent?.startsWith(${JSON.stringify(`${MARKER} · `)}) === true && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
     await leaveMemberReview();
 
     at('exclusion-ended');
@@ -1914,10 +1914,10 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'version-two-versions');
     const enabledTwo = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'version-two-enabled');
     requireJourney(JSON.stringify(enabledTwo.procedures[0].versions.map((version) => [version.version, version.state, version.latestEligible, version.eligiblePill])) ===
-      JSON.stringify([['2', 'enabled', 'true', '最新可用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
-      // 最新可用's meaning is a visible field note, for sighted users as much as for a screen reader (Issue #684).
+      JSON.stringify([['2', 'enabled', 'true', '新建审阅默认使用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
+      // The visible status now states directly which version new reviews use (Issue #684).
       JSON.stringify(enabledTwo.procedures[0].versions.map((version) => version.eligibleNote)) ===
-        JSON.stringify([{ text: '新建审阅按这个工序运行时，默认用这一版。', visible: true }, null]) &&
+        JSON.stringify([null, null]) &&
       enabledTwo.procedures[0].versions[1].runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 1 次审阅 · 已完成 · `), 'version-two-latest-eligible', enabledTwo.procedures[0].versions);
 
     at('procedure-exact-version');
@@ -1968,7 +1968,7 @@ async function main() {
     requireJourney(stopPreview.procedures[0].versions[1].state === 'enabled' && previewRead.heading === `停用《${PROCEDURE_TITLE}》第 1 版` && previewRead.after === '2' &&
       JSON.stringify(previewRead.versions) === JSON.stringify([['1', '1', '0']]) &&
       JSON.stringify(previewRead.prepared) === JSON.stringify([`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · 计划已冻结 · 待授权`]) &&
-      previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版。' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
+      previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
     await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-stop h5')`, 'stop-preview-focused', 10_000);
     await clickSelector(renderer, '.captured-procedure-stop [data-procedure-action="confirm-stop"]', 'stop-confirm');
     const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.state === 'stopped', 'stop-stopped');
@@ -1990,7 +1990,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="stop-all"]`, 'stop-all-open');
     const allPreview = (await readProcedures(renderer, (page) => page.procedures[0]?.stopAll !== null, 'stop-all-preview')).procedures[0].stopAll;
     requireJourney(allPreview.heading === `停用《${PROCEDURE_TITLE}》尚未停用的 1 个版本` && allPreview.after === '' && JSON.stringify(allPreview.versions) === JSON.stringify([['2', '0', '0']]) &&
-      allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。', 'stop-all-words', allPreview);
+      allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存', 'stop-all-words', allPreview);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] > .captured-procedure-stop [data-procedure-action="confirm-stop"]`, 'stop-all-confirm');
     const allStopped = await readProcedures(renderer, (page) => page.procedures[0]?.runnable === 'false', 'stop-all-stopped');
     requireJourney(!allStopped.procedures[0].run && allStopped.procedures[0].pill === '已停用' && allStopped.procedures[0].pillBorder === 'dotted' &&
@@ -2028,7 +2028,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${seriesProcedureId}"] [data-procedure-action="versions"]`, 'series-procedure-versions');
     const seriesCard = (page) => page.procedures.find((card) => card.id === seriesProcedureId);
     const seriesPending = await readProcedures(renderer, (page) => seriesCard(page)?.versions.length === 1, 'series-procedure-listed');
-    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择。',
+    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择',
       'series-procedure-requirement', seriesCard(seriesPending).versions[0]);
     await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.state === 'enabled' && seriesCard(page)?.run === true, 'series-procedure-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'series-procedure-back');
@@ -2044,7 +2044,7 @@ async function main() {
     const READ_OFFERED = `Array.from(document.querySelectorAll('dialog.review-sheet [data-review-field="procedure"] option'), (option) => [option.value, option.textContent, option.dataset.procedureFit ?? null])`;
     const offeredHere = await renderer.evaluate(READ_OFFERED);
     // 《体例复核》's versions are all stopped: it is offered nowhere.
-    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序 · 自己选类别', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
@@ -2141,7 +2141,7 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'series-mismatch-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-mismatch-sheet');
     const offeredThere = await renderer.evaluate(READ_OFFERED);
-    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序 · 自己选类别', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书现在不能运行（「书系一致性」：${SERIES_NOT_IN_SERIES}）`, 'none']]), 'series-mismatch-offered', offeredThere);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'series-mismatch-close');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, 'series-mismatch-closed');

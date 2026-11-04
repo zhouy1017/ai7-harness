@@ -193,7 +193,7 @@ describe('the one model-service flow', () => {
       await screen.renderModelServiceSettings();
       const page = root as unknown as MiniElement;
       expect(page.querySelector('[aria-label="代理 URL"]')!.placeholder).toBe('http://127.0.0.1:端口');
-      expect(page.textContent).toContain('只有代理本身提供 TLS 入口时才用 https://');
+      expect(page.textContent).toContain('仅在代理支持 TLS 时使用 https://');
       expect(page.querySelector('.model-service-technical [data-model-discovery-code]')!.textContent).toContain('MODEL_DISCOVERY_CREDENTIAL_REJECTED');
       pickChannel(page, 'anthropic-claude');
       page.querySelector('[data-model-service-proxy] form')!.dispatchEvent({ type: 'submit' });
@@ -205,9 +205,20 @@ describe('the one model-service flow', () => {
       expect(page.textContent).toContain(new Date(projection.lastProxyProbe!.checkedAt).toLocaleString());
       expect(page.querySelector('[data-model-service-flow]')!.dataset['flowChannel']).toBe('opencode-go');
       expect(setStatus).toHaveBeenLastCalledWith('模型服务设置已打开');
+      setTechnicalLayerVisible(false);
+      calls.getModelServiceSettings.mockResolvedValue({ ...projection, launchPolicy: { ...projection.launchPolicy,
+        providerProcessing: { ...projection.launchPolicy.providerProcessing, label: '本机生产：需先设置模型服务，当前不会传输' } } });
+      await screen.renderModelServiceSettings();
+      expect(page.querySelector('[data-policy-integrity-state]')?.textContent).toBe('尚未设置模型服务，当前不会发送内容。');
+      expect(page.textContent).toContain('合成设置');
+      calls.getModelServiceSettings.mockResolvedValue({ ...projection, launchPolicy: { ...projection.launchPolicy,
+        integrityState: 'denied', denialReason: 'binding-not-allowed' } });
+      await screen.renderModelServiceSettings();
+      expect(page.querySelector('[data-policy-integrity-state]')?.textContent).toBe('当前模型连接不在允许范围内。');
+      setTechnicalLayerVisible(true);
       page.querySelectorAll('button').find((node) => node.textContent === '返回')!.click();
       expect(initializeStartup).toHaveBeenCalledOnce();
-    } finally { vi.unstubAllGlobals(); }
+    } finally { setTechnicalLayerVisible(true); vi.unstubAllGlobals(); }
   });
 
   it('lists the six channels and offers the in-use channel\'s model to both roles only once its credential is ready', () => {
@@ -317,7 +328,8 @@ describe('the one model-service flow', () => {
     expect(banner).toContain(`OpenCode Go / ${model.modelLabel}`);
     if (code !== null) expect(banner).not.toContain(code);
     const painted = flow(answer).node;
-    expect(painted.querySelector(`[data-connection-test-outcome="${outcome}"]`)!.textContent).toContain(model.modelLabel);
+    expect(painted.querySelector(`[data-model-choice="${model.modelId}"]`)!.checked).toBe(true);
+    expect(painted.querySelector(`[data-connection-test-outcome="${outcome}"]`)!.textContent).toContain('文本连接测试');
     expect(painted.querySelector('.model-service-flow-feedback .technical-details')!.textContent).toContain(code ?? '无');
   });
 

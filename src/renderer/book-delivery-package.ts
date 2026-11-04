@@ -22,8 +22,6 @@ import {
   PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN,
   PACKAGE_ARCHIVE_FILES_LABEL,
   PACKAGE_ARCHIVE_FILES_TRUNCATED,
-  PACKAGE_ARCHIVE_NOTE,
-  PACKAGE_ARCHIVE_PAGES_NOTE,
   PACKAGE_ARCHIVE_REVEAL,
   PACKAGE_ARCHIVE_STATUS_LINES,
   PACKAGE_CONDITION_STATE,
@@ -47,7 +45,6 @@ import {
   PACKAGE_LIMITATIONS_TRUNCATED,
   PACKAGE_PREPARE,
   PACKAGE_PREVIEW_HEADING,
-  PACKAGE_PURPOSE_HINT,
   PACKAGE_PURPOSE_LABEL,
   PACKAGE_PURPOSE_NEEDED,
   PACKAGE_STATUS_LINES,
@@ -72,8 +69,6 @@ import {
 } from './book-delivery-package-labels.js';
 import {
   EXPORT_DEGRADED_NOTE,
-  EXPORT_OPTION_LABELS,
-  exportOptionNote,
   EXPORT_OPTIONS_LEGEND,
 } from './manuscript-export-labels.js';
 import { renderExportFidelity } from './manuscript-export.js';
@@ -310,8 +305,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     for (const entry of items) {
       const item = el('li');
       item.dataset['itemKind'] = entry.kind;
-      item.append(el('span', 'package-item-label', entry.label));
-      if (entry.detail !== null) item.append(el('span', 'field-note package-item-detail', entry.detail));
+      const label = el('span', 'package-item-label', entry.label);
+      if (entry.detail !== null) label.append(' · ', el('span', 'package-item-detail', entry.detail));
+      item.append(label);
       list.append(item);
     }
     return list;
@@ -321,13 +317,12 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const block = el('section', 'package-preview');
     block.dataset['contentDigest'] = next.content.digest;
     block.append(el('h4', undefined, PACKAGE_PREVIEW_HEADING));
-    block.append(el('h5', undefined, PACKAGE_INCLUDED_HEADING), itemList('package-included', next.content.included));
-    if (next.content.includedTruncated) block.append(el('p', 'field-note', PACKAGE_INCLUDED_TRUNCATED));
+    const included = el('h5', undefined, next.content.includedTruncated ? `${PACKAGE_INCLUDED_HEADING} · ${PACKAGE_INCLUDED_TRUNCATED}` : PACKAGE_INCLUDED_HEADING);
+    block.append(included, itemList('package-included', next.content.included));
     block.append(el('h5', undefined, PACKAGE_EXCLUDED_HEADING), itemList('package-excluded', next.content.excluded));
     const limitations = el('ul', 'package-limitations');
     for (const line of next.content.limitations) limitations.append(el('li', undefined, line));
-    block.append(el('h5', undefined, PACKAGE_LIMITATIONS_HEADING), limitations);
-    if (next.content.limitationsTruncated) block.append(el('p', 'field-note', PACKAGE_LIMITATIONS_TRUNCATED));
+    block.append(el('h5', undefined, next.content.limitationsTruncated ? `${PACKAGE_LIMITATIONS_HEADING} · ${PACKAGE_LIMITATIONS_TRUNCATED}` : PACKAGE_LIMITATIONS_HEADING), limitations);
     return block;
   }
 
@@ -351,21 +346,26 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     input.dataset['packageField'] = 'purpose';
     input.value = purpose;
     input.disabled = busy();
-    const hint = el('small', 'field-note', PACKAGE_PURPOSE_HINT);
-    hint.id = uid('purpose-hint');
-    input.setAttribute('aria-describedby', hint.id);
-    label.append(el('span', undefined, PACKAGE_PURPOSE_LABEL), input, hint);
+    input.placeholder = '例如：交出版社存档';
+    label.append(el('span', undefined, PACKAGE_PURPOSE_LABEL), input);
     form.append(label);
     const prepare = el('button', 'primary', PACKAGE_PREPARE);
     prepare.type = 'button';
     prepare.dataset['packageAction'] = 'prepare';
-    const reason = el('p', 'field-note package-prepare-reason');
+    const reason = el('span', 'package-prepare-reason');
     reason.id = uid('prepare-reason');
+    prepare.setAttribute('aria-label', prepare.textContent ?? '');
     prepare.setAttribute('aria-describedby', reason.id);
+    const reasonLabel = el('span');
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, reason);
+    prepare.append(reasonLabel);
     const sync = (): void => {
       const why = blocker(next);
       reason.textContent = why ?? '';
       reason.hidden = why === null;
+      reasonLabel.hidden = why === null;
+      reasonPrefix.textContent = why === null ? '' : ' · ';
       prepare.disabled = busy() || why !== null;
     };
     input.addEventListener('input', () => {
@@ -377,14 +377,14 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     if (problem !== null) form.append(el('p', 'attention-note package-problem', problem));
     const row = el('div', 'button-row compact-actions');
     row.append(prepare);
-    form.append(row, reason);
+    form.append(row);
     sync();
     return form;
   }
 
   function renderVersions(versions: ReadonlyArray<BookDeliveryPackageVersionProjection>, truncated: boolean): HTMLElement {
     const block = el('section', 'package-versions');
-    block.append(el('h4', undefined, PACKAGE_VERSIONS_HEADING));
+    block.append(el('h4', undefined, truncated ? `${PACKAGE_VERSIONS_HEADING} · ${PACKAGE_VERSIONS_TRUNCATED}` : PACKAGE_VERSIONS_HEADING));
     const list = el('ol', 'package-version-list');
     for (const version of versions) {
       const item = el('li');
@@ -401,11 +401,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       open.disabled = busy();
       const actions = el('div', 'button-row compact-actions');
       actions.append(open);
-      item.append(
-        line,
-        el('p', 'field-note package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))),
-        el('p', 'package-version-summary', version.summary),
-      );
+      line.append(' · ', el('span', 'package-version-meta', packageVersionMeta(version.purpose, localInstantLabel(version.preparedAt))));
+      item.append(line, el('p', 'package-version-summary', version.summary));
       if (version.exports.length > 0) item.append(renderHistory(version));
       item.append(actions);
       if (exporting !== null && exporting.packageVersionId === version.packageVersionId) item.append(renderExport(exporting));
@@ -422,7 +419,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       list.append(item);
     }
     block.append(list);
-    if (truncated) block.append(el('p', 'field-note', PACKAGE_VERSIONS_TRUNCATED));
     return block;
   }
 
@@ -440,8 +436,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const list = el('ol', 'package-export-list');
     list.setAttribute('aria-label', packageExportsAccessibleName(version.label));
     for (const entry of version.exports) list.append(historyEntry(entry));
+    if (version.exportsTruncated) list.append(el('li', undefined, PACKAGE_EXPORTS_TRUNCATED));
     block.append(list);
-    if (version.exportsTruncated) block.append(el('p', 'field-note', PACKAGE_EXPORTS_TRUNCATED));
     return block;
   }
 
@@ -450,10 +446,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     item.dataset['packageExportId'] = entry.exportId;
     item.dataset['packageExportState'] = entry.state;
     item.dataset['packageExportKind'] = entry.kind ?? 'folder';
-    item.append(
-      el('p', 'package-export-line', packageExportHistoryLine(entry.summary, localInstantLabel(entry.exportedAt))),
-      el('p', 'field-note package-export-folder', entry.folder),
-    );
+    const line = el('p', 'package-export-line', packageExportHistoryLine(entry.summary, localInstantLabel(entry.exportedAt)));
+    line.append(' · ', el('span', 'package-export-folder', entry.folder));
+    item.append(line);
     if (entry.revealPreparationId !== null) {
       const preparationId = entry.revealPreparationId;
       const reveal = el('button', 'quiet', entry.kind === 'archive' ? PACKAGE_ARCHIVE_REVEAL : PACKAGE_EXPORT_ACTION_LABELS.reveal);
@@ -495,15 +490,17 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       label.append(radio, document.createTextNode(title)); routes.append(label);
     }
     panel.append(routes);
-    if (current.route === 'archive') panel.append(el('p', 'field-note', PACKAGE_ARCHIVE_NOTE));
     const shown = current.result ?? current.prepared;
-    if (current.review !== null) panel.append(el('p', 'export-local-line', current.review.statement));
+    if (current.review !== null) panel.append(el('p', 'export-local-line', current.route === 'archive'
+      ? '压缩包汇集全部内容，不发稿、交付、更改记录或发送文件。' : current.review.statement));
     panel.append(renderExportOptions(current));
     if (current.review !== null) {
       const review = current.review;
       panel.dataset['packageExportDegraded'] = String(review.degraded);
-      const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : PACKAGE_EXPORT_FILES_LABEL);
+      const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : shown === null ? `${PACKAGE_EXPORT_FILES_LABEL} · 勾选本页，翻页会清除选择` : PACKAGE_EXPORT_FILES_LABEL);
       label.id = uid('export-files');
+      if ((shown?.filesTruncated ?? review.filesTruncated) === true) label.append(' · ', current.route === 'archive'
+        ? PACKAGE_ARCHIVE_FILES_TRUNCATED : PACKAGE_EXPORT_FILES_TRUNCATED);
       const list = el('ol', 'package-export-files');
       list.setAttribute('aria-labelledby', label.id);
       for (const file of shown?.files ?? review.files) {
@@ -511,9 +508,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       }
       panel.append(label, list);
       if (shown === null) {
-        panel.append(el('p', 'field-note', current.route === 'archive'
-          ? PACKAGE_ARCHIVE_PAGES_NOTE
-          : '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
           const button = windowStep(el('button', 'quiet', name), name === '上一页' ? 'before' : 'after', name === '上一页' ? '向前浏览文件' : '向后浏览文件');
@@ -534,8 +528,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         }
         panel.append(pages);
       }
-      if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', current.route === 'archive'
-        ? PACKAGE_ARCHIVE_FILES_TRUNCATED : PACKAGE_EXPORT_FILES_TRUNCATED));
       // EXP-008: what is degraded or cannot be written is said above; the approval accepts it for this export only.
       if (review.degraded) panel.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
     }
@@ -571,7 +563,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
    */
   function renderExportOptions(current: ExportState): HTMLElement {
     const fieldset = el('fieldset', 'export-options package-export-options');
-    fieldset.append(el('legend', undefined, EXPORT_OPTIONS_LEGEND));
+    const legend = el('legend', undefined, EXPORT_OPTIONS_LEGEND);
+    legend.append(' · ', el('span', undefined, PACKAGE_EXPORT_OPTIONS_NOTE));
+    fieldset.append(legend);
     for (const key of PACKAGE_EXPORT_OPTION_ORDER) {
       const option = el('label', 'export-option');
       const box = el('input');
@@ -579,16 +573,13 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       box.checked = current.options[key];
       box.disabled = current.result !== null || current.phase === 'choosing' || current.phase === 'writing';
       box.dataset['packageField'] = key;
-      const note = el('small', 'field-note', exportOptionNote(key, 'docx'));
-      note.id = uid(`export-${key}-note`);
-      box.setAttribute('aria-describedby', note.id);
       box.addEventListener('change', () => changeOption(current, key, box.checked));
       const words = el('span', 'export-option-text');
-      words.append(el('strong', undefined, EXPORT_OPTION_LABELS[key]), note);
+      words.append(el('strong', undefined, key === 'includeAnnotations'
+        ? '含批注，保留作者与回复' : '含修改建议，作为 Word 修订并保留作者'));
       option.append(box, words);
       fieldset.append(option);
     }
-    fieldset.append(el('p', 'field-note', PACKAGE_EXPORT_OPTIONS_NOTE));
     return fieldset;
   }
 
@@ -613,10 +604,15 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         else current.selected.delete(file.key);
         draw('keep');
       });
-      label.append(box, el('span', undefined, `选择：${file.label}`));
+      const name = el('span', 'package-export-file-label', file.label);
+      name.append(' · ', el('span', 'package-export-file-name', packageExportFileName(file.fileName, file.format)));
+      label.append(box, name);
       item.append(label);
+    } else {
+      const name = el('span', 'package-export-file-label', file.label);
+      name.append(' · ', el('span', 'package-export-file-name', packageExportFileName(file.fileName, file.format)));
+      item.append(name);
     }
-    item.append(el('span', 'package-export-file-label', file.label), el('span', 'field-note package-export-file-name', packageExportFileName(file.fileName, file.format)));
     if ('outcome' in file) {
       item.dataset['packageExportOutcome'] = file.outcome;
       item.append(el('span', `state-term status-pill package-export-outcome is-${file.outcome}`, file.outcomeLabel));
@@ -626,9 +622,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       item.dataset['packageExportDegraded'] = String(reviewed.degraded);
       const details = el('details', 'package-export-fidelity');
       details.open = current.disclosed.get(file.key) ?? reviewed.degraded;
-      details.append(el('summary', undefined, packageExportFidelitySummary(reviewed.degraded)),
-        renderExportFidelity(reviewed, { heading: false, degradedNote: false }),
-        el('p', 'field-note export-format-line', reviewed.formatLine));
+      const summary = el('summary', undefined, packageExportFidelitySummary(reviewed.degraded));
+      summary.append(' · ', el('span', 'export-format-line', reviewed.formatLine));
+      details.append(summary, renderExportFidelity(reviewed, { heading: false, degradedNote: false }));
       details.addEventListener('toggle', () => current.disclosed.set(file.key, details.open));
       item.append(details);
     }
@@ -639,14 +635,19 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
   function renderExportActions(current: ExportState, inFlight: boolean): HTMLElement {
     const row = el('div', 'button-row export-actions');
     const approve = exportButton('approve', 'primary', () => void approveExport());
-    const reason = el('p', 'field-note export-approve-reason', PACKAGE_EXPORT_APPROVE_REASON);
+    const reason = el('span', 'export-approve-reason', current.prepared === null ? PACKAGE_EXPORT_APPROVE_REASON : '');
     reason.id = uid('export-approve-reason');
     reason.hidden = current.prepared !== null;
     approve.disabled = inFlight || current.prepared === null;
+    approve.setAttribute('aria-label', approve.textContent ?? '');
     approve.setAttribute('aria-describedby', reason.id);
+    const reasonLabel = el('span');
+    reasonLabel.hidden = reason.hidden;
+    reasonLabel.append(reason.hidden ? '' : ' · ', reason);
+    approve.append(reasonLabel);
     const cancel = exportButton('cancel', 'quiet', () => closeExport(true));
     cancel.disabled = inFlight && current.phase !== 'writing';
-    row.append(approve, cancel, reason);
+    row.append(approve, cancel);
     return row;
   }
 

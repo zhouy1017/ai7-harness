@@ -180,8 +180,7 @@ const DELIVERY_CUSTOM = '出版社发行部';
 const DELIVERY_EDIT = '〔交付后修订〕';
 const DOCUMENT_EXPORT_FILE = '新闻稿 · 版本 2.docx';
 const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
-const DELIVERY_UNSAVED = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
-const DELIVERY_CURRENT_TEXT = '现在的文字（交付时先保存为版本 3）';
+const DELIVERY_CURRENT_TEXT = '现在的文字 · 交付时先保存为版本 3';
 // Issue #416 (S67a): 图书交付包 — prepared once with a purpose, again unchanged, and once more with a new purpose.
 const PACKAGE_PURPOSE = '交出版社存档';
 const PACKAGE_PURPOSE_2 = '交印厂付印';
@@ -401,7 +400,7 @@ const PAGE_HELPERS = `(() => {
       const node = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
       return node === undefined ? null : Number((node.textContent ?? '').slice('修订日志序号 '.length));
     },
-    milestoneSave: () => Array.from(document.querySelectorAll('details.milestone-section button')).find((item) => item.textContent === '保存里程碑版本') ?? null,
+    milestoneSave: () => Array.from(document.querySelectorAll('details.milestone-section button')).find((item) => (item.getAttribute('aria-label') ?? item.textContent) === '保存里程碑版本') ?? null,
     decisionText: () => {
       const clone = block()?.cloneNode(true);
       if (!clone) return '';
@@ -436,7 +435,7 @@ const PAGE_HELPERS = `(() => {
     // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
     packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
     packageExportFiles: () => Array.from(window.__j07.packageExport()?.querySelectorAll('ol.package-export-files > li') ?? [])
-      .map((item) => [item.dataset.packageExportFile, item.dataset.packageExportFormat, item.querySelector('.package-export-file-label')?.textContent ?? '',
+      .map((item) => [item.dataset.packageExportFile, item.dataset.packageExportFormat, item.querySelector('.package-export-file-label')?.firstChild?.textContent ?? '',
         item.querySelector('.package-export-file-name')?.textContent ?? '', item.dataset.packageExportOutcome ?? '', item.querySelector('.package-export-outcome')?.textContent ?? ''].join('|')),
   };
   return true;
@@ -1184,9 +1183,9 @@ async function main() {
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
       return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
         page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
-        actions.length === 0 && block.querySelector(':scope > h3')?.textContent === '发稿 · 稿件' &&
+        actions.length === 0 && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
-        designate instanceof HTMLButtonElement && designate.disabled && designate.textContent === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
+        designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
         block.querySelector('.publication-change-notice') === null &&
         window.__j07.documents()?.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' &&
@@ -1214,7 +1213,7 @@ async function main() {
     await openManuscript(renderer, 'before-milestone');
 
     at('milestone-needs-a-purpose');
-    // 标签 / 用途 / 说明（可选）: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
+    // 标签 / 用途 / 说明 · 可选: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
     // purpose with its reason beside it (V2-UX-MILE-003); 自行输入 asks for the editor's own words.
     await openMilestoneForm(renderer, 'first');
     await assertRenderer(renderer, `(() => {
@@ -1223,8 +1222,8 @@ async function main() {
       const custom = section.querySelector('#milestone-purpose-custom');
       const save = window.__j07.milestoneSave();
       return section.querySelector('label[for="milestone-label"]')?.textContent === '标签' &&
-        section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途' &&
-        section.querySelector('label[for="milestone-note"]')?.textContent === '说明（可选）' &&
+        section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。' &&
+        section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
         radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
         save instanceof HTMLButtonElement && save.disabled;
@@ -1308,7 +1307,7 @@ async function main() {
         JSON.stringify(terms) === '["图书","稿件","里程碑版本","与当前稿件","操作人","时间"]' &&
         scope instanceof HTMLInputElement && scope.required && scope.closest('label')?.querySelector('.publication-field-label')?.textContent === '发稿范围' &&
         basis instanceof HTMLTextAreaElement && basis.required && basis.closest('label')?.querySelector('.publication-field-label')?.textContent === '依据' &&
-        confirm instanceof HTMLButtonElement && confirm.disabled && confirm.textContent === '设为发稿版本' &&
+        confirm instanceof HTMLButtonElement && confirm.disabled && confirm.getAttribute('aria-label') === '设为发稿版本' &&
         cancel instanceof HTMLButtonElement && !cancel.disabled && cancel.textContent === '取消' &&
         reason instanceof HTMLElement && !reason.hidden && (reason.textContent ?? '').startsWith('还需要选择一个里程碑版本');
     })()`, 'designate-form-states-everything-and-preselects-nothing');
@@ -1661,7 +1660,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const block = window.__j07.documents();
       const cards = Array.from(block.querySelectorAll('li.production-document-card'));
-      return block.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
+      return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
         JSON.stringify(cards.map((card) => card.dataset.documentTypeId + ':' + card.querySelector('h4')?.textContent + ':' + card.dataset.documentState)) === ${JSON.stringify(JSON.stringify(DOCUMENT_TYPES.map(([typeId, label]) => `${typeId}:${label}:none`)))} &&
         cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
           window.__j07.cardAction(card.dataset.documentTypeId, 'create')?.disabled === false &&
@@ -1675,7 +1674,7 @@ async function main() {
     // manuscript's own: no 审阅, no 分析, no milestone, no 发稿.
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="create"]', 'document-create-open');
     await waitFor(renderer, `window.__j07.card('news-release')?.querySelector('form.document-create') !== null && document.activeElement === window.__j07.card('news-release').querySelector('input[name="document-source"]')`, 'document-create-form');
-    await assertRenderer(renderer, `(() => { const form = window.__j07.card('news-release').querySelector('form.document-create'); const radios = Array.from(form.querySelectorAll('input[name="document-source"]')); return radios.length === 1 && !radios[0].checked && form.querySelector('legend')?.textContent === '选择来源材料' && (form.querySelector('label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === true; })()`, 'document-create-nothing-preselected');
+    await assertRenderer(renderer, `(() => { const form = window.__j07.card('news-release').querySelector('form.document-create'); const radios = Array.from(form.querySelectorAll('input[name="document-source"]')); return radios.length === 1 && !radios[0].checked && form.querySelector('legend')?.textContent === '选择来源材料 · 文档从材料创建，材料本身不变' && (form.querySelector('label.choice-row span')?.textContent ?? '').startsWith(${JSON.stringify(`${DRAFT_FILE} · DOCX · 导入于 `)}) && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === true; })()`, 'document-create-nothing-preselected');
     await assertRenderer(renderer, `(() => { const radio = window.__j07.card('news-release').querySelector('input[name="document-source"]'); radio.click(); return radio.checked && window.__j07.cardAction('news-release', 'confirmCreate')?.disabled === false; })()`, 'document-create-choose');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmCreate"]', 'document-create-confirm');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"][data-document-type-id="news-release"] [data-testid="manuscript-editor"] > [data-block-id]') !== null`, 'document-opened', 120_000);
@@ -1687,14 +1686,14 @@ async function main() {
       const versions = Array.from(lens?.querySelectorAll('ol.document-version-list > li') ?? []).map((item) => item.dataset.versionOrdinal + ':' + (item.dataset.versionCurrent ?? ''));
       return {
         book: shell?.dataset.bookId === ${JSON.stringify(bookId)},
-        label: shell?.querySelector('.editor-toolbar .section-label')?.textContent === ${JSON.stringify(`${EXCERPT.title} · 生产文档`)},
+        label: shell?.querySelector('.editor-toolbar .section-label') === null,
         heading: shell?.querySelector('.editor-toolbar h2')?.textContent === '新闻稿 · 版本 1',
         meta: Array.from(shell?.querySelectorAll('.editor-meta > span') ?? []).some((item) => item.textContent === '当前版本 版本 1'),
         lens: lens?.querySelector(':scope > .section-label')?.textContent === '工作流程',
         // Since S66c (Issue #415) the workflow opens the column: 下一项需要处理 and 阶段, then 版本与交付 and the materials.
-        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
+        sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.firstChild?.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
         versions: JSON.stringify(versions) === '["1:true"]',
-        materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。',
         // Issue #547: how its material was read, standing in the column rather than only in the notice that opened it.
         originMarks: lens?.querySelector('.document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)},
         work: work.length === 0 && document.querySelector('#app-sidebar [data-nav-book-section="deliverables"]') !== null,
@@ -1845,7 +1844,7 @@ async function main() {
         JSON.stringify(recipients.map((item) => item.value + ':' + item.checked + ':' + item.closest('label')?.querySelector('span')?.textContent)) === ${JSON.stringify(DELIVERY_RECIPIENTS)} &&
         form.querySelector('[data-delivery-field="custom"]')?.disabled === true && form.querySelector('.delivery-unsaved') === null &&
         form.querySelector('.delivery-statement')?.textContent === ${JSON.stringify(DELIVERY_STATEMENT)} &&
-        confirm?.textContent === '交付' && confirm.disabled === true && window.__j07.deliveryReason('news-release') === '先选择要交付的版本';
+        confirm?.getAttribute('aria-label') === '交付' && confirm.disabled === true && window.__j07.deliveryReason('news-release') === '先选择要交付的版本';
     })()`, 'deliver-nothing-preselected');
     await assertRenderer(renderer, `(() => { const version = window.__j07.delivery('news-release').querySelector('input[name="delivery-version"]'); version.click(); return version.checked && window.__j07.cardAction('news-release', 'confirmDeliver').disabled === true && window.__j07.deliveryReason('news-release') === '先选择交给谁'; })()`, 'deliver-choose-version');
     await assertRenderer(renderer, `(() => {
@@ -1945,7 +1944,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const form = window.__j07.delivery('news-release');
       const versions = Array.from(form.querySelectorAll('input[name="delivery-version"]'));
-      return form.querySelector('.delivery-unsaved')?.textContent === ${JSON.stringify(DELIVERY_UNSAVED)} &&
+      return form.querySelector('.delivery-unsaved') === null &&
         JSON.stringify(versions.map((item) => item.value === 'current' ? item.closest('label')?.querySelector('span')?.textContent : (item.closest('label')?.querySelector('span')?.textContent ?? '').split(' · ')[0])) === ${JSON.stringify(JSON.stringify([DELIVERY_CURRENT_TEXT, '版本 2', '版本 1']))} &&
         Array.from(form.querySelectorAll('input[name="delivery-version"], input[name="delivery-recipient"]')).every((item) => !item.checked);
     })()`, 'redeliver-current-text-offered');
@@ -2031,7 +2030,7 @@ async function main() {
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'true'`, 'package-ready');
     await assertRenderer(renderer, `(() => {
       const bundle = window.__j07.pkg();
-      const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.textContent);
+      const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.firstChild?.textContent);
       const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
       return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3', 'evaluation-record:评估记录 · 第 1 版定稿']))} &&
         JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([
@@ -2124,8 +2123,8 @@ async function main() {
           details?.open === degraded && (details.querySelector('summary')?.textContent ?? '').startsWith('导出保真审阅')];
       });
       return JSON.stringify(boxes.map((box) => box.dataset.packageField + ':' + box.checked + ':' + box.closest('label')?.querySelector('strong')?.textContent)) ===
-          '["includeAnnotations:true:含批注","includeSuggestions:true:含修改建议（作为修订）"]' &&
-        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files))} &&
+          '["includeAnnotations:true:含批注，保留作者与回复","includeSuggestions:true:含修改建议，作为 Word 修订并保留作者"]' &&
+        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files.map(([key, degraded, count, restoration, open]) => [key, degraded, count, typeof restoration === 'string' ? restoration.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线') : restoration, open])))} &&
         (panel.querySelector('.export-degraded-note') !== null) === ${packageReview.degraded === true};
     })()`, 'package-export-fidelity-and-switches');
     // Turning 含批注 off reviews the files again under it, focus staying on the switch; turning it on again restores the
@@ -2390,10 +2389,10 @@ async function main() {
       return items.length === 1 && item.closest('section.global-attention-group')?.dataset.attentionGroup === 'decisions' &&
         item.dataset.attentionItem === ${JSON.stringify(`maintenance:${supersessionCase.caseId}`)} && item.dataset.attentionTarget === 'maintenance' &&
         item.dataset.attentionBlocked === 'false' && item.querySelector('.global-attention-book')?.textContent === ${JSON.stringify(`《${EXCERPT.title}》`)} &&
-        item.querySelector('.global-attention-open')?.textContent === '维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本' &&
+        item.querySelector('.global-attention-object-name')?.textContent === '维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本' &&
         item.querySelector('.global-attention-pill')?.textContent === '维护事项待处理 · 等待另设发稿版本' &&
         item.querySelector('.global-attention-reason')?.textContent === '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。' &&
-        item.querySelector('.global-attention-next')?.textContent === '安全的下一步：关联发稿版本';
+        item.querySelector('.global-attention-next')?.textContent === '关联发稿版本';
     })()`, 'maintenance-attention-item');
     await clickSelector(renderer, `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`, 'maintenance-attention-open');
     await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)}); return heading instanceof HTMLElement && document.activeElement === heading && heading.textContent === '第 3 项维护事项 · 替代'; })()`, 'maintenance-attention-returns-to-the-case', 60_000);
@@ -2418,7 +2417,7 @@ async function main() {
       const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)});
       return listed.length === 6 && listed[5] === ${JSON.stringify(supersessionCase.caseId)} && heading instanceof HTMLElement && document.activeElement === heading &&
         heading.textContent === '第 3 项维护事项 · 替代' &&
-        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older .field-note`)})?.textContent === '还有 1 项更早的维护事项';
+        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older [data-maintenance-action="older"]`)})?.textContent === '还有 1 项更早的维护事项 · 查看';
     })()`, 'maintenance-attention-older-opened', 60_000);
     // 归档 of that designation: its maintenance is closed, and the 替代 leaves 待我处理 without being concluded.
     await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-archive-open');
@@ -2820,7 +2819,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('deliverables')), 'writing-back');
     await waitForDeliverables(renderer, 'writing-card');
     await waitFor(renderer, `window.__j07.card('promotion-article')?.dataset.documentState === 'document'`, 'writing-card-document');
-    await assertRenderer(renderer, `(() => { const card = window.__j07.card('promotion-article'); return card?.querySelector('.document-card-line')?.textContent === '版本 1 · 由写作任务起草（范例只参照，不复制）' && card.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理'; })()`, 'writing-card-words');
+    await assertRenderer(renderer, `(() => { const card = window.__j07.card('promotion-article'); return card?.querySelector('.document-card-line')?.textContent === '版本 1 · 由写作任务起草 · 范例只参照，不复制' && card.querySelector('.document-workflow-summary')?.textContent === '1 个阶段进行中 · 0 项等待处理'; })()`, 'writing-card-words');
     const writingDocument = await renderer.evaluate(`window.ai7.inspectProductionDocuments().then((page) => { const document = page.types.find((type) => type.typeId === 'promotion-article')?.document; return document ? JSON.stringify([document.origin.drafted, document.versions.length, document.workflow.phases.find((phase) => phase.phaseId === 'drafting')?.state, document.workflow.transitions]) : null; })`);
     requireJourney(writingDocument === JSON.stringify([true, 1, 'in-progress', 1]), 'writing-card-service', writingDocument);
     const writingAfter = await readWriting((page) => page.state === 'settled', 'writing-after');

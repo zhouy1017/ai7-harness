@@ -51,7 +51,7 @@ export const REGION_NAMES = { supportingWidth: '导航面板', drawerWidth: '任
 export const REGIONS_NOTE = '在稿件旁拖动面板边缘的分隔条，或聚焦分隔条后用方向键调整；稿件正文始终保留可用宽度。';
 export const RESTORE_DEFAULT_LAYOUT = '恢复默认布局';
 export const RESTORED_DEFAULT_LAYOUT = '已恢复默认布局；只改变本机显示，不影响稿件或任何记录。';
-export const regionDefault = '跟随窗口（默认）';
+export const regionDefault = '跟随窗口';
 export const regionWidthValue = (px: number): string => `${px} 像素`;
 export const separatorLabel = (region: keyof typeof REGION_NAMES): string => `调整${REGION_NAMES[region]}宽度`;
 export const regionAnnouncement = (region: keyof typeof REGION_NAMES, px: number): string => `${REGION_NAMES[region]}宽度 ${px} 像素。`;

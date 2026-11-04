@@ -40,7 +40,12 @@ export const ANALYSIS_EDITORIAL_NOT_DO = ['不会直接修改稿件', '不读这
  * a dispatch decision no plan has frozen.
  */
 export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null): string {
-  if (!technicalLayerVisible) return '开始后按本次选择执行。';
+  if (!technicalLayerVisible) {
+    if (pin === null) return '这里只会记录本次授权，计划尚未确定发送方式。';
+    return pin.decision === 'deny'
+      ? '这里只会记录本次授权；当前设置不允许向模型服务发送内容。'
+      : '这里只会记录本次授权；模型服务只能接收本次计划范围内的内容。';
+  }
   const flow = '本流程只冻结并记录本次标准直接授权';
   if (pin === null) return `${flow}。`;
   return pin.decision === 'deny'
@@ -56,9 +61,15 @@ export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null)
  * hold in every state — the kind and that a Revision does not modify the manuscript — still read.
  */
 export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPolicyPin | null): string {
-  if (!technicalLayerVisible) return '分析结果供编辑参考，不修改稿件。';
+  if (!technicalLayerVisible) {
+    if (policy === null) return '分析结果供编辑参考，不修改稿件。';
+    const denied = 'decision' in policy ? policy.decision === 'deny' : policy.liveTransmissions === 0;
+    return denied
+      ? '这份分析不允许向模型服务发送内容，结果供编辑参考且不修改稿件。'
+      : '这份分析仅在满足条件时可按计划向模型服务发送内容，结果供编辑参考且不修改稿件。';
+  }
   const kind = '一个精确版本化的覆盖式分析种类';
-  const revision = '结果集修订版不修改稿件';
+  const revision = '分析结果不修改稿件';
   if (policy === null) return `${kind}；${revision}。`;
   const version = 'version' in policy ? policy.version : policy.providerProcessingVersion;
   const denied = 'decision' in policy ? policy.decision === 'deny' : policy.liveTransmissions === 0;
@@ -74,7 +85,11 @@ export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPo
  * label's closed union, and both of its members carry the `：` the halves are taken around.
  */
 export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['providerProcessing']['label']): string {
-  if (!technicalLayerVisible) return '连接设置用于之后开始的任务。';
+  if (!technicalLayerVisible) {
+    if (label.endsWith('零次实时传输')) return '当前设置不允许向模型服务发送内容。';
+    if (label.endsWith('当前不会传输')) return '尚未设置模型服务，当前不会发送内容。';
+    return '向模型服务发送内容受每次任务计划的范围约束。';
+  }
   const separator = label.indexOf('：');
   return `当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }

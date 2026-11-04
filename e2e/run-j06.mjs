@@ -1031,14 +1031,14 @@ async function main() {
       return {
         group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
         target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
       };
     })()`);
     requireJourney(conflictRow?.group === 'exceptions' && conflictRow.state === 'manuscript-conflict-deferred' && conflictRow.blocked === 'true' &&
       conflictRow.target === 'manuscript-conflict' && conflictRow.pill === '需要解决冲突 · 暂不处理' && conflictRow.object === '修改建议 · 稿件冲突' &&
       conflictRow.reason === '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。已记下暂不处理，这处冲突仍未解决。' &&
-      conflictRow.next === '安全的下一步：解决冲突…', 'attention-conflict-row', conflictRow);
+      conflictRow.next === '解决冲突…', 'attention-conflict-row', conflictRow);
     await assertRenderer(renderer, `(() => { const open = document.querySelector('[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(`conflict:${secondId}`)}]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'attention-conflict-open');
     await waitFor(renderer, `window.__j06.conflict()?.dataset.conflictMarkId === ${JSON.stringify(secondId)} && window.__j06.conflict().dataset.conflictState === 'deferred' && window.__j06.units().length > 0`, 'attention-conflict-workspace');
     await returnToManuscript(renderer, secondId, 'attention-conflict-return');

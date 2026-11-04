@@ -144,7 +144,7 @@ export function returnChipArrived(place: string): string {
 /** A draft's card in 等你处理 (TASK-004): no Task yet, nothing started by itself. */
 /** 发起全书任务's own way to the composer (TASK-001): the editor says what AI7 should do; the procedures below stay for 快速开始. */
 export const TASK_PANEL_COMPOSE_OPEN = '发起全书任务…';
-export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作，先存为任务草稿；下面的全书工序可以直接准备或快速开始。';
+export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作。';
 
 export const TASK_COMPOSER_TITLES = {
   selection: '就这段发起任务',
@@ -185,7 +185,7 @@ export const TASK_COMPOSER_PENDING_LABEL = '待保存修订版';
 /** Where a range lies: one block, or a span's contiguous blocks (Issue #1176), counted without the breaks between them. */
 export function taskComposerRangeLine(position: number | null, graphemes: number, revisionLabel: string, paragraphs = 1): string {
   const place = position === null ? '段落已不在当前稿件中' : paragraphs > 1 ? `第 ${position}–${position + paragraphs - 1} 段` : `第 ${position} 段`;
-  return `${place} · ${graphemes - (paragraphs - 1)} 字 · 修订版 ${technicalWords(revisionLabel)}`;
+  return `${place} · ${graphemes - (paragraphs - 1)} 字${technicalWords(` · 修订版 ${revisionLabel}`)}`;
 }
 export const TASK_COMPOSER_RANGE_REMOVE = '移除';
 /** 再选一段加入 lives here, never in the selection menu (TASK-046). */
@@ -208,7 +208,7 @@ export const TASK_COMPOSER_ACTIONS = {
   resume: '返回继续',
 } as const;
 /** What 准备任务 does (TASK-004): a durable draft, and nothing else. */
-export const TASK_COMPOSER_NOTE = '准备任务只把这些存为任务草稿：不调用模型、不发送任何内容，也不会开始任务；准备计划后它才成为任务，由你开始。';
+export const TASK_COMPOSER_NOTE = '保存草稿不会读取稿件、调用模型或发送内容；准备计划后由你开始任务。';
 export function taskComposerDraftHeading(ordinal: number): string {
   return `任务意图草稿 · ${technicalWords(`第 ${ordinal} 版`, '版本')}`;
 }

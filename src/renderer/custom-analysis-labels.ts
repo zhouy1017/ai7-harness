@@ -7,7 +7,7 @@ import type { CustomAnalysisRowProjection } from '../shared/protocol.js';
  * the quotation it rests on as a link back to the manuscript. 分析反馈 is not offered on these rows in this version.
  */
 export const CUSTOM_TAB_LABEL = '自定义';
-export const CUSTOM_TAB_EMPTY = '尚无自定义分析维度';
+export const CUSTOM_TAB_EMPTY = '尚无自定义分析维度，可在知识库中添加。';
 export const CUSTOM_TAB_EMPTY_NOTE = '在「知识库 › 工序与规则 › 自定义分析维度」中新建并启用一个维度后，它会出现在这里。';
 export const CUSTOM_TAB_NOT_RUN = '尚未运行';
 export const CUSTOM_TAB_RUN = '运行';
@@ -17,7 +17,7 @@ export const CUSTOM_TAB_PREPARING = '正在为自定义分析准备任务计划�
 export const CUSTOM_TAB_PREPARED = '自定义分析的任务计划已准备：在右侧的任务计划里看过之后再开始任务。';
 
 export function customTabVersionLine(version: number, revisionLabel: string, ordinal: number): string {
-  return `第 ${ordinal} 份结果 · 按维度${technicalWords(`第 ${version} 版`, '版本')} · 读的是 ${technicalWords(revisionLabel)}`;
+  return `第 ${ordinal} 份结果${technicalWords(` · 按维度第 ${version} 版 · 读的是 ${revisionLabel}`)}`;
 }
 
 export function customTabCountsLine(counts: { units: number; rows: number; located: number; unlocated: number }): string {

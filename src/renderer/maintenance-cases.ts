@@ -152,7 +152,7 @@ function summaryOf(projection: MaintenanceCaseProjection): MaintenanceCaseSummar
 }
 
 function designationLabel(designation: PublicationVersionProjection): string {
-  return `第 ${designation.ordinal} 次 · 「${designation.milestoneLabel}」 · ${designation.revisionLabel} · ${designation.scope}`;
+  return `第 ${designation.ordinal} 次 · 「${designation.milestoneLabel}」${technicalWords(` · ${designation.revisionLabel}`)} · ${designation.scope}`;
 }
 
 export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceSurface {
@@ -202,11 +202,11 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     section.dataset['maintenanceWithdrawn'] = String(maintenance.withdrawn);
     section.dataset['maintenanceArchived'] = String(maintenance.archived);
     const heading = el('h5', undefined, MAINTENANCE_HEADING);
+    if (maintenance.archived) heading.append(' · ', el('span', 'maintenance-archived', MAINTENANCE_ARCHIVED));
     heading.id = uid('heading');
     section.setAttribute('aria-labelledby', heading.id);
     section.append(heading);
     if (maintenance.withdrawn) section.append(el('p', 'attention-note maintenance-withdrawn', `${MAINTENANCE_WITHDRAWN}：${MAINTENANCE_INTERNAL_ONLY}`));
-    if (maintenance.archived) section.append(el('p', 'field-note maintenance-archived', MAINTENANCE_ARCHIVED));
     // Keep one older page beside the newest cases; return to the start to revisit earlier pages.
     const listed = new Set(maintenance.cases.map((summary) => summary.caseId));
     const shown = [...maintenance.cases, ...(older.get(designation.publicationVersionId) ?? []).filter((summary) => !listed.has(summary.caseId))];
@@ -224,9 +224,9 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const remaining = maintenance.total - shown.length - (pinned === null ? 0 : 1);
     if (olderPage === undefined ? remaining > 0 : olderHasMore) {
       const more = el('div', 'maintenance-older');
-      more.append(el('p', 'field-note', olderPage === undefined ? maintenanceOlderLine(remaining) : '还有更早的维护事项。'));
       const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
       read.disabled = working;
+      read.textContent = olderPage === undefined ? `${maintenanceOlderLine(remaining)} · 查看` : '查看更早的维护事项';
       more.append(read);
       section.append(more);
     }
@@ -308,9 +308,10 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const form = el('form', 'maintenance-draft');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
-    form.append(el('p', 'field-note maintenance-draft-target', maintenanceDraftTargetLine(designationLabel(designation))));
     const choices = el('fieldset', 'maintenance-classifications');
-    choices.append(el('legend', undefined, MAINTENANCE_CLASSIFICATION_LEGEND));
+    const legend = el('legend', undefined, MAINTENANCE_CLASSIFICATION_LEGEND);
+    legend.append(' · ', el('span', 'maintenance-draft-target', maintenanceDraftTargetLine(designationLabel(designation))));
+    choices.append(legend);
     const name = uid('classification');
     for (const classification of MAINTENANCE_CLASSIFICATIONS) {
       const option = el('label', 'maintenance-classification-option');
@@ -328,7 +329,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         options.redraw();
       });
       const words = el('span', 'maintenance-classification-text');
-      words.append(el('strong', undefined, MAINTENANCE_CLASSIFICATION_LABELS[classification]), el('small', 'field-note', MAINTENANCE_CONSEQUENCES[classification]));
+      words.append(el('strong', undefined, MAINTENANCE_CLASSIFICATION_LABELS[classification]), ` · ${MAINTENANCE_CONSEQUENCES[classification]}`);
       option.append(radio, words);
       choices.append(option);
     }
@@ -346,13 +347,11 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     evidence.value = current.evidence;
     evidence.rows = 2;
     evidence.disabled = working;
-    const hint = el('small', 'field-note', MAINTENANCE_EVIDENCE_HINT);
-    hint.id = uid('evidence-hint');
-    evidence.setAttribute('aria-describedby', hint.id);
+    evidence.placeholder = MAINTENANCE_EVIDENCE_HINT;
     const reasonLabel = el('label', 'maintenance-field');
     reasonLabel.append(el('span', undefined, MAINTENANCE_REASON_LABEL), reason);
     const evidenceLabel = el('label', 'maintenance-field');
-    evidenceLabel.append(el('span', undefined, MAINTENANCE_EVIDENCE_LABEL), evidence, hint);
+    evidenceLabel.append(el('span', undefined, MAINTENANCE_EVIDENCE_LABEL), evidence);
     form.append(reasonLabel, evidenceLabel);
     if (current.problem !== null) {
       const alert = el('p', 'export-problem', current.problem);
@@ -361,20 +360,27 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     }
     const row = el('div', 'button-row maintenance-actions');
     const confirm = actionButton('confirmRecord', 'primary', () => void recordCase(designation));
-    const why = el('p', 'field-note maintenance-reason');
+    const why = el('span', 'maintenance-reason');
     why.id = uid('record-reason');
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
+    const blockerLabel = el('span');
+    const blockerPrefix = el('span');
+    blockerLabel.append(blockerPrefix, why);
+    confirm.append(blockerLabel);
     const cancel = actionButton('cancel', 'quiet', () => closeDraft(true));
     cancel.disabled = working;
     const sync = (): void => {
       const blocker = draftBlocker(current);
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
+      blockerLabel.hidden = blocker === null;
+      blockerPrefix.textContent = blocker === null ? '' : ' · ';
       confirm.disabled = working || blocker !== null;
     };
     reason.addEventListener('input', () => { current.reason = reason.value; current.problem = null; sync(); });
     evidence.addEventListener('input', () => { current.evidence = evidence.value; current.problem = null; sync(); });
-    row.append(confirm, cancel, why);
+    row.append(confirm, cancel);
     form.append(row);
     form.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape' || working) return;
@@ -419,7 +425,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       line.tabIndex = -1;
       item.append(line);
       if (revision.reason !== null) item.append(el('span', 'maintenance-revision-reason', maintenanceReasonLine(revision.step, revision.reason)));
-      if (revision.evidence !== null) item.append(el('span', 'field-note maintenance-revision-evidence', maintenanceEvidenceLine(revision.evidence)));
+      if (revision.evidence !== null) line.append(' · ', el('span', 'maintenance-revision-evidence', maintenanceEvidenceLine(revision.evidence)));
       if (revision.link?.kind === 'errata') {
         const link = el('button', 'quiet maintenance-revision-link', `查看${maintenanceLinkLine(revision.link)}`);
         link.type = 'button';
@@ -427,7 +433,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         const versionId = revision.link.errataVersionId;
         link.addEventListener('click', () => void inspectPage(current, 'errataVersionId', versionId));
         item.append(link);
-      } else if (revision.link !== null) item.append(el('span', 'field-note maintenance-revision-link', maintenanceLinkLine(revision.link)));
+      } else if (revision.link !== null) line.append(' · ', el('span', 'maintenance-revision-link', maintenanceLinkLine(revision.link)));
       timeline.append(item);
     }
     panel.append(timeline);
@@ -500,13 +506,22 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
     const confirm = actionButton(panel === 'errata' ? 'saveErrata' : panel === 'conclude' ? 'confirmConclude' : 'confirmLink', 'primary', () => void takeStep(current, panel));
-    const why = el('p', 'field-note maintenance-reason');
+    const why = el('span', 'maintenance-reason');
     why.id = uid('step-reason');
+    confirm.setAttribute('aria-label', confirm.textContent ?? '');
     confirm.setAttribute('aria-describedby', why.id);
+    const reasonLabel = el('span');
+    const reasonPrefix = el('span');
+    reasonLabel.append(reasonPrefix, why);
+    confirm.append(reasonLabel);
     const sync = (): void => {
-      const blocker = panelBlocker(current, panel);
+      const emptyChoice = panel === 'link-proposal' && projection.choices.proposals.length === 0 ? MAINTENANCE_NO_PROPOSALS
+        : panel === 'link-publication' && projection.choices.publications.length === 0 ? MAINTENANCE_NO_PUBLICATIONS : null;
+      const blocker = emptyChoice ?? panelBlocker(current, panel);
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
+      reasonLabel.hidden = blocker === null;
+      reasonPrefix.textContent = blocker === null ? '' : ' · ';
       confirm.disabled = working || blocker !== null;
     };
     const radios = (legend: string, entries: ReadonlyArray<{ value: string; label: string; detail: string | null }>, chosen: string | null, pick: (value: string) => void): HTMLElement => {
@@ -530,28 +545,26 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
         });
         const words = el('span', 'maintenance-choice-text');
         words.append(el('span', undefined, entry.label));
-        if (entry.detail !== null) words.append(el('small', 'field-note', entry.detail));
+        if (entry.detail !== null) words.append(` · ${entry.detail}`);
         option.append(radio, words);
         fieldset.append(option);
       }
       return fieldset;
     };
     if (panel === 'link-proposal') {
-      if (projection.choices.proposals.length === 0) form.append(el('p', 'field-note maintenance-no-choice', MAINTENANCE_NO_PROPOSALS));
-      else form.append(radios(MAINTENANCE_PROPOSALS_LEGEND, projection.choices.proposals.map((proposal) => ({ value: proposal.markId, label: proposal.label, detail: proposal.stateLabel })),
+      if (projection.choices.proposals.length > 0) form.append(radios(MAINTENANCE_PROPOSALS_LEGEND, projection.choices.proposals.map((proposal) => ({ value: proposal.markId, label: proposal.label, detail: proposal.stateLabel })),
         current.choice, (value) => { current.choice = value; }));
     } else if (panel === 'link-publication') {
-      if (projection.choices.publications.length === 0) form.append(el('p', 'field-note maintenance-no-choice', MAINTENANCE_NO_PUBLICATIONS));
-      else form.append(radios(MAINTENANCE_PUBLICATIONS_LEGEND, projection.choices.publications.map((publication) => ({ value: publication.publicationVersionId, label: publication.label, detail: null })),
+      if (projection.choices.publications.length > 0) form.append(radios(MAINTENANCE_PUBLICATIONS_LEGEND, projection.choices.publications.map((publication) => ({ value: publication.publicationVersionId, label: publication.label, detail: null })),
         current.choice, (value) => { current.choice = value; }));
       if (projection.choices.publicationsAfter !== null) form.append(inspectionButton(current, '后续发稿版本', 'afterPublicationOrdinal', projection.choices.publicationsAfter));
       if (current.inspection?.afterPublicationOrdinal !== undefined) form.append(inspectionButton(current, '返回最早的可选版本', 'afterPublicationOrdinal', null));
     } else {
       if (panel === 'conclude') {
         // Only the conclusions the case may record now: a 替代 or 再版 still waiting for its version is never 已完成.
-        form.append(radios(MAINTENANCE_CONCLUSION_LEGEND, projection.conclusions.map((value) => ({ value, label: MAINTENANCE_CONCLUSION_CHOICES[value], detail: null })),
+        const legend = projection.conclusions.includes('complete') ? MAINTENANCE_CONCLUSION_LEGEND : `${MAINTENANCE_CONCLUSION_LEGEND} · ${MAINTENANCE_COMPLETE_AFTER_LINK}`;
+        form.append(radios(legend, projection.conclusions.map((value) => ({ value, label: MAINTENANCE_CONCLUSION_CHOICES[value], detail: null })),
           current.conclusion, (value) => { current.conclusion = value === 'complete' ? 'complete' : 'unresolved'; }));
-        if (!projection.conclusions.includes('complete')) form.append(el('p', 'field-note maintenance-complete-after-link', MAINTENANCE_COMPLETE_AFTER_LINK));
       }
       const area = el('textarea');
       area.dataset['maintenanceField'] = panel === 'errata' ? 'errata' : 'outcome';
@@ -566,7 +579,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const row = el('div', 'button-row maintenance-actions');
     const cancel = actionButton('cancel', 'quiet', () => closePanel(current));
     cancel.disabled = working;
-    row.append(confirm, cancel, why);
+    row.append(confirm, cancel);
     form.append(row);
     sync();
     return form;

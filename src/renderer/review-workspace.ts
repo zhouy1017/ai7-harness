@@ -1,6 +1,6 @@
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { filterChoices } from './components/controls.js';
-import { technicalWords, identityWords } from './technical-layer.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
@@ -118,7 +118,6 @@ import {
   REVIEW_CONSEQUENCE_TERMS,
   REVIEW_CONTINUE_NOTE,
   REVIEW_INFLUENCE_HEADING,
-  REVIEW_INFLUENCE_NOTE,
   REVIEW_INFLUENCE_STOP_NOTE,
   REVIEW_SCOPE_CANCEL_NOTE,
   REVIEW_SCOPE_STOP_NOTE,
@@ -133,14 +132,11 @@ import {
   REVIEW_COST_BEFORE_PLAN,
   REVIEW_COVERAGE_COLUMNS,
   REVIEW_COVERAGE_HEADING,
-  REVIEW_COVERAGE_NOTE,
   REVIEW_COVERAGE_PILLS,
   REVIEW_EXPORT_NEEDS_REPORT,
   REVIEW_FILTER_ALL,
   REVIEW_FILTER_LABELS,
-  REVIEW_FILTER_NOTE,
   REVIEW_IGNORE_LABEL,
-  REVIEW_IGNORE_NOTE,
   REVIEW_LEDE,
   REVIEW_NOT_DO,
   REVIEW_NO_FILTERED_FINDINGS,
@@ -152,10 +148,7 @@ import {
   REVIEW_PLAN_HEADING,
   REVIEW_PREPARING_ESCAPE,
   REVIEW_PROGRESS_HEADING,
-  REVIEW_QUICK_START_REASON,
   REVIEW_REPORT_HEADING,
-  REVIEW_REPORT_NONE,
-  REVIEW_REPORT_NOTE,
   REVIEW_REPORT_NO_MUST_ITEMS,
   REVIEW_REPORT_OVERVIEW_COLUMNS,
   REVIEW_REPORT_STATISTICS_CHAPTER,
@@ -168,7 +161,6 @@ import {
   REVIEW_SCOPE_LEGEND,
   REVIEW_SECTION_LABEL,
   REVIEW_SEVERITY_PILLS,
-  REVIEW_SHEET_NOTE,
   REVIEW_SHEET_TITLE,
   REVIEW_STATUS_LINES,
   REVIEW_STATUS_PILLS,
@@ -192,7 +184,6 @@ import {
   reviewFindingLocation,
   reviewGenerateReportLabel,
   reviewGroupCountLine,
-  reviewIgnoreReasonCount,
   reviewIgnoreReasonLine,
   reviewIgnoreReasonProblem,
   reviewLiveLine,
@@ -403,8 +394,10 @@ export function findingReferencedRules(finding: Pick<ReviewFindingProjection, 'r
   const disclosure = el('details', 'review-referenced-rules');
   disclosure.dataset['referencedRules'] = '';
   disclosure.append(el('summary', 'status-pill', '已参考规则'));
-  for (const rule of finding.referencedRuleVersions ?? []) disclosure.append(el('p', 'field-note',
-    `${rule.text}（本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}）`));
+  const rules = el('ul');
+  for (const rule of finding.referencedRuleVersions ?? []) rules.append(el('li', undefined,
+    `${rule.text}${technicalWords(` · 本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}`)}`));
+  disclosure.append(rules);
   return disclosure;
 }
 
@@ -800,7 +793,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const heading = el('div', 'review-workspace-heading');
     heading.append(el('h3', undefined, REVIEW_CARD_HEADING));
     if (run !== null) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
-    node.append(heading, el('p', 'field-note review-manuscript-line', reviewManuscriptLine(next.manuscript)));
+    heading.append(el('span', 'review-manuscript-line', reviewManuscriptLine(next.manuscript)));
+    node.append(heading);
     const newReviewReasonId = uid('new-review-reason');
     node.append(renderCoverage(next, newReviewReasonId), renderRuns(next), renderNewReview(next, newReviewReasonId));
     if (run !== null) node.append(renderRun(next, run));
@@ -830,10 +824,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     control.type = 'button';
     control.disabled = true;
     control.dataset['reviewAction'] = action;
-    const why = el('small', 'field-note', reason);
+    const why = el('span', undefined, reason);
     why.id = uid(`${action}-reason`);
+    control.setAttribute('aria-label', label);
     control.setAttribute('aria-describedby', why.id);
-    wrap.append(control, why);
+    control.append(' · ', why);
+    wrap.append(control);
     return wrap;
   };
 
@@ -872,7 +868,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (row.state === 'needs-review') {
         const changed = category?.scopes.changed;
         if (changed !== undefined && !changed.available) {
-          act.append(el('span', 'field-note', changed.unavailableReason ?? ''));
+          act.append(document.createTextNode(changed.unavailableReason ?? ''));
         } else {
           const rereview = actionButton('rereview-changed', 'secondary', () => void openSheet({ categories: [row.categoryId], scope: 'changed', from: null, to: null }, rereview));
           rereview.dataset['reviewCategory'] = row.categoryId;
@@ -883,23 +879,24 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           act.append(rereview);
         }
       } else if (row.state === 'unavailable' && row.unavailableReason !== null) {
-        act.append(el('span', 'field-note', row.unavailableReason));
+        act.append(document.createTextNode(row.unavailableReason));
       }
       // A reviewed category whose earlier records could not all be checked says so (Issue #709).
-      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(el('span', 'field-note', row.unavailableReason));
+      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(document.createTextNode(row.unavailableReason));
       tr.append(name, state, last, changes, act);
       body.append(tr);
     }
     table.append(head, body);
-    section.append(heading, el('p', 'field-note', REVIEW_COVERAGE_NOTE), table);
+    section.append(heading, table);
     return section;
   }
 
   function renderRuns(next: ReviewWorkspaceProjection): HTMLElement {
     const section = el('section', 'review-runs-section');
-    section.append(el('h4', undefined, REVIEW_RUNS_HEADING));
+    const heading = el('h4', undefined, `${REVIEW_RUNS_HEADING}${next.runsTruncated ? ` · ${reviewRunsTruncatedLine(next.runs.length)}` : ''}`);
+    section.append(heading);
     if (next.runs.length === 0) {
-      section.append(el('p', 'field-note', REVIEW_NO_RUNS));
+      heading.append(` · ${REVIEW_NO_RUNS}`);
       return section;
     }
     const list = el('ol', 'review-runs');
@@ -910,13 +907,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       item.dataset['reviewRunState'] = summary.state;
       const opened = next.run?.reviewRunId === summary.reviewRunId;
       if (opened) item.setAttribute('aria-current', 'true');
-      const created = el('span', 'field-note review-run-created', reviewCreatedLine(localInstantLabel(summary.createdAt)));
+      const created = el('span', 'review-run-created', reviewCreatedLine(localInstantLabel(summary.createdAt)));
       created.append(el('span', 'technical-identity', summary.createdAt));
-      item.append(
-        el('span', 'review-run-line', reviewRunLine(summary)),
-        el('span', 'field-note review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`),
-        created,
-      );
+      const details = el('span', 'review-run-details');
+      details.append(el('span', 'review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`), ' · ', created);
+      const line = el('p', 'review-run-line', reviewRunLine(summary));
+      line.append(' · ', details);
+      item.append(line);
       // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
       if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', summary.historicalMarker));
       const open = actionButton('open-run', 'quiet', () => openRun(summary.reviewRunId));
@@ -925,7 +922,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       list.append(item);
     }
     section.append(list);
-    if (next.runsTruncated) section.append(el('p', 'field-note', reviewRunsTruncatedLine(next.runs.length)));
     return section;
   }
 
@@ -937,10 +933,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     row.append(start, local);
     if (!next.newReview.available) {
       start.disabled = true;
-      const why = el('p', 'field-note review-unavailable-reason', next.newReview.unavailableReason ?? '');
+      const why = el('span', 'review-unavailable-reason', next.newReview.unavailableReason ?? '');
       why.id = reasonId;
+      start.setAttribute('aria-label', start.textContent ?? '');
       start.setAttribute('aria-describedby', reasonId);
-      row.append(why);
+      start.append(' · ', why);
     } else if (working) {
       start.disabled = true;
     }
@@ -974,23 +971,33 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     title.tabIndex = -1;
     heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     appendProposalOffer(heading, run);
-    const meta = el('p', 'field-note review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
+    const meta = el('span', 'review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
       const authorized = el('span', 'review-run-authorized', reviewAuthorizedLine(localInstantLabel(run.authorization.authorizedAt)));
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
-    section.append(heading, meta);
+    heading.append(meta);
+    section.append(heading);
     if (run.localCheck !== undefined) {
       const local = el('section', 'review-local-check');
       local.dataset['localCheck'] = run.localCheck.state;
-      local.append(el('p', 'field-note', run.localCheck.options.tables === undefined
-        ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规。'
-        : '确定性检查在本机完成；字形对照及带条件词形仅供复核。机械修正须由你采纳后才会写入稿件，可在修改记录中撤销。'));
-      local.append(el('p', 'field-note', `本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
-      for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
-      for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}（${exclusion.candidateId}）。`));
+      const localBoundary = run.localCheck.options.tables === undefined
+        ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规'
+        : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销';
+      local.append(el('p', 'field-note', `${localBoundary}；本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
+      if (technicalLayerVisible && Object.keys(run.localCheck.counts ?? {}).length > 0) {
+        const counts = el('ul');
+        for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
+        local.append(counts);
+      }
+      if (run.localCheck.excluded.length > 0) {
+        const exclusions = el('ul');
+        exclusions.setAttribute('aria-label', '未生成批注');
+        for (const exclusion of run.localCheck.excluded) exclusions.append(el('li', undefined, `${exclusion.reason}${technicalWords(` · ${exclusion.candidateId}`)}`));
+        local.append(el('strong', undefined, '未生成批注'), exclusions);
+      }
       section.append(local);
       if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {
         local.append(actionButton('scope-cancel', 'secondary', () => void cancelRun(run)));
@@ -1004,12 +1011,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pin.dataset['procedureStopped'] = String(run.procedure.stopped);
       pin.dataset['procedureMissing'] = String(run.procedure.missing);
       pin.append(el('p', 'field-note review-procedure-line', runProcedureLine(run.procedure)));
-      for (const entry of run.procedure.leftOut) {
-        // A Series step the editor did not choose (S31b; REUSE-050), told apart from one the Book could not take.
-        const view = runProcedureLeftOutView(entry);
-        const line = el('p', 'field-note review-procedure-left-out', view.text);
-        Object.assign(line.dataset, view.data);
-        pin.append(line);
+      if (run.procedure.leftOut.length > 0) {
+        const leftOut = el('ul');
+        for (const entry of run.procedure.leftOut) {
+          // A Series step the editor did not choose (S31b; REUSE-050), told apart from one the Book could not take.
+          const view = runProcedureLeftOutView(entry);
+          const line = el('li', 'review-procedure-left-out', view.text);
+          Object.assign(line.dataset, view.data);
+          leftOut.append(line);
+        }
+        pin.append(leftOut);
       }
       section.append(pin);
     }
@@ -1123,12 +1134,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The Historically Affected Result Marker (SER-026): beside the Run, its report and its findings, never in place of them. */
   function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>, run: ReviewRunProjection): HTMLElement {
     const box = el('div', 'review-historical-marker');
-    box.append(el('p', 'review-historical-marker-label', marker.label), el('p', 'field-note', marker.detail));
+    const markerLine = el('p');
+    markerLine.append(el('span', 'review-historical-marker-label', `${marker.label} · ${marker.detail}`));
+    box.append(markerLine);
     // The marker links to the later remediation (Issue #912; LAUD-008): when, the material in 学习回溯, and the way on without it.
     const remediation = marker.remediation;
     if (remediation !== undefined) {
       box.dataset['remediationMaterial'] = remediation.materialKey;
-      box.append(el('p', 'field-note review-marker-remediation', reviewMarkerRemediationLine(remediation.recordedAt, localInstantLabel)));
+      markerLine.append(' · ', el('span', 'review-marker-remediation', reviewMarkerRemediationLine(remediation.recordedAt, localInstantLabel)));
       const actions = el('div', 'button-row');
       if (options.openLearningLineage !== undefined) {
         actions.append(actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(remediation.bookId, remediation.materialKey, run.reviewRunId)));
@@ -1146,12 +1159,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** 为什么会影响这个结果 (Issue #912; LAUD-004): each category's 本社审阅偏好 version and the materials behind it, closed until asked. */
   function renderInfluence(run: ReviewRunProjection): HTMLElement {
     const details = el('details', 'review-influence');
-    details.append(el('summary', undefined, REVIEW_INFLUENCE_HEADING), el('p', 'field-note', REVIEW_INFLUENCE_NOTE));
+    details.append(el('summary', undefined, `${REVIEW_INFLUENCE_HEADING} · 本社审阅偏好仅供参考`));
     for (const entry of run.influence) {
       const group = el('div', 'review-influence-category');
       group.dataset['categoryId'] = entry.categoryId;
       group.dataset['versionOrdinal'] = String(entry.ordinal);
-      group.append(el('p', 'review-influence-line', reviewInfluenceLine(entry)));
+      const summary = el('p', 'review-influence-line', reviewInfluenceLine(entry));
+      if (entry.moreMaterials > 0) summary.append(' · ', reviewInfluenceMore(entry.moreMaterials));
+      group.append(summary);
       const list = el('ul', 'review-influence-materials');
       for (const material of entry.materials) {
         const item = el('li', undefined, reviewInfluenceMaterialLine(material, material.kind === null ? '学习材料' : LEARNING_AUDIT_KIND_LABELS[material.kind], localInstantLabel));
@@ -1163,7 +1178,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         list.append(item);
       }
       group.append(list);
-      if (entry.moreMaterials > 0) group.append(el('p', 'field-note', reviewInfluenceMore(entry.moreMaterials)));
       details.append(group);
     }
     return details;
@@ -1267,7 +1281,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
       filters.append(more);
     }
-    section.append(filters, el('p', 'field-note', REVIEW_FILTER_NOTE));
+    section.append(filters);
     if ((run.excludedTotal ?? 0) > 0) {
       const details = el('details', 'review-excluded');
       details.open = excludedOpen;
@@ -1276,8 +1290,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const finding of run.excluded ?? []) {
         const item = el('div', 'review-excluded-entry');
         item.setAttribute('style', 'overflow-wrap: anywhere');
-        item.append(el('p', 'field-note', `${finding.categoryLabel} · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`}`),
-          el('p', '', finding.text), el('p', 'field-note', `${finding.reasonLabel}（${finding.reasonCode}）`));
+        item.append(el('strong', undefined, `${finding.categoryLabel} · ${finding.reasonLabel}${technicalWords(` · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`} · ${finding.reasonCode}`)}`),
+          el('blockquote', undefined, finding.text));
         details.append(item);
       }
       if (run.excludedTruncated) {
@@ -1289,9 +1303,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       section.append(details);
     }
     const filtered = Object.values(query.filters).some((value) => value !== null);
-    if (filtered) section.append(el('p', 'field-note review-filtered', reviewFilteredLine(run.findingsTotal)));
-    if (run.findings.length === 0) {
-      section.append(el('p', 'field-note review-no-findings', filtered ? REVIEW_NO_FILTERED_FINDINGS : REVIEW_NO_FINDINGS));
+    if (filtered || run.findings.length === 0) {
+      const empty = run.findings.length === 0 ? (filtered ? REVIEW_NO_FILTERED_FINDINGS : REVIEW_NO_FINDINGS) : null;
+      const filter = filtered ? reviewFilteredLine(run.findingsTotal) : null;
+      const status = [filter, empty].filter((line): line is string => line !== null).map((line) => line.replace(/。$/u, '')).join('；');
+      heading.append(' · ', el('span', `${filtered ? 'review-filtered' : ''}${empty === null ? '' : ' review-no-findings'}`.trim(), `${status}。`));
     }
     for (const category of run.categories) {
       const findings = run.findings.filter((finding) => finding.categoryId === category.categoryId);
@@ -1305,7 +1321,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         refresh(true);
       });
       button.disabled = working;
-      more.append(button, el('span', 'field-note', reviewShownLine(run.findings.length, run.findingsTotal)));
+      button.append(` · ${reviewShownLine(run.findings.length, run.findingsTotal)}`);
+      more.append(button);
       section.append(more);
     }
     return section;
@@ -1330,7 +1347,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const heading = el('h6', undefined, FACT_LENS_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'field-note', FACT_LENS_NOTE), el('p', 'fact-lens-counts', factLensCountsLine(lens)));
+    const counts = el('p', 'fact-lens-counts', `${factLensCountsLine(lens)} · ${fact.results.length === 0 ? FACT_LENS_NOTE.replace(/。$/u, '') : FACT_LENS_NOTE}`);
+    if (fact.results.length === 0) counts.append(`；${FACT_LENS_EMPTY_FILTERED}`);
+    section.append(heading, counts);
     if (lens.run?.disclosure != null) section.append(el('p', 'fact-lens-disclosure', lens.run.disclosure));
     const filters = el('div', 'review-filters fact-lens-filters');
     filters.setAttribute('role', 'group');
@@ -1358,7 +1377,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       select('actionNeed', (Object.keys(FACTUAL_ACTION_NEED_LABELS) as FactualActionNeed[]).map((value) => [value, FACTUAL_ACTION_NEED_LABELS[value]] as const)),
     );
     section.append(filters);
-    if (fact.results.length === 0) section.append(el('p', 'field-note', FACT_LENS_EMPTY_FILTERED));
     const list = el('ol', 'fact-lens-rows');
     for (const result of fact.results) list.append(renderFactRow(run, result));
     section.append(list);
@@ -1452,7 +1470,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const group = el('section', 'review-group');
     group.dataset['reviewCategory'] = category.categoryId;
     const heading = el('div', 'review-group-heading');
-    heading.append(el('h6', undefined, category.label), el('span', 'field-note', reviewGroupCountLine(category.findingsCount)));
+    heading.append(el('h6', undefined, `${category.label} · ${reviewGroupCountLine(category.findingsCount)}`));
     // V2-UX-REV-006: the batch belongs to a category configured for it (错别字与规范用语); 文学性与表达改进's
     // suggestions are accepted one by one.
     if (category.batchApply && category.output === 'change-suggestion' && category.state === 'settled') {
@@ -1577,21 +1595,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     reason.value = form.reason;
     reason.required = true;
     reason.dataset['reviewField'] = 'ignore-reason';
-    const count = el('small', 'field-note review-reason-count', reviewIgnoreReasonCount(form.reason));
-    count.id = uid('ignore-count');
     const problem = el('p', 'review-problem');
     problem.setAttribute('role', 'alert');
     problem.id = uid('ignore-problem');
     problem.hidden = form.problem === null;
     problem.textContent = form.problem ?? '';
-    reason.setAttribute('aria-describedby', `${count.id} ${problem.id}`);
+    reason.setAttribute('aria-describedby', problem.id);
     reason.setAttribute('aria-invalid', form.problem === null ? 'false' : 'true');
     reason.addEventListener('input', () => {
       form.reason = reason.value;
-      count.textContent = reviewIgnoreReasonCount(reason.value);
     });
-    field.append(reason, count);
-    const confirm = actionButton('ignore-confirm', 'primary', () => void confirmIgnore(run, finding, form, reason, problem));
+    field.append(reason);
+    const confirm = actionButton('ignore-confirm', 'primary', () => void confirmIgnore(run, finding, form, reason, problem), '忽略并记录原因');
     const cancel = actionButton('ignore-cancel', 'quiet', () => closeInline('ignore', finding.findingId));
     if (working) {
       confirm.disabled = true;
@@ -1599,7 +1614,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const row = el('div', 'button-row');
     row.append(confirm, cancel);
-    wrap.append(field, el('p', 'field-note', REVIEW_IGNORE_NOTE), problem, row);
+    wrap.append(field, problem, row);
     wrap.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -1619,7 +1634,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.dataset['reviewField'] = name;
       input.addEventListener('input', () => update(input.value));
       node.append(input);
-      if (hint !== null) node.append(el('small', 'field-note', hint));
+      if (hint !== null) input.placeholder = hint;
       return node;
     };
     const problem = el('p', 'review-problem');
@@ -1633,11 +1648,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       cancel.disabled = true;
     }
     const row = el('div', 'button-row');
-    row.append(confirm, cancel);
+    const consequence = el('span', 'review-convert-consequence', REVIEW_CONVERT_NOTE);
+    consequence.id = uid('convert-consequence');
+    confirm.setAttribute('aria-describedby', consequence.id);
+    row.append(consequence, confirm, cancel);
     wrap.append(
       field(REVIEW_CONVERT_TO, form.proposedText, 'convert-to', REVIEW_CONVERT_TO_HINT, (text) => { form.proposedText = text; }),
       field(REVIEW_CONVERT_RATIONALE, form.rationale, 'convert-rationale', null, (text) => { form.rationale = text; }),
-      el('p', 'field-note', REVIEW_CONVERT_NOTE),
       problem,
       row,
     );
@@ -1675,7 +1692,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       nothing.id = scopeId;
       node.append(nothing);
     } else {
-      const scope = el('p', 'review-batch-scope', reviewBatchScopeLine(strip.items.length));
+      const scopeParts = [reviewBatchScopeLine(strip.items.length), REVIEW_BATCH_ALL_OR_NONE];
+      if (strip.excluded > 0) scopeParts.push(reviewBatchExcludedLine(strip.excluded));
+      if (strip.capped) scopeParts.push(reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS));
+      const scope = el('p', 'review-batch-scope', `${scopeParts.map((line) => line.replace(/。$/u, '')).join('；')}。`);
       scope.id = scopeId;
       const items = el('ol', 'review-batch-items');
       for (const item of strip.items) {
@@ -1685,9 +1705,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         items.append(line);
       }
       node.append(scope, items);
-      if (strip.excluded > 0) node.append(el('p', 'field-note', reviewBatchExcludedLine(strip.excluded)));
-      if (strip.capped) node.append(el('p', 'field-note', reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS)));
-      node.append(el('p', 'field-note', REVIEW_BATCH_ALL_OR_NONE));
       if (strip.unknown) {
         node.append(el('p', 'review-problem', '结果待确认；确认权威记录之前不能再次应用。'));
         row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
@@ -1722,7 +1739,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function renderReport(run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
-    section.append(el('h5', undefined, REVIEW_REPORT_HEADING), el('p', 'field-note', REVIEW_REPORT_NOTE));
+    section.append(el('h5', undefined, `${REVIEW_REPORT_HEADING} · 旧版保留`));
     // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).
     if (run.historicalMarker !== null) section.append(el('p', 'review-historical-marker-label review-report-marker', run.historicalMarker.label));
     if (run.reportVersions.length > 0) {
@@ -1751,8 +1768,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     section.append(actions);
     if (report !== null) section.append(exportSlot);
-    if (run.report === null) section.append(el('p', 'field-note', REVIEW_REPORT_NONE));
-    else section.append(renderReportRecord(run.report, run.categories));
+    if (run.report !== null) section.append(renderReportRecord(run.report, run.categories));
     return section;
   }
 
@@ -1830,9 +1846,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       block.dataset['reviewCategory'] = entry.categoryId;
       block.append(
         el('p', 'review-report-summary-title', `${entry.label} · ${entry.stateLine}`),
-        el('p', undefined, reviewCountsLine(entry.counts)),
-        el('p', 'field-note', recordedReviewBasisWords(entry, categories)),
-        el('p', 'field-note', reviewReportExcludedLine(entry.excludedCount)),
+        el('p', undefined, `${reviewCountsLine(entry.counts)} · ${recordedReviewBasisWords(entry, categories)} · ${reviewReportExcludedLine(entry.excludedCount)}`),
       );
       summaries.append(block);
     }
@@ -1869,13 +1883,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         list.append(item);
       }
       const omitted = reviewReportOmittedLine(record.findings.omitted);
-      derived.push(part('findings', record.findings.title, list, ...(omitted === null ? [] : [el('p', 'field-note', omitted)])));
+      const findings = part('findings', record.findings.title, list);
+      if (omitted !== null) findings.querySelector('h6')?.append(' · ', el('span', undefined, omitted));
+      derived.push(findings);
     }
     const appendix = el('ul', 'review-report-list');
     appendix.append(el('li', undefined, reviewReportConfigurationLine(record.appendix.configuration.version)));
     for (const category of record.appendix.categories) appendix.append(el('li', undefined, reviewReportAppendixLine(category)));
+    const overview = part('overview', record.overview.title, table);
+    if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
-      part('overview', record.overview.title, table, ...(record.totals === undefined ? [] : [el('p', 'field-note review-report-totals', reviewReportTotalsLine(record.totals))])),
+      overview,
       part('must-items', record.mustItems.title, must),
       ...derived,
       part('category-summaries', record.categorySummaries.title, summaries),
@@ -2296,7 +2314,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     form.noValidate = true;
     const title = el('h3', undefined, REVIEW_SHEET_TITLE);
     title.id = sheetTitleId;
-    form.append(title, el('p', 'field-note', REVIEW_SHEET_NOTE));
+    form.append(title);
 
     // 按已保存的工序 (Issue #65, S30; ADR 0087 §4): fills the categories and the scope; the plan is still read before 开始审阅.
     const procedureField = el('div', 'review-sheet-procedure');
@@ -2304,7 +2322,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const procedureSelect = el('select');
     const versionSelect = el('select');
     procedureSelect.dataset['reviewField'] = 'procedure';
-    procedureSelect.append(new Option(SHEET_PROCEDURE_NONE, ''));
+    procedureSelect.append(new Option(state.procedures.length === 0 ? SHEET_PROCEDURE_NONE_ENABLED : SHEET_PROCEDURE_NONE, ''));
     // Each with the one version a new use takes and how much of it this Book can take (S31b; REUSE-053): said, never ruled out.
     for (const procedure of state.procedures) {
       const option = new Option(sheetProcedureOption(procedure), procedure.procedureId);
@@ -2318,7 +2336,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     procedureSelect.addEventListener('change', () => void chooseProcedure(state, procedureSelect.value));
     procedureLabel.append(el('span', undefined, SHEET_PROCEDURE_LABEL), procedureSelect);
     procedureField.append(procedureLabel);
-    if (state.procedures.length === 0) procedureField.append(el('p', 'field-note', SHEET_PROCEDURE_NONE_ENABLED));
     if (state.procedure !== null) {
       procedureField.dataset['procedureId'] = state.procedure.procedureId;
       if (state.procedure.resolved !== null) {
@@ -2335,18 +2352,24 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);
         procedureField.append(versionLabel);
       }
-      for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
+      const procedureLines = sheetProcedureLines(state.procedure);
+      if (procedureLines.length > 0) {
+        const list = el('ul');
+        for (const line of procedureLines) list.append(el('li', 'review-sheet-procedure-line', line));
+        procedureField.append(list);
+      }
     }
     form.append(procedureField);
     const categories = el('fieldset', 'review-category-options');
+    const categoryLegend = el('legend', undefined, REVIEW_CATEGORY_LEGEND);
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
-      const line = el('p', 'field-note review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
+      const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
-      categories.append(line);
+      categoryLegend.append(' · ', line);
     }
     procedureField.hidden = state.definition !== null;
-    categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
+    categories.append(categoryLegend);
     const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
     const localCategory: ReviewWorkspaceCategoryProjection = {
       categoryId: 'local-text-check', label: '本地文字检查', description: '单独在本机检查标点、规范字形与异形词；数字检查可选。',
@@ -2368,14 +2391,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.value = entry.categoryId;
       input.checked = state.categories.has(entry.categoryId);
       const text = el('span', 'review-category-text');
-      const description = el('span', 'review-category-description', entry.description);
-      description.id = uid('category-description');
       const basis = el('span', 'review-category-basis', reviewBasisWords(entry.basis));
       basis.id = uid('category-basis');
       const reason = el('span', 'review-category-reason');
       reason.id = uid('category-reason');
-      input.setAttribute('aria-describedby', `${description.id} ${basis.id} ${reason.id}`);
-      text.append(el('strong', undefined, entry.label), description, basis, reason);
+      input.setAttribute('aria-describedby', `${basis.id} ${reason.id}`);
+      text.append(el('strong', undefined, entry.label), basis, reason);
       label.append(input, text);
       input.addEventListener('change', () => {
         if (input.checked && entry.categoryId === 'local-text-check') state.categories.clear();
@@ -2402,7 +2423,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     proseLabel.append(prose, el('span', undefined, '我确认所选范围为中文正文，启用 P01–P03 标点检查'));
     const numeralLabel = el('label', 'review-field');
     const numerals = el('select'); numerals.dataset['localCheckNumerals'] = '';
-    for (const [value, label] of [['off', '数字检查关闭（默认）'], ['national-standard', '按国标有限条款检查 N01、N02'], ['editor-convention', '按编辑约定检查 N01、N02']]) numerals.append(new Option(label, value));
+    for (const [value, label] of [['off', '数字检查关闭'], ['national-standard', '按国标有限条款检查 N01、N02'], ['editor-convention', '按编辑约定检查 N01、N02']]) numerals.append(new Option(label, value));
     numerals.value = state.localOptions.numerals;
     numerals.addEventListener('change', () => {
       const value = numerals.value as typeof state.localOptions.numerals;
@@ -2420,7 +2441,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     confirmation.addEventListener('change', () => { state.localOptions = { ...state.localOptions, numeralsConfirmed: confirmation.checked }; updateSheet(); });
     confirmationLabel.append(confirmation, el('span', undefined, '我明确选择本次数字依据及 N01、N02；编辑约定不表示国标适用'));
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
-      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点及无附加条件的异形词可生成机械修正；其余生成批注。代码、网址、邮件等会排除。'));
+      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点和无附加条件的异形词可生成机械修正，其余为批注；排除代码、网址和邮件等。'));
     const tables = state.localOptions.tables!;
     for (const [key, label] of [['characters', '通用规范汉字表（2013）及字形对照参考'], ['variantWords', '第一批异形词整理表（GF 1001-2001；附录仅供复核）']] as const) {
       const row = el('label', 'review-field'); const input = el('input'); input.type = 'checkbox'; input.checked = tables[key]; input.dataset['localTable'] = key;
@@ -2429,14 +2450,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const termsLabel = el('label', 'review-field'); const terms = el('textarea'); terms.dataset['localBookTerms'] = '';
     terms.value = tables.bookTerms.map((entry) => `${entry.kind}\t${entry.preferred}\t${entry.variants.join('|')}`).join('\n');
-    const termProblem = el('p', 'field-note'); let invalidTerms = false;
+    const termProblem = el('span'); termProblem.setAttribute('role', 'alert'); let invalidTerms = false;
     terms.addEventListener('input', () => {
       try { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, bookTerms: parseBookTerms(terms.value) } }; invalidTerms = false; termProblem.textContent = ''; }
       catch (error) { invalidTerms = true; termProblem.textContent = error instanceof Error ? error.message : '请核对本书词表。'; }
       updateSheet();
     });
-    termsLabel.append(el('span', undefined, '本书术语/人名/地名表：每行以制表符分隔 类型、采用写法、待统一异写（多种用 | 分隔）；类型为 term/person/place。明确列出的异写可机械替换，随本次审阅保存。'), terms);
-    localOptions.append(termsLabel, termProblem);
+    termsLabel.append(el('span', undefined, '本书术语、人名与地名表：每行用制表符分隔类型、采用写法和异写，多种异写用 | 分隔；类型为 term/person/place，明确列出的异写可机械替换并随本次审阅保存。'), terms, termProblem);
+    localOptions.append(termsLabel);
     if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
       const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';
       const houseStatus = el('span', undefined, '本社自用词表：正在读取');
@@ -2445,7 +2466,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         try {
           const page = await api.inspectHouseWordList!({ versionId: null, entryOffset: 0, historyOffset: 0 });
           house.disabled = page.selected === null || page.selected.enabledCount === 0;
-          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 ${technicalWords(`第${page.selected.ordinal}版`, '版本')}（${page.selected.enabledCount}条启用）；选中后仅生成批注`;
+          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 ${technicalWords(`第${page.selected.ordinal}版`, '版本')} · ${page.selected.enabledCount} 条启用；选中后仅生成批注`;
           house.onchange = () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: house.checked ? page.current : null } }; updateSheet(); };
         } catch { house.disabled = true; houseStatus.textContent = '本社词表读取失败，请重新打开检查选项。'; }
         updateSheet();
@@ -2476,14 +2497,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.value = kind;
       input.checked = state.scope === kind;
       input.disabled = !availability.available;
-      label.append(input, el('span', undefined, REVIEW_SCOPE_LABELS[kind]));
+      const name = el('span', undefined, REVIEW_SCOPE_LABELS[kind]);
+      label.append(input, name);
       if (!availability.available) {
         label.dataset['unavailableReason'] = availability.unavailableReason ?? '';
         input.dataset['unavailableReason'] = availability.unavailableReason ?? '';
-        const why = el('small', 'field-note', availability.unavailableReason ?? '');
+        const why = el('span', undefined, ` · ${availability.unavailableReason ?? ''}`);
         why.id = uid('scope-reason');
         input.setAttribute('aria-describedby', why.id);
-        label.append(why);
+        name.append(why);
       }
       if (kind === 'changed') {
         label.append(changedNote);
@@ -2558,7 +2580,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const series of state.seriesChoices) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
       select.value = state.seriesId ?? '';
       select.addEventListener('change', () => { state.seriesId = select.value || null; state.problem = null; updateSheet(); });
-      row.append(select, el('small', 'field-note', '仅供任务明确选用；只有当前策略开放书系知识时才能开始。'));
+      row.append(select);
       materialField.append(row);
     }
     materialField.append(similarMaterialsField(api, workspace.bookId, materialItems, state.materialIds, (materialId) => {
@@ -2583,12 +2605,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     problem.setAttribute('role', 'alert');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
-    const quickReason = el('p', 'field-note review-quick-start-reason', REVIEW_QUICK_START_REASON);
-    quickReason.id = uid('quick-start-reason');
     const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
     const prepare = actionButton('prepare', 'secondary', () => void prepareRun(state));
-    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, 'quick'));
-    quick.setAttribute('aria-describedby', quickReason.id);
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
@@ -2657,8 +2675,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
-      quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
-      start.disabled = quick.disabled;
+      start.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
@@ -2845,7 +2862,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   };
 }
 
-type ReviewMaterialInput = { item: WritingTaskMaterialProjection; input: HTMLInputElement; reason: HTMLElement };
+type ReviewMaterialInput = { item: WritingTaskMaterialProjection; input: HTMLInputElement; reason: HTMLElement; separator: HTMLElement };
 
 /** 新建审阅's 允许参考 fieldset: one choice per offered 资料库 item, ticking one is the sheet's to refresh (Issue #428). */
 export function reviewMaterialsField(
@@ -2854,9 +2871,12 @@ export function reviewMaterialsField(
   updateSheet: () => void,
 ): { field: HTMLElement; inputs: ReviewMaterialInput[]; items: ReadonlyArray<WritingTaskMaterialProjection> } {
   const field = el('fieldset', 'review-materials');
-  field.append(el('legend', undefined, '允许参考 · 资料库'));
-  field.append(el('p', 'field-note', offers?.statement ?? '暂无可参考的资料库资料。'));
+  const legend = el('legend', undefined, '允许参考 · 资料库');
+  if ((offers?.more ?? 0) > 0) legend.append(el('span', undefined, ' · '), el('span', undefined, `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
+  field.append(legend);
+  const statement = offers?.statement ?? '暂无可参考的资料库资料。';
   const items = offers?.items ?? [];
+  field.append(el('p', 'field-note', items.length === 0 ? statement : `${statement.replace(/。$/u, '')}；资料只供调用模型的审阅类别参考，事实核查与只读已有线索的类别不参考这些资料。`));
   const inputs = items.map((item) => {
     const label = el('label', 'review-category-option');
     const input = el('input');
@@ -2868,15 +2888,17 @@ export function reviewMaterialsField(
       state.problem = null;
       updateSheet();
     });
-    const reason = el('small', 'field-note');
+    const reason = el('span');
     reason.id = uid('material-reason');
     input.setAttribute('aria-describedby', reason.id);
-    label.append(input, el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · ${taskMaterialSizeText(item)}`), reason);
+    const name = el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · ${taskMaterialSizeText(item)}`);
+    const separator = el('span', undefined, ' · ');
+    separator.hidden = true;
+    name.append(separator, reason);
+    label.append(input, name);
     field.append(label);
-    return { item, input, reason };
+    return { item, input, reason, separator };
   });
-  if ((offers?.more ?? 0) > 0) field.append(el('p', 'field-note', `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
-  field.append(el('p', 'field-note', '资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'));
   return { field, inputs, items };
 }
 
@@ -2892,13 +2914,14 @@ export function syncReviewMaterials(
   state.materialIds.clear();
   for (const id of retained) state.materialIds.add(id);
   const acceptsMaterials = categories.some((entry) => state.categories.has(entry.categoryId) && entry.materialReferencesAllowed === true);
-  for (const { item, input, reason } of inputs) {
+  for (const { item, input, reason, separator } of inputs) {
     const offered = currentOffers.find((entry) => entry.materialId === item.materialId);
     const why = reviewMaterialChoiceReason(offered, currentOffers, state.materialIds, acceptsMaterials);
     input.checked = state.materialIds.has(item.materialId);
     input.disabled = busy || (why !== null && !input.checked);
     reason.textContent = why ?? '';
     reason.hidden = why === null;
+    separator.hidden = why === null;
   }
   return acceptsMaterials;
 }

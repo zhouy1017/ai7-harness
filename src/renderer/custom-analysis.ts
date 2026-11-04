@@ -8,7 +8,6 @@ import type {
 } from '../shared/protocol.js';
 import {
   CUSTOM_TAB_EMPTY,
-  CUSTOM_TAB_EMPTY_NOTE,
   CUSTOM_TAB_FEEDBACK_NOTE,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
@@ -32,8 +31,6 @@ import {
   CUSTOM_DIMENSION_REVISE,
   CUSTOM_DIMENSION_SAVE,
   CUSTOM_DIMENSION_STOP,
-  CUSTOM_DIMENSION_STOP_NOTE,
-  CUSTOM_DIMENSION_TEMPLATE_HINT,
   CUSTOM_DIMENSION_TEMPLATE_LABEL,
   CUSTOM_DIMENSION_TITLE_LABEL,
   customDimensionEnabledLine,
@@ -125,12 +122,12 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     section.dataset['revisionId'] = latest.revisionId;
     section.dataset['freshness'] = latest.freshness.state;
     section.dataset['coverage'] = latest.coverage.state;
-    section.append(
-      el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal)),
-      el('p', 'field-note custom-axis', latest.coverage.label),
-      el('p', 'field-note custom-axis', latest.freshness.label),
-      el('p', 'custom-counts', customTabCountsLine(latest.rowCounts)),
-    );
+    const revision = el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal));
+    const freshness = { current: '与当前稿件一致', stale: '稿件已更新，分析待更新', superseded: '已有更新结果' }[latest.freshness.state];
+    revision.append(' · ', el('span', 'custom-axis', latest.coverage.label), ' · ', el('span', 'custom-axis', technicalWords(latest.freshness.label, freshness)));
+    const counts = el('p', 'custom-counts', customTabCountsLine(latest.rowCounts));
+    if (latest.rowsTruncated) counts.append(' · ', el('span', 'custom-more', customTabMoreRows(latest.rows.length)));
+    section.append(revision, counts);
     if (latest.gaps.length > 0) {
       const gaps = el('ul', 'custom-gaps');
       for (const gap of latest.gaps) {
@@ -158,17 +155,12 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
           link.addEventListener('click', () => options.jump(blockId));
           return link;
         })();
-      item.append(
-        el('span', 'custom-row-unit', `第 ${row.unitOrdinal} 单元`),
-        el('p', 'custom-answer', row.answer),
-        anchor,
-        el('p', 'field-note custom-confidence', row.confidenceNote),
-      );
+      const answer = el('p', 'custom-answer', row.answer);
+      answer.append(' · ', el('span', 'custom-confidence', row.confidenceNote));
+      item.append(el('span', 'custom-row-unit', `第 ${row.unitOrdinal} 单元`), answer, anchor);
       rows.append(item);
     }
     section.append(rows);
-    if (latest.rowsTruncated) section.append(el('p', 'field-note', customTabMoreRows(latest.rows.length)));
-    section.append(el('p', 'field-note custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE));
     return section;
   };
 
@@ -178,10 +170,11 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     if (projection.dimensions.length === 0) {
       const empty = el('section', 'custom-empty');
       empty.dataset['customEmpty'] = 'no-dimension';
-      empty.append(el('p', undefined, CUSTOM_TAB_EMPTY), el('p', 'field-note', CUSTOM_TAB_EMPTY_NOTE));
+      empty.append(el('p', undefined, CUSTOM_TAB_EMPTY));
       panel.replaceChildren(empty);
       return;
     }
+    const firstAnswer = projection.dimensions.find((dimension) => dimension.book?.latest != null);
     const cards = projection.dimensions.map((dimension) => {
       const card = el('article', 'custom-dimension-card');
       card.dataset['dimensionId'] = dimension.dimensionId;
@@ -189,6 +182,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       const book = dimension.book;
       const heading = el('div', 'custom-dimension-heading');
       heading.append(el('h3', undefined, dimension.title));
+      if (dimension === firstAnswer) heading.append(el('span', 'custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE));
       if (book?.taskState != null) {
         const state = el('span', 'state-term status-pill custom-task-state', book.taskState.stateLabel);
         state.dataset['taskState'] = book.taskState.state;
@@ -206,8 +200,13 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
         open.dataset['analysisAction'] = 'custom-open-plan';
         actions.append(open);
       }
+      if (book?.unavailableReason != null) {
+        const reason = el('span', 'custom-unavailable', book.unavailableReason);
+        reason.id = `custom-unavailable-${dimension.dimensionId}`;
+        start.setAttribute('aria-describedby', reason.id);
+        actions.append(reason);
+      }
       card.append(actions);
-      if (book?.unavailableReason != null) card.append(el('p', 'field-note custom-unavailable', book.unavailableReason));
       if (book?.latest == null) {
         const none = el('p', 'custom-not-run', CUSTOM_TAB_NOT_RUN);
         none.dataset['customEmpty'] = 'not-run';
@@ -302,10 +301,11 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     title.maxLength = 160;
     title.value = latest?.title ?? '';
     titleLabel.append(title);
-    const templateLabel = el('label', undefined, CUSTOM_DIMENSION_TEMPLATE_LABEL);
+    const templateLabel = el('label', undefined, `${CUSTOM_DIMENSION_TEMPLATE_LABEL} · 最多 400 字，勿粘贴稿件原文`);
     const template = el('textarea');
     template.name = 'questionTemplate';
     template.rows = 4;
+    template.placeholder = '可用 {本单元} 标出位置';
     template.maxLength = 1600;
     template.value = latest?.questionTemplate ?? '';
     templateLabel.append(template);
@@ -324,7 +324,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         dimensionId: dimension?.dimensionId ?? null, title: titleText, questionTemplate: template.value.trim(),
       }), () => customDimensionSavedLine(titleText));
     });
-    node.append(titleLabel, templateLabel, el('p', 'field-note', CUSTOM_DIMENSION_TEMPLATE_HINT), actions);
+    node.append(titleLabel, templateLabel, actions);
     return node;
   };
 
@@ -336,11 +336,15 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     if (projection === null) return;
     section.dataset['dimensionCount'] = String(projection.dimensions.length);
     if (editing === null) section.append(form(null));
-    else section.append(actionButton(CUSTOM_DIMENSION_NEW, 'secondary', 'new', () => {
-      editing = null;
-      render();
-    }));
-    if (projection.dimensions.length === 0) section.append(el('p', 'field-note custom-dimensions-empty', CUSTOM_DIMENSIONS_EMPTY));
+    else {
+      const actions = el('div', 'button-row');
+      if (projection.dimensions.length === 0) actions.append(el('span', 'custom-dimensions-empty', CUSTOM_DIMENSIONS_EMPTY));
+      actions.append(actionButton(CUSTOM_DIMENSION_NEW, 'secondary', 'new', () => {
+        editing = null;
+        render();
+      }));
+      section.append(actions);
+    }
     for (const dimension of projection.dimensions) {
       const card = el('article', 'custom-dimension-card');
       card.dataset['dimensionId'] = dimension.dimensionId;
@@ -359,13 +363,13 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
             act('正在验证并启用…', () => api.enableCustomAnalysisDimension({ versionId: version.versionId }), () => customDimensionEnabledLine(version.title, version.version))));
         }
         if (version.state !== 'stopped') {
-          actions.append(actionButton(CUSTOM_DIMENSION_STOP, 'secondary', 'stop', () =>
+          actions.append(actionButton(`${CUSTOM_DIMENSION_STOP} · 已有分析保留`, 'secondary', 'stop', () =>
             act('正在停用…', () => api.stopCustomAnalysisDimension({ versionId: version.versionId }), () => customDimensionStoppedLine(version.title, version.version))));
         }
         if (actions.children.length > 0) item.append(actions);
         versions.append(item);
       }
-      card.append(versions, el('p', 'field-note', CUSTOM_DIMENSION_STOP_NOTE));
+      card.append(versions);
       if (editing === dimension.dimensionId) card.append(form(dimension));
       else card.append(actionButton(CUSTOM_DIMENSION_REVISE, 'quiet', 'revise', () => {
         editing = dimension.dimensionId;

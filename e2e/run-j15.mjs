@@ -230,7 +230,7 @@ const READ_KNOWLEDGE = `(() => {
       older: card.querySelector('.guideline-older')?.textContent ?? null,
       fixed: card.querySelector('.guideline-fixed')?.textContent ?? null,
       importable: card.querySelector('[data-guideline-action="import"]') instanceof HTMLButtonElement,
-      preview: card.querySelector('.guideline-preview h4')?.textContent ?? null,
+      preview: card.querySelector('.guideline-preview h4')?.firstChild?.textContent ?? null,
       changes: card.querySelector('.guideline-preview-changes')?.textContent ?? null,
       previewClauses: card.querySelectorAll('.guideline-preview li').length,
       refusal: card.querySelector('.guideline-refusal')?.textContent ?? null,
@@ -253,7 +253,7 @@ async function readKnowledge(renderer, predicate, name) {
 // book, handed to 放入资料… through the picker control of the relaunched window.
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const LIBRARY_TITLE = '样书一';
-const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
+const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 /** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
 const READ_LIBRARY = `(() => {
   const root = document.querySelector('[data-screen="knowledge-base"] .library-materials');
@@ -266,7 +266,7 @@ const READ_LIBRARY = `(() => {
     empty: root.querySelector('.library-empty')?.textContent ?? null,
     refusal: root.querySelector('.library-refusal')?.textContent ?? null,
     preview: preview === null ? null : {
-      heading: preview.querySelector('h3')?.textContent ?? null,
+      heading: preview.querySelector('h3')?.firstChild?.textContent ?? null,
       facts: preview.querySelector('.library-preview-facts')?.textContent ?? null,
       title: preview.querySelector('[data-library-field="title"]')?.value ?? null,
       kinds: Array.from(preview.querySelectorAll('[data-library-choice]'), (input) => [input.value, input.checked]),
@@ -740,7 +740,7 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="add"]', 'library-add');
     const libraryPreview = await readLibrary(renderer, (page) => page.preview !== null, 'library-preview');
     requireJourney(libraryPreview.preview.heading === '放入资料库：sample1.docx' &&
-      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原件原样保存在本机，不会改动` && libraryPreview.preview.title === 'sample1' &&
+      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原文件保持不变` && libraryPreview.preview.title === 'sample1' &&
       JSON.stringify(libraryPreview.preview.kinds) === JSON.stringify([['book', false], ['paper', false], ['document', false], ['web', false]]) &&
       libraryPreview.preview.confirmDisabled === true, 'library-preview-words', libraryPreview.preview);
     await waitFor(renderer, `document.activeElement === document.querySelector('.library-preview h3')`, 'library-preview-focused', 10_000);
@@ -812,9 +812,9 @@ async function main() {
     requireJourney(JSON.stringify(indexAttention) === JSON.stringify(['recent', 'indexing-completed', 'view-material-index', 'library-index', 'complete', 0]), 'library-index-attention', indexAttention);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'library-index-attention-entry');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(indexSelector)}) !== null`, 'library-index-attention-listed', 30_000);
-    const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('button.global-attention-open')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
+    const indexListed = await renderer.evaluate(`(() => { const item=document.querySelector(${JSON.stringify(indexSelector)}); return { group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, pill: item.querySelector('.global-attention-pill')?.textContent ?? null, object: item.querySelector('.global-attention-object-name')?.textContent ?? null, next: item.querySelector('.global-attention-next')?.textContent ?? null }; })()`);
     requireJourney(indexListed.group === 'recent' && indexListed.pill === '索引完成' && indexListed.object === `资料索引 · 图书「${LIBRARY_TITLE}」` &&
-      indexListed.next === '安全的下一步：查看索引', 'library-index-attention-words', indexListed);
+      indexListed.next === '查看索引', 'library-index-attention-words', indexListed);
     await clickSelector(renderer, `${indexSelector} button.global-attention-open`, 'library-index-attention-open');
     await readLibrary(renderer, (page) => page.state === 'ready' && page.cards.some((card) => card.id === materialId && card.index === 'complete'), 'library-index-attention-opened');
 

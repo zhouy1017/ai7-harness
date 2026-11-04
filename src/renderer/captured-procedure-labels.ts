@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import {
   CAPTURED_PROCEDURE_SCOPE_LABELS,
   MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN,
@@ -37,7 +37,7 @@ export const CAPTURE_CLASSIFICATION_LEGEND = '保存成什么' as const;
 export const CAPTURE_WHY_HEADING = '为什么这样分类' as const;
 export const CAPTURE_EXTRACT_HEADING = '将提取什么' as const;
 export const CAPTURE_NOT_SAVED_HEADING = '不会保存什么' as const;
-export const CAPTURE_TITLE_LABEL = '工序名称（只作标签，不发给模型）' as const;
+export const CAPTURE_TITLE_LABEL = '工序名称 · 只作标签，不发给模型' as const;
 export const CAPTURE_TARGET_LABEL = '保存为' as const;
 export const CAPTURE_NEW_PROCEDURE = '新的可复用工序' as const;
 export const CAPTURE_SAVE = '保存为可复用工序' as const;
@@ -46,7 +46,7 @@ export const CAPTURE_PICK_TITLE = '请给这个工序起一个名字。' as cons
 export const PROPOSAL_SAVE = '保存开发建议' as const;
 export const PROPOSAL_FIELDS = {
   title: '建议的标题',
-  missingCapability: '缺少的能力（必填）',
+  missingCapability: '缺少的能力 · 必填',
   affectedProcedure: '涉及的工序',
   direction: '建议的实现方向',
   pluginCandidate: '可以评估的插件',
@@ -113,7 +113,7 @@ export function captureExtractLines(
 
 /** Where a capture came from, said once and kept only on this computer (REUSE-015). */
 export function captureSourceLine(runLabel: string, scopeLabel: string): string {
-  return `来源：${runLabel}（${scopeLabel}）。来源只记在本机，不进入工序。`;
+  return `来源：${runLabel} · ${scopeLabel}；只记在本机，不进入工序。`;
 }
 
 export function captureNextVersionOption(title: string, latestVersion: number): string {
@@ -131,10 +131,10 @@ export function proposalSavedLine(title: string, version: number): string {
 // ---- 知识库 › 工序与规则 --------------------------------------------------------------------------------------
 
 export const PROCEDURES_SECTION_HEADING = '可复用工序' as const;
-export const PROCEDURES_SECTION_NOTE = '从完成的审阅保存下来的工序。保存后即可在新建审阅里按它运行。' as const;
-export const PROCEDURES_EMPTY = '还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。' as const;
+export const PROCEDURES_SECTION_NOTE = '已完成的审阅可保存为工序，供新建审阅使用。' as const;
+export const PROCEDURES_EMPTY = '还没有可复用工序，可从已完成的审阅保存。' as const;
 export const PROPOSALS_SECTION_HEADING = '开发建议' as const;
-export const PROPOSALS_SECTION_NOTE = '需要 AI7 新增能力的做法，只记在本机。可以导出为文件交给开发流程；AI7 不会发送它，也不会安装或启用任何插件。' as const;
+export const PROPOSALS_SECTION_NOTE = '开发建议只保存在本机，可导出交给开发流程；AI7 不会发送，也不会安装或启用插件。' as const;
 export const PROPOSALS_EMPTY = '还没有开发建议。' as const;
 export const PROCEDURE_ACTIONS = {
   validate: '启用',
@@ -150,7 +150,7 @@ export const PROCEDURE_ACTIONS = {
 } as const;
 export const PROCEDURE_RUN_BOOK_LABEL = '在哪本书里运行' as const;
 export const PROCEDURE_RUN_NOTE = '会打开这本书的「新建审阅」，按这个工序选好类别；你看过计划后，再由你开始。' as const;
-export const PROCEDURE_STOP_NOTE = '停用后这一版不会再被选用，也不能再启用；按它运行过的审阅仍然记着它。要再用，请从一次新的审阅重新保存。' as const;
+export const PROCEDURE_STOP_NOTE = '停用后不能再选用或启用，按它运行过的审阅仍记着它；如需再用，请从新审阅保存。' as const;
 
 export function procedureVersionLine(version: Pick<CapturedProcedureVersionProjection, 'version' | 'stateLabel' | 'steps' | 'scopeSlot'>): string {
   return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.steps.length} 步 · 范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[version.scopeSlot]}」`;
@@ -302,7 +302,7 @@ export function proposalFileSavedLine(fileName: string): string {
 // ---- 新建审阅 and the Run ---------------------------------------------------------------------------------------
 
 export const SHEET_PROCEDURE_LABEL = '按已保存的工序' as const;
-export const SHEET_PROCEDURE_NONE = '不按工序（自己选类别）' as const;
+export const SHEET_PROCEDURE_NONE = '不按工序 · 自己选类别' as const;
 export const SHEET_PROCEDURE_NONE_ENABLED = '还没有启用的可复用工序。' as const;
 /** The manual selector of an exact eligible version (Issue #66, S31; REUSE-054): the latest eligible first and marked. */
 export const SHEET_PROCEDURE_VERSION_LABEL = '版本' as const;
@@ -349,13 +349,18 @@ function filledWords(steps: ReadonlyArray<Pick<CapturedProcedureRunStepProjectio
 /** The status once a choice filled the sheet (S31b review P3-5): what it ticked, in the same words as the sheet's own line. */
 export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection): string {
   if (run.resolved === null) return run.unavailableReason ?? '';
-  return `已读取《${run.title}》${technicalWords(`第 ${run.resolved.version} 版`, '版本')}：${filledWords(run.resolved.steps)}。`;
+  return `已读取《${run.title}》${technicalWords(`第 ${run.resolved.version} 版`)}：${filledWords(run.resolved.steps)}。`;
 }
 
 /** What the sheet says once a Captured Procedure filled it (ADR 0087 §4; REUSE-054): the exact version, and what it leaves out. */
 export function sheetProcedureLines(run: CapturedProcedureRunProjection): string[] {
   if (run.resolved === null) return [run.unavailableReason ?? ''];
   const resolved = run.resolved;
+  if (!technicalLayerVisible) {
+    return resolved.steps.flatMap((step) => !step.available
+      ? [`不运行「${step.label}」：${step.unavailableReason ?? ''}`]
+      : step.chosenApart ? [sheetChosenApartLine(step.label)] : []);
+  }
   const lines = [`按《${run.title}》第 ${resolved.version} 版：${resolved.steps.map((step) => step.label).join(' → ')}；范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[resolved.scopeSlot]}」。${filledWords(resolved.steps)}，计划可按需查看。`];
   for (const step of resolved.steps) {
     if (!step.available) lines.push(`不运行「${step.label}」：${step.unavailableReason ?? ''}`);
@@ -375,7 +380,7 @@ export function sheetProcedureLines(run: CapturedProcedureRunProjection): string
 
 /** The pin a Run shows (ADR 0087 §4): never moved by a later version or a 停用. */
 export function runProcedureLine(procedure: ReviewRunProcedureProjection): string {
-  const note = procedure.missing ? '（本机没有这一版；这次审阅仍记着它）' : procedure.stopped ? '（这一版已停用；这次审阅仍记着它）' : '';
+  const note = procedure.missing ? ' · 本机缺少此版本，审阅记录保留' : procedure.stopped ? ' · 已停用，审阅记录保留' : '';
   return `按可复用工序《${procedure.title}》${technicalWords(`第 ${procedure.version} 版`, '版本')}${note}`;
 }
 

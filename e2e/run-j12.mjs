@@ -818,14 +818,18 @@ async function main() {
     // Nothing has been remembered for 甲 yet, so the one transient notice says the manuscript opened at
     // its start instead of claiming a return. It floats rather than taking a row from the manuscript,
     // and both readings are taken in one pass because the notice is on its way out while they are read.
+    await assertRenderer(primary, `document.querySelector('[data-toast]') !== null`, 'entry-toast-exists');
+    await assertRenderer(primary, `document.querySelector('[data-toast]')?.hidden === false`, 'entry-toast-visible');
+    await assertRenderer(primary, `getComputedStyle(document.querySelector('[data-toast]')).position === 'fixed'`, 'entry-toast-fixed');
     await assertRenderer(primary, `(() => {
-      const notice=document.querySelector('[data-entry-notice]');
-      return notice instanceof HTMLElement &&
+      const toast=document.querySelector('[data-toast]');
+      const notice=toast?.querySelector('span');
+      return toast instanceof HTMLElement && !toast.hidden && notice instanceof HTMLElement &&
         notice.textContent==='从稿件开头打开；这本图书还没有记录上次位置。' &&
-        getComputedStyle(notice).position==='absolute';
+        getComputedStyle(toast).position==='fixed';
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
-    await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
+    await waitFor(primary, `document.querySelector('[data-toast]')?.hidden === true`, 'entry-notice-self-dismissed');
     // Wave 23 #1286: entering the global destination closes the book-only drawer and releases its column.
     await assertRenderer(primary, `(() => { const entry=document.querySelector('[data-edge-entry="tasks"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return true; })()`, 'global-agent-book-drawer-open');
     await waitFor(primary, `document.querySelector('#task-drawer')?.hidden===false`, 'global-agent-book-drawer-ready');
@@ -1295,11 +1299,8 @@ async function main() {
     await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'restart-a-manuscript');
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(editSuffix)})`, 'restart-persisted-edit');
     await assertRenderer(primary, `(() => {
-      const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
-      const place=/第 (\\d+) \\/ (\\d+) 个段落/.exec(notice);
-      return notice.startsWith('回到上次位置 · ') && place!==null &&
-        Number(place[1])===${JSON.stringify(pagedAwayPosition)} && Number(place[1])<=Number(place[2]) &&
-        !/blk_[0-9a-f]{24}/.test(notice);
+      const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
+      return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('overview')), 'restart-back-overview');
     await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'restart-overview');
@@ -1313,7 +1314,7 @@ async function main() {
       if(!(anchorSection instanceof HTMLElement)||!(records instanceof HTMLElement))return false;
       const labels=Array.from(anchorSection.querySelectorAll(':scope > dl > dt'),(node)=>node.textContent);
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
-      return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
+      return JSON.stringify(labels)===JSON.stringify(['稿件','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
@@ -1526,7 +1527,7 @@ async function main() {
     // candidate are refused, and clearing succeeds. Choosing a keyed fallback is composed service evidence (tests/service/search-fallback.test.ts).
     await assertRenderer(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-search-backend]'));
       return cards.length===5 && cards.every((card)=>{ const control=card.querySelector('[data-action="select-search-fallback"]'); return control instanceof HTMLButtonElement && control.textContent==='设为备用来源' && control.disabled && card.dataset.fallback==='false'; }) &&
-        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源') &&
+        document.querySelector('[data-search-backends]').textContent.includes('未实测候选不可选') &&
         document.querySelector('[data-search-backends]').textContent.includes('设置备用来源后') &&
         document.querySelector('[data-search-backends]').textContent.includes('余额或套餐额度不足时，直接切换一次') &&
         document.querySelector('[data-search-backends]').textContent.includes('其他认证错误不会切换');
@@ -1812,10 +1813,9 @@ async function main() {
     await click(primary, '按所选方式导入', 'database-import-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.replacementId !== undefined && document.querySelector('.database-import')?.dataset.pending === 'true'`, 'database-import-pending');
     const pendingLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const replaceBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[1] ?? '' : '')?.[1];
+    const replaceBackup = /^已准备好用「AI7 数据库\.ai7db」替换本机全部数据；本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(pendingLines) && pendingLines.length === 3 && pendingLines[0] === '已准备好用「AI7 数据库.ai7db」替换本机全部数据。' &&
-        replaceBackup !== undefined && pendingLines[2] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
+      Array.isArray(pendingLines) && pendingLines.length === 2 && replaceBackup !== undefined && pendingLines[1] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
       'database-import-pending-words',
       pendingLines,
     );
@@ -1838,7 +1838,7 @@ async function main() {
       titlesReplaced.every((title) => titlesBeforeReplace.includes(title)), 'database-replaced-titles', titlesReplaced);
     await openDataAndStorage('database-replaced');
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)}`, 'database-replaced-recorded');
-    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}) && document.querySelector('.database-import-roll-back p')?.textContent === ${JSON.stringify(`上次用「AI7 数据库.ai7db」替换了本机全部数据；替换前的数据在「${replaceBackup}」里。`)}; })()`, 'database-replaced-words');
+    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}); })()`, 'database-replaced-words');
     await close();
 
     at('database-import-merge');
@@ -1867,10 +1867,10 @@ async function main() {
     await click(primary, '按所选方式导入', 'database-merge-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'merge'`, 'database-merge-pending');
     const mergeLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const mergeBackup = /^本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[1] ?? '' : '')?.[1];
+    const mergeBackup = /本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(mergeLines) && mergeLines[0] === `已准备好把「${replaceBackup}」里的 1 本图书合并到本机。` && mergeBackup !== undefined &&
-        mergeLines[2] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
+      Array.isArray(mergeLines) && mergeLines[0]?.startsWith(`已准备好把「${replaceBackup}」里的 1 本图书合并到本机；`) && mergeBackup !== undefined &&
+        mergeLines[1] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
       'database-merge-pending-words',
       mergeLines,
     );
@@ -1905,10 +1905,10 @@ async function main() {
     await click(primary, '确认回退', 'database-roll-back-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'roll-back'`, 'database-roll-back-pending');
     const rollBackLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const rollBackBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[1] ?? '' : '')?.[1];
+    const rollBackBackup = /本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(rollBackLines) && rollBackLines[0] === `已准备好回退到「${replaceBackup}」。` && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
-        rollBackLines[2] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
+      Array.isArray(rollBackLines) && rollBackLines[0]?.startsWith(`已准备好回退到「${replaceBackup}」；`) && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
+        rollBackLines[1] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
       'database-roll-back-pending-words',
       rollBackLines,
     );
@@ -1982,19 +1982,19 @@ async function main() {
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
       calibrationPage.waiting === null &&
       // The house offset (Issue #429, EVAL-011a): its method stated, waiting below ten 调分记录, nothing said of 停用 while on.
-      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
+      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
       calibrationPage.method === '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。' &&
       calibrationPage.offEffect === null &&
       calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
       JSON.stringify(calibrationPage.switches) === JSON.stringify({ calibration: [true, false], prediction: [false, true] }) &&
-      calibrationPage.empty === '还没有已发稿的图书。设为发稿版本后，在这里录入它的定价与首印。' && calibrationPage.books.length === 0,
+      calibrationPage.empty === '尚无已发稿图书，设为发稿版本后可在此录入定价和首印。' && calibrationPage.books.length === 0,
     'calibration-page-words', calibrationPage);
     const toggle = (name) => primary.evaluate(`(() => { const input = document.querySelector('[data-calibration-switch="${name}"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`);
     requireJourney(await toggle('calibration'), 'calibration-off-click');
     const calibrationOff = await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 已关闭', 'calibration-off');
     requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration' &&
       // Off says what a new version does instead, and that the switch stays reversible (EVAL-011; EVAL-011a).
-      calibrationOff.offEffect === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && calibrationOff.offset === 'waiting',
+      calibrationOff.offEffect === '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。' && calibrationOff.offset === 'waiting',
     'calibration-off-words', calibrationOff);
     const offService = await primary.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => [answer.calibration.enabled, answer.calibration.active, answer.preferenceEntries, answer.prediction.enabled])`);
     requireJourney(JSON.stringify(offService) === JSON.stringify([false, false, 1, false]), 'calibration-off-service', offService);

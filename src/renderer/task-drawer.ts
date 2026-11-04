@@ -121,7 +121,6 @@ import {
   TASK_PLAN_EDIT_ASK_FIRST_NOTE,
   TASK_PLAN_EDIT_RESTORE,
   TASK_PLAN_EDIT_STEP_REMOVED,
-  TASK_PLAN_EDIT_STEPS_NOTE,
   TASK_PLAN_EDIT_TAG,
   TASK_PLAN_FULL_LINK_EDITABLE,
   TASK_BAR_UPDATE_FAILED,
@@ -137,7 +136,6 @@ import {
   TASK_PLAN_FULL_LINK,
   TASK_PLAN_GOAL_TERMS,
   TASK_PLAN_LOCKED,
-  TASK_PLAN_LOCKED_NOTE,
   TASK_PLAN_MATERIALITY_LABELS,
   TASK_PLAN_NO_ADAPTATION,
   TASK_PLAN_NO_REFERENCE,
@@ -480,6 +478,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   title.id = 'task-drawer-title';
   title.tabIndex = -1;
   const pill = el('span', 'state-term status-pill review-pill task-drawer-pill');
+  pill.setAttribute('role', 'status');
   const modes = el('div', 'task-drawer-modes');
   modes.setAttribute('role', 'group');
   modes.setAttribute('aria-label', TASK_DRAWER_MODE_GROUP);
@@ -793,7 +792,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.unconfirmed === null ? [] : [unconfirmedRecord(next.unconfirmed)]),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
-      ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
       ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact').flatMap((path) => {
         const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
@@ -848,10 +846,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const wrap = el('span', 'task-plan-unavailable');
     const button = control(label, className, name);
     button.disabled = true;
-    const why = el('small', 'field-note', reason);
+    const why = el('span', undefined, reason);
     why.id = uid(name);
+    button.setAttribute('aria-label', label);
     button.setAttribute('aria-describedby', why.id);
-    wrap.append(button, why);
+    button.append(' · ', why);
+    wrap.append(button);
     return wrap;
   }
 
@@ -943,7 +943,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON));
     } else {
       // A Task prepared from a Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, and 修改 back to the composer.
-      const asked = el('p', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
+      const asked = el('span', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
       asked.dataset['taskPlanDraft'] = draft.draftId;
       const edit = control(TASK_PLAN_EDIT, 'quiet', 'edit');
       edit.addEventListener('click', () => {
@@ -951,7 +951,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         surface.openDraft(next.bookId, draft.draftId, returnFocus);
         composerReturn = back === null ? null : () => surface.open(back, returnFocus);
       });
-      sentence.append(asked, edit, el('p', 'field-note task-plan-sentence-procedure', next.goal.sentence));
+      const context = el('p', 'task-plan-sentence-combined');
+      context.append(asked, ' · ', el('span', 'task-plan-sentence-procedure', next.goal.sentence));
+      sentence.append(context, edit);
     }
     const chips = el('ul', 'task-plan-chips');
     for (const chip of taskPlanChips(next.goal.chips)) {
@@ -959,10 +961,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       item.dataset['taskPlanChip'] = chip.key;
       chips.append(item);
     }
+    if (next.goal.savedForEdits) chips.append(el('li', 'task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
+    if (next.edit.lastEdit !== null) chips.append(el('li', 'task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit)));
     section.append(sentence, chips);
-    if (next.goal.savedForEdits) {
-      section.append(el('p', 'field-note task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
-    }
     return section;
   }
 
@@ -1062,10 +1063,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (step.removable) item.append(...editControls(next, step.id, step.label, step.removed, removed, 'step'));
       steps.append(item);
     }
-    const stepsNote = next.edit.editable && next.steps.some((step) => step.removable) ? [el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_STEPS_NOTE)] : [];
     const usage = el('span');
     usage.append(next.service.usage);
-    if (next.service.usageIsCeiling) usage.append(el('small', 'field-note task-plan-ceiling-note', TASK_PLAN_CEILING_NOTE));
+    if (next.service.usageIsCeiling) usage.append(` · ${TASK_PLAN_CEILING_NOTE}`);
     const participation = [next.participation.during, ...(next.participation.after === null ? [] : [`${TASK_PLAN_AFTERWARDS}：${next.participation.after}`])];
     whole.append(
       planSection(0, facts([[TASK_PLAN_GOAL_TERMS[0], next.goal.sentence], [TASK_PLAN_GOAL_TERMS[1], listOf(next.outcomes, 'task-plan-list')]])),
@@ -1073,9 +1073,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SCOPE_TERMS[0], next.scope.process],
         [TASK_PLAN_SCOPE_TERMS[1], next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference, 'task-plan-list')],
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
-        [TASK_PLAN_SCOPE_TERMS[3], next.scope.notRead],
+        [TASK_PLAN_SCOPE_TERMS[3], technicalWords(next.scope.notRead, next.scope.notRead.replace('来源材料（来源版本仅作血缘证据，不属于可读范围）', '来源材料'))],
       ])),
-      planSection(2, steps, ...stepsNote, ...assuranceBlock(next)),
+      planSection(2, steps, ...assuranceBlock(next)),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         ...(!technicalLayerVisible ? [
@@ -1124,9 +1124,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     if (next.boundary.adaptable.length === 0 || adaptations.childElementCount === 0) adaptations.append(el('li', undefined, TASK_PLAN_NO_ADAPTATION));
     adaptable.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[0]), adaptations);
-    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.movable)) {
-      adaptable.append(el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
-    }
     const askFirst = el('div', 'task-plan-boundary-column');
     askFirst.dataset['taskPlanBoundary'] = 'ask-first';
     const locked = el('ul', 'task-plan-list task-plan-locked');
@@ -1137,18 +1134,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const movedIn = el('ul', 'task-plan-list task-plan-asked');
     movedIn.append(...asked);
-    askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), ...(asked.length === 0 ? [] : [movedIn]), locked, el('p', 'field-note', TASK_PLAN_LOCKED_NOTE));
+    const askFirstHeading = el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]);
+    if (next.edit.editable && next.boundary.adaptable.some((entry) => entry.movable)) {
+      askFirstHeading.append(' · ', el('span', 'task-plan-edit-note', TASK_PLAN_EDIT_ASK_FIRST_NOTE));
+    }
+    askFirst.append(askFirstHeading, ...(asked.length === 0 ? [] : [movedIn]), locked);
     section.append(adaptable, askFirst);
     return section;
   }
 
   /** 快速开始后 (S75 D5): which rule version started this Task, quietly, with the way to the rule. */
   function quickStartedBlock(startedBy: NonNullable<TaskPlanProjection['defaultRule']['startedBy']>): HTMLElement {
-    const notice = el('p', 'field-note task-plan-quick-started');
+    const notice = el('div', 'task-plan-quick-started');
     notice.dataset['taskPlanQuickStarted'] = startedBy.ruleVersionId;
-    const view = control(TASK_PLAN_VIEW_RULES, 'quiet', 'view-rules');
+    const view = control(`${taskPlanQuickStarted(startedBy.name)} · ${TASK_PLAN_VIEW_RULES}`, 'quiet', 'view-rules');
     view.addEventListener('click', () => options.openRules());
-    notice.append(taskPlanQuickStarted(startedBy.name), ' · ', view);
+    notice.append(view);
     return notice;
   }
 
@@ -1160,14 +1161,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function defaultRuleBlock(next: TaskPlanProjection): HTMLElement {
     const rule = next.defaultRule;
     const section = el('section', 'task-plan-default-rule');
+    const row = el('div', 'button-row');
     section.dataset['taskPlanDefaultRule'] = rule.canSet ? 'offered' : 'unavailable';
     if (rule.current !== null) {
-      const line = el('p', 'field-note task-plan-default-rule-current', taskPlanDefaultRuleCurrent(rule.current));
+      const line = el('span', 'task-plan-default-rule-current', taskPlanDefaultRuleCurrent(rule.current));
       line.dataset['defaultRuleState'] = rule.current.state;
-      section.append(line);
+      row.append(line);
     }
     if (!rule.canSet || rule.planEnvelopeDigest === null) {
-      section.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      section.append(row);
       return section;
     }
     const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
@@ -1204,7 +1207,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     });
     yes.addEventListener('click', () => void setDefaultRule());
     if (working) for (const button of [open, yes, no]) button.disabled = true;
-    section.append(open, confirm);
+    row.append(open);
+    section.append(row, confirm);
     return section;
   }
 
@@ -1702,7 +1706,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const shown = assuranceBuffers.get(key) ?? assurance.level;
     const block = el('fieldset', 'task-plan-assurance');
     block.dataset['taskPlanAssurance'] = shown;
-    block.append(el('legend', undefined, TASK_PLAN_ASSURANCE_HEADING), el('p', 'field-note', TASK_PLAN_ASSURANCE_NOTE));
+    const legend = el('legend', undefined, `${TASK_PLAN_ASSURANCE_HEADING} · ${TASK_PLAN_ASSURANCE_NOTE}`);
+    if (!assurance.settable && assurance.reason !== null) legend.append(' · ', assurance.reason);
+    block.append(legend);
     const name = uid('assurance');
     for (const option of assurance.options) {
       const label = el('label', 'task-plan-assurance-option');
@@ -1721,8 +1727,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         body.querySelector<HTMLElement>(`[data-task-plan-edit="assurance:${option.level}"]`)?.focus();
       });
       const text = el('span', 'task-plan-assurance-text');
-      text.append(el('strong', undefined, option.label), el('span', 'field-note', option.consequence));
-      if (option.requirement !== null) text.append(el('span', 'field-note task-plan-assurance-requirement', option.requirement));
+      const consequence = [option.consequence, option.requirement].filter((line): line is string => line !== null)
+        .map((line) => line.replace(/。$/u, '')).join('；');
+      text.append(el('strong', undefined, option.label), ' · ', el('span', 'task-plan-assurance-consequence', `${consequence}。`));
       label.append(input, text);
       block.append(label);
     }
@@ -1731,7 +1738,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const chosen = assurance.options.find((option) => option.level === pending);
       block.append(el('p', 'task-plan-assurance-edited', `${TASK_PLAN_EDIT_TAG} · ${taskPlanAssuranceEdited(chosen?.label ?? pending)}`));
     }
-    if (!assurance.settable && assurance.reason !== null) block.append(el('p', 'field-note', assurance.reason));
     return [block];
   }
 
@@ -1750,19 +1756,19 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     input.id = uid('budget-input');
     input.dataset['taskDrawerControl'] = 'budget-input';
     input.value = form.draft;
-    const label = el('label', undefined, TASK_PLAN_BUDGET_INPUT);
+    const label = el('label', undefined, `${TASK_PLAN_BUDGET_INPUT} · ${TASK_PLAN_BUDGET_HINT}`);
     label.htmlFor = input.id;
-    const hint = el('small', 'field-note', TASK_PLAN_BUDGET_HINT);
-    hint.id = uid('budget-hint');
-    const described = [hint.id];
-    const error = form.error === null ? null : el('small', 'field-note task-plan-budget-error', form.error);
+    input.setAttribute('aria-label', `${TASK_PLAN_BUDGET_INPUT} · ${TASK_PLAN_BUDGET_HINT}`);
+    const described: string[] = [];
+    const error = form.error === null ? null : el('span', 'task-plan-budget-error', form.error);
     if (error !== null) {
       error.id = uid('budget-error');
       error.setAttribute('role', 'alert');
       described.push(error.id);
       input.setAttribute('aria-invalid', 'true');
+      label.append(' · ', error);
     }
-    input.setAttribute('aria-describedby', described.join(' '));
+    if (described.length > 0) input.setAttribute('aria-describedby', described.join(' '));
     input.addEventListener('input', () => {
       form.draft = input.value;
     });
@@ -1780,7 +1786,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     apply.addEventListener('click', () => applyBudgetForm(next, form));
     const cancel = control(TASK_PLAN_BUDGET_CANCEL, 'secondary', 'budget-cancel');
     cancel.addEventListener('click', () => closeBudgetForm());
-    group.append(label, input, hint, ...(error === null ? [] : [error]), apply, cancel);
+    group.append(label, input, apply, cancel);
     return group;
   }
 
@@ -2191,10 +2197,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (plan !== null) {
       const path = 'runControl.cancel.impact';
       const meta = plan.listPages?.[path];
-      const count = el('p', 'field-note', taskPageShown(TASK_PAGE_NAMES[path]!, meta?.shown ?? run.cancel.impact.length, meta?.total ?? run.cancel.impact.length));
+      const count = el('span', undefined, taskPageShown(TASK_PAGE_NAMES[path]!, meta?.shown ?? run.cancel.impact.length, meta?.total ?? run.cancel.impact.length));
       count.dataset['cancelImpactCount'] = '';
       count.setAttribute('aria-live', 'polite');
-      section.insertBefore(count, lines);
+      heading.append(' · ', count);
       const more = pageControl(plan, path, TASK_PAGE_NAMES[path]!);
       if (more !== null) section.insertBefore(more, actions);
     }
@@ -2211,17 +2217,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     section.setAttribute('aria-label', TASK_PLAN_ACTIVITY_TITLE);
     section.dataset['taskPlanActivity'] = run.cancelling ? 'cancelling' : run.pausing ? 'pausing'
       : run.continuation !== null ? 'stopped' : run.activity === null ? 'unreported' : 'running';
-    section.append(el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE));
+    const heading = el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE);
+    section.append(heading);
     const activity = run.activity;
     // A stopped Run: nothing is in flight, and what it kept is its continuation point (CONT-015).
     if (run.continuation !== null) {
       section.dataset['taskPlanActivityProgress'] = `${run.continuation.unitsSettled ?? 'unreadable'}/${run.continuation.unitsTotal}`;
-      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
+      heading.append(' · ', el('span', 'task-plan-activity-status', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
         plan?.listPages?.['runControl.continuation.pendingAnswerUnits']?.total)));
       return section;
     }
     if (activity === null) {
-      section.append(el('p', 'field-note', TASK_PLAN_ACTIVITY_UNREPORTED));
+      heading.append(' · ', el('span', 'task-plan-activity-status', TASK_PLAN_ACTIVITY_UNREPORTED));
       return section;
     }
     const now = Date.now();
@@ -2482,16 +2489,23 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const choices = el('fieldset', 'task-plan-clarification-choices');
     choices.append(el('legend', 'task-plan-clarification-question', card.question));
     const submit = control(TASK_PLAN_CLARIFICATION_SUBMIT, 'primary', `clarification-submit:${id}`);
-    const submitWhy = el('small', 'field-note', TASK_PLAN_CLARIFICATION_SUBMIT_REASON);
+    const submitWhy = el('span', undefined, TASK_PLAN_CLARIFICATION_SUBMIT_REASON);
     submitWhy.id = uid('clarification-submit');
+    submit.setAttribute('aria-label', TASK_PLAN_CLARIFICATION_SUBMIT);
+    const submitReason = el('span');
+    const submitReasonPrefix = el('span');
+    submitReason.append(submitReasonPrefix, submitWhy);
+    submit.append(submitReason);
     // A drawer whose service stopped offers nothing; the card says why it cannot be answered only when the Run says so.
     const blocked = card.answerable.reason ?? (interrupted ? '' : null);
     const ready = (): void => {
       const validText = card.origin !== 'model' || draft.optionId !== 'free-text' ||
         (draft.note.trim() !== '' && [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(draft.note)].length <= 500);
       submit.disabled = draft.optionId === null || !validText || working || blocked !== null;
-      submitWhy.textContent = blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON;
+      submitWhy.textContent = submit.disabled ? blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON : '';
       submitWhy.hidden = !submit.disabled;
+      submitReason.hidden = !submit.disabled;
+      submitReasonPrefix.textContent = submit.disabled ? ' · ' : '';
       if (submit.disabled) submit.setAttribute('aria-describedby', submitWhy.id);
       else submit.removeAttribute('aria-describedby');
     };
@@ -2515,10 +2529,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       });
       const text = el('span', 'task-plan-choice-text');
       text.append(el('span', 'task-plan-choice-label', option.label));
-      if (option.recommended !== null) {
-        text.append(el('span', 'task-plan-choice-recommended', TASK_PLAN_CLARIFICATION_RECOMMENDED), el('small', 'field-note task-plan-choice-why', option.recommended));
+      if (option.recommended !== null) text.append(el('span', 'task-plan-choice-recommended', TASK_PLAN_CLARIFICATION_RECOMMENDED));
+      if (card.origin !== 'model' || !option.id.startsWith('model-option-')) {
+        const explanation = el('span', 'task-plan-choice-detail');
+        if (option.recommended !== null) explanation.append(el('span', 'task-plan-choice-why', option.recommended.replace(/^推荐：/u, '').replace(/。$/u, '')), '；');
+        explanation.append(el('span', 'task-plan-choice-consequence', option.consequence));
+        text.append(' · ', explanation);
       }
-      text.append(el('small', 'field-note task-plan-choice-consequence', option.consequence));
       choice.append(input, text);
       choices.append(choice);
     }
@@ -2532,8 +2549,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       clarificationDrafts.set(id, draft);
       repaintQuestions(draft.noteOpen ? `clarification-note:${id}` : `clarification-note-toggle:${id}`);
     });
-    const parts: HTMLElement[] = [heading, scope, choices, el('p', 'field-note task-plan-clarification-why', card.why),
-      el('p', 'field-note task-plan-clarification-detail', card.detail), noteToggle];
+    const explanation = el('p', 'field-note');
+    explanation.append(el('span', 'task-plan-clarification-why', card.why.replace(/。$/u, '')), '；',
+      el('span', 'task-plan-clarification-detail', card.detail.replace(/。$/u, '')), '；',
+      el('span', 'task-plan-clarification-after', card.origin === 'model'
+        ? '回答会发给模型并继续处理，已完成部分保留。' : '回答后继续归纳和抽样。'));
+    const parts: HTMLElement[] = [heading, scope, choices, explanation, noteToggle];
     if (draft.noteOpen) {
       // The note is IME-safe: Enter writes into it and nothing is submitted but by 提交回答.
       const note = document.createElement('textarea');
@@ -2544,15 +2565,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       note.disabled = blocked !== null;
       note.dataset['taskDrawerControl'] = `clarification-note:${id}`;
       note.setAttribute('aria-label', card.note.label);
-      const hint = el('small', 'field-note', card.note.hint);
-      hint.id = uid('clarification-note');
-      note.setAttribute('aria-describedby', hint.id);
+      note.placeholder = card.note.hint;
+      note.setAttribute('aria-description', card.note.hint);
       note.addEventListener('input', () => {
         draft.note = note.value;
         clarificationDrafts.set(id, draft);
         ready();
       });
-      parts.push(note, hint);
+      parts.push(note);
     }
     const defer = control(TASK_PLAN_CLARIFICATION_DEFER, 'secondary', `clarification-defer:${id}`);
     defer.addEventListener('click', () => {
@@ -2563,7 +2583,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     ready();
     const actions = el('div', 'button-row');
     actions.append(submit, defer);
-    parts.push(el('p', 'field-note task-plan-clarification-after', card.after), actions, submitWhy);
+    parts.push(actions);
     section.append(...parts);
     return section;
   }
@@ -2577,10 +2597,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const item = el('li');
       item.dataset['taskPlanClarification'] = card.requestId;
       item.dataset['clarificationState'] = card.state;
-      item.append(el('span', undefined, card.question));
-      item.append(el('span', 'field-note task-plan-clarification-answer', card.answer === null
+      const line = el('span', undefined, `${card.question} · `);
+      line.append(el('span', 'task-plan-clarification-answer', card.answer === null
         ? card.answerable.reason ?? ''
-        : `${card.answer.line}（${localInstantLabel(card.answer.answeredAt)}）`));
+        : `${card.answer.line} · ${localInstantLabel(card.answer.answeredAt)}`));
+      item.append(line);
       list.append(item);
     }
     section.append(list);
@@ -2694,10 +2715,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       delete root.dataset['taskPlanVersion'];
       delete root.dataset['taskPlanStart'];
       root.dataset['taskPlanState'] = 'loading';
-      pill.hidden = true;
+      pill.textContent = TASK_DRAWER_LOADING;
+      pill.hidden = false;
       questions.replaceChildren();
       questionsPainted = '';
-      body.replaceChildren(questions, el('p', 'field-note task-drawer-loading', TASK_DRAWER_LOADING));
+      body.replaceChildren(questions);
       bar.hidden = true;
       bar.replaceChildren();
       options.onOpen();

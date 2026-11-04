@@ -433,7 +433,7 @@ const READ_QUESTIONS = `Array.from(document.querySelectorAll('#task-drawer .task
     option.dataset.clarificationOption, option.querySelector('.task-plan-choice-label')?.textContent ?? null,
     option.querySelector('.task-plan-choice-recommended')?.textContent ?? null, option.querySelector('input')?.checked === true,
   ]),
-  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.textContent, button.disabled]; })(),
+  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.getAttribute('aria-label') ?? button.textContent, button.disabled]; })(),
   defer: card.querySelector('[data-task-drawer-control^="clarification-defer:"]')?.textContent ?? null,
   line: card.dataset.clarificationState === 'deferred' ? card.textContent : null,
 }))`;
@@ -461,7 +461,7 @@ const READ_DRAWER = `(() => {
     note: text(drawer.querySelector('.task-bar-note')),
     actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => {
       const described = button.getAttribute('aria-describedby');
-      return [button.dataset.taskDrawerControl, button.textContent, button.disabled ? 'disabled' : 'enabled', described === null ? null : text(document.getElementById(described))];
+      return [button.dataset.taskDrawerControl, button.getAttribute('aria-label') ?? button.textContent, button.disabled ? 'disabled' : 'enabled', described === null ? null : text(document.getElementById(described))];
     }),
     activity: activity === null ? null : {
       state: activity.dataset.taskPlanActivity ?? null,
@@ -469,7 +469,7 @@ const READ_DRAWER = `(() => {
       rows: Object.fromEntries(Array.from(activity.querySelectorAll('dd[data-task-plan-activity-row]')).map((cell) => [cell.dataset.taskPlanActivityRow, cell.textContent])),
     },
     impact: impact === null ? null : {
-      heading: text(impact.querySelector('h4')),
+      heading: impact.querySelector('h4')?.firstChild?.textContent ?? null,
       lines: Array.from(impact.querySelectorAll('li')).map((line) => line.textContent),
       confirm: text(impact.querySelector('[data-task-drawer-control="confirm-cancel-run"]')),
       keep: text(impact.querySelector('[data-task-drawer-control="keep-running"]')),
@@ -889,7 +889,7 @@ async function main() {
     // 已暂停 with where 续行 will go on — and 续行 is offered, since a place of the governor is free.
     await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
     await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'paused-bar');
-    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.field-note')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
+    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.task-plan-activity-status')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='paused' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已暂停'`, 'paused-card-label', 30_000);
     const paused = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const pausedAttempt = paused?.run?.attempt;
@@ -1392,7 +1392,7 @@ async function main() {
       statement: SHUTDOWN_STATEMENT,
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
     const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const keptAnswer = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredRestart?.run?.state === 'resumable' && answeredRestart.run.runRecordId === queuedRun.run.runRecordId &&
@@ -1424,7 +1424,7 @@ async function main() {
     const answeredPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredPlan?.clarifications?.[0]?.state === 'answered' && answeredPlan.clarifications[0].answer?.optionId === 'retry' &&
       answeredPlan.clarifications[0].answer.note === QUESTION_NOTE, 'answer-record', answeredPlan?.clarifications ?? null);
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
 
     // ---- The Run Budget Ceiling (Issue #51, S16a; MODEL-013, MODEL-015 to MODEL-017) ----------------------------------
     at('relaunch-for-budget');
@@ -1452,7 +1452,7 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'fifth-revise');
     await waitFor(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='未设置任务预算上限' && section.querySelector('.task-plan-budget-note')?.textContent===${JSON.stringify(BUDGET_NOTE)} && section.querySelector('[data-task-plan-edit="budget"]')?.textContent==='设置上限…' && section.querySelector('[data-task-plan-edit="budget-remove"]')===null; })()`, 'budget-offered', 10_000);
     await clickSelector(renderer, '#task-drawer [data-task-plan-edit="budget"]', 'budget-open');
-    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && document.querySelector('#task-drawer label[for="'+input.id+'"]')?.textContent==='预算上限（tokens）' && document.querySelector('#task-drawer [data-task-plan-edit="budget"]')?.getAttribute('aria-expanded')==='true'; })()`, 'budget-input-focused', 10_000);
+    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && document.querySelector('#task-drawer label[for="'+input.id+'"]')?.textContent==='预算上限 · 词元 · 这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。' && document.querySelector('#task-drawer [data-task-plan-edit="budget"]')?.getAttribute('aria-expanded')==='true'; })()`, 'budget-input-focused', 10_000);
     await renderer.send('Input.insertText', { text: '五千' });
     await pressEnter(renderer);
     await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && input.value==='五千' && input.getAttribute('aria-invalid')==='true' && document.querySelector('#task-drawer .task-plan-budget-error')?.textContent===${JSON.stringify(BUDGET_INVALID)} && document.querySelector('#task-drawer .task-plan-budget-edited')===null; })()`, 'budget-refused', 10_000);
@@ -1469,7 +1469,7 @@ async function main() {
       JSON.stringify(budgetPlan.providerResolutionPlan?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
       (budgetPlan.planRevision ?? null) === null && budgetPlan.planRevisions?.at(-1)?.trigger === 'plan-edit',
     'budget-version', { edits: budgetPlan?.planVersion?.edits ?? null, ceiling: budgetPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, revision: budgetPlan?.planRevision ?? null });
-    await assertRenderer(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens' && section.querySelector('dd[data-task-plan-term="用量上限"]')?.textContent==='达到 5,000 tokens 后不再发送新的请求（8 个阅读范围）上限，不是预测' && section.querySelector('[data-task-plan-edit="budget-remove"]')?.textContent==='去掉上限' && document.querySelector('#task-drawer .task-plan-edit-record')?.textContent?.endsWith('：预算上限：未设置任务预算上限 → 任务运行预算上限：5,000 tokens')===true; })()`, 'budget-plan-words');
+    await assertRenderer(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens' && section.querySelector('dd[data-task-plan-term="用量上限"]')?.textContent==='达到 5,000 tokens 后不再发送新的请求（8 个阅读范围） · 上限，不是预测' && section.querySelector('[data-task-plan-edit="budget-remove"]')?.textContent==='去掉上限' && document.querySelector('#task-drawer .task-plan-edit-record')?.textContent?.endsWith('：预算上限：未设置任务预算上限 → 任务运行预算上限：5,000 tokens')===true; })()`, 'budget-plan-words');
 
     at('budget-reached');
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
@@ -1562,7 +1562,7 @@ async function main() {
     requireJourney(settledAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-budget-reached')) === true, 'budget-left-attention', settledAttention?.groups ?? null);
 
     at('quiet-completion-notice');
-    // One notice, in Task Outcome words (never 任务已完成), dismissed by itself within its 2.5 seconds; the completion stays in
+    // One notice, in Task Outcome words (never 任务已完成), dismissed by itself after 2.5 seconds; the completion stays in
     // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
@@ -1792,13 +1792,13 @@ async function main() {
       return {
         group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
         target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
       };
     })()`);
     requireJourney(unconfirmedRow?.group === 'exceptions' && unconfirmedRow.state === 'analysis-outcome-unconfirmed' && unconfirmedRow.blocked === 'false' &&
       unconfirmedRow.target === 'task-plan' && unconfirmedRow.pill === '结果待确认' && unconfirmedRow.object === '基线分析 · 跨单元归纳' &&
-      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '安全的下一步：查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
+      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
 
     at('outcome-unconfirmed-kept');
     // The item opens ②A with the plan in the drawer, where 结果待确认 says what is known and what is missing. 查看未确认的部分 lists the

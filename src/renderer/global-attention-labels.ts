@@ -321,10 +321,8 @@ export const REVIEW_ON_SELECTION = '所选段落';
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
 export const GLOBAL_ATTENTION_CLARIFICATION_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
 /** The prefix the product already puts before a record's safe next action. */
-export const GLOBAL_ATTENTION_NEXT_STEP_PREFIX = '安全的下一步：';
-
 export function globalAttentionNextStepLine(step: GlobalAttentionNextStep): string {
-  return `${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}${GLOBAL_ATTENTION_NEXT_STEP_LABELS[step]}`;
+  return GLOBAL_ATTENTION_NEXT_STEP_LABELS[step];
 }
 
 /** The Book an item belongs to; an import that names none yet says so. */
@@ -428,7 +426,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return item.state === 'manuscript-conflict-deferred' ? `${why}已记下暂不处理，这处冲突仍未解决。` : why;
     }
     case 'analysis-failed':
-      return '运行失败，没有形成新的结果集修订版。';
+      return '运行失败，没有形成新的分析结果。';
     case 'analysis-interrupted':
       return '运行已在派发后中断；已完成单元的结果与缺口均已保留。';
     // Issue #541: under developer-live the launch set the ceiling, and the plan cannot raise it.
@@ -502,10 +500,10 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return next === undefined ? '继续审阅时从没有完成的类别接着审。' : `「${next.label}」${next.detail ?? next.stateLabel}`;
     }
     case 'analysis-completed':
-      return facts.revisionOrdinal === null ? '已形成结果集修订版。' : `已形成第 ${facts.revisionOrdinal} 份基线分析。`;
+      return facts.revisionOrdinal === null ? '分析结果已生成。' : `已形成第 ${facts.revisionOrdinal} 份基线分析。`;
     case 'analysis-completed-with-gaps':
       if (facts.completion?.reason) return facts.completion.reason;
-      return facts.revisionOrdinal === null ? '已形成结果集修订版 · 有缺口单元。' : `已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`;
+      return facts.revisionOrdinal === null ? '分析结果已生成，部分内容尚未完成。' : `已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`;
     case 'review-completed':
       return facts.categories.length === 0 ? '审阅发现已标到稿件上。' : `已审：${quoted(facts.categories.map((category) => category.label))}；发现已标到稿件上。`;
     // The 任务 panel's own three (Issue #423, S77a): nothing starts by itself, and a cancellation keeps what was read.

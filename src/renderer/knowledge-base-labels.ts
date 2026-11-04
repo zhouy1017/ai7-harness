@@ -39,7 +39,7 @@ export interface KnowledgeBaseTabView {
 }
 
 export const KNOWLEDGE_BASE_TITLE = '知识库';
-export const KNOWLEDGE_BASE_LEDE = '社里管理的专业资料。图书与任务只选用这里的条目、记下用的版本，从不就地改动。';
+export const KNOWLEDGE_BASE_LEDE = '图书与任务可选用这里的专业资料，不会改动原条目。';
 export const KNOWLEDGE_BASE_TABS_LABEL = '知识库分类';
 
 export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
@@ -199,7 +199,7 @@ export function guidelineImported(title: string, ordinal: number): string {
 
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
 
-export const EXEMPLARS_EMPTY = '还没有范例。本社的书设为发稿版本后，交付过的文档自动归入；以前出版的书可由你导入范例。';
+export const EXEMPLARS_EMPTY = '暂无范例，已发稿并交付的本社文档会自动加入。';
 export const EXEMPLARS_NONE_DELIVERED = '还没有交付过的文档；交付后自动归入。';
 /** Reads the next page of published Books (Issue #427 review). */
 export const EXEMPLARS_MORE = '更多已出版的书…';
@@ -221,7 +221,7 @@ export const EXEMPLAR_READERS_REPORT_PINS: Readonly<Record<ReadersReportExemplar
   later: '发稿版本设定后才起草，按现在的最新一版',
 };
 /** The one action on an offered 审稿意见: the editor admits it, under the eligibility it comes with. */
-export const EXEMPLAR_READERS_REPORT_ADMIT = '归入范例（仅本社）';
+export const EXEMPLAR_READERS_REPORT_ADMIT = '归入本社范例';
 export const EXEMPLAR_READERS_REPORT_STATUS = {
   admitting: '正在归入范例…',
   admitted: '审稿意见已归入范例',
@@ -311,7 +311,7 @@ export const LIBRARY_ATTRIBUTE = '定归属…';
 export const LIBRARY_ATTRIBUTE_CONFIRM = '确定归属';
 export const LIBRARY_ELIGIBILITY = '定学习准入…';
 export const LIBRARY_ELIGIBILITY_CONFIRM = '记录决定';
-export const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
+export const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 export const LIBRARY_TITLE_LABEL = '标题';
 export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '归属';
@@ -327,7 +327,7 @@ export const LIBRARY_NO_ELIGIBILITY = '尚未定';
 export const LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION = '先定归属，再定学习准入。';
 export const LIBRARY_ELIGIBILITY_RESET = '归属改了：学习准入要按新的归属重新定，之前的决定仍留在记录里。';
 export const LIBRARY_RECOMMENDED = '建议';
-export const LIBRARY_REASON_LABEL = '补充说明（可不填）';
+export const LIBRARY_REASON_LABEL = '补充说明 · 可不填';
 /** What eligibility does and does not do (LEARN-009, LEARN-010), said once beside the choice. */
 export const LIBRARY_ELIGIBILITY_BOUNDARY = '学习准入只决定它能不能在所选范围内形成学习信号：不会启用记忆，不会扩大任务的读取范围，也不允许把它发送出去。';
 /** The wider choice's consequence, shown inline when it is chosen (LEARN-005, LEARN-012). */
@@ -377,12 +377,12 @@ export function libraryPreviewHeading(preview: Pick<LibraryMaterialPreviewProjec
 }
 
 export function libraryPreviewFacts(preview: Pick<LibraryMaterialPreviewProjection, 'source'>): string {
-  return `${LIBRARY_FORMAT_LABELS[preview.source.format]} · ${libraryBytes(preview.source.bytes)} · 原件原样保存在本机，不会改动`;
+  return `${LIBRARY_FORMAT_LABELS[preview.source.format]}${technicalWords(` · ${libraryBytes(preview.source.bytes)}`)} · 原文件保持不变`;
 }
 
 /** What arrived, how big it is, and when. */
 export function librarySourceLine(material: Pick<LibraryMaterialProjection, 'source' | 'recordedAt'>, instant: (iso: string) => string): string {
-  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]} · ${libraryBytes(material.source.bytes)} · 放入于 ${instant(material.recordedAt)}`;
+  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]}${technicalWords(` · ${libraryBytes(material.source.bytes)}`)} · 放入于 ${instant(material.recordedAt)}`;
 }
 
 /** One Learning Eligibility choice as the chooser offers it and the card states it (LEARN-004 to LEARN-006). */
@@ -470,7 +470,7 @@ export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖�
 export const MATERIAL_VECTORS_BUILD = '构建相似索引';
 export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
 export const MATERIAL_VECTORS_SEARCH = '检索';
-export const MATERIAL_VECTORS_SEARCH_NOTE = '在本机按已建的相似索引找出与这段文字相近的段落；结果只是线索，原文以分段为准。';
+export const MATERIAL_VECTORS_SEARCH_NOTE = '本机相似搜索仅供参考，原文以分段为准。';
 export const MATERIAL_VECTORS_SEARCH_FAILED = '暂时无法检索，请重试。';
 export const MATERIAL_VECTORS_BUILD_FAILED = '暂时无法构建相似索引，请重试。';
 /** 生成来源译文 (Issue #892): a non-Chinese item's machine translation, asked for under the selected policy's rule. */
@@ -479,7 +479,7 @@ export const MATERIAL_TRANSLATION_FAILED = '暂时无法生成来源译文，请
 /** What a translation shown beside its paragraph is called: the machine's, never the original. */
 export const MATERIAL_TRANSLATION_TERM = '来源译文';
 /** What the index is and is not, said once on the card (KB-009). */
-export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立：它不授予任务读取范围；任务只读计划列进「允许参考」的资料，发送什么仍由任务计划决定。';
+export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立，任务的读取和发送范围以计划为准。';
 export const MATERIAL_SEGMENTS_OPEN = '查看分段';
 export const MATERIAL_SEGMENTS_CLOSE = '收起分段';
 export const MATERIAL_SEGMENTS_PREVIOUS = '上一页';
@@ -620,7 +620,7 @@ export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported'
 
 export const CUSTOM_DIMENSIONS_HEADING = '自定义分析维度';
 export const CUSTOM_DIMENSIONS_NOTE =
-  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文。名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
+  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文；名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
 export const CUSTOM_DIMENSIONS_EMPTY = '还没有自定义分析维度。';
 export const CUSTOM_DIMENSION_NEW = '新建维度…';
 export const CUSTOM_DIMENSION_REVISE = '修改为新版本…';

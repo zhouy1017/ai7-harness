@@ -6,7 +6,7 @@ import licensesDocument from './third-party-licenses.generated.json' with { type
 import {
   HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_BACK, HELP_BREADCRUMB, HELP_LICENSE_EMPTY,
   HELP_LICENSE_FIELD_LICENSE, HELP_LICENSE_FIELD_SOURCE, HELP_LICENSE_FILTER_LABEL, HELP_LICENSE_FILTER_PLACEHOLDER,
-  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LICENSE_TEXT_SUMMARY, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
+  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
   helpLicenseCount, type HelpTab,
 } from './help-labels.js';
 import { HELP_PRIVACY_SECTIONS, helpUsageSections, type HelpSection } from './help-text.js';
@@ -70,11 +70,19 @@ export function mountHelp(options: HelpSurfaceOptions): void {
 
   // 关于: the same two versions 设置 › 数据与存储 shows, plus the service protocol this build speaks.
   const about = el('section', 'source-card help-about');
-  const aboutLine = el('p', 'help-about-line', HELP_ABOUT_LOADING);
+  const aboutLine = el('span', 'help-about-line', HELP_ABOUT_LOADING);
   // Whether the Data Version is frozen, in 设置 › 数据与存储's own words (Issue #967).
-  const stateLine = el('p', 'field-note help-data-version-state');
-  const buildLine = el('p', 'field-note help-build-identity');
-  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine, buildLine);
+  const buildContext = el('span');
+  const prefix = el('span', undefined, ' · ');
+  prefix.hidden = true;
+  const stateLine = el('span', 'help-data-version-state');
+  const separator = el('span', undefined, ' · ');
+  separator.hidden = true;
+  const buildLine = el('span', 'help-build-identity');
+  buildContext.append(prefix, stateLine, separator, buildLine);
+  const aboutDetails = el('p');
+  aboutDetails.append(aboutLine, buildContext);
+  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutDetails);
   if (technicalLayerVisible) root.append(about);
   const developer = el('label', 'help-developer-mode');
   const toggle = el('input');
@@ -97,6 +105,8 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       aboutLine.textContent = helpAboutLine(versions.softwareVersion, versions.dataVersion, protocolVersion);
       stateLine.textContent = dataVersionStateLine(versions);
       buildLine.textContent = buildIdentityLine(identity);
+      prefix.hidden = false;
+      separator.hidden = false;
     },
   ).catch(() => { aboutLine.textContent = HELP_ABOUT_FAILED; stateLine.textContent = ''; buildLine.textContent = ''; });
 
@@ -127,17 +137,21 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   licensesPanel.setAttribute('role', 'tabpanel');
   licensesPanel.tabIndex = 0;
   licensesPanel.setAttribute('aria-labelledby', 'help-tab-licenses');
-  licensesPanel.append(el('h3', undefined, HELP_TABS[2]!.label));
-  licensesPanel.append(el('p', 'field-note', HELP_LICENSE_LOCAL_NOTE));
+  const licensesHeading = el('h3', undefined, HELP_TABS[2]!.label);
+  licensesHeading.append(' · ', el('span', undefined, HELP_LICENSE_LOCAL_NOTE));
+  licensesPanel.append(licensesHeading);
   const filterLabel = el('label', 'field-note', HELP_LICENSE_FILTER_LABEL);
   filterLabel.htmlFor = 'help-license-filter';
   const filter = el('input');
   filter.id = 'help-license-filter';
   filter.type = 'search';
   filter.placeholder = HELP_LICENSE_FILTER_PLACEHOLDER;
-  const count = el('p', 'field-note help-license-count');
-  const empty = el('p', 'field-note help-license-empty', HELP_LICENSE_EMPTY);
+  const filterStatus = el('output', 'help-license-status');
+  filterStatus.setAttribute('aria-live', 'polite');
+  const count = el('span', 'help-license-count');
+  const empty = el('span', 'help-license-empty', ` · ${HELP_LICENSE_EMPTY}`);
   empty.hidden = true;
+  filterStatus.append(count, empty);
   const list = el('ul', 'help-license-list');
   const items = licenses.map((license) => {
     const item = el('li', 'help-license');
@@ -148,7 +162,6 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       el('span', 'help-license-name', license.name),
       el('span', 'help-license-version', technicalLayerVisible ? license.version : ''),
       el('span', 'help-license-id', `${HELP_LICENSE_FIELD_LICENSE} ${license.license}`),
-      el('span', 'field-note help-license-hint', HELP_LICENSE_TEXT_SUMMARY),
     );
     const source = [license.repository, license.homepage].filter((value): value is string => value !== null).join(' · ');
     details.append(
@@ -172,7 +185,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     empty.hidden = shown > 0;
   };
   filter.addEventListener('input', filterLicenses);
-  licensesPanel.append(filterLabel, filter, count, empty, list);
+  licensesPanel.append(filterLabel, filter, filterStatus, list);
 
   panels.set('usage', usagePanel);
   panels.set('privacy', privacyPanel);
