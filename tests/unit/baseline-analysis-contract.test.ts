@@ -64,45 +64,38 @@ describe('parseUnitResult (Baseline Manuscript Analysis Contract v1)', () => {
     expect(parsed.ok).toBe(true);
   });
 
-  it('rejects unanchored unresolved strings instead of accepting them as typed notes (#807)', () => {
-    const invalid = { ...validResult(), unresolved: ['合成未确定事项。'] };
-    expect(parseUnitResult(JSON.stringify(invalid), expected)).toEqual({
-      ok: false, code: 'schema-invalid', detail: '未解决事项不符合契约 v1。',
-    });
-    expect(parseUnitResult(JSON.stringify({ ...invalid,
-      unresolved: [{ description: '合成未确定事项。', sourceRanges: [] }],
-    }), expected).ok).toBe(true);
+  it('wraps string notes, defaults missing arrays and overrides request echoes', () => {
+    const body = { ...validResult(4), extra: 1, schema: 'other', confidence: 'certain', unresolved: ['合成事项'] };
+    const parsed = parseUnitResult(JSON.stringify(body), expected);
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 3, confidence: 'low', unresolved: [{ description: '合成事项', sourceRanges: [] }] } });
+    expect(parseUnitResult('not json', expected)).toMatchObject({ ok: false, code: 'not-json' });
+    expect(parseUnitResult('{}', expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
   });
 
-  it('rejects non-JSON, an extra or missing key, a wrong schema, and an unknown confidence', () => {
-    expect(parseUnitResult('这不是 JSON', expected)).toEqual({ ok: false, code: 'not-json', detail: '模型输出不是 JSON。' });
-    expect(parseUnitResult(JSON.stringify({ ...validResult(), extra: 1 }), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    const { conflicts: _conflicts, ...missing } = validResult();
-    expect(parseUnitResult(JSON.stringify(missing), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseUnitResult(JSON.stringify({ ...validResult(), schema: 'other/1' }), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseUnitResult(JSON.stringify({ ...validResult(), confidence: 'certain' }), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseUnitResult(JSON.stringify({ ...validResult(), entities: [{ name: '', kind: 'person', aliases: [], note: null, sourceRanges: [] }] }), expected))
-      .toMatchObject({ ok: false, code: 'schema-invalid' });
+  it('drops only an unknown range and falls back to the whole block for invalid offsets', () => {
+    const body = validResult();
+    (body.entities as Array<{ sourceRanges: unknown[] }>)[0]!.sourceRanges.push({ blockId: BLOCK_C });
+    (body.events as Array<{ sourceRanges: unknown[] }>)[0]!.sourceRanges = [{ blockId: BLOCK_B, fromGrapheme: 5, toGrapheme: 2 }];
+    const parsed = parseUnitResult(JSON.stringify(body), expected);
+    expect(parsed).toMatchObject({ ok: true, result: { entities: [{ sourceRanges: [{ blockId: BLOCK_A }] }], events: [{ sourceRanges: [{ fromGrapheme: null, toGrapheme: null }] }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'range-out-of-unit' })]));
   });
 
-  it('rejects a result that names another unit', () => {
-    expect(parseUnitResult(JSON.stringify(validResult(4)), expected)).toMatchObject({ ok: false, code: 'unit-mismatch' });
+  it('falls back to a whole-block reference when an offset exceeds the pinned text', () => {
+    const parsed = parseUnitResult(JSON.stringify(validResult()), { ...expected, blockLengths: new Map([[BLOCK_A, 2]]) });
+    expect(parsed.ok && parsed.result.entities[0]!.sourceRanges).toEqual([{ blockId: BLOCK_A, fromGrapheme: null, toGrapheme: null }]);
+    expect(parsed.ok && parsed.result.salvaged).toEqual([{ section: 'entities.0.sourceRanges', index: 0, reason: 'range-offsets-whole-block' }]);
   });
 
-  it('rejects a source range that leaves the unit', () => {
-    const outside = validResult();
-    (outside.events as Array<{ sourceRanges: unknown[] }>)[0]!.sourceRanges = [{ blockId: BLOCK_C, fromGrapheme: null, toGrapheme: null }];
-    expect(parseUnitResult(JSON.stringify(outside), expected)).toMatchObject({ ok: false, code: 'range-out-of-unit' });
-    const malformed = validResult();
-    (malformed.entities as Array<{ sourceRanges: unknown[] }>)[0]!.sourceRanges = [{ blockId: BLOCK_A, fromGrapheme: 5, toGrapheme: 2 }];
-    expect(parseUnitResult(JSON.stringify(malformed), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
+  it('stably renumbers duplicate events and drops only malformed entries', () => {
+    const body = validResult();
+    (body.events as unknown[]).push({ ordinal: 1, summary: '重复', participants: [] }, { summary: '' });
+    const parsed = parseUnitResult(JSON.stringify(body), expected);
+    expect(parsed.ok && parsed.result.events.map((entry) => entry.ordinal)).toEqual([1, 2]);
+    expect(parsed.ok && parsed.result.entities).toHaveLength(1);
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ section: 'events', index: 2, reason: 'entry-invalid' })]));
   });
 
-  it('rejects duplicate event ordinals', () => {
-    const duplicated = validResult();
-    (duplicated.events as unknown[]).push({ ordinal: 1, summary: '重复。', chronology: null, participants: [], sourceRanges: [] });
-    expect(parseUnitResult(JSON.stringify(duplicated), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-  });
 });
 
 describe('prompt contract', () => {
@@ -158,7 +151,7 @@ describe('prompt contract', () => {
     expect(v2Prompt).not.toMatch(/tool|工具调用/u);
   });
 
-  it('shows in /2 a note the unchanged parser admits and a bare string it still refuses (#826)', () => {
+  it('keeps the frozen /2 note instructions while accepting historical bare strings (#1311)', () => {
     const allowed = /应写 (\[\{.*?\}\])，/u.exec(BASELINE_PROMPT_CONTRACT.systemPrompt)?.[1];
     const forbidden = /不得写 (\[".*?"\])。/u.exec(BASELINE_PROMPT_CONTRACT.systemPrompt)?.[1];
     expect(allowed).toBe('[{"description": "说明", "sourceRanges": []}]');
@@ -166,7 +159,7 @@ describe('prompt contract', () => {
     for (const key of ['conflicts', 'unresolved'] as const) {
       expect(parseUnitResult(JSON.stringify({ ...validResult(), [key]: JSON.parse(allowed!) as unknown }), expected).ok).toBe(true);
       expect(parseUnitResult(JSON.stringify({ ...validResult(), [key]: JSON.parse(forbidden!) as unknown }), expected))
-        .toMatchObject({ ok: false, code: 'schema-invalid' });
+        .toMatchObject({ ok: true });
     }
   });
 

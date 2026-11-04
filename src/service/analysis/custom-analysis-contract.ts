@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, boundedText, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasExactKeys, hasKeys, isRecord, sha256Hex } from './canonical.js';
 import {
   CUSTOM_ANALYSIS_CONTRACT_VERSION,
   CUSTOM_ANALYSIS_DIMENSION_SCHEMA,
@@ -198,45 +198,25 @@ export type CustomAnalysisUnitResultParse =
   | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: CustomAnalysisUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'quote-not-in-block'; detail: string };
 
-/**
- * One unit's answer under the contract, or why it is not one. An unknown key, a row beyond the bound or a score anywhere is a
- * refused unit result rather than a dropped row: a model that answered another shape has not answered this contract.
- */
+/** Bad rows are excluded individually; exact quotations and real block ordinals remain required. */
 export function parseCustomAnalysisUnitResult(text: string, expected: { unitOrdinal: number; blockCount: number }): CustomAnalysisUnitResultParse {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripModelJsonFence(text)) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): CustomAnalysisUnitResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'rows'])) return invalid('单元结果键集合不符合自定义分析契约 v1。');
-  if (parsed.schema !== CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是自定义分析契约 v1。');
-  if (!Number.isSafeInteger(parsed.unitOrdinal) || (parsed.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (parsed.unitOrdinal !== expected.unitOrdinal) {
-    return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(parsed.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
-  }
-  if (!Array.isArray(parsed.rows) || parsed.rows.length > MAX_CUSTOM_ANALYSIS_ROWS_PER_UNIT) {
-    return invalid(`回答集合不符合自定义分析契约 v1（至多 ${MAX_CUSTOM_ANALYSIS_ROWS_PER_UNIT} 条）。`);
-  }
+  const reader = ModelResultReader.read(text, CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
+  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
   const rows: CustomAnalysisUnitRow[] = [];
-  for (const [index, candidate] of (parsed.rows as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条回答`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['answer', 'blockOrdinal', 'quote', 'confidenceNote'])) {
-      return invalid(`${label}的键集合不符合自定义分析契约 v1。`);
+  for (const [index, candidate] of reader.array(reader.value.rows, 'rows', MAX_CUSTOM_ANALYSIS_ROWS_PER_UNIT).entries()) {
+    if (!hasKeys(candidate, ['answer', 'blockOrdinal', 'quote']) || !boundedText(candidate.quote, MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES)) {
+      reader.drop('rows', index, 'quote-invalid'); continue;
     }
-    if (!boundedText(candidate.answer, MAX_CUSTOM_ANALYSIS_ANSWER_GRAPHEMES)) return invalid(`${label}的回答缺失或超出 ${MAX_CUSTOM_ANALYSIS_ANSWER_GRAPHEMES} 字素边界。`);
-    if (!Number.isSafeInteger(candidate.blockOrdinal) || (candidate.blockOrdinal as number) < 1) return invalid(`${label}的内容块序号无效。`);
-    if (!boundedText(candidate.quote, MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES)) return invalid(`${label}的引文缺失或超出 ${MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES} 字素边界。`);
-    if (!boundedText(candidate.confidenceNote, MAX_CUSTOM_ANALYSIS_CONFIDENCE_NOTE_GRAPHEMES)) {
-      return invalid(`${label}的把握说明缺失或超出 ${MAX_CUSTOM_ANALYSIS_CONFIDENCE_NOTE_GRAPHEMES} 字素边界。`);
+    const ordinal = typeof candidate.blockOrdinal === 'string' && candidate.blockOrdinal.trim() !== '' ? Number(candidate.blockOrdinal) : candidate.blockOrdinal;
+    if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > expected.blockCount) {
+      reader.drop('rows', index, 'quote-not-in-block'); continue;
     }
-    if ((candidate.blockOrdinal as number) > expected.blockCount) {
-      return { ok: false, code: 'quote-not-in-block', detail: `${label}引用的内容块序号 ${String(candidate.blockOrdinal)} 不在本单元列出的 ${expected.blockCount} 个内容块内。` };
-    }
-    rows.push({ answer: candidate.answer, blockOrdinal: candidate.blockOrdinal as number, quote: candidate.quote, confidenceNote: candidate.confidenceNote });
+    const answer = reader.text(candidate.answer, MAX_CUSTOM_ANALYSIS_ANSWER_GRAPHEMES, 'rows', index);
+    const confidenceNote = reader.text(candidate.confidenceNote, MAX_CUSTOM_ANALYSIS_CONFIDENCE_NOTE_GRAPHEMES, 'rows', index, true);
+    if (answer === null || confidenceNote === null) { reader.drop('rows', index, 'text-invalid'); continue; }
+    if (ordinal !== candidate.blockOrdinal) reader.drop('rows', index, 'blockOrdinal-normalized');
+    rows.push({ answer, blockOrdinal: ordinal as number, quote: candidate.quote, confidenceNote });
   }
-  const result: CustomAnalysisUnitResult = { schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, rows };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  if (rows.length === 0 && !reader.empty('rows')) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
+  return reader.finish<CustomAnalysisUnitResult>({ schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, rows });
 }

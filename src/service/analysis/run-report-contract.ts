@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, boundedText, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, sha256Hex } from './canonical.js';
 import type { RunReportAccounting, RunReportSuggestion } from './run-report.js';
 
 /**
@@ -127,28 +127,16 @@ export function runReportReflectionRequestDigest(promptContractDigest: string, a
  * disclosed absence in the report rather than a failed Run.
  */
 export function parseRunReportReflectionResult(text: string): RunReportReflectionResultParse {
-  const body = stripModelJsonFence(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): RunReportReflectionResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'items'])) return invalid('运行反思结果键集合不符合契约 v1。');
-  if (parsed.schema !== RUN_REPORT_REFLECTION_RESULT_SCHEMA) return invalid('运行反思结果 schema 不是契约 v1。');
-  if (!Array.isArray(parsed.items) || parsed.items.length > MAX_RUN_REPORT_REFLECTION_ITEMS) {
-    return invalid('运行反思条目集合缺失或超出边界。');
-  }
+  const reader = ModelResultReader.read(text, RUN_REPORT_REFLECTION_RESULT_SCHEMA);
+  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
   const items: RunReportSuggestion[] = [];
-  for (const [index, candidate] of (parsed.items as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条建议`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['suggestion', 'basis'])) return invalid(`${label}的键集合不符合契约 v1。`);
-    if (!boundedText(candidate.suggestion, MAX_TEXT_GRAPHEMES)) return invalid(`${label}的做法缺失或超出边界。`);
-    if (!boundedText(candidate.basis, MAX_TEXT_GRAPHEMES)) return invalid(`${label}的依据缺失或超出边界。`);
-    items.push({ suggestion: candidate.suggestion, basis: candidate.basis });
+  for (const [index, candidate] of reader.array(reader.value.items, 'items', MAX_RUN_REPORT_REFLECTION_ITEMS).entries()) {
+    if (!hasKeys(candidate, ['suggestion'])) { reader.drop('items', index, 'entry-invalid'); continue; }
+    const suggestion = reader.text(candidate.suggestion, MAX_TEXT_GRAPHEMES, 'items', index);
+    const basis = reader.text(candidate.basis, MAX_TEXT_GRAPHEMES, 'items', index, true);
+    if (suggestion === null || basis === null) { reader.drop('items', index, 'text-invalid'); continue; }
+    items.push({ suggestion, basis });
   }
-  const result: RunReportReflectionResult = { schema: RUN_REPORT_REFLECTION_RESULT_SCHEMA, items };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  if (items.length === 0 && !reader.empty('items')) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
+  return reader.finish<RunReportReflectionResult>({ schema: RUN_REPORT_REFLECTION_RESULT_SCHEMA, items });
 }

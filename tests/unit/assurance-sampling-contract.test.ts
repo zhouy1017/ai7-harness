@@ -135,15 +135,15 @@ describe('the Assurance Sampling prompt contract /2 (Issue #826)', () => {
     expect(v2Instruction).not.toMatch(/tool|工具调用/u);
   });
 
-  it('shows in /2 a ref the unchanged parser admits and the two forms it still refuses', () => {
+  it('keeps the frozen /2 ref instructions while accepting historical numeric and bracketed refs', () => {
     const shown = /应写 "ref": "(.*?)"，不得写 (.*?) 或 "(.*?)"。/u.exec(ASSURANCE_SAMPLING_PROMPT_CONTRACT_V2.instruction);
     expect(shown?.slice(1)).toEqual(['0', '0', '[0]']);
     const listed = { refs: ['0'] };
     const body = (ref: unknown) => JSON.stringify({ schema: ASSURANCE_SAMPLING_RESULT_SCHEMA, dispositions: [{ ref, disposition: '成立', reason: '合成理由。' }] });
     expect(parseAssuranceSamplingResult(body('0'), listed).ok).toBe(true);
-    // The two V4.1 answers of #826: the JSON number and the bracketed string. Neither is coerced.
-    expect(parseAssuranceSamplingResult(body(0), listed)).toEqual({ ok: false, code: 'schema-invalid', detail: '第 1 项判定的发现编号无效。' });
-    expect(parseAssuranceSamplingResult(body('[0]'), listed)).toEqual({ ok: false, code: 'schema-invalid', detail: '第 1 项判定的发现编号无效。' });
+    // The two historical V4.1 forms are normalized by the loose parser.
+    expect(parseAssuranceSamplingResult(body(0), listed)).toMatchObject({ ok: true, result: { dispositions: [{ ref: '0' }] } });
+    expect(parseAssuranceSamplingResult(body('[0]'), listed)).toMatchObject({ ok: true, result: { dispositions: [{ ref: '0' }] } });
   });
 
   it('writes the bound contract’s instruction into the message and nothing else of it differs', () => {
@@ -211,41 +211,18 @@ describe('parseAssuranceSamplingResult (Assurance Sampling Contract v1)', () => 
     }
   });
 
-  it('refuses a response that is not JSON', () => {
-    expect(parseAssuranceSamplingResult('这不是 JSON', EXPECTED)).toEqual({ ok: false, code: 'not-json', detail: '模型输出不是 JSON。' });
+  it('normalizes refs and dispositions, retaining the first duplicate and only gaps for missing refs', () => {
+    const body = { schema: 'other', dispositions: [
+      { ref: 0, disposition: '降级', reason: '据'.repeat(201) }, { ref: '[0]', disposition: '成立' }, { ref: '7', disposition: '成立' },
+    ] };
+    const parsed = parseAssuranceSamplingResult(JSON.stringify(body), EXPECTED);
+    expect(parsed).toMatchObject({ ok: true, result: { dispositions: [{ ref: '0', disposition: '需降级', reason: '据'.repeat(200) }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'ref-out-of-sample' }), expect.objectContaining({ reason: 'duplicate-ref' }),
+      expect.objectContaining({ section: 'missingRefs', index: 1 }),
+    ]));
+    expect(parseAssuranceSamplingResult('not json', EXPECTED)).toMatchObject({ ok: false, code: 'not-json' });
+    expect(parseAssuranceSamplingResult(JSON.stringify({ dispositions: [] }), EXPECTED)).toMatchObject({ ok: false, code: 'schema-invalid' });
   });
 
-  it('refuses every shape the schema does not admit', () => {
-    const refuse = (mutate: (body: Record<string, unknown>) => void) => {
-      const body = validResult();
-      mutate(body);
-      return parseAssuranceSamplingResult(JSON.stringify(body), EXPECTED);
-    };
-    expect(refuse((body) => { body.extra = 1; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { body.schema = 'other/1'; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { delete body.dispositions; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { (body.dispositions as Array<{ disposition: string }>)[0]!.disposition = '存疑'; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { (body.dispositions as Array<{ reason: string }>)[0]!.reason = ''; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { (body.dispositions as Array<Record<string, unknown>>)[0]!.note = 1; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    // 200 graphemes is the bound; 201 is not.
-    expect(refuse((body) => { (body.dispositions as Array<{ reason: string }>)[0]!.reason = '合'.repeat(200); }).ok).toBe(true);
-    expect(refuse((body) => { (body.dispositions as Array<{ reason: string }>)[0]!.reason = '合'.repeat(201); })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    // One finding, two dispositions: a malformed array, not an unlisted finding.
-    expect(refuse((body) => { const list = body.dispositions as Array<Record<string, unknown>>; list[1] = { ...list[0]! }; }))
-      .toMatchObject({ ok: false, code: 'schema-invalid' });
-  });
-
-  it('refuses a disposition on a finding this turn never listed', () => {
-    const outside = validResult();
-    (outside.dispositions as Array<{ ref: string }>)[1]!.ref = '7';
-    expect(parseAssuranceSamplingResult(JSON.stringify(outside), EXPECTED)).toMatchObject({ ok: false, code: 'ref-out-of-sample' });
-  });
-
-  it('refuses a result that leaves a listed finding unjudged', () => {
-    const short = validResult();
-    (short.dispositions as unknown[]).pop();
-    expect(parseAssuranceSamplingResult(JSON.stringify(short), EXPECTED)).toMatchObject({ ok: false, code: 'disposition-missing' });
-    expect(parseAssuranceSamplingResult(JSON.stringify({ schema: ASSURANCE_SAMPLING_RESULT_SCHEMA, dispositions: [] }), EXPECTED))
-      .toMatchObject({ ok: false, code: 'disposition-missing' });
-  });
 });

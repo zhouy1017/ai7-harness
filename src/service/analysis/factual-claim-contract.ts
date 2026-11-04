@@ -1,7 +1,7 @@
-import { stripModelJsonFence, type SalvagedModelResult, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import { ModelResultReader, NO_USABLE_MODEL_ENTRIES, type SalvagedModelResult, canonicalJson, sha256Hex } from './canonical.js';
 import type { EvidenceAssuranceLevel } from '../../shared/protocol.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, parseFactualReviewUnitResult, type FactualUnitAssertion } from './factual-review-contract.js';
-import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, parseFactualReviewUnitResultV2, type FactualEvidenceRelation, type FactualCorrectionEntry } from './factual-review-contract-v2.js';
+import { parseFactualEvidenceRelations, parseFactualCorrectionVariants, type FactualEvidenceRelation, type FactualCorrectionEntry } from './factual-review-contract-v2.js';
 import { FACTUAL_CLAIM_EXTRACTION_CONTRACT, FACTUAL_CLAIM_VERIFICATION_CONTRACT } from './factual-claim-ledger.js';
 import { factualReviewLevelDefinition, type AnalysisKindDefinition } from './kind-definition.js';
 import { reduceFactualReview, type FactualUnitOutcome } from './factual-review-reducers.js';
@@ -34,24 +34,20 @@ export function factualClaimVerificationPrompt(level: Exclude<EvidenceAssuranceL
     ].join('\n'), tools: ['websearch', 'webfetch'] as const };
 }
 
-function readObject(text: string): Record<string, unknown> | null {
-  try {
-    const value: unknown = JSON.parse(stripModelJsonFence(text));
-    return isRecord(value) ? value : null;
-  } catch { return null; }
-}
-
-/** Reuse the established assertion limits and class/reference parser, without accepting an old contract response. */
+/** Validate each assertion before canonicalization; JSON.stringify safely transports untrusted surrogates. */
 export function parseFactualClaimExtraction(text: string, expected: { unitOrdinal: number; blockCount: number }) {
-  let value: unknown;
-  try { value = JSON.parse(stripModelJsonFence(text)); }
-  catch { return { ok: false as const, code: 'not-json' as const, detail: '断言抽取结果不是有效 JSON。' }; }
-  if (!isRecord(value) || value.schema !== FACTUAL_CLAIM_EXTRACTION_CONTRACT) return { ok: false as const, code: 'schema-invalid' as const, detail: '结果不符合断言抽取契约。' };
-  const parsed = parseFactualReviewUnitResult(canonicalJson({ ...value, schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA }), expected);
+  const reader = ModelResultReader.read(text, FACTUAL_CLAIM_EXTRACTION_CONTRACT, expected.unitOrdinal);
+  if (reader === null) {
+    try { JSON.parse(text); return { ok: false as const, code: 'schema-invalid' as const, detail: NO_USABLE_MODEL_ENTRIES }; }
+    catch { return { ok: false as const, code: 'not-json' as const, detail: NO_USABLE_MODEL_ENTRIES }; }
+  }
+  if (reader.value.assertions === undefined && !reader.empty('assertions')) {
+    return { ok: false as const, code: 'schema-invalid' as const, detail: NO_USABLE_MODEL_ENTRIES };
+  }
+  const parsed = parseFactualReviewUnitResult(JSON.stringify({ ...reader.value, schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA }), expected);
   if (!parsed.ok) return parsed;
-  const result = { ...parsed.result, schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT };
-  const json = canonicalJson(result);
-  return { ok: true as const, result, canonicalJson: json, digest: sha256Hex(json) };
+  reader.salvaged.push(...parsed.result.salvaged ?? []);
+  return reader.finish({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal: expected.unitOrdinal, assertions: parsed.result.assertions });
 }
 
 export interface FactualClaimVerificationResult extends SalvagedModelResult {
@@ -63,21 +59,16 @@ export interface FactualClaimVerificationResult extends SalvagedModelResult {
 
 /** Evidence keeps v2's bounds; identity and assertion text come solely from the frozen claim. */
 export function parseFactualClaimVerification(text: string, claim: { readonly claimId: string; readonly assertion: FactualUnitAssertion }) {
-  const value = readObject(text);
-  const invalid = () => ({ ok: false as const, code: 'schema-invalid' as const, detail: '结果不符合这条断言的联网取证契约。' });
-  if (value === null || !hasExactKeys(value, ['schema', 'claimId', 'evidenceRelations', 'corrections']) ||
-    value.schema !== FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA || value.claimId !== claim.claimId || !Array.isArray(value.corrections)) return invalid();
-  const parsed = parseFactualReviewUnitResultV2(canonicalJson({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1,
-    assertions: [{ ...claim.assertion, evidenceRelations: value.evidenceRelations }],
-    corrections: value.corrections.length === 0 ? [] : [{ assertionRef: 1, variants: value.corrections }],
-  }), { unitOrdinal: 1, blockCount: claim.assertion.blockOrdinal });
-  if (!parsed.ok || parsed.result.schema !== FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA) return invalid();
-  const evidenceRelations = parsed.result.assertions[0]!.evidenceRelations;
-  if (evidenceRelations.some((relation) => !relation.sourceRef.startsWith('https://'))) return invalid();
-  const result: FactualClaimVerificationResult = { schema: FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA, claimId: claim.claimId,
-    evidenceRelations, corrections: parsed.result.corrections[0]?.variants ?? [] };
-  const json = canonicalJson(result);
-  return { ok: true as const, result, canonicalJson: json, digest: sha256Hex(json) };
+  const reader = ModelResultReader.read(text, FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA);
+  if (reader === null) return { ok: false as const, code: 'not-json' as const, detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader.value.claimId !== claim.claimId) reader.drop('claimId', -1, 'request-claimId');
+  const evidenceRelations = parseFactualEvidenceRelations(reader.value.evidenceRelations, reader, 'evidenceRelations', true);
+  const corrections = parseFactualCorrectionVariants(reader.value.corrections, reader, 'corrections');
+  const hadEntries = [reader.value.evidenceRelations, reader.value.corrections].some((value) => Array.isArray(value) && value.length > 0);
+  if (evidenceRelations.length + corrections.length === 0 && (hadEntries || !reader.empty('evidenceRelations') && !reader.empty('corrections'))) {
+    return { ok: false as const, code: 'schema-invalid' as const, detail: NO_USABLE_MODEL_ENTRIES };
+  }
+  return reader.finish<FactualClaimVerificationResult>({ schema: FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA, claimId: claim.claimId, evidenceRelations, corrections });
 }
 
 /** Stable historical intent vocabulary; reading it does not admit a new execution. */

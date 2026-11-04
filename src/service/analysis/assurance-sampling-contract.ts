@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, graphemeCount, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, requireAnalysis, sha256Hex } from './canonical.js';
 import type {
   AnalysisAssuranceSampleStratumProjection,
   CoverageManifestProjection,
@@ -271,10 +271,6 @@ export function assuranceSamplingRequestDigest(
   return sha256Hex(canonicalJson({ promptContractDigest, unitOrdinal, unitDigest, sampleDigest }));
 }
 
-function boundedReason(value: unknown): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= MAX_REASON_GRAPHEMES;
-}
-
 /**
  * Validate a model response against the sampling contract. Every refusal is one of four codes, and the
  * caller records it as a gap for this turn's findings only; nothing here throws, because an invalid
@@ -284,42 +280,31 @@ export function parseAssuranceSamplingResult(
   text: string,
   expected: { readonly refs: ReadonlyArray<string> },
 ): AssuranceSamplingResultParse {
-  const body = stripModelJsonFence(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): AssuranceSamplingResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'dispositions'])) return invalid('保证抽样结果键集合不符合契约 v1。');
-  if (parsed.schema !== ASSURANCE_SAMPLING_RESULT_SCHEMA) return invalid('保证抽样结果 schema 不是契约 v1。');
-  if (!Array.isArray(parsed.dispositions) || parsed.dispositions.length > MAX_DISPOSITIONS) return invalid('保证抽样判定集合缺失或超出边界。');
+  const reader = ModelResultReader.read(text, ASSURANCE_SAMPLING_RESULT_SCHEMA);
+  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
   const listed = new Set(expected.refs);
   const seen = new Set<string>();
   const dispositions: AssuranceSamplingDisposition[] = [];
-  for (const [index, candidate] of (parsed.dispositions as unknown[]).entries()) {
-    const label = `第 ${index + 1} 项判定`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['ref', 'disposition', 'reason'])) return invalid(`${label}的键集合不符合契约 v1。`);
-    if (typeof candidate.ref !== 'string' || !REF_PATTERN.test(candidate.ref)) return invalid(`${label}的发现编号无效。`);
-    if (!ASSURANCE_DISPOSITIONS.includes(candidate.disposition as AssuranceDisposition)) return invalid(`${label}的判定不在闭合集合内。`);
-    if (!boundedReason(candidate.reason)) return invalid(`${label}的理由缺失或超出边界。`);
-    if (!listed.has(candidate.ref)) {
-      return { ok: false, code: 'ref-out-of-sample', detail: `${label}引用了本次抽样未列出的发现 ${candidate.ref}。` };
-    }
-    // A repeated ref is a malformed array rather than an unlisted finding: the second row has no
-    // finding of its own to judge, and admitting it would let one finding carry two dispositions.
-    if (seen.has(candidate.ref)) return invalid(`${label}重复判定了同一条发现。`);
-    seen.add(candidate.ref);
-    dispositions.push({ ref: candidate.ref, disposition: candidate.disposition as AssuranceDisposition, reason: candidate.reason });
+  const aliases: Readonly<Record<string, AssuranceDisposition>> = {
+    upheld: '成立', supported: '成立', 支持: '成立', 保留: '成立', downgrade: '需降级', 降级: '需降级', 需要降级: '需降级',
+    delete: '应删除', remove: '应删除', 删除: '应删除', 需删除: '应删除',
+  };
+  for (const [index, candidate] of reader.array(reader.value.dispositions, 'dispositions', MAX_DISPOSITIONS).entries()) {
+    if (!hasKeys(candidate, ['ref'])) { reader.drop('dispositions', index, 'entry-invalid'); continue; }
+    const ref = typeof candidate.ref === 'string' || typeof candidate.ref === 'number' ? String(candidate.ref).trim().replace(/^[\[（(【]|[\]）)】]$/gu, '') : '';
+    if (!REF_PATTERN.test(ref) || !listed.has(ref)) { reader.drop('dispositions', index, 'ref-out-of-sample'); continue; }
+    if (seen.has(ref)) { reader.drop('dispositions', index, 'duplicate-ref'); continue; }
+    const reason = reader.text(candidate.reason, MAX_REASON_GRAPHEMES, 'dispositions', index, true);
+    if (reason === null) { reader.drop('dispositions', index, 'reason-invalid'); continue; }
+    if (ref !== candidate.ref) reader.drop('dispositions', index, 'ref-normalized');
+    seen.add(ref);
+    dispositions.push({ ref, disposition: reader.enum(candidate.disposition, ASSURANCE_DISPOSITIONS, aliases, '需降级', 'dispositions', index), reason });
   }
-  const missing = expected.refs.filter((ref) => !seen.has(ref));
-  if (missing.length > 0) {
-    return { ok: false, code: 'disposition-missing', detail: `本次抽样列出的发现 ${missing.join('、')} 没有判定。` };
+  expected.refs.forEach((ref, index) => { if (!seen.has(ref)) reader.drop('missingRefs', index, `disposition-missing:${ref}`); });
+  if (dispositions.length === 0 && (expected.refs.length > 0 || !reader.empty('dispositions'))) {
+    return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
   }
-  const result: AssuranceSamplingResult = { schema: ASSURANCE_SAMPLING_RESULT_SCHEMA, dispositions };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  return reader.finish<AssuranceSamplingResult>({ schema: ASSURANCE_SAMPLING_RESULT_SCHEMA, dispositions });
 }
 
 // ---- the seed and the strata ---------------------------------------------------------------------

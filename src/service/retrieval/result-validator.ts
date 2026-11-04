@@ -1,4 +1,4 @@
-import { stripModelJsonFence, isRecord } from '../analysis/canonical.js';
+import { extractModelJson, isRecord } from '../analysis/canonical.js';
 import type { RetrievalCandidate, RetrievalIndex } from './index.js';
 
 export const NOT_EXACT_FETCHED = '未经精确取文';
@@ -9,11 +9,8 @@ interface RejectedCitation { readonly collection: string; readonly ordinal: numb
 export function prepareRetrievalResult(text: string, index: RetrievalIndex | null): {
   readonly text: string; readonly rejected: readonly RejectedCitation[];
 } {
-  // The same fenced body the unit parsers accept, so an anchored citation in a fenced answer is validated, not refused as unknown keys.
-  const body = stripModelJsonFence(text);
-  let value: unknown;
-  try { value = JSON.parse(body); } catch { return { text, rejected: [] }; }
-  if (!isRecord(value)) return { text, rejected: [] };
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { text, rejected: [] };
   const rejected: RejectedCitation[] = [];
   let changed = false;
   const walk = (item: unknown, path: readonly (string | number)[]): void => {
@@ -48,6 +45,10 @@ export function markRetrievalResult(result: unknown, rejected: readonly Rejected
   const accepted = Array.isArray(result.acceptedIndexes) ? result.acceptedIndexes as readonly unknown[] : null;
   for (const citation of rejected) {
     const { collection } = citation;
+    const salvaged = Array.isArray(result.salvaged) ? result.salvaged : [];
+    salvaged.push({ section: citation.path?.join('.') ?? collection, index: citation.ordinal, reason: 'retrieval-reference-not-exact-fetched' });
+    result.salvaged = salvaged;
+    if (collection !== 'findings' && collection !== 'assertions') continue;
     const ordinal = accepted === null || collection !== 'findings' ? citation.ordinal : accepted.indexOf(citation.ordinal);
     if (ordinal < 0) continue;
     const path = accepted === null || collection !== 'findings' ? citation.path : citation.path?.map((key, depth) => depth === 1 ? ordinal : key);

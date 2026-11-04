@@ -208,11 +208,13 @@ export function assuranceSampleOutcome(
   usage: { inputTokens: number; outputTokens: number } | null,
   gapReasons: ReadonlyArray<string>,
   parseFailures: AnalysisAssuranceSampleProjection['parseFailures'] = [],
+  salvaged: SalvagedModelResult['salvaged'] = [],
 ): AssuranceSampleOutcome {
   const state = gapReasons.length === 0 ? 'closed' : dispositions.length === 0 ? 'gap' : 'closed-with-gaps';
   return {
     state,
     ...(parseFailures.length === 0 ? {} : { parseFailures }),
+    ...(salvaged.length === 0 ? {} : { salvaged }),
     seed: draw.seed,
     size: draw.size,
     candidateCount: draw.candidateCount,

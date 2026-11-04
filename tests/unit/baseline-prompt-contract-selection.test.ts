@@ -124,7 +124,7 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     });
     for (const selection of ['current', 'retained-v1'] as const) {
       expect(baselineAnalysisKindDefinition(selection).parseUnitResult(bare, unit))
-        .toEqual({ ok: false, code: 'schema-invalid', detail: '未解决事项不符合契约 v1。' });
+        .toMatchObject({ ok: true, result: { unresolved: [{ description: '合成未确定事项。', sourceRanges: [] }] } });
     }
   });
 

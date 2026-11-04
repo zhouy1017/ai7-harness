@@ -589,6 +589,7 @@ export interface StageContinuation {
     turns: Array<{ requestDigest: string; unitOrdinal: number; usage: { inputTokens: number; outputTokens: number } | null; state: 'closed' | 'gap' | 'outcome-unknown' }>;
     dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
     parseFailures?: import('../../shared/protocol.js').AnalysisAssuranceSampleProjection['parseFailures'];
+    salvaged?: import('../../shared/protocol.js').SalvagedModelResult['salvaged'];
     sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
   };
 }

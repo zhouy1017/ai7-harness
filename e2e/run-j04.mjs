@@ -3535,6 +3535,13 @@ async function main() {
     const recorded = await readBaseline(renderer);
     const realRevision = recorded?.resultSetRevision;
     const realReport = recorded?.taskOutcome?.report;
+    recordDebugDetail('J-04', 'H2_RECORDED_SUMMARY ' + JSON.stringify({ run: recorded?.run?.state, classification: recorded?.taskOutcome?.classification,
+      coverage: realRevision?.coverage, counts: { entities: realRevision?.synthesis?.entities.length, events: realRevision?.synthesis?.events.length,
+        relationships: realRevision?.synthesis?.relationships.length, settingClaims: realRevision?.synthesis?.settingClaims.length },
+      units: realRevision?.units.map((unit) => ({ ordinal: unit.unitOrdinal, state: unit.state, salvaged: unit.salvaged })),
+      crossUnit: realRevision?.crossUnitReduction, sampling: realRevision?.assuranceSample, usage: realRevision?.usage,
+      stages: realReport?.usagePerStage, reflection: { state: realReport?.ifRedone?.state, reason: realReport?.ifRedone?.reason, count: realReport?.ifRedone?.items.length },
+      resultDigest: realRevision?.digest, reportDigest: realReport?.reportDigest }));
     requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
       realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
       realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&

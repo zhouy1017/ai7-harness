@@ -481,7 +481,7 @@ function modelResultGapReason(code: string): string {
     case 'quote-not-in-block': return '模型回答的引文无法对应到指定原文。';
     case 'ref-out-of-sample': return '模型回答判定了本次抽检之外的发现。';
     case 'disposition-missing': return '模型回答遗漏了需要判定的发现。';
-    case 'schema-invalid': return '模型回答的条目缺少必要内容或格式无法识别。';
+    case 'schema-invalid': return '模型回答无法读出任何可用条目。';
     default: return '模型回答中的条目未能通过检查。';
   }
 }
@@ -1620,7 +1620,7 @@ export class BaselineAnalysisExecutionOwner {
       if (canonical?.kind === 'empty-answer') return gap(runReportReflectionEmptyAnswerGapReason(canonical.reasoningPresent));
       const parsed = parseRunReportReflectionResult(candidate.text);
       if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
-      return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null }, usage };
+      return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null, ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }, usage };
     }
     if (result.terminal === 'completed') return gap('运行反思的技术回合完成但没有模型输出。');
     if (result.terminal === 'failed') {
@@ -2614,13 +2614,7 @@ export class BaselineAnalysisExecutionOwner {
             return 'waiting';
           }
           const validated = prepareRetrievalResult(candidate.text, retrieval);
-          if (validated.rejected.some((entry) => entry.collection !== 'findings' && entry.collection !== 'assertions')) {
-            acceptedOutputDigests.add(candidate.digest);
-            gap('contract-invalid', '未经精确取文');
-            keepSettled(unit, s.wallMs);
-            return 'settled';
-          }
-          const parsed = definition.parseUnitResult(validated.text, unit);
+          const parsed = definition.parseUnitResult(validated.text, unit, blocksById);
           if (parsed.ok) {
             if (parsed.salvaged !== undefined && isRecord(parsed.result)) {
               parsed.result.salvaged = parsed.salvaged;
@@ -3511,6 +3505,7 @@ export class BaselineAnalysisExecutionOwner {
               const parsed = parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
                 citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
+                blockLengths: new Map(blocks.map((block) => [block.blockId, block.graphemes])),
               });
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage,
@@ -3767,7 +3762,7 @@ export class BaselineAnalysisExecutionOwner {
       const next = kept.ended ? undefined : assuranceSamplingTurns(kept.draw.sampled)[kept.nextTurn - 1];
       return assuranceSampleOutcome(kept.draw, kept.dispositions,
         kept.sampled.turnsWithUsage === 0 ? null : { inputTokens: kept.sampled.inputTokens, outputTokens: kept.sampled.outputTokens },
-        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')], kept.parseFailures);
+        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')], kept.parseFailures, kept.salvaged);
     }
     if (context.stopped || active.interrupted) return assuranceSampleNotRun(context.stoppedReason ?? '运行在单元阶段结束前停止，保证抽样未发起。');
     if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
@@ -3787,6 +3782,7 @@ export class BaselineAnalysisExecutionOwner {
     const dispositions = [...(prior?.dispositions ?? [])];
     const gapReasons = [...(prior?.gapReasons ?? [])];
     const parseFailures = [...(prior?.parseFailures ?? [])];
+    const salvaged = [...(prior?.salvaged ?? [])];
     const sampled = { ...(prior?.sampled ?? { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }) };
     const turns = assuranceSamplingTurns(draw.sampled);
     const settledTurns = [...(prior?.turns ?? [])];
@@ -3798,7 +3794,8 @@ export class BaselineAnalysisExecutionOwner {
     const save = (nextTurn: number, ended: boolean): void => {
       context.stages.sampling = { inputDigest, contractDigest, draw, nextTurn, ended,
         turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled },
-        ...(parseFailures.length === 0 ? {} : { parseFailures: [...parseFailures] }) };
+        ...(parseFailures.length === 0 ? {} : { parseFailures: [...parseFailures] }),
+        ...(salvaged.length === 0 ? {} : { salvaged: [...salvaged] }) };
       context.checkpoint();
     };
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
@@ -3890,6 +3887,10 @@ export class BaselineAnalysisExecutionOwner {
             gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));
             continue;
           }
+          salvaged.push(...(parsed.result.salvaged ?? []).map((entry) => ({ ...entry, section: `unit.${turn.unitOrdinal}.${entry.section}` })));
+          const answered = new Set(parsed.result.dispositions.map((entry) => entry.ref));
+          const missing = turn.findings.filter((entry) => !answered.has(entry.ref));
+          if (missing.length > 0) gap(`本次抽检仅缺少发现 ${missing.map((entry) => entry.ref).join('、')} 的判定。`);
           // The disposition names its finding by `ref`; the tier and the anchor unit are read back from
           // the candidate the Run itself drew, never from the model's answer.
           const byRef = new Map(turn.findings.map((finding) => [finding.ref, finding] as const));
@@ -3903,7 +3904,7 @@ export class BaselineAnalysisExecutionOwner {
               reason: entry.reason,
             });
           }
-          settledState = 'closed';
+          settledState = missing.length === 0 ? 'closed' : 'gap';
         } else if (result.terminal === 'completed') {
           gap('技术回合完成但没有模型输出。');
         } else if (result.terminal === 'failed') {
@@ -3940,7 +3941,7 @@ export class BaselineAnalysisExecutionOwner {
     }
     context.clock.close();
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
-    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons, parseFailures);
+    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons, parseFailures, salvaged);
   }
 }
 
