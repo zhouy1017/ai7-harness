@@ -64,9 +64,9 @@ describe('runBudgetCeilingLabel', () => {
 describe('taskAuthorizationDispatchNote', () => {
   it('keeps the actual provider decision visible in editorial language', () => {
     setTechnicalLayerVisible(false);
-    expect(taskAuthorizationDispatchNote(null)).toBe('这里只记录本次授权，计划尚未确定发送方式。');
-    expect(taskAuthorizationDispatchNote(DENIED_PIN)).toBe('这里只记录本次授权；当前设置不允许向模型服务发送内容。');
-    expect(taskAuthorizationDispatchNote(ELIGIBLE_PIN)).toBe('这里只记录本次授权；模型服务只能接收本次计划范围内的内容。');
+    expect(taskAuthorizationDispatchNote(null)).toBe('这里只会记录本次授权，计划尚未确定发送方式。');
+    expect(taskAuthorizationDispatchNote(DENIED_PIN)).toBe('这里只会记录本次授权；当前设置不允许向模型服务发送内容。');
+    expect(taskAuthorizationDispatchNote(ELIGIBLE_PIN)).toBe('这里只会记录本次授权；模型服务只能接收本次计划范围内的内容。');
     setTechnicalLayerVisible(true);
   });
   it('reproduces the development-ci bytes the note rendered as a fixed string', () => {
