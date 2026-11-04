@@ -1710,9 +1710,13 @@ async function main() {
     const overviewIds = overviewBooks.slice(0, 3).map(book=>overviewItem(book).itemId);
     const overviewAction = async (id, action) => clickSelector(renderer, `.task-overview-card[data-task-item="${id}"] [data-task-action="${action}"]`, `overview-${action}`);
     await waitFor(renderer, `document.querySelector('.task-overview-card[data-task-item="${overviewIds[2]}"] .task-overview-card-line')?.textContent.startsWith('第 1 位')`, 'overview-first-position-visible');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
     await overviewAction(overviewIds[0], 'pause');
     await writeFile(holdPath, '2', 'utf8');
-    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}) && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000);
+    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}) && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000).catch(async (error) => {
+      if (localDebugEnabled()) recordDebugDetail('J-09', 'overview-pause ' + JSON.stringify(await renderer.evaluate(`(async () => { const p=await window.ai7.inspectTaskOverview(); return { groups:p.groups.map(g=>({key:g.key,items:g.items.map(i=>({id:i.itemId,book:i.bookId,state:i.state,source:i.attention.state,position:i.queuePosition,progress:i.progress}))})),status:document.querySelector('#persistence-status')?.textContent,toast:document.querySelector('[data-toast]')?.textContent }; })()`)));
+      throw error;
+    });
     // Put the same third task back in the queue before adding the fourth, then prove 置顶 wins the next release.
     await overviewAction(overviewIds[2], 'pause');
     await writeFile(holdPath, '3', 'utf8');
