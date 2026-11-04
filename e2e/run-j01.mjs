@@ -812,7 +812,7 @@ async function prepareSourceImportReview(renderer, expectation) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]'); return review?.textContent.includes('来源导入记录') && !review.textContent.includes('明确不会发生') && !review.querySelector('.dimension-list') && Array.from(review.querySelectorAll('.commit-bar button')).some(button=>!button.disabled); })()`,
+    `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]'); return review?.textContent.includes('来源材料记录') && !review.textContent.includes('明确不会发生') && !review.querySelector('.dimension-list') && Array.from(review.querySelectorAll('.commit-bar button')).some(button=>!button.disabled); })()`,
     'source-review-effects',
   );
   await assertRenderer(
