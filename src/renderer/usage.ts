@@ -116,9 +116,11 @@ export function mountUsage(options: MountUsageOptions): void {
     root.dataset['usageRange'] = usage.range;
     root.dataset['usageGrouping'] = usage.groupBy;
     root.dataset['usageRuns'] = String(usage.totals.runCount);
+    let summary: HTMLElement;
     if (usage.emptyLabel !== null) {
       const empty = el('p', 'field-note usage-empty', USAGE_EMPTY);
       empty.dataset['usageEmpty'] = 'true';
+      summary = empty;
       table.append(empty);
     } else {
       delete root.dataset['usageEmpty'];
@@ -201,9 +203,10 @@ export function mountUsage(options: MountUsageOptions): void {
       const totalsCost = usageCostLine(estimateUsageCost(usage.totals.byRoute, prices));
       const foot = el('p', 'usage-totals', `${usageTotalsLine(usage)} · ${totalsCost}`);
       foot.dataset['usageTotals'] = 'true';
+      summary = foot;
       table.append(grid, foot);
     }
-    if (usage.unrecordedRuns > 0) table.append(el('p', 'field-note usage-unrecorded', USAGE_UNRECORDED_NOTE(usage.unrecordedRuns)));
+    if (usage.unrecordedRuns > 0) summary.append('；', el('span', 'usage-unrecorded', USAGE_UNRECORDED_NOTE(usage.unrecordedRuns)));
     exportRow.hidden = usage.emptyLabel !== null;
   };
 
