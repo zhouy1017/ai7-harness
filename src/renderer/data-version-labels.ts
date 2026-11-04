@@ -84,15 +84,15 @@ export function dataVersionRollbackSteps(
 ): { readonly lead: string; readonly steps: ReadonlyArray<string> } {
   const rollback = upgrade.rollback;
   if (rollback !== undefined && !rollback.backupPresent) return {
-    lead: `本次升级前是一次未完成升级留下的中间状态，它的旧版 AI7 不能导入这份备份。可回退的较早备份「${rollback.backupFileName}」${technicalWords(`（数据版本 ${rollback.dataVersion}）`)}已不在备份位置，无法按此记录回退。`, steps: [],
+    lead: `本次升级前是一次未完成升级留下的中间状态，它的旧版 AI7 不能导入这份备份；可回退的较早备份「${rollback.backupFileName}」${technicalWords(`（数据版本 ${rollback.dataVersion}）`)}已不在备份位置，无法按此记录回退。`, steps: [],
   };
   const version = rollback === undefined ? upgrade.fromSoftwareVersion : rollback.softwareVersion;
-  const earlier = version === null ? '升级前的 AI7' : `升级前的 AI7（${version}）`;
+  const earlier = version === null ? '升级前的 AI7' : `升级前的 AI7${technicalWords(`（${version}）`, ` · ${version}`)}`;
   const fileName = rollback?.backupFileName ?? upgrade.backupFileName;
   return {
-    lead: `${rollback === undefined ? '' : `本次升级前是未完成升级的中间状态；回退使用较早的完整备份${technicalWords(`（数据版本 ${rollback.dataVersion}）`)}。`}回退只恢复升级前的数据，AI7 不保留、也不运行旧版软件。${earlier}打不开升级后的数据，所以先把它挪开：`,
+    lead: `${rollback === undefined ? '' : `本次升级前是未完成升级的中间状态；回退使用较早的完整备份${technicalWords(`（数据版本 ${rollback.dataVersion}）`)}；`}回退只恢复升级前的数据，AI7 不保留、也不运行旧版软件；${earlier}打不开升级后的数据，所以先把它挪开：`,
     steps: [
-      `关闭 AI7，把数据文件夹「${places.dataRoot}」改名，例如在名字后面加上「-升级后」。不要删除它，升级后的数据都在里面。`,
+      `关闭 AI7，把数据文件夹「${places.dataRoot}」改名，例如在名字后面加上「-升级后」；不要删除它，升级后的数据都在里面。`,
       `安装并启动${earlier}：它以空白数据启动。`,
       `在它的「设置 › 数据与存储」里选「导入数据库…」，选「${places.backupLocation}」里的「${fileName}」，再选「替换本机全部数据」。`,
     ],
