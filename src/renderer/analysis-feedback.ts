@@ -320,11 +320,13 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
     const { total, dimensions } = analysisQualityMetricLines(quality);
     const lines = el('ul', 'analysis-list analysis-feedback-dimensions');
     for (const line of dimensions) lines.append(el('li', undefined, line));
+    const method = el('details');
+    method.append(el('summary', undefined, '统计口径'), el('p', 'analysis-feedback-note', ANALYSIS_FEEDBACK_METRIC_NOTE));
     metric.replaceChildren(
       el('h5', undefined, ANALYSIS_FEEDBACK_HEADING),
       el('p', 'analysis-feedback-total', total),
       ...(dimensions.length === 0 ? [] : [lines]),
-      el('p', 'field-note analysis-feedback-note', ANALYSIS_FEEDBACK_METRIC_NOTE),
+      method,
       technicalDetails(
         'analysis-facts',
         el('dt', undefined, '分析质量指标'),
