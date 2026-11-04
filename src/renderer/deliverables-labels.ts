@@ -34,7 +34,7 @@ export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
 export const DELIVERABLES_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as const;
 
 export const MILESTONE_LIST_HEADING = '里程碑版本';
-export const MILESTONE_LIST_EMPTY = '还没有里程碑版本。在稿件的导航面板里「保存为里程碑版本」后，会列在这里。';
+export const MILESTONE_LIST_EMPTY = '还没有里程碑版本，可在稿件导航面板中保存。';
 export const PUBLICATION_HISTORY_HEADING = '设为发稿版本的记录';
 export const PUBLICATION_HISTORY_EMPTY = '还没有设为发稿版本。';
 /** The newest designation in the history is the Book's current 发稿版本; the older ones stay as they were. */

@@ -1694,7 +1694,7 @@ async function main() {
         // Since S66c (Issue #415) the workflow opens the column: 下一项需要处理 and 阶段, then 版本与交付 and the materials.
         sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
         versions: JSON.stringify(versions) === '["1:true"]',
-        materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。',
+        materials: lens?.querySelector('.document-materials .document-materials-empty')?.textContent === '暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。',
         // Issue #547: how its material was read, standing in the column rather than only in the notice that opened it.
         originMarks: lens?.querySelector('.document-materials .document-origin-marks')?.textContent === ${JSON.stringify(DRAFT_MARKS_LINE)},
         work: work.length === 0 && document.querySelector('#app-sidebar [data-nav-book-section="deliverables"]') !== null,

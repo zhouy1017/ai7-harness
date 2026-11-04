@@ -94,7 +94,7 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DOCUMENT_LENS_LABEL).toBe('工作流程');
     expect(labels.DOCUMENT_VERSIONS_HEADING).toBe('版本与交付');
     expect(labels.DOCUMENT_MATERIALS_HEADING).toBe('这份文档的材料');
-    expect(labels.DOCUMENT_MATERIALS_EMPTY).toBe('暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。');
+    expect(labels.DOCUMENT_MATERIALS_EMPTY).toBe('暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。');
     for (const words of surface) {
       expect(words).not.toMatch(/里程碑|签发|发稿/u);
       for (const forbidden of PUBLICATION_FORBIDDEN_WORDS) expect(words).not.toContain(forbidden);

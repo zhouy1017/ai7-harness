@@ -196,7 +196,7 @@ export const DOCUMENT_VERSIONS_TRUNCATED = '更早的版本保留在文档的历
 /** The version the working text stands on. */
 export const DOCUMENT_VERSION_CURRENT_MARK = '当前';
 export const DOCUMENT_MATERIALS_HEADING = '这份文档的材料';
-export const DOCUMENT_MATERIALS_EMPTY = '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。';
+export const DOCUMENT_MATERIALS_EMPTY = '暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。';
 
 /** A version row: `版本 2 · 2026年9月24日 10:30`. */
 export function documentVersionLine(label: string, createdAt: string): string {
