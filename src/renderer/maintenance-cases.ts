@@ -547,9 +547,9 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     } else {
       if (panel === 'conclude') {
         // Only the conclusions the case may record now: a 替代 or 再版 still waiting for its version is never 已完成.
-        form.append(radios(MAINTENANCE_CONCLUSION_LEGEND, projection.conclusions.map((value) => ({ value, label: MAINTENANCE_CONCLUSION_CHOICES[value], detail: null })),
+        const legend = projection.conclusions.includes('complete') ? MAINTENANCE_CONCLUSION_LEGEND : `${MAINTENANCE_CONCLUSION_LEGEND} · ${MAINTENANCE_COMPLETE_AFTER_LINK}`;
+        form.append(radios(legend, projection.conclusions.map((value) => ({ value, label: MAINTENANCE_CONCLUSION_CHOICES[value], detail: null })),
           current.conclusion, (value) => { current.conclusion = value === 'complete' ? 'complete' : 'unresolved'; }));
-        if (!projection.conclusions.includes('complete')) form.append(el('p', 'field-note maintenance-complete-after-link', MAINTENANCE_COMPLETE_AFTER_LINK));
       }
       const area = el('textarea');
       area.dataset['maintenanceField'] = panel === 'errata' ? 'errata' : 'outcome';
