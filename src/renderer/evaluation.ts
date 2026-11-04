@@ -227,13 +227,10 @@ export function evaluationMaterialsField(
   const fieldset = el('fieldset', 'evaluation-materials');
   fieldset.dataset['evaluationMaterials'] = kind;
   fieldset.append(el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`));
-  fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
-  // 初评 carries no 定稿 of its own, so its row says what references never override there (Issue #795 item 3); 审稿意见, which
-  // drafts from a 定稿 record, keeps the 定稿 wording.
-  fieldset.append(el('p', 'field-note', kind === 'readersReport'
-    ? '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'
-    : '资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。'));
   const items = page.materials?.items ?? [];
+  const guidance = items.length === 0 ? page.materials?.statement ?? '暂无可参考的资料库资料。'
+    : `最多参考 4 份，每份不超过 3,000 字、合计不超过 6,000 字；只参照，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
+  fieldset.append(el('p', 'field-note', guidance));
   // A choice the page no longer offers, or no longer lets be ticked, leaves the selection with its reason (Issue #759).
   const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
   selected.clear();
@@ -497,7 +494,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.dataset['initialState'] = initial.task?.state ?? 'none';
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
+    const latest = initial.latest;
+    section.append(heading, el('p', latest === null ? 'field-note evaluation-initial-none' : 'field-note', latest === null ? EVALUATION_AI7_NONE : EVALUATION_AI7_LEDE));
     const initialBlocked = page.materialReferences?.blocked.initial === true;
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
     if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'field-note', initial.task.historicalMarker));
@@ -515,11 +513,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       section.append(row);
     }
     if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
-    const latest = initial.latest;
     const initialProfile = latest?.profile ?? page.profile;
-    if (latest === null) {
-      section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
-    } else {
+    if (latest !== null) {
       section.dataset['initialRevision'] = latest.revisionId;
       section.dataset['initialCurrent'] = String(latest.current);
       section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(initialProfile, latest)));
