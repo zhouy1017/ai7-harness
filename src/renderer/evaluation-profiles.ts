@@ -109,9 +109,11 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
   const draft = initial.items.map((item) => ({ ...item }));
   const form = el('form', 'evaluation-profile-form');
   form.dataset['profileEdit'] = '';
-  form.append(el('h4', undefined, '新建评估方案版本'), el('p', 'field-note', PROFILE_CALIBRATION));
+  const heading = el('h4', undefined, '新建评估方案版本');
+  form.append(heading, el('p', 'field-note', PROFILE_CALIBRATION));
   const fields = el('div', 'evaluation-profile-fields');
-  const count = el('p', 'field-note');
+  const count = el('span');
+  heading.append(' · ', count);
   const refusal = el('p', 'attention-note');
   refusal.setAttribute('role', 'alert');
   const saveButton = button('保存为新版本', () => undefined, 'save');
@@ -151,7 +153,7 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
     paintItems();
     fields.querySelectorAll('input').item(draft.length - 1)?.focus();
   }, 'add-item');
-  const readinessLabel = el('label', undefined, '就绪清单（每行一项，最多 20 项，每项最多 200 字）');
+  const readinessLabel = el('label', undefined, '就绪清单 · 每行一项，最多 20 项，每项最多 200 字');
   const readiness = el('textarea');
   readiness.dataset['profileField'] = 'readiness';
   readiness.rows = 5;
@@ -159,7 +161,7 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
   readinessLabel.append(readiness);
   const actions = el('div', 'button-row');
   actions.append(saveButton, button('取消', cancel, 'cancel'));
-  form.append(count, fields, add, readinessLabel, refusal, actions);
+  form.append(fields, add, readinessLabel, refusal, actions);
   paintItems();
   form.addEventListener('submit', (event) => {
     event.preventDefault();

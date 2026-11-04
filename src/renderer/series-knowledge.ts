@@ -265,9 +265,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const state = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
     const details = el('details', 'knowledge-item-history');
     details.open = state.open;
-    details.append(el('summary', undefined, knowledgeRevisionsSummary(item.revisionCount)));
+    const summary = el('summary', undefined, knowledgeRevisionsSummary(item.revisionCount));
+    details.append(summary);
     if (state.revisions === null) {
-      if (state.open && !state.failed) details.append(el('p', 'field-note', KNOWLEDGE_STATUS.loadingMore));
+      if (state.open && !state.failed) summary.append(' · ', KNOWLEDGE_STATUS.loadingMore);
     } else {
       const list = el('ol');
       for (const revision of state.revisions) {
