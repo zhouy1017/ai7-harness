@@ -122,7 +122,9 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   const open = el('button', 'secondary', isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
   open.type = 'button';
   open.dataset['taskResultAction'] = 'open';
-  foot.append(open);
+  const noFindings = el('span', 'task-result-no-findings', REVIEW_RESULT_NONE);
+  noFindings.hidden = true;
+  foot.append(noFindings, open);
   section.append(bar, body, foot);
 
   let closed = false;
@@ -246,7 +248,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     const read = `${run.scope.label} · ${reviewResultReadLine(run.categories.map((category) => category.label))}`;
     const parts: HTMLElement[] = [meta(read, REVIEW_RESULT_NOT_DONE)];
     if (findings.length === 0) {
-      parts.push(el('p', 'field-note', REVIEW_RESULT_NONE));
+      noFindings.hidden = false;
     } else {
       const results = table(TASK_RESULT_COLUMNS.review, findings.map((finding) => {
         const row = el('tr');
