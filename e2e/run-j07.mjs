@@ -1688,8 +1688,8 @@ async function main() {
       return {
         book: shell?.dataset.bookId === ${JSON.stringify(bookId)},
         label: shell?.querySelector('.editor-toolbar .section-label') === null,
-        heading: shell?.querySelector('.editor-toolbar h2')?.textContent === '新闻稿',
-        meta: Array.from(shell?.querySelectorAll('.editor-meta > span') ?? []).some((item) => item.textContent === '当前文档'),
+        heading: shell?.querySelector('.editor-toolbar h2')?.textContent === '新闻稿 · 版本 1',
+        meta: Array.from(shell?.querySelectorAll('.editor-meta > span') ?? []).some((item) => item.textContent === '当前版本 版本 1'),
         lens: lens?.querySelector(':scope > .section-label')?.textContent === '工作流程',
         // Since S66c (Issue #415) the workflow opens the column: 下一项需要处理 and 阶段, then 版本与交付 and the materials.
         sections: JSON.stringify(Array.from(lens?.querySelectorAll('h3') ?? []).map((item) => item.firstChild?.textContent)) === '["下一项需要处理","阶段","版本与交付","这份文档的材料"]',
