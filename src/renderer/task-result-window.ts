@@ -179,7 +179,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   let manuscriptId: string | null = null;
 
   function jumpButton(blockId: string | null, markId: string | null): HTMLElement {
-    if (blockId === null) return el('span', 'field-note', '—');
+    if (blockId === null) return el('span', 'task-result-unlocated', '无位置');
     const button = el('button', 'quiet task-result-jump', TASK_RESULT_JUMP);
     button.type = 'button';
     button.dataset['taskResultJump'] = blockId;
