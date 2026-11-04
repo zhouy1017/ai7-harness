@@ -546,9 +546,8 @@ export function registerProductionAndPackageHandlers(context: {
     envelope(async () => {
       const owned = requireSender(event);
       requireAuthority();
-      const generation = owned.routeGeneration;
       const result = await service.call('inspectTaskOverview', {});
-      requireCurrentRouteGeneration(owned, generation);
+      // Like Global Attention, this cross-Book read remains valid across Book navigation.
       overviewBooks.set(owned, new Set(result.books.map((book) => book.bookId)));
       return result;
     }),
