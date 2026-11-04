@@ -323,7 +323,7 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       }
       const settled = book.store.inspectInitialEvaluation(book.bookId);
       expect(settled.taskOutcome?.classification).toBe('failed');
-      expect(settled.taskOutcome?.summary).not.toContain('AI7_FIXTURE_MISMATCH');
+      expect(settled.taskOutcome?.report?.failures.find((failure) => failure.code === 'SYNTHESIS_UNAVAILABLE')?.reason).not.toContain('AI7_FIXTURE_MISMATCH');
       expect(settled.taskOutcome?.report?.failures).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'SYNTHESIS_UNAVAILABLE' })]));
       expect(settled.resultSetRevision).toBeNull();
       expect(book.store.inspectEvaluation(book.bookId, null).initial.latest).toBeNull();
