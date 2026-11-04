@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import {
   MIN_ANCHOR_CHARACTERS,
   SOURCE_TRANSLATION_NOT_ADMITTED,
@@ -398,6 +399,17 @@ describe('the words the editor reads', () => {
       .toBe('可能已过期（取回于 本地 2026-07-01T00:00:00.000Z，之后再次取回时内容已变）');
     expect(sourceStalenessLine({ ...record, staleness: { state: 'current', reasons: [], label: null } }, 90, instant)).toBeNull();
     expect(findingSourceLine(record, 90, instant)).toBe('来源：馆藏 · 来源全文 · 取回于 本地 2026-07-01T00:00:00.000Z · 对应 · 依据中引用的词句 · 第 2 句 · 可能已过期（取回于 本地 2026-07-01T00:00:00.000Z，已超过 90 天）');
+  });
+
+  it('keeps source status concise in production without losing its reason', () => {
+    setTechnicalLayerVisible(false);
+    try {
+      expect(sourceStalenessLine(record, 90, instant)).toBe('可能已过期 · 已超过 90 天');
+      expect(sourceAlignmentLine({ ...record, captureState: 'failed', alignment: 'unaligned', alignmentLabel: '未能对应', anchors: [] }))
+        .toBe('引文对应：未能对应 · 没有取回文字');
+    } finally {
+      setTechnicalLayerVisible(true);
+    }
   });
 
   it('says what an alignment found and why one found nothing, never a verdict', () => {

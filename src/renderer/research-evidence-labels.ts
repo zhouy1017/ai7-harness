@@ -9,6 +9,7 @@ import {
   type ReviewEvidenceSource,
 } from '../shared/protocol.js';
 import { findingEvidenceSources } from '../shared/report-wording.js';
+import { technicalWords } from './technical-layer.js';
 
 /**
  * The words of 来源与证据 and of a 事实核查 finding's sources (Issue #425, plan slice S70; V2-UX-SRC-013, EGR-003, FACT-007,
@@ -59,15 +60,15 @@ export function sourceCaptureLine(record: Pick<ResearchEvidenceProjection, 'capt
 export function sourceStalenessLine(record: Pick<ResearchEvidenceProjection, 'staleness' | 'capturedAt'>, staleAfterDays: number, instant: InstantLabel): string | null {
   if (record.staleness.state !== 'possibly-stale') return null;
   const why = record.staleness.reasons.map((reason) => reason === 'age' ? `已超过 ${staleAfterDays} 天` : '之后再次取回时内容已变').join('，');
-  return `${RESEARCH_EVIDENCE_STALE_LABEL}（取回于 ${instant(record.capturedAt)}，${why}）`;
+  return technicalWords(`${RESEARCH_EVIDENCE_STALE_LABEL}（取回于 ${instant(record.capturedAt)}，${why}）`, `${RESEARCH_EVIDENCE_STALE_LABEL} · ${why}`);
 }
 
 /** 「引文对应：对应 · 句 3」 — what the alignment found, and where — or why it found nothing. */
 export function sourceAlignmentLine(record: Pick<ResearchEvidenceProjection, 'alignment' | 'alignmentLabel' | 'anchors' | 'claim' | 'captureState'>): string {
-  if (record.captureState === 'failed') return `引文对应：${record.alignmentLabel}（没有取回任何文字）`;
-  if (record.claim === null) return `引文对应：${record.alignmentLabel}（没有发现引用这个来源）`;
+  if (record.captureState === 'failed') return `引文对应：${record.alignmentLabel}${technicalWords('（没有取回任何文字）', ' · 没有取回文字')}`;
+  if (record.claim === null) return `引文对应：${record.alignmentLabel}${technicalWords('（没有发现引用这个来源）', ' · 没有发现引用这个来源')}`;
   const looked = record.claim.origin === 'basis-quotation' ? '依据中引用的词句' : '稿件引文';
-  if (record.anchors.length === 0) return `引文对应：${record.alignmentLabel}（${looked}不在取回的文字里）`;
+  if (record.anchors.length === 0) return `引文对应：${record.alignmentLabel}${technicalWords(`（${looked}不在取回的文字里）`, ` · ${looked}不在取回的文字里`)}`;
   const sentences = [...new Set(record.anchors.map((anchor) => anchor.sentence))];
   return `引文对应：${record.alignmentLabel} · ${looked} · 第 ${sentences.join('、')} 句`;
 }
@@ -98,7 +99,7 @@ export function findingResearchLines(projection: ResearchEvidenceBookProjection,
 
 /** 「单元 2 · 联网核查已完成 · 检索 1 次 · 留存取回 1 次 · 1 个来源未能取回 · 1 条发现没有外部来源」. */
 export function researchUnitLine(unit: ResearchEvidenceBookProjection['units'][number]): string {
-  if (unit.retentionFailure !== undefined) return `阅读范围 ${unit.unitOrdinal} · 来源留存失败（${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}）；没有可查看的留存来源。`;
+  if (unit.retentionFailure !== undefined) return `阅读范围 ${unit.unitOrdinal} · 来源留存失败${technicalWords(`（${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}）`, ` · ${unit.retentionFailure === 'storage' ? '保存失败' : '处理失败'}`)}；没有可查看的留存来源。`;
   return [
     `阅读范围 ${unit.unitOrdinal}`, unit.label, `检索 ${unit.searchCalls} 次`, `留存取回 ${unit.retentionFetches} 次`,
     unit.failedRetrievals > 0 ? `${unit.failedRetrievals} 个来源未能取回全文` : null,
