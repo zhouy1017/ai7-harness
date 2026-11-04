@@ -150,7 +150,7 @@ describe('the one model-service flow', () => {
       await screen.renderModelServiceSettings();
       const page = root as unknown as MiniElement;
       expect(page.querySelector('[aria-label="代理 URL"]')!.placeholder).toBe('http://127.0.0.1:端口');
-      expect(page.textContent).toContain('只有代理本身提供 TLS 入口时才用 https://');
+      expect(page.textContent).toContain('仅在代理支持 TLS 时使用 https://');
       expect(page.querySelector('.model-service-technical [data-model-discovery-code]')!.textContent).toContain('MODEL_DISCOVERY_CREDENTIAL_REJECTED');
       pickChannel(page, 'anthropic-claude');
       page.querySelector('[data-model-service-proxy] form')!.dispatchEvent({ type: 'submit' });

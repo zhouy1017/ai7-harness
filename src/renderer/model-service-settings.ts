@@ -83,7 +83,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       }
     });
     form.append(mode, input, save);
-    section.append(element('p', 'field-note', '绝大多数本机代理（Clash、v2rayN、ProxyBridge 等）用 http://127.0.0.1:端口；只有代理本身提供 TLS 入口时才用 https://。'));
+    section.append(element('p', 'field-note', '本机代理通常使用 http://127.0.0.1:端口；仅在代理支持 TLS 时使用 https://。'));
     section.append(form, element('p', 'field-note', '仅用于获准的模型服务请求；代理设置不随数据库导入、导出或备份迁移，代理认证将在后续版本提供。'));
     if (projection.lastProxyProbe) {
       const probe = projection.lastProxyProbe;
@@ -156,7 +156,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const protectedStore = element(
       'p',
       'field-note',
-      `安全凭据库：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}。未启用文件或命令行替代存储。`,
+      `安全凭据库：${projection.protectedSecretStore.label} · ${projection.protectedSecretStore.availability === 'available' ? '可用' : '不可用'}；未启用文件或命令行替代存储。`,
     );
     const technical = element('details', 'model-service-technical');
     technical.append(element('summary', undefined, '查看技术详情'), unsupported, policy, protectedStore);
@@ -165,8 +165,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       discovery.dataset['modelDiscoveryCode'] = projection.modelDiscovery.code;
       discovery.append(
         element('h3', undefined, '模型列表获取失败'),
-        element('p', undefined, projection.modelDiscovery.reason),
-        element('p', 'field-note', `错误代码：${projection.modelDiscovery.code}`),
+        element('p', undefined, `${projection.modelDiscovery.reason.replace(/。$/u, '')}；错误代码：${projection.modelDiscovery.code}`),
       );
       technical.append(discovery);
     }
