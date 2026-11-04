@@ -173,11 +173,11 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     nodes.push(toolbar);
     if (propose !== null) nodes.push(draftForm(propose, 'propose'));
 
-    nodes.push(el('h4', undefined, KNOWLEDGE_ITEMS_HEADING));
+    const itemsHeading = el('h4', undefined, KNOWLEDGE_ITEMS_HEADING);
+    if (knowledge.items.length === 0) itemsHeading.append(' · ', el('span', 'knowledge-items-empty', searched === '' ? KNOWLEDGE_ITEMS_EMPTY : KNOWLEDGE_SEARCH_NONE));
+    nodes.push(itemsHeading);
     if (knowledge.itemCount > 0) nodes.push(searchRow());
-    if (knowledge.items.length === 0) {
-      nodes.push(el('p', 'field-note knowledge-items-empty', searched === '' ? KNOWLEDGE_ITEMS_EMPTY : KNOWLEDGE_SEARCH_NONE));
-    } else {
+    if (knowledge.items.length > 0) {
       const list = el('ul', 'knowledge-items');
       for (const item of knowledge.items) list.append(itemNode(item));
       nodes.push(list);
@@ -185,9 +185,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     if (knowledge.itemsNext !== null) nodes.push(moreRow(KNOWLEDGE_ITEMS_MORE, 'items-more', () => void loadItems(false)));
     if (itemsLater) nodes.push(moreRow('回到首批条目', 'items-reset', () => void loadItems(true, true)));
     if (conflictReader !== null) nodes.push(conflictReaderNode());
-    nodes.push(el('h4', undefined, KNOWLEDGE_CANDIDATES_HEADING));
-    if (knowledge.candidates.length === 0) nodes.push(el('p', 'field-note knowledge-candidates-empty', KNOWLEDGE_CANDIDATES_EMPTY));
-    else {
+    const candidatesHeading = el('h4', undefined, KNOWLEDGE_CANDIDATES_HEADING);
+    if (knowledge.candidates.length === 0) candidatesHeading.append(' · ', el('span', 'knowledge-candidates-empty', KNOWLEDGE_CANDIDATES_EMPTY));
+    nodes.push(candidatesHeading);
+    if (knowledge.candidates.length > 0) {
       const list = el('ul', 'knowledge-candidates');
       for (const candidate of knowledge.candidates) list.append(candidateNode(candidate));
       nodes.push(list);
