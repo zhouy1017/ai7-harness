@@ -29,7 +29,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       const batchItems = [...page.items];
       if (apply) {
         let cursor = page.next;
-        if (offset > 0) { const first = await read(0); batchItems.splice(0, batchItems.length, ...first.items); cursor = first.next; }
+        if (next > 0) { const first = await read(0); batchItems.splice(0, batchItems.length, ...first.items); cursor = first.next; }
         while (cursor !== null && batchItems.length < 500) { const rest = await read(cursor); batchItems.push(...rest.items); cursor = rest.next; }
       }
       offset = next;
@@ -44,9 +44,12 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
         line.textContent = `${group.label} · ${group.count}`;
         groups.append(line);
       }
+      let batchButton: HTMLButtonElement | null = null;
+      const available = (): BookFindingProjection[] => batchItems.filter((item) => item.suggestion?.batchAllowed && (category === '' || item.category === category)).slice(0, 500);
+      const syncBatch = (): void => { if (batchButton) { const count = available().length; batchButton.textContent = `接受并应用全部 ${count} 条`; batchButton.hidden = count === 0; } };
       const filter = filterChoices({ label: FINDINGS_CENTER_WORDS.filter,
         choices: [['', FINDINGS_CENTER_WORDS.allCategories], ...page.groups.map((group) => [group.category, `${group.label} · ${group.count}`] as const)],
-        value: category, change: (value) => { category = value; paint(); },
+        value: category, change: (value) => { category = value; paint(); syncBatch(); },
       });
       filter.dataset['findingsFilter'] = 'category';
       const list = document.createElement('div');
@@ -72,23 +75,23 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       };
       paint();
       const actions = document.createElement('div'); actions.className = 'button-row';
-      const action = (label: string, disabled: boolean, run: () => void): void => {
-        const button = createButton(); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', run); actions.append(button);
-      };
       actions.append(listPosition({ offset, total: page.total, pageSize: page.pageSize, label: '发现位置', change: (next) => void load(next) }));
       if (apply) {
-        const available = batchItems.filter((item) => item.suggestion?.batchAllowed && (category === '' || item.category === category)).slice(0, 500);
-        if (available.length > 0) action(`接受并应用全部 ${available.length} 条`, false, () => {
+        batchButton = createButton(); batchButton.type = 'button'; syncBatch();
+        batchButton.addEventListener('click', () => {
+          const items = available();
           const bar = document.createElement('div'); bar.className = 'attention-note findings-confirm'; bar.setAttribute('role', 'alert');
-          const scope = document.createElement('p'); scope.textContent = `将把所列 ${available.length} 条修改建议写入稿件${batchItems.length >= 500 ? '；每次最多读取 500 项发现' : ''}。`;
-          const confirm = createButton(); confirm.textContent = '确认应用'; confirm.addEventListener('click', () => { bar.remove(); void perform(available); });
+          const scope = document.createElement('p'); scope.textContent = `将把所列 ${items.length} 条修改建议写入稿件${batchItems.length >= 500 ? '；每次最多读取 500 项发现' : ''}。`;
+          const confirm = createButton(); confirm.type = 'button'; confirm.textContent = '确认应用'; confirm.addEventListener('click', () => { bar.remove(); void perform(items); });
           const cancel = createButton(); cancel.textContent = '取消'; cancel.addEventListener('click', () => bar.remove());
-          bar.append(scope, ...available.map((item) => { const line = document.createElement('p'); line.textContent = `${item.suggestion!.quote} → ${item.suggestion!.replacement}`; return line; }), confirm, cancel); actions.append(bar);
+          bar.append(scope, ...items.map((item) => { const line = document.createElement('p'); line.textContent = `${item.suggestion!.quote} → ${item.suggestion!.replacement}`; return line; }), confirm, cancel); actions.append(bar);
         });
+        actions.append(batchButton);
       }
       root.append(summary, groups, filter, list, actions);
     } catch {
       if (!root.isConnected || request !== generation) return;
+      signature = '';
       root.dataset['findingsState'] = 'failed';
       root.replaceChildren();
       const retry = createButton(); retry.type = 'button'; retry.textContent = FINDINGS_CENTER_WORDS.unavailable; retry.addEventListener('click', () => void load(offset)); root.append(retry);
