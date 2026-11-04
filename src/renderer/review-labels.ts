@@ -259,11 +259,11 @@ export function reviewReadConsequence(
     case null:
       return '选好范围后显示';
     case 'whole':
-      return manuscript === null ? '这本书还没有稿件。' : `当前稿件（修订版${technicalWords(` ${manuscript.revisionLabel}`)}）的全部 ${manuscript.totalBlocks} 个段落`;
+      return manuscript === null ? '这本书还没有稿件。' : technicalWords(`当前稿件（修订版 ${manuscript.revisionLabel}）的全部 ${manuscript.totalBlocks} 个段落`, `当前稿件的全部 ${manuscript.totalBlocks} 个段落`);
     case 'chapters':
       return chapters.from === null || chapters.to === null
         ? '选好起止的章后显示'
-        : `所选各章：从「${chapters.from.title}」到「${chapters.to.title}」（段落 ${chapters.from.position}–${chapters.to.endPosition}）`;
+        : technicalWords(`所选各章：从「${chapters.from.title}」到「${chapters.to.title}」（段落 ${chapters.from.position}–${chapters.to.endPosition}）`, `所选各章：从「${chapters.from.title}」到「${chapters.to.title}」 · 第 ${chapters.from.position}–${chapters.to.endPosition} 段`);
     case 'changed':
       return '每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审';
     case 'selection':

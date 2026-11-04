@@ -190,6 +190,10 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个段落');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: null })).toBe('选好起止的章后显示');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」（段落 1–43）');
+    setTechnicalLayerVisible(false);
+    expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件的全部 97 个段落');
+    expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」 · 第 1–43 段');
+    setTechnicalLayerVisible(true);
     expect(reviewReadConsequence('changed', manuscript, none)).toBe('每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审');
     expect(reviewReadConsequence('selection', manuscript, none)).toBe('稿件里选中的文字');
     expect(reviewSendConsequence([])).toBe('选好类别后显示');

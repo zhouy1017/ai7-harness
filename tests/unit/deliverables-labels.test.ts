@@ -277,6 +277,9 @@ describe('where 发稿 stands, in the block and on 工作概览', () => {
     expect(deliverablesOverviewLine(truncated)).toBe('发稿 · 里程碑版本 2 个以上 · 还没有设为发稿版本');
     expect(deliverablesOverviewLine(designated)).toBe('发稿 · 里程碑版本 2 个 · 发稿版本「二审稿」 · r2 · 纸质版首印');
     expect(deliverablesOverviewLine(changed)).toBe('发稿 · 里程碑版本 2 个 · 发稿版本「二审稿」 · r2 · 纸质版首印 · 自发稿版本后有修改');
+    setTechnicalLayerVisible(false);
+    expect(deliverablesOverviewLine(designated)).toBe('发稿 · 里程碑版本 2 个 · 发稿版本「二审稿」 · 纸质版首印');
+    setTechnicalLayerVisible(true);
     expect(deliverablesOverviewLine(changed)).not.toMatch(/%/);
   });
 });

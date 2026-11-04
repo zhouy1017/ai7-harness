@@ -229,7 +229,7 @@ export function deliverablesOverviewLine(projection: Pick<DeliverablesProjection
   const current = publication.designations.find((designation) => designation.current) ?? null;
   const designation = current === null
     ? '还没有设为发稿版本'
-    : `发稿版本「${current.milestoneLabel}」 · ${current.revisionLabel} · ${current.scope}`;
+    : `发稿版本「${current.milestoneLabel}」${technicalWords(` · ${current.revisionLabel}`)} · ${current.scope}`;
   const notice = publication.changeNotice === null ? '' : ` · ${PUBLICATION_CHANGE_NOTICE}`;
   return `发稿 · ${milestones} · ${designation}${notice}`;
 }
