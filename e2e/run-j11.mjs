@@ -364,7 +364,7 @@ async function backToLibrary(renderer, name) {
 const CARDS = `Array.from(document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item'), (card) => ({
   bookId: card.querySelector('button[data-book-id]')?.dataset.bookId ?? null,
   title: card.querySelector('button[data-book-id]')?.textContent ?? '',
-  people: card.querySelector('.book-people-line')?.textContent ?? null,
+  people: card.querySelector('.book-people-line')?.firstChild?.textContent ?? null,
   related: card.querySelector('.book-related-line')?.textContent ?? null,
 }))`;
 
