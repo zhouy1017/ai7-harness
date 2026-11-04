@@ -191,7 +191,7 @@ describe('quiet notice lifetime', () => {
       expect(host.hidden).toBe(false);
       hovering = false;
       host.dispatchEvent({ type: 'mouseleave' });
-      vi.advanceTimersByTime(3_999);
+      vi.advanceTimersByTime(499);
       expect(host.hidden).toBe(false);
       vi.advanceTimersByTime(1);
       expect(host.hidden).toBe(true);

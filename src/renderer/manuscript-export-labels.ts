@@ -106,16 +106,9 @@ export const EXPORT_OPTIONS_NOTE = '这些选项只改变导出的文件，不�
 
 export const EXPORT_FIDELITY_HEADING = '导出保真审阅';
 
-/** A status reads in text and in shape as well as in colour (V2-UX-EXP-007, VIS). */
-export function exportStatusShape(status: ExportFidelityStatus): string {
-  if (status === 'preserved') return '✓';
-  if (status === 'degraded') return '△';
-  if (status === 'unavailable') return '⊘';
-  return '○';
-}
-
+/** Shape is rendered by the state-term component; words stay readable on their own. */
 export function exportPillText(row: Pick<ExportFidelityRowProjection, 'status' | 'statusLabel'>): string {
-  return `${exportStatusShape(row.status)} ${row.statusLabel}`;
+  return row.statusLabel;
 }
 
 export function exportCountText(count: number): string {

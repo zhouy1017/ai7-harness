@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import {
   HOUSE_DISCLOSURE, HOUSE_PAGE_SIZE, MAX_HOUSE_ENTRIES, HouseWordListError, previewHousePaste, validateSaveHouseWordListInput,
   type HousePastePreview, type HouseWordListApi, type HouseWordListDraftEntry, type HouseWordListPage,
@@ -5,7 +6,7 @@ import {
 } from '../shared/protocol/house-word-list.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node;
+  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
 }
 /** The shared editor for the House list, also mounted from deterministic-check setup. */
 export function mountHouseWordList(options: {
@@ -22,7 +23,7 @@ export function mountHouseWordList(options: {
   let committedRead: SaveHouseWordListResult | null = null;
   let busy = false; let destroyed = false;
   const button = (label: string, name: string, run: () => void, disabled = false): HTMLButtonElement => {
-    const node = el('button', label); node.type = 'button'; node.className = 'button secondary'; node.dataset['houseAction'] = name;
+    const node = el('button', label); node.type = 'button'; node.className = 'btn ' + ('button secondary'); node.dataset['houseAction'] = name;
     node.disabled = busy || disabled; node.addEventListener('click', run); return node;
   };
   const run = async (work: () => Promise<void>): Promise<void> => {
@@ -102,8 +103,8 @@ export function mountHouseWordList(options: {
         })); list.append(row);
       }
       panel.append(list, el('p', `共${draft.length}条；每页最多50条。`),
-        button('上一页词条', 'draft-previous', () => { draftOffset -= HOUSE_PAGE_SIZE; paint(); }, draftOffset === 0),
-        button('下一页词条', 'draft-next', () => { draftOffset += HOUSE_PAGE_SIZE; paint(); }, draftOffset + HOUSE_PAGE_SIZE >= draft.length),
+        windowStep(button('上一页词条', 'draft-previous', () => { draftOffset -= HOUSE_PAGE_SIZE; paint(); }, draftOffset === 0), 'before', "向前浏览词条"),
+        windowStep(button('下一页词条', 'draft-next', () => { draftOffset += HOUSE_PAGE_SIZE; paint(); }, draftOffset + HOUSE_PAGE_SIZE >= draft.length), 'after', "向后浏览词条"),
         button('添加词条', 'add', () => { draft?.push({ entryId: null, literal: '', note: '', enabled: true }); draftOffset = Math.floor(((draft?.length ?? 1) - 1) / HOUSE_PAGE_SIZE) * HOUSE_PAGE_SIZE; paint(); }, draft.length >= MAX_HOUSE_ENTRIES));
       const pasteLabel = el('label', '粘贴词条（一行一条，空行忽略）'); const paste = el('textarea'); paste.value = pastedText; paste.disabled = busy; paste.dataset['houseField'] = 'paste';
       paste.addEventListener('input', () => { pastedText = paste.value; preview = null; }); pasteLabel.append(paste);
@@ -133,8 +134,8 @@ export function mountHouseWordList(options: {
           const entry = page!.entries[index]!; const row = el('li'); row.value = request.entryOffset + index + 1;
           row.append(el('span', `${entry.literal} · ${entry.enabled ? '启用' : '停用'}`), el('p', `词条说明：${entry.note || '（无）'}`)); entries.append(row);
         }
-        panel.append(entries, button('上一页词条', 'entries-previous', () => void run(() => inspect({ ...request, entryOffset: Math.max(0, request.entryOffset - HOUSE_PAGE_SIZE) })), request.entryOffset === 0),
-          button('下一页词条', 'entries-next', () => void run(() => inspect({ ...request, entryOffset: page!.nextEntryOffset! })), page?.nextEntryOffset === null));
+        panel.append(entries, windowStep(button('上一页词条', 'entries-previous', () => void run(() => inspect({ ...request, entryOffset: Math.max(0, request.entryOffset - HOUSE_PAGE_SIZE) })), request.entryOffset === 0), 'before', "向前浏览词条"),
+          windowStep(button('下一页词条', 'entries-next', () => void run(() => inspect({ ...request, entryOffset: page!.nextEntryOffset! })), page?.nextEntryOffset === null), 'after', "向后浏览词条"));
         const details = el('details'); details.append(el('summary', '版本技术详情'), el('p', `词表 ${selected.pin.listId} · 版本 ${selected.pin.versionId} · 摘要 ${selected.pin.digest}`)); panel.append(details);
       }
       panel.append(button(page?.current === null ? '创建词表' : '编辑当前版本', 'edit', () => void beginDraft()));

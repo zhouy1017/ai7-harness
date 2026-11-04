@@ -1,3 +1,4 @@
+import type { IconId } from './components/icon-sprite.js';
 import type { ShellBookSection } from '../shared/preferences.js';
 import type { DialogueAttemptProjection } from '../shared/protocol.js';
 import { dialogueIncompleteLine } from './dialogue-labels.js';
@@ -9,42 +10,42 @@ export function globalAgentAnswerStatus(attempt: DialogueAttemptProjection | und
 }
 
 // The shell's words (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3, §8; IA-006 to IA-013, ADR 0092):
-// the two-level sidebar, the searchable multi-book switcher, the context header and the 设置 hub. Each row's icon is one
-// character of its own name, drawn by the stylesheet from a data attribute, so a row's text is exactly its label and a
+// the two-level sidebar, the searchable multi-book switcher, the context header and the 设置 hub. Each row uses an
+// SVG symbol from the fixed A4 sprite, so a row's text is exactly its label and a
 // collapsed row keeps that label as its accessible name.
 
 export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
 
 /** The six global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
-export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: string }> = Object.freeze([
-  { key: 'attention', label: '待我处理', icon: '待' },
-  { key: 'library', label: '书库', icon: '库' },
-  { key: 'series', label: '书系', icon: '系' },
-  { key: 'knowledge', label: '知识库', icon: '知' },
-  { key: 'quality', label: '质量与学习', icon: '质' },
-  { key: 'global-agent', label: '全域智能体（记忆与全局指导）', icon: '智' },
+export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: IconId }> = Object.freeze([
+  { key: 'attention', label: '待我处理', icon: 'i-inbox' },
+  { key: 'library', label: '书库', icon: 'i-library' },
+  { key: 'series', label: '书系', icon: 'i-series' },
+  { key: 'knowledge', label: '知识库', icon: 'i-kb' },
+  { key: 'quality', label: '质量与学习', icon: 'i-learn' },
+  { key: 'global-agent', label: '全域智能体（记忆与全局指导）', icon: 'i-learn' },
 ]);
 
 /** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */
 export const SHELL_BOOK_GROUPS: ReadonlyArray<{
   readonly key: 'work' | 'handling' | 'records';
   readonly label: string;
-  readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: string }>;
+  readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: IconId }>;
 }> = Object.freeze([
   { key: 'work', label: '工作', sections: [
-    { key: 'manuscript', label: '稿件', icon: '稿' },
-    { key: 'review', label: '审阅', icon: '审' },
-    { key: 'evaluation', label: '评估', icon: '评' },
-    { key: 'deliverables', label: '交付物', icon: '交' },
+    { key: 'manuscript', label: '稿件', icon: 'i-ms' },
+    { key: 'review', label: '审阅', icon: 'i-review' },
+    { key: 'evaluation', label: '评估', icon: 'i-star' },
+    { key: 'deliverables', label: '交付物', icon: 'i-box' },
   ] },
   { key: 'handling', label: '处理', sections: [
-    { key: 'findings', label: '发现', icon: '发' },
+    { key: 'findings', label: '发现', icon: 'i-flag' },
   ] },
   { key: 'records', label: '资料与记录', sections: [
-    { key: 'analysis', label: '分析', icon: '析' },
-    { key: 'sources', label: '来源与证据', icon: '源' },
-    { key: 'overview', label: '工作概览', icon: '概' },
-    { key: 'history', label: '历史与恢复', icon: '史' },
+    { key: 'analysis', label: '分析', icon: 'i-analysis' },
+    { key: 'sources', label: '来源与证据', icon: 'i-source' },
+    { key: 'overview', label: '工作概览', icon: 'i-overview' },
+    { key: 'history', label: '历史与恢复', icon: 'i-history' },
   ] },
 ]);
 
@@ -53,9 +54,9 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
  * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
  * section, and nothing opens it on its own.
  */
-export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'A', state: 'agent-workspace' } as const);
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-ms', state: 'agent-workspace' } as const);
 
-export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: '设' });
+export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
 
 export const SHELL_LABELS = Object.freeze({
   navigation: '主导航',

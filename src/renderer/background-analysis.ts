@@ -69,6 +69,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -196,7 +197,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     root.dataset['backgroundNext'] = projection.next.kind;
     root.dataset['backgroundStarted'] = String(projection.startedRunCount);
     const heading = el('div', 'background-analysis-heading');
-    const pill = el('span', `status-pill background-analysis-state background-analysis-state-${projection.state}`, projection.stateLabel);
+    const pill = el('span', `state-term status-pill background-analysis-state background-analysis-state-${projection.state}`, projection.stateLabel);
     heading.append(el('h3', undefined, BACKGROUND_HEADING), pill);
     const kindChoice = el('select');
     kindChoice.setAttribute('aria-label', BACKGROUND_KIND_LABEL);

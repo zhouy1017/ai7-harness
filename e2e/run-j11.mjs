@@ -314,7 +314,7 @@ async function pressEscape(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...escape });
 }
 async function choose(renderer, selector, value, name) {
-  await assertRenderer(renderer, `(() => { const select = document.querySelector(${JSON.stringify(selector)}); if (!(select instanceof HTMLSelectElement)) return false; select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === ${JSON.stringify(value)}; })()`, name);
+  await assertRenderer(renderer, `(() => { const select = document.querySelector(${JSON.stringify(selector)}); if (select?.classList.contains('filter-choices')) { const button = Array.from(select.querySelectorAll('[data-filter-value]')).find((node) => node.dataset.filterValue === ${JSON.stringify(value)}); if (!button || button.disabled) return false; button.click(); return true; } if (!(select instanceof HTMLSelectElement)) return false; select.value = ${JSON.stringify(value)}; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === ${JSON.stringify(value)}; })()`, name);
 }
 /** Commit a date or exact-dimension filter as leaving the field does; input alone does not submit these filters. */
 async function changeHistoryInput(renderer, filter, value, name) {
@@ -433,7 +433,7 @@ const READ_EVALUATION = `(() => {
         latest: section.querySelector('.evaluation-initial-latest')?.textContent ?? null,
         items: Array.from(section.querySelectorAll('.evaluation-initial-items li'), (line) => [line.dataset.itemId, line.dataset.sufficiency, line.textContent]),
         conclusion: section.querySelector('.evaluation-initial-conclusion')?.textContent ?? null,
-        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
+        actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button:not([data-evaluation-action="close-initial-sheet"])'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         reason: section.querySelector('.evaluation-initial-reason')?.textContent ?? null,
       };
     })(),
@@ -890,8 +890,8 @@ const READ_HISTORY = `(() => {
     entryBooks: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-book')?.textContent ?? null),
     entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-line')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
     people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
-    loading: root.querySelector('select[data-feedback-filter]')?.disabled ?? false,
-    filters: Object.fromEntries(Array.from(root.querySelectorAll('select[data-feedback-filter]'), (select) => [select.dataset.feedbackFilter, [select.value, Array.from(select.options, (option) => option.textContent)]])),
+    loading: root.querySelector('[data-feedback-filter]')?.dataset.disabled === 'true',
+    filters: Object.fromEntries(Array.from(root.querySelectorAll('[data-feedback-filter]'), (group) => [group.dataset.feedbackFilter, [group.dataset.value, Array.from(group.querySelectorAll('[data-filter-value]'), (option) => option.textContent)]])),
     inputs: Object.fromEntries(['dimension', 'from', 'to'].map((name) => [name, root.querySelector('#feedback-filter-' + name)?.value ?? null])),
     unclassified: root.querySelector('#feedback-filter-unclassified')?.checked ?? false,
     dimensionDisabled: root.querySelector('#feedback-filter-dimension')?.disabled ?? false,
@@ -937,8 +937,8 @@ const READ_AUDIT = `(() => {
     later: root.querySelector('.learning-audit-later')?.textContent ?? null,
     none: root.querySelector('.learning-audit-none')?.textContent ?? null,
     books: Array.from(root.querySelectorAll('.learning-audit-book'), (book) => book.querySelector('h3')?.textContent ?? null),
-    bookOptions: Array.from(root.querySelectorAll('#learning-audit-filter-book option'), (option) => option.textContent),
-    standingFilter: root.querySelector('#learning-audit-filter-standing')?.value ?? null,
+    bookOptions: Array.from(root.querySelectorAll('#learning-audit-filter-book [data-filter-value]'), (option) => option.textContent),
+    standingFilter: root.querySelector('#learning-audit-filter-standing')?.dataset.value ?? null,
     rows: Array.from(root.querySelectorAll('li.learning-audit-material'), (item) => [item.dataset.materialKey ?? null, item.dataset.learningStanding ?? null,
       item.querySelector('.learning-audit-standing')?.textContent ?? null, item.querySelector('.learning-audit-use')?.textContent ?? null,
       item.querySelector('.learning-audit-select') !== null]),
@@ -1830,6 +1830,8 @@ async function main() {
     requireJourney(beforeInitial.initial.state === 'none' && beforeInitial.initial.none === 'AI7 还没有为这本书做初评。' &&
       JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['prepare-initial', '查看计划', false], ['start-initial', 'AI7 初评', false]]) && beforeInitial.startFromInitial === null,
     'initial-evaluation-offered-words', beforeInitial.initial);
+    await clickSelector(renderer, '[data-evaluation-action="new-evaluation"]', 'initial-evaluation-sheet');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].evaluation-sheet'); return sheet?.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'initial-evaluation-nonmodal');
     await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'initial-evaluation-plan', 120_000);
     // The plan in the editor's words, as the drawer reads it: its task, its two steps, its 工序, and that it scores nothing for
@@ -2642,8 +2644,8 @@ async function main() {
       return item instanceof HTMLElement && item.dataset.analysisFeedbackJudgment === 'accurate' &&
         card?.dataset.analysisTab === 'entities' && item.getClientRects().length > 0 && document.activeElement === item;
     })()`, 'history-existing-window-exact', 60_000);
-    await waitFor(otherRenderer, `document.querySelector('#feedback-filter-origin')?.value === 'analysis-feedback' &&
-      document.querySelector('#feedback-filter-origin')?.disabled === false &&
+    await waitFor(otherRenderer, `document.querySelector('#feedback-filter-origin')?.dataset.value === 'analysis-feedback' &&
+      document.querySelector('#feedback-filter-origin')?.dataset.disabled === 'false' &&
       document.activeElement === document.querySelector('[data-entry-id$="/entities/0"] [data-feedback-action="open"]')`, 'history-requester-focus-restored');
 
     await close();
@@ -3097,6 +3099,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
     };
     const runInitialEvaluation = async (name) => {
+      await clickSelector(renderer, '[data-evaluation-action="new-evaluation"]', `${name}-sheet`);
       await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', `${name}-prepare`);
       await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, `${name}-plan`, 120_000);
       await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', `${name}-run`);

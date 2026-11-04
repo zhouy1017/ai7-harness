@@ -2719,6 +2719,7 @@ async function main() {
       JSON.stringify(writingBefore.buttons) === JSON.stringify([['new', '新建文档…', false]]), 'writing-section-words', writingBefore);
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-new');
     const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
     requireJourney(JSON.stringify(writingSheet.similarMaterials) === JSON.stringify([[1, '相似段落检索', 1_000,
       [['使用当前选中文字', 'button', false], ['检索相似段落', 'button', false]]]]), 'writing-sheet-retrieval-control', writingSheet.similarMaterials);
     requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, false, false])) &&

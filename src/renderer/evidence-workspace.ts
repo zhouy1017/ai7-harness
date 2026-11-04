@@ -111,6 +111,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -225,7 +226,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     for (const [term, value] of factStateLines(result)) {
       const state = el('span', 'evidence-state');
       state.dataset['stateTerm'] = term;
-      state.append(el('span', 'evidence-term', term), el('span', `status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
+      state.append(el('span', 'evidence-term', term), el('span', `state-term status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
       states.append(state);
     }
     const children: HTMLElement[] = [heading, header, states, el('p', 'evidence-level', factLevelLine(result)), el('p', 'evidence-counts', factSourceCountsLine(result))];

@@ -38,6 +38,7 @@ const LANE_LABELS: Readonly<Record<(typeof LANE_KINDS)[number], string>> = {
 function el(tag: 'div' | 'button', className: string): HTMLElement {
   const node = document.createElement(tag);
   node.className = className;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 

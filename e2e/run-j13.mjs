@@ -1753,12 +1753,12 @@ async function main() {
     const knowledgeChooser = '[data-mark-composer="choose-knowledge-series"]';
     await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-first');
     for (let pass = 0; pass < 2; pass += 1) {
-      await click(renderer, '下一页书系', 'knowledge-member-series-next');
+      await clickSelector(renderer, '[data-window-step="after"][aria-label="向后浏览书系"]', 'knowledge-member-series-next');
       await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail');
       await click(renderer, '回到第一页', 'knowledge-member-series-reset');
       await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-reset-ready');
     }
-    await click(renderer, '下一页书系', 'knowledge-member-series-next-final');
+    await clickSelector(renderer, '[data-window-step="after"][aria-label="向后浏览书系"]', 'knowledge-member-series-next-final');
     await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail-final');
     const offPage = await renderer.evaluate(`(() => { const item = Array.from(document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button')).find((node) => node.textContent === '分页书系050'); if (!(item instanceof HTMLButtonElement)) return null; const id = item.dataset.seriesId; item.click(); return id; })()`);
     requireJourney(UUID_PATTERN.test(offPage ?? ''), 'knowledge-member-series-tail-identity');

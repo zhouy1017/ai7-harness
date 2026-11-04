@@ -1,3 +1,4 @@
+import { createButton } from './components/controls.js';
 import type {
   EvidenceAssuranceLevel,
   BaselineAnalysisGoal,
@@ -331,6 +332,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -459,7 +461,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const title = el('h2', 'task-drawer-title', TASK_DRAWER_TITLE);
   title.id = 'task-drawer-title';
   title.tabIndex = -1;
-  const pill = el('span', 'status-pill review-pill task-drawer-pill');
+  const pill = el('span', 'state-term status-pill review-pill task-drawer-pill');
   const modes = el('div', 'task-drawer-modes');
   modes.setAttribute('role', 'group');
   modes.setAttribute('aria-label', TASK_DRAWER_MODE_GROUP);
@@ -752,7 +754,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     else root.dataset['taskPlanVersion'] = String(next.planVersion);
     const tone = next.runOutcome?.classification === 'completed-with-gaps' ? { tone: 'warn', shape: 'triangle' } : TASK_PLAN_STATE_PILLS[next.state.key];
     pill.hidden = false;
-    pill.className = `status-pill review-pill task-drawer-pill review-pill-${tone.tone}`;
+    pill.className = `state-term status-pill review-pill task-drawer-pill review-pill-${tone.tone}`;
     pill.dataset['pillTone'] = tone.tone;
     pill.dataset['pillShape'] = tone.shape;
     pill.textContent = next.runOutcome?.label ?? next.state.label;
@@ -839,9 +841,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     section.append(heading, el('p', 'attention-note', unconfirmedStatement(listed, plan?.listPages?.['unconfirmed.ranges']?.total)));
     const listId = uid('unconfirmed-list');
     const actions = el('div', 'button-row');
-    const view = document.createElement('button');
+    const view = createButton();
     view.type = 'button';
-    view.className = 'secondary';
+    view.className = 'btn ' + ('secondary');
     view.textContent = TASK_BAR_VIEW_UNCONFIRMED;
     view.dataset['taskDrawerControl'] = 'view-unconfirmed-record';
     view.setAttribute('aria-controls', listId);
@@ -850,9 +852,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       unconfirmedRecordShown = !unconfirmedRecordShown;
       if (plan !== null) paint(plan, true);
     });
-    const keep = document.createElement('button');
+    const keep = createButton();
     keep.type = 'button';
-    keep.className = 'secondary';
+    keep.className = 'btn ' + ('secondary');
     keep.textContent = UNCONFIRMED_KEEP_AS_GAP;
     keep.dataset['taskDrawerControl'] = 'keep-unconfirmed';
     keep.disabled = working || interrupted;
@@ -1515,15 +1517,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       parts.push(el('span', 'task-plan-edit-tag', `${TASK_PLAN_EDIT_TAG} · ${kind === 'step' ? TASK_PLAN_EDIT_STEP_REMOVED : TASK_PLAN_EDIT_ADAPTATION_WITHDRAWN}`));
     }
     if (!next.edit.editable) return parts;
-    const button = document.createElement('button');
+    const button = createButton();
     button.type = 'button';
     button.dataset['taskPlanEdit'] = removed ? 'restore' : 'remove';
     if (removed) {
-      button.className = 'quiet task-plan-edit-restore';
+      button.className = 'btn ' + ('quiet task-plan-edit-restore');
       button.textContent = TASK_PLAN_EDIT_RESTORE;
     } else {
       const name = kind === 'step' ? taskPlanEditRemoveStep(label) : taskPlanEditWithdraw(label);
-      button.className = 'quiet task-plan-edit-remove';
+      button.className = 'btn ' + ('quiet task-plan-edit-remove');
       button.setAttribute('aria-label', name);
       button.title = name;
     }
@@ -1543,10 +1545,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     if (!next.edit.editable) return parts;
     if (shown !== 'kept') {
-      const restore = document.createElement('button');
+      const restore = createButton();
       restore.type = 'button';
       restore.dataset['taskPlanEdit'] = 'restore';
-      restore.className = 'quiet task-plan-edit-restore';
+      restore.className = 'btn ' + ('quiet task-plan-edit-restore');
       restore.textContent = TASK_PLAN_EDIT_RESTORE;
       restore.addEventListener('click', () => setItemEdit(next, entry.id, committed, 'kept'));
       parts.push(restore);
@@ -1554,22 +1556,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     if (entry.removable) {
       const name = taskPlanEditWithdraw(entry.label);
-      const remove = document.createElement('button');
+      const remove = createButton();
       remove.type = 'button';
       remove.dataset['taskPlanEdit'] = 'remove';
-      remove.className = 'quiet task-plan-edit-remove';
+      remove.className = 'btn ' + ('quiet task-plan-edit-remove');
       remove.setAttribute('aria-label', name);
       remove.title = name;
       remove.addEventListener('click', () => setItemEdit(next, entry.id, committed, 'removed'));
       parts.push(remove);
     }
     if (entry.movable) {
-      const move = document.createElement('button');
+      const move = createButton();
       move.type = 'button';
       move.dataset['taskPlanEdit'] = 'ask-first';
       // Its words are the style sheet's, as `×`'s glyph is, so the item's text stays the adaptation's own words; the
       // name says what it does.
-      move.className = 'quiet task-plan-edit-ask-first';
+      move.className = 'btn ' + ('quiet task-plan-edit-ask-first');
       move.setAttribute('aria-label', taskPlanEditAskFirst(entry.label));
       move.title = taskPlanEditAskFirst(entry.label);
       move.addEventListener('click', () => setItemEdit(next, entry.id, committed, 'ask-first'));
@@ -1611,10 +1613,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const line = el('p', 'task-plan-budget-edited');
       line.append(el('span', 'task-plan-edit-tag', `${TASK_PLAN_EDIT_TAG} · ${taskPlanBudgetEdited(pending)}`));
       if (next.edit.editable) {
-        const restore = document.createElement('button');
+        const restore = createButton();
         restore.type = 'button';
         restore.dataset['taskPlanEdit'] = 'budget-restore';
-        restore.className = 'quiet task-plan-edit-restore';
+        restore.className = 'btn ' + ('quiet task-plan-edit-restore');
         restore.textContent = TASK_PLAN_EDIT_RESTORE;
         restore.addEventListener('click', () => setBudget(next, undefined));
         line.append(restore);
@@ -1628,9 +1630,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const open = budgetForm !== null && budgetForm.key === key;
     const actions = el('div', 'task-plan-budget-actions');
-    const set = document.createElement('button');
+    const set = createButton();
     set.type = 'button';
-    set.className = 'quiet task-plan-budget-set';
+    set.className = 'btn ' + ('quiet task-plan-budget-set');
     set.dataset['taskPlanEdit'] = 'budget';
     set.textContent = TASK_PLAN_BUDGET_SET;
     set.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -1642,9 +1644,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     });
     actions.append(set);
     if (shownCeiling(next) !== 'unset') {
-      const remove = document.createElement('button');
+      const remove = createButton();
       remove.type = 'button';
-      remove.className = 'quiet task-plan-budget-remove';
+      remove.className = 'btn ' + ('quiet task-plan-budget-remove');
       remove.dataset['taskPlanEdit'] = 'budget-remove';
       remove.textContent = TASK_PLAN_BUDGET_REMOVE;
       remove.addEventListener('click', () => setBudget(next, 'unset'));

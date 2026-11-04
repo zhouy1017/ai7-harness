@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import {
   LIBRARY_MATERIAL_KINDS,
   MAX_MATERIAL_VECTOR_QUERY_CODE_UNITS,
@@ -121,6 +122,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -440,7 +442,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const section = el('section', 'material-index');
     section.dataset['indexState'] = index.state;
     const heading = el('div', 'material-index-heading');
-    heading.append(el('h4', undefined, MATERIAL_INDEX_TERM), el('span', 'status-pill material-index-state', materialIndexStateLine(index)));
+    heading.append(el('h4', undefined, MATERIAL_INDEX_TERM), el('span', 'state-term status-pill material-index-state', materialIndexStateLine(index)));
     const layers = el('dl', 'material-index-layers');
     for (const layer of MATERIAL_INDEX_LAYERS) {
       const line = el('dd', 'material-index-layer', materialIndexLayerLine(index, layer));
@@ -624,8 +626,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
         list.append(item);
       }
       const row = el('div', 'button-row');
-      if (page.previous !== null) row.append(action(MATERIAL_SEGMENTS_PREVIOUS, 'quiet', 'segments-previous', () => void read(page.previous!)));
-      if (page.next !== null) row.append(action(MATERIAL_SEGMENTS_NEXT, 'quiet', 'segments-next', () => void read(page.next!)));
+      if (page.previous !== null) row.append(windowStep(action(MATERIAL_SEGMENTS_PREVIOUS, 'quiet', 'segments-previous', () => void read(page.previous!)), 'before', "向前浏览"));
+      if (page.next !== null) row.append(windowStep(action(MATERIAL_SEGMENTS_NEXT, 'quiet', 'segments-next', () => void read(page.next!)), 'after', "向后浏览"));
       row.append(action(MATERIAL_SEGMENTS_CLOSE, 'quiet', 'segments-close', () => {
         section.replaceChildren(open);
         delete section.dataset['segmentsFrom'];

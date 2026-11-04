@@ -1,3 +1,4 @@
+import { createSheet, sheetContent } from './components/sheet.js';
 import { startPreparedTask } from './one-action-start.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -147,6 +148,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -310,7 +312,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const title = el('h4', 'task-card-title', view.title);
     title.id = uid('card');
     item.setAttribute('aria-labelledby', title.id);
-    const pill = el('span', `status-pill review-pill task-card-pill review-pill-${view.pill.tone}`, view.stateLabel);
+    const pill = el('span', `state-term status-pill review-pill task-card-pill review-pill-${view.pill.tone}`, view.stateLabel);
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;
     const head = el('div', 'task-card-head');
@@ -661,7 +663,9 @@ function keptRanges(draft: TaskIntentDraftProjection): ComposerRange[] {
  */
 export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSurface {
   const { api } = options;
-  const element = el('section', 'task-composer');
+  const element = createSheet('task-composer');
+  element.addEventListener('close', () => finish());
+  element.addEventListener('cancel', (event) => { if (working) event.preventDefault(); });
   element.dataset['taskComposer'] = 'closed';
   /** The recommendation slot (#423 rev 6): created once per composer and moved, never rebuilt, so 7c's children stay. */
   let slot = el('div', 'task-composer-recommendation');
@@ -799,7 +803,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       const where = el('small', 'field-note', taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1));
       item.append(words, where);
       if (range.stateLabel !== null) {
-        const label = el('span', `status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
+        const label = el('span', `state-term status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
         label.dataset['rangeStateLabel'] = range.state;
         item.append(label);
       }
@@ -940,7 +944,8 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     unsaved.hidden = !(kind === 'draft' && current.dirty);
     parts.push(unsaved);
     parts.push(actionRow(kind));
-    element.replaceChildren(...parts);
+    sheetContent(element, heading, parts.slice(1, -1), parts.at(-1)!);
+    element.open = true;
     if (active !== null) {
       const target = element.querySelector<HTMLElement>(`[data-task-composer-action="${CSS.escape(active)}"], [data-task-composer-field="${CSS.escape(active)}"]`);
       if (target !== null && !(target instanceof HTMLButtonElement && target.disabled)) target.focus();
@@ -1079,6 +1084,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     ticket += 1;
     state = null;
     element.dataset['taskComposer'] = 'closed';
+    element.open = false;
     element.replaceChildren();
     options.close();
   }

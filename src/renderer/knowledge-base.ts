@@ -500,7 +500,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       card.dataset['rulePattern'] = rule.pattern;
       card.dataset['ruleOrdinal'] = String(rule.ordinal);
       const heading = element('div', 'default-rule-heading');
-      const state = element('span', `status-pill default-rule-state-${rule.state}`, rule.stateLabel);
+      const state = element('span', `state-term status-pill default-rule-state-${rule.state}`, rule.stateLabel);
       heading.append(element('h3', undefined, `《${rule.bookTitle}》 · ${rule.name}`), state);
       const set = `由${rule.setBy}设定于 ${localInstantLabel(rule.setAt)}${rule.state === 'deactivated' ? ` · 停用于 ${localInstantLabel(rule.stateRecordedAt)}` : ''}`;
       // 查看: what the rule binds, in the rows the confirmation listed, and one step further the exact identities.

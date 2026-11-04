@@ -1,3 +1,4 @@
+import { tabButton } from './components/controls.js';
 import type { DataVersionProjection } from '../shared/protocol.js';
 import { SERVICE_PROTOCOL_VERSION } from '../shared/protocol.js';
 import licensesDocument from './third-party-licenses.generated.json' with { type: 'json' };
@@ -47,6 +48,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className !== undefined) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -165,7 +167,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     root.dataset['helpTab'] = tab;
     for (const [key, node] of buttons) {
       const current = key === tab;
-      node.className = current ? 'secondary' : 'quiet';
+      node.className = current ? 'btn tab secondary' : 'btn tab quiet';
       node.setAttribute('aria-selected', String(current));
       node.tabIndex = current ? 0 : -1;
     }
@@ -174,7 +176,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   };
 
   HELP_TABS.forEach((entry, index) => {
-    const node = el('button', entry.tab === 'usage' ? 'secondary' : 'quiet', entry.label);
+    const node = tabButton({ label: entry.label, id: `help-tab-${entry.tab}`, panel: `help-panel-${entry.tab}`, selected: entry.tab === 'usage', activate: () => select(entry.tab, true) });
     node.type = 'button';
     node.id = `help-tab-${entry.tab}`;
     node.dataset['helpTab'] = entry.tab;
@@ -182,15 +184,6 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     node.setAttribute('aria-selected', String(entry.tab === 'usage'));
     node.setAttribute('aria-controls', `help-panel-${entry.tab}`);
     node.tabIndex = entry.tab === 'usage' ? 0 : -1;
-    node.addEventListener('click', () => select(entry.tab, true));
-    node.addEventListener('keydown', (event) => {
-      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-      const jump = event.key === 'Home' ? -index : event.key === 'End' ? HELP_TABS.length - 1 - index : 0;
-      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault();
-      const next = HELP_TABS[(index + (step !== 0 ? step : jump) + HELP_TABS.length) % HELP_TABS.length]!;
-      select(next.tab, true);
-    });
     buttons.set(entry.tab, node);
     tabs.append(node);
   });

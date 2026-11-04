@@ -183,12 +183,12 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     await flush();
     expect(view.root.querySelectorAll('[data-fact-result-id]').map((row) => row.dataset['factResultId'])).toEqual([RESULT, SECOND]);
     const filter = view.root.querySelector('[data-fact-filter="outcome"]')!;
-    filter.value = '待核查'; filter.dispatchEvent({ type: 'change' });
+    filter.querySelector('[data-filter-value="待核查"]')!.click();
     await flush();
     expect(view.root.querySelectorAll('[data-fact-result-id]')).toHaveLength(0);
     const clear = view.root.querySelector('[data-fact-filter="outcome"]')!;
     expect(clear).not.toBeNull();
-    clear.value = ''; clear.dispatchEvent({ type: 'change' });
+    clear.querySelector('[data-filter-value=""]')!.click();
     await flush();
     expect(view.root.querySelectorAll('[data-fact-result-id]')).toHaveLength(1);
     expect(view.inspectFactualVerification.mock.calls.at(-1)?.[0].after).toBeNull();
@@ -203,7 +203,7 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     expect(view.root.querySelector('.evidence-workspace')).toBeNull();
     view.surface.refresh(); await flush();
     const filter = view.root.querySelector('[data-fact-filter="outcome"]')!;
-    filter.value = '待核查'; filter.dispatchEvent({ type: 'change' }); await flush();
+    filter.querySelector('[data-filter-value="待核查"]')!.click(); await flush();
     view.root.querySelectorAll('[data-review-action="open-run"]')[1]!.click(); await flush();
     expect(view.root.querySelector('.evidence-workspace')).toBeNull();
     expect(view.inspectFactualVerification.mock.calls.at(-1)?.[0]).toMatchObject({ reviewRunId: OTHER, after: null, outcome: null });

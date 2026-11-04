@@ -1,3 +1,5 @@
+import { filterChoices, listPosition, stateTerm } from './components/controls.js';
+import { createButton } from './components/controls.js';
 import type { BookFindingProjection, BookFindingsProjection } from '../shared/protocol.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
 
@@ -17,29 +19,27 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       root.dataset['findingsTotal'] = String(page.total);
       const summary = document.createElement('p');
       summary.textContent = page.total === 0 ? FINDINGS_CENTER_WORDS.empty : FINDINGS_CENTER_WORDS.summary(page.total, page.pageSize);
-      const filter = document.createElement('select');
-      filter.setAttribute('aria-label', FINDINGS_CENTER_WORDS.filter);
-      const all = document.createElement('option');
-      all.value = ''; all.textContent = FINDINGS_CENTER_WORDS.allCategories; filter.append(all);
       const groups = document.createElement('ul');
       for (const group of page.groups) {
-        const option = document.createElement('option'); option.value = group.category; option.textContent = `${group.label} · ${group.count}`; filter.append(option);
         const line = document.createElement('li');
-        line.textContent = `${group.label} · ${group.count} · ${Object.entries(group.bySeverity).map(([key, count]) => `${key} ${count}`).join(' / ')} · ${Object.entries(group.byStatus).map(([key, count]) => `${key} ${count}`).join(' / ')}`;
+        line.textContent = `${group.label} · ${group.count}`;
         groups.append(line);
       }
-      filter.value = category;
+      const filter = filterChoices({ label: FINDINGS_CENTER_WORDS.filter,
+        choices: [['', FINDINGS_CENTER_WORDS.allCategories], ...page.groups.map((group) => [group.category, `${group.label} · ${group.count}`] as const)],
+        value: category, change: (value) => { category = value; paint(); },
+      });
+      filter.dataset['findingsFilter'] = 'category';
       const list = document.createElement('div');
       const paint = (): void => {
-        category = filter.value;
         list.replaceChildren();
         for (const group of page.groups.filter((entry) => category === '' || entry.category === category)) {
           const section = document.createElement('section');
           const heading = document.createElement('h3'); heading.textContent = group.label; section.append(heading);
           for (const item of page.items.filter((entry) => entry.category === group.category)) {
             const row = document.createElement('article'); row.dataset['findingId'] = item.id; row.dataset['findingKind'] = item.target.kind;
-            const words = document.createElement('p'); words.textContent = `${item.severity} · ${item.status} · ${item.summary}`;
-            const link = document.createElement('button'); link.type = 'button'; link.textContent = FINDINGS_CENTER_WORDS.open; link.addEventListener('click', () => open(item));
+            const words = document.createElement('p'); words.append(stateTerm(item.status, 'attention'), document.createTextNode(` ${item.severity} · ${item.summary}`));
+            const link = createButton(); link.type = 'button'; link.textContent = FINDINGS_CENTER_WORDS.open; link.addEventListener('click', () => open(item));
             row.append(words, link); section.append(row);
           }
           if (section.childElementCount > 1) list.append(section);
@@ -48,20 +48,19 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
           const empty = document.createElement('p'); empty.textContent = FINDINGS_CENTER_WORDS.pageEmpty; list.append(empty);
         }
       };
-      filter.addEventListener('change', paint); paint();
+      paint();
       const actions = document.createElement('div'); actions.className = 'button-row';
       const action = (label: string, disabled: boolean, run: () => void): void => {
-        const button = document.createElement('button'); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', run); actions.append(button);
+        const button = createButton(); button.type = 'button'; button.textContent = label; button.disabled = disabled; button.addEventListener('click', run); actions.append(button);
       };
-      action(FINDINGS_CENTER_WORDS.previous, offset === 0, () => void load(Math.max(0, offset - page.pageSize)));
-      action(FINDINGS_CENTER_WORDS.next, page.next === null, () => void load(page.next!));
+      actions.append(listPosition({ offset, total: page.total, pageSize: page.pageSize, label: '发现位置', change: (next) => void load(next) }));
       action(FINDINGS_CENTER_WORDS.refresh, false, () => void load(offset));
       root.append(summary, groups, filter, list, actions);
     } catch {
       if (!root.isConnected || request !== generation) return;
       root.dataset['findingsState'] = 'failed';
       root.replaceChildren();
-      const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = FINDINGS_CENTER_WORDS.unavailable; retry.addEventListener('click', () => void load(offset)); root.append(retry);
+      const retry = createButton(); retry.type = 'button'; retry.textContent = FINDINGS_CENTER_WORDS.unavailable; retry.addEventListener('click', () => void load(offset)); root.append(retry);
     } finally { if (request === generation) root.removeAttribute('aria-busy'); }
   };
   void load(0);

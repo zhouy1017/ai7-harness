@@ -32,6 +32,10 @@ export class MiniElement {
   parentElement: MiniElement | null = null;
   #text = '';
   #listeners = new Map<string, Listener[]>();
+  open = false;
+  show(): void { this.open = true; }
+  close(): void { this.open = false; this.dispatchEvent({ type: 'close' }); }
+  matches(selector: string): boolean { return selector === ':hover' ? false : matches(this, selector); }
   hidden = false;
   disabled = false;
   checked = false;
@@ -254,6 +258,8 @@ function compound(element: MiniElement, part: string): boolean {
 export const miniDocument = {
   body: new MiniElement('body'),
   activeElement: null as MiniElement | null,
+  querySelector(selector: string): MiniElement | null { return miniDocument.body.querySelector(selector); },
+  createElementNS(_namespace: string, tag: string): MiniElement { return new MiniElement(tag); },
   createElement(tag: string): MiniElement {
     if (tag === 'button') return new MiniButton(tag);
     if (tag === 'input') return new MiniInput(tag);

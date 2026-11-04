@@ -1,3 +1,5 @@
+import { windowStep } from './components/controls.js';
+import { createButton } from './components/controls.js';
 import type {
   LearningEligibilityChoice,
   LearningMaterialProjection,
@@ -60,6 +62,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -122,14 +125,14 @@ export function mountWordTrackedEditDetail(options: {
   };
   const paintNavigation = (): void => {
     navigation.replaceChildren();
-    const back = action('上一页修改详情', 'secondary', 'word-detail-previous', () => {
+    const back = windowStep(action('上一页修改详情', 'secondary', 'word-detail-previous', () => {
       const cursor = previous.at(-1); if (busy || previous.length === 0 || cursor === undefined) return;
       void read(cursor, 'previous');
-    });
+    }), 'before', "向前浏览修改详情");
     back.disabled = busy || previous.length === 0;
-    const next = action('下一页修改详情', 'secondary', 'word-detail-next', () => {
+    const next = windowStep(action('下一页修改详情', 'secondary', 'word-detail-next', () => {
       if (!busy && page?.nextCursor !== null && page?.nextCursor !== undefined) void read(page.nextCursor, 'next');
-    }); next.disabled = busy || page?.nextCursor == null;
+    }), 'after', "向后浏览修改详情"); next.disabled = busy || page?.nextCursor == null;
     const source = action('查看保留的原始来源版本', 'secondary', 'word-detail-source', () => {
       if (busy || page === null) return;
       void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原始来源版本。'; });
@@ -250,7 +253,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningState'] = material.state;
     const head = el('div', 'learning-material-head');
-    const pill = el('span', `status-pill learning-state learning-state-${material.state}`, material.kind === 'word-tracked-edit'
+    const pill = el('span', `state-term status-pill learning-state learning-state-${material.state}`, material.kind === 'word-tracked-edit'
       ? '原始修改对已保留' : LEARNING_STATE_LABELS[material.state]);
     head.append(el('span', 'learning-origin', learningOriginLine(material, localInstantLabel)), pill);
     item.append(head);
@@ -456,7 +459,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
   const all = document.createElement('option');
   all.value = ''; all.textContent = '本社全部图书'; select.append(all);
   let cursor: import('../shared/protocol.js').BookSummaryCursor | null = null;
-  const more = document.createElement('button'); more.type = 'button'; more.textContent = '更多图书…';
+  const more = createButton(); more.type = 'button'; more.textContent = '更多图书…';
   const loadBooks = async () => {
     more.disabled = true;
     try {

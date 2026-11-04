@@ -6,6 +6,7 @@ import { MODEL_SERVICE_ROUTE_BINDINGS, modelServiceChannelOf } from '../shared/p
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 function field(label: string, input: HTMLElement): HTMLLabelElement {
@@ -92,7 +93,7 @@ export function mountGlobalAgent(options: {
   text.dataset['globalAgentText'] = 'input';
   const save = el('button', '新建记忆');
   save.type = 'submit';
-  save.className = 'secondary';
+  save.className = 'btn ' + ('secondary');
   save.dataset['globalAgentSave'] = 'submit';
   const effectField = field('监督作用', effect);
   const bookField = field('图书', book);
@@ -136,7 +137,7 @@ export function mountGlobalAgent(options: {
   const answerButtons = new Map<'stop' | 'continue' | 'regenerate', HTMLButtonElement>();
   for (const [operation, label] of [['stop', '停止回答'], ['continue', '继续回答'], ['regenerate', '重新回答']] as const) {
     const button = el('button', label); button.type = 'button'; button.disabled = true;
-    button.className = 'quiet';
+    button.className = 'btn ' + ('quiet');
     button.addEventListener('click', () => {
       const last = latestDialogue?.attempts.at(-1);
       if (last === undefined || latestDialogue === null) return;
@@ -192,7 +193,7 @@ export function mountGlobalAgent(options: {
       for (const proposal of dialogue.supervisionProposals ?? []) {
         const key = `${proposal.attemptId}/${proposal.callId}`;
         const confirm = el('button', confirmed.has(key) ? '已记录' : '确认并记录为学习监督指令'); confirm.type = 'button'; confirm.disabled = confirmed.has(key);
-        confirm.className = 'secondary';
+        confirm.className = 'btn ' + ('secondary');
         confirm.dataset['globalAgentConfirmProposal'] = key;
         confirm.addEventListener('click', () => {
           confirm.disabled = true;
@@ -219,8 +220,8 @@ export function mountGlobalAgent(options: {
   questionForm.dataset['globalAgentQuestionForm'] = '';
   const question = el('textarea'); question.maxLength = 500; question.rows = 3;
   question.placeholder = '向全域智能体提问…'; question.dataset['globalAgentQuestion'] = '';
-  const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'primary'; ask.disabled = true; question.disabled = true;
-  const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'secondary'; previewButton.disabled = true;
+  const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'btn ' + ('primary'); ask.disabled = true; question.disabled = true;
+  const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'btn ' + ('secondary'); previewButton.disabled = true;
   const scopeList = el('fieldset'); scopeList.className = 'global-agent-scope';
   scopeList.append(el('legend', '参考图书与工序'), el('p', '勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选记忆。'));
   const scopeBooks = el('div'); scopeBooks.className = 'global-agent-choice-list';
@@ -228,7 +229,7 @@ export function mountGlobalAgent(options: {
   const scopedBooks = new Set<string>();
   const scopedProcedures = new Map<string, GlobalAgentProcedure>();
   const selectedSources = new Map<string, GlobalAgentSourceCandidate>();
-  const habits = el('button', '生成审阅习惯总结'); habits.type = 'button'; habits.className = 'quiet'; habits.disabled = true; habits.dataset['globalAgentHabits'] = 'summary';
+  const habits = el('button', '生成审阅习惯总结'); habits.type = 'button'; habits.className = 'btn ' + ('quiet'); habits.disabled = true; habits.dataset['globalAgentHabits'] = 'summary';
   const disclosure = el('section'); disclosure.className = 'global-agent-preview'; disclosure.hidden = true; disclosure.setAttribute('aria-label', '将发送的内容');
   let previewGeneration = 0;
   let sending = false;
@@ -295,7 +296,7 @@ export function mountGlobalAgent(options: {
       if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆。'));
       for (const entry of prepared.sources) {
         const row = el('article'); row.className = 'global-agent-source-card';
-        const remove = el('button', '本次移除'); remove.type = 'button'; remove.className = 'quiet';
+        const remove = el('button', '本次移除'); remove.type = 'button'; remove.className = 'btn ' + ('quiet');
         remove.addEventListener('click', () => {
           selectedSources.delete(entry.itemId); selected.delete(entry.itemId);
           for (const checkbox of list.querySelectorAll<HTMLInputElement>('input')) if (checkbox.dataset['sourceItem'] === entry.itemId) checkbox.checked = false;
@@ -330,7 +331,7 @@ export function mountGlobalAgent(options: {
   const audit = el('button', '学习回溯 · 停止今后使用');
   audit.type = 'button';
   audit.addEventListener('click', options.openAudit);
-  audit.className = 'quiet';
+  audit.className = 'btn ' + ('quiet');
   root.append(state, conversation, questionForm, items, scopeList, form, directives, history, audit);
   let current: GlobalAgentProjection | null = null;
   let busy = false;
@@ -415,7 +416,7 @@ export function mountGlobalAgent(options: {
     for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选记忆'} · ${directive.recordedAt}`));
     historyList.replaceChildren();
     for (const dialogue of projection.history) {
-      const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'quiet global-agent-history-entry';
+      const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'btn ' + ('quiet global-agent-history-entry');
       open.addEventListener('click', () => {
         if (poll !== undefined) clearTimeout(poll);
         previousTurns.replaceChildren(); foreground = dialogue.dialogueId; void showDialogue();

@@ -1,3 +1,4 @@
+import { icon as svgIcon, navigationIcon } from './components/icon-sprite.js';
 import { MODEL_SERVICE_ROUTE_EFFECT_LABEL, type BookSummaryCursor, type ModelServiceSettingsProjection, type RendererApi } from '../shared/protocol.js';
 import {
   MAX_RECENT_BOOKS,
@@ -428,15 +429,17 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
-/** A sidebar row: a link whose text is exactly its label, its icon drawn from `data-nav-icon`, and never a page load. */
+/** A sidebar row with a fixed SVG symbol, accessible text and a hover name. */
 function navLink(label: string, icon: string, activate: () => void): HTMLAnchorElement {
   const link = el('a', 'sidebar-link');
   link.href = '#';
   link.dataset['navIcon'] = icon;
-  link.append(el('span', 'nav-label', label));
+  link.title = label;
+  link.append(navigationIcon(icon), el('span', 'nav-label', label));
   link.addEventListener('click', (event) => {
     event.preventDefault();
     if (link.getAttribute('aria-disabled') === 'true') return;
@@ -447,6 +450,7 @@ function navLink(label: string, icon: string, activate: () => void): HTMLAnchorE
 
 export function mountShell(options: MountShellOptions): ShellSurface {
   const { sidebar, preferences } = options;
+  options.toggle.replaceChildren(svgIcon('i-menu'));
   const modelSelector = options.modelSelector === undefined ? null : compactModelSelector({ ...options.modelSelector, setStatus: options.setStatus, errorMessage: options.errorMessage });
   if (modelSelector !== null) options.actions.after(modelSelector.element);
   let book: ShellBookEntry | null = null;
@@ -470,6 +474,9 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       node.dataset['navDestination'] = 'attention';
       node.dataset['navIcon'] = entry.icon;
       node.classList.add('sidebar-link');
+      node.title = entry.label;
+      if (node.children.length === 0) node.append(el('span', 'nav-label', entry.label));
+      node.append(navigationIcon(entry.icon));
       item.append(node);
       destinationLinks.set(entry.key, node);
     } else {
@@ -493,6 +500,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const switcherHeader = el('div', 'sidebar-books-header');
   const switcherToggle = el('button', 'sidebar-book-switcher-toggle', SHELL_LABELS.switchBookTrigger);
   switcherToggle.type = 'button';
+  switcherToggle.replaceChildren(svgIcon('i-library'), el('span', 'nav-label', SHELL_LABELS.switchBookTrigger));
   switcherToggle.dataset['shellBookSwitcher'] = 'toggle';
   switcherToggle.dataset['navIcon'] = bookIcon(SHELL_LABELS.switchBook);
   switcherToggle.setAttribute('aria-expanded', 'false');
@@ -559,7 +567,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
           pick.dataset['shellPickerBook'] = row.bookId;
           pick.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.current ? SHELL_LABELS.currentBook : row.state));
           if (row.current) pick.setAttribute('aria-current', 'true');
-          const icon = el('span', 'shell-book-picker-icon', bookIcon(row.title));
+          const icon = svgIcon('i-library');
           icon.setAttribute('aria-hidden', 'true');
           const text = el('span', 'shell-book-picker-meta');
           text.append(el('span', 'shell-book-picker-title', row.title), el('span', 'shell-book-picker-state', row.current ? SHELL_LABELS.currentBook : row.state));
@@ -767,8 +775,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     // A collapsed row says its name on hover too; a full row shows it already.
     for (const link of sidebar.querySelectorAll<HTMLElement>('.sidebar-link')) {
       const name = link.getAttribute('aria-label') ?? link.querySelector('.nav-label')?.textContent ?? '';
-      if (mode === 'icons') link.title = name;
-      else link.removeAttribute('title');
+      link.title = name;
     }
     if (interrupted) for (const link of allLinks()) disable(link);
   };
@@ -796,7 +803,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     else helpLink?.removeAttribute('aria-current');
     bookGroup.hidden = book === null;
     if (book !== null) {
-      bookTitle.textContent = book.title;
+      bookTitle.replaceChildren(svgIcon('i-library'), el('span', 'nav-label', book.title));
       bookTitle.dataset['navIcon'] = bookIcon(book.title);
       bookGroup.dataset['bookId'] = book.bookId;
     } else {
