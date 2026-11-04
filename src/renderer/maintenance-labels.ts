@@ -36,7 +36,7 @@ export function maintenanceRecordAccessibleName(ordinal: number): string {
 
 export const MAINTENANCE_CLASSIFICATION_LEGEND = '维护类型';
 export const MAINTENANCE_REASON_LABEL = '原因';
-export const MAINTENANCE_EVIDENCE_LABEL = '依据（可选）';
+export const MAINTENANCE_EVIDENCE_LABEL = '依据 · 可选';
 export const MAINTENANCE_EVIDENCE_HINT = '例如读者来信、质检单或核对记录。';
 
 /** MAINT-002: the exact designation the draft binds. */

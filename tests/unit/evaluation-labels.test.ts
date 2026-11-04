@@ -221,10 +221,10 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   });
 
   it('marks AI7\'s suggested conclusion as AI7\'s, and names the five adjustment reasons unticked', () => {
-    expect(evaluationAi7ConclusionLine(PROFILE, 'revise')).toBe('AI7 建议的结论：修改后再议（由你选定）');
+    expect(evaluationAi7ConclusionLine(PROFILE, 'revise')).toBe('AI7 建议的结论：修改后再议');
     expect(evaluationAi7ConclusionLine(PROFILE, null)).toBe('AI7 没有给出建议结论。');
     expect(Object.values(EVALUATION_ADJUSTMENT_REASON_LABELS)).toEqual(['打分偏高', '打分偏低', '依据不足', '未考虑某方面', '自行输入']);
-    expect(EVALUATION_ADJUSTMENT_LEGEND).toBe('调分原因（可多选，不预先勾选）');
+    expect(EVALUATION_ADJUSTMENT_LEGEND).toBe('调分原因 · 可多选');
   });
 
   it('says the Task and the latest 初评 in one line each, and when the manuscript moved past it', () => {

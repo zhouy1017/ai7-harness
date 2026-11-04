@@ -166,7 +166,7 @@ describe('范例 (Issue #427, S79b)', () => {
       .toBe('审稿意见 · 给作者的修改意见 · 版本 2 · 保存于 t1 · 发稿版本设定后才起草，按现在的最新一版 · 学习准入：仅本社 · 已归入于 t2');
     expect(readersReportExemplarAdmission({ state: 'superseded', admittedAt: null, decisions: 1 }, (iso) => iso)).toBe('此前归入的是另一版；这一版尚未归入');
     expect(EXEMPLAR_READERS_REPORT_PINS).toEqual({ designation: '设为发稿版本时的最新一版', later: '发稿版本设定后才起草，按现在的最新一版' });
-    expect(EXEMPLAR_READERS_REPORT_ADMIT).toBe('归入范例（仅本社）');
+    expect(EXEMPLAR_READERS_REPORT_ADMIT).toBe('归入本社范例');
     expect(EXEMPLAR_READERS_REPORT_STATUS).toEqual({ admitting: '正在归入范例…', admitted: '审稿意见已归入范例', failed: '无法归入范例。' });
   });
 });

@@ -288,7 +288,7 @@ describe('the milestone form', () => {
       label: '标签',
       purpose: '用途',
       customPurpose: '自行输入的用途',
-      note: '说明（可选）',
+      note: '说明 · 可选',
       save: '保存里程碑版本',
     });
     expect(MILESTONE_PURPOSE_NOTE).toBe('用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。');

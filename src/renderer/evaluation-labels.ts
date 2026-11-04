@@ -72,7 +72,7 @@ export const EVALUATION_READINESS = '就绪清单：距离可出版还差什么�
 export const EVALUATION_STRENGTHS = '主要优点（每行一条）';
 export const EVALUATION_WEAKNESSES = '主要问题（每行一条）';
 export const EVALUATION_VERDICT = '总评';
-export const EVALUATION_CONCLUSION_LEGEND = '结论（由你选定）';
+export const EVALUATION_CONCLUSION_LEGEND = '结论 · 由你选定';
 export const EVALUATION_RECOMMEND_BLOCKED = '有「高」风险还没有经人工复核，「推荐出版」暂不能选。';
 export const EVALUATION_VERSIONS_HEADING = '版本';
 export const EVALUATION_EMPTY = '这本书还没有评估。';
@@ -248,7 +248,7 @@ export const EVALUATION_AI7_OPEN_TASK = '查看任务';
 export const EVALUATION_START_FROM_INITIAL = '从 AI7 初评开始';
 export const EVALUATION_AI7_SUFFICIENCY: Readonly<Record<InitialEvaluationSufficiency, string>> = { sufficient: '充分', fair: '一般', insufficient: '不足' };
 export const EVALUATION_AI7_SUGGESTED = 'AI7 建议';
-export const EVALUATION_ADJUSTMENT_LEGEND = '调分原因（可多选，不预先勾选）';
+export const EVALUATION_ADJUSTMENT_LEGEND = '调分原因 · 可多选';
 export const EVALUATION_ADJUSTMENT_REASON_LABELS: Readonly<Record<EvaluationAdjustmentReasonId, string>> = EVALUATION_ADJUSTMENT_REASON_WORDS;
 export const EVALUATION_ADJUSTMENT_NOTE = '自行输入的原因';
 export const EVALUATION_AI7_STATUS = {
@@ -338,7 +338,7 @@ export function evaluationAi7RecordLine(initial: Pick<EvaluationInitialDraftProj
 
 /** The conclusion AI7 would suggest, said as AI7's (EVAL-007). */
 export function evaluationAi7ConclusionLine(profile: Pick<EvaluationProfileProjection, 'conclusions'>, conclusion: EvaluationConclusion | null): string {
-  return conclusion === null ? 'AI7 没有给出建议结论。' : `AI7 建议的结论：${evaluationConclusionLabel(profile, conclusion)}（由你选定）`;
+  return conclusion === null ? 'AI7 没有给出建议结论。' : `AI7 建议的结论：${evaluationConclusionLabel(profile, conclusion)}`;
 }
 
 // ---- 审稿意见 (Issue #429, plan slice S81c; V2-UX-EVAL-013) ------------------------------------------------------------

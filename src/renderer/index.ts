@@ -3695,7 +3695,7 @@ function renderBookCreationForm(): void {
   const titleError = element('p', 'field-error');
   titleError.id = 'empty-book-title-error';
   titleError.hidden = true;
-  const numberLabel = element('label', undefined, '内部编号（可选）');
+  const numberLabel = element('label', undefined, '内部编号 · 可选');
   numberLabel.htmlFor = 'empty-book-number';
   const internalNumber = element('input');
   internalNumber.id = 'empty-book-number';

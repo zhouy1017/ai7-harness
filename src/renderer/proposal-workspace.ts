@@ -147,7 +147,7 @@ export function mountProposalWorkspace(options: {
     const decision = suggestion.decision;
     if (decision !== null) {
       if (decision.reason !== null) yours.append(el('p', `你的原因：${decision.reason}`));
-      const reasons = el('details'); reasons.append(el('summary', '你的原因（可选）'));
+      const reasons = el('details'); reasons.append(el('summary', '你的原因 · 可选'));
       const saveReason = (reason: string, reasonSource: 'suggested' | 'free-text'): void => void act(async () => {
         const target = { ...binding, windowStartBlockId: item.blockId, markId: item.markId, decisionId: decision.decisionId, reason, reasonSource };
         if (decision.reasonState === 'given') await api.recordProposalDecisionFeedback({ ...target, action: 'revise', expectedFeedback: decision.feedbackEntries });

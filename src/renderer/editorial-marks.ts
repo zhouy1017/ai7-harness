@@ -776,7 +776,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: suggestion
         ? [
             { name: 'proposedText', label: '改为', value: range.text, required: false, hint: '留空表示删去这段文字。' },
-            { name: 'rationale', label: '修改理由（可选）', value: '', required: false },
+            { name: 'rationale', label: '修改理由 · 可选', value: '', required: false },
           ]
         : [{ name: 'body', label: kind === 'annotation' ? '批注内容' : '备注内容', value: '', required: true }],
       submitLabel: suggestion ? '提出修改建议' : kind === 'annotation' ? '添加批注' : '添加备注',
@@ -848,7 +848,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: suggestion
         ? [
             { name: 'proposedText', label: '改为', value: source.pinnedText, required: false, hint: '留空表示删去这段文字。' },
-            { name: 'rationale', label: '修改理由（可选）', value: source.kind === 'annotation' || source.kind === 'editor-note' ? source.body : '', required: false },
+            { name: 'rationale', label: '修改理由 · 可选', value: source.kind === 'annotation' || source.kind === 'editor-note' ? source.body : '', required: false },
           ]
         : [{ name: 'body', label: target === 'annotation' ? '批注内容' : '备注内容', value: source.body, required: true }],
       submitLabel: CONVERT_LABELS[target],

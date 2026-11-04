@@ -37,10 +37,10 @@ export const DECISION_REASON_CHIPS: Readonly<Record<ProposalItemDisposition, Rea
  * accord: `补充原因…`, or `改原因…` once one stands.
  */
 export const DECISION_REASON_PROMPTS: Readonly<Record<ProposalItemDisposition, string>> = {
-  deferred: '为什么暂不决定？（可选）',
-  accepted: '为什么接受？（可选）',
-  rejected: '为什么拒绝？（可选）',
-  'accepted-with-edit': '为什么这样改？（可选）',
+  deferred: '为什么暂不决定？ · 可选',
+  accepted: '为什么接受？ · 可选',
+  rejected: '为什么拒绝？ · 可选',
+  'accepted-with-edit': '为什么这样改？ · 可选',
 };
 export const DECISION_REASON_OWN = '其他 / 自行输入';
 export const DECISION_REASON_DISMISS = '不说明';

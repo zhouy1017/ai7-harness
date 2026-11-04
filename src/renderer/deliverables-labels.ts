@@ -282,7 +282,7 @@ export const MILESTONE_FORM_WORDS = {
   label: '标签',
   purpose: '用途',
   customPurpose: '自行输入的用途',
-  note: '说明（可选）',
+  note: '说明 · 可选',
   save: '保存里程碑版本',
 } as const;
 /** V2-UX-MILE-009: a purpose states the intended next use only and grants nothing. */

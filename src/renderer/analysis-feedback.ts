@@ -95,7 +95,7 @@ export function learningReasonAskCard(ask: LearningReasonAskProjection, api: Pic
   let choice: string | null = null;
   const text = el('textarea'); text.rows = 2; text.maxLength = 2_048;
   text.dataset['learningAskText'] = '';
-  const own = el('label', undefined, '补充说明（可选）'); own.append(text);
+  const own = el('label', undefined, '补充说明 · 可选'); own.append(text);
   const status = el('p', 'field-note'); status.setAttribute('role', 'status');
   const save = el('button', 'button secondary', '记下原因'); save.type = 'button'; save.dataset['learningAskAnswer'] = ''; save.disabled = true;
   const update = () => { save.disabled = choice === null && text.value.trim().length === 0; };

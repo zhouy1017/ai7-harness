@@ -230,7 +230,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
 
   /**
    * A published Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one line per template with a draft, at the version 图书交付包
-   * pins, each with `归入范例（仅本社）` until the editor admits that exact version. Admitting replaces only this list, from the Book
+   * pins, each with `归入本社范例` until the editor admits that exact version. Admitting replaces only this list, from the Book
    * the service answers with, and focus lands on the line admitted.
    */
   function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {

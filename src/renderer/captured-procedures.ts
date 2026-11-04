@@ -492,7 +492,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       const fields = el('dl', 'developer-proposal-fields');
       for (const [key, label] of [['missingCapability', PROPOSAL_FIELDS.missingCapability], ['affectedProcedure', PROPOSAL_FIELDS.affectedProcedure],
         ['direction', PROPOSAL_FIELDS.direction], ['pluginCandidate', PROPOSAL_FIELDS.pluginCandidate]] as const) {
-        fields.append(el('dt', undefined, label.replace('（必填）', '')), el('dd', undefined, version[key].trim().length === 0 ? '未填写' : version[key]));
+        fields.append(el('dt', undefined, label.replace(' · 必填', '')), el('dd', undefined, version[key].trim().length === 0 ? '未填写' : version[key]));
       }
       item.append(fields);
     }

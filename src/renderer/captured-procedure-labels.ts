@@ -46,7 +46,7 @@ export const CAPTURE_PICK_TITLE = '请给这个工序起一个名字。' as cons
 export const PROPOSAL_SAVE = '保存开发建议' as const;
 export const PROPOSAL_FIELDS = {
   title: '建议的标题',
-  missingCapability: '缺少的能力（必填）',
+  missingCapability: '缺少的能力 · 必填',
   affectedProcedure: '涉及的工序',
   direction: '建议的实现方向',
   pluginCandidate: '可以评估的插件',

@@ -213,7 +213,7 @@ export const EXEMPLAR_READERS_REPORT_PINS: Readonly<Record<ReadersReportExemplar
   later: '发稿版本设定后才起草，按现在的最新一版',
 };
 /** The one action on an offered 审稿意见: the editor admits it, under the eligibility it comes with. */
-export const EXEMPLAR_READERS_REPORT_ADMIT = '归入范例（仅本社）';
+export const EXEMPLAR_READERS_REPORT_ADMIT = '归入本社范例';
 export const EXEMPLAR_READERS_REPORT_STATUS = {
   admitting: '正在归入范例…',
   admitted: '审稿意见已归入范例',

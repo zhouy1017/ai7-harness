@@ -228,7 +228,7 @@ export function reviewRunsTruncatedLine(listed: number): string {
 
 export const REVIEW_SHEET_TITLE = '新建审阅';
 export const REVIEW_SHEET_NOTE = '选择审阅类别后即可开始，默认检查全书。';
-export const REVIEW_CATEGORY_LEGEND = '审阅类别（可多选）';
+export const REVIEW_CATEGORY_LEGEND = '审阅类别 · 可多选';
 export const REVIEW_SCOPE_LEGEND = '审阅范围';
 export const REVIEW_CHAPTER_FROM = '从';
 export const REVIEW_CHAPTER_TO = '到';
@@ -424,7 +424,7 @@ export const REVIEW_IGNORE_NOTE = '忽略后，这条发现在稿件上的标记
 export const REVIEW_IGNORE_REQUIRED = '忽略一条发现需要说明原因。';
 export const REVIEW_CONVERT_TO = '改为';
 export const REVIEW_CONVERT_TO_HINT = '留空表示删去这段文字。';
-export const REVIEW_CONVERT_RATIONALE = '修改理由（可选）';
+export const REVIEW_CONVERT_RATIONALE = '修改理由 · 可选';
 export const REVIEW_CONVERT_NOTE = '转为修改建议后，这条批注记为已处理；稿件本身不变，修改建议仍要你接受才会写入。';
 
 /**
