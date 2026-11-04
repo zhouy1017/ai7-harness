@@ -23,7 +23,7 @@ import { learningChoiceLabel } from './quality-learning-labels.js';
 export const LEARNING_AUDIT_HEADING = '学习回溯';
 /** What the audit is and is not (LAUD-001, LAUD-009, LAUD-012), said once above it. */
 export const LEARNING_AUDIT_NOTE =
-  '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么。停止今后使用不会删除任何历史，这里也不授予任何权限。';
+  '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么；停止今后使用不会删除任何历史，这里也不授予任何权限。';
 export const LEARNING_AUDIT_FILTERS = {
   query: '搜索',
   book: '图书',
@@ -51,7 +51,7 @@ export const LEARNING_AUDIT_SERIES_UNAVAILABLE = '书系记录无法读取，书
 /** The filters LAUD-002 names that are not offered yet, and why. */
 export const LEARNING_AUDIT_FILTERS_LATER =
   '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
-export const LEARNING_AUDIT_EMPTY = '还没有学习材料。你在修改建议、分析结果和审阅里写下的原因与改动，会在这里留下来源链。';
+export const LEARNING_AUDIT_EMPTY = '还没有学习材料，你在修改建议、分析结果和审阅里的原因与改动会留下来源链。';
 export const LEARNING_AUDIT_NONE_MATCH = '没有符合的学习材料。';
 export const LEARNING_AUDIT_OPEN = '查看来源链…';
 export const LEARNING_AUDIT_MORE = '更多学习材料…';

@@ -74,16 +74,13 @@ import {
   DELIVERY_NOTE_LABEL,
   DELIVERY_RECIPIENT_LEGEND,
   DELIVERY_STATEMENT,
-  DELIVERY_UNSAVED_NOTE,
   DELIVERY_VERSION_LEGEND,
   DOCUMENT_ACTION_LABELS,
   DOCUMENT_CHANGED_SINCE_DELIVERY,
   DOCUMENT_CHANGED_SINCE_VERSION,
   DOCUMENT_DELIVERIES_HEADING,
   DOCUMENT_NOT_DELIVERED,
-  DOCUMENT_KEPT_NOTE,
   DOCUMENT_NO_SOURCES,
-  DOCUMENT_SOURCE_HINT,
   DOCUMENT_SOURCE_LEGEND,
   DOCUMENT_STATE_NONE,
   DOCUMENT_STATE_NOT_FOR_THIS_BOOK,
@@ -911,8 +908,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       if (documentNow.changedSinceVersion) item.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
     }
     if (type.notForThisBook) {
-      item.append(el('p', 'document-not-for-this-book', DOCUMENT_STATE_NOT_FOR_THIS_BOOK));
-      if (type.document !== null) item.append(el('p', 'field-note', DOCUMENT_KEPT_NOTE));
+      item.append(el('p', 'document-not-for-this-book', type.document === null ? DOCUMENT_STATE_NOT_FOR_THIS_BOOK : `${DOCUMENT_STATE_NOT_FOR_THIS_BOOK} · 文档与版本保留`));
       const restore = documentButton('restore', type, 'secondary');
       restore.addEventListener('click', () => void decide(type, false));
       actions.append(restore);
@@ -999,7 +995,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     form.append(el('h5', undefined, DELIVERY_FORM_HEADING));
     const versions = el('fieldset');
     versions.append(el('legend', undefined, DELIVERY_VERSION_LEGEND));
-    if (documentNow.changedSinceVersion) versions.append(el('p', 'field-note delivery-unsaved', DELIVERY_UNSAVED_NOTE));
     const confirm = documentButton('confirmDeliver', type, 'primary');
     const reason = el('p', 'field-note delivery-reason');
     reason.id = uid('delivery-reason');
@@ -1183,10 +1178,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
     const fieldset = el('fieldset');
-    fieldset.append(el('legend', undefined, DOCUMENT_SOURCE_LEGEND));
-    const hint = el('p', 'field-note', DOCUMENT_SOURCE_HINT);
-    hint.id = uid('document-source-hint');
-    fieldset.append(hint);
+    fieldset.append(el('legend', undefined, `${DOCUMENT_SOURCE_LEGEND} · 文档从材料创建，材料本身不变`));
     for (const source of next.sources) {
       const label = el('label', 'choice-row');
       const input = el('input');
@@ -1195,7 +1187,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       input.value = source.sourceVersionId;
       input.checked = state.sourceVersionId === source.sourceVersionId;
       input.disabled = working;
-      input.setAttribute('aria-describedby', hint.id);
       input.addEventListener('change', () => {
         state.sourceVersionId = source.sourceVersionId;
         state.problem = null;

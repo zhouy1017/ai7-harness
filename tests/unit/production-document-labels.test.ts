@@ -139,7 +139,7 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DELIVERY_FORM_HEADING).toBe('交付');
     expect(labels.DELIVERY_VERSION_LEGEND).toBe('交付哪一版');
     expect(labels.DELIVERY_UNSAVED_NOTE).toBe('有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。');
-    expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字（交付时先保存为版本 3）');
+    expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字 · 交付时先保存为版本 3');
     expect(labels.DELIVERY_RECIPIENT_LEGEND).toBe('交给谁');
     expect(labels.DELIVERY_CUSTOM_RECIPIENT).toBe('自行输入');
     expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁（自行输入）');

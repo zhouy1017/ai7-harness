@@ -20,7 +20,6 @@ import {
   LEARNING_AUDIT_CLEAR_SELECTION,
   LEARNING_AUDIT_EMPTY,
   LEARNING_AUDIT_FILTERS,
-  LEARNING_AUDIT_FILTERS_LATER,
   LEARNING_AUDIT_FIRST,
   LEARNING_AUDIT_KIND_LABELS,
   LEARNING_AUDIT_MORE,
@@ -370,7 +369,6 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     // A damaged Series record leaves the 书系 filter with 全部 alone, and says so; the audit reads on (Issue #677).
     if (filterChoices.seriesUnavailable) parts.push(cutNote('series', LEARNING_AUDIT_SERIES_UNAVAILABLE));
     else if (filterChoices.seriesTruncated) parts.push(cutNote('series', learningAuditChoicesCut('series', filterChoices.series.length)));
-    parts.push(el('p', 'field-note learning-audit-later', LEARNING_AUDIT_FILTERS_LATER));
     if (listRefusal !== null) {
       const alert = el('p', 'attention-note learning-audit-refusal', listRefusal);
       alert.setAttribute('role', 'alert');
@@ -699,7 +697,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const record = action(LEARNING_RECORD, 'primary', 'reinclude-record', () => void reinclude());
     const show = (): void => {
       consequence.hidden = panel.choice === null;
-      consequence.textContent = panel.choice === null ? '' : learningChoiceConsequence(panel.choice, open.projection.bookTitle);
+      consequence.textContent = panel.choice === null ? '' : `${learningChoiceConsequence(panel.choice, open.projection.bookTitle).replace(/。$/u, '')}；${LEARNING_LINEAGE_REINCLUDE_NOTE}`;
       record.disabled = busy || panel.choice === null;
     };
     for (const entry of LEARNING_CHOICES) {
@@ -725,7 +723,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const row = el('div', 'button-row');
     row.append(record, cancel);
     show();
-    fieldset.append(consequence, el('p', 'field-note', LEARNING_LINEAGE_REINCLUDE_NOTE), row);
+    fieldset.append(consequence, row);
     return fieldset;
   };
 
@@ -774,9 +772,11 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       item.dataset['decisionOrdinal'] = String(entry.ordinal);
       item.dataset['decisionState'] = entry.superseded ? 'superseded' : 'current';
       item.dataset['decisionVia'] = entry.via;
-      item.append(el('p', 'learning-lineage-decision-line', learningLineageDecisionLine(entry, localInstantLabel)),
-        el('p', 'field-note learning-lineage-decision-status', learningLineageDecisionStatus(entry)));
-      if (entry.attribution !== null) item.append(el('p', 'field-note learning-lineage-attribution', feedbackAttributionLine(entry.attribution)));
+      const decision = el('p', 'learning-lineage-decision-line');
+      decision.append(learningLineageDecisionLine(entry, localInstantLabel), ' · ',
+        el('span', 'learning-lineage-decision-status', learningLineageDecisionStatus(entry)));
+      if (entry.attribution !== null) decision.append(' · ', el('span', 'learning-lineage-attribution', feedbackAttributionLine(entry.attribution)));
+      item.append(decision);
       decisions.append(item);
     }
     const decisionBody: HTMLElement[] = read.decisions.length === 0 ? [el('p', 'field-note', LEARNING_LINEAGE_NO_DECISION)] : [decisions];
