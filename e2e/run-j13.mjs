@@ -2040,7 +2040,7 @@ async function main() {
     const READ_OFFERED = `Array.from(document.querySelectorAll('dialog.review-sheet [data-review-field="procedure"] option'), (option) => [option.value, option.textContent, option.dataset.procedureFit ?? null])`;
     const offeredHere = await renderer.evaluate(READ_OFFERED);
     // 《体例复核》's versions are all stopped: it is offered nowhere.
-    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序 · 自己选类别', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
@@ -2137,7 +2137,7 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'series-mismatch-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-mismatch-sheet');
     const offeredThere = await renderer.evaluate(READ_OFFERED);
-    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序 · 自己选类别', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书现在不能运行（「书系一致性」：${SERIES_NOT_IN_SERIES}）`, 'none']]), 'series-mismatch-offered', offeredThere);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'series-mismatch-close');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, 'series-mismatch-closed');

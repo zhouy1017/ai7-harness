@@ -37,7 +37,7 @@ export const CAPTURE_CLASSIFICATION_LEGEND = '保存成什么' as const;
 export const CAPTURE_WHY_HEADING = '为什么这样分类' as const;
 export const CAPTURE_EXTRACT_HEADING = '将提取什么' as const;
 export const CAPTURE_NOT_SAVED_HEADING = '不会保存什么' as const;
-export const CAPTURE_TITLE_LABEL = '工序名称（只作标签，不发给模型）' as const;
+export const CAPTURE_TITLE_LABEL = '工序名称 · 只作标签，不发给模型' as const;
 export const CAPTURE_TARGET_LABEL = '保存为' as const;
 export const CAPTURE_NEW_PROCEDURE = '新的可复用工序' as const;
 export const CAPTURE_SAVE = '保存为可复用工序' as const;
@@ -302,7 +302,7 @@ export function proposalFileSavedLine(fileName: string): string {
 // ---- 新建审阅 and the Run ---------------------------------------------------------------------------------------
 
 export const SHEET_PROCEDURE_LABEL = '按已保存的工序' as const;
-export const SHEET_PROCEDURE_NONE = '不按工序（自己选类别）' as const;
+export const SHEET_PROCEDURE_NONE = '不按工序 · 自己选类别' as const;
 export const SHEET_PROCEDURE_NONE_ENABLED = '还没有启用的可复用工序。' as const;
 /** The manual selector of an exact eligible version (Issue #66, S31; REUSE-054): the latest eligible first and marked. */
 export const SHEET_PROCEDURE_VERSION_LABEL = '版本' as const;

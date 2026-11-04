@@ -319,7 +319,7 @@ export const LIBRARY_NO_ELIGIBILITY = '尚未定';
 export const LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION = '先定归属，再定学习准入。';
 export const LIBRARY_ELIGIBILITY_RESET = '归属改了：学习准入要按新的归属重新定，之前的决定仍留在记录里。';
 export const LIBRARY_RECOMMENDED = '建议';
-export const LIBRARY_REASON_LABEL = '补充说明（可不填）';
+export const LIBRARY_REASON_LABEL = '补充说明 · 可不填';
 /** What eligibility does and does not do (LEARN-009, LEARN-010), said once beside the choice. */
 export const LIBRARY_ELIGIBILITY_BOUNDARY = '学习准入只决定它能不能在所选范围内形成学习信号：不会启用记忆，不会扩大任务的读取范围，也不允许把它发送出去。';
 /** The wider choice's consequence, shown inline when it is chosen (LEARN-005, LEARN-012). */
