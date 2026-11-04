@@ -8,13 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
-import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING } from '../../src/service/launch-policy.js';
+import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
 import { reviewCategoryEntry, reviewCategoryEntryForBook, reviewCategoryContractInput, reviewCategoryBasisStatement } from '../../src/service/review/category-configuration.js';
 import { reviewCategoryKindDefinition } from '../../src/service/review/review-category-kind.js';
 import { parseReviewCategoryUnitMessageHeader } from '../../src/service/review/review-category-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
+import { kindLocalTools, liveKindAdmission } from '../../src/service/analysis/live-kind-admission.js';
 import { reviewDeliverables, REVIEW_DELIVERABLES_ABSENT, REVIEW_DELIVERABLES_DRAFT, REVIEW_DELIVERABLE_CHANGED } from '../../src/service/production-documents.js';
 import { graphemeCount, normalizedQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
@@ -300,6 +300,17 @@ describe('cross-deliverable participants and revision lineage', () => {
       })) } };
       expect(liveKindAdmission(denied, definition, DEVELOPER_LIVE_POLICY_BINDING)).toBeNull();
     }
+  });
+
+  it('admits the configured production tools with the frozen finalized-deliverable contract (#1290)', async () => {
+    const doc=await create();await finalize(doc.documentId);
+    const binding={...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find(candidate=>candidate.route==='opencode-go')!,credentialReference:randomUUID()};
+    const production=await resolveSourceCheckoutLaunchPolicy(roots.codeRoot,'ordinary-production',binding);
+    const tools=kindLocalTools(production,'editorial-review/cross-deliverable-consistency');
+    expect(tools?.declarations?.length).toBeGreaterThan(0);
+    const definition=reviewCategoryKindDefinition(reviewCategoryContractInput(entry()),2,tools!);
+    expect(liveKindAdmission(production,definition,binding)).not.toBeNull();
+    expect(liveKindAdmission(production,{...definition,promptContractDigest:'a'.repeat(64)},binding)).toBeNull();
   });
 
   it('grounds both sources read-only, preserving every deliverable byte through a Run and manuscript Apply', async () => {

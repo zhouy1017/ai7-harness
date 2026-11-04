@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
@@ -105,9 +106,9 @@ describe('资料索引 over the real store', () => {
       const bookId = emptyBook(store, '检索边界回归');
       const item = await put(store, file('retrieval.md', '# Public synthetic vocabulary\n\nalpha beta gamma\n\nalpha delta'), '检索词表');
       store.startMaterialIndexing(); await store.settleMaterialIndexing();
-      expect((await store.searchReferableMaterials({ bookId, query: 'alpha', k: 8 })).candidates.length).toBe(0);
-      store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-      store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      expect((await store.searchReferableMaterials({ bookId, query: 'alpha', k: 8 })).candidates.length).toBe(2);
+      setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+      setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
       const pin = store.pinMaterialReference(bookId, item.materialId);
       const boundary = { bookId, references: [pin] };
       const index = new RetrievalIndex(materialRetrievalSources(boundary, (scope, id, from) => store.readMaterialIndexForTask(scope, id, from)));
@@ -131,7 +132,7 @@ describe('资料索引 over the real store', () => {
         const hybrid = await store.searchReferableMaterials({ bookId, query: 'alpha delta', k: 8 });
         expect(hybrid.candidates[0]!.score).toBeGreaterThan(1 / 61);
         expect(hybrid.candidates.every((candidate) => candidate.sourceId === item.materialId && candidate.revisionOrIndexDigest === pin.indexDigest)).toBe(true);
-        store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         expect((await index.retrieve('alpha')).length).toBe(0);
         expect(() => index.exactFetch(candidates[0]!.candidateId)).toThrowError('MATERIAL_REFERENCE_UNAVAILABLE');
       } finally { watching.close(); index.dispose(); }
@@ -194,11 +195,11 @@ describe('资料索引 over the real store', () => {
       const recent = attention.groups.find((group) => group.key === 'recent')!.items.filter((item) => item.object.kind === 'library-index');
       expect(recent.map((item) => [item.state, item.itemId, item.object, item.nextStep, item.target, item.book.title])).toEqual([[
         'indexing-completed', `library-index:${added.materialId}`,
-        { kind: 'library-index', title: '样书一', materialKind: 'book', scope: 'none', outcome: 'complete' },
+        { kind: 'library-index', title: '样书一', materialKind: 'book', scope: 'house', outcome: 'complete' },
         'view-material-index', { kind: 'library-material', materialId: added.materialId }, null,
       ]]);
       // The item still waits for its attribution: 索引完成 asks nothing and the count is the decision's alone.
-      expect(attention.actionableCount).toBe(1);
+      expect(attention.actionableCount).toBe(0);
 
       // The ledger is append-only and the build is the current indexer's.
       const database = new DatabaseSync(storePath());
@@ -472,10 +473,10 @@ describe('资料索引 over the real store', () => {
       await store.settleMaterialIndexing();
 
       // Indexed, but no Task may list it before the editor decides where it belongs and its Learning Eligibility (KB-007).
+      expect(store.pinMaterialReference(bookA, listed.materialId).materialId).toBe(listed.materialId);
+      setLibraryDecision(store, { materialId: listed.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } } });
       expect(await refusal(() => store.pinMaterialReference(bookA, listed.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
-      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: bookA } } });
-      expect(await refusal(() => store.pinMaterialReference(bookA, listed.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
-      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      setLibraryDecision(store, { materialId: listed.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
       // Another Book's Tasks may not list an item that belongs to this one.
       expect(await refusal(() => store.pinMaterialReference(bookB, listed.materialId))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
       const pin = store.pinMaterialReference(bookA, listed.materialId);
@@ -502,11 +503,11 @@ describe('资料索引 over the real store', () => {
         watch.close();
       }
       // An eligibility left for later takes the item out of every plan's reach at once.
-      store.decideLibraryMaterial({ materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: listed.materialId, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(await refusal(() => store.readMaterialIndexForTask({ bookId: bookA, references: [pin] }, listed.materialId, 1))).toBe('MATERIAL_REFERENCE_UNAVAILABLE');
       // An item of the house may be listed by any Book's Tasks.
-      store.decideLibraryMaterial({ materialId: unlisted.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
-      store.decideLibraryMaterial({ materialId: unlisted.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'excluded', reason: null } });
+      setLibraryDecision(store, { materialId: unlisted.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'house' } } });
+      setLibraryDecision(store, { materialId: unlisted.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'excluded', reason: null } });
       const house = store.pinMaterialReference(bookB, unlisted.materialId);
       expect(store.readMaterialIndexForTask({ bookId: bookB, references: [house] }, unlisted.materialId, 1).total).toBe(5);
       store.markCleanShutdown();

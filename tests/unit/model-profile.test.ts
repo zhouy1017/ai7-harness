@@ -14,50 +14,20 @@ import { GENERATED_MODEL_PROFILES } from '../../src/service/provider/provider-pr
 // these tests pin only what ADR 0080 §3 establishes, never what a binding does with it.
 
 describe('model capability profiles: toolCalling and webSearchTool (ADR 0080 §2, §3)', () => {
-  it('declares DeepSeek official able to call functions, and its pages silent on a search tool of its own', () => {
-    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities.toolCalling).toBe('function');
-    expect(DEEPSEEK_V4_PRO_PROFILE.evidence.toolCalling).toEqual({
-      kind: 'vendor-documentation',
-      source: 'DeepSeek official Tool Calls guide, api-docs.deepseek.com/guides/tool_calls',
-      readOn: '2026-09-11',
-    });
-    expect(DEEPSEEK_V4_PRO_PROFILE.capabilities.webSearchTool).toBe('none');
-    expect(DEEPSEEK_V4_PRO_PROFILE.evidence.webSearchTool).toMatchObject({
-      kind: 'vendor-documentation',
-      readOn: '2026-09-10',
-    });
-  });
-
-  it('keeps the historical V4 gateway model without tool evidence and without a provider search tool', () => {
-    // ADR 0080 §2: the Owner's own session observed a client tool call through this gateway, but an
-    // informal observation is not yet a recorded live-test item, so this stays `none`.
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.toolCalling).toBe('none');
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.toolCalling).toEqual({ kind: 'unverified' });
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.capabilities.webSearchTool).toBe('none');
-    expect(OPENCODE_GO_V4_FLASH_PROFILE.evidence.webSearchTool).toMatchObject({
-      kind: 'vendor-documentation',
-      readOn: '2026-09-11',
-    });
-  });
-
-  it('declares only the exact V4.1 client function loop observed by the §7.7 item', () => {
-    expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities.toolCalling).toBe('function');
-    expect(OPENCODE_GO_V41_FLASH_PROFILE.evidence.toolCalling).toEqual({
-      kind: 'live-test-item', itemIds: ['S40/whole-manuscript/1', 'S40/whole-manuscript/2'], observedOn: '2026-10-15',
-    });
-    expect(OPENCODE_GO_V41_FLASH_PROFILE.capabilities.webSearchTool).toBe('none');
-  });
-
-  it('declares an inert non-DeepSeek profile the same way as every other undemonstrated model on the gateway', () => {
-    const glm = modelProfileFor(OPENCODE_GO_ROUTE, 'glm-5.3');
-    expect(glm).not.toBeNull();
-    expect(glm!.capabilities.toolCalling).toBe('none');
-    expect(glm!.evidence.toolCalling).toEqual({ kind: 'unverified' });
-    expect(glm!.capabilities.webSearchTool).toBe('none');
-    expect(glm!.evidence.webSearchTool).toMatchObject({
-      kind: 'vendor-documentation',
-      readOn: '2026-09-11',
-    });
+  it('inherits text, stream and function tools for arbitrary IDs on each implemented route', () => {
+    for (const route of ['deepseek-open-platform', 'opencode-go', 'opencode-zen', 'opencode-zen-messages', 'opencode-zen-responses', 'openai-platform', 'anthropic-claude', 'google-gemini'] as const) {
+      const profile = modelProfileFor(route, 'account/new-model-2027')!;
+      expect(profile.model).toBe('account/new-model-2027');
+      expect(profile.capabilities.answerChannel).not.toBe('none');
+      expect(profile.capabilities.toolCalling).toBe('function');
+      expect(profile.capabilities.streaming).toMatch(/-sse$/u);
+      expect(profile.context.tokens).toBeNull();
+      expect(profile.capabilities.structuredOutput).toBe('none');
+      expect(profile.evidence.toolCalling.kind).toBe('adapter-implementation');
+    }
+    expect(modelProfileFor('opencode-go', '')).toBeNull();
+    expect(modelProfileFor('opencode-go', 'bad\nmodel')).toBeNull();
+    expect(modelProfileFor('unknown' as never, 'model')).toBeNull();
   });
 
   it('fails if any profile omits either capability or its evidence', () => {

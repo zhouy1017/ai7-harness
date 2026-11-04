@@ -5,6 +5,7 @@ import {
   MAX_TASK_INTENT_DRAFT_RANGES,
   MAX_TASK_INTENT_GOAL_LENGTH,
   TASK_INTENT_OUTCOME_CLASSES,
+  type TaskIntentDeliverablePin,
   type TaskIntentDraftAnswerProjection,
   type TaskIntentDraftOption,
   type TaskIntentDraftOrigin,
@@ -35,7 +36,7 @@ export const TASK_INTENT_DRAFT_SCHEMA_SQL = {
   task_intent_drafts: `CREATE TABLE task_intent_drafts (
   draft_id TEXT PRIMARY KEY CHECK(length(draft_id) = 36),
   book_id TEXT NOT NULL REFERENCES books(book_id),
-  origin TEXT NOT NULL CHECK(origin IN ('composer-selection', 'composer-book', 'dialogue-answer')),
+  origin TEXT NOT NULL CHECK(origin IN ('composer-selection', 'composer-book', 'composer-deliverable', 'dialogue-answer')),
   created_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
   sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
@@ -45,7 +46,7 @@ export const TASK_INTENT_DRAFT_SCHEMA_SQL = {
   draft_id TEXT NOT NULL REFERENCES task_intent_drafts(draft_id),
   ordinal INTEGER NOT NULL CHECK(ordinal >= 1),
   goal TEXT NOT NULL CHECK(length(goal) BETWEEN 1 AND ${MAX_TASK_INTENT_GOAL_LENGTH}),
-  target_kind TEXT NOT NULL CHECK(target_kind IN ('book', 'ranges')),
+  target_kind TEXT NOT NULL CHECK(target_kind IN ('book', 'ranges', 'deliverable')),
   outcome_class TEXT CHECK(outcome_class IS NULL OR outcome_class IN ('analysis', 'review', 'factual', 'writing')),
   range_count INTEGER NOT NULL CHECK(range_count BETWEEN 0 AND ${MAX_TASK_INTENT_DRAFT_RANGES}),
   created_at TEXT NOT NULL,
@@ -85,6 +86,30 @@ export const TASK_INTENT_DRAFT_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArr
     'version_id>task_intent_draft_versions.version_id:NO ACTION/NO ACTION/NONE',
   ],
 };
+
+/** Revision 106 widens draft targets and origins; historical JSON, row order and promotions are preserved. */
+export function initializeDeliverableDraftSchema(db: DatabaseSync): void {
+  if (Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 106) return;
+  const existing = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'task_intent_drafts'").get()?.sql;
+  if (typeof existing !== 'string' || existing.includes("'composer-deliverable'")) return;
+  const foreignKeys = Number(db.prepare('PRAGMA foreign_keys').get()?.foreign_keys) === 1;
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    for (const table of ['task_intent_drafts', 'task_intent_draft_versions'] as const) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all().map((row) => String(row.name)).join(', ');
+      db.exec(`CREATE TEMP TABLE migrate_${table} AS SELECT rowid AS prior_rowid, * FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(TASK_INTENT_DRAFT_SCHEMA_SQL[table]);
+      db.exec(`INSERT INTO ${table}(rowid, ${columns}) SELECT prior_rowid, ${columns} FROM temp.migrate_${table} ORDER BY prior_rowid`);
+      db.exec(`DROP TABLE temp.migrate_${table}`);
+      for (const op of ['update', 'delete']) db.exec(TASK_INTENT_DRAFT_TRIGGER_SQL[`${table}_no_${op}`]!);
+    }
+    requireDraft(db.prepare('PRAGMA foreign_key_check').all().length === 0, 'SCHEMA_MIGRATION_FAILED', '交付物任务草稿迁移后引用校验失败。');
+    db.exec('COMMIT');
+  } catch (error) { db.exec('ROLLBACK'); throw error; }
+  finally { if (foreignKeys) db.exec('PRAGMA foreign_keys = ON'); }
+}
 
 /** Revision 80's relations, created once before the version is stamped: an older store gains them empty and nothing moves. */
 export function initializeTaskIntentDraftSchema(db: DatabaseSync, version: number): void {
@@ -147,7 +172,8 @@ export interface StoredDraftRange {
 /** What one version holds: the editor's words and choices, and the context it came from. */
 export interface DraftContent {
   readonly goal: string;
-  readonly target: 'book' | 'ranges';
+  readonly target: 'book' | 'ranges' | 'deliverable';
+  readonly deliverable?: TaskIntentDeliverablePin;
   readonly outcomeClass: TaskIntentOutcomeClass | null;
   readonly ranges: ReadonlyArray<StoredDraftRange>;
   readonly answer: TaskIntentDraftAnswerProjection | null;
@@ -269,6 +295,7 @@ export class TaskIntentDraftLedger {
       procedurePin: content.procedurePin === null ? null : { procedureId: content.procedurePin.procedureId, versionId: content.procedurePin.versionId },
       ranges: content.ranges,
       target: content.target,
+      ...(content.deliverable === undefined ? {} : { deliverable: content.deliverable }),
       versionId,
     });
     this.#db.prepare(
@@ -371,7 +398,8 @@ export class TaskIntentDraftLedger {
       versionId: record.versionId as string,
       ordinal: record.ordinal as number,
       goal: record.goal as string,
-      target: record.target as 'book' | 'ranges',
+      target: record.target as DraftContent['target'],
+      ...(record.deliverable === undefined ? {} : { deliverable: record.deliverable as unknown as TaskIntentDeliverablePin }),
       outcomeClass: record.outcomeClass as TaskIntentOutcomeClass | null,
       ranges: record.ranges as StoredDraftRange[],
       answer: record.answer as TaskIntentDraftAnswerProjection | null,
@@ -448,7 +476,12 @@ function settle(options: ReadonlyArray<TaskIntentDraftOption>, none: string): Ta
  * target; 事实核查 as its category; 写作任务 of one house type, over the whole Book. Ranges spread over more than one paragraph
  * are never widened to the text between them (TASK-003): the draft says so and stays editable.
  */
-export function resolveDraft(draft: Pick<DraftContent, 'target' | 'outcomeClass' | 'ranges' | 'goal'>, facts: DraftResolutionFacts): TaskIntentDraftResolution {
+export function resolveDraft(draft: Pick<DraftContent, 'target' | 'outcomeClass' | 'ranges' | 'goal' | 'deliverable'>, facts: DraftResolutionFacts): TaskIntentDraftResolution {
+  if (draft.target === 'deliverable') {
+    const pin = draft.deliverable;
+    if (pin === undefined || draft.outcomeClass !== 'writing') return { state: 'unsupported', reason: '请选择写作任务，按当前交付物的类型修改。' };
+    return { state: 'ready', option: option({ kind: 'writing', typeId: pin.typeId }, 'writing', `修改${pin.label}`, true, null) };
+  }
   if (draft.outcomeClass === null) return { state: 'unsupported', reason: DRAFT_RESOLUTION_REASONS.noOutcome };
   const onRanges = draft.target === 'ranges';
   // A range across paragraphs (Issue #1176) is the one place a Task reads; another range beside it is a second place.

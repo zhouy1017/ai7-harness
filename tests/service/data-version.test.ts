@@ -104,12 +104,14 @@ describe('数据版本 over the real store', () => {
     expect([updated.update?.from, updated.update?.to, updated.update?.fromDataVersion, updated.update?.toDataVersion]).toEqual(['0.0.9', version, 1, 1]);
     expect(updated.history.map((entry) => entry.softwareVersion)).toEqual([version, '0.0.9']);
     // The version the service entry hands the store is the one recorded: here, a later software opening the same data.
-    const later = await reopened((store) => store.inspectDataVersion(), '0.5.0');
+    const parts = version.split('.').map(Number);
+    const nextVersion = `${parts[0]}.${parts[1]}.${parts[2]! + 1}`;
+    const later = await reopened((store) => store.inspectDataVersion(), nextVersion);
     expect([later.softwareVersion, later.update?.from, later.update?.to, later.history.map((entry) => entry.softwareVersion)])
-      .toEqual(['0.5.0', version, '0.5.0', ['0.5.0', version, '0.0.9']]);
-    // The review's probe (Issue #433 review): 0.5.0, then an earlier build opens the data again. That is no update.
+      .toEqual([nextVersion, version, nextVersion, [nextVersion, version, '0.0.9']]);
+    // The review's probe: the later software, then an earlier build. That is no update.
     const back = await reopened((store) => store.inspectDataVersion(), '0.1.0');
-    expect([back.update?.from, back.update?.to, back.update?.direction]).toEqual(['0.5.0', '0.1.0', 'earlier']);
+    expect([back.update?.from, back.update?.to, back.update?.direction]).toEqual([nextVersion, '0.1.0', 'earlier']);
     // A build with build metadata opens it as its own version.
     const built = await reopened((store) => store.inspectDataVersion(), '0.5.0+build.7');
     expect([built.softwareVersion, built.update?.direction]).toEqual(['0.5.0+build.7', 'newer']);

@@ -1,48 +1,67 @@
-import { currentPreinstalledVersion, selectedProcedureForBook, resolveProcedureForKind, readProcedurePlanView, procedureStopped, validateProcedureEdit } from '../procedures/editable.js';
-import { withProcedureDefinition, procedureInstruction } from '../procedures/execution.js';
-import { MODEL_REQUEST_ADMISSION_SCHEMA_VERSION } from '../task-authorization.js';
-import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
-import { recordProcedurePlanPin, readProcedurePlanPin, resolveProcedureDefinition } from '../procedures/definition-store.js';
-import { withReviewLocalTools, pinnedReviewDefinition, reviewCategoryKindDefinition } from '../review/review-category-kind.js';
-import { BUILTIN_REVIEW_CATEGORY_CONFIGURATION, reviewCategoryEntry, reviewCategoryContractInput } from '../review/category-configuration.js';
-import type { CompositionOptions } from '../harness/primary-agent-harness.js';
-import type { PinnedLocalToolSources } from '../retrieval/index.js';
-import { kindResearchDeclaration } from './live-kind-admission.js';
-import { factualReviewDefinitionsByDigest, factualReviewKindDefinition, factualReviewLevelDefinition, withFactualResearch } from './kind-definition.js';
-import { factualClaimKindDefinition } from './factual-claim-contract.js';
-import { FACTUAL_REVIEW_KIND, MODEL_SERVICE_CONNECTION_IDS, modelServiceChannelOf, type EvidenceAssuranceLevel, type ProcedureDefinitionPin } from '../../shared/protocol.js';
-import { FACTUAL_VERIFICATION_POLICY_VERSION } from './factual-review-contract.js';
-import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
-import { platformToolsFromProjection } from '../provider/search-service.js';
-import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
-import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
-import type { FrozenWebToolsBackend, FrozenWebToolsFallback } from '../../shared/protocol.js'; import { freezeSearchFallback } from '../provider/search-backend-settings.js';
-import { isResultSetPolicyPin, selectedPolicyIdentityOf, type LocalFixtureProfile, type SelectedPolicyIdentity } from '../../shared/protocol.js';
-import { STOCK_TYPOS_LEAF_FIXTURE, STOCK_TYPOS_LEAF_FIXTURE_SHA256, STOCK_TYPOS_LEAF_LOCAL_TOOLS, localFixtureRegisteredProfile, type LocalFixtureRuntimeContext } from '../provider/model-fixture.js';
-import { providerPlanPolicyMetadata } from './plan-boundary.js';
-import { randomUUID } from 'node:crypto';
-import { liveKindAdmission, liveKindRule } from './live-kind-admission.js';
-import { withModelClarification } from '../provider/clarification-contract.js';
-import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import * as requestAdmissionOperations from './request-admission-operations.js';
+import * as clarificationOperations from './clarification-operations.js';
+import * as runCheckpointOperations from './run-checkpoint-operations.js';
+import * as curationRuns from './curation-runs.js';
 import {
+  currentPreinstalledVersion,
+  selectedProcedureForBook,
+  resolveProcedureForKind,
+  readProcedurePlanView,
+  procedureStopped,
+  validateProcedureEdit,
+} from '../procedures/editable.js';
+import { withProcedureDefinition, procedureInstruction } from '../procedures/execution.js';
+import { procedureIdForKind, FACTUAL_CLAIM_PROCEDURE_ID } from '../procedures/preinstalled.js';
+import {
+  recordProcedurePlanPin,
+  readProcedurePlanPin,
+  resolveProcedureDefinition,
+} from '../procedures/definition-store.js';
+import {
+  withReviewLocalTools,
+  pinnedReviewDefinition,
+  reviewCategoryKindDefinition,
+} from '../review/review-category-kind.js';
+import {
+  BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
+  reviewCategoryEntry,
+  reviewCategoryContractInput,
+} from '../review/category-configuration.js';
+import {
+  type CompositionOptions,
+  describeComposition,
+  STOCK_TYPOS_FANOUT,
+  STOCK_TYPOS_LEAF,
+} from '../harness/primary-agent-harness.js';
+import type { PinnedLocalToolSources } from '../retrieval/index.js';
+import { kindResearchDeclaration, liveKindAdmission, liveKindRule, kindLocalTools } from './live-kind-admission.js';
+import {
+  factualReviewDefinitionsByDigest,
+  factualReviewKindDefinition,
+  factualReviewLevelDefinition,
+  withFactualResearch,
+  type AnalysisKindDefinition,
+  baselineAnalysisKindDefinition,
+} from './kind-definition.js';
+import { factualClaimKindDefinition, FACTUAL_CLAIM_UPDATE_MODES } from './factual-claim-contract.js';
+import {
+  FACTUAL_REVIEW_KIND,
+  MODEL_SERVICE_CONNECTION_IDS,
+  modelServiceChannelOf,
+  type EvidenceAssuranceLevel,
+  type ProcedureDefinitionPin,
+  type FrozenWebToolsBackend,
+  type FrozenWebToolsFallback,
+  isResultSetPolicyPin,
+  selectedPolicyIdentityOf,
   BASELINE_ANALYSIS_KIND,
-  EVALUATION_REWRITE_KIND,
-  INITIAL_EVALUATION_KIND,
-  READERS_REPORT_KIND,
   WRITING_KIND,
-  type AnalysisAssuranceSampleDispositionProjection,
-  type AnalysisGoal,
   type AnalysisKindId,
   type AnalysisProjection,
   type AnalysisTaskMode,
   type BaselineAnalysisTaskMode,
-  type FactualReviewProjection,
-  type FactualReviewHistoryProjection,
-  type FactualReviewResultSetRevisionProjection,
   type AnalysisFreshnessAxis,
-  type AnalysisReducerStageProjection,
   type AnalysisReusePlanCounts,
-  type AnalysisReusePlanProjection,
   type AnalysisUnitLineage,
   type BaselineAnalysisExecutionBindingProjection,
   type BaselineAnalysisHistoryEntryProjection,
@@ -62,7 +81,6 @@ import {
   type BaselineAnalysisUpdateProjection,
   type BaselineAnalysisUpdateRequest,
   type CoverageManifestProjection,
-  type DeveloperLiveCeiling,
   type LaunchPolicyProjection,
   type MaterialPlanInputsProjection,
   type ModelCredentialOperationState,
@@ -71,20 +89,26 @@ import {
   type PlanRevisionState,
   type CredentialSlotId,
   type ExecutionRouteId,
-  type ResultSetPolicyPin,
-  type ReviewCategoryHistoryProjection,
-  type ReviewCategoryResultSetRevisionProjection,
-  type ReviewCategoryUnitLineage,
   type ReviewCategoryUpdateControlsProjection,
   type ReviewCategoryUpdateProjection,
   type ReviewScopePlanCounts,
-  type ReviewScopePlanProjection,
-  type RunAttemptState,
-  type AnalysisInFlightUnitProjection,
   type RunBudgetCeilingState,
   type SafeRetryRepetition,
+  MODEL_SERVICE_SETUP_REQUIRED_REASON,
 } from '../../shared/protocol.js';
+import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
+import { platformToolsFromProjection } from '../provider/search-service.js';
+import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
+import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
+import { freezeSearchFallback } from '../provider/search-backend-settings.js';
 import {
+  STOCK_TYPOS_LEAF_FIXTURE,
+  STOCK_TYPOS_LEAF_FIXTURE_SHA256,
+  STOCK_TYPOS_LEAF_LOCAL_TOOLS,
+  localFixtureRegisteredProfile,
+} from '../provider/model-fixture.js';
+import {
+  providerPlanPolicyMetadata,
   PLAN_REVISION_REQUIRED_REASON,
   buildPlanAdaptationRecord,
   diffMaterialPlanInputs,
@@ -96,6 +120,9 @@ import {
   sameMaterialPlanInputs,
   type PlanAdaptationRecord,
 } from './plan-boundary.js';
+import { randomUUID } from 'node:crypto';
+import { withModelClarification } from '../provider/clarification-contract.js';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   NO_PLAN_EDITS,
   PLAN_CEILING_LAUNCH_REASON,
@@ -108,18 +135,7 @@ import {
   withoutCeiling,
   type PlanEdits,
 } from './plan-edits.js';
-import {
-  CLARIFICATION_ANSWER_SCHEMA,
-  CLARIFICATION_NOTE_MAX,
-  CLARIFICATION_OPTION_IDS,
-  CLARIFICATION_REQUEST_SCHEMA,
-  clarificationGraphemes,
-  modelClarificationExpired,
-  parseModelClarification,
-  type ModelClarificationQuestion,
-  type AnyClarificationOptionId,
-  type ClarificationFacts,
-} from './clarifications.js';
+import type { ModelClarificationQuestion, ClarificationFacts } from './clarifications.js';
 import {
   AnalysisError,
   DIGEST_PATTERN,
@@ -133,21 +149,30 @@ import {
 } from './canonical.js';
 import { unitRequestDigest } from './contract.js';
 import { saysCarried, saysOutcomeUnknown } from './outcome-unknown.js';
-import { deriveCoverageManifest, manifestCoversEveryBlock, manifestDigestIsExact, unitContentKeys, type ManifestBlockInput } from './coverage-manifest.js';
+import {
+  deriveCoverageManifest,
+  manifestCoversEveryBlock,
+  manifestDigestIsExact,
+  unitContentKeys,
+  type ManifestBlockInput,
+} from './coverage-manifest.js';
 import {
   manifestWeight,
   UnreadWalkCache,
   unreadWalkWeight,
   walkUnreadChanges,
-  type ChainRevision,
   type UnreadWalk,
   type UnreadWalkCut,
 } from './unread-changes.js';
 import { TASK_INPUT_CHECKPOINT_PURPOSE } from './identity.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION, searchFallbackTermsOf, type OrdinaryProductionAllowedBinding } from '../launch-policy.js';
+import {
+  ACTIVE_SET_VERSION,
+  DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
+  ORDINARY_PRODUCTION_ALLOWED_BINDINGS,
+  ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
+  searchFallbackTermsOf,
+} from '../launch-policy.js';
 import { DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/protected-secret-identity.js';
-import { MAX_TASK_INTENT_GOAL_LENGTH, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../../shared/protocol.js';
-import type { AnalysisKindDefinition, AnalysisReductionResult } from './kind-definition.js';
 import {
   deriveReusePlan,
   deriveScopePlan,
@@ -159,1324 +184,192 @@ import {
 import {
   NO_TASK_OUTCOME_REASON,
   PRE_RUN_REPORT_REASON,
-  RUN_REPORT_NO_USAGE,
-  buildRunReport,
   runReportDigest,
   runReportProjection,
-  runReportReflectionNotRun,
   type RunReportRecord,
 } from './run-report.js';
-import { assuranceSampleNotRun, type CrossUnitOutcome } from './reducers.js';
-import { baselineAnalysisKindDefinition } from './kind-definition.js';
-import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST, assuranceSamplingTurns, buildAssuranceSamplingMessage, type AssuranceSampleDraw } from './assurance-sampling-contract.js';
-import { describeComposition, STOCK_TYPOS_FANOUT, STOCK_TYPOS_LEAF } from '../harness/primary-agent-harness.js';
-import { kindLocalTools } from './live-kind-admission.js';
+import { ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST } from './assurance-sampling-contract.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../provider/egress-gate.js';
 import type { AnalysisOutcomeAttentionReading, AnalysisTaskAttentionReading } from '../global-attention.js';
 import { PLAN_MOVED_LABEL, type WaitingRunBlockCause } from '../reconnect-preflight.js';
-import { isPublicSampleBookSourceDigest, SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../shared/public-samplebooks.js';
+import { isPublicSampleBookSourceDigest } from '../../shared/public-samplebooks.js';
 import { ANALYSIS_LINEAGE_UNAVAILABLE_REASON } from '../../shared/public-samplebook-labels.js';
-
-type SqlRow = Record<string, SQLOutputValue>;
-
-/** The exact `sample1` source digest, the ADR 0044 baseline among the Public SampleBooks every non-production analysis Task requires. */
-export const SAMPLE1_SOURCE_DIGEST = SAMPLE1_PUBLIC_SAMPLEBOOK.sha256;
-const NATIVE_CARRIER_DIGEST = 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' as const;
-const SIDECAR_DIGEST = '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' as const;
-const SUCCESSOR_BEHAVIOR ='每次更新都是新的用户发起任务，经准备 → 计划预览 → 标准直接授权 → 执行后，在同一结果集上追加下一序号的不可变后继修订版；前一修订版不被改写，且始终可在修订历史中按其原始稿件 pin 查看。' as const;
-/** 重新分析这段's paragraphs are no longer in the working manuscript, or out of order (Issue #423 review, P3-3). */
-const SELECTED_BLOCKS_GONE = '所选文字所在的段落已不在当前稿件中，或先后颠倒；请重新选择。' as const;
-/** A range Task's paragraphs no longer stand at the positions its plan names (Issue #423 review, P3-4). */
-const SELECTED_RANGE_MOVED = '所选范围的段落在准备之后已移动或删除；请重新选择范围，再准备这项任务。' as const;
-/**
- * What an active Run of a kind is called, and what it keeps from being prepared (Issue #760 review): the baseline's 分析任务
- * and 更新任务, a 写作任务's own, 评估's for AI7 初评, 审稿意见 and 按我的评分重写评语, and 审阅's for a review category's Task.
- */
-function activeRunWords(kind: string): { readonly task: string; readonly next: string } {
-  if (kind === BASELINE_ANALYSIS_KIND) return { task: '分析任务', next: '新的更新任务' };
-  if (kind === WRITING_KIND) return { task: '写作任务', next: '新的写作任务' };
-  if (kind === INITIAL_EVALUATION_KIND || kind === READERS_REPORT_KIND || kind === EVALUATION_REWRITE_KIND) return { task: '评估任务', next: '新的评估任务' };
-  return { task: '审阅任务', next: '新的审阅' };
-}
-/** A queued Run's own words (Issue #49, S14; CONC-007): what it waits for, and that nothing has begun. */
-export const RUN_QUEUED_LABEL = '等待运行名额' as const;
-/** A start the editor deferred to idle time (Issue #1089; ADR 0095 §3): authorized, holding no place until quiet. */
-export const RUN_WAITING_IDLE_LABEL = '等待空闲' as const;
-/** A background Run AI7 paused at a unit boundary for the editor's waiting Run (Issue #1089); it goes on at the next quiet. */
-export const RUN_IDLE_YIELD_LABEL = '让位给你的任务' as const;
-/** The waiting state's own words (Issue #502, OFF-005): recorded, and nothing has been sent or begun. */
-const CONNECTIVITY_WAIT_DETAIL = '已记录授权；联网并通过重新联网预检后开始。此前不调用模型、不产生用量。' as const;
-
-/**
- * Why a mode that reads only what changed is not on offer: nothing has changed. The mode's own label
- * closes the sentence, so the baseline kind reads `…后才可同步到当前稿件。` exactly as it always has and
- * a review category names its own action.
- */
-/** A frozen reuse plan the chain no longer derives (#711 review P3-4): at dispatch, and before authorization. */
-export const REUSE_PLAN_DRIFT_REASON = '重新推导的复用计划与冻结计划不一致；未开始执行，请重新准备。' as const;
-export const REUSE_PLAN_DRIFT_AUTHORIZE_REASON = '重新推导的复用计划与冻结计划不一致；无法授权，请重新准备。' as const;
-
-/**
- * How much one ledger keeps of its walks and of revisions as a walk reads them (Issue #716): a few entries, and no more
- * block references than a large manuscript's handful of manifests hold. The least recently used is let go first.
- *
- * The chain cache is bounded four times wider than the walk cache (Issue #727). A walk reads its chain newest-first to
- * the chain's first Run whenever a chapter stands unread, so once a chain outgrows the bound the walk evicts, in order,
- * exactly what the next walk asks for first, and every revision is read from SQLite again at each new latest revision:
- * a cliff, not a decline (`tests/unit/unread-changes.test.ts` measures it). At 262,144 the chain of a ~3,000-block
- * manuscript (~4,700 weight a revision) stays cached to some 55 revisions, the entry bound's neighbourhood; the walk
- * cache, one walk per latest revision, keeps its bound.
- */
-export const UNREAD_WALK_CACHE_ENTRIES = 16;
-export const CHAIN_REVISION_CACHE_ENTRIES = 64;
-export const UNREAD_WALK_CACHE_WEIGHT = 65_536;
-export const CHAIN_REVISION_CACHE_WEIGHT = 4 * UNREAD_WALK_CACHE_WEIGHT;
-
-type ChainRevisionRead = { readonly revision: ChainRevision; readonly predecessorRevisionId: string | null } | 'unreadable';
-
-function changedModeUnavailableReason(label: string): string {
-  return `结果集修订版仍绑定当前稿件；只有在已确认编辑使精确修订版新鲜度为“已过期”后才可${label}。`;
-}
-
-const RUN_STATE_LABELS: Record<BaselineAnalysisRunState, string> = {
-  authorized: '已记录授权',
-  'blocked-before-dispatch': '派发前阻止 · 未启动',
-  admitted: '已进入调度器',
-  executing: '正在执行分析单元',
-  completed: '已完成',
-  'completed-with-gaps': '已完成 · 保留缺口',
-  failed: '运行失败',
-  interrupted: '运行已中断',
-  'awaiting-connectivity': '等待网络 · 未启动',
-  cancelled: '已取消 · 未启动',
-  cancelling: '正在取消',
-  pausing: '正在暂停',
-  paused: '已暂停',
-  resumable: '任务已中断 · 可续行',
-  'awaiting-clarification': '任务等待你的说明',
-};
-
-/**
- * A Run cancelled after it began executing its units (Issue #422, CTRL-005): `已取消`, and never `已取消 · 未启动`,
- * which stays the word for a Run cancelled before it ran anything, nor 已中断, which OFF-012 keeps for a Run that
- * can resume.
- */
-export const RUN_CANCELLED_AFTER_START_LABEL = '已取消' as const;
-
-/** What `cancelling` records (CTRL-005): the editor's word, and where the Run stops. */
-export const RUN_CANCELLING_DETAIL = '编辑取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容。' as const;
-
-/** What `pausing` records (CTRL-001): the editor's word, and where the Run stops to wait. */
-export const RUN_PAUSING_DETAIL = '编辑暂停了这项任务；正在进行的这一步完成后停下，不再开始下一步，已完成的结果与用量都会保存。' as const;
-
-/** What reconciliation records for a Run AI7 stopped under (CONT-014): nothing of it runs, and nothing is sent until 续行. */
-export const RECONCILED_RESUMABLE_DETAIL = 'AI7 上次关闭时这项任务正在运行；已读完的阅读范围都已保存。点「续行」从下一个阅读范围接着读；在此之前不会发送任何内容。' as const;
-export const RECONCILED_PAUSED_DETAIL = 'AI7 上次关闭时这项任务正在暂停；已读完的阅读范围都已保存，任务已暂停。' as const;
-/** A Run left yielded at a restart (Issue #1089; ADR 0034): it no longer goes on by itself at the next quiet. */
-export const RECONCILED_YIELDED_DETAIL = 'AI7 上次关闭时这项任务正让位给你的任务；已读完的阅读范围都已保存，任务已暂停，点「续行」接着处理。' as const;
-/**
- * A start AI7 closed on while it waited for a place (Issue #49 review; ADR 0034): it never began, and a restart starts
- * nothing by itself, so it is blocked before dispatch with why, and the editor starts it again when they choose.
- */
-/**
- * What reconciliation records for a Run of a kind that cannot resume (Issue #429 review, P1): AI7 closed while it ran,
- * its results lived only in the Run it lost, and nothing of it will be sent again. It ends 已中断 with this outcome, and
- * the editor prepares the Task again — the kind's own surface offers that at once.
- */
-export const RECONCILED_INTERRUPTED_DETAIL =
-  'AI7 上次关闭时这项任务正在运行；这类任务不能续行，已读的内容没有形成结果集修订版，此后不会再发送任何内容。需要时请重新准备并开始。' as const;
-/** Why such a Run's later stages never ran, in its Run Report. */
-const RECONCILED_INTERRUPTED_STAGE_REASON = 'AI7 上次关闭时运行中断，这一步没有发起。' as const;
-export const RECONCILED_QUEUED_DETAIL =
-  'AI7 上次关闭时这项任务还在等待运行名额，没有开始，也没有发送任何内容；重新启动后它不会自己开始。需要时请重新准备并开始。' as const;
-
-/** The schema of one unit's continuation checkpoint (Issue #422, S76b). */
-const UNIT_CHECKPOINT_SCHEMA = 'ai7.analysis.unit-checkpoint/1' as const;
-
-/** One unit a Run settled, as its continuation checkpoint keeps it: the revision's unit record, and what was observed. */
-export interface UnitCheckpoint {
-  readonly attemptId: string;
-  readonly unit: UnitResultRecord;
-  readonly observation: { unitOrdinal: number; attempts: number; wallMs: number; usage: { inputTokens: number; outputTokens: number } | null } | null;
-  /** The kind's typed unit result, read back the way a predecessor's is; `null` for a gap. */
-  readonly result: unknown;
-}
-
-const OUTCOME_LABELS = {
-  completed: '任务结果：已完成',
-  'completed-with-gaps': '任务结果：已完成（保留缺口）',
-  failed: '任务结果：失败',
-  interrupted: '任务结果：已中断',
-  cancelled: '任务结果：已取消',
-} as const;
-
-/** The Run Budget Ceiling Reached outcome's own words (Issue #51, S16a; V2-UX-MODEL-016, interaction-spec §706). */
-const BUDGET_REACHED_OUTCOME_LABEL = '任务结果：任务运行预算已达上限 · 已保留部分结果' as const;
-/** …and the Run's, where ②A and its card read the Run (RUN-012): a terminal partial outcome, never 已中断. */
-export const BUDGET_REACHED_RUN_LABEL = '任务运行预算已达上限 · 已保留部分结果' as const;
-/** A Run the provider's account limit stopped (Issue #51, S16b; RUN-012): a remediable blocker, never 任务已中断 · 可续行. */
-export const ACCOUNT_LIMIT_RUN_LABEL = '模型服务账户限额' as const;
-/**
- * A Run stopped because a sent request's result cannot be known (Issue #51, S16c; CTRL-007, COPY-009), never 任务已中断 · 可续行
- * nor 已取消. Only Runs recorded before #1080 carry that stop; it reads as the per-unit state 该单元结果未知 (ADR 0095 §2).
- */
-export const OUTCOME_UNKNOWN_RUN_LABEL = '该单元结果未知' as const;
-/** Why 结果待确认 has no 续行 (Issue #51, S16c; ADR 0034, CONT-011, CONT-016). */
-export const OUTCOME_UNKNOWN_NO_RESUME = '结果待确认：有阅读范围的请求已发出而结果无法确认，这次运行不能续行；可以取消任务保留已读完的部分，或改计划重做。' as const;
-
-/**
- * One reading range whose sent request's result could not be known (Issue #51, S16c): a kept checkpoint whose gap is
- * `outcome-unknown`, with how often its request was sent and the gap's own words — the technical layer's, never the bar's.
- */
-export interface UnconfirmedUnitRecord {
-  readonly unitOrdinal: number;
-  readonly attempts: number;
-  readonly reason: string;
-}
-
-/** A step after the ranges whose sent request's result cannot be known (Issue #757): the reduction, a sample, the reflection. */
-export type UnconfirmedStage = 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
-
-/**
- * One sent request of a Book's Runs of one kind whose result cannot be known and that no later Run of the kind has read since
- * (Issue #757; CTRL-007, CONT-011): a range — named by the content key the reuse plans match by, and by its ordinal in the
- * latest revision that holds it — or a step of the latest Run that reached its Task Outcome. `key` names it across launches:
- * the kind, the Run that sent the request, and the range's content key or the step, so 人工结果确认 settles exactly it.
- */
-export interface UnconfirmedOutcomeRecord {
-  readonly key: string;
-  readonly kind: string;
-  /** The Run that sent the request — for a range carried forward, the Run that first sent it, never the one that carried it. */
-  readonly runRecordId: string;
-  readonly taskIntentId: string;
-  /** That Run's Task Outcome; `null` while it has none. */
-  readonly classification: string | null;
-  /** When that Run's outcome was recorded, or its revision when it has none. */
-  readonly recordedAt: string;
-  readonly unitOrdinal: number | null;
-  /** The manuscript revision the latest revision holding the range read — whose text `unitOrdinal` counts in; `null` for a step. */
-  readonly heldAtRevisionId: string | null;
-  readonly contentKey: string | null;
-  readonly stage: UnconfirmedStage | null;
-}
-
-/** The units a Task's reuse or scope plan names, as `resendUnitsByContent` reads them: which it reads again, by content key. */
-export interface ResendPlan {
-  readonly units: ReadonlyArray<{ readonly unitOrdinal: number; readonly contentKey: string; readonly disposition: string }>;
-}
-
-/** The outcome key of a range or a step (Issue #757), as `UnconfirmedOutcomeRecord.key` and the resolutions spell it. */
-export function unconfirmedOutcomeKey(kind: string, runRecordId: string, target: { contentKey: string } | { stage: UnconfirmedStage }): string {
-  return `${kind}\n${runRecordId}\n${'contentKey' in target ? `range:${target.contentKey}` : `step:${target.stage}`}`;
-}
-
-/** Why an interrupted Run stopped, when a limit stopped it (Issue #51, S16a): the ceiling, what it used, and what it read. */
-export interface RunStop {
-  readonly reason: 'run-budget-ceiling-reached';
-  readonly maxTotalTokens: number;
-  readonly usedTokens: number;
-  readonly unitsSettled: number;
-  readonly unitsTotal: number;
-}
-
-/** A recorded stop read back: exactly the five facts, each a count; `null` for anything else, which no reader invents. */
-function runStopOf(value: unknown): RunStop | null {
-  if (!isRecord(value) || value.reason !== 'run-budget-ceiling-reached' || Object.keys(value).length !== 5) return null;
-  const counts = [value.maxTotalTokens, value.usedTokens, value.unitsSettled, value.unitsTotal];
-  if (!counts.every((count) => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)) return null;
-  return {
-    reason: 'run-budget-ceiling-reached',
-    maxTotalTokens: value.maxTotalTokens as number,
-    usedTokens: value.usedTokens as number,
-    unitsSettled: value.unitsSettled as number,
-    unitsTotal: value.unitsTotal as number,
-  };
-}
-
-/** Whether a Run began executing its units: the one fact that tells a started cancellation from a wait cancelled. */
-function runBegan(transitions: ReadonlyArray<{ state: BaselineAnalysisRunState }>): boolean {
-  return transitions.some((transition) => transition.state === 'executing');
-}
-
-/**
- * The assurance sampling contract a frozen execution plan names (Issue #826). A plan records it only when its kind binds a
- * sampling contract other than /1 — today the current baseline's /2 — so every factual, Review Category and retained /1
- * baseline plan keeps the bytes it always had. A plan without it is read conservatively as /1: that is what every delivered
- * plan recorded before #826 was frozen under. (An unpinned plan of the #826 development candidate that sampled /2 reads as /1
- * too; the reading only refuses to execute such a plan again, and never relabels a Run already recorded.)
- */
-export function frozenAssurancePromptContractDigest(executionPlan: Readonly<Record<string, unknown>>): string {
-  const recorded = executionPlan.assurancePromptContractDigest;
-  if (recorded === undefined) return ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST;
-  requireAnalysis(typeof recorded === 'string' && DIGEST_PATTERN.test(recorded), 'ANALYSIS_RECORD_INVALID', '计划记录的保证抽样契约无效。');
-  return recorded;
-}
-
-/**
- * Whether a kind now samples under another contract than the one its frozen plan names (Issue #826). The Execution Binding and
- * the composition pin only the unit prompt contract, so this is what keeps a plan frozen under one sampling contract from being
- * sampled under another. A kind that samples nothing never moves.
- */
-export function assuranceContractMoved(definition: Pick<AnalysisKindDefinition, 'assurance'>, frozenDigest: string): boolean {
-  return definition.assurance !== null && definition.assurance.promptContractDigest !== frozenDigest;
-}
-
-export interface BaselineAnalysisRouteFacts {
-  readonly reviewContractVersion?: 1 | 2;
-  readonly fixtureIdentity: string;
-  readonly fixtureSha256: string;
-  readonly fixtureLineage: ReadonlyArray<{ identity: string; sha256: string }>;
-}
-
-interface ManuscriptCheckpointBinding {
-  bookId: string;
-  manuscriptId: string;
-  branchId: string;
-  revisionId: string;
-  revisionLabel: string;
-  revisionDigest: string;
-  journalSequence: number;
-  createdForDirtyJournal: boolean;
-}
-
-// The purposes the bounded manuscript's checkpoint names; this owner persists only its own (Issue #413 adds the export's).
-type CheckpointPurpose = typeof TASK_INPUT_CHECKPOINT_PURPOSE | 'Reimport Safety / 重新导入安全固定点' | 'Export Input / 导出输入' | 'Document Version / 文档版本';
-
-interface CheckpointOwner {
-  createManuscriptCheckpointWork(
-    manuscriptId: string,
-    branchId: string,
-    purpose: typeof TASK_INPUT_CHECKPOINT_PURPOSE,
-    options?: { preemptible?: boolean },
-  ): { workId: string | null; total: number; checkpoint: ManuscriptCheckpointBinding | null };
-  advanceManuscriptCheckpointWork(workId: string):
-    { done: boolean; completed: number; total: number; checkpoint: ManuscriptCheckpointBinding | null };
-  finalizeManuscriptCheckpointWork(
-    workId: string,
-    persist: (checkpoint: ManuscriptCheckpointBinding, purpose: CheckpointPurpose) => void,
-  ): ManuscriptCheckpointBinding;
-  cancelManuscriptCheckpointWork(workId: string): boolean;
-}
-
-interface PreparationWork {
-  workId: string;
-  taskIntentId: string;
-  bookId: string;
-  checkpointWorkId: string;
-  launchPolicy: LaunchPolicyProjection;
-  total: number;
-  /** The 后台分析登记 dispatcher's (Issue #95, S39): any preparation the editor starts on the Book stops it first. */
-  background: boolean;
-  /** The dispatcher's Task Intent, not yet written: it is written only as the plan freezes (#713 re-review, P2-1). */
-  pendingIntent: PendingIntent | null;
-  intentDraft?: { promoted(taskIntentId: string): void };
-}
-
-/** A Task Intent as `prepare` decided it, before it is written. */
-interface PendingIntent {
-  readonly procedure?: ProcedureDefinitionPin;
-  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
-  readonly taskIntentId: string;
-  readonly bookId: string;
-  readonly goal: string;
-  readonly mode: AnalysisTaskMode;
-  readonly redoOf: string | null;
-  readonly preparedByEnrollmentVersionId: string | null;
-  /** The Book's share of the Enrollment's ceiling the dispatcher's Task is held to (Issue #864); `null` for the editor's. */
-  readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
-  readonly predecessor: { readonly revisionId: string; readonly digest: string } | null;
-  readonly selectedRange: BaselineAnalysisSelectedRange | null;
-  /** The Task Intent Draft version 准备计划 promoted into this Task (Issue #423, slice 7a); `null` for every other Task. */
-  readonly intentDraftVersionId: string | null;
-  readonly intentDraftParagraphs: number | null;
-}
-
-/** The tokens ceiling a 后台分析登记 holds each Run it starts to: the Book's share of the Enrollment's ceiling (Issue #864). */
-export interface BackgroundRunBudgetCeiling {
-  readonly kind: 'tokens';
-  readonly maxTotalTokens: number;
-}
-
-function isBackgroundRunBudgetCeiling(value: unknown): value is BackgroundRunBudgetCeiling {
-  return isRecord(value) && value.kind === 'tokens' && Number.isSafeInteger(value.maxTotalTokens) && (value.maxTotalTokens as number) >= 1 &&
-    Object.keys(value).length === 2;
-}
-
-/** The facts one `analysis_task_intents` row carries, with the canonical record they were read from. */
-interface IntentFacts {
-  readonly taskIntentId: string;
-  readonly bookId: string;
-  readonly mode: AnalysisTaskMode;
-  readonly goal: string;
-  readonly createdAt: string;
-  readonly predecessorRevisionId: string | null;
-  readonly selectedRange: BaselineAnalysisSelectedRange | null;
-  /** The immutable Task Intent record; the expected outcome class the Task froze is read from here, never from the kind's constant. */
-  readonly record: Readonly<Record<string, unknown>>;
-  readonly expectedOutcome: string;
-  /** 改计划重做 (Issue #422, S76c; CONT-013): the cancelled Run this Task redoes; `null` for any other Task. */
-  readonly redoOfRunRecordId: string | null;
-  /** The 后台分析登记 version whose dispatcher created this Task Intent (Issue #95, S39); `null` for every Task the editor asked for. */
-  readonly preparedByEnrollmentVersionId: string | null;
-  /** The ceiling that dispatcher holds the Task's Run to (Issue #864); `null` for the editor's Tasks and for one made before #864. */
-  readonly backgroundRunBudgetCeiling: BackgroundRunBudgetCeiling | null;
-  /** The Task Intent Draft version this Task was promoted from (Issue #423, slice 7a): its goal is that draft's sentence. */
-  readonly intentDraftVersionId: string | null;
-  readonly intentDraftParagraphs: number | null;
-}
-
-/**
- * The kind-generic shape the store builds before it is read as one kind's projection. Every member
- * either is identical for both kinds or is widened to what the definition supplies; nothing here is
- * a member neither kind declares.
- */
-type AnalysisProjectionShape = Omit<
-  BaselineAnalysisProjection,
-  'kind' | 'contractVersion' | 'taskIntent' | 'executionPlan' | 'resultSetRevision' | 'update' | 'updateControls' | 'history' | 'inspectedRevision'
-> & {
-  kind: AnalysisKindId;
-  contractVersion: string;
-  taskIntent: null | {
-    taskIntentId: string;
-    goal: string;
-    expectedOutcome: string;
-    createdAt: string;
-    mode: AnalysisTaskMode;
-    modeLabel: string;
-    /** The baseline kind's alone (Issue #422, S76c). */
-    redoOf?: null | { runRecordId: string; taskIntentId: string };
-  };
-  executionPlan: null | {
-    steps: ReadonlyArray<string>;
-    effects: readonly [];
-    unitCount: number;
-    recomputedUnitCount?: number;
-    reusedUnitCount?: number;
-    reducerStages: ReadonlyArray<AnalysisReducerStageProjection['stage']>;
-    stopCondition: string;
-  };
-  resultSetRevision: null | AnyResultSetRevisionProjection;
-  update: null | BaselineAnalysisUpdateProjection | ReviewCategoryUpdateProjection;
-  updateControls: null | BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection;
-  history: null | BaselineAnalysisHistoryProjection | FactualReviewHistoryProjection | ReviewCategoryHistoryProjection;
-  inspectedRevision: null | { revision: AnyResultSetRevisionProjection; current: boolean; readOnly: true };
-};
-
-type AnyResultSetRevisionProjection =
-  | BaselineAnalysisResultSetRevisionProjection
-  | FactualReviewResultSetRevisionProjection
-  | ReviewCategoryResultSetRevisionProjection;
-
-/**
- * The plan a Task that does not read the whole manuscript afresh freezes: the baseline kind's reuse
- * plan, or the scope plan of a kind that leaves out-of-scope units unreviewed (Issue #417). Both are
- * the `reuse-plan` component, and both are re-derived and compared byte for byte before execution.
- */
-export type AnalysisPlanRecord = AnalysisReusePlanProjection | ReviewScopePlanProjection;
-
-/** What a caller asks the ledger to prepare beside the kind's whole first Task: a mode, and the range a range mode needs. */
-export interface AnalysisModeRequest {
-  readonly mode: AnalysisTaskMode;
-  readonly selectedRange: BaselineAnalysisSelectedRange | null;
-}
-
-/**
- * The progress of one preparation. The projection is the kind's own once a caller that knows which
- * ledger it asked narrows it; the ledger itself returns the discriminated union.
- */
-export type AnalysisPreparationResult<TProjection = AnalysisProjection> = {
-  done: boolean;
-  workId: string | null;
-  completed: number;
-  total: number;
-  projection: TProjection | null;
-};
-
-export type BaselineAnalysisPreparationResult = AnalysisPreparationResult;
-
-export type BaselineAnalysisPrepareInput =
-  /**
-   * `update` is `null` for the kind's whole first Task and otherwise names the mode: one of the kind's
-   * update modes, or — for a kind that declares one — its range-bound first mode, which starts the
-   * Result Set over one selected range (Issue #417).
-   */
-  | {
-    phase: 'start';
-    factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
-    bookId: string;
-    goal: AnalysisGoal;
-    update: BaselineAnalysisUpdateRequest | AnalysisModeRequest | null;
-    reconfirm: boolean;
-    launchPolicy: LaunchPolicyProjection;
-    /** 改计划重做 (Issue #422, S76c): the cancelled Run of the Book's latest Task this new Task redoes. */
-    redoOf?: string | null;
-    /**
-     * The 后台分析登记 dispatcher's preparation (Issue #95, S39; the Commander's ruling on #713, P1-2): always a new Task Intent of
-     * its own, marked with the enrollment version, never one the editor asked for; refused while any preparation of the Book is
-     * under way or the editor's own Task is prepared and not started; its checkpoint gives way to any other the Book asks for.
-     */
-    background?: { enrollmentVersionId: string; runBudgetCeiling: BackgroundRunBudgetCeiling };
-    /**
-     * A new Task Intent even where the latest prepared one would be revised in place (Issue #428): 写作任务's preparation when
-     * the 资料库 builds it pins differ from the ones the prepared Task froze. Its contract holds words only, so the same words
-     * at another build are the same contract, and only a Task of its own can freeze the new pins.
-     */
-    newTask?: boolean;
-    /**
-     * 准备计划 on a Task Intent Draft (Issue #423, slice 7a; decision 1): always a new Task Intent, whose goal is the draft's own
-     * bounded sentence — `goal` — and whose record names the draft version; `promoted` records the promotion in the very write
-     * that makes the Task Intent, so a refused promotion leaves no Task behind. Never with a redo, a reconfirmation or a dispatcher.
-     */
-    intentDraft?: { versionId: string; paragraphs?: number; promoted(taskIntentId: string): void };
-  }
-  | { phase: 'advance'; workId: string }
-  | { phase: 'cancel'; workId: string }
-  | { phase: 'cancel-all' };
-
-/**
- * What the execution owner observes of the Run in flight: Measured Run Progress and the four
- * liveness facts it holds itself (ADR 0071 §3). The fifth, `lastTransitionAt`, belongs to the ledger's
- * own transitions and is composed by `#runProjection`, which already reads them; the owner never
- * re-reads the record it is writing to. Identities, counts, and instants only — V2-UX-LIVE-006 keeps
- * model content, prompt text, and payloads out of this shape entirely.
- */
-export interface RunProgress {
-  readonly unitsTotal: number;
-  readonly unitsSettled: number;
-  readonly currentUnitOrdinal: number | null;
-  readonly currentUnitStartedAt: string | null;
-  readonly attemptState: RunAttemptState | null;
-  readonly inFlightUnits?: ReadonlyArray<AnalysisInFlightUnitProjection>;
-  readonly completedAttempts: number;
-  readonly longestSettledUnitMs: number | null;
-  /** Which declared step of the Run is in flight: the unit loop, the cross-unit reduction, or the sample. */
-  readonly stage: RunProgressStage;
-}
-
-/** The Run's declared steps, in the order the execution owner performs them. */
-export type RunProgressStage = 'units' | 'cross-unit-reduction' | 'assurance-sampling' | 'run-report-reflection';
-
-export type ProgressReader = (runRecordId: string) => RunProgress | null;
-
-/**
- * The plan facts of a frozen Task that carries a plan, re-derived and verified before execution. The
- * predecessor is `null` exactly for a range-bound first Task, which has a plan — the units in its
- * range, and every other unit left unreviewed — and nothing to reuse from.
- */
-export interface ExecutionUpdateFacts {
-  readonly mode: AnalysisTaskMode;
-  readonly selectedRange: BaselineAnalysisSelectedRange | null;
-  readonly predecessor: null | { revisionId: string; ordinal: number; digest: string; coverageManifestDigest: string; manifest: CoverageManifestProjection };
-  readonly reusePlan: AnalysisPlanRecord;
-  readonly reusePlanDigest: string;
-}
-
-/** One `analysis_plan_versions` row: an immutable plan version of a Task Intent and the envelope digest it froze. */
-interface PlanVersionFacts {
-  readonly planVersionId: string;
-  readonly taskIntentId: string;
-  readonly ordinal: number;
-  readonly planRevisionId: string | null;
-  readonly planEnvelopeDigest: string;
-  readonly createdAt: string;
-}
-
-/** The input of one `safe-retry` Plan Adaptation the execution owner records before it dispatches the retry. */
-export interface PlanAdaptationInput {
-  readonly adaptationClass?: 'safe-retry' | 'contract-retry';
-  readonly attemptIndex?: 2 | 3;
-  readonly attemptId: string;
-  readonly runRecordId: string;
-  readonly taskIntentId: string;
-  readonly ordinal: number;
-  readonly unitOrdinal: number;
-  readonly classifiedReason: string;
-  readonly failureCode: string;
-  readonly failureClass: string;
-  readonly failureStatus: number | null;
-  readonly requestDigest: string;
-  readonly firstPayloadDigest: string | null;
-  /** The digest of the unit message the first attempt submitted (Issue #286); `null` when the request it answers kept none. */
-  readonly firstUnitMessageDigest: string | null;
-  readonly planEnvelopeDigest: string;
-  readonly bindingDigest: string;
-}
-
-/** Everything the execution owner needs from the frozen plan before the first model call. */
-export interface ExecutionPlanFacts {
-  readonly factualDecision?: import('../factual-verification.js').FactualRecheckSelection;
-  readonly retainedPolicyPin?: ResultSetPolicyPin;
-  readonly retainedPolicy?: LaunchPolicyProjection;
-  readonly selectedPolicyIdentity?: SelectedPolicyIdentity;
-  readonly localFixtureProfile?: LocalFixtureProfile;
-  readonly localFixtureRuntime?: LocalFixtureRuntimeContext;
-  readonly webToolsBackend?: FrozenWebToolsBackend; readonly webToolsFallback?: FrozenWebToolsFallback;
-  readonly searchCredentialReference?: string;
-  readonly bookId: string;
-  readonly taskIntentId: string;
-  readonly runRecordId: string;
-  /** The exact plan version the Run Authorization bound. */
-  readonly planVersionId: string;
-  readonly planVersionOrdinal: number;
-  /**
-   * Who started the Run, as its Run Authorization records it (Issue #864): a Run a 后台分析登记 started is admitted live only
-   * under the selected policy's enrolled-background rule.
-   */
-  readonly startWhen?: 'now' | 'idle';
-  readonly origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
-  readonly checkpoint: ManuscriptCheckpointBinding;
-  readonly manifest: CoverageManifestProjection;
-  readonly manifestDigest: string;
-  readonly planEnvelopeDigest: string;
-  readonly runSourceScopeDigest: string;
-  readonly providerResolutionPlanDigest: string;
-  readonly credentialReference: string;
-  /** The source digest the frozen manuscript pin carries; the execution owner re-checks it before any dispatch. */
-  readonly sourceDigest: string;
-  /** The bound deterministic fixture; `null` under developer-live, whose route replays no fixture. */
-  readonly route: BaselineAnalysisRouteFacts | null;
-  /**
-   * The remote binding the plan froze under ordinary-production (Issue #811): the route, model, endpoint and credential slot
-   * the editor had configured when the plan froze, which the Run keeps whatever route is configured later. `null` under every
-   * other scope, whose route is the launch's own.
-   */
-  readonly productionBinding: ProductionPlanBinding | null;
-  readonly artifactPin: { nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
-  readonly promptContractDigest: string;
-  readonly behaviorCompositionDigest: string;
-  readonly compositionOptions?: CompositionOptions;
-  /** The assurance sampling contract the plan froze ({@link frozenAssurancePromptContractDigest}). */
-  readonly assurancePromptContractDigest: string;
-  /** The ceiling the frozen Provider Resolution Plan carries, already resolved against the frozen unit count. */
-  readonly runBudgetCeiling: RunBudgetCeilingState;
-  /** `null` for the first baseline; the verified reuse plan for an update Task. */
-  readonly update: ExecutionUpdateFacts | null;
-  /** What the bound plan leaves out at the editor's word (Issue #419): the Run honours each. */
-  readonly editorEdits: PlanEdits;
-}
-
-/** One frozen ordinary-production binding: one of the two allowed routes, exactly (Issue #811). */
-export interface ProductionPlanBinding {
-  readonly route: OrdinaryProductionAllowedBinding['route'];
-  readonly model: OrdinaryProductionAllowedBinding['model'];
-  readonly endpoint: string;
-  readonly credentialSlot: OrdinaryProductionAllowedBinding['credentialSlot'];
-}
-
-export interface ExecutionBindingRecord {
-  readonly compositionVersion?: 2 | 3 | 4;
-  readonly attemptId: string;
-  readonly taskIntentId: string;
-  readonly runRecordId: string;
-  readonly bookId: string;
-  readonly planEnvelopeDigest: string;
-  /** The plan version the envelope digest identifies; a Plan Adaptation never changes it. */
-  readonly planVersion: number;
-  readonly runSourceScopeDigest: string;
-  readonly providerResolutionPlanDigest: string;
-  readonly coverageManifestDigest: string;
-  readonly manuscriptPin: { revisionId: string; revisionDigest: string };
-  readonly nativeArtifact: { identity: '@ai7/editorial-workspace-profile'; version: '1.0.0'; nativeCarrierSha256: string; sidecarRevision: 2; sidecarSha256: string };
-  readonly behaviorCompositionDigest: string;
-  readonly promptContractDigest: string;
-  /** The exact contract version of the analysis kind this attempt executes. */
-  readonly contractVersion: string;
-  /** The lineage root Session; under developer-live each unit opens its own Session beneath it. */
-  readonly harnessSessionId: string;
-  readonly route: ExecutionRouteId;
-  readonly model: string;
-  /** The deterministic fixture pin; `null` on the live route, which replays no fixture. */
-  readonly adapterPin: { fixtureIdentity: string; fixtureSha256: string } | null;
-  readonly credentialSlot: { modelRole: 'Main Editorial Role'; slot: CredentialSlotId; credentialReference: string };
-  /** `unpublished-excerpts` under ordinary-production (Issue #811): the editor's own words, never called public. */
-  readonly outboundDataCategory: 'public-or-synthetic' | 'unpublished-excerpts';
-  readonly policyPin: ResultSetPolicyPin;
-  readonly runBudgetCeiling: RunBudgetCeilingState;
-  readonly dispatchAttribution: 'Dispatch';
-  readonly boundAt: string;
-  /**
-   * The mode and reuse-plan digest an attempt with a plan executes; absent for a whole first Task. The
-   * predecessor is `null` only for a range-bound first Task (Issue #417), which no baseline attempt is.
-   */
-  readonly update?: { mode: AnalysisTaskMode; predecessorRevisionId: string | null; reusePlanDigest: string };
-}
-
-export interface UnitResultRecord {
-  readonly unitOrdinal: number;
-  readonly requestDigest: string;
-  /** `unreviewed` only under a kind that leaves out-of-scope units unreviewed; the two other kinds never write it. */
-  readonly lineage: ReviewCategoryUnitLineage;
-  readonly closed:
-    | { state: 'closed'; responseDigest: string; usage: { inputTokens: number; outputTokens: number } | null; result: unknown }
-    | { state: 'gap'; gap: BaselineAnalysisProjection['resultSetRevision'] extends infer R ? (R extends { gaps: ReadonlyArray<infer G> } ? G : never) : never };
-}
-
-/** A closed predecessor unit result, ready to be copied by lineage into a successor revision. */
-export interface PredecessorUnitResult {
-  readonly unitOrdinal: number;
-  readonly requestDigest: string;
-  readonly responseDigest: string;
-  readonly usage: { inputTokens: number; outputTokens: number } | null;
-  /** The kind's own typed unit result, read back by the kind's definition; the ledger never looks inside it. */
-  readonly result: unknown;
-}
-
-export interface RevisionPersistInput {
-  readonly facts: ExecutionPlanFacts;
-  readonly attemptId: string;
-  readonly bindingDigest: string;
-  readonly harnessSessionId: string;
-  readonly reduction: AnalysisReductionResult;
-  readonly units: ReadonlyArray<UnitResultRecord>;
-  readonly usage: { inputTokens: number; outputTokens: number; requests: number };
-  /** The units the Run adapted in-envelope (one safe retry each), disclosed in the revision's provenance. */
-  readonly adaptedUnitOrdinals: ReadonlyArray<number>;
-}
-
-function asString(value: unknown): string {
-  requireAnalysis(typeof value === 'string', 'ANALYSIS_RECORD_INVALID', '分析记录字段无效。');
-  return value;
-}
-
-function asNumber(value: unknown): number {
-  requireAnalysis(typeof value === 'number' && Number.isSafeInteger(value), 'ANALYSIS_RECORD_INVALID', '分析记录数值无效。');
-  return value;
-}
-
-/**
- * Who started the Task, as its Run Authorization records it (Issue #421): `standard-direct` from its plan,
- * `default-execution-rule` — 快速开始 under a 默认执行规则 — with the rule version the authorization names, or
- * `background-analysis-enrollment` — AI7 by itself under the Book's 后台分析登记 (Issue #95, S39) — with the enrollment version.
- */
-function authorizationOrigin(row: SqlRow): {
-  origin: 'standard-direct' | 'default-execution-rule' | 'background-analysis-enrollment';
-  ruleVersionId: string | null;
-  enrollmentVersionId: string | null;
-} {
-  const origin = asString(row.origin);
-  if (origin === 'standard-direct') return { origin, ruleVersionId: null, enrollmentVersionId: null };
-  const record = parseCanonicalJson(asString(row.canonical_json));
-  if (origin === 'background-analysis-enrollment') {
-    requireAnalysis(isRecord(record) && record.origin === origin && typeof record.enrollmentVersionId === 'string' &&
-      UUID_PATTERN.test(record.enrollmentVersionId) && record.ruleVersionId === undefined,
-    'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
-    return { origin, ruleVersionId: null, enrollmentVersionId: record.enrollmentVersionId };
-  }
-  requireAnalysis(origin === 'default-execution-rule' && isRecord(record) && record.origin === origin &&
-    typeof record.ruleVersionId === 'string' && UUID_PATTERN.test(record.ruleVersionId),
-  'ANALYSIS_RECORD_INVALID', '运行授权的来源记录无效。');
-  return { origin, ruleVersionId: record.ruleVersionId, enrollmentVersionId: null };
-}
-
-/**
- * How a Run is authorized: from its plan, by 快速开始 under one version of a 默认执行规则 (Issue #421), or by AI7 itself under one
- * version of the Book's 后台分析登记 (Issue #95, S39).
- */
-export type AnalysisAuthorizationOrigin =
-  | { readonly kind: 'standard-direct' }
-  | { readonly kind: 'default-execution-rule'; readonly ruleVersionId: string }
-  | { readonly kind: 'background-analysis-enrollment'; readonly enrollmentVersionId: string };
-const STANDARD_DIRECT: AnalysisAuthorizationOrigin = { kind: 'standard-direct' };
-/** What a Run AI7 started under the Book's 后台分析登记 records when it is authorized (Issue #95, S39). */
-export const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
-
-function transact<T>(db: DatabaseSync, body: () => T): T {
-  if (db.isTransaction) return body();
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = body();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (rollbackError) {
-      throw new AggregateError([error, rollbackError], 'Analysis ledger transaction rollback failed.');
-    }
-    throw error;
-  }
-}
-
-/** A Task Intent Draft's sentence as a goal (Issue #423, slice 7a): trimmed, one to `MAX_TASK_INTENT_GOAL_LENGTH` characters. */
-function isDraftGoal(goal: unknown): goal is string {
-  return typeof goal === 'string' && goal.trim() === goal && goal.length >= 1 && goal.length <= MAX_TASK_INTENT_GOAL_LENGTH;
-}
-
-function sameRange(left: BaselineAnalysisSelectedRange | null, right: BaselineAnalysisSelectedRange | null): boolean {
-  return left === null || right === null ? left === right : left.startPosition === right.startPosition && left.endPosition === right.endPosition;
-}
-
-function firstBaselineCounts(unitCount: number): AnalysisReusePlanCounts {
-  return { reused: 0, recomputed: unitCount, invalidated: 0, bypassed: 0 };
-}
-
-/**
- * A Task whose Run is authorized for dispatch, waiting in Connectivity Wait, admitted, executing, stopping at the
- * editor's cancellation, pausing, paused, or left 可续行 blocks any new update Task: a paused Run holds no slot, but it
- * is not done (Issue #422, S76b). A waiting Run holds no execution slot, but it will run: the
- * editor cancels it to prepare another (Issue #502, OFF-010); a cancelling one still holds the slot until it has
- * stopped (Issue #422).
- */
-export function runIsActive(state: BaselineAnalysisRunState | null): boolean {
-  return state === 'authorized' || state === 'awaiting-connectivity' || state === 'admitted' || state === 'executing' ||
-    state === 'cancelling' || state === 'pausing' || state === 'paused' || state === 'resumable' || state === 'awaiting-clarification';
-}
-
-/**
- * Why an active Run blocks a new Task, in the words of its state — a waiting Run is never said to be under way (OFF-005,
- * OFF-006; Issue #49, S14) — and of its kind (Issue #760 review): a 写作任务 is never called an 分析任务.
- */
-export function activeRunReason(state: BaselineAnalysisRunState | null, kind: string = BASELINE_ANALYSIS_KIND): string {
-  const { task, next } = activeRunWords(kind);
-  if (state === 'awaiting-connectivity') return `有一项${task}在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
-  if (state === 'authorized') return `有一项${task}在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
-  return `当前已有${task}在调度或执行中；在其结束前不能准备${next}。`;
-}
-
-/**
- * The launch facts a Run's plan must freeze, handed to the ledger once by the service entry. Under
- * `development-ci` the plan stays exactly what it was: the denied production binding, the local
- * deterministic route when one is bound, and an `unset` ceiling. Under `developer-live` the plan
- * freezes the selected developer-live binding — the `opencode-go` route, its bare model id, its fixed development
- * Credential Reference, and the required token ceiling, explicit or the policy's per-frozen-unit
- * default — because every one of those is a material plan input that must be pinned before
- * authorization, not chosen at dispatch.
- */
-export interface LaunchBinding {
-  readonly retainedPolicyFor?: (pin: ResultSetPolicyPin, binding: import('../launch-policy.js').ConfiguredProviderBinding) => LaunchPolicyProjection | null;
-  readonly localFixtureRuntime?: () => LocalFixtureRuntimeContext | null;
-  /** Verified runtime policy for review admission; never persisted as a new record or IPC member. */
-  readonly policy?: LaunchPolicyProjection;
-  readonly operationalScope: 'development-ci' | 'developer-live' | 'ordinary-production';
-  /**
-   * Under `ordinary-production` (Issue #811) the editor's configured binding — `null` while none is configured, when every
-   * model-calling action says 模型服务需设置 — read when each plan freezes, so a route switch reaches the next Task only.
-   */
-  readonly live: DeveloperLiveLaunchBinding | OrdinaryProductionLaunchBinding | null;
-}
-
-/** The developer-live binding: the one Go route, its fixed development Credential Reference, and the launch's ceiling. */
-export interface DeveloperLiveLaunchBinding {
-  readonly scope?: undefined;
-  readonly route: 'opencode-go';
-  readonly model: 'deepseek-v4.1-flash';
-  readonly endpoint: string;
-  readonly credentialSlot: 'opencode-go';
-  readonly credentialReference: string;
-  readonly runBudgetCeiling: DeveloperLiveCeiling;
-}
-
-/**
- * The editor's configured binding under ordinary-production (Issue #811): one of the two allowed routes, the Credential
- * Reference its connection holds, and no launch ceiling — the Run's ceiling is the editor's own, set in the plan (S16a).
- */
-export interface OrdinaryProductionLaunchBinding extends ProductionPlanBinding {
-  readonly scope: 'ordinary-production';
-  readonly credentialReference: string;
-  readonly runBudgetCeiling: 'unset';
-}
-
-/** The reading of an ordinary-production launch with no configured route: a stand-in for the binding in its sentences. */
-export const MODEL_SERVICE_SETUP_REQUIRED = 'ordinary-production-setup-required' as const;
-type LiveReading = LaunchBinding['live'] | typeof MODEL_SERVICE_SETUP_REQUIRED;
-
-/** Whether the launch, not the plan, sets the Run Budget Ceiling: developer-live only (ADR 0070). */
-function launchSetsCeilingOf(live: LaunchBinding['live']): boolean {
-  return live !== null && live.scope !== 'ordinary-production';
-}
-
-const DEVELOPMENT_CI_LAUNCH: LaunchBinding = { operationalScope: 'development-ci', live: null };
-
-/**
- * Resolve the bound ceiling against the frozen Coverage Manifest unit count: an explicit form
- * ceiling is already a total, and the policy default is 30,000 tokens times the unit count
- * (ADR 0070), computed here — after the manifest is frozen and before the plan is.
- */
-export function resolveDeveloperLiveCeiling(ceiling: DeveloperLiveCeiling, unitCount: number): { kind: 'tokens'; maxTotalTokens: number } {
-  return ceiling.kind === 'tokens'
-    ? ceiling
-    : { kind: 'tokens', maxTotalTokens: ceiling.tokensPerFrozenUnit * unitCount };
-}
-
-/** The exact ceiling state a frozen Provider Resolution Plan carries; the plan writes only this shape. */
-function runBudgetCeilingStateOf(value: unknown): RunBudgetCeilingState {
-  if (value === 'unset') return 'unset';
-  const maxTotalTokens = isRecord(value) ? value['maxTotalTokens'] : null;
-  requireAnalysis(isRecord(value) && value['kind'] === 'tokens' && typeof maxTotalTokens === 'number' && Number.isSafeInteger(maxTotalTokens) && maxTotalTokens > 0,
-    'ANALYSIS_RECORD_INVALID', 'Run Budget Ceiling 记录无效。');
-  return { kind: 'tokens', maxTotalTokens };
-}
-
-/**
- * The one reading every developer-live surface states for the bound ceiling. An explicit ceiling is
- * its total; the per-frozen-unit default states the formula before a manifest exists and the computed
- * total once one does.
- */
-function ceilingReading(ceiling: DeveloperLiveCeiling, unitCount: number | null): string {
-  if (ceiling.kind === 'tokens') return `${ceiling.maxTotalTokens} tokens`;
-  return unitCount === null
-    ? `${ceiling.tokensPerFrozenUnit} tokens × 冻结单元数`
-    : `${ceiling.tokensPerFrozenUnit * unitCount} tokens（${ceiling.tokensPerFrozenUnit} × ${unitCount} 个冻结单元）`;
-}
-
-/**
- * Every statement a Task surface makes about the trusted scope, the Provider Processing version, the
- * live transmissions, and the Run Budget Ceiling is derived here from the bound launch, never from a
- * constant. Under `development-ci` each one reads exactly as it always has — the v1 denial and its
- * zero live transmissions, byte for byte. Under `developer-live` each states the scope the launch
- * actually bound, its version, the route, and the frozen token ceiling: a surface that promised zero
- * transmission one row above the endpoint the Run was calling is the defect these derive away.
- *
- * The three are exported so a test can compare both readings against the captured base text directly,
- * without standing up the Run each surface would otherwise need. `unitCount` is the frozen Coverage
- * Manifest count when one exists, so the per-frozen-unit default can state its computed total.
- */
-export function namedNonEffects(live: LiveReading, unitCount: number | null = null): ReadonlyArray<string> {
-  return [
-    '不修改稿件，不创建修订版或事实判定',
-    '不创建学习资格、策略激活、Enrollment、Apply 或 Effect',
-    '只读取当前图书的任务输入修订版，不读取其他图书',
-    live === null
-      ? 'development-ci · Provider Processing v1：0 次实时传输，远程绑定被拒绝'
-      : live === MODEL_SERVICE_SETUP_REQUIRED
-        ? `ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION}：模型服务需设置，尚无可用路线，0 次实时传输`
-        : live.scope === 'ordinary-production'
-          ? `ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION}：经你配置的模型服务 ${live.route} · ${live.model} 实时传输，每个单元实际调用；任务运行预算上限由计划设定`
-          : `developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION}：实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}），远程绑定 ${live.route} · ${live.model} 已获准`,
-    '凭据值不进入任务账本、协议帧、日志、诊断或 Session 内容',
-  ];
-}
-
-/** Why a Run that cannot dispatch was blocked; only the first reason states the launch's own facts. */
-export function blockedReasons(live: LiveReading, unitCount: number | null = null): ReadonlyArray<string> {
-  return [
-    live === null
-      ? '当前可信启动范围为 development-ci，Provider Processing v1 允许 0 次实时传输；远程 DeepSeek 绑定被拒绝。'
-      : live === MODEL_SERVICE_SETUP_REQUIRED
-        ? MODEL_SERVICE_SETUP_REQUIRED_REASON
-        : live.scope === 'ordinary-production'
-          ? `当前可信启动范围为 ordinary-production，Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} 允许经你配置的模型服务 ${live.route} · ${live.model} 实时传输。`
-          : `当前可信启动范围为 developer-live，Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 允许的实时传输受运行边界约束（任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}）；远程绑定 ${live.route} · ${live.model} 已获准。`,
-    '未提供 J-04 专用的本地确定性模型适配器控制，因此没有可执行的本地路由。',
-    '运行授权已记录；派发前阻止，未创建 Session、未构造 Provider payload、未访问网络。',
-  ];
-}
-
-/**
- * What an analysis update does to the Provider, stated for the launch the next Run would execute
- * under. `firstTaskLabel` is the label of the kind's own first Task, which the sentence compares an
- * update to; it defaults to the baseline kind's, so every existing reading keeps its exact text.
- */
-export function providerConsequence(live: LiveReading, unitCount: number | null = null, firstTaskLabel = '首次基线分析'): string {
-  if (live === MODEL_SERVICE_SETUP_REQUIRED) return MODEL_SERVICE_SETUP_REQUIRED_REASON;
-  if (live !== null && live.scope === 'ordinary-production') {
-    return `与${firstTaskLabel}相同：经你配置的模型服务 ${live.route} · ${live.model} 在 ordinary-production · Provider Processing ${ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION} 下执行；外发数据类别 unpublished-excerpts；任务运行预算上限由计划设定，未设置则不设上限；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
-  }
-  return live === null
-    ? `与${firstTaskLabel}相同：远程 DeepSeek 绑定被 development-ci · Provider Processing v1 拒绝（0 次实时传输），只有 J-04 控制绑定的 AI7 本地确定性模型适配器可执行；外发数据类别 public-or-synthetic；未设置任务预算上限；只有重算单元形成模型请求并计入用量，复用单元不形成任何模型负载。`
-    : `与${firstTaskLabel}相同：远程绑定 ${live.route} · ${live.model} 在 developer-live · Provider Processing ${DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION} 下可执行，实时传输受运行边界约束；外发数据类别 public-or-synthetic；任务运行预算上限 ${ceilingReading(live.runBudgetCeiling, unitCount)}；每个重算单元形成一次实时传输并计入用量，复用单元不形成任何模型负载。`;
-}
-
-/**
- * The stages a stop keeps its usage for (Issue #541): settled or refused stage work was spent all the same. A unit
- * a stop kept carries its own usage in its checkpoint.
- */
-export const CARRIED_STAGES = ['cross-unit-reduction', 'assurance-sampling'] as const;
-export type CarriedStages = Record<(typeof CARRIED_STAGES)[number], { requests: number; inputTokens: number; outputTokens: number }>;
-
-/** Private continuation evidence, nested in existing Run states; never a public protocol or a new binding. */
-export interface StageContinuation {
-  readonly runRecordId: string;
-  readonly attemptId: string;
-  readonly bindingDigest: string;
-  readonly manifestDigest: string;
-  readonly promptContractDigest: string;
-  reduction?: { inputDigest: string; contractDigest: string; requestDigest: string | null; outcome: CrossUnitOutcome };
-  sampling?: {
-    inputDigest: string; contractDigest: string; draw: AssuranceSampleDraw;
-    nextTurn: number; ended: boolean;
-    turns: Array<{ requestDigest: string; unitOrdinal: number; usage: { inputTokens: number; outputTokens: number } | null; state: 'closed' | 'gap' | 'outcome-unknown' }>;
-    dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
-    sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
-  };
-}
-
-/** Payload-free identities for physical model admissions; tool dispatch tokens never cross this boundary. */
-export interface AnalysisRequestIdentity {
-  readonly requestId: string;
-  readonly producerId: string;
-  readonly requestOrdinal: number;
-  readonly sessionId: string;
-  readonly unitOrdinal: number | null;
-  readonly stage: RunProgressStage | 'web-verification';
-  readonly attemptIndex: number;
-  readonly adaptationId: string | null;
-  readonly payloadDigest: string;
-  readonly messageDigest: string;
-  readonly requestDigest: string;
-  readonly inputDigest: string;
-  readonly contractDigest: string;
-}
-
-interface RequestAdmissionPins {
-  readonly runRecordId: string;
-  readonly attemptId: string;
-  readonly bindingDigest: string;
-  readonly planEnvelopeDigest: string;
-  readonly manifestDigest: string;
-  readonly compositionDigest: string;
-  readonly promptContractDigest: string;
-  readonly policyVersion: string;
-  readonly policyRuleId: string;
-}
-
-type RequestAdmissionEvent =
-  | { readonly kind: 'execution'; readonly width: 1 | 3; readonly limits: { readonly requests: 4; readonly units: 3; readonly backgroundRequests: 1 } }
-  | { readonly kind: 'admit'; readonly request: AnalysisRequestIdentity }
-  | { readonly kind: 'resolve'; readonly requests: readonly string[]; readonly evidence: {
-      readonly kind: 'no-send' | 'unit-checkpoint' | 'clarification-checkpoint' | 'stage-checkpoint' | 'reflection-outcome' | 'refused-turn' | 'unavailable' | 'factual-checkpoint';
-      readonly digest: string;
-    } };
-
-interface RequestAdmissionData extends RequestAdmissionPins {
-  readonly sequence: number;
-  readonly predecessorDigest: string | null;
-  readonly event: RequestAdmissionEvent;
-}
-
-export interface RequestAdmissionReading {
-  readonly pins: RequestAdmissionPins;
-  readonly width: 1 | 3;
-  readonly sequence: number;
-  readonly digest: string;
-  readonly open: ReadonlyMap<string, AnalysisRequestIdentity>;
-  readonly unavailable: ReadonlyArray<AnalysisRequestIdentity>;
-  readonly notSent: ReadonlyArray<AnalysisRequestIdentity>;
-}
-
-/**
- * The append-only ledger of one analysis kind of one Book database. The kind it serves is the
- * {@link AnalysisKindDefinition} it is constructed with: the identity it tags every row with, the
- * contract version, the Task modes and their goals, the frozen prompt contract its plans freeze, the
- * reducer its Runs reduce through, and the stages its plans declare. Two instances over the same
- * database serve the two kinds of Issue #53 without either seeing the other's Tasks, plans, Runs, or
- * revisions: every read is filtered by the definition's kind.
- */
-/** The provider-free v2 fixture identity whose lineage runs the factual levels on the deterministic route (Issue #901). */
-export const FACTUAL_VERIFIED_FIXTURE_IDENTITY = 'sample1-factual-verified';
-/** Why a level below the Factual Verification Policy's minimum is refused; the document names none today (EASSURE-008). */
-export const FACTUAL_POLICY_MINIMUM_REASON = '事实核查政策要求更高的证据保证级别；这个级别不能选。' as const;
-const LEVEL_ORDER: Readonly<Record<EvidenceAssuranceLevel, number>> = { quick: 0, standard: 1, strict: 2 };
-
-/** Whether a level is below the minimum the pinned Factual Verification Policy Document requires (EASSURE-008). */
-export function levelBelowPolicyMinimum(level: EvidenceAssuranceLevel, minimum: EvidenceAssuranceLevel | null = FACTUAL_VERIFICATION_POLICY_VERSION.minimumLevel): boolean {
-  return minimum !== null && LEVEL_ORDER[level] < LEVEL_ORDER[minimum];
-}
-
-/** Immutable references only: no route, launch policy, source selection, provider or writes. */
-function admissionRow(row: SqlRow | undefined): Record<string, unknown> {
-  requireAnalysis(row !== undefined, 'ANALYSIS_RECORD_INVALID', '请求准入引用缺失。');
-  const record = parseCanonicalJson(asString(row.canonical_json));
-  requireAnalysis(isRecord(record) && canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '请求准入引用摘要不一致。');
-  return record;
-}
-
-function readAdmissionBinding(db: DatabaseSync, runRecordId: string): { attemptId: string; binding: ExecutionBindingRecord; bindingDigest: string } | null {
-  const runRow = db.prepare('SELECT * FROM analysis_run_records WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
-  const run = admissionRow(runRow);
-  const attemptRow = db.prepare('SELECT * FROM analysis_execution_attempts WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
-  if (attemptRow === undefined) return null;
-  const attempt = admissionRow(attemptRow);
-  const bindingRow = db.prepare('SELECT * FROM analysis_execution_bindings WHERE attempt_id = ?').get(attemptRow.attempt_id!) as SqlRow | undefined;
-  const binding = admissionRow(bindingRow) as unknown as ExecutionBindingRecord;
-  const authorization = admissionRow(db.prepare('SELECT * FROM analysis_run_authorizations WHERE authorization_id = ?').get(runRow!.authorization_id!) as SqlRow | undefined);
-  const intent = admissionRow(db.prepare('SELECT * FROM analysis_task_intents WHERE task_intent_id = ?').get(runRow!.task_intent_id!) as SqlRow | undefined);
-  requireAnalysis(run.runRecordId === runRecordId && run.taskIntentId === runRow!.task_intent_id && run.authorizationId === runRow!.authorization_id &&
-    attempt.attemptId === attemptRow.attempt_id && attempt.runRecordId === runRecordId &&
-    binding.attemptId === attempt.attemptId && binding.runRecordId === runRecordId && binding.taskIntentId === run.taskIntentId &&
-    intent.taskIntentId === run.taskIntentId && intent.bookId === binding.bookId && authorization.authorizationId === run.authorizationId &&
-    authorization.taskIntentId === run.taskIntentId && authorization.planEnvelopeDigest === binding.planEnvelopeDigest && authorization.planVersionOrdinal === binding.planVersion,
-    'ANALYSIS_RECORD_INVALID', '请求准入的运行、尝试与授权引用不一致。');
-  return { attemptId: asString(attemptRow.attempt_id), binding, bindingDigest: asString(bindingRow!.sha256) };
-}
-
-function readAdmissionManifest(db: DatabaseSync, stored: NonNullable<ReturnType<typeof readAdmissionBinding>>): CoverageManifestProjection {
-  const rows = db.prepare('SELECT * FROM analysis_plan_records WHERE task_intent_id = ? AND plan_version = ?').all(stored.binding.taskIntentId, stored.binding.planVersion) as SqlRow[];
-  const components = new Map(rows.map((row) => [asString(row.component), { record: admissionRow(row), digest: asString(row.sha256) }]));
-  for (const [component, digest] of [
-    ['plan-envelope', stored.binding.planEnvelopeDigest],
-    ['provider-resolution-plan', stored.binding.providerResolutionPlanDigest], ['run-source-scope', stored.binding.runSourceScopeDigest],
-  ]) requireAnalysis(components.get(component!)?.digest === digest, 'ANALYSIS_RECORD_INVALID', '请求准入的固定计划引用不一致。');
-  const manifest = components.get('coverage-manifest')!.record as unknown as CoverageManifestProjection;
-  requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
-    manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
-    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
-  return manifest;
-}
-
-function readAdmissionAdaptations(db: DatabaseSync, attemptId: string): Array<{ adaptationId: unknown; unitOrdinal: unknown }> {
-  return (db.prepare('SELECT * FROM analysis_plan_adaptations WHERE attempt_id = ? ORDER BY ordinal').all(attemptId) as SqlRow[]).map((row) => {
-    const record = admissionRow(row);
-    requireAnalysis(record.adaptationId === row.adaptation_id && record.attemptId === attemptId && record.unitOrdinal === row.unit_ordinal,
-      'ANALYSIS_RECORD_INVALID', '请求准入的调整引用不一致。');
-    return { adaptationId: record.adaptationId, unitOrdinal: record.unitOrdinal };
-  });
-}
-
-function readRequestAdmissions(db: DatabaseSync, runRecordId: string): RequestAdmissionReading | null {
-  const rows = db.prepare(`SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ?
-      AND json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence`).all(runRecordId) as SqlRow[];
-  if (rows.length === 0 && db.prepare(`SELECT 1 FROM analysis_run_states WHERE run_record_id = ? AND
-      json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL LIMIT 1`).get(runRecordId) === undefined) return null;
-  const exact = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => isRecord(value) &&
-    Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-  const invalid = (): never => { throw new AnalysisError('ANALYSIS_RECORD_INVALID', '模型请求准入记录无法核对；不能续行。'); };
-  const state: { reading: RequestAdmissionReading | null } = { reading: null };
-  const open = new Map<string, AnalysisRequestIdentity>();
-  const unavailable: AnalysisRequestIdentity[] = [];
-  const notSent: AnalysisRequestIdentity[] = [];
-  const seen = new Set<string>();
-  const admitted = new Map<string, { request: AnalysisRequestIdentity; recordedAt: string }>();
-  const resolutions = new Map<string, { kind: string; digest: string }>();
-  const refusalProofs = new Map<string, number>();
-  const ordinals = new Map<string, number>();
-  const stored = readAdmissionBinding(db, runRecordId);
-  let requestManifest: CoverageManifestProjection | undefined;
-  let adaptations: ReturnType<typeof readAdmissionAdaptations> | undefined;
-  for (const row of rows) {
-    const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
-    const receipt = record.requestAdmission;
-    if (record.runRecordId !== runRecordId || record.sequence !== row.sequence || record.recordedAt !== row.recorded_at) return invalid();
-    if (receipt === undefined) continue;
-    if (canonicalRecord(record).digest !== row.sha256 || !exact(receipt, ['schema', 'data', 'digest']) ||
-      receipt.schema !== 'ai7.analysis.request-admission/1' || !isRecord(receipt.data) || canonicalRecord(receipt.data).digest !== receipt.digest) return invalid();
-    const data = receipt.data as unknown as RequestAdmissionData;
-    if (!exact(data, ['runRecordId', 'attemptId', 'bindingDigest', 'planEnvelopeDigest', 'manifestDigest', 'compositionDigest',
-      'promptContractDigest', 'policyVersion', 'policyRuleId', 'sequence', 'predecessorDigest', 'event']) ||
-      data.sequence !== (state.reading?.sequence ?? 0) + 1 || data.predecessorDigest !== (state.reading?.digest ?? null)) return invalid();
-    const { sequence, predecessorDigest, event, ...pins } = data;
-    if (stored === null || pins.runRecordId !== runRecordId || pins.attemptId !== stored.attemptId || pins.bindingDigest !== stored.bindingDigest ||
-      pins.planEnvelopeDigest !== stored.binding.planEnvelopeDigest || pins.manifestDigest !== stored.binding.coverageManifestDigest ||
-      pins.compositionDigest !== stored.binding.behaviorCompositionDigest || pins.promptContractDigest !== stored.binding.promptContractDigest ||
-      pins.policyVersion !== stored.binding.policyPin.providerProcessingVersion || typeof pins.policyRuleId !== 'string' || !/^[a-z][a-z0-9-]{0,159}$/u.test(pins.policyRuleId) ||
-      state.reading !== null && canonicalJson(pins) !== canonicalJson(state.reading.pins)) return invalid();
-    let width: 1 | 3 = state.reading?.width ?? 1;
-    if (state.reading === null) {
-      if (!exact(event, ['kind', 'width', 'limits']) || event.kind !== 'execution' || (event.width !== 1 && event.width !== 3) ||
-        !exact(event.limits, ['requests', 'units', 'backgroundRequests']) || event.limits.requests !== 4 || event.limits.units !== 3 || event.limits.backgroundRequests !== 1 ||
-        event.width === 3 && (stored!.binding.compositionVersion !== 2 && stored!.binding.compositionVersion !== 4 || stored!.binding.policyPin.operationalScope !== 'ordinary-production' || stored!.binding.runBudgetCeiling !== 'unset')) return invalid();
-      width = event.width;
-    } else if (event.kind === 'admit') {
-      if (!exact(event, ['kind', 'request'])) return invalid();
-      const request = event.request;
-      if (!exact(request, ['requestId', 'producerId', 'requestOrdinal', 'sessionId', 'unitOrdinal', 'stage', 'attemptIndex', 'adaptationId',
-        'payloadDigest', 'messageDigest', 'requestDigest', 'inputDigest', 'contractDigest']) ||
-        ![request.requestId, request.producerId, request.sessionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) ||
-        seen.has(request.requestId) || !Number.isSafeInteger(request.requestOrdinal) || request.requestOrdinal !== (ordinals.get(request.producerId) ?? 0) + 1 ||
-        !Number.isSafeInteger(request.attemptIndex) || request.attemptIndex < 1 || request.attemptIndex > 4 ||
-        request.adaptationId !== null && !UUID_PATTERN.test(request.adaptationId) ||
-        ![request.payloadDigest, request.messageDigest, request.requestDigest, request.inputDigest, request.contractDigest].every((digest) => typeof digest === 'string' && DIGEST_PATTERN.test(digest)) ||
-        !['units', 'cross-unit-reduction', 'assurance-sampling', 'run-report-reflection', 'web-verification'].includes(request.stage) ||
-        request.stage === 'units' && (!Number.isSafeInteger(request.unitOrdinal) || request.unitOrdinal! < 1) ||
-        request.stage !== 'units' && request.unitOrdinal !== null) return invalid();
-      const manifest = requestManifest ??= readAdmissionManifest(db, stored);
-      if (request.unitOrdinal !== null && (manifest.units[request.unitOrdinal - 1]?.ordinal !== request.unitOrdinal ||
-        manifest.units[request.unitOrdinal - 1]!.digest !== request.inputDigest || request.contractDigest !== stored.binding.promptContractDigest)) return invalid();
-      if (request.stage === 'web-verification') {
-        const session = db.prepare("SELECT canonical_json FROM factual_claim_sessions WHERE session_id = ? AND run_record_id = ? AND stage = 'web-verification'").get(request.sessionId, runRecordId);
-        const pins = session === undefined ? null : JSON.parse(String(session.canonical_json)) as import('../factual-verification.js').FactualClaimSession;
-        if (pins === null || pins.sourceMessageDigest !== request.messageDigest || pins.promptContractDigest !== request.contractDigest || pins.ledgerDigest !== request.inputDigest) return invalid();
-      }
-      if (request.adaptationId !== null && !(adaptations ??= readAdmissionAdaptations(db, stored!.attemptId)).some((adaptation) => adaptation.adaptationId === request.adaptationId && adaptation.unitOrdinal === request.unitOrdinal)) return invalid();
-      admitted.set(request.requestId, { request, recordedAt: asString(row.recorded_at) });
-      seen.add(request.requestId); ordinals.set(request.producerId, request.requestOrdinal); open.set(request.requestId, request);
-    } else if (event.kind === 'resolve') {
-      if (!exact(event, ['kind', 'requests', 'evidence']) || !Array.isArray(event.requests) || new Set(event.requests).size !== event.requests.length ||
-        !event.requests.every((id) => typeof id === 'string' && open.has(id)) || !exact(event.evidence, ['kind', 'digest']) || !DIGEST_PATTERN.test(event.evidence.digest)) return invalid();
-      const requests = event.requests.map((id) => open.get(id)!);
-      const evidence = event.evidence;
-      if (event.requests.length === 0 && evidence.kind !== 'stage-checkpoint') return invalid();
-      if (evidence.kind === 'no-send') {
-        if (requests.length !== 1 || canonicalRecord(requests[0]).digest !== evidence.digest) return invalid();
-        notSent.push(requests[0]!);
-      } else if (evidence.kind === 'unit-checkpoint') {
-        const unit = requests[0]?.unitOrdinal;
-        const checkpoint = db.prepare('SELECT canonical_json, sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
-        if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
-        const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
-        if (canonicalRecord(kept).digest !== evidence.digest || !Array.isArray(kept.requests) || kept.requests.length !== event.requests.length || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
-      } else if (evidence.kind === 'clarification-checkpoint') {
-        const unit = requests[0]?.unitOrdinal;
-        const checkpoint = db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unit ?? -1) as SqlRow | undefined;
-        if (checkpoint === undefined || checkpoint.sha256 !== evidence.digest || sha256Hex(asString(checkpoint.canonical_json)) !== evidence.digest ||
-          requests.some((request) => request.stage !== 'units' || request.unitOrdinal !== unit)) return invalid();
-        const kept = parseCanonicalJson(asString(checkpoint!.canonical_json)) as { requests?: unknown };
-        if (!Array.isArray(kept.requests) || kept.requests.length !== event.requests.length || !event.requests.every((id) => (kept.requests as unknown[]).includes(id))) return invalid();
-      } else if (evidence.kind === 'stage-checkpoint') {
-        const stage = record.stageContinuation;
-        if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
-          !isRecord(stage.data) || canonicalRecord(stage.data).digest !== stage.digest ||
-          !exact(record.carriedUsage, ['inputTokens', 'outputTokens', 'stages']) ||
-          ![record.carriedUsage.inputTokens, record.carriedUsage.outputTokens].every((value) => Number.isSafeInteger(value) && (value as number) >= 0) ||
-          !exact(record.carriedUsage.stages, CARRIED_STAGES) ||
-          !Object.values(record.carriedUsage.stages).every((value) => exact(value, ['requests', 'inputTokens', 'outputTokens']) &&
-            Object.values(value).every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
-        if (record.stageContinuation === undefined || record.carriedUsage === undefined ||
-          canonicalRecord({ stageContinuation: record.stageContinuation, carriedUsage: record.carriedUsage }).digest !== evidence.digest ||
-          requests.some((request) => request.stage === 'units' || request.stage === 'run-report-reflection')) return invalid();
-        const stages = (record.stageContinuation as { data?: StageContinuation }).data;
-        if (stages === undefined || stages.runRecordId !== runRecordId || stages.attemptId !== stored!.attemptId ||
-          stages.bindingDigest !== stored!.bindingDigest || stages.manifestDigest !== stored!.binding.coverageManifestDigest ||
-          stages.promptContractDigest !== stored!.binding.promptContractDigest || requests.some((request) => request.stage === 'cross-unit-reduction'
-            ? stages.reduction?.inputDigest !== request.inputDigest || stages.reduction.requestDigest !== request.requestDigest || stages.reduction.contractDigest !== request.contractDigest
-            : stages.sampling?.inputDigest !== request.inputDigest || stages.sampling.contractDigest !== request.contractDigest || !stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))) return invalid();
-      } else if (evidence.kind === 'reflection-outcome') {
-        const outcome = db.prepare('SELECT canonical_json, sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
-        if (outcome === undefined || outcome.sha256 !== evidence.digest || sha256Hex(asString(outcome.canonical_json)) !== evidence.digest ||
-          requests.some((request) => request.stage !== 'run-report-reflection')) return invalid();
-      } else if (evidence.kind === 'refused-turn') {
-        const refused = record.requestRefusal;
-        if (!exact(refused, ['state', 'stage', 'unitOrdinal', 'observation']) || refused.state !== 'provider-account-limit' ||
-          canonicalRecord(refused).digest !== evidence.digest || requests.some((request) => request.stage !== refused.stage || request.unitOrdinal !== refused.unitOrdinal)) return invalid();
-        const observed = refused.observation;
-        if (!exact(observed, ['attempts', 'usage']) || !Number.isSafeInteger(observed.attempts) || (observed.attempts as number) < 1 ||
-          observed.usage !== null && (!exact(observed.usage, ['inputTokens', 'outputTokens']) ||
-            ![observed.usage.inputTokens, observed.usage.outputTokens].every((count) => Number.isSafeInteger(count) && (count as number) >= 0))) return invalid();
-        refusalProofs.set(evidence.digest, Number(row.sequence));
-      } else if (evidence.kind === 'factual-checkpoint') {
-        if (requests.some((request) => request.stage !== 'web-verification' || request.sessionId !== requests[0]?.sessionId) ||
-          !db.prepare("SELECT 1 FROM factual_claim_events WHERE session_id = ? AND kind = 'verification-result' AND sha256 = ?").get(requests[0]?.sessionId ?? '', evidence.digest)) return invalid();
-      } else if (evidence.kind === 'unavailable') {
-        if (canonicalRecord({ requests, reason: 'possible-send-without-durable-result' }).digest !== evidence.digest) return invalid();
-        unavailable.push(...requests);
-      } else return invalid();
-      for (const id of event.requests) { resolutions.set(id, { kind: evidence.kind, digest: evidence.digest }); open.delete(id); }
-    } else return invalid();
-    state.reading = { pins, width, sequence, digest: receipt.digest as string, open, unavailable, notSent };
-  }
-  // Check arrays independently of discharge events, including the crash window before discharge.
-  for (const table of ['analysis_unit_checkpoints', 'analysis_clarification_requests'] as const) {
-    for (const checkpoint of db.prepare(`SELECT * FROM ${table} WHERE run_record_id = ?`).all(runRecordId) as SqlRow[]) {
-      const kept = admissionRow(checkpoint);
-      if (!Object.hasOwn(kept, 'requests')) continue;
-      if (!Array.isArray(kept.requests) || new Set(kept.requests).size !== kept.requests.length ||
-        kept.runRecordId !== runRecordId || kept.attemptId !== stored!.attemptId ||
-        table === 'analysis_clarification_requests' && kept.taskIntentId !== stored!.binding.taskIntentId ||
-        kept.unitOrdinal !== undefined && kept.unitOrdinal !== checkpoint.unit_ordinal) return invalid();
-      const manifest = requestManifest ??= readAdmissionManifest(db, stored!);
-      if (manifest.units[Number(checkpoint.unit_ordinal) - 1]?.ordinal !== checkpoint.unit_ordinal) return invalid();
-      const ids = kept.requests as unknown[];
-      const checkpointTime = asString(table === 'analysis_unit_checkpoints' ? checkpoint.recorded_at : checkpoint.raised_at);
-      if (!ids.every((id) => typeof id === 'string' && admitted.has(id) &&
-        admitted.get(id)!.request.stage === 'units' && admitted.get(id)!.request.unitOrdinal === checkpoint.unit_ordinal &&
-        admitted.get(id)!.recordedAt <= checkpointTime)) return invalid();
-      if (table === 'analysis_unit_checkpoints') {
-        const unit = kept.unit as { unitOrdinal?: unknown; requestDigest?: unknown } | undefined;
-        if (unit?.unitOrdinal !== checkpoint.unit_ordinal || !ids.every((id) => admitted.get(id as string)!.request.requestDigest === unit!.requestDigest)) return invalid();
-        for (const [id, value] of admitted) if (value.request.stage === 'units' && value.request.unitOrdinal === checkpoint.unit_ordinal &&
-          (resolutions.get(id) === undefined || resolutions.get(id)!.kind === 'unit-checkpoint' && resolutions.get(id)!.digest === checkpoint.sha256) && !ids.includes(id)) return invalid();
-      }
-    }
-  }
-  for (const row of db.prepare("SELECT sequence, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND json_type(canonical_json, '$.requestRefusal') IS NOT NULL").all(runRecordId) as SqlRow[]) {
-    const record = admissionRow(row);
-    const refusal = record.requestRefusal;
-    if (!exact(refusal, ['state', 'stage', 'unitOrdinal', 'observation']) || !refusalProofs.has(canonicalRecord(refusal).digest) ||
-      refusalProofs.get(canonicalRecord(refusal).digest)! > Number(row.sequence)) return invalid();
-  }
-  const claims = new Set<string>();
-  const firstReceiptRowSequence = rows.length === 0 ? null : asNumber(rows[0]!.sequence);
-  const sameEvidence = (left: unknown, right: unknown): boolean => left === undefined || right === undefined
-    ? left === right : canonicalRecord(left).digest === canonicalRecord(right).digest;
-  let predecessor: Record<string, unknown> | null = null;
-  for (const row of db.prepare('SELECT sequence, recorded_at, canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence').all(runRecordId) as SqlRow[]) {
-    const record = admissionRow(row);
-    // A governed row inherits its predecessor's stage evidence; only its own stage checkpoint carries new evidence.
-    if (Object.hasOwn(record, 'requestAdmission')) {
-      const event = (record.requestAdmission as { data: { event: { kind: string; evidence?: { kind: string } } } }).data.event;
-      if (!(event.kind === 'resolve' && event.evidence?.kind === 'stage-checkpoint') &&
-        (!sameEvidence(record.stageContinuation, predecessor?.stageContinuation) || !sameEvidence(record.carriedUsage, predecessor?.carriedUsage))) return invalid();
-    }
-    predecessor = record;
-    if (rows.length > 0 && Object.hasOwn(record, 'stageContinuation')) {
-      const stage = record.stageContinuation;
-      if (!exact(stage, ['schema', 'data', 'digest']) || stage.schema !== 'ai7.analysis.stage-continuation/1' ||
-        !isRecord(stage.data) || canonicalRecord(stage.data).digest !== stage.digest ||
-        stage.data.runRecordId !== runRecordId || stage.data.attemptId !== stored!.attemptId ||
-        stage.data.bindingDigest !== stored!.bindingDigest || stage.data.manifestDigest !== stored!.binding.coverageManifestDigest ||
-        stage.data.promptContractDigest !== stored!.binding.promptContractDigest) return invalid();
-    }
-    if (!Object.hasOwn(record, 'modelClarificationAnswerClaim')) continue;
-    if (record.runRecordId !== runRecordId || record.sequence !== row.sequence || record.recordedAt !== row.recorded_at) return invalid();
-    const claim = record.modelClarificationAnswerClaim;
-    if (typeof claim !== 'string' || !UUID_PATTERN.test(claim)) return invalid();
-    if (!claims.has(claim)) {
-      if (stored === null) return invalid();
-      const clarification = db.prepare('SELECT * FROM analysis_clarification_requests WHERE request_id = ?').get(claim) as SqlRow | undefined;
-      const question = admissionRow(clarification);
-      const model = clarification?.model_question_json == null ? null : parseModelClarification(asString(clarification.model_question_json));
-      const answerRow = db.prepare('SELECT * FROM analysis_clarification_answers WHERE request_id = ?').get(claim) as SqlRow | undefined;
-      const answer = admissionRow(answerRow);
-      const manifest = requestManifest ??= readAdmissionManifest(db, stored!);
-      const selected = typeof answer.optionId === 'string' ? /^model-option-([0-3])$/u.exec(answer.optionId)?.[1] : undefined;
-      if (question.schema !== CLARIFICATION_REQUEST_SCHEMA || question.requestId !== claim || clarification!.request_id !== claim ||
-        clarification!.run_record_id !== runRecordId || question.runRecordId !== runRecordId || question.origin !== 'model' || question.kind !== 'model-question' ||
-        question.attemptId !== stored!.attemptId || question.taskIntentId !== stored!.binding.taskIntentId ||
-        question.planVersion !== stored!.binding.planVersion || question.planEnvelopeDigest !== stored!.binding.planEnvelopeDigest ||
-        question.unitOrdinal !== clarification!.unit_ordinal || !Number.isSafeInteger(question.unitOrdinal) || (question.unitOrdinal as number) < 1 ||
-        manifest.units[(question.unitOrdinal as number) - 1]?.ordinal !== question.unitOrdinal ||
-        typeof question.requestDigest !== 'string' || !DIGEST_PATTERN.test(question.requestDigest) ||
-        typeof question.firstUnitMessageDigest !== 'string' || !DIGEST_PATTERN.test(question.firstUnitMessageDigest) ||
-        model === null || canonicalJson(question.modelQuestion) !== clarification!.model_question_json ||
-        answer.schema !== CLARIFICATION_ANSWER_SCHEMA || answer.answerId !== answerRow!.answer_id ||
-        typeof answer.answerId !== 'string' || !UUID_PATTERN.test(answer.answerId) || answer.requestId !== claim || answerRow!.request_id !== claim ||
-        answer.runRecordId !== runRecordId || answer.requestSha256 !== clarification!.sha256 || answerRow!.option_id !== 'retry' ||
-        answer.answeredAt !== answerRow!.answered_at || (answer.actor !== 'editor' && answer.actor !== 'service-timeout') ||
-        (answer.note !== null && (typeof answer.note !== 'string' || !answer.note.isWellFormed() || clarificationGraphemes(answer.note) > CLARIFICATION_NOTE_MAX)) ||
-        !(answer.optionId === 'no-answer' ? answer.note === null || answer.note === '' : answer.optionId === 'free-text'
-          ? model.freeTextAllowed && typeof answer.note === 'string' && answer.note !== ''
-          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (answer.note === null || answer.note === '')) ||
-        answer.actor === 'service-timeout' && answer.optionId !== 'no-answer') return invalid();
-      const receipt = record.requestAdmission as { data?: { event?: RequestAdmissionEvent } } | undefined;
-      const event = receipt?.data?.event;
-      if (firstReceiptRowSequence !== null && asNumber(row.sequence) >= firstReceiptRowSequence &&
-        (event?.kind !== 'admit' || event.request.stage !== 'units' || event.request.unitOrdinal !== clarification!.unit_ordinal)) return invalid();
-      claims.add(claim);
-    }
-  }
-  return state.reading;
-}
-
-/** Validate every persisted request variant without selecting a policy, mutating, or reconciling. */
-export function validateRequestAdmissionRecords(db: DatabaseSync, allowGoverned: boolean): void {
-  const fields = [
-    ['analysis_run_states', 'requestAdmission'], ['analysis_run_states', 'requestRefusal'],
-    ['analysis_unit_checkpoints', 'requests'], ['analysis_clarification_requests', 'requests'],
-  ] as const;
-  const runs = new Set<string>();
-  for (const [table, field] of fields) {
-    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table) === undefined) continue;
-    const rows = db.prepare(`SELECT run_record_id FROM ${table} WHERE json_type(canonical_json, '$.${field}') IS NOT NULL`).all() as SqlRow[];
-    requireAnalysis(allowGoverned || rows.length === 0, 'ANALYSIS_RECORD_INVALID', '请求准入记录与数据库读者修订不一致。');
-    for (const row of rows) runs.add(asString(row.run_record_id));
-  }
-  const governedRuns = new Set(runs);
-  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'analysis_run_states'").get() !== undefined) {
-    for (const row of db.prepare("SELECT DISTINCT run_record_id FROM analysis_run_states WHERE json_type(canonical_json, '$.modelClarificationAnswerClaim') IS NOT NULL").all() as SqlRow[]) runs.add(asString(row.run_record_id));
-  }
-  const requestOwners = new Map<string, string>();
-  for (const runRecordId of runs) {
-    const reading = readRequestAdmissions(db, runRecordId);
-    requireAnalysis(!governedRuns.has(runRecordId) || reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入证据缺少执行收据。');
-    if (reading === null) continue;
-    for (const row of db.prepare("SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit'").all(runRecordId) as SqlRow[]) {
-      const record = parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } };
-      const requestId = record.requestAdmission.data.event.request.requestId;
-      requireAnalysis(!requestOwners.has(requestId), 'ANALYSIS_RECORD_INVALID', '物理请求标识不能跨运行复用。');
-      requestOwners.set(requestId, runRecordId);
-    }
-  }
-}
+import type {
+  AnalysisAuthorizationOrigin,
+  AnalysisModeRequest,
+  AnalysisPlanRecord,
+  AnalysisProjectionShape,
+  AnalysisRequestIdentity,
+  BackgroundRunBudgetCeiling,
+  BaselineAnalysisPreparationResult,
+  BaselineAnalysisPrepareInput,
+  BaselineAnalysisRouteFacts,
+  CarriedStages,
+  ChainRevisionRead,
+  CheckpointOwner,
+  CheckpointPurpose,
+  ExecutionBindingRecord,
+  ExecutionPlanFacts,
+  ExecutionUpdateFacts,
+  IntentFacts,
+  LaunchBinding,
+  LiveReading,
+  ManuscriptCheckpointBinding,
+  PendingIntent,
+  PlanAdaptationInput,
+  PlanVersionFacts,
+  PredecessorUnitResult,
+  PreparationWork,
+  ProductionPlanBinding,
+  ProgressReader,
+  RequestAdmissionEvent,
+  RequestAdmissionPins,
+  RequestAdmissionReading,
+  ResendPlan,
+  RevisionPersistInput,
+  RunProgressStage,
+  RunStop,
+  SqlRow,
+  StageContinuation,
+  UnconfirmedOutcomeRecord,
+  UnconfirmedStage,
+  UnconfirmedUnitRecord,
+  UnitCheckpoint,
+  UnitResultRecord,
+} from './baseline-analysis-types.js';
+import {
+  ACCOUNT_LIMIT_RUN_LABEL,
+  BACKGROUND_AUTHORIZED_DETAIL,
+  BUDGET_REACHED_OUTCOME_LABEL,
+  BUDGET_REACHED_RUN_LABEL,
+  CHAIN_REVISION_CACHE_ENTRIES,
+  CHAIN_REVISION_CACHE_WEIGHT,
+  CONNECTIVITY_WAIT_DETAIL,
+  DEVELOPMENT_CI_LAUNCH,
+  FACTUAL_POLICY_MINIMUM_REASON,
+  FACTUAL_VERIFIED_FIXTURE_IDENTITY,
+  MODEL_SERVICE_SETUP_REQUIRED,
+  NATIVE_CARRIER_DIGEST,
+  OUTCOME_LABELS,
+  OUTCOME_UNKNOWN_NO_RESUME,
+  OUTCOME_UNKNOWN_RUN_LABEL,
+  RECONCILED_PAUSED_DETAIL,
+  RECONCILED_QUEUED_DETAIL,
+  RECONCILED_RESUMABLE_DETAIL,
+  RECONCILED_YIELDED_DETAIL,
+  REUSE_PLAN_DRIFT_AUTHORIZE_REASON,
+  REUSE_PLAN_DRIFT_REASON,
+  RUN_CANCELLED_AFTER_START_LABEL,
+  RUN_CANCELLING_DETAIL,
+  RUN_IDLE_YIELD_LABEL,
+  RUN_PAUSING_DETAIL,
+  RUN_QUEUED_LABEL,
+  RUN_STATE_LABELS,
+  RUN_WAITING_IDLE_LABEL,
+  SELECTED_BLOCKS_GONE,
+  SELECTED_RANGE_MOVED,
+  SIDECAR_DIGEST,
+  STANDARD_DIRECT,
+  SUCCESSOR_BEHAVIOR,
+  UNREAD_WALK_CACHE_ENTRIES,
+  UNREAD_WALK_CACHE_WEIGHT,
+  activeRunReason,
+  asNumber,
+  asString,
+  assuranceContractMoved,
+  authorizationOrigin,
+  blockedReasons,
+  changedModeUnavailableReason,
+  firstBaselineCounts,
+  frozenAssurancePromptContractDigest,
+  isBackgroundRunBudgetCeiling,
+  isDraftGoal,
+  launchSetsCeilingOf,
+  levelBelowPolicyMinimum,
+  namedNonEffects,
+  providerConsequence,
+  resolveDeveloperLiveCeiling,
+  runBegan,
+  runBudgetCeilingStateOf,
+  runIsActive,
+  runStopOf,
+  sameRange,
+  transact,
+  unconfirmedOutcomeKey,
+} from './run-state.js';
+
+export { AnalysisError, isRecord };
+
+export { type UnitCheckpoint, type UnconfirmedUnitRecord, type UnconfirmedStage, type UnconfirmedOutcomeRecord, type ResendPlan, type RunStop, type BaselineAnalysisRouteFacts, type BackgroundRunBudgetCeiling, type AnalysisPlanRecord, type AnalysisModeRequest, type AnalysisPreparationResult, type BaselineAnalysisPreparationResult, type BaselineAnalysisPrepareInput, type RunProgress, type RunProgressStage, type ProgressReader, type ExecutionUpdateFacts, type PlanAdaptationInput, type ExecutionPlanFacts, type ProductionPlanBinding, type ExecutionBindingRecord, type UnitResultRecord, type PredecessorUnitResult, type RevisionPersistInput, type AnalysisAuthorizationOrigin, type LaunchBinding, type DeveloperLiveLaunchBinding, type OrdinaryProductionLaunchBinding, type CarriedStages, type StageContinuation, type AnalysisRequestIdentity, type RequestAdmissionReading } from './baseline-analysis-types.js';
+export { SAMPLE1_SOURCE_DIGEST, RUN_QUEUED_LABEL, RUN_WAITING_IDLE_LABEL, RUN_IDLE_YIELD_LABEL, REUSE_PLAN_DRIFT_REASON, REUSE_PLAN_DRIFT_AUTHORIZE_REASON, UNREAD_WALK_CACHE_ENTRIES, CHAIN_REVISION_CACHE_ENTRIES, UNREAD_WALK_CACHE_WEIGHT, CHAIN_REVISION_CACHE_WEIGHT, RUN_CANCELLED_AFTER_START_LABEL, RUN_CANCELLING_DETAIL, RUN_PAUSING_DETAIL, RECONCILED_RESUMABLE_DETAIL, RECONCILED_PAUSED_DETAIL, RECONCILED_YIELDED_DETAIL, RECONCILED_INTERRUPTED_DETAIL, RECONCILED_QUEUED_DETAIL, BUDGET_REACHED_RUN_LABEL, ACCOUNT_LIMIT_RUN_LABEL, OUTCOME_UNKNOWN_RUN_LABEL, OUTCOME_UNKNOWN_NO_RESUME, unconfirmedOutcomeKey, frozenAssurancePromptContractDigest, assuranceContractMoved, BACKGROUND_AUTHORIZED_DETAIL, runIsActive, activeRunReason, MODEL_SERVICE_SETUP_REQUIRED, resolveDeveloperLiveCeiling, namedNonEffects, blockedReasons, providerConsequence, CARRIED_STAGES, FACTUAL_VERIFIED_FIXTURE_IDENTITY, FACTUAL_POLICY_MINIMUM_REASON, levelBelowPolicyMinimum } from './run-state.js';
+export { validateRequestAdmissionRecords } from './request-admissions.js';
 
 export class BaselineAnalysisStore {
+  readonly #requestAdmissionOperationsHost: requestAdmissionOperations.RequestAdmissionOperationsHost = this.#requestAdmissionOperationsHostOf();
+
+  #requestAdmissionOperationsHostOf(): requestAdmissionOperations.RequestAdmissionOperationsHost {
+    const store = this;
+    return {
+      get db() { return store.#db; },
+      planRecords: this.#planRecords.bind(this),
+      get carriedUsageOf() { return store.carriedUsageOf.bind(store); },
+      get checkpointClarificationRequests() { return store.checkpointClarificationRequests.bind(store); },
+      get checkpointModelRequests() { return store.checkpointModelRequests.bind(store); },
+      get checkpointReflectionRequests() { return store.checkpointReflectionRequests.bind(store); },
+      get checkpointStageRequests() { return store.checkpointStageRequests.bind(store); },
+      get clarificationsOf() { return store.clarificationsOf.bind(store); },
+      get definitionForRun() { return store.definitionForRun.bind(store); },
+      get executionBindingOf() { return store.executionBindingOf.bind(store); },
+      get hasCommittedOutcome() { return store.hasCommittedOutcome.bind(store); },
+      get modelClarificationAnswerClaimed() { return store.modelClarificationAnswerClaimed.bind(store); },
+      get readRevisionBlocks() { return store.readRevisionBlocks.bind(store); },
+      get recordRunState() { return store.recordRunState.bind(store); },
+      get recordUnitCheckpoint() { return store.recordUnitCheckpoint.bind(store); },
+      get requestAdmissionOf() { return store.requestAdmissionOf.bind(store); },
+      get stageContinuationOf() { return store.stageContinuationOf.bind(store); },
+      get unitCheckpoints() { return store.unitCheckpoints.bind(store); },
+    };
+  }
+
+  readonly #clarificationOperationsHost: clarificationOperations.ClarificationOperationsHost = this.#clarificationOperationsHostOf();
+
+  #clarificationOperationsHostOf(): clarificationOperations.ClarificationOperationsHost {
+    const store = this;
+    return {
+      appendExecutionEvidence: this.#appendExecutionEvidence.bind(this),
+      get db() { return store.#db; },
+      get checkpointClarificationRequests() { return store.checkpointClarificationRequests.bind(store); },
+      get clarificationsOf() { return store.clarificationsOf.bind(store); },
+      get inspect() { return store.inspect.bind(store); },
+      get modelClarificationAnswerClaimed() { return store.modelClarificationAnswerClaimed.bind(store); },
+      get recordRunState() { return store.recordRunState.bind(store); },
+      get requestAdmissionOf() { return store.requestAdmissionOf.bind(store); },
+    };
+  }
+
+  readonly #runCheckpointOperationsHost: runCheckpointOperations.RunCheckpointOperationsHost = this.#runCheckpointOperationsHostOf();
+
+  #runCheckpointOperationsHostOf(): runCheckpointOperations.RunCheckpointOperationsHost {
+    const store = this;
+    return {
+      get db() { return store.#db; },
+      unitResultOfRecord: this.#unitResultOfRecord.bind(this),
+      get requestAdmissionOf() { return store.requestAdmissionOf.bind(store); },
+    };
+  }
+
+  readonly #curationRunsHost: curationRuns.CurationRunsHost = this.#curationRunsHostOf();
+
+  #curationRunsHostOf(): curationRuns.CurationRunsHost {
+    const store = this;
+    return {
+      get db() { return store.#db; },
+      insertRunState: this.#insertRunState.bind(this),
+      get recordRunState() { return store.recordRunState.bind(store); },
+      get settleCuration() { return store.settleCuration.bind(store); },
+    };
+  }
+
   #factualVerification: import('../factual-verification.js').FactualVerificationLedger | null = null;
 
   bindFactualVerification(owner: import('../factual-verification.js').FactualVerificationLedger): void {
@@ -1525,100 +418,30 @@ export class BaselineAnalysisStore {
 
   /** Reservations belong to actual Runs, including a send whose result is unknown after restart. */
   curationBudgetUse(controlEntryId: string): { passesUsed: number; reservedTokens: number } {
-    const rows = this.#db.prepare(`SELECT a.canonical_json, o.canonical_json outcome FROM analysis_run_authorizations a
-      LEFT JOIN analysis_task_outcomes o ON o.task_intent_id = a.task_intent_id
-      WHERE a.origin = 'enabled-learning' AND json_extract(a.canonical_json, '$.controlEntryId') = ?`).all(controlEntryId);
-    return { passesUsed: rows.length, reservedTokens: rows.reduce((total, row) => {
-      const reserved = Number((parseCanonicalJson(String(row.canonical_json)) as { reservedTokens: number }).reservedTokens);
-      const outcome = row.outcome === null ? null : parseCanonicalJson(String(row.outcome)) as { usage: Record<string, number> | null };
-      const actual = Object.values(outcome?.usage ?? {}).reduce((sum, count) => sum + count, 0);
-      return total + Math.max(reserved, actual);
-    }, 0) };
+    return curationRuns.curationBudgetUse(this.#curationRunsHost, controlEntryId);
   }
 
   curationRuns(): Array<{ runRecordId: string; state: string; summary: string }> {
-    return this.#db.prepare(`SELECT r.run_record_id, s.state, s.canonical_json FROM analysis_run_records r
-      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
-      JOIN analysis_run_states s ON s.run_record_id = r.run_record_id
-      WHERE t.kind = 'learning-curation' AND s.sequence = (SELECT max(sequence) FROM analysis_run_states WHERE run_record_id = r.run_record_id)
-      ORDER BY r.rowid DESC LIMIT 10`).all().map((row) => ({ runRecordId: String(row.run_record_id), state: String(row.state),
-      summary: String((parseCanonicalJson(String(row.canonical_json)) as { detail: string }).detail) }));
+    return curationRuns.curationRuns(this.#curationRunsHost);
   }
 
   /** Called by the existing startup reconciliation; possible sends never become retries or fresh budget. */
   reconcileCuration(): void {
-    for (const row of this.#db.prepare(`SELECT r.*, p.canonical_json plan, p.sha256 plan_digest, scope.canonical_json sources
-      FROM analysis_run_records r JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
-      JOIN analysis_plan_records p ON p.task_intent_id = t.task_intent_id AND p.component = 'plan-envelope'
-      JOIN analysis_plan_records scope ON scope.task_intent_id = t.task_intent_id AND scope.component = 'run-source-scope'
-      WHERE t.kind = 'learning-curation' AND NOT EXISTS (SELECT 1 FROM analysis_task_outcomes o WHERE o.run_record_id = r.run_record_id)`).all()) {
-      const plan = parseCanonicalJson(String(row.plan)) as { controlEntryId: string; envelope: import('../../shared/protocol/learning.js').EnabledLearningEnvelope; compositionDigest: string };
-      const bundle = parseCanonicalJson(String(row.sources)) as import('../../shared/protocol/learning.js').LearningCurationBundle;
-      const run = { taskIntentId: String(row.task_intent_id), runRecordId: String(row.run_record_id), authorizationId: String(row.authorization_id),
-        controlEntryId: plan.controlEntryId, envelope: plan.envelope, compositionDigest: plan.compositionDigest, bundle, planDigest: String(row.plan_digest) };
-      const possibleSend = this.#db.prepare("SELECT 1 FROM analysis_run_states WHERE run_record_id = ? AND state = 'executing'").get(run.runRecordId) !== undefined;
-      this.settleCuration(run, 'interrupted', { usage: null, proposals: 0, transmitted: possibleSend,
-        reason: possibleSend ? '服务中断，学习整理发送结果不确定；保留预算与来源，不自动重发。' : '服务中断，本次学习整理未完成；保留来源记录，不自动重发。' });
-    }
+    return curationRuns.reconcileCuration(this.#curationRunsHost);
   }
 
   startCuration(bundle: import('../../shared/protocol/learning.js').LearningCurationBundle,
     control: { entryId: string; envelope: import('../../shared/protocol/learning.js').EnabledLearningEnvelope }): import('../learning/curation.js').CurationRun {
-    requireAnalysis(this.#db.isTransaction && bundle.state === 'ready', 'ANALYSIS_PLAN_INVALID', '学习整理必须冻结完整来源。');
-    const taskIntentId = randomUUID(), runRecordId = randomUUID(), authorizationId = randomUUID(), planVersionId = randomUUID();
-    const instant = new Date().toISOString();
-    const envelope = control.envelope;
-    const compositionDigest = describeComposition(envelope.binding.route, envelope.binding.model, envelope.contractDigest,
-      { version: 2, learningCuration: { bundleDigest: bundle.digest, contractDigest: envelope.contractDigest } }).digest;
-    const intent = canonicalRecord({ taskIntentId, bookId: bundle.bookId, kind: 'learning-curation', contractVersion: bundle.schema,
-      goal: '从完整编辑样例整理待接受的偏好与记忆', expectedOutcome: 'reviewable-learning-proposals', mode: 'learning-curation', createdAt: instant });
-    this.#db.prepare(`INSERT INTO analysis_task_intents(task_intent_id,book_id,kind,contract_version,goal,created_at,canonical_json,sha256,mode)
-      VALUES (?,?,'learning-curation',?,?,?,?,?,'learning-curation')`).run(taskIntentId, bundle.bookId, bundle.schema,
-        '从完整编辑样例整理待接受的偏好与记忆', instant, intent.json, intent.digest);
-    const plan = canonicalRecord({ schema: 'ai7.learning-curation-plan/1', taskIntentId, controlEntryId: control.entryId,
-      envelope, sourceManifestDigest: bundle.digest, compositionDigest, operations: ['model-processing'], startWhen: 'idle', tools: [], retries: 0 });
-    for (const [component, value] of [['run-source-scope', bundle], ['provider-resolution-plan', envelope.binding], ['plan-envelope', parseCanonicalJson(plan.json)]] as const) {
-      const record = canonicalRecord(value);
-      this.#db.prepare('INSERT INTO analysis_plan_records VALUES (?,1,?,?,?,?)').run(taskIntentId, component, record.json, record.digest, instant);
-    }
-    const version = canonicalRecord({ planVersionId, taskIntentId, ordinal: 1, planEnvelopeDigest: plan.digest, createdAt: instant });
-    this.#db.prepare('INSERT INTO analysis_plan_versions VALUES (?,?,1,NULL,?,?,?,?)')
-      .run(planVersionId, taskIntentId, plan.digest, instant, version.json, version.digest);
-    const authorization = canonicalRecord({ authorizationId, taskIntentId, origin: 'enabled-learning', authority: 'standard-direct-dispatch',
-      startWhen: 'idle', planEnvelopeDigest: plan.digest, controlEntryId: control.entryId, reservedTokens: envelope.budget.perPassTokens, authorizedAt: instant });
-    this.#db.prepare(`INSERT INTO analysis_run_authorizations VALUES (?,?,?,'enabled-learning','standard-direct-dispatch',?,?,?,'idle')`)
-      .run(authorizationId, taskIntentId, plan.digest, instant, authorization.json, authorization.digest);
-    const run = canonicalRecord({ runRecordId, taskIntentId, authorizationId, recordedAt: instant });
-    this.#db.prepare('INSERT INTO analysis_run_records VALUES (?,?,?,?,?,?)').run(runRecordId, taskIntentId, authorizationId, instant, run.json, run.digest);
-    this.#insertRunState(runRecordId, 1, 'authorized', { detail: '已启用的学习范围授权一次完整样例整理；预算已保留。' }, instant);
-    return { taskIntentId, runRecordId, authorizationId, controlEntryId: control.entryId, envelope, bundle, planDigest: plan.digest, compositionDigest };
+    return curationRuns.startCuration(this.#curationRunsHost, bundle, control);
   }
 
   bindCuration(run: import('../learning/curation.js').CurationRun, sessionId: string): { attemptId: string; bindingDigest: string } {
-    const attemptId = randomUUID(), at = new Date().toISOString();
-    const attempt = canonicalRecord({ attemptId, runRecordId: run.runRecordId, ordinal: 1, startedAt: at });
-    const binding = canonicalRecord({ schema: 'ai7.learning-curation-binding/1', attemptId, harnessSessionId: sessionId,
-      planEnvelopeDigest: run.planDigest, sourceManifestDigest: run.bundle.digest, compositionDigest: run.compositionDigest,
-      envelope: run.envelope, boundAt: at });
-    transact(this.#db, () => {
-      this.#db.prepare('INSERT INTO analysis_execution_attempts VALUES (?,?,1,?,?,?)').run(attemptId, run.runRecordId, at, attempt.json, attempt.digest);
-      this.#db.prepare('INSERT INTO analysis_execution_bindings VALUES (?,?,?,?,?)').run(attemptId, sessionId, at, binding.json, binding.digest);
-      this.recordRunState(run.runRecordId, 'admitted', { detail: '学习整理执行绑定已固定。', attemptId, bindingDigest: binding.digest });
-    });
-    return { attemptId, bindingDigest: binding.digest };
+    return curationRuns.bindCuration(this.#curationRunsHost, run, sessionId);
   }
 
   settleCuration(run: import('../learning/curation.js').CurationRun, state: 'completed' | 'failed' | 'interrupted',
     evidence: { usage: import('../provider/classification.js').UsageFacts | null; proposals: number; transmitted: boolean; reason: string }): void {
-    transact(this.#db, () => {
-      this.recordRunState(run.runRecordId, state, { detail: evidence.reason, curation: evidence });
-      const outcomeId = randomUUID(), recordedAt = new Date().toISOString();
-      const outcome = canonicalRecord({ schema: 'ai7.learning-curation-outcome/1', outcomeId, taskIntentId: run.taskIntentId,
-        runRecordId: run.runRecordId, classification: state, resultSetRevisionId: null, sourceManifestDigest: run.bundle.digest,
-        summary: evidence.reason, safeNextAction: '查看候选记忆；本批来源不会自动重发。', ...evidence, recordedAt });
-      this.#db.prepare('INSERT INTO analysis_task_outcomes VALUES (?,?,?,?,NULL,?,?,?)')
-        .run(outcomeId, run.taskIntentId, run.runRecordId, state, recordedAt, outcome.json, outcome.digest);
-    });
+    return curationRuns.settleCuration(this.#curationRunsHost, run, state, evidence);
   }
 
   /** The analysis kind this ledger serves; the execution owner reads its contract through this. */
@@ -1735,7 +558,8 @@ export class BaselineAnalysisStore {
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
   #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
     if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
-    if (mode !== undefined && mode !== 'whole-manuscript' && this.#definition.factualClaims !== undefined) {
+    // A whole-book repeat keeps the admitted claim pipeline; historical range updates retain their frozen contract.
+    if (mode !== undefined && mode !== 'whole-manuscript' && mode !== 'review-again' && this.#definition.factualClaims !== undefined) {
       const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
       return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
         modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };
@@ -1995,7 +819,7 @@ export class BaselineAnalysisStore {
       expectedOutcome: intent.expectedOutcome,
       createdAt: intent.createdAt,
       mode: intent.mode,
-      modeLabel: this.#definition.mode(intent.mode).label,
+      modeLabel: this.#recordedMode(intent.mode).label,
       ...(this.#definition.kind !== BASELINE_ANALYSIS_KIND ? {} : {
         redoOf: intent.redoOfRunRecordId === null
           ? null
@@ -2642,14 +1466,6 @@ export class BaselineAnalysisStore {
     // Credential Reference, and the launch form's ceiling — not the production connection row, whose
     // binding this scope never uses. Otherwise every developer-live plan would look drifted at once.
     const live = this.#launch.live;
-    const pin = this.#db.prepare(
-      `SELECT pin.native_artifact_id, pin.sidecar_revision, pin.sidecar_sha256, installation.artifact_version, installation.content_sha256
-       FROM editorial_workspace_profile_book_pins pin
-       JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
-       WHERE pin.book_id = ? AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       ORDER BY pin.sidecar_revision DESC LIMIT 1`,
-    ).get(bookId) as SqlRow | undefined;
-    requireAnalysis(pin !== undefined, 'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案。');
     const latest = this.#isInitial(mode) ? undefined : this.#revisionRows(bookId).at(-1);
     return {
       ...this.#selectedPlanMetadata(),
@@ -2671,11 +1487,11 @@ export class BaselineAnalysisStore {
             credentialReference: live.credentialReference,
           }),
       artifactPin: {
-        identity: asString(pin.native_artifact_id),
-        version: asString(pin.artifact_version),
-        nativeCarrierSha256: asString(pin.content_sha256),
-        sidecarRevision: asNumber(pin.sidecar_revision),
-        sidecarSha256: asString(pin.sidecar_sha256),
+        identity: '@ai7/editorial-workspace-profile',
+        version: '1.0.0',
+        nativeCarrierSha256: NATIVE_CARRIER_DIGEST,
+        sidecarRevision: 2,
+        sidecarSha256: SIDECAR_DIGEST,
       },
       selectedRange: this.#definition.mode(mode).rangeBound ? selectedRange : null,
       predecessorRevision: latest === undefined ? null : { revisionId: asString(latest.revision_id), ordinal: asNumber(latest.ordinal), digest: asString(latest.sha256) },
@@ -2687,7 +1503,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -3143,7 +1959,14 @@ export class BaselineAnalysisStore {
 
   /** A mode that starts a Result Set rather than updating one; the kind's definition decides which. */
   #isInitial(mode: AnalysisTaskMode): boolean {
-    return this.#definition.mode(mode).initial;
+    return this.#recordedMode(mode).initial;
+  }
+
+  /** History keeps its intent vocabulary when today's model/policy is unconfigured.
+   * Preparation still uses the current definition's admitted modes and update controls. */
+  #recordedMode(mode: AnalysisTaskMode) {
+    return (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
+      ?? this.#definition.mode(mode);
   }
 
   /**
@@ -3152,7 +1975,7 @@ export class BaselineAnalysisStore {
    * unreviewed. Only a whole first Task carries none — it reads every unit, and there is nothing to plan.
    */
   #carriesPlan(mode: AnalysisTaskMode): boolean {
-    const definition = this.#definition.mode(mode);
+    const definition = this.#recordedMode(mode);
     return !definition.initial || definition.rangeBound;
   }
 
@@ -3210,7 +2033,7 @@ export class BaselineAnalysisStore {
     const intentDraftVersionId = isRecord(record) && typeof record.intentDraftVersionId === 'string' && UUID_PATTERN.test(record.intentDraftVersionId)
       ? record.intentDraftVersionId : null;
     requireAnalysis(isRecord(record) && (record.intentDraftVersionId === undefined || intentDraftVersionId !== null) &&
-      (intentDraftVersionId === null ? goal === this.#definition.mode(mode).goal : isDraftGoal(goal) && record.goal === goal),
+      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal : isDraftGoal(goal) && record.goal === goal),
     'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
@@ -3647,7 +2470,7 @@ export class BaselineAnalysisStore {
       };
     }
     const update = body.update as Omit<BaselineAnalysisRevisionUpdateProjection, 'modeLabel'>;
-    return { ...update, modeLabel: this.#definition.mode(update.mode).label };
+    return { ...update, modeLabel: this.#recordedMode(update.mode).label };
   }
 
   #unitLineage(unit: Record<string, unknown>): AnalysisUnitLineage {
@@ -3740,7 +2563,7 @@ export class BaselineAnalysisStore {
        FROM branch_working_state bws
        JOIN manuscripts m ON m.manuscript_id = bws.manuscript_id
        JOIN manuscript_revisions mr ON mr.revision_id = bws.base_revision_id
-       WHERE m.manuscript_id = ? AND m.book_id = ? AND m.role = 'primary'`,
+       WHERE m.manuscript_id = ? AND m.book_id = ?`,
     ).get(manuscriptId, bookId) as SqlRow | undefined;
     requireAnalysis(head !== undefined, 'ANALYSIS_RECORD_INVALID', '无法读取当前稿件工作状态。');
     return {
@@ -3987,8 +2810,8 @@ export class BaselineAnalysisStore {
       // re-verify is not that a predecessor is still the latest revision but that there is still none.
       return {
         mode: intent.mode,
-        modeLabel: this.#definition.mode(intent.mode).label,
-        meaning: this.#definition.mode(intent.mode).meaning,
+        modeLabel: this.#recordedMode(intent.mode).label,
+        meaning: this.#recordedMode(intent.mode).meaning,
         predecessor: null,
         predecessorCurrent: latest === null,
         selectedRange: reusePlan === null ? intent.selectedRange : reusePlan.selectedRange,
@@ -4001,8 +2824,8 @@ export class BaselineAnalysisStore {
     const pin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
     return {
       mode: intent.mode as BaselineAnalysisUpdateMode,
-      modeLabel: this.#definition.mode(intent.mode).label,
-      meaning: this.#definition.mode(intent.mode).meaning,
+      modeLabel: this.#recordedMode(intent.mode).label,
+      meaning: this.#recordedMode(intent.mode).meaning,
       predecessor: {
         revisionId: intent.predecessorRevisionId,
         ordinal: asNumber(predecessorRow.ordinal),
@@ -4108,7 +2931,7 @@ export class BaselineAnalysisStore {
       startPosition: unit.startPosition,
       endPosition: unit.endPosition,
       graphemes: unit.graphemes,
-      label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 内容块 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
+      label: `结构段 ${unit.sectionOrdinal}${unit.headingText === null ? '' : `「${unit.headingText}」`} · 单元 ${unit.ordinal}/${preview.units.length}（${unit.subUnitIndex}/${unit.subUnitCount}）· 段落 ${unit.startPosition}–${unit.endPosition} · ${unit.graphemes} 字素`,
       expected: this.#definition.kind === BASELINE_ANALYSIS_KIND ? null : expected(mode, { startPosition: unit.startPosition, endPosition: unit.endPosition }),
     }));
     const actions = Object.fromEntries(this.#definition.updateModes.map((mode) => {
@@ -4299,16 +3122,24 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId).promptContractDigest &&
+    const currentDefinition = this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId);
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === currentDefinition.promptContractDigest &&
       (existing.executionPlan === null ||
-        !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
+        !assuranceContractMoved(currentDefinition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
     const selectedProcedure = background === null ? selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind) : null;
     const sameProcedure = canonicalJson(latestIntent?.record.procedure ?? null) === canonicalJson(selectedProcedure);
-    const sameTask = sameProcedure && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    // A fresh initiation uses the search selection now, while the earlier Review keeps its frozen Task.
+    // Search is not part of the model material-input comparison; reusing that Task would silently send to its old backend.
+    const priorProvider = existing.providerResolutionPlan;
+    const searchCurrent = priorProvider === null || existing.run !== null || canonicalJson({
+      ...(priorProvider.webToolsBackend === undefined ? {} : { webToolsBackend: priorProvider.webToolsBackend, searchCredentialReference: priorProvider.searchCredentialReference }),
+      ...(priorProvider.webToolsFallback === undefined ? {} : { webToolsFallback: priorProvider.webToolsFallback }),
+    }) === canonicalJson(this.#currentSearchPlan(currentDefinition, latestIntent?.preparedByEnrollmentVersionId ?? null, input.launchPolicy));
+    const sameTask = sameProcedure && (input.reconfirm || searchCurrent) && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -4446,6 +3277,24 @@ export class BaselineAnalysisStore {
       planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
   }
 
+  /** Derive the search pins for both fresh preparation reuse and plan freezing. */
+  #currentSearchPlan(definition: AnalysisKindDefinition, enrollmentVersionId: string | null, policy = this.#launch.policy): {
+    webToolsBackend?: FrozenWebToolsBackend; searchCredentialReference?: string; webToolsFallback?: FrozenWebToolsFallback;
+  } {
+    const admitted = definition.kind === BASELINE_ANALYSIS_KIND || enrollmentVersionId !== null ? null : liveKindRule(this.#launch.policy, definition.kind);
+    if (this.#launch.live === null || admitted === null || !kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration).webSearch) return {};
+    const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
+    const adapter = searchBackend(asString(row.backend_id));
+    const production = this.#launch.live.scope === 'ordinary-production';
+    if (production) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
+      'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
+    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
+    const searchCredentialReference = production ? asString(row.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
+    const webToolsFallback = production ? freezeSearchFallback(this.#db, searchFallbackTermsOf(policy), adapter.declaration.id) : undefined;
+    return { webToolsBackend, searchCredentialReference, ...(webToolsFallback === undefined ? {} : { webToolsFallback }) };
+  }
+
   /**
    * Freeze one plan version of a Task: the seven components (eight for an update Task) derived from
    * the checkpoint revision, the current Provider Binding, the artifact pin, and the version's own
@@ -4550,7 +3399,7 @@ export class BaselineAnalysisStore {
       bookId: checkpoint.bookId,
       manuscriptId: checkpoint.manuscriptId,
       taskInputRevision: { revisionId: checkpoint.revisionId, revisionDigest: checkpoint.revisionDigest },
-      readableScopeKinds: ['current-book-primary-manuscript-revision'],
+      readableScopeKinds: [this.#definition.manuscriptTarget === undefined ? 'current-book-primary-manuscript-revision' : 'current-book-production-document-revision'],
       ...(this.#definition.seriesScopes === undefined ? {} : { readableScopeKinds: ['current-book-primary-manuscript-revision', 'series'],
         seriesScopes: this.#definition.seriesScopes.map((scope) => ({ ...scope, members: scope.members.map((member) => member.bookId !== checkpoint.bookId ? member : {
           ...member, manuscriptId: checkpoint.manuscriptId, revisionId: checkpoint.revisionId, revisionDigest: checkpoint.revisionDigest, sourceVersionId: facts.sourceVersionId,
@@ -4589,18 +3438,7 @@ export class BaselineAnalysisStore {
     // A Task a 后台分析登记 prepared declares no research, as before the declaration existed (#744 keeps #887's guard).
     const researchDeclaration = admittedToolRule === null ? { webSearch: false, searchEngine: null } as const
       : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
-    const toolsDeclared = live !== null && researchDeclaration.webSearch;
-    let webToolsBackend: FrozenWebToolsBackend | undefined;
-    let searchCredentialReference: string | undefined; let webToolsFallback: FrozenWebToolsFallback | undefined;
-    if (toolsDeclared) {
-      const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
-      requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
-      const adapter = searchBackend(asString(row.backend_id));
-      if (production !== null) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
-        'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
-      webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
-      searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference); if (production !== null) webToolsFallback = freezeSearchFallback(this.#db, searchFallbackTermsOf(input.policy ?? this.#launch.policy), adapter.declaration.id);
-    }
+    const { webToolsBackend, searchCredentialReference, webToolsFallback } = this.#currentSearchPlan(definition, intent.preparedByEnrollmentVersionId, input.policy);
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
@@ -4677,7 +3515,7 @@ export class BaselineAnalysisStore {
           ...editorEdits,
         };
     // The sampling contract, only when it is not /1 (Issue #826): every other plan's record reads exactly as before.
-    const assurance = this.#definition.assurance;
+    const assurance = definition.assurance;
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};
@@ -5047,20 +3885,7 @@ export class BaselineAnalysisStore {
     observation: UnitCheckpoint['observation'];
     requests?: readonly string[];
   }): void {
-    if (input.requests !== undefined) requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求检查点写入需要已验证的读者修订。');
-    const recordedAt = new Date().toISOString();
-    const record = canonicalRecord({
-      schema: UNIT_CHECKPOINT_SCHEMA,
-      runRecordId: input.runRecordId,
-      attemptId: input.attemptId,
-      unit: input.unit,
-      observation: input.observation,
-      ...(input.requests === undefined ? {} : { requests: input.requests }),
-      recordedAt,
-    });
-    this.#db.prepare(
-      'INSERT INTO analysis_unit_checkpoints(run_record_id, unit_ordinal, state, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(input.runRecordId, input.unit.unitOrdinal, input.unit.closed.state, recordedAt, record.json, record.digest);
+    return runCheckpointOperations.recordUnitCheckpoint(this.#runCheckpointOperationsHost, input);
   }
 
   /**
@@ -5068,72 +3893,12 @@ export class BaselineAnalysisStore {
    * stop kept it (Issue #51, S16a): the ceiling counts it after 续行 as it did before. `null` when no stop kept any.
    */
   carriedUsageOf(runRecordId: string): { inputTokens: number; outputTokens: number; stages: CarriedStages | null; webVerification?: { inputTokens: number; outputTokens: number } } | null {
-    const rows = this.#db.prepare(
-      `SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? AND
-       (state IN ('paused', 'resumable', 'awaiting-clarification') OR
-        json_extract(canonical_json, '$.requestAdmission.schema') = 'ai7.analysis.request-admission/1' AND json_type(canonical_json, '$.carriedUsage') IS NOT NULL)
-       ORDER BY sequence DESC`,
-    ).all(runRecordId) as SqlRow[];
-    const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-    for (const row of rows) {
-      const record = parseCanonicalJson(asString(row.canonical_json)) as { carriedUsage?: unknown; requestAdmission?: unknown };
-      if (record.requestAdmission !== undefined) {
-        requireAnalysis(canonicalRecord(record).digest === row.sha256, 'ANALYSIS_RECORD_INVALID', '阶段用量记录无法核对。');
-        this.requestAdmissionOf(runRecordId);
-      }
-      const carried = record.carriedUsage;
-      if (carried === undefined) continue;
-      const usage = carried as { inputTokens?: unknown; outputTokens?: unknown; stages?: unknown; webVerification?: { inputTokens?: unknown; outputTokens?: unknown } };
-      requireAnalysis(carried !== null && typeof carried === 'object' && count(usage.inputTokens) && count(usage.outputTokens),
-        'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
-      // The stages a stop kept its usage by (Issue #541); a stop recorded before they were kept names none.
-      let stages: CarriedStages | null = null;
-      if (usage.stages !== undefined) {
-        const kept = usage.stages as Record<string, { requests?: unknown; inputTokens?: unknown; outputTokens?: unknown } | undefined>;
-        requireAnalysis(usage.stages !== null && typeof usage.stages === 'object' && Object.keys(usage.stages).length === CARRIED_STAGES.length &&
-          CARRIED_STAGES.every((stage) => kept[stage] !== undefined && count(kept[stage]!.requests) && count(kept[stage]!.inputTokens) && count(kept[stage]!.outputTokens)),
-        'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
-        stages = Object.fromEntries(CARRIED_STAGES.map((stage) => [stage, {
-          requests: kept[stage]!.requests as number, inputTokens: kept[stage]!.inputTokens as number, outputTokens: kept[stage]!.outputTokens as number,
-        }])) as CarriedStages;
-        const summed = CARRIED_STAGES.reduce((total, stage) => ({
-          inputTokens: total.inputTokens + stages![stage].inputTokens, outputTokens: total.outputTokens + stages![stage].outputTokens,
-        }), { inputTokens: 0, outputTokens: 0 });
-        requireAnalysis(summed.inputTokens <= (usage.inputTokens as number) && summed.outputTokens <= (usage.outputTokens as number),
-          'ANALYSIS_RECORD_INVALID', '运行记录的已用量无效。');
-      }
-      const web = usage.webVerification;
-      requireAnalysis(web === undefined || web !== null && count(web.inputTokens) && count(web.outputTokens) &&
-        web.inputTokens <= (usage.inputTokens as number) && web.outputTokens <= (usage.outputTokens as number),
-      'ANALYSIS_RECORD_INVALID', '联网取证阶段的已用量无效。');
-      return { inputTokens: usage.inputTokens as number, outputTokens: usage.outputTokens as number, stages,
-        ...(web === undefined ? {} : { webVerification: { inputTokens: web.inputTokens as number, outputTokens: web.outputTokens as number } }) };
-    }
-    return null;
+    return runCheckpointOperations.carriedUsageOf(this.#runCheckpointOperationsHost, runRecordId);
   }
 
   /** A Run's continuation checkpoints in unit order, each read back against its own digest. */
   unitCheckpoints(runRecordId: string): UnitCheckpoint[] {
-    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
-    const rows = this.#db.prepare('SELECT * FROM analysis_unit_checkpoints WHERE run_record_id = ? ORDER BY unit_ordinal').all(runRecordId) as SqlRow[];
-    return rows.map((row) => {
-      const json = asString(row.canonical_json);
-      const record = parseCanonicalJson(json) as {
-        schema: string; runRecordId: string; attemptId: string; unit: UnitResultRecord; observation: UnitCheckpoint['observation'];
-      };
-      const unitOrdinal = asNumber(row.unit_ordinal);
-      requireAnalysis(canonicalRecord(record).digest === asString(row.sha256) && record.schema === UNIT_CHECKPOINT_SCHEMA &&
-        record.runRecordId === runRecordId && record.unit.unitOrdinal === unitOrdinal && record.unit.closed.state === asString(row.state),
-      'ANALYSIS_RECORD_INVALID', '运行的阅读进度记录与其摘要不一致。');
-      return {
-        attemptId: record.attemptId,
-        unit: record.unit,
-        observation: record.observation,
-        result: record.unit.closed.state === 'closed'
-          ? this.#unitResultOfRecord(record.unit.closed.result as Record<string, unknown>, unitOrdinal)
-          : null,
-      };
-    });
+    return runCheckpointOperations.unitCheckpoints(this.#runCheckpointOperationsHost, runRecordId);
   }
 
   // ---- Clarification Requests (Issue #422, plan slice S76d) ---------------------------------------------------
@@ -5160,99 +3925,12 @@ export class BaselineAnalysisStore {
     firstUsage: { inputTokens: number; outputTokens: number } | null;
     firstWallMs: number;
   }): string {
-    requireAnalysis(UUID_PATTERN.test(input.runRecordId) && UUID_PATTERN.test(input.attemptId) && UUID_PATTERN.test(input.taskIntentId) &&
-      Number.isSafeInteger(input.unitOrdinal) && input.unitOrdinal >= 1 && Number.isSafeInteger(input.planVersion) && input.planVersion >= 1 &&
-      DIGEST_PATTERN.test(input.planEnvelopeDigest) && DIGEST_PATTERN.test(input.requestDigest) &&
-      (input.firstPayloadDigest === null || DIGEST_PATTERN.test(input.firstPayloadDigest)),
-    'ANALYSIS_RECORD_INVALID', '澄清请求记录无效。');
-    const requestId = randomUUID();
-    const raisedAt = input.raisedAt ?? new Date().toISOString();
-    const modelJson = input.modelQuestion === undefined ? null : canonicalJson(input.modelQuestion);
-    const requests = this.requestAdmissionOf(input.runRecordId);
-    const covered = requests === null ? undefined : [...requests.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === input.unitOrdinal).map((request) => request.requestId);
-    requireAnalysis(modelJson === null || parseModelClarification(modelJson) !== null, 'ANALYSIS_RECORD_INVALID', '模型澄清问题无效。');
-    if (covered !== undefined) requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION, 'ANALYSIS_RECORD_INVALID', '请求澄清写入需要已验证的读者修订。');
-    const record = canonicalRecord({
-      schema: CLARIFICATION_REQUEST_SCHEMA,
-      ...(modelJson === null ? {} : { origin: 'model', modelQuestion: input.modelQuestion, firstAttempts: input.firstAttempts ?? 1 }),
-      requestId,
-      runRecordId: input.runRecordId,
-      attemptId: input.attemptId,
-      taskIntentId: input.taskIntentId,
-      unitOrdinal: input.unitOrdinal,
-      kind: modelJson === null ? 'ask-first-adaptation' : 'model-question',
-      ...(modelJson === null ? { adaptationClass: 'safe-retry' } : {}),
-      planVersion: input.planVersion,
-      planEnvelopeDigest: input.planEnvelopeDigest,
-      requestDigest: input.requestDigest,
-      failure: input.failure,
-      firstPayloadDigest: input.firstPayloadDigest,
-      // What the retry the answer may let the Run make has to repeat byte for byte (Issue #286).
-      firstUnitMessageDigest: input.firstUnitMessageDigest,
-      firstUsage: input.firstUsage,
-      firstWallMs: Math.max(0, Math.round(input.firstWallMs)),
-      raisedAt,
-      ...(covered === undefined ? {} : { requests: covered }),
-    });
-    this.#db.prepare(
-      'INSERT INTO analysis_clarification_requests(request_id, run_record_id, unit_ordinal, kind, raised_at, canonical_json, sha256, model_question_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(requestId, input.runRecordId, input.unitOrdinal, 'ask-first-adaptation', raisedAt, record.json, record.digest, modelJson);
-    this.checkpointClarificationRequests(input.runRecordId, input.unitOrdinal);
-    return requestId;
+    return clarificationOperations.recordClarificationRequest(this.#clarificationOperationsHost, input);
   }
 
   /** A Run's Clarification Requests in unit order, each with its answer when it has one, read back against their digests. */
   clarificationsOf(runRecordId: string): ClarificationFacts[] {
-    requireAnalysis(UUID_PATTERN.test(runRecordId), 'ANALYSIS_RUN_INVALID', '运行记录标识无效。');
-    const rows = this.#db.prepare(
-      `SELECT q.request_id, q.unit_ordinal, q.model_question_json, q.canonical_json q_json, q.sha256 q_sha, a.answer_id, a.option_id, a.canonical_json a_json, a.sha256 a_sha
-       FROM analysis_clarification_requests q
-       LEFT JOIN analysis_clarification_answers a ON a.request_id = q.request_id
-       WHERE q.run_record_id = ? ORDER BY q.unit_ordinal`,
-    ).all(runRecordId) as SqlRow[];
-    return rows.map((row) => {
-      const request = parseCanonicalJson(asString(row.q_json)) as Record<string, unknown>;
-      requireAnalysis(canonicalRecord(request).digest === asString(row.q_sha) && request.schema === CLARIFICATION_REQUEST_SCHEMA &&
-        request.requestId === asString(row.request_id) && request.runRecordId === runRecordId && request.unitOrdinal === asNumber(row.unit_ordinal),
-      'ANALYSIS_RECORD_INVALID', '澄清请求记录与其摘要不一致。');
-      const modelQuestion = row.model_question_json === null ? null : parseModelClarification(asString(row.model_question_json));
-      requireAnalysis(row.model_question_json === null ? request.origin === undefined && request.modelQuestion === undefined
-        : modelQuestion !== null && request.origin === 'model' && canonicalJson(request.modelQuestion) === asString(row.model_question_json),
-      'ANALYSIS_RECORD_INVALID', '模型澄清问题与其摘要不一致。');
-      let answer: ClarificationFacts['answer'] = null;
-      if (row.answer_id !== null) {
-        const record = parseCanonicalJson(asString(row.a_json)) as Record<string, unknown>;
-        requireAnalysis(canonicalRecord(record).digest === asString(row.a_sha) && record.schema === CLARIFICATION_ANSWER_SCHEMA &&
-          record.answerId === asString(row.answer_id) && record.requestId === request.requestId &&
-          (modelQuestion === null ? record.optionId === asString(row.option_id) : row.option_id === 'retry') &&
-          record.requestSha256 === asString(row.q_sha),
-        'ANALYSIS_RECORD_INVALID', '澄清回答记录与其摘要不一致。');
-        answer = {
-          answerId: record.answerId as string,
-          optionId: record.optionId as AnyClarificationOptionId,
-          note: record.note as string | null,
-          answeredAt: record.answeredAt as string,
-          ...(modelQuestion !== null && record.actor === 'service-timeout' ? { timedOut: true as const } : {}),
-        };
-      }
-      return {
-        ...(modelQuestion === null ? {} : { origin: 'model' as const, modelQuestion, firstAttempts: request.firstAttempts as number }),
-        requestId: request.requestId as string,
-        runRecordId,
-        attemptId: request.attemptId as string,
-        taskIntentId: request.taskIntentId as string,
-        unitOrdinal: request.unitOrdinal as number,
-        planVersion: request.planVersion as number,
-        raisedAt: request.raisedAt as string,
-        requestDigest: request.requestDigest as string,
-        failure: request.failure as ClarificationFacts['failure'],
-        firstPayloadDigest: request.firstPayloadDigest as string | null,
-        firstUnitMessageDigest: typeof request.firstUnitMessageDigest === 'string' ? request.firstUnitMessageDigest : null,
-        firstUsage: request.firstUsage as ClarificationFacts['firstUsage'],
-        firstWallMs: request.firstWallMs as number,
-        answer,
-      };
-    });
+    return clarificationOperations.clarificationsOf(this.#clarificationOperationsHost, runRecordId);
   }
 
   /**
@@ -5265,81 +3943,20 @@ export class BaselineAnalysisStore {
     runRecordId: string;
     runState: BaselineAnalysisRunState;
   } {
-    requireAnalysis(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(input.taskIntentId) && UUID_PATTERN.test(input.requestId),
-      'ANALYSIS_CLARIFICATION_INVALID', '回答的参数无效。');
-    const note = typeof input.note === 'string' ? input.note.trim() : null;
-    const current = this.inspect(bookId);
-    const run = current.run;
-    requireAnalysis(current.taskIntent?.taskIntentId === input.taskIntentId && run !== null,
-      'ANALYSIS_CLARIFICATION_STALE', '这项任务已经变化；这个问题不再等你回答。');
-    requireAnalysis(run.state === 'admitted' || run.state === 'executing' || run.state === 'pausing' || run.state === 'paused' ||
-      run.state === 'resumable' || run.state === 'awaiting-clarification',
-    'ANALYSIS_CLARIFICATION_STALE', '这次运行已经结束或正在取消；这个问题不再等你回答。');
-    const request = this.clarificationsOf(run.runRecordId).find((entry) => entry.requestId === input.requestId);
-    requireAnalysis(request !== undefined, 'ANALYSIS_CLARIFICATION_STALE', '这个问题不是这次运行提的。');
-    requireAnalysis(request.answer === null, 'ANALYSIS_CLARIFICATION_ANSWERED', '这个问题已经回答过了。');
-    requireAnalysis(!modelClarificationExpired(request, Date.now()), 'ANALYSIS_CLARIFICATION_EXPIRED', '这个问题已超过 24 小时，按「不回答」接着做。');
-    requireAnalysis(input.note === null || (typeof input.note === 'string' && input.note.isWellFormed() &&
-      (request.origin === 'model' ? clarificationGraphemes(input.note) : input.note.length) <= CLARIFICATION_NOTE_MAX),
-    'ANALYSIS_CLARIFICATION_INVALID', `说明最多 ${CLARIFICATION_NOTE_MAX} 字。`);
-    const model = request.modelQuestion;
-    const selected = typeof input.optionId === 'string' ? /^model-option-([0-3])$/u.exec(input.optionId)?.[1] : undefined;
-    // A safe-retry question keeps S76d's words; only a model question offers its own options and free text.
-    requireAnalysis(model !== undefined || (typeof input.optionId === 'string' && (CLARIFICATION_OPTION_IDS as ReadonlyArray<string>).includes(input.optionId)),
-      'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答。');
-    requireAnalysis(model === undefined
-      || (input.optionId === 'no-answer' ? note === null || note === ''
-        : input.optionId === 'free-text' ? model.freeTextAllowed && note !== null && note !== ''
-          : selected !== undefined && model.options?.[Number(selected)] !== undefined && (note === null || note === '')),
-    'ANALYSIS_CLARIFICATION_INVALID', '请选择一个回答，或在允许时自行说明。');
-    const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(input.requestId) as SqlRow;
-    const answerId = randomUUID();
-    const answeredAt = new Date().toISOString();
-    const record = canonicalRecord({
-      schema: CLARIFICATION_ANSWER_SCHEMA,
-      answerId,
-      requestId: input.requestId,
-      requestSha256: asString(requestRow.sha256),
-      runRecordId: run.runRecordId,
-      optionId: input.optionId,
-      note: note === null || note.length === 0 ? null : note,
-      actor: 'editor',
-      answeredAt,
-    });
-    this.#db.prepare(
-      'INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)',
-    ).run(answerId, input.requestId, model === undefined ? input.optionId as string : 'retry', answeredAt, record.json, record.digest);
-    return { answerId, runRecordId: run.runRecordId, runState: run.state };
+    return clarificationOperations.recordClarificationAnswer(this.#clarificationOperationsHost, bookId, input);
   }
 
   /** Service-clock timeout, append-only and idempotent; an editor answer already recorded wins. */
   expireModelClarifications(runRecordId: string, now = Date.now()): number {
-    let expired = 0;
-    for (const request of this.clarificationsOf(runRecordId)) {
-      if (!modelClarificationExpired(request, now)) continue;
-      const requestRow = this.#db.prepare('SELECT sha256 FROM analysis_clarification_requests WHERE request_id = ?').get(request.requestId)!;
-      const answerId = randomUUID();
-      const answeredAt = new Date(now).toISOString();
-      const record = canonicalRecord({ schema: CLARIFICATION_ANSWER_SCHEMA, answerId, requestId: request.requestId,
-        requestSha256: asString(requestRow.sha256), runRecordId, optionId: 'no-answer', note: null, actor: 'service-timeout', answeredAt });
-      this.#db.prepare('INSERT INTO analysis_clarification_answers(answer_id, request_id, option_id, answered_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(answerId, request.requestId, 'retry', answeredAt, record.json, record.digest);
-      expired += 1;
-    }
-    return expired;
+    return clarificationOperations.expireModelClarifications(this.#clarificationOperationsHost, runRecordId, now);
   }
 
   modelClarificationAnswerClaimed(runRecordId: string, requestId: string): boolean {
-    const rows = this.#db.prepare('SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ?').all(runRecordId);
-    return rows.some((row) => (parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>).modelClarificationAnswerClaim === requestId);
+    return clarificationOperations.modelClarificationAnswerClaimed(this.#clarificationOperationsHost, runRecordId, requestId);
   }
 
   claimModelClarificationAnswer(runRecordId: string, requestId: string, preserveState = false): boolean {
-    if (this.modelClarificationAnswerClaimed(runRecordId, requestId)) return false;
-    const detail = { detail: '按澄清回答接着处理这个阅读范围。', modelClarificationAnswerClaim: requestId };
-    if (preserveState) this.#appendExecutionEvidence(runRecordId, { modelClarificationAnswerClaim: requestId });
-    else this.recordRunState(runRecordId, 'executing', detail);
-    return true;
+    return clarificationOperations.claimModelClarificationAnswer(this.#clarificationOperationsHost, runRecordId, requestId, preserveState);
   }
 
   /**
@@ -5642,238 +4259,71 @@ export class BaselineAnalysisStore {
 
   /** Immutable request pins remain readable after this Run publishes its successor revision. */
   #requestManifest(stored: NonNullable<ReturnType<BaselineAnalysisStore['executionBindingOf']>>): CoverageManifestProjection {
-    const manifest = this.#planRecords(stored.binding.taskIntentId, 'any', stored.binding.planVersion)['coverage-manifest'] as CoverageManifestProjection;
-    requireAnalysis(manifestDigestIsExact(manifest) && manifest.digest === stored.binding.coverageManifestDigest &&
-      manifest.manuscript.revisionId === stored.binding.manuscriptPin.revisionId && manifest.manuscript.revisionDigest === stored.binding.manuscriptPin.revisionDigest,
-    'ANALYSIS_RECORD_INVALID', '请求准入的固定覆盖清单无法核对。');
-    return manifest;
+    return requestAdmissionOperations.internalRequestManifest(this.#requestAdmissionOperationsHost, stored);
   }
 
   /** An absent receipt is historical evidence, never an inferred admission. */
   requestAdmissionOf(runRecordId: string): RequestAdmissionReading | null {
-    return readRequestAdmissions(this.#db, runRecordId);
+    return requestAdmissionOperations.requestAdmissionOf(this.#requestAdmissionOperationsHost, runRecordId);
   }
 
   /** Preserve the latest stop, detail and idle-yield marker when appending private execution evidence. */
   #appendExecutionEvidence(runRecordId: string, detail: Record<string, unknown>): void {
-    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_run_states WHERE run_record_id = ? ORDER BY sequence DESC LIMIT 1').get(runRecordId) as SqlRow | undefined;
-    requireAnalysis(row !== undefined && sha256Hex(asString(row.canonical_json)) === row.sha256, 'ANALYSIS_RECORD_INVALID', '运行状态无法核对。');
-    const { runRecordId: _run, sequence: _sequence, state, recordedAt: _at, requestAdmission: _receipt, ...kept } = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
-    this.recordRunState(runRecordId, state as BaselineAnalysisRunState, { ...kept, ...detail });
+    return requestAdmissionOperations.internalAppendExecutionEvidence(this.#requestAdmissionOperationsHost, runRecordId, detail);
   }
 
   #appendRequestAdmission(runRecordId: string, pins: RequestAdmissionPins, event: RequestAdmissionEvent, detail: Record<string, unknown> = {}): void {
-    requireAnalysis(Number(this.#db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_REQUEST_ADMISSION_SCHEMA_VERSION,
-      'ANALYSIS_RECORD_INVALID', '请求准入写入需要已验证的读者修订。');
-    transact(this.#db, () => {
-      const prior = this.requestAdmissionOf(runRecordId);
-      const data: RequestAdmissionData = { ...pins, sequence: (prior?.sequence ?? 0) + 1, predecessorDigest: prior?.digest ?? null, event };
-      this.#appendExecutionEvidence(runRecordId, { ...detail, requestAdmission: { schema: 'ai7.analysis.request-admission/1', data, digest: canonicalRecord(data).digest } });
-      this.requestAdmissionOf(runRecordId);
-    });
+    return requestAdmissionOperations.internalAppendRequestAdmission(this.#requestAdmissionOperationsHost, runRecordId, pins, event, detail);
   }
 
   beginRequestAdmissions(runRecordId: string, width: 1 | 3, policyRuleId: string): 1 | 3 {
-    requireAnalysis(typeof policyRuleId === 'string' && /^[a-z][a-z0-9-]{0,159}$/u.test(policyRuleId),
-      'ANALYSIS_RECORD_INVALID', '请求准入需要实际规则标识。');
-    const prior = this.requestAdmissionOf(runRecordId);
-    if (prior !== null) {
-      requireAnalysis(prior.pins.policyRuleId === policyRuleId, 'ANALYSIS_RECORD_INVALID', '请求准入的固定规则与实际规则不一致。');
-      return prior.width;
-    }
-    const stored = this.executionBindingOf(runRecordId);
-    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '请求准入前必须保存执行绑定。');
-    const binding = stored.binding;
-    this.#appendRequestAdmission(runRecordId, { runRecordId, attemptId: stored.attemptId, bindingDigest: stored.bindingDigest,
-      planEnvelopeDigest: binding.planEnvelopeDigest, manifestDigest: binding.coverageManifestDigest, compositionDigest: binding.behaviorCompositionDigest,
-      promptContractDigest: binding.promptContractDigest, policyVersion: binding.policyPin.providerProcessingVersion, policyRuleId },
-    { kind: 'execution', width, limits: { requests: 4, units: 3, backgroundRequests: 1 } });
-    return this.requestAdmissionOf(runRecordId)!.width;
+    return requestAdmissionOperations.beginRequestAdmissions(this.#requestAdmissionOperationsHost, runRecordId, width, policyRuleId);
   }
 
   admitModelRequest(runRecordId: string, request: AnalysisRequestIdentity, clarificationRequestId: string | null = null): void {
-    transact(this.#db, () => {
-      const reading = this.requestAdmissionOf(runRecordId);
-      requireAnalysis(reading !== null, 'ANALYSIS_RECORD_INVALID', '请求准入缺少执行收据。');
-      if (clarificationRequestId !== null) requireAnalysis(!this.modelClarificationAnswerClaimed(runRecordId, clarificationRequestId),
-        'ANALYSIS_CLARIFICATION_ALREADY_CLAIMED', '澄清回答回合已经提交；没有再次发送。');
-      this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'admit', request },
-        clarificationRequestId === null ? {} : { modelClarificationAnswerClaim: clarificationRequestId });
-    });
+    return requestAdmissionOperations.admitModelRequest(this.#requestAdmissionOperationsHost, runRecordId, request, clarificationRequestId);
   }
 
   recordModelRequestNotSent(runRecordId: string, requestId: string): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    const request = reading?.open.get(requestId);
-    requireAnalysis(reading !== null && request !== undefined, 'ANALYSIS_RECORD_INVALID', '未发送证明缺少精确的请求标识。');
-    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: [requestId], evidence: { kind: 'no-send', digest: canonicalRecord(request).digest } });
+    return requestAdmissionOperations.recordModelRequestNotSent(this.#requestAdmissionOperationsHost, runRecordId, requestId);
   }
 
   checkpointFactualRequests(runRecordId: string, round: import('../factual-verification.js').FactualClaimRound): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return;
-    const requests = [...reading.open.values()].filter((request) => request.stage === 'web-verification' && request.sessionId === round.sessionId).map((request) => request.requestId);
-    if (requests.length > 0) this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
-      evidence: { kind: 'factual-checkpoint', digest: canonicalRecord(round).digest } });
+    return requestAdmissionOperations.checkpointFactualRequests(this.#requestAdmissionOperationsHost, runRecordId, round);
   }
 
   checkpointModelRequests(runRecordId: string, unitOrdinal: number): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return;
-    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
-    if (requests.length === 0) return;
-    const checkpoint = this.#db.prepare('SELECT sha256 FROM analysis_unit_checkpoints WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
-    requireAnalysis(checkpoint !== undefined, 'ANALYSIS_RECORD_INVALID', '请求结算前必须保存对应的单元结果。');
-    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'unit-checkpoint', digest: asString(checkpoint.sha256) } });
-    this.requestAdmissionOf(runRecordId);
+    return requestAdmissionOperations.checkpointModelRequests(this.#requestAdmissionOperationsHost, runRecordId, unitOrdinal);
   }
 
   checkpointClarificationRequests(runRecordId: string, unitOrdinal: number): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return;
-    const row = this.#db.prepare('SELECT canonical_json, sha256 FROM analysis_clarification_requests WHERE run_record_id = ? AND unit_ordinal = ?').get(runRecordId, unitOrdinal) as SqlRow | undefined;
-    if (row === undefined) return;
-    const checkpoint = parseCanonicalJson(asString(row.canonical_json)) as { requests?: string[] };
-    const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === unitOrdinal && checkpoint.requests?.includes(request.requestId)).map((request) => request.requestId);
-    if (requests.length === 0) return;
-    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
-      evidence: { kind: 'clarification-checkpoint', digest: asString(row.sha256) } });
+    return requestAdmissionOperations.checkpointClarificationRequests(this.#requestAdmissionOperationsHost, runRecordId, unitOrdinal);
   }
 
   modelClarificationAnswerNotSent(runRecordId: string, clarificationRequestId: string, unitOrdinal: number): boolean {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return false;
-    const claims = this.#db.prepare(`SELECT sequence, canonical_json FROM analysis_run_states WHERE run_record_id = ? AND
-      json_extract(canonical_json, '$.modelClarificationAnswerClaim') = ? ORDER BY sequence LIMIT 1`).get(runRecordId, clarificationRequestId) as SqlRow | undefined;
-    if (claims === undefined) return false;
-    const firstReceipt = this.#db.prepare(`SELECT sequence FROM analysis_run_states WHERE run_record_id = ? AND
-      json_type(canonical_json, '$.requestAdmission') IS NOT NULL ORDER BY sequence LIMIT 1`).get(runRecordId) as SqlRow;
-    const origin = parseCanonicalJson(asString(claims.canonical_json)) as { requestAdmission?: { data: { event: RequestAdmissionEvent } } };
-    const admitted = origin.requestAdmission?.data.event;
-    if (asNumber(claims.sequence) < asNumber(firstReceipt.sequence) || admitted?.kind !== 'admit' ||
-        admitted.request.stage !== 'units' || admitted.request.unitOrdinal !== unitOrdinal) return false;
-    const rows = this.#db.prepare(`SELECT canonical_json FROM analysis_run_states WHERE run_record_id = ? AND sequence >= ? AND
-      json_extract(canonical_json, '$.requestAdmission.data.event.kind') = 'admit' AND
-      json_extract(canonical_json, '$.requestAdmission.data.event.request.unitOrdinal') = ?`).all(runRecordId, claims.sequence!, unitOrdinal) as SqlRow[];
-    const ids = rows.map((row) => (parseCanonicalJson(asString(row.canonical_json)) as { requestAdmission: { data: { event: { request: AnalysisRequestIdentity } } } }).requestAdmission.data.event.request.requestId);
-    return ids.length > 0 && ids.every((id) => reading.notSent.some((request) => request.requestId === id));
+    return requestAdmissionOperations.modelClarificationAnswerNotSent(this.#requestAdmissionOperationsHost, runRecordId, clarificationRequestId, unitOrdinal);
   }
 
   checkpointStageRequests(runRecordId: string, stage: 'cross-unit-reduction' | 'assurance-sampling', stages: StageContinuation, carriedUsage: { inputTokens: number; outputTokens: number; stages: CarriedStages }): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return;
-    const detail = { stageContinuation: { schema: 'ai7.analysis.stage-continuation/1', data: stages, digest: canonicalRecord(stages).digest }, carriedUsage };
-    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve',
-      requests: [...reading.open.values()].filter((request) => request.stage === stage && (stage === 'cross-unit-reduction'
-        ? stages.reduction?.requestDigest === request.requestDigest && stages.reduction.inputDigest === request.inputDigest
-        : stages.sampling?.inputDigest === request.inputDigest && stages.sampling.turns.some((turn) => turn.requestDigest === request.requestDigest))).map((request) => request.requestId),
-      evidence: { kind: 'stage-checkpoint', digest: canonicalRecord(detail).digest } }, detail);
+    return requestAdmissionOperations.checkpointStageRequests(this.#requestAdmissionOperationsHost, runRecordId, stage, stages, carriedUsage);
   }
 
   checkpointReflectionRequests(runRecordId: string): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return;
-    const requests = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection').map((request) => request.requestId);
-    if (requests.length === 0) return;
-    const outcome = this.#db.prepare('SELECT sha256 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) as SqlRow | undefined;
-    requireAnalysis(outcome !== undefined, 'ANALYSIS_RECORD_INVALID', '反思请求结算前必须保存运行结果。');
-    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests, evidence: { kind: 'reflection-outcome', digest: asString(outcome.sha256) } });
+    return requestAdmissionOperations.checkpointReflectionRequests(this.#requestAdmissionOperationsHost, runRecordId);
   }
 
   hasCommittedOutcome(runRecordId: string): boolean {
-    return this.#db.prepare('SELECT 1 FROM analysis_task_outcomes WHERE run_record_id = ?').get(runRecordId) !== undefined;
+    return requestAdmissionOperations.hasCommittedOutcome(this.#requestAdmissionOperationsHost, runRecordId);
   }
 
   checkpointRefusedRequests(runRecordId: string, stage: RunProgressStage, unitOrdinal: number | null,
     observation: { attempts: number; usage: { inputTokens: number; outputTokens: number } | null }): void {
-    const reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null) return;
-    const requests = [...reading.open.values()].filter((request) => request.stage === stage && request.unitOrdinal === unitOrdinal).map((request) => request.requestId);
-    if (requests.length === 0) return;
-    const requestRefusal = { state: 'provider-account-limit', stage, unitOrdinal, observation };
-    this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests,
-      evidence: { kind: 'refused-turn', digest: canonicalRecord(requestRefusal).digest } }, { requestRefusal });
+    return requestAdmissionOperations.checkpointRefusedRequests(this.#requestAdmissionOperationsHost, runRecordId, stage, unitOrdinal, observation);
   }
 
   /** Startup only: a possible send without an exact committed result is never re-executed. */
   reconcileRequestAdmissions(runRecordId: string): void {
-    let reading = this.requestAdmissionOf(runRecordId);
-    if (reading === null || reading.open.size === 0) return;
-    const stored = this.executionBindingOf(runRecordId);
-    requireAnalysis(stored !== null, 'ANALYSIS_RECORD_INVALID', '准入记录缺少执行绑定。');
-    const manifest = this.#requestManifest(stored);
-    // The Run's frozen contract, never the launch's current one: a reopened Run whose current
-    // rule is missing or differs still names its admitted requests by the digests it froze.
-    const frozen = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
-    const ordinals = [...new Set([...reading.open.values()].filter((request) => request.stage === 'units').map((request) => request.unitOrdinal!))].sort((left, right) => left - right);
-    for (const ordinal of ordinals) {
-      this.checkpointClarificationRequests(runRecordId, ordinal);
-      reading = this.requestAdmissionOf(runRecordId)!;
-      const requests = [...reading.open.values()].filter((request) => request.stage === 'units' && request.unitOrdinal === ordinal);
-      if (requests.length === 0) continue;
-      const pins = reading.pins;
-      // The unknown checkpoint and its discharge commit together: a refused discharge leaves no row behind.
-      transact(this.#db, () => {
-        const existing = this.unitCheckpoints(runRecordId).find((checkpoint) => checkpoint.unit.unitOrdinal === ordinal);
-        if (existing === undefined) {
-          const unit = manifest.units[ordinal - 1]!;
-          const reason = '本次请求已准入，AI7 关闭前没有保存可核对的单元结果；结果未知，这次运行不会再次发送。';
-          const question = this.clarificationsOf(runRecordId).find((entry) => entry.unitOrdinal === ordinal);
-          this.recordUnitCheckpoint({ runRecordId, attemptId: pins.attemptId, requests: requests.map((request) => request.requestId),
-            unit: { unitOrdinal: ordinal, requestDigest: frozen.requestDigest(ordinal, unit.digest), lineage: { kind: 'recomputed' },
-              closed: { state: 'gap', gap: { unitOrdinal: ordinal, code: 'outcome-unknown', reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } } },
-            observation: { unitOrdinal: ordinal, attempts: (question?.firstAttempts ?? (question === undefined ? 0 : 1)) + new Set(requests.map((request) => `${request.sessionId}:${request.attemptIndex}:${request.adaptationId ?? ''}`)).size,
-              usage: question?.firstUsage ?? null, wallMs: question?.firstWallMs ?? 0 } });
-        }
-        this.checkpointModelRequests(runRecordId, ordinal);
-      });
-      reading = this.requestAdmissionOf(runRecordId)!;
-    }
-    const stageRequests = [...reading.open.values()].filter((request) => request.stage === 'cross-unit-reduction' || request.stage === 'assurance-sampling');
-    if (stageRequests.length > 0) {
-      const kept = this.stageContinuationOf(runRecordId);
-      const stages: StageContinuation = kept ?? { runRecordId, attemptId: reading.pins.attemptId, bindingDigest: reading.pins.bindingDigest,
-        manifestDigest: reading.pins.manifestDigest, promptContractDigest: reading.pins.promptContractDigest };
-      const usage = this.carriedUsageOf(runRecordId);
-      const carried: CarriedStages = structuredClone(usage?.stages ?? {
-        'cross-unit-reduction': { requests: 0, inputTokens: 0, outputTokens: 0 }, 'assurance-sampling': { requests: 0, inputTokens: 0, outputTokens: 0 },
-      });
-      const reduction = stageRequests.find((request) => request.stage === 'cross-unit-reduction');
-      if (reduction !== undefined && stages.reduction === undefined) {
-        stages.reduction = { inputDigest: reduction.inputDigest, contractDigest: reduction.contractDigest, requestDigest: reduction.requestDigest,
-          outcome: { state: 'gap', code: 'outcome-unknown', requestDigest: reduction.requestDigest,
-            reason: '归纳请求可能已经发出，关闭前没有保存可核对的结果；本次运行不会再次发送。' } };
-        carried['cross-unit-reduction'].requests += 1;
-      }
-      const sampling = stageRequests.find((request) => request.stage === 'assurance-sampling');
-      if (sampling !== undefined) {
-        const sample = stages.sampling;
-        requireAnalysis(sample !== undefined && sample.inputDigest === sampling.inputDigest && sample.contractDigest === sampling.contractDigest,
-          'ANALYSIS_RECORD_INVALID', '抽样准入缺少可核对的抽取记录；不能续行。');
-        if (!sample.turns.some((turn) => turn.requestDigest === sampling.requestDigest)) {
-          const turn = assuranceSamplingTurns(sample.draw.sampled)[sample.nextTurn - 1];
-          const definition = this.definitionForRun(runRecordId, reading.pins.promptContractDigest);
-          const blocks = new Map(this.readRevisionBlocks(manifest.manuscript.manuscriptId, manifest.manuscript.revisionId).map((block) => [block.blockId, block] as const));
-          requireAnalysis(turn !== undefined && definition.assurance !== null && canonicalRecord(buildAssuranceSamplingMessage(manifest.units[turn.unitOrdinal - 1]!,
-            manifest.units.length, blocks, turn.findings, definition.assurance.prompt)).digest === sampling.requestDigest,
-          'ANALYSIS_RECORD_INVALID', '抽样请求与抽取记录不一致；不能续行。');
-          sample.turns.push({ requestDigest: sampling.requestDigest, unitOrdinal: turn.unitOrdinal, usage: null, state: 'outcome-unknown' });
-          sample.nextTurn += 1; sample.ended = true;
-          sample.gapReasons.push(`第 ${turn.unitOrdinal} 个阅读范围的抽样请求可能已经发出，关闭前没有保存结果；本次运行不会再次发送。`);
-          carried['assurance-sampling'].requests += 1;
-        }
-      }
-      const totals = { inputTokens: usage?.inputTokens ?? 0, outputTokens: usage?.outputTokens ?? 0, stages: carried };
-      if (reduction !== undefined) this.checkpointStageRequests(runRecordId, 'cross-unit-reduction', stages, totals);
-      if (sampling !== undefined) this.checkpointStageRequests(runRecordId, 'assurance-sampling', stages, totals);
-      reading = this.requestAdmissionOf(runRecordId)!;
-    }
-    const reflection = [...reading.open.values()].filter((request) => request.stage === 'run-report-reflection');
-    if (reflection.length > 0) {
-      if (this.hasCommittedOutcome(runRecordId)) this.checkpointReflectionRequests(runRecordId);
-      else this.#appendRequestAdmission(runRecordId, reading.pins, { kind: 'resolve', requests: reflection.map((request) => request.requestId),
-        evidence: { kind: 'unavailable', digest: canonicalRecord({ requests: reflection, reason: 'possible-send-without-durable-result' }).digest } });
-    }
+    return requestAdmissionOperations.reconcileRequestAdmissions(this.#requestAdmissionOperationsHost, runRecordId);
   }
 
   recordRunState(runRecordId: string, state: BaselineAnalysisRunState, detail: Record<string, unknown>): void {
@@ -5947,12 +4397,13 @@ export class BaselineAnalysisStore {
       // a production connection's own Credential Reference — whatever route the editor has configured since.
       const route = providerPlan.executionRoute;
       const allowed = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((binding) => route.kind === binding.route && 'endpoint' in route &&
-        route.model === binding.model && route.endpoint === binding.endpoint && providerPlan.remoteBinding.credentialSlot === binding.credentialSlot);
+        route.endpoint === binding.endpoint && providerPlan.remoteBinding.credentialSlot === binding.credentialSlot);
       const reference = providerPlan.remoteBinding.credentialReference;
       requireAnalysis(allowed !== undefined && providerPlan.remoteBinding.providerProcessing.operationalScope === 'ordinary-production' &&
         UUID_PATTERN.test(reference) && !DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()),
       'ANALYSIS_ROUTE_STALE', '冻结计划不是正式使用下可执行的模型服务路线。');
-      productionBinding = { route: allowed.route, model: allowed.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot };
+      requireAnalysis('model' in route, 'ANALYSIS_ROUTE_STALE', '冻结计划缺少模型。');
+      productionBinding = { route: allowed.route, model: route.model, endpoint: allowed.endpoint, credentialSlot: allowed.credentialSlot };
     } else if (live !== null && live.scope !== 'ordinary-production') {
       requireAnalysis(providerPlan.executionRoute.kind === live.route && providerPlan.executionRoute.model === live.model &&
         providerPlan.executionRoute.endpoint === live.endpoint, 'ANALYSIS_ROUTE_STALE', '当前启动的实时路由与冻结计划不一致。');
@@ -6433,27 +4884,20 @@ export class BaselineAnalysisStore {
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,
-              pin.sidecar_revision, pin.sidecar_sha256, installation.content_sha256 native_carrier_sha256,
               connection.credential_reference, connection.credential_operation_state
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
        JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
        JOIN manuscript_revisions mr ON mr.revision_id = ${checkpoint === undefined ? 'bws.base_revision_id' : '?'}
        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
-       LEFT JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = m.book_id
-         AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
-         AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       LEFT JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
        LEFT JOIN model_service_connections connection ON connection.connection_id = ?
-       WHERE m.book_id = ? AND m.role = 'primary'
-       ORDER BY pin.sidecar_revision DESC`,
-    ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId])) as SqlRow | undefined;
+       WHERE m.book_id = ? AND ${checkpoint !== undefined || this.#definition.manuscriptTarget !== undefined ? 'm.manuscript_id = ? AND mb.branch_id = ?' : "m.role = 'primary'"}`,
+    ).get(...(checkpoint === undefined ? [connectionId, bookId] : [checkpoint.revisionId, connectionId, bookId]),
+      ...(checkpoint !== undefined ? [checkpoint.manuscriptId, checkpoint.branchId] : this.#definition.manuscriptTarget === undefined ? [] : [this.#definition.manuscriptTarget.manuscriptId, this.#definition.manuscriptTarget.branchId])) as SqlRow | undefined;
     requireAnalysis(row !== undefined && (production
       ? typeof row.source_digest === 'string' && DIGEST_PATTERN.test(row.source_digest)
       : isPublicSampleBookSourceDigest(row.source_digest)),
     'ANALYSIS_LINEAGE_UNAVAILABLE', ANALYSIS_LINEAGE_UNAVAILABLE_REASON);
-    requireAnalysis(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST && row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
-      'ANALYSIS_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     // Ordinary production with no connection yet: 模型服务需设置, naming both routes (Issue #811).
     requireAnalysis(!production || (typeof row.credential_operation_state === 'string' && typeof row.credential_reference === 'string'),
       'ANALYSIS_MODEL_SERVICE_SETUP_REQUIRED', MODEL_SERVICE_SETUP_REQUIRED_REASON);
@@ -6515,5 +4959,3 @@ function plannedRunAdmission(...args: Parameters<typeof liveKindAdmission>): Ret
   const rule = liveKindAdmission(...args);
   return rule?.modelRole === 'Main Editorial Role' ? rule : null;
 }
-
-export { AnalysisError, isRecord };

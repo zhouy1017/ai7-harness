@@ -31,7 +31,10 @@ export async function readDistributionChannel(packaged: boolean, resourcesPath: 
 /** Packaged command lines cannot supply development scope, a cache, controls or an arbitrary data root. */
 export function packagedLaunchForm(args: readonly string[], platform = process.platform): { launchForm: TrustedLaunchForm; selfCheck: boolean } {
   // macOS can hand a Finder-launched app its process serial number (`-psn_0_<n>`), e.g. on a quarantined first open; it carries no control.
-  const given = platform === 'darwin' ? args.filter((value) => !/^-psn_\d+_\d+$/.test(value)) : args;
+  // The Chromium pipe is an observation transport (inherited handles, no listening port), not
+  // an AI7 development control. It lets the real production package be walked through unchanged.
+  const given = args.filter((value) => value !== '--remote-debugging-pipe' &&
+    !(platform === 'darwin' && /^-psn_\d+_\d+$/.test(value)));
   if (!(given.length === 0 || (given.length === 1 && given[0] === '--self-check'))) throw new Error('AI7_PACKAGED_ARGUMENT_INVALID');
   return { launchForm: parseTrustedLaunchForm({ trustedOperationalScope: 'ordinary-production' })!, selfCheck: given.length === 1 };
 }

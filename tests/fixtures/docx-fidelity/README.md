@@ -8,6 +8,8 @@ The synthetic source uses container tokens; the other composes spans of exact ad
 
 The disclosure each pair pins — the retention lists and the summary line 导出 shows before the approval and the receipt repeats — is identical for both sources, since it names classes, counts and parts only.
 
+Wave 23 #1288 makes the source table read-only. The edited variant now changes the two body paragraphs and preserves the table cell; its disclosure records one source paragraph restored and three regenerated. The mark-exported variant still exercises annotations on source content. Table XML/media restoration also has a focused public-intake service regression in `tests/service/manuscript-source-objects.test.ts`.
+
 All assertions report identities, counts, digests and classifications. Corpus success is bounded engineering evidence, not an editorial-quality or full-fidelity claim.
 
 Issue #1132 adds `buildWordProfileRecipe` and the separate `wordTrackedProfile` classifications. Authored synthetic tokens exercise replacement, paragraph joins, named moves with distinct range IDs, both empty-reading cases and whole-group normalization. The existing six corpus pairs and their expectations stay intact. The new recipes run through the real successor compiler, graph, ordered mapping and selected-reading writer in the existing unit suites; joins regenerate projected paragraph properties rather than choosing one original paragraph's style.

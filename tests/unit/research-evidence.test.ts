@@ -20,6 +20,7 @@ import {
   type UnitResearchFinding,
 } from '../../src/service/analysis/factual-review-evidence.js';
 import type { ResearchSnapshot } from '../../src/service/provider/research-snapshot-cache.js';
+import { urlsIn } from '../../src/service/provider/platform-tool-session.js';
 import {
   findingResearchLines,
   readFindingResearch,
@@ -38,6 +39,15 @@ const CAPTURE = '曾侯乙尊盘出土于1978年。它由尊与盘两件器物�
 const instant = (iso: string): string => `本地 ${iso}`;
 
 describe('sentence alignment against the captured text', () => {
+  it.each(['John F. Example', 'Dr. J. R. Example', 'the U.S. team', 'the 9:32 a.m. (local time) event'])('keeps %s inside its complete sentence with exact offsets', (subject) => {
+    const first = `The public archive describes ${subject} and the result of the demonstration.`;
+    const next = 'A separate observation follows.';
+    const captured = `  ${first} ${next}`;
+    const sentences = evidenceSentences(captured);
+    expect(sentences.map(range => captured.slice(range.from, range.to))).toEqual([first, next]);
+    expect(sentences[0]).toEqual({ from: 2, to: first.length + 2 });
+  });
+
   it('splits the capture into sentences at Chinese and Latin stops and at line breaks', () => {
     const sentences = evidenceSentences(CAPTURE).map((range) => CAPTURE.slice(range.from, range.to));
     expect(sentences).toEqual(['曾侯乙尊盘出土于1978年。', '它由尊与盘两件器物组成，现藏湖北省博物馆。', '铸造采用失蜡法，这一说法仍有争议！']);
@@ -136,6 +146,11 @@ describe('citations from the model’s basis', () => {
     expect(evidenceCitations([{ ...FINDING, basis: 'https://zh.wikipedia.org/wiki/zun' }], sameSite).map((entry) => entry.url))
       .toEqual(['https://zh.wikipedia.org/wiki/zun']);
     expect(evidenceCitations([{ ...FINDING, basis: '维基百科' }], sameSite)).toEqual([]);
+    const precise = 'https://source.example/wiki/County_(OtherSource)';
+    expect(evidenceCitations([{ ...FINDING, basis: `[source](${precise})` }], [
+      { url: precise, title: 'County', snippet: null, via: 'search' },
+      { url: 'https://other.example/page', title: 'OtherSource', snippet: null, via: 'search' },
+    ]).map((entry) => entry.url)).toEqual([precise]);
   });
 });
 
@@ -152,25 +167,100 @@ describe('staleness', () => {
 describe('来源译文', () => {
   const english = 'The bronze zun and pan were excavated in 1978. They are held by the Hubei Provincial Museum.';
   const base = { captured: english, contentSha256: digest(english), url: 'https://example.org/en', anchors: [{ from: 47, to: 92, sentence: 2 }] };
+  it.each([true, false])('translates complete initial/time context with an anchor=%s, retaining the original hash and range', async (anchored) => {
+    const prose = 'The public archive records John F. Example arriving at 9:32 a.m. (local time) for the demonstration.';
+    const captured = `Public archive\n${prose} Another complete sentence follows.`;
+    const from = captured.indexOf(prose), asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured),
+      anchors: anchored ? [{ from: captured.indexOf('John F.'), to: captured.indexOf('Example') + 'Example'.length, sentence: 2 }] : [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '公开合成译文。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual([prose]);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { contentSha256: digest(captured), from, to: from + prose.length } });
+  });
   it('needs none for a Chinese source', async () => {
     expect(needsSourceTranslation(CAPTURE)).toBe(false);
     expect(needsSourceTranslation(english)).toBe(true);
     expect(await sourceTranslation({ ...base, captured: CAPTURE, rule: { operationalScope: 'developer-live', sourceTranslationAllowed: true }, translator: null })).toBeNull();
   });
 
-  it('produces none and calls nothing when the rule refuses — every current rule — or no translator is bound', async () => {
+  it('produces none and calls nothing when the rule refuses or no translator is bound', async () => {
     let calls = 0;
     const translator = async (): Promise<{ text: string; route: string; model: string }> => { calls += 1; return { text: '译文', route: 'r', model: 'm' }; };
     expect(await sourceTranslation({ ...base, rule: { operationalScope: 'developer-live' }, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
-    expect(await sourceTranslation({ ...base, rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true }, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
+    expect(await sourceTranslation({ ...base, rule: { operationalScope: 'development-ci', sourceTranslationAllowed: true }, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
     expect(await sourceTranslation({ ...base, rule: null, translator })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED });
     expect(await sourceTranslation({ ...base, rule: { operationalScope: 'developer-live', sourceTranslationAllowed: true }, translator: null })).toEqual({ state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE });
     expect(calls).toBe(0);
   });
 
+  it('ignores URL-heavy navigation on a Chinese page instead of translating a home link', async () => {
+    const captured = '[](https://www.public-source.example.org/home)\n[Home](https://www.public-source.example.org/navigation)\n[新闻](https://www.public-source.example.org/news/archive)\n\n这里介绍器物的出土年代与收藏地点。';
+    let calls = 0;
+    expect(needsSourceTranslation(captured)).toBe(false);
+    expect(await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async () => { calls += 1; return { text: '无效链接', route: 'r', model: 'm' }; } })).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('translates foreign prose after navigation with offsets in the unchanged original capture', async () => {
+    const navigation = '[](https://www.public-source.example.org/home)\n[Home](https://www.public-source.example.org/) | [About](https://www.public-source.example.org/about)\n\n';
+    const prose = 'They are held by the Hubei Provincial Museum.';
+    const captured = navigation + prose;
+    const asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '它们由湖北省博物馆收藏。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual([prose]);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { contentSha256: digest(captured), from: navigation.length, to: captured.length } });
+    if (translation?.state === 'translated') expect(captured.slice(translation.attribution.from, translation.attribution.to)).toBe(prose);
+  });
+
+  it('keeps server diagnostic text without presenting it as translated source prose', async () => {
+    const captured = '**Warning**: require_once(article.php): failed to open stream: No such file or directory\n\n**Fatal error**: Uncaught Error: Failed opening required article.php';
+    let calls = 0;
+    expect(await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async () => { calls += 1; return { text: '服务器错误', route: 'r', model: 'm' }; } })).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('passes over unanchored headings, dates, slogans and maintenance notices to reach article prose', async () => {
+    const navigation = 'Browse the archive\nWhen was this ancient object made?\nNews Release 12-May-2025\nThe home of remarkable historical collections\nThe service is temporarily unavailable and will be back soon.\nLog in any time to see account details.\nCopyright 2025 Collection Archive All rights reserved.\n';
+    const prose = 'The bronze vessel was excavated beside the old settlement.';
+    const captured = navigation + prose;
+    const asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '这件青铜器在旧聚落旁出土。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual([prose]);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { from: navigation.length, to: captured.length } });
+  });
+
+  it('does not mistake an English platform notice for prose on a Chinese source page', async () => {
+    const captured = '这篇文章介绍青铜器的出土过程、发现年代和收藏地点，并逐项说明考古记录。'.repeat(8) + '\nNotice: The content above was uploaded by a user and this platform provides storage services.';
+    let calls = 0;
+    expect(await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async () => { calls += 1; return { text: '平台声明', route: 'r', model: 'm' }; } })).toBeNull();
+    expect(calls).toBe(0);
+  });
+
+  it('preserves a short foreign quotation genuinely anchored in the original source', async () => {
+    const captured = 'The collection contains several objects from the old settlement. Rare amber.';
+    const from = captured.indexOf('Rare amber.');
+    const asked: string[] = [];
+    const translation = await sourceTranslation({ ...base, captured, contentSha256: digest(captured), anchors: [{ from, to: captured.length, sentence: 2 }],
+      rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
+      translator: async ({ text }) => { asked.push(text); return { text: '稀有琥珀。', route: 'r', model: 'm' }; } });
+    expect(asked).toEqual(['Rare amber.']);
+    expect(translation).toMatchObject({ state: 'translated', attribution: { from, to: captured.length } });
+  });
+
   it('under an admitting rule labels the Run model’s translation, attributes it to the captured range, and keeps the original beside it', async () => {
     const asked: string[] = [];
-    const translation = await sourceTranslation({ ...base, rule: { operationalScope: 'developer-live', sourceTranslationAllowed: true },
+    const translation = await sourceTranslation({ ...base, rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: true },
       translator: async ({ text }) => { asked.push(text); return { text: '它们由湖北省博物馆收藏。', route: 'opencode-go', model: 'deepseek-v4.1-flash' }; } });
     expect(asked).toEqual(['They are held by the Hubei Provincial Museum.']);
     expect(translation).toEqual({ state: 'translated', label: '来源译文', machine: true, targetLanguage: 'zh-Hans', text: '它们由湖北省博物馆收藏。',
@@ -188,6 +278,14 @@ function fetchSnapshot(url: string, html: string, contentType = 'text/html; char
 }
 
 describe('reading the Research Snapshot Cache', () => {
+  it('keeps parenthesized citation addresses exact in search answers and Markdown', () => {
+    const url = 'https://source.example/wiki/County_(Province)';
+    expect(urlsIn(`${JSON.stringify([{ url }])} [source](${url}). https://other.example/page?q=(one_(two))。`))
+      .toEqual([url, url, 'https://other.example/page?q=(one_(two))']);
+    const answer = { ...fetchSnapshot('https://s', ''), kind: 'search-call' as const, text: `[{"url":"${url}"` };
+    expect(searchHitsOf(answer)).toEqual([{ url, title: null, snippet: null, via: 'search' }]);
+  });
+
   it('converts a fetched page again from its whole bytes, never from the text the model read', () => {
     const snapshot = fetchSnapshot('https://example.org/p', '<html><body><h1>尊盘</h1><p>现藏湖北省博物馆。</p></body></html>');
     const page = retainedPageOf(snapshot)!;
@@ -216,6 +314,19 @@ describe('retaining one research unit', () => {
     findings: [FINDING, other], sources, pages: new Map<string, RetainedPage>(), searchSnapshotDigest: digest('search'), searchState: 'completed' as const,
     searchCalls: 1, rule: { operationalScope: 'developer-live' }, translator: null, now: () => new Date('2026-10-15T23:30:00.000Z'),
   };
+
+  it('retains the exact parenthesized source already captured without fetching a truncated address', async () => {
+    const url = 'https://source.example/wiki/County_(Province)';
+    const asked: string[] = [];
+    const result = await retainUnitEvidence({ ...input,
+      findings: [{ ...FINDING, basis: `据 ${url}：「现藏湖北省博物馆」。` }],
+      sources: [{ url, title: 'Source', snippet: null, via: 'search' }], pages: new Map([[url, page(url, CAPTURE)]]),
+      fetchAllowed: true, fetch: async (address) => { asked.push(address); return { failed: 'No network in this regression.' }; },
+    });
+    expect(asked).toEqual([]);
+    expect(result.evidence).toHaveLength(1);
+    expect(result.evidence[0]).toMatchObject({ url, captureState: 'full-text', contentSha256: digest(CAPTURE) });
+  });
 
   it('fetches each cited page it has no page of once, keeps the whole text, and counts the finding no source names', async () => {
     const asked: string[] = [];

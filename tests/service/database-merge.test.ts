@@ -1,3 +1,5 @@
+import { setLibraryDecision } from '../support/library-materials.js';
+import { asDraftRevision105 } from '../support/draft-revisions.js';
 import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL } from '../../src/shared/protocol.js';
 import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
@@ -910,6 +912,24 @@ describe('Book learning controls across database merge (#1115)', () => {
 });
 
 describe('只导入其中的图书 over the store', () => {
+  it('keeps a revision-105 draft when its Book is migrated and merged', async () => {
+    let source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const bookId = emptyBook(source, '旧版本草稿合并');
+    const draft = source.saveTaskIntentDraft({ bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book', goal: '审阅本书', target: { kind: 'book' }, outcomeClass: 'review' });
+    source.markCleanShutdown(); source.close();
+    const db = new DatabaseSync(storeOf(roots.dataRoot));
+    try { asDraftRevision105(db); } finally { db.close(); }
+    source = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    let path: string;
+    try { path = await exportedFrom(source, 'revision105-merge.ai7db'); } finally { source.close(); }
+    let target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try { const preview = await target.inspectDatabaseImport(path); await target.prepareDatabaseMerge(preview.previewId, T); }
+    finally { target.close(); }
+    target = await EditorialStore.open(otherRoot, roots.codeRoot);
+    try { expect(target.inspectTaskIntentDrafts({ bookId, draftId: draft.draftId }).drafts[0]!.version).toEqual(draft.version); }
+    finally { target.close(); }
+  });
+
   it('selected policy profile merge preserves exact frozen Book metadata without importing House authority', async () => {
     const fixture = await loadModelFixture(join(roots.codeRoot, 'tests/fixtures/model'), 'sample1-factual-authored');
     const control = { induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
@@ -935,7 +955,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 104, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 107, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);
@@ -1822,7 +1842,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
   }
 
   function attribute(store: EditorialStore, materialId: string, expectedDecisions: number, bookId: string | null): void {
-    store.decideLibraryMaterial({
+    setLibraryDecision(store, {
       materialId, expectedDecisions, decision: { kind: 'attribution', attribution: bookId === null ? { scope: 'house' } : { scope: 'book', bookId } },
     });
   }
@@ -1836,7 +1856,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       recordMissingCredentialConnection(source, '合成参考测试连接');
       const id = await libraryItem(source, '合成参考', '仅用于验证合并提示的合成资料。');
       attribute(source, id, 0, bookId);
-      source.decideLibraryMaterial({ materialId: id, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+      setLibraryDecision(source, { materialId: id, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
       source.startMaterialIndexing();
       await source.settleMaterialIndexing();
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot);
@@ -1878,7 +1898,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
       const bookId = emptyBook(source, '甲书');
       itemId = await libraryItem(source, '甲书参考', '甲书的参考资料');
       attribute(source, itemId, 0, bookId);
-      source.decideLibraryMaterial({ materialId: itemId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: '只用于本书' } });
+      setLibraryDecision(source, { materialId: itemId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: '只用于本书' } });
       // The house's own item stays with the house.
       attribute(source, await libraryItem(source, '本社参考', '本社的参考资料'), 0, null);
       packagePath = await exportedFrom(source, 'AI7 数据库.ai7db');
@@ -1897,7 +1917,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     try {
       const item = target.inspectLibraryMaterial(itemId);
       expect([item.attribution, item.eligibility?.choice, item.eligibility?.reason, item.decisionCount]).toEqual([
-        expect.objectContaining({ scope: 'book', bookTitle: '甲书' }), 'book', '只用于本书', 2,
+        expect.objectContaining({ scope: 'book', bookTitle: '甲书' }), 'book', '只用于本书', 4,
       ]);
       expect(target.inspectLibraryMaterials(null).materials.map((entry) => entry.title)).toEqual(['甲书参考']);
       // Its original came with it, whole, under its content's digest.
@@ -2026,7 +2046,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     }
     let copy = await EditorialStore.open(diverged, roots.codeRoot);
     try {
-      attribute(copy, shared, 0, null);
+      copy.decideLibraryMaterial({ materialId: shared, expectedDecisions: copy.inspectLibraryMaterial(shared).decisionCount, decision: { kind: 'eligibility', choice: 'deferred', reason: '本机暂不参考' } });
       copy.markCleanShutdown();
     } finally {
       copy.close();
@@ -2049,7 +2069,7 @@ describe('what a merge refuses, puts back and brings forward', () => {
     try {
       expect(titles(target)).toEqual(['丙书', '乙书']);
       const item = target.inspectLibraryMaterial(shared);
-      expect([item.attribution, item.decisionCount]).toEqual([expect.objectContaining({ scope: 'book', bookTitle: '乙书' }), 1]);
+      expect([item.attribution, item.decisionCount]).toEqual([expect.objectContaining({ scope: 'book', bookTitle: '乙书' }), 3]);
       expect(target.inspectLibraryMaterials(null).materials.map((entry) => entry.title).sort()).toEqual(['丙书用过的资料', '共同的资料']);
       target.markCleanShutdown();
     } finally { target.close(); }

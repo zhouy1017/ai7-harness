@@ -44,7 +44,7 @@ export type AdmittedDialogueRoute = AdmittedFastRoleRoute;
  */
 const LIVE_ROUTES: Readonly<Record<'developer-live' | 'ordinary-production', ReadonlyArray<RemoteExecutionRoute>>> = {
   'developer-live': [CONFIGURED_RUNTIME_MODEL_TABLE.developerLive.route],
-  'ordinary-production': [...new Set(CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.fast.map((binding) => binding.route))],
+  'ordinary-production': [...new Set(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast.map((binding) => binding.route))],
 };
 
 /** The categories the Egress Gate reads; a rule naming any other carries it to no binding. */
@@ -104,8 +104,7 @@ export function admittedFastRoleRoute(policy: LaunchPolicyProjection, kindId: st
     modelRole: modelRole as CredentialSlotBinding['modelRole'],
     profile,
     modelProfile,
-    localTools: modelProfile.capabilities.toolCalling === 'function' && modelProfile.evidence.toolCalling.kind === 'live-test-item' &&
-      modelProfile.evidence.toolCalling.itemIds.length > 0 ? localToolsFromProjection(rule) : null,
+    localTools: modelProfile.capabilities.toolCalling === 'function' ? localToolsFromProjection(rule) : null,
     outboundDataCategories: new Set(OUTBOUND_CATEGORIES.filter((category) => strings(rule['outboundDataCategories'])!.includes(category))),
   };
 }

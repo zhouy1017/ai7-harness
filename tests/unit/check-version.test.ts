@@ -10,14 +10,14 @@ const ledger = [
   '| 0.1.0 | integrated | Waves 1–20 and the governance wave | `a40bf0b8` | none |',
   '| 0.2.0 | planned | Wave 21 — the core completes | — | — |',
   '| 0.3.0 | planned | Wave 22 — desk work | — | — |',
-  '| 1.0.0 | planned | Wave 23 — acceptance (`1.0.0-rc.N` before) | — | — |',
+  '| 0.5.0 | planned | Wave 23 — functional Beta | — | — |',
   '', '## Canonical inputs', '', '| Version | Status |', '| 9.9.9 | planned |',
 ].join('\n');
 const progress = 'Checkpoint.\n\nVersion: integrated **0.1.0**, next **0.2.0** (Wave 21), under ADR 0098.\n';
 const plan = [
   '3. **Wave 21 → 0.2.0 — the core completes:** …',
   '4. **Wave 22 → 0.3.0 — desk work:** …',
-  '5. **Wave 23 → 1.0.0 — acceptance and closure:** …',
+  '5. **Wave 23 → 0.5.0 — functional Beta:** …',
 ].join('\n');
 const agreeing = { packageJson: { version: '0.1.0' }, ledgerMarkdown: ledger, progressMarkdown: progress, planMarkdown: plan };
 
@@ -26,7 +26,7 @@ describe('one x.y.z version across package.json, the ledger, PROGRESS and the pl
     const parsed = parseLedger(ledger);
     expect(parsed.findings).toEqual([]);
     expect(parsed.rows.map((row: { version: string; status: string }) => `${row.version}:${row.status}`))
-      .toEqual(['0.1.0:integrated', '0.2.0:planned', '0.3.0:planned', '1.0.0:planned']);
+      .toEqual(['0.1.0:integrated', '0.2.0:planned', '0.3.0:planned', '0.5.0:planned']);
     expect(parseLedger('# no ledger here').findings).toEqual(['ledger-section-missing']);
   });
 
@@ -37,6 +37,32 @@ describe('one x.y.z version across package.json, the ledger, PROGRESS and the pl
     // Windows working trees check out CRLF; the records still agree.
     const crlf = (text: string) => text.replace(/\n/gu, '\r\n');
     expect(checkVersionConsistency({ ...agreeing, ledgerMarkdown: crlf(ledger), progressMarkdown: crlf(progress), planMarkdown: crlf(plan) })).toEqual([]);
+  });
+
+  it('keeps Wave 23 at 0.5.0 Beta while the current package remains 0.4.1', () => {
+    const beta = {
+      packageJson: { version: '0.4.1' },
+      ledgerMarkdown: ledger.replace('| 0.1.0 | integrated |', '| 0.4.1 | integrated |')
+        .split('\n').filter((line) => !line.includes('| 0.2.0 |') && !line.includes('| 0.3.0 |')).join('\n'),
+      progressMarkdown: 'Version: integrated **0.4.1**, next **0.5.0** (Wave 23 Beta)',
+      planMarkdown: 'Wave 23 → 0.5.0 — functional Beta',
+    };
+    expect(checkVersionConsistency(beta)).toEqual([]);
+    expect(checkVersionConsistency({ ...beta, packageJson: { version: '1.0.0' } }))
+      .toContain('package-ledger-mismatch:1.0.0!=0.4.1');
+  });
+
+  it('records a Beta candidate without inventing a later wave or release', () => {
+    const candidate = {
+      packageJson: { version: '0.5.0' },
+      ledgerMarkdown: ledger.split('\n').filter((line) => !line.includes('| 0.2.0 |') && !line.includes('| 0.3.0 |'))
+        .join('\n').replace('| 0.5.0 | planned |', '| 0.5.0 | candidate |'),
+      progressMarkdown: 'Version: candidate **0.5.0** (Wave 23 Beta); human testing pending.',
+      planMarkdown: plan,
+    };
+    expect(checkVersionConsistency(candidate)).toEqual([]);
+    expect(checkVersionConsistency({ ...candidate, packageJson: { version: '1.0.0' } }))
+      .toContain('package-ledger-mismatch:1.0.0!=0.5.0');
   });
 
   it('names each disagreement instead of guessing', () => {

@@ -6,7 +6,7 @@ This is a live query over Orca task/workspace records and GitHub Issues/PRs. [Or
 
 | Source | Owns |
 | --- | --- |
-| Issue body | Bounded outcome, brief revision, dependencies, allowed change and acceptance |
+| Issue body | Bounded outcome, brief revision, dependencies, hint paths and acceptance |
 | Orca task/workspace and messages | Actual assignment, workspace, current writer, handoff and live state |
 | Slice PR | Incoming review head, corrections, validation candidate and slice-to-wave merge |
 | Wave PR | Cumulative candidate, Commander release and final dev integration |
@@ -15,7 +15,7 @@ This is a live query over Orca task/workspace records and GitHub Issues/PRs. [Or
 ## Query procedure
 
 1. Read the assigned Issue and the actual Orca task/workspace identifiers.
-2. Correlate the recorded role, model pair, branch, baseline and current writer with the live task/workspace state.
+2. Correlate the session-assigned role, model, branch, baseline and current writer with the live task/workspace state.
 3. Inspect the linked PR and checks for its current head/base. A task marked done, a green check or a local commit does not alone establish a released merge.
 4. Distinguish slice completion in the wave from final integration on dev; record actionable drift or missing evidence in the existing Issue/task record.
 

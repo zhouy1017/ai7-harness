@@ -82,7 +82,9 @@ function sameKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): 
 export function readMaterialTranslationAnswer(text: string, count: number): string[] | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text.trim());
+    const trimmed = text.trim();
+    const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/iu.exec(trimmed);
+    parsed = JSON.parse(fenced?.[1] ?? trimmed);
   } catch {
     return null;
   }

@@ -256,7 +256,7 @@ function validKnowledgeTarget(value: unknown): boolean {
 }
 
 /** The manuscript span a candidate cites, as a mark names its range, or `null` for the editor's own words. */
-function validKnowledgeSpan(value: unknown): boolean {
+function validKnowledgeSpan(value: unknown, textLimit = MAX_BLOCK_CODE_UNITS): boolean {
   if (value === null) return true;
   return isRecord(value) && hasExactKeys(value, [
     'manuscriptId', 'branchId', 'windowStartBlockId', 'baseRevisionId', 'expectedJournalSequence', 'blockId', 'baseBlockDigest', 'fromGrapheme',
@@ -264,7 +264,7 @@ function validKnowledgeSpan(value: unknown): boolean {
   ]) && validMarkBinding(value) && isBoundedString(value.baseRevisionId, 36) && UUID_PATTERN.test(value.baseRevisionId) &&
     isSafeInteger(value.expectedJournalSequence, 0) && isBoundedString(value.blockId, 28) && MARK_BLOCK_PATTERN.test(value.blockId) &&
     isBoundedString(value.baseBlockDigest, 64) && HEX_DIGEST_PATTERN.test(value.baseBlockDigest) && isSafeInteger(value.fromGrapheme, 0) &&
-    isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, MAX_BLOCK_CODE_UNITS);
+    isSafeInteger(value.toGrapheme, 1) && isBoundedString(value.selectedText, textLimit);
 }
 
 /**
@@ -274,7 +274,7 @@ function validKnowledgeSpan(value: unknown): boolean {
 function validSelection(value: unknown): boolean {
   if (!isRecord(value) || !('span' in value)) return validKnowledgeSpan(value);
   const { span, ...range } = value;
-  return validKnowledgeSpan(range) && Array.isArray(span) && span.length >= 2 && span.length <= MAX_SELECTION_SPAN_BLOCKS && span.every((pin) =>
+  return validKnowledgeSpan(range, MAX_BLOCK_CODE_UNITS * MAX_SELECTION_SPAN_BLOCKS) && Array.isArray(span) && span.length >= 2 && span.length <= MAX_SELECTION_SPAN_BLOCKS && span.every((pin) =>
     isRecord(pin) && hasExactKeys(pin, ['blockId', 'blockDigest', 'fromGrapheme', 'toGrapheme']) && isBoundedString(pin.blockId, 28) &&
     MARK_BLOCK_PATTERN.test(pin.blockId) && isBoundedString(pin.blockDigest, 64) && HEX_DIGEST_PATTERN.test(pin.blockDigest) &&
     isSafeInteger(pin.fromGrapheme, 0) && isSafeInteger(pin.toGrapheme, 0));
@@ -532,11 +532,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // The route new Tasks use (Issues #811, #1225): one of the Model Service routes.
     case 'selectFastRoleModel':
+    case 'selectMainRoleModel':
+    case 'selectBothRoleModels':
     case 'testModelServiceConnection': {
       const input = requireInput(value.input, ['route', 'modelId'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route) || !isBoundedString(input.modelId, 128)) throw new ProtocolError(tentativeId);
       break;
     }
+    case 'refreshModelServiceModels':
     case 'selectModelServiceRoute': {
       const input = requireInput(value.input, ['route'], tentativeId);
       if (!(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(input.route)) throw new ProtocolError(tentativeId);
@@ -1026,8 +1029,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 放入资料库: the preview, and the title and kind the editor gave it; the store holds the title to its bounds.
     case 'addLibraryMaterial': {
-      const input = requireInput(value.input, ['previewId', 'title', 'kind'], tentativeId);
-      if (!validUuid(input.previewId) || !isBoundedString(input.title, 2_000) || !LIBRARY_MATERIAL_KINDS.includes(input.kind as LibraryMaterialKind)) {
+      const input = requireInputWithOptional(value.input, ['previewId', 'title', 'kind'], ['bookId'], tentativeId);
+      if (!validUuid(input.previewId) || !(input.bookId === undefined || input.bookId === null || validUuid(input.bookId)) || !isBoundedString(input.title, 2_000) || !LIBRARY_MATERIAL_KINDS.includes(input.kind as LibraryMaterialKind)) {
         throw new ProtocolError(tentativeId);
       }
       break;
@@ -2185,6 +2188,13 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'readManuscriptImageChunk': {
+      const input = requireInput(value.input, ['manuscriptId', 'branchId', 'sourceVersionId', 'ordinal', 'offset'], tentativeId);
+      if (![input.manuscriptId, input.branchId, input.sourceVersionId].every((id) => typeof id === 'string' && UUID_PATTERN.test(id)) ||
+        !Number.isSafeInteger(input.ordinal) || Number(input.ordinal) < 0 || Number(input.ordinal) >= 100000 ||
+        !Number.isSafeInteger(input.offset) || Number(input.offset) < 0 || Number(input.offset) >= 64 * 1024 * 1024) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'recordManuscriptEntryPosition': {
       const input = requireInput(value.input, ['manuscriptId', 'branchId', 'blockId', 'grapheme'], tentativeId);
       if (
@@ -2487,6 +2497,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       if (structure !== undefined && !(isRecord(structure) && (
         (structure.kind === 'split' && hasExactKeys(structure, ['kind', 'newBlockId']) && isBoundedString(structure.newBlockId, 28) &&
           /^blk_[0-9a-f]{24}$/.test(structure.newBlockId)) ||
+        (structure.kind === 'style' && hasExactKeys(structure, ['kind', 'blockKind', 'level']) &&
+          ((structure.blockKind === 'paragraph' && structure.level === null) || (structure.blockKind === 'title' && structure.level === 1) ||
+            (structure.blockKind === 'heading' && Number.isSafeInteger(structure.level) && Number(structure.level) >= 1 && Number(structure.level) <= 6))) ||
         (structure.kind === 'merge' && hasExactKeys(structure, ['kind', 'mergedBlockId', 'mergedBlockDigest']) &&
           isBoundedString(structure.mergedBlockId, 28) && /^blk_[0-9a-f]{24}$/.test(structure.mergedBlockId) &&
           isBoundedString(structure.mergedBlockDigest, 64) && HEX_DIGEST_PATTERN.test(structure.mergedBlockDigest))))) {
@@ -2724,8 +2737,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopDialogueAnswer':
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      const input = requireInput(value.input, ['bookId', 'dialogueId', 'attemptId'], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : [], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
+      if (input.question !== undefined && !isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'convertDialogueToChangeSuggestion': {
@@ -2751,13 +2765,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
         (hasExactKeys(range, ['kind', 'rangeId']) && range.kind === 'kept' && validUuid(range.rangeId)) ||
         (hasExactKeys(range, ['kind', 'span']) && range.kind === 'new' && range.span !== null && validSelection(range.span)));
       const validTarget = isRecord(target) && ((hasExactKeys(target, ['kind']) && target.kind === 'book') ||
+        (hasExactKeys(target, ['kind', 'manuscriptId', 'branchId', 'revisionId']) && target.kind === 'deliverable' && validUuid(target.manuscriptId) && validUuid(target.branchId) && validUuid(target.revisionId)) ||
         (hasExactKeys(target, ['kind', 'ranges']) && target.kind === 'ranges' && Array.isArray(target.ranges) && target.ranges.length >= 1 &&
           target.ranges.length <= MAX_TASK_INTENT_DRAFT_RANGES && target.ranges.every(validRange)));
       const pin = input.procedurePin;
       const validPin = pin === undefined || pin === null ||
         (isRecord(pin) && hasExactKeys(pin, ['procedureId', 'versionId']) && validUuid(pin.procedureId) && validUuid(pin.versionId));
       if (!validUuid(input.bookId) || !(input.draftId === null ? input.expectedOrdinal === null : validUuid(input.draftId) && isSafeInteger(input.expectedOrdinal, 1)) ||
-          (input.origin !== 'composer-selection' && input.origin !== 'composer-book') || !isBoundedString(input.goal, 4 * MAX_TASK_INTENT_GOAL_LENGTH) ||
+          (input.origin !== 'composer-selection' && input.origin !== 'composer-book' && input.origin !== 'composer-deliverable') || !isBoundedString(input.goal, 4 * MAX_TASK_INTENT_GOAL_LENGTH) ||
           !validTarget || !(input.outcomeClass === null || TASK_INTENT_OUTCOME_CLASSES.includes(input.outcomeClass as never)) || !validPin) {
         throw new ProtocolError(tentativeId);
       }
@@ -2791,7 +2806,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'proposeAgentWorkspaceChangeSet': {
       const input = requireInput(value.input, ['bookId', 'selection', 'instruction'], tentativeId);
-      if (!validUuid(input.bookId) || input.selection === null || !validKnowledgeSpan(input.selection) ||
+      if (!validUuid(input.bookId) || input.selection === null || !validSelection(input.selection) ||
           !isBoundedString(input.instruction, 4 * MAX_DIALOGUE_QUESTION_CHARACTERS)) {
         throw new ProtocolError(tentativeId);
       }

@@ -1,3 +1,4 @@
+import { startPreparedTask } from './one-action-start.js';
 import type {
   DefaultExecutionRuleReference,
   ProductionDocumentProjection,
@@ -58,7 +59,7 @@ export interface WritingTaskSurface {
   destroy(): void;
 }
 
-type WritingApi = Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'> & Partial<Pick<RendererApi, 'searchReferableMaterials'>>;
+type WritingApi = Partial<Pick<RendererApi, 'inspectTaskPlan' | 'authorizeWritingTask'>> & Pick<RendererApi, 'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'> & Partial<Pick<RendererApi, 'searchReferableMaterials'>>;
 
 export interface MountWritingTaskOptions {
   root: HTMLElement;
@@ -294,8 +295,10 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       form.append(problem);
     }
     const row = el('div', 'button-row');
-    const plan = action(WRITING_ACTIONS.plan, 'primary', 'plan', () => void prepare(null));
+    const plan = action('查看计划', 'secondary', 'plan', () => void prepare(null, true));
+    const start = action('开始写作', 'primary', 'start', () => void prepare(null));
     plan.disabled = busy || page.unavailable !== null;
+    start.disabled = plan.disabled;
     plan.setAttribute('aria-controls', 'task-drawer');
     // 快速开始 is the chosen type's writing 默认执行规则's to give (S84b): a rule covers only the type it was set from, so the
     // type is chosen first; with that type's rule in force and matching, it prepares and starts under it.
@@ -317,8 +320,8 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       paint('[data-writing-action="new"]');
     });
     cancel.disabled = busy;
-    row.append(plan, quick, cancel);
-    form.append(row, quickReason);
+    row.append(start, plan, cancel);
+    form.append(row);
     return form;
   }
 
@@ -387,7 +390,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
    * would start it; whatever would make the start differ from the rule leaves the Task at its plan, open in the drawer with the
    * reason beside the bar, and nothing recorded.
    */
-  async function prepare(rule: DefaultExecutionRuleReference | null): Promise<void> {
+  async function prepare(rule: DefaultExecutionRuleReference | null, preview = false): Promise<void> {
     if (busy || sheet === null || projection === null) return;
     const state = sheet;
     if (state.typeId === null) {
@@ -433,7 +436,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       if (rule === null || ref === null) {
         options.setStatus(WRITING_STATUS.prepared, 'success');
         paint(null);
-        if (ref !== null) options.openPlan(ref);
+        if (ref !== null) { if (preview) options.openPlan(ref); else { await startPreparedTask(api, 'writing', ref); projection = await api.inspectWritingTask(); paint(null); } }
         return;
       }
       if (planEnvelopeDigest === null) {

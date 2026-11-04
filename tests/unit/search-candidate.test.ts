@@ -87,7 +87,7 @@ const POLICY: SearchConnectionTestPolicy = Object.freeze<SearchConnectionTestPol
 
 function decide(overrides: Partial<Parameters<typeof evaluateSearchCandidateProbe>[0]> = {}, reads = { connection: 0 }) {
   const candidate = searchBackendCandidate('search-deepseek', 'deepseek-direct-search-v1');
-  return evaluateSearchCandidateProbe({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v32', policy: POLICY,
+  return evaluateSearchCandidateProbe({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v33', policy: POLICY,
     candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: candidate.credentialSlot, arguments: candidate.search.probeArguments },
     configurationDigest: candidateConfigurationDigestOf(document()), developmentReference: () => false,
     connection: () => { reads.connection += 1; return { credentialReference: '6f9c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f', credentialOperationState: 'ready' }; }, ...overrides });
@@ -119,7 +119,7 @@ describe('the candidate probe decision and its single credential release', () =>
     const ticket: SearchCandidateProbeTicket = decision.ticket;
     expect(ticket).toMatchObject({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1', endpoint: POLICY.endpoint, method: 'POST',
       protocol: 'deepseek-direct-search', arguments: POLICY.arguments, argumentsDigest: POLICY.argumentsCanonicalSha256, credentialSlot: 'search-deepseek',
-      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32' } });
+      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v33' } });
     expect(Object.isFrozen(ticket)).toBe(true);
     let reads = 0;
     const broker = new CredentialBroker({ resolve: async () => { reads += 1; return 'placeholder'; } }, { developmentReferences: 'refused' });
@@ -135,10 +135,21 @@ describe('the candidate probe decision and its single credential release', () =>
 });
 
 describe('the closed search failure classes', () => {
-  it('reads a class from the HTTP status or an AI7 error code, never from a body', () => {
+  it('keeps the generic HTTP-status and AI7-code classifications', () => {
     expect([200, 400, 401, 402, 403, 404, 429, 500, 504].map((status) => searchFailureClass({ status })))
       .toEqual(['malformed', 'rejected', 'auth', 'quota', 'auth', 'rejected', 'rate', 'server', 'server']);
     expect(['SEARCH_SERVICE_CREDENTIAL_REQUIRED', 'CREDENTIAL_MISSING', 'PLATFORM_TOOL_TIMEOUT', 'PLATFORM_TOOL_FAILED', 'PLATFORM_TOOL_BODY_TOO_LARGE', 'PLATFORM_TOOL_TICKET_REFUSED']
       .map((code) => searchFailureClass({ code }))).toEqual(['credential-missing', 'credential-missing', 'transport', 'transport', 'malformed', 'refused']);
+  });
+
+  it('recognizes only Bocha\'s structured account-quota rejection without changing its HTTP status', () => {
+    const body = JSON.stringify({ code: '403', message: 'You do not have enough money or package quota' });
+    const failure = { status: 403, backendId: 'search-bochaai', body };
+    expect(searchFailureClass(failure)).toBe('quota');
+    expect(failure.status).toBe(403);
+    expect(searchFailureClass({ ...failure, backendId: 'search-brave' })).toBe('auth');
+    expect(searchFailureClass({ ...failure, body: JSON.stringify({ code: '403', message: 'Access denied' }) })).toBe('auth');
+    expect(searchFailureClass({ ...failure, body: JSON.stringify({ code: '401', message: 'You do not have enough money or package quota' }) })).toBe('auth');
+    expect(searchFailureClass({ ...failure, body: 'not JSON' })).toBe('auth');
   });
 });

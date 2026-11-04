@@ -30,7 +30,7 @@ export interface LiveKindRule {
 /** The enabled-learning origin is distinct from enrolled background processing, despite its shared kind name. */
 export function learningCurationRule(policy: LaunchPolicyProjection | undefined, binding: LiveKindBinding): AdmittedProviderRule | null {
   if (policy?.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' ||
-    (policy.providerProcessing.version !== 'v31' && policy.providerProcessing.version !== 'v32') || policy.providerProcessing.decision !== 'eligible-only' ||
+    (policy.providerProcessing.version !== 'v31' && (policy.providerProcessing.version !== 'v32' && policy.providerProcessing.version !== 'v33')) || policy.providerProcessing.decision !== 'eligible-only' ||
     policy.providerProcessing.liveTransmissionAllowed !== true) return null;
   const rules = policy.providerProcessing.admittedRules?.filter((rule) => rule.ruleId === 'ordinary-production-learning-curation') ?? [];
   const rule = rules.length === 1 ? rules[0]! : null;
@@ -272,15 +272,10 @@ export function liveKindContractCategories(kind: string, definition?: LiveKindDe
     ...(definition === undefined || liveMaterialContract(definition) === null ? [] : ['frozen-material-reference-excerpt'] as const)];
 }
 
-/**
- * Whether a Run's model may be handed the platform tools: its profile declares the client function loop on recorded evidence
- * (ADR 0080 §2, §7.7). A rule naming the tools is not enough — a web-bearing category on any other model is not admitted, and
- * writing and evaluation run on it without tools, as they did before the rule named them.
- */
+/** A model inherits the function-tool loop implemented by its route's protocol; historical evidence is not admission. */
 export function modelAdmitsPlatformTools(route: string, model: string): boolean {
   const profile = modelProfileFor(route as RemoteExecutionRoute, model);
-  return profile?.capabilities.toolCalling === 'function' && profile.evidence.toolCalling.kind === 'live-test-item' &&
-    profile.evidence.toolCalling.itemIds.length > 0;
+  return profile?.capabilities.toolCalling === 'function';
 }
 
 /** Local retrieval never changes web declarations. Baseline and enrolled background remain outside targeted retrieval. */

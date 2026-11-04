@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { LAUNCH_SELECTABLE_SCOPES, MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
+import { LAUNCH_SELECTABLE_SCOPES, MODEL_SERVICE_CHANNELS, MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, modelServiceRuntimeBinding, isTrustedOperationalScope, type ModelServiceChannelProjection, type ModelServiceModelDisposition, type ModelServiceRouteId, type AdmittedLocalTools, type AdmittedPlatformTools, type AdmittedProviderRule, type DeveloperLiveCeiling, type OutboundDataCategoryId, type DevelopmentValidationIntent, type LaunchPolicyProjection, type TrustedLaunchForm, type TrustedOperationalScope, type SearchConnectionTestPolicy } from '../shared/protocol.js';
 import { CREDENTIAL_REFERENCE_PATTERN, DEVELOPMENT_CREDENTIAL_REFERENCES } from '../shared/protected-secret-identity.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES, CONFIGURED_PROVIDER_LABELS, CONFIGURED_RUNTIME_MODEL_TABLE } from '../shared/provider-configuration.generated.js';
 import {
@@ -12,8 +12,8 @@ import {
   LOCAL_TOOL_BREAKER_END, LOCAL_TOOL_CALLS_PER_UNIT, LOCAL_TOOL_CANDIDATES_PER_CALL, LOCAL_TOOL_DECLARATION_NAMES, LOCAL_TOOL_ROUND_TRIP_BREAKER, readLocalToolsRule,
 } from './provider/local-tools.js';
 import { familyAdmissionRefusal, modelDisposition, providerPreflight, type ProviderPreflightRefusal } from './provider/family-dispositions.js';
-import { modelProfileFor, type ProviderModelProfile } from './provider/model-profile.js';
-import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS } from './provider/provider-profiles.generated.js';
+import { modelProfileFor, validModelId, type ProviderModelProfile } from './provider/model-profile.js';
+import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS, GENERATED_ROUTE_PROFILES as PROVIDER_ROUTE_PROFILES } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js'; import { SEARCH_RESPONSE_MAX_BYTES, SEARCH_SERVICE_TIMEOUT_MS } from './provider/search-service.js';
 import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
@@ -35,8 +35,8 @@ import { canonicalJson } from './analysis/canonical.js';
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v23' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v23.json';
+export const ACTIVE_SET_VERSION = 'v24' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v24.json';
 const ACTIVE_SET_SHA256 = CURRENT_ACTIVE_SET_SHA256;
 const PROVIDER_PINS = {
   'development-ci': {
@@ -50,8 +50,8 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v32',
-    canonicalPath: 'docs/policies/provider-processing-policy.v32.json',
+    version: 'v33',
+    canonicalPath: 'docs/policies/provider-processing-policy.v33.json',
     sha256: CURRENT_PRODUCTION_POLICY_SHA256,
   },
   'developer-live': {
@@ -93,10 +93,10 @@ export const DEFAULT_PROVIDER_CACHE_DIRECTORY = 'ai7-harness-provider-cache';
  * Reviewed v26 runtime choices, default first (ADR 0095 §6). The store lists these routes and the service arms their
  * declared hosts. The verifier separately checks the immutable policy baseline; a choice is never a fallback chain.
  */
-export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.main;
-export type OrdinaryProductionAllowedBinding = (typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number];
-export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction.fast;
-export type OrdinaryProductionFastAllowedBinding = (typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number];
+export const ORDINARY_PRODUCTION_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main;
+export type OrdinaryProductionAllowedBinding = Omit<(typeof ORDINARY_PRODUCTION_ALLOWED_BINDINGS)[number], 'model'> & { readonly model: string };
+export const ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS = CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast;
+export type OrdinaryProductionFastAllowedBinding = Omit<(typeof ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS)[number], 'model'> & { readonly model: string };
 
 /**
  * The endpoint hosts the ordinary-production service arms before the network denial (Issue #1274): every admitted Main and
@@ -132,11 +132,12 @@ export const CONNECTION_TEST_POLICY = {
 export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null): OrdinaryProductionAllowedBinding | null;
 export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null, role: 'fast-interaction'): OrdinaryProductionFastAllowedBinding | null;
 export function allowedProductionBindingOf(binding: ConfiguredProviderBinding | null, role?: 'fast-interaction'): OrdinaryProductionFastAllowedBinding | null {
-  if (binding === null || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
+  if (binding === null || !validModelId(binding.model) || !CREDENTIAL_REFERENCE_PATTERN.test(binding.credentialReference) ||
       DEVELOPMENT_CREDENTIAL_REFERENCES.has(binding.credentialReference.toLowerCase())) return null;
   const allowedBindings = role === 'fast-interaction' ? ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS : ORDINARY_PRODUCTION_ALLOWED_BINDINGS;
-  return allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
-    allowed.model === binding.model && allowed.credentialSlot === binding.credentialSlot) ?? null;
+  const channel = allowedBindings.find((allowed) => allowed.route === binding.route && allowed.endpoint === binding.endpoint &&
+    allowed.credentialSlot === binding.credentialSlot);
+  return channel === undefined || modelProfileFor(channel.route, binding.model) === null ? null : { ...channel, model: binding.model };
 }
 
 /**
@@ -149,34 +150,35 @@ export function productionBindingRefusal(model: ProviderModelProfile, role: 'mai
   return familyAdmissionRefusal(model, families) ?? providerPreflight(model, { stream: false, functionTools: false });
 }
 
-/**
- * The one Settings flow's channels (ADR 0094 §1; Issue #1215): every model each channel's routes declare, with its named
- * disposition for the Main and the Fast role. A model is `eligible` only where the selected policy admits its family, its text
- * answer is supported on evidence, and the runtime model table holds its reviewed record for the role; a gateway catalogue
- * alone establishes none of these. Derived from the generated declarations and the model table alone, so it changes no
- * selection, grants no authority and reads no credential.
- */
-export function modelServiceChannels(): ModelServiceChannelProjection[] {
+/** Catalogue choices inherit protocol capabilities and are eligible on admitted channels, independent of model evidence. */
+export function modelServiceChannels(catalogue?: (route: ModelServiceRouteId) => readonly import('../shared/protocol.js').DiscoveredModel[]): ModelServiceChannelProjection[] {
   const disposition = (model: ProviderModelProfile, role: 'main' | 'fast'): ModelServiceModelDisposition => {
     const refused = productionBindingRefusal(model, role);
-    if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'not-in-runtime-model-table'>;
-    return CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role].some((binding) => binding.route === model.route && binding.model === model.model)
-      ? 'eligible' : 'not-in-runtime-model-table';
+    if (refused !== null) return refused.reason as Exclude<ModelServiceModelDisposition, 'eligible' | 'channel-not-admitted-by-selected-policy'>;
+    return CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline[role].some((binding) => binding.route === model.route)
+      ? 'eligible' : 'channel-not-admitted-by-selected-policy';
   };
   return MODEL_SERVICE_CHANNELS.map((channelId) => {
     const route = MODEL_SERVICE_ROUTES.includes(channelId as ModelServiceRouteId) ? channelId as ModelServiceRouteId : null;
+    const entries = catalogue?.(channelId) ?? GENERATED_MODEL_PROFILES
+      .filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`))
+      .map((model) => ({ modelId: model.model, modelLabel: model.displayName }));
     return {
       channelId,
       channelLabel: route === null ? CONFIGURED_PROVIDER_LABELS[channelId] : MODEL_SERVICE_ROUTE_BINDINGS[route].providerLabel,
       route,
-      models: GENERATED_MODEL_PROFILES.filter((model) => model.route === channelId || model.route.startsWith(`${channelId}-`)).map((model) => ({
-        modelId: model.model,
-        modelLabel: model.displayName,
-        family: model.capabilities.requestShape,
-        capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
-        main: disposition(model, 'main'),
-        fast: disposition(model, 'fast'),
-      })),
+      models: entries.map((entry) => {
+        const runtime = modelServiceRuntimeBinding(channelId, entry.modelId, 'main');
+        const model = modelProfileFor(runtime?.route ?? channelId, entry.modelId)!;
+        return {
+          modelId: model.model,
+          modelLabel: entry.modelLabel,
+          family: model.capabilities.requestShape,
+          capabilities: { text: modelDisposition(model, 'text'), stream: modelDisposition(model, 'stream'), functionTools: modelDisposition(model, 'functionTools') },
+          main: disposition(model, 'main'),
+          fast: disposition(model, 'fast'),
+        };
+      }).sort((a, b) => Number(b.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId) - Number(a.modelId === MODEL_SERVICE_ROUTE_BINDINGS[channelId].modelId)),
     };
   });
 }
@@ -1600,6 +1602,16 @@ export interface OrdinaryProductionPolicyReading {
 }
 
 function allowedBindingsOf(role: unknown): AllowedRoleBinding[] {
+  if (isRecord(role) && Array.isArray(role['allowedChannels'])) {
+    return role['allowedChannels'].map((entry: unknown) => {
+      requirePolicy(isRecord(entry) && exactKeys(entry, ['route', 'endpointHost', 'protocolFamily', 'credentialSlot']));
+      const route = entry['route'] as RemoteExecutionRoute;
+      const profile = PROVIDER_ROUTE_PROFILES[route];
+      requirePolicy(profile !== undefined && entry['endpointHost'] === new URL(profile.endpoint).host &&
+        entry['credentialSlot'] === profile.credentialSlot && entry['protocolFamily'] === GENERATED_ROUTE_DISPOSITIONS[route].family);
+      return { route, endpoint: profile.endpoint, model: '*', credentialSlot: profile.credentialSlot };
+    });
+  }
   requirePolicy(isRecord(role) && Array.isArray(role['allowedBindings']) && role['allowedBindings'].length > 0);
   const bindings: AllowedRoleBinding[] = [];
   for (const entry of role['allowedBindings'] as unknown[]) {
@@ -1626,9 +1638,13 @@ function readFamilyAdmission(policy: Record<string, unknown>): true {
   const roles = policy['roleBindings'] as Record<string, unknown>;
   const main = allowedBindingsOf(roles['Main Editorial Role']), fast = allowedBindingsOf(roles['Fast Interaction Role']);
   const connectionTest = policy['connectionTest'];
-  requirePolicy(sameValue(main, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main) && sameValue(fast, CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast) &&
-    bindingsWithin(ORDINARY_PRODUCTION_ALLOWED_BINDINGS, main) && bindingsWithin(ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, fast) &&
-    isRecord(connectionTest) && bindingsWithin(CONNECTION_TEST_POLICY.allowedBindings, allowedBindingsOf(connectionTest)));
+  // Frozen v32 still names its original Zen paths. Its exact document digest is verified above;
+  // compare channel identity here so current host-admitted v33 can repair paths without rewriting history.
+  const channels = (bindings: readonly AllowedRoleBinding[]) => [...new Map(bindings.map(({ route, endpoint, credentialSlot }) =>
+    [route, { route, endpointHost: new URL(endpoint).host, credentialSlot }])).values()];
+  requirePolicy(sameValue(channels(main), channels(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.main)) &&
+    sameValue(channels(fast), channels(CONFIGURED_RUNTIME_MODEL_TABLE.policyBaseline.fast)) && isRecord(connectionTest) &&
+    sameValue(channels(allowedBindingsOf(connectionTest)), channels(fast)));
   return true;
 }
 
@@ -1639,7 +1655,7 @@ export interface SearchFallbackTerms {
   readonly eligibleBackendIds: readonly string[];
   readonly frozenInPlan: readonly ['backendId', 'host', 'configurationDigest', 'credentialReference'];
   readonly ledgerAttribution: 'fallback-from';
-  /** At most one resend per failed submission, only for these failure classes; an accepted (possibly billed) one never. */
+  /** Primary-channel retries only: at most one, for these classes; an accepted/possibly billed submission is never retried. */
   readonly maximumResendsPerFailedSubmission: 1;
   readonly resendableFailureClasses: readonly ['transport-failure-before-any-response-byte', 'http-5xx', 'http-429'];
   readonly http429RetryAfterHonoured: true;
@@ -1653,6 +1669,8 @@ export function readSearchFallbackTerms(rule: unknown): SearchFallbackTerms {
   const research = isRecord(contract) ? contract['research'] : null;
   requirePolicy(isRecord(rule) && isRecord(research) && isRecord(rule['platformTools']) && isRecord(rule['platformTools']['websearch']));
   const fallback = research['backendFallback'], resend = research['knownOrUnknownFailedSubmissionResendAllowed'];
+  // Backup eligibility binds an existing measured profile. Its selection after an exact account rejection is distinct
+  // from retrying the same primary submission; the Owner's Wave23 clarification does not add a retry class or plan field.
   const shipped = ((rule['platformTools']['websearch'] as Record<string, unknown>)['backends'] as Array<{ id: string }>).map((backend) => backend.id);
   requirePolicy(isRecord(fallback) && Array.isArray(fallback['eligibleBackendIds']) && fallback['eligibleBackendIds'].length > 0 &&
     fallback['eligibleBackendIds'].every((id: unknown) => typeof id === 'string' && shipped.includes(id)) && sameValue(fallback, {
@@ -1934,9 +1952,9 @@ function readSearchConnectionTest(block: unknown): SearchConnectionTestPolicy {
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === ({ v30: '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3',
-    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058' } as Record<string, string>)[String(policy['version'])]);
+    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058', v33: '8b75acbe8c662abf00981b7762f91d87347a6267c0bde5ab2bcd3843d14eab46' } as Record<string, string>)[String(policy['version'])]);
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
-  const admission = policy['version'] === 'v32' ? readFamilyAdmission(policy) : null;
+  const admission = (policy['version'] === 'v32' || policy['version'] === 'v33') ? readFamilyAdmission(policy) : null;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
@@ -2003,7 +2021,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30' || policy['version'] === 'v31' || policy['version'] === 'v32') return projectOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30' || policy['version'] === 'v31' || (policy['version'] === 'v32' || policy['version'] === 'v33')) return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -2187,7 +2205,7 @@ export function bindOrdinaryProductionRules(reading: OrdinaryProductionPolicyRea
     if (selected === null) continue;
     if (!isRecord(selected) || !exactKeys(selected, ['route', 'endpoint', 'model', 'credentialSlot', 'credentialReference']) ||
         allowedProductionBindingOf(selected, 'fast-interaction') === null || !permitted.some((candidate) =>
-          candidate.route === selected.route && candidate.model === selected.model && candidate.endpoint === selected.endpoint && candidate.credentialSlot === selected.credentialSlot)) return null;
+          candidate.route === selected.route && candidate.endpoint === selected.endpoint && candidate.credentialSlot === selected.credentialSlot)) return null;
   }
   const admitted: AdmittedProviderRule[] = [];
   for (const { ruleId, reading: kind, allowedRoutes, platformTools, localTools, projection } of reading.rules) {
@@ -2340,8 +2358,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v23.schema.json', '0935a0bb8193771dd132970959931d8aee033e09abca0ca06709963cdbb951dc'],
-      ['docs/policies/provider-processing-policy.v32.schema.json', 'e2acb9cb2eaf53199d53eba4de121a5e4c32e6382e982041d6b471434dadf0dd'],
+      ['docs/policies/active-policy-set.v24.schema.json', '96ab1479f9853c54980dfbf6aa467bbb9cf7393738d68b1c60d83345d3a001e1'],
+      ['docs/policies/provider-processing-policy.v33.schema.json', '2e01a84df92e4a31237924b73aefc5ff941cab1d86fc057dbbcc6978aa15e463'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(
@@ -2483,6 +2501,7 @@ function* verifyLaunchPolicyInputs(
           ...(reading.transport === undefined ? {} : { transport: reading.transport }),
           ...(reading.research === undefined ? {} : { research: reading.research }),
           ...(reading.searchConnectionTest === undefined ? {} : { searchConnectionTest: reading.searchConnectionTest }),
+          settingsSearchTools: reading.rules.find((rule) => rule.platformTools !== null)?.platformTools ?? null,
           ...(reading.backgroundProcessingEnrollment === undefined ? {} : { backgroundProcessingEnrollment: reading.backgroundProcessingEnrollment }),
           ...(reading.subAgents === undefined ? {} : { subAgents: reading.subAgents }),
           decision: 'eligible-only',

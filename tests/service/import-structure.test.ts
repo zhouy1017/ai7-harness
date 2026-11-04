@@ -84,6 +84,40 @@ describe('candidate structure on import (#1205)', () => {
 });
 
 describe('long paragraphs on import (#1205)', () => {
+  it('reimports auto-split paragraphs and commits their source mapping after an external insertion', async () => {
+    const request = { ...HEADINGLESS, joined: { ...JOINED, softBreaks: true } };
+    const original = await stage(request);
+    const { book } = await commit(review(original.staged));
+    const source = store.getBookOverview(book.bookId).records.find((record) => record.kind === 'source');
+    if (source?.kind !== 'source') throw new Error('missing source version');
+    const next = await stage({ ...request, blocks: 31 });
+    const work = store.createManuscriptReimportPreparationWork(next.staged.draftId, next.staged.draftVersion,
+      { kind: 'existing-book', bookId: book.bookId, relationship: 'reimport', reuseSourceVersionId: null,
+        lineage: { kind: 'verified-source-version', sourceVersionId: source.sourceVersionId } });
+    let prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
+    while (!prepared.done) prepared = store.advanceManuscriptReimportPreparationWork(work.workId);
+    let reviewed = prepared.review!;
+    for (const group of store.getReimportMappingPage(reviewed.draftId, reviewed.draftVersion, null).items) {
+      const resolution = store.createReimportResolutionWork(reviewed.draftId, reviewed.draftVersion, group.groupId, 'rewrite');
+      let progress = store.advanceReimportResolutionWork(resolution.workId);
+      while (!progress.done) progress = store.advanceReimportResolutionWork(resolution.workId);
+      reviewed = progress.review!;
+    }
+    const started = await store.createManuscriptReimportCommitWork({ draftId: reviewed.draftId, expectedDraftVersion: reviewed.draftVersion,
+      reviewDigest: reviewed.reviewDigest, commitId: randomUUID() });
+    let result = started.result;
+    while (result === null) {
+      await new Promise((settle) => setTimeout(settle, 5));
+      result = (await store.advanceManuscriptReimportCommitWork(started.workId!)).result;
+    }
+    expect(result.completionLabel).toBe('稿件已重新导入');
+    expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).position.totalBlocks).toBe(31);
+    store.markCleanShutdown();
+    store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).position.totalBlocks).toBe(31);
+  }, 120_000);
+
   it('splits a paragraph over the bound at its soft line breaks, and discloses the source paragraph of each block', async () => {
     const { staged } = await stage({ ...HEADINGLESS, joined: { ...JOINED, softBreaks: true } });
     expect(staged.structure!.softBreakSplits).toMatchObject([{ sourceOrdinal: 3, firstPosition: 3, pieceCount: 12 }]);

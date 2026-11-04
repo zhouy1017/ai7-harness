@@ -1,3 +1,4 @@
+import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import {
   ANALYSIS_MORE_REPORT_ROWS,
@@ -163,7 +164,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
   }
 
   function rangeText(range: BaselineAnalysisSelectedRange | null): string {
-    return range === null ? '全部内容块' : `内容块 ${range.startPosition}–${range.endPosition}`;
+    return range === null ? '全部段落' : `段落 ${range.startPosition}–${range.endPosition}`;
   }
 
   /** The primary branch the Book's analysis navigates into: the frozen checkpoint's, else the working head's. */
@@ -511,7 +512,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         const manifestUnit = manifestUnits.get(unit.unitOrdinal);
         const title = manifestUnit === undefined
           ? `第 ${unit.unitOrdinal} 个阅读范围`
-          : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 内容块 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
+          : `${manifestUnit.headingText === null ? `第 ${unit.unitOrdinal} 个阅读范围` : `「${manifestUnit.headingText}」`}${manifestUnit.subUnitCount > 1 ? `（第 ${manifestUnit.subUnitIndex}/${manifestUnit.subUnitCount} 部分）` : ''} · 段落 ${manifestUnit.startPosition}–${manifestUnit.endPosition}`;
         item.append(element('h5', undefined, title));
         const lineage = unit.lineage.kind === 'reused' ? `复用自 Revision ${unit.lineage.revisionOrdinal} / 单元 ${unit.lineage.unitOrdinal}` : '本次重算';
         if (unit.state === 'closed') {
@@ -545,7 +546,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const item = element('li');
       item.dataset['analysisGapUnit'] = String(gap.unitOrdinal);
       item.dataset['analysisGapCode'] = gap.code;
-      item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 内容块 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
+      item.append(element('span', undefined, `第 ${gap.unitOrdinal} 个阅读范围 · 段落 ${gap.startPosition}–${gap.endPosition} · ${gap.reason} `));
       if (gap.firstBlockId !== null) item.append(returnButton(gap.firstBlockId));
       gaps.append(item);
     }
@@ -731,6 +732,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     input: { goal: string; update: BaselineAnalysisUpdateRequest | null; reconfirm: boolean },
     controls: { start: HTMLButtonElement; cancel: HTMLButtonElement; others: ReadonlyArray<HTMLButtonElement> },
     quick: DefaultExecutionRuleReference | null = null,
+    preview = false,
   ): Promise<void> {
     const { start, cancel, others } = controls;
     start.disabled = true;
@@ -759,11 +761,12 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           await quickStartPrepared(host, bookTitle, completed.result, quick);
           return;
         }
-        setStatus(completed.result.planRevision !== null
-          ? '计划的关键内容已变化：请在任务计划里查看计划修订并重新确认计划。'
-          : '任务计划已准备；可在任务计划里开始任务。', 'success');
-        // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer beside ②A, whose bar starts it (S74a).
-        openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null);
+        if (preview) { openTaskPlan(completed.result.bookId, 'baseline-analysis', completed.result.taskIntent?.taskIntentId ?? null); return; }
+        const ref = completed.result.taskIntent?.taskIntentId;
+        if (ref === undefined) throw new Error('任务计划尚未准备完成。');
+        await startPreparedTask(window.ai7, 'baseline-analysis', ref);
+        renderBaselineAnalysis(host, await window.ai7.inspectBaselineAnalysis(), bookTitle);
+        setStatus('已开始分析', 'success');
       }
     } catch (error) {
       start.disabled = false;
@@ -843,12 +846,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // both readings stay at full rank; the digests that identify them go one step away.
     facts.append(
       element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${controls.target.ordinal} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
-      element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个内容块 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
-      element('dt', undefined, '模型提供方 / 外发 / 预算'), element('dd', undefined, controls.providerConsequence),
+      element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
+      element('dt', undefined, '模型服务与用量'), element('dd', undefined, '沿用本次分析的模型服务、发送范围与预算；复用已有结果不调用模型。'),
       element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
     );
     section.append(facts, technicalDetails(
       'analysis-facts',
+      element('dt', undefined, '模型服务、发送范围与预算'), element('dd', 'technical-identity', controls.providerConsequence),
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
@@ -869,7 +873,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       }
       // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
       // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
-      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning));
+      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
       const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
       block.append(expected, technicalDetails('analysis-facts',
@@ -898,7 +902,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
               selectedRange = { startPosition: option.startPosition, endPosition: option.endPosition };
               block.dataset['selectedRange'] = radio.value;
               for (const key of ['expectedReused', 'expectedRecomputed', 'expectedInvalidated', 'expectedBypassed']) delete block.dataset[key];
-              expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
+              expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${ANALYSIS_READING}`;
               expectedExact.textContent = '';
               start.disabled = !action.available;
               try {
@@ -909,7 +913,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
                 block.dataset['expectedRecomputed'] = String(picked.expected.recomputed);
                 block.dataset['expectedInvalidated'] = String(picked.expected.invalidated);
                 block.dataset['expectedBypassed'] = String(picked.expected.bypassed);
-                expected.textContent = `所选内容块 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
+                expected.textContent = `所选段落 ${option.startPosition}–${option.endPosition}：${updateReuseReading(picked.expected, mode)}`;
                 expectedExact.textContent = reuseCountsText(picked.expected);
               } catch {
                 if (!radio.checked || !block.isConnected) return;
@@ -946,7 +950,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         }
         block.append(fieldset);
       }
-      const start = button('先看计划', 'secondary', async () => {
+      const start = button('查看计划', 'secondary', async () => {
         const update: BaselineAnalysisUpdateRequest = { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null };
         if (mode === 'reanalyze-range' && update.selectedRange === null) {
           setStatus('请先选择要重新分析的范围。', 'error');
@@ -956,7 +960,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           start,
           cancel,
           others: actionButtons.filter((other) => other !== start),
-        });
+        }, null, true);
       });
       start.dataset['analysisAction'] = mode;
       start.disabled = !action.available || mode === 'reanalyze-range';
@@ -969,30 +973,29 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const quickStart = action.quickStart ?? null;
       const quickRule = quickStart !== null && quickStart.available ? quickStart.rule : null;
       const quick = button(mode === 'sync-current' ? '开始同步' : mode === 'reanalyze-range' ? '开始重新分析' : '开始全部重来', 'primary', async () => {
-        if (quickRule === null) return;
-        await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: null }, reconfirm: false }, {
+        if (mode === 'reanalyze-range' && selectedRange === null) { setStatus('请先选择要重新分析的范围。', 'error'); return; }
+        await startAnalysisPreparation(host, bookTitle, { goal: action.goal, update: { mode, selectedRange: mode === 'reanalyze-range' ? selectedRange : null }, reconfirm: false }, {
           start: quick,
           cancel,
           others: actionButtons.filter((other) => other !== quick),
         }, quickRule);
       });
       quick.dataset['analysisAction'] = `quick-${mode}`;
-      quick.disabled = quickRule === null;
+      quick.disabled = !action.available;
       if (quickStart?.rule) quick.dataset['ruleVersionId'] = quickStart.rule.ruleVersionId;
       // Only a quick start on offer joins the actions a preparation holds and gives back.
-      if (quickRule !== null) actionButtons.push(quick);
+      actionButtons.push(quick);
       const quickNote = element('p', 'field-note analysis-quick-note', quickRule !== null
         ? `按默认执行规则「${quickRule.name}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`
         : quickStart?.reason ?? '这种更新没有快速开始；请先看计划。');
       quickNote.id = `analysis-quick-note-${mode}`;
       quickNote.dataset['quickStart'] = quickRule !== null ? 'available' : 'unavailable';
-      quick.setAttribute('aria-describedby', quickNote.id);
       const choice = element('div', 'analysis-update-choice');
       choice.id = `analysis-update-choice-${mode}`;
       choice.hidden = true;
       const choiceActions = element('div', 'button-row analysis-actions');
       choiceActions.append(quick, start);
-      choice.append(choiceActions, quickNote);
+      choice.append(choiceActions);
       const chooser = button(action.label, mode === 'sync-current' ? 'primary' : 'secondary', () => {
         choice.hidden = !choice.hidden;
         chooser.setAttribute('aria-expanded', choice.hidden ? 'false' : 'true');
@@ -1215,11 +1218,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       goal.readOnly = true;
       const actions = element('div', 'button-row analysis-actions');
       const cancel = analysisCancelButton();
-      const start = button('开始基线稿件分析', 'primary', () =>
+      const start = button('开始分析', 'primary', () =>
         startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start, cancel, others: [] }));
-      start.dataset['analysisAction'] = 'prepare';
-      actions.append(start, cancel);
-      form.append(label, goal, element('p', 'field-note', '开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开；不会构造模型请求。'), actions);
+      start.dataset['analysisAction'] = 'start';
+      const preview = button('查看计划', 'secondary', () => startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: preview, cancel, others: [start] }, null, true));
+      preview.dataset['analysisAction'] = 'prepare';
+      actions.append(start, preview, cancel);
+      form.append(label, goal, actions);
       records.append(form);
       host.replaceChildren(card);
       return;
@@ -1251,11 +1256,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const restart = element('section', 'form-row analysis-form analysis-restart');
       const restartActions = element('div', 'button-row analysis-actions');
       const restartCancel = analysisCancelButton();
-      const restartStart = button('开始基线稿件分析', 'primary', () =>
-        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [] }));
-      restartStart.dataset['analysisAction'] = 'prepare';
-      restartActions.append(restartStart, restartCancel);
-      restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以重新开始。开始后先为任务保存修订版并整理阅读范围，计划在右侧的任务计划里打开。'), restartActions);
+      const restartStart = button('开始分析', 'primary', () =>
+        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [restartPreview] }));
+      restartStart.dataset['analysisAction'] = 'start';
+      const restartPreview = button('查看计划', 'secondary', () =>
+        startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartPreview, cancel: restartCancel, others: [restartStart] }, null, true));
+      restartPreview.dataset['analysisAction'] = 'prepare';
+      restartActions.append(restartStart, restartPreview, restartCancel);
+      restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以直接重新开始，也可先查看计划。'), restartActions);
       records.append(restart);
     }
 
@@ -1275,7 +1283,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       records.append(more);
     }
 
-    // §10: 明确不会发生 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
+    // §10: 不会做 reads 不会做 in the editor's words, and the engineer's statements — every one of them,
     // unabridged — are one step away in 查看技术详情.
     const notDo = element('ul', 'analysis-list analysis-not-do');
     for (const statement of ANALYSIS_EDITORIAL_NOT_DO) notDo.append(element('li', undefined, statement));

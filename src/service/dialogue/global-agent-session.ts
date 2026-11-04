@@ -114,15 +114,15 @@ export function admittedGlobalAgentRoute(policy: LaunchPolicyProjection): Admitt
 }
 
 /**
- * The scoped rule's route (#1171): only v31's declared rule, read as it states its source and tool blocks, on a model with
- * tool-calling evidence. Its local tools are exactly the four declared names, one call at a time, under the existing caps.
+ * The scoped rule's route (#1171): only v31's declared rule, read as it states its source and tool blocks, on a channel whose protocol
+ * implements function tools. Its local tools are exactly the four declared names, one call at a time, under the existing caps.
  */
 export function admittedGlobalAgentScopedRoute(policy: LaunchPolicyProjection): AdmittedDialogueRoute | null {
   const route = admittedFastRoleRoute(policy, GLOBAL_AGENT_SCOPED_KIND, 'house-review-preference-excerpt');
   const declared = policy.providerProcessing.admittedRules.filter((entry) => entry.ruleId === GLOBAL_AGENT_SCOPED_RULE_ID);
   const rule = route?.globalAgentScopedDialogue;
   const local = route?.localTools;
-  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || (route.providerProcessingVersion !== 'v31' && route.providerProcessingVersion !== 'v32') ||
+  if (route?.operationalScope !== 'ordinary-production' || route.ruleId !== GLOBAL_AGENT_SCOPED_RULE_ID || (route.providerProcessingVersion !== 'v31' && (route.providerProcessingVersion !== 'v32' && route.providerProcessingVersion !== 'v33')) ||
       route.modelRole !== 'Fast Interaction Role' || declared.length !== 1 || declared[0]!.webSearchToolAllowed !== false ||
       declared[0]!.platformTools !== null || rule === undefined || local == null || local.targetedRetrieval.allowed !== true) return null;
   const { source, scopedTools: tools } = rule;
@@ -227,7 +227,7 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
   const ruleId = scope === undefined ? 'ordinary-production-global-agent-dialogue' : GLOBAL_AGENT_SCOPED_RULE_ID;
   const connection = store.globalAgentModelConnection();
   const routeId = route.profile.route;
-  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31' && selected.providerProcessingVersion !== 'v32') ||
+  if (policy.integrityState !== 'verified' || policy.operationalScope !== 'ordinary-production' || selected === null || (selected.providerProcessingVersion !== 'v30' && selected.providerProcessingVersion !== 'v31' && (selected.providerProcessingVersion !== 'v32' && selected.providerProcessingVersion !== 'v33')) ||
       (scope !== undefined && selected.providerProcessingVersion === 'v30') ||
       policy.activePolicySetVersion !== selected.activePolicySetVersion || policy.providerProcessing.version !== selected.providerProcessingVersion ||
       route.providerProcessingVersion !== selected.providerProcessingVersion ||
@@ -283,23 +283,23 @@ function qualifiedGlobalPreparation(store: GlobalAgentTurnStore, owner: Dialogue
 export function prepareGlobalAgentDisclosure(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput): GlobalAgentDisclosure {
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(policy) : owner.requireGlobalReady(policy);
-  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || policy.providerProcessing.version === 'v32')
+  if (policy.providerProcessing.version === 'v30' || policy.providerProcessing.version === 'v31' || (policy.providerProcessing.version === 'v32' || policy.providerProcessing.version === 'v33'))
     return qualifiedGlobalPreparation(store, owner, policy, input, store.prepareGlobalAgentTurn(input)).disclosure;
   return globalAgentDisclosure(store.prepareGlobalAgentTurn(input), store.inspectGlobalAgent().sourceCandidates ?? [],
     route, owner.globalDisclosureReference());
 }
 
-/** The explicit action consumes the preview; the same check is repeated at the final payload gate, including queued turns. */
+/** Direct send prepares its payload in the same action; recheck it at the final payload gate, including queued turns. */
 export function startGlobalAgentTurn(store: GlobalAgentTurnStore, owner: DialogueExecutionOwner,
   policy: () => LaunchPolicyProjection, input: PrepareGlobalAgentTurnInput, disclosureSha256: string | undefined): DialogueTurnStart {
   const disclosure = prepareGlobalAgentDisclosure(store, owner, policy(), input);
-  if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。未发送任何内容。');
+  if (disclosureSha256 !== disclosure.sha256) throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新发送问题。未发送任何内容。');
   const initialPolicy = policy();
   const route = input.kind === 'ask' && input.scope !== undefined ? owner.requireGlobalScopedReady(initialPolicy) : owner.requireGlobalReady(initialPolicy);
-  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31' || initialPolicy.providerProcessing.version === 'v32')
+  const prepared = (initialPolicy.providerProcessing.version === 'v30' || initialPolicy.providerProcessing.version === 'v31' || (initialPolicy.providerProcessing.version === 'v32' || initialPolicy.providerProcessing.version === 'v33'))
     ? qualifiedGlobalPreparation(store, owner, initialPolicy, input, store.prepareGlobalAgentTurn(input)) : null;
   if (prepared !== null && prepared.disclosure.sha256 !== disclosure.sha256)
-    throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新查看将发送的内容。');
+    throw new DialogueError('GLOBAL_AGENT_DISCLOSURE_CHANGED', '发送内容或模型服务已经变化；请重新发送问题。');
   const turn = input.kind === 'ask' ? store.askGlobalAgent(input, undefined, prepared?.qualification)
     : store.globalAgentAttempt(input, input.kind, undefined, false, prepared?.qualification);
   if (typeof turn === 'string') throw new DialogueError('DIALOGUE_INVALID', '回答标识无效。');

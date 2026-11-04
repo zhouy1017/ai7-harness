@@ -24,10 +24,6 @@ import {
   materialIndexStateLine,
   materialSegmentsHeading,
   artifactLine,
-  procedureLine,
-  procedureStagesLine,
-  PROCEDURE_PREDECESSOR_NOTE,
-  PROCEDURE_STATE_LABELS,
   EXEMPLARS_LATER,
   EXEMPLAR_READERS_REPORT_ADMIT,
   EXEMPLAR_READERS_REPORT_PINS,
@@ -76,7 +72,7 @@ describe('知识库', () => {
     }
     // 范例 keeps the Owner's default and 资料库 its gate, as the specification states them.
     expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')!.holds).toContain('学习准入默认「仅本社」');
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'library')!.holds).toContain('「允许参考」');
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'library')!.holds).toContain('任务');
   });
 
   it('says 审阅规范文件 in the editor\'s words: the version and issuer, its use, the Books on an older one, and each version', () => {
@@ -177,13 +173,6 @@ describe('范例 (Issue #427, S79b)', () => {
 
 describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
   it('names each pre-installed 工序 by what it does, its version, its use and its stages, and the artifact in its own words', () => {
-    // Issue #1081 (F-26a): the library re-expresses the nine categories and baseline analysis as pre-installed procedures.
-    const procedure = { procedureId: 'p', version: 1, digest: 'a'.repeat(64), title: '出版风险点标注', state: 'enabled' as const, uses: 0,
-      stages: [{ stageType: 'chunked-review' as const, label: '分块审读' }, { stageType: 'synthesis' as const, label: '综合' }] };
-    expect(procedureLine(procedure)).toBe('出版风险点标注 · 第 1 版 · 预装 · 已使用 0 次');
-    expect(procedureLine({ ...procedure, uses: 3 })).toBe('出版风险点标注 · 第 1 版 · 预装 · 已使用 3 次');
-    expect(procedureStagesLine(procedure)).toBe('分块审读 → 综合');
-    expect([PROCEDURE_STATE_LABELS, PROCEDURE_PREDECESSOR_NOTE]).toEqual([{ enabled: '已启用' }, '下方的可复用工序是审阅专用前身，仅用于审阅；已保存的版本仍可查看和运行。']);
     // The 方案 in the house's words, 本社方案 vN, in its lifecycle; no identifier of the carrier's.
     const artifact = { title: '本社方案', revision: 2, state: 'installed' as const, enabledBooks: 2 };
     expect(artifactLine(artifact)).toBe('本社方案 v2 · 已安装 · 已为 2 本书启用');
@@ -229,7 +218,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect((['book', 'house', 'excluded', 'deferred'] as const).map((choice) => eligibilityChoiceLabel(choice, '甲书')))
       .toEqual(['仅纳入《甲书》', '纳入出版社经验', '明确排除', '稍后决定']);
     expect(LIBRARY_HOUSE_CONSEQUENCE).toBe('纳入出版社经验：全社以后的图书都可能从它学习。');
-    expect(LIBRARY_EMPTY).toContain('「允许参考」');
+    expect(LIBRARY_EMPTY).toContain('任务');
     // Each decision on record, by its ordinal, what it decided, who and when.
     expect(libraryDecisionLine({ ordinal: 1, recordedAt: '2026-09-25T02:00:00.000Z', decision: { kind: 'attribution', scope: 'book', bookId: 'b', bookTitle: '甲书' } }, instant))
       .toBe('第 1 条 · 归属：《甲书》 · 本机编辑 · 〔2026-09-25〕');

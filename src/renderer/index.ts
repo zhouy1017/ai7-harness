@@ -1,3 +1,5 @@
+import { ScreenReturnHistory } from './screen-return.js';
+import { startPreparedTask } from './one-action-start.js';
 import { createModelServiceSettings } from './model-service-settings.js';
 import { createKnowledgeBase } from './knowledge-base.js';
 import { createDataStorage } from './data-storage.js';
@@ -42,7 +44,6 @@ import type {
   BookWorkbenchRoute,
   BookWorkOverviewProjection,
   ContinueImportProjection,
-  EditorialWorkspaceProfileProjection,
   ForegroundExecutionBoundaryProjection,
   GlobalAttentionItemProjection,
   GlobalAttentionProjection,
@@ -137,6 +138,7 @@ import {
 import type { ProductionDocumentContext } from './production-document-lens.js';
 import { conflictCompletionOn } from './proposal-conflict-labels.js';
 import {
+  fidelityDetailText,
   fidelityDisclosureSummary,
   fidelityOutcomeLabel,
   WORD_IMPORT_MODE_NAMES,
@@ -345,7 +347,7 @@ function jumpToSelectionText(bookId: string, selection: { readonly manuscriptId:
 async function startWholeBookTask(
   bookId: string,
   input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
-): Promise<{ ref: string; note?: string } | null> {
+): Promise<{ ref: string; note?: string; started?: true } | null> {
   // The Task Input is frozen from the journal: the words typed just now, and any held after a failed write, are
   // settled first, or nothing is prepared.
   if (!(await settleScreen())) return null;
@@ -364,10 +366,14 @@ async function startWholeBookTask(
     const taskIntentId = prepared.taskIntent?.taskIntentId ?? null;
     const planEnvelopeDigest = prepared.planEnvelope?.digest ?? null;
     if (taskIntentId === null) throw new Error('基线稿件分析准备未返回计划。');
-    if (input.quick === null || planEnvelopeDigest === null) {
-      setStatus(prepared.planRevision !== null ? '计划的关键内容已变化：请在任务计划里查看计划修订并重新确认计划。' : TASK_PANEL_COMPOSE_STATUS.prepared, 'success');
-      return { ref: taskIntentId };
+    if (input.quick === null) {
+      await startPreparedTask(window.ai7, 'baseline-analysis', taskIntentId);
+      taskSurfaceRefresh['baseline-analysis']?.();
+      globalAttentionReader.refresh();
+      setStatus('已开始分析', 'success');
+      return { ref: taskIntentId, started: true };
     }
+    if (planEnvelopeDigest === null) throw new Error('任务计划尚未准备完成。');
     const rule = input.quick;
     setStatus(`正在按默认执行规则「${rule.name}」开始…`, 'busy');
     let result: QuickStartBaselineAnalysisResult;
@@ -380,7 +386,7 @@ async function startWholeBookTask(
     taskSurfaceRefresh['baseline-analysis']?.();
     if (result.outcome === 'started') {
       setStatus(quickStartStartedLine(rule, result.projection), 'success');
-      return null;
+      return { ref: taskIntentId, started: true };
     }
     const note = taskPlanQuickStartFellBack(result.reasons);
     setStatus(note);
@@ -434,7 +440,7 @@ async function prepareSelectionTask(
       quick: null,
     });
     if (next === null) return false;
-    taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
+    if (next.started !== true) taskDrawer.open({ bookId, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
     return true;
   }
   if (choice.kind === 'procedure') {
@@ -468,7 +474,7 @@ async function prepareSelectionTask(
   return prepareSelectionReview(bookId, [choice.categoryId], anchor, null, returnFocus);
 }
 
-/** 审阅 of 当前选区 prepared on the paragraph — by hand in one category, or pinned to a procedure version — and its plan opened. */
+/** Start selection review from the paragraph, following its marks without requiring the plan drawer. */
 async function prepareSelectionReview(
   bookId: string,
   categoryIds: ReadonlyArray<string>,
@@ -495,7 +501,11 @@ async function prepareSelectionReview(
     }
     taskSurfaceRefresh['review-run']?.();
     setStatus(SELECTION_TASK_STATUS.prepared, 'success');
-    taskDrawer.open({ bookId, kind: 'review-run', ref: result.run.reviewRunId }, returnFocus);
+    await startPreparedTask(window.ai7, 'review-run', result.run.reviewRunId);
+    taskSurfaceRefresh['review-run']?.();
+    globalAttentionReader.refresh();
+    manuscriptOnScreen?.followReviewMarks(bookId, result.run.reviewRunId);
+    setStatus('已开始审阅', 'success');
     return true;
   } catch (error) {
     setStatus(rendererErrorMessage(error, SELECTION_TASK_STATUS.failed), 'error');
@@ -986,7 +996,27 @@ function applyAuthorityInterruption(): void {
   else setStatus('本地业务服务已中断；当前业务操作已停止。', 'error');
 }
 
+const screenReturns = new ScreenReturnHistory();
+function returnToOrigin(): Promise<void> { return screenReturns.back(screen.dataset['screen'] ?? '', initializeStartup); }
+function restoreCurrentScreen(): () => void | Promise<void> {
+  const content = screen.firstElementChild;
+  const restore = content instanceof HTMLElement ? agentWorkspaceReturns.get(content) : undefined;
+  if (restore !== undefined) return restore;
+  const state = screen.dataset['screen'];
+  if (state === 'settings') return renderSettingsHub;
+  if (state === 'data-storage') return renderDataAndStorage;
+  if (state === 'quality-learning') return () => renderQualityLearning('learning', null);
+  if (state === 'knowledge-base') return () => renderKnowledgeBase();
+  if (state === 'model-service') return renderModelServiceSettings;
+  if (state === 'series-list' || state === 'series') return () => renderSeriesList(null);
+  if (state === 'evaluation-calibration') return () => renderEvaluationCalibration(null);
+  const book = shell.currentBook();
+  if (book !== null && content instanceof HTMLElement && content.dataset['bookId'] === book.bookId) return () => openBookSection(book, 'overview');
+  return initializeStartup;
+}
+
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
+  screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;
   const recoveryReturn = currentRecoveryReturn();
   if (recoveryReturn && previous instanceof HTMLElement && previous.dataset['bookId'] !== undefined &&
@@ -1452,7 +1482,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
     // reporting a count of nothing.
     element('dt', undefined, '检测结果'),
     element('dd', undefined, staged.editableImport.available
-      ? `${staged.detectedBlockCount} 个可编辑内容块`
+      ? `${staged.detectedBlockCount} 个可编辑段落`
       : '未进行本地解析；仅保留原始文件'),
   );
   card.append(details, technicalDetails(undefined, element('dt', undefined, '来源 SHA-256'), sourceDigest));
@@ -2412,7 +2442,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       categories.append(element(
         'li',
         undefined,
-        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${category.detail}`,
+        `${category.label} · ${category.statusLabel} · ${category.count} 项 · ${fidelityDetailText(category.detail)}`,
       ));
     }
     fidelity.append(categories);
@@ -2425,7 +2455,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       for (const item of record.degradationDecision.acceptedItems) {
         const category = record.fidelityCategories.find((candidate) => candidate.key === item.categoryKey);
         if (!category) throw new Error('AI7_IMPORT_RESULT_INVALID');
-        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${category.detail}`);
+        const row = element('li', undefined, `${item.label} · ${item.count} 项 · ${fidelityDetailText(category.detail)}`);
         row.dataset['degradationCategory'] = item.categoryKey;
         row.dataset['degradationCount'] = String(item.count);
         accepted.append(row);
@@ -2435,7 +2465,7 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
     }
   }
   if (record.kind === 'source-import-record') {
-    detail.append(listSection('明确不会发生', record.namedNonEffects));
+    detail.append(listSection('不会做', record.namedNonEffects));
   }
   if (record.kind === 'revision') {
     const openRevision = button('打开此历史修订版', 'secondary', async () => {
@@ -2522,6 +2552,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   content.append(element('p', 'section-label', FINDINGS_CENTER_WORDS.section(bookTitle)), element('h2', undefined, FINDINGS_CENTER_WORDS.heading),
     element('p', 'lede', FINDINGS_CENTER_WORDS.lede), host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
+  agentWorkspaceReturns.set(content, () => renderBookFindings(bookId, bookTitle));
   mountFindingsCenter(host, (offset) => window.ai7.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
     const target = item.target;
     if (target.kind === 'review') renderBookReview(bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
@@ -2600,11 +2631,7 @@ function renderBookAnalysis(bookId: string, bookTitle: string, target?: JudgedAn
         unavailable.dataset['analysisState'] = 'unavailable';
         const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
         unavailable.append(element('h3', undefined, '基线稿件分析'), element('p', undefined, refusal.text));
-        if (refusal.actionLabel !== null) {
-          const toProfile = button(refusal.actionLabel, 'secondary', () => void openAgentWorkspaceProfile(bookId, bookTitle));
-          toProfile.dataset['profileAction'] = 'go-to-profile';
-          unavailable.append(toProfile);
-        }
+
         host.replaceChildren(unavailable);
       },
     );
@@ -3084,7 +3111,7 @@ function renderBookOverview(
       element('dt', undefined, '分支 ID'), element('dd', 'technical-identity', anchor.branchId),
       element('dt', undefined, '修订版 ID'), element('dd', 'technical-identity', anchor.revisionId),
       element('dt', undefined, '修订日志序号'), element('dd', 'technical-identity', String(anchor.journalSequence)),
-      element('dt', undefined, '上次位置内容块 ID'),
+      element('dt', undefined, '上次位置段落 ID'),
       element('dd', 'technical-identity', anchor.entry === null ? '—' : anchor.entry.blockId),
       element('dt', undefined, '上次位置字素'),
       element('dd', 'technical-identity', anchor.entry === null ? '—' : String(anchor.entry.grapheme)),
@@ -3119,26 +3146,15 @@ function renderBookOverview(
   content.append(seriesSlot);
   mountBookSeries({ root: seriesSlot, bookId: overview.book.bookId, api: window.ai7 });
 
-  const artifactHost = element('div');
-  artifactHost.dataset['nativeArtifactBookId'] = overview.book.bookId;
-  content.append(artifactHost);
-  void window.ai7.inspectEditorialWorkspaceProfile().then(
-    (projection) => {
-      if (artifactHost.isConnected && projection.bookId === artifactHost.dataset['nativeArtifactBookId']) {
-        renderEditorialWorkspaceProfile(artifactHost, projection);
-      }
-    },
-    (error) => {
-      if (!artifactHost.isConnected) return;
-      const unavailable = element('section', 'native-artifact-card attention-note');
-      unavailable.dataset['nativeArtifactState'] = 'unavailable-needs-attention';
-      unavailable.append(
-        element('h3', undefined, '编辑工作区方案'),
-        element('p', undefined, rendererErrorMessage(error, '无法读取本地声明式方案。')),
-      );
-      artifactHost.replaceChildren(unavailable);
-    },
-  );
+  const agentEntry = element('div', 'agent-workspace-entry');
+  agentEntry.dataset['agentWorkspaceEntry'] = 'available';
+  const openAgent = button(AGENT_WORKSPACE_WORDS.overviewEntry, 'secondary', () => {
+    const back = agentWorkspaceReturn(overview.book.bookId, overview.book.title);
+    void leaveThen(() => openAgentWorkspace(overview.book.bookId, back));
+  });
+  openAgent.dataset['agentWorkspaceAction'] = 'open';
+  agentEntry.append(openAgent);
+  content.append(agentEntry);
 
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
@@ -3201,12 +3217,7 @@ function renderBookOverview(
         analysisHost.dataset['analysisState'] = 'unavailable';
         const refusal = analysisRefusalView(rendererErrorCode(error), rendererErrorMessage(error, '无法读取本地图书的基线稿件分析记录。'));
         analysisHost.replaceChildren(element('h3', undefined, '分析'), element('p', 'attention-note', refusal.text));
-        if (refusal.actionLabel !== null) {
-          // Already on 工作概览: the profile card is on this screen, so the button only brings it into view.
-          const toProfile = button(refusal.actionLabel, 'secondary', () => void focusEditorialProfileCard(overview.book.bookId));
-          toProfile.dataset['profileAction'] = 'go-to-profile';
-          analysisHost.append(toProfile);
-        }
+
       },
     );
   };
@@ -3619,210 +3630,6 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
   host.replaceChildren(card);
 }
 
-function renderEditorialWorkspaceProfile(
-  host: HTMLElement,
-  projection: EditorialWorkspaceProfileProjection,
-): void {
-  const card = element('section', 'native-artifact-card');
-  card.dataset['nativeArtifactState'] = projection.lifecycle.state;
-  card.dataset['nativeArtifactIdentity'] = projection.identity;
-  card.dataset['authoritySidecarIdentity'] = projection.sidecar.identity;
-  if (projection.sidecar.activeRevision !== null) {
-    card.dataset['authoritySidecarActiveRevision'] = String(projection.sidecar.activeRevision);
-  }
-  if (projection.sidecar.offeredRevision !== null) {
-    card.dataset['authoritySidecarOfferedRevision'] = String(projection.sidecar.offeredRevision);
-  }
-  const heading = element('div', 'native-artifact-heading');
-  heading.append(
-    element('h3', undefined, '编辑工作区方案'),
-    element(
-      'span',
-      `status-pill native-artifact-status native-artifact-status-${projection.lifecycle.state}`,
-      projection.lifecycle.label,
-    ),
-  );
-  const values = element('dl', 'native-artifact-facts');
-  values.append(
-    element('dt', undefined, '类型'), element('dd', undefined, projection.kind),
-    element('dt', undefined, '来源'), element('dd', undefined, projection.provenance),
-    element('dt', undefined, '许可'), element('dd', undefined, projection.license),
-    element('dt', undefined, '精确字节'), element('dd', undefined, `${projection.byteLength} bytes`),
-    element('dt', undefined, '兼容性'), element('dd', undefined, projection.compatibility),
-  );
-  const artifactExact = technicalDetails(
-    'native-artifact-facts',
-    element('dt', undefined, '原生载体身份'), element('dd', 'technical-identity', projection.identity),
-    element('dt', undefined, '原生载体版本'), element('dd', 'technical-identity', projection.version),
-    element('dt', undefined, '内置载体'), element('dd', 'technical-identity', projection.source),
-    element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', projection.sha256),
-  );
-  const sidecar = element('section', 'native-artifact-authority');
-  const sidecarValues = element('dl', 'native-artifact-facts');
-  // Which Revision is in force for this Book, what successor is on offer, and when each was pinned are
-  // the enablement decisions this card exists for, so the pin history keeps its local reading at full
-  // rank; the sidecar's identity and the exact pin instants go one step away. It reads as a list rather
-  // than a `；`-joined wall (ADR 0071 §2) — one line per pin, in the order this Book pinned them — and
-  // each pin's digest and exact instant stay on one line of their own in the disclosure, so a reader can
-  // copy the identity of one pin without separating it from the pin it belongs to.
-  const pinHistoryValue = (layer: 'decision' | 'technical'): HTMLElement => {
-    const value = element('dd', layer === 'technical' ? 'technical-identity' : undefined);
-    if (projection.sidecar.pinHistory.length === 0) {
-      value.textContent = '空（无）';
-      return value;
-    }
-    const pins = element('ul');
-    for (const pin of projection.sidecar.pinHistory) {
-      const item = element('li', undefined, layer === 'technical'
-        ? `Revision ${pin.revision} · ${pin.sha256} · ${pin.pinnedAt}`
-        : `Revision ${pin.revision} · ${localInstantLabel(pin.pinnedAt)}`);
-      item.dataset['sidecarPin'] = String(pin.revision);
-      pins.append(item);
-    }
-    value.append(pins);
-    return value;
-  };
-  sidecarValues.append(
-    element('dt', undefined, '当前生效 Revision'), element('dd', undefined,
-      projection.sidecar.activeRevision === null ? '空（本图书未启用）' : `Revision ${projection.sidecar.activeRevision}`),
-    element('dt', undefined, '可审阅后继'), element('dd', undefined,
-      projection.sidecar.offeredRevision === null ? '空（无）' : `Revision ${projection.sidecar.offeredRevision}`),
-    element('dt', undefined, '本图书 pin 历史'), pinHistoryValue('decision'),
-  );
-  sidecar.append(element('h4', undefined, 'AI7 权限侧车'), sidecarValues, technicalDetails(
-    'native-artifact-facts',
-    element('dt', undefined, '侧车身份'), element('dd', 'technical-identity', projection.sidecar.identity),
-    element('dt', undefined, '本图书 pin 历史（精确时间）'), pinHistoryValue('technical'),
-  ));
-  // Past revisions go one step away, so the card's actions stay reachable without scrolling past every
-  // revision this artifact has ever had (ADR 0071 §2): the Revision in force for this Book and the
-  // successor on offer render in place, and every other section moves into one disclosure that states
-  // how many there are. When neither is pinned nothing here is past — every section renders in place,
-  // because the ceiling an editor is deciding to install is the decision, not history.
-  const pinned = projection.sidecar.activeRevision !== null || projection.sidecar.offeredRevision !== null;
-  const pastRevisions: HTMLElement[] = [];
-  for (const revision of projection.sidecar.revisions) {
-    const revisionSection = element('section', 'native-artifact-authority');
-    revisionSection.dataset['authoritySidecarRevision'] = String(revision.revision);
-    const authorityValues = element('dl', 'native-artifact-facts');
-    const ceiling = revision.authorityCeiling;
-    // The eight ceiling fields that can be empty fold into one reading (ADR 0071 §2): a granted field
-    // keeps its own row, and the rest collect their labels, in the order they read in, into the row that
-    // closes the record. A ceiling that grants none of the eight says so once rather than eight times;
-    // `Model Role`, which this artifact always declares, stays at full rank either way.
-    const undeclared: string[] = [];
-    const ceilingRow = (label: string, granted: ReadonlyArray<string> | boolean): ReadonlyArray<HTMLElement> => {
-      const reading = typeof granted === 'boolean'
-        ? (granted ? '有' : null)
-        : (granted.length === 0 ? null : granted.join('、'));
-      if (reading === null) {
-        undeclared.push(label);
-        return [];
-      }
-      return [element('dt', undefined, label), element('dd', undefined, reading)];
-    };
-    authorityValues.append(
-      element('dt', undefined, '规范字节'), element('dd', undefined, `${revision.byteLength} bytes`),
-      element('dt', undefined, '兼容性'), element('dd', undefined, revision.compatibility),
-      element('dt', undefined, '模型角色'), element('dd', undefined, ceiling.modelRoles.join('、')),
-      ...ceilingRow('AI7 能力', ceiling.capabilities),
-      ...ceilingRow('可读范围', ceiling.readableScopeKinds),
-      ...ceilingRow('模型提供方绑定', ceiling.providerBindings),
-      ...ceilingRow('凭据访问', ceiling.credentialAccess),
-      ...ceilingRow('网络访问', ceiling.networkAccess),
-      ...ceilingRow('受控动作', ceiling.effectClasses),
-      ...ceilingRow('后台分析登记', ceiling.backgroundAnalysisEnrollment),
-      ...ceilingRow('AI7 正式应用', ceiling.applyAuthority),
-    );
-    if (undeclared.length === 8) {
-      authorityValues.append(element('dt', undefined, '权限上限'), element('dd', undefined, '未声明任何权限（8 项均为空）'));
-    } else if (undeclared.length > 0) {
-      authorityValues.append(element('dt', undefined, '未声明'), element('dd', undefined, undeclared.join('、')));
-    }
-    revisionSection.append(element('h4', undefined, `权限上限 · Revision ${revision.revision}`), authorityValues,
-      technicalDetails('native-artifact-facts',
-        element('dt', undefined, 'SHA-256'), element('dd', 'technical-identity', revision.sha256)));
-    if (!pinned || revision.revision === projection.sidecar.activeRevision ||
-        revision.revision === projection.sidecar.offeredRevision) {
-      sidecar.append(revisionSection);
-    } else {
-      pastRevisions.push(revisionSection);
-    }
-  }
-  if (pastRevisions.length > 0) {
-    const otherRevisions = element('details', 'technical-details');
-    otherRevisions.append(element('summary', undefined, `其他 Revision（${pastRevisions.length}）`), ...pastRevisions);
-    sidecar.append(otherRevisions);
-  }
-  const nonEffects = element('ul', 'native-artifact-non-effects');
-  for (const statement of projection.namedNonEffects) nonEffects.append(element('li', undefined, statement));
-  const actions = element('div', 'button-row native-artifact-actions');
-  if (projection.actions.canInstall) {
-    const install = button('获取并安装（保持停用）', 'primary', async () => {
-      install.disabled = true;
-      setStatus('正在保留并验证本地方案…', 'busy');
-      try {
-        const installed = await window.ai7.installEditorialWorkspaceProfile();
-        if (host.isConnected && installed.bookId === host.dataset['nativeArtifactBookId']) {
-          renderEditorialWorkspaceProfile(host, installed);
-          setStatus('方案已安装，本图书仍保持停用。', 'success');
-        }
-      } catch (error) {
-        install.disabled = false;
-        setStatus(rendererErrorMessage(error, '无法安装本地方案。'), 'error');
-      }
-    });
-    install.dataset['nativeArtifactAction'] = 'install-disabled';
-    actions.append(install);
-  }
-  if (projection.actions.canEnable) {
-    const upgrading = projection.sidecar.activeRevision === 1;
-    const enable = button(upgrading ? '审阅并追加 Revision 2' : '审阅并为本图书启用 Revision 2', 'primary', async () => {
-      enable.disabled = true;
-      setStatus(upgrading ? '正在为当前图书追加 Revision 2…' : '正在为当前图书启用 Revision 2…', 'busy');
-      try {
-        const enabled = await window.ai7.enableEditorialWorkspaceProfile();
-        if (host.isConnected && enabled.bookId === host.dataset['nativeArtifactBookId']) {
-          renderEditorialWorkspaceProfile(host, enabled);
-          setStatus(upgrading ? 'Revision 2 已追加；Revision 1 历史保持不变。' : 'Revision 2 已仅为当前图书启用。', 'success');
-        }
-      } catch (error) {
-        enable.disabled = false;
-        setStatus(rendererErrorMessage(error, '无法为当前图书启用方案。'), 'error');
-      }
-    });
-    enable.dataset['nativeArtifactAction'] = 'enable-current-book';
-    actions.append(enable);
-  }
-  // Agent 工作区 (Issue #90, wave 13 slice 13a; AGENT-001, 004): an explicit choice from here once Revision 2 is enabled for
-  // this Book; before that, the one sentence of what opens it.
-  const agentEntry = element('div', 'agent-workspace-entry');
-  const agentAvailable = projection.lifecycle.enabledForCurrentBook && projection.sidecar.activeRevision === 2;
-  agentEntry.dataset['agentWorkspaceEntry'] = agentAvailable ? 'available' : 'unavailable';
-  if (agentAvailable) {
-    const open = button(AGENT_WORKSPACE_WORDS.overviewEntry, 'secondary', () => {
-      const back = agentWorkspaceReturn(projection.bookId, shell.currentBook()?.title ?? '');
-      void leaveThen(() => openAgentWorkspace(projection.bookId, back));
-    });
-    open.dataset['agentWorkspaceAction'] = 'open';
-    agentEntry.append(element('p', 'field-note', AGENT_WORKSPACE_WORDS.overviewNote), open);
-  } else {
-    agentEntry.append(element('p', 'field-note', AGENT_WORKSPACE_WORDS.overviewPrerequisite));
-  }
-  card.append(
-    heading,
-    element('p', 'field-note', '这是一份声明式、Provider-free 的本地方案；安装与为当前图书启用是两个独立动作。'),
-    values,
-    artifactExact,
-    sidecar,
-    element('h4', undefined, '明确不会发生'),
-    nonEffects,
-    agentEntry,
-    actions,
-  );
-  host.replaceChildren(card);
-}
-
 function renderBookCreationReview(review: BookCreationReviewProjection): void {
   const content = panel();
   content.append(
@@ -3844,7 +3651,7 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
   content.append(
     identity,
     listSection('将创建的记录', review.recordsToCreate),
-    listSection('明确不会发生', review.nonEffects),
+    listSection('不会做', review.nonEffects),
   );
   const dimensions = element('section', 'review-section');
   dimensions.append(
@@ -3975,7 +3782,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   content.classList.add('series-list-screen');
   const host = element('div');
   const back = element('div', 'button-row');
-  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  back.append(button('返回', 'quiet', () => void returnToOrigin()));
   content.append(element('p', 'section-label', SERIES_TITLE), element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
   replaceScreen('series-list', content);
   setStatus(SERIES_STATUS.loading, 'busy');
@@ -4025,7 +3832,7 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   content.classList.add('evaluation-calibration-page');
   const host = element('div');
   const back = element('div', 'button-row');
-  back.append(button('返回', 'quiet', () => void initializeStartup()));
+  back.append(button('返回', 'quiet', () => void returnToOrigin()));
   content.append(
     element('p', 'section-label', `设置 · ${CALIBRATION_PAGE_GROUP}`),
     element('h2', undefined, CALIBRATION_PAGE_TITLE),
@@ -4335,7 +4142,6 @@ async function openAgentWorkspace(bookId: string, back: () => void): Promise<voi
         setStatus,
         errorMessage: rendererErrorMessage,
         back,
-        openProfile: () => void leaveThen(() => openAgentWorkspaceProfile(route.bookId, route.bookTitle)),
         openMarks: (promotion) => void leaveThen(() => openAgentWorkspaceMarks(promotion, route.bookTitle)),
       });
       replaceScreen('agent-workspace', content);
@@ -4360,32 +4166,6 @@ async function openAgentWorkspaceMarks(promotion: AgentWorkspacePromotionProject
   } catch (error) {
     setStatus(rendererErrorMessage(error, AGENT_WORKSPACE_WORDS.manuscriptFailed), 'error');
   }
-}
-
-/** 前往编辑工作区方案: 工作概览 with the profile card, where Revision 2 is enabled for the Book, in view. */
-async function openAgentWorkspaceProfile(bookId: string, bookTitle: string): Promise<void> {
-  await openBookSection({ bookId, title: bookTitle }, 'overview');
-  await focusEditorialProfileCard(bookId);
-}
-
-/** The profile card of the 工作概览 on screen, focused by its heading and scrolled into view once it has been drawn. */
-async function focusEditorialProfileCard(bookId: string): Promise<void> {
-  const card = await new Promise<HTMLElement | null>((resolveCard) => {
-    const started = performance.now();
-    const look = (): void => {
-      const found = screen.querySelector<HTMLElement>(`[data-native-artifact-book-id="${bookId}"] .native-artifact-card`);
-      if (found !== null || performance.now() - started > 5_000) resolveCard(found);
-      else window.setTimeout(look, 50);
-    };
-    look();
-  });
-  if (card === null) return;
-  const heading = card.querySelector<HTMLElement>('h3');
-  if (heading) {
-    heading.tabIndex = -1;
-    heading.focus();
-  }
-  card.scrollIntoView({ block: 'start' });
 }
 
 /**
@@ -4905,8 +4685,8 @@ function renderEditorWindow(
     setContextActions: (content) => shell.setContextActions(content),
     setStatus, setCloseRisk, errorMessage: rendererErrorMessage, recentlyActivatedControl, awaitServiceJob,
     composerRangeOf, selectionTaskOffer, selectionProcedureOffer, prepareSelectionTask,
-    renderEditorWindow, renderBookOverview, renderBookAnalysis, renderBookSources, renderBookReview,
-    renderBookDeliverables, renderBookEvaluation, renderBookFindings, renderProposalConflict, renderProposalWorkspace,
+    renderEditorWindow, renderBookAnalysis, renderBookReview,
+    renderBookDeliverables, renderProposalConflict, renderProposalWorkspace,
     returnToRecoveryComparison,
   });
 }
@@ -4937,17 +4717,18 @@ const appearance = createAppearance(window.ai7);
 
 
 const { renderDataAndStorage } = createDataStorage({
-  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, technicalDetails, replaceScreen,
+  setStatus, panel, element, button, rendererErrorMessage, initializeStartup, returnToOrigin, technicalDetails, replaceScreen,
 });
 
 
 const { renderKnowledgeBase, renderQualityLearning } = createKnowledgeBase({
-  setStatus, rendererErrorMessage, element, openWordSourceVersion, technicalDetails, panel, button, leaveThen, renderGlobalAgent, initializeStartup, replaceScreen, openFeedbackTarget, openLearningMaterialSource, requestBookWorkbenchRoute, renderBookDeliverables, renderBookEvaluation, renderBookReview,
+  rememberReturn: (node, restore) => agentWorkspaceReturns.set(node, restore),
+  setStatus, rendererErrorMessage, element, openWordSourceVersion, technicalDetails, panel, button, leaveThen, renderGlobalAgent, initializeStartup, returnToOrigin, replaceScreen, openFeedbackTarget, openLearningMaterialSource, requestBookWorkbenchRoute, renderBookDeliverables, renderBookEvaluation, renderBookAnalysis, renderBookReview,
 });
 
 
 const { renderModelServiceSettings } = createModelServiceSettings({
-  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, replaceScreen,
+  element, button, setStatus, rendererErrorMessage, panel, initializeStartup, returnToOrigin, replaceScreen,
 });
 
 async function initializeRenderer(): Promise<void> {

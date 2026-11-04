@@ -151,7 +151,7 @@ type Focus = 'keep' | 'prepare' | 'version' | 'export-heading' | 'export-choose'
  * 图书交付包 on 交付物 (Issue #416, plan slice S67a; editor-surfaces §9; V2-UX-BUNDLE-001 to 005): the third of the
  * page's three things, apart from 发稿 and 交付 · 生产文档. It states what a package is and is not, lists the conditions
  * with a route beside each one that does not hold, shows what a package made now would hold and leave out, and
- * offers `准备图书交付包` — unavailable, with the unmet conditions named beside it, until every one holds and a purpose
+ * offers `准备图书交付包` — unavailable, with the missing manuscript payload named beside it, until the manuscript payload exists and a purpose
  * is written. Each prepared version is listed newest first with its purpose and its Package Export History.
  *
  * A version's `导出…` (Issue #416, S67b; BUNDLE-004, EXP-010 to EXP-022) lists the files it writes; `选择位置…` asks the

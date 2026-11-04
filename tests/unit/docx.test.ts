@@ -151,12 +151,14 @@ describe('explicit tracked Word successor compiler (#1132)', () => {
     if (staged.value.compatibility !== 'ready') throw new Error('expected honest nonempty Word preview');
     expect(staged.value.previewReading).toBe('accepted');
     expect(staged.value.readings.rejected).toMatchObject({ usable: false, blockCount: 0 });
-    expect(staged.value.readings.accepted).toMatchObject({ usable: true, blockCount: 1 });
+    expect(staged.value.readings.accepted).toMatchObject({ usable: true, blockCount: 3 });
     expect(staged.value.legacy.kind).toBe('unavailable');
     expect(Object.hasOwn(staged.value, 'acceptedBaselineConfirmed')).toBe(false);
-    expect(preview).toEqual(['new']);
+    expect(preview[0]).toBe('new');
+    expect(preview).toHaveLength(3);
+    expect(result.word.readings.accepted.blocks.slice(1).map((block) => block.note?.part)).toEqual(['footnote', 'endnote']);
     expect(legacy).toEqual([]);
-    expect(result.parsed.blockCount).toBe(1);
+    expect(result.parsed.blockCount).toBe(3);
     expect(result.parsed.importedMarks).toEqual([]);
     expect(result.parsed.fidelity.find((row) => row.key === 'notes')!.count).toBe(2);
     expect(deriveImportFidelityPlan(result.parsed.fidelity, result.parsed.sourceDigest, result.parsed.archiveBytes, undefined,

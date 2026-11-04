@@ -81,7 +81,7 @@ describe('知识库 and the Run', () => {
         guidelineChanges: [{ categoryId: 'style-and-format', label: '体例与格式', title: '体例条款', sourceVersion: '1', version: '2' }],
       },
     })).toEqual([
-      '按《体例复核》第 2 版：体例与格式 → 情节逻辑与前后一致；范围「全书」。类别已按它选好，计划照常先看。',
+      '按《体例复核》第 2 版：体例与格式 → 情节逻辑与前后一致；范围「全书」。类别已按它选好，计划可按需查看。',
       '不运行「情节逻辑与前后一致」：还没有基线分析。',
       '「体例与格式」按今天的《体例条款》第 2 版，来源审阅用的是第 1 版',
       '没有用第 3 版：工序已更新。',
@@ -97,7 +97,7 @@ describe('知识库 and the Run', () => {
       bookId: 'b', procedureId: 'p', title: '体例复核', passedOver: [{ version: 3, reason: '这一版已停用。' }], unavailableReason: null,
       eligibleVersions: [{ versionId: 'v2', version: 2 }, { versionId: 'v1', version: 1 }], resolved,
     })).toEqual([
-      '按《体例复核》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划照常先看。',
+      '按《体例复核》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划可按需查看。',
       '你选了第 1 版；最新可用的是第 2 版。',
       '没有用第 3 版：这一版已停用。',
     ]);
@@ -155,24 +155,24 @@ describe('Series material chosen apart, applicability and linked packages (Issue
     const run = { bookId: 'b', procedureId: 'p', title: '书系复核', passedOver: [], unavailableReason: null, eligibleVersions: [{ versionId: 'v', version: 1 }],
       resolved: { versionId: 'v', version: 1, latestEligible: true, documentSha256: 'd', scopeSlot: 'whole' as const, steps, guidelineChanges: [] } };
     expect(sheetProcedureLines(run)).toEqual([
-      '按《书系复核》第 1 版：体例与格式 → 书系一致性；范围「全书」。其余类别已按它选好，计划照常先看。',
+      '按《书系复核》第 1 版：体例与格式 → 书系一致性；范围「全书」。其余类别已按它选好，计划可按需查看。',
       '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。',
     ]);
     // A procedure of the Series step alone ticks nothing: the editor ticks it, or runs nothing.
     expect(sheetProcedureLines({ ...run, resolved: { ...run.resolved, steps: [steps[1]!] } })[0])
-      .toBe('按《书系复核》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划照常先看。');
+      .toBe('按《书系复核》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划可按需查看。');
     // The status says what the sheet ticked, in the sheet's own words (S31b review P3-5).
     expect(sheetProcedureChosenStatus(run)).toBe('已读取《书系复核》第 1 版：其余类别已按它选好。');
     expect(sheetProcedureChosenStatus({ ...run, resolved: { ...run.resolved, steps: [steps[1]!] } })).toBe('已读取《书系复核》第 1 版：要运行的类别由你勾选。');
     expect(sheetProcedureChosenStatus({ ...run, resolved: { ...run.resolved, steps: [steps[0]!] } })).toBe('已读取《书系复核》第 1 版：类别已按它选好。');
     const none = { ...run, resolved: { ...run.resolved, steps: [{ ...steps[0]!, available: false, unavailableReason: '还没有基线分析。' }] } };
     expect(sheetProcedureChosenStatus(none)).toBe('已读取《书系复核》第 1 版：这本书现在一步也不能运行。');
-    expect(sheetProcedureLines(none)[0]).toBe('按《书系复核》第 1 版：体例与格式；范围「全书」。这本书现在一步也不能运行，计划照常先看。');
+    expect(sheetProcedureLines(none)[0]).toBe('按《书系复核》第 1 版：体例与格式；范围「全书」。这本书现在一步也不能运行，计划可按需查看。');
     expect(sheetProcedureChosenStatus({ ...run, resolved: null, unavailableReason: '还没有启用。' })).toBe('还没有启用。');
     // A Series step this Book cannot take is said as left out, never as a choice.
     const outside = { ...run, resolved: { ...run.resolved, steps: [steps[0]!, { ...steps[1]!, available: false, unavailableReason: '这本书不在任何书系中。' }] } };
     expect(sheetProcedureLines(outside)).toEqual([
-      '按《书系复核》第 1 版：体例与格式 → 书系一致性；范围「全书」。类别已按它选好，计划照常先看。',
+      '按《书系复核》第 1 版：体例与格式 → 书系一致性；范围「全书」。类别已按它选好，计划可按需查看。',
       '不运行「书系一致性」：这本书不在任何书系中。',
     ]);
     expect(sheetChosenApartLine('书系一致性')).toBe('「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。');

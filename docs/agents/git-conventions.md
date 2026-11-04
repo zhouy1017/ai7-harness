@@ -4,7 +4,7 @@
 
 ## Branches
 
-Protected `dev` and `main` receive changes through PRs; direct pushes remain prohibited. Use the wave and Issue-bound slice names assigned by Orca dispatch. A slice targets its wave; final development integration targets dev. The [Change Brief](change-brief.md) fixes the bounded outcome and allowed paths.
+Protected `dev` and `main` receive changes through PRs; direct pushes remain prohibited. Use the session-assigned target and slice names; Orca dispatch names are defaults. A slice targets its wave; final development integration targets dev. The [Change Brief](change-brief.md) fixes the bounded outcome and hint paths.
 
 ## Commits
 
@@ -28,7 +28,7 @@ Use truthful tool attribution for agent-authored commits. A Codex session may us
 ## Pull requests and evidence
 
 - Title describes the resulting change; body links the Issue and includes [Change closure](change-brief.md#pull-request-closure).
-- Keep a PR Draft while its current candidate has unresolved authoring, repair or validation. Release and merge permissions are exclusively defined by Orca dispatch.
+- Use Draft when useful for unfinished authoring or repair; session instructions and applicable verification determine readiness. Release and merge permissions are exclusively defined by Orca dispatch.
 - Record checks at the final candidate's exact head and target base; changes invalidate evidence according to that rulebook.
 - [CI and test boundaries](ci-test-boundaries.md) owns the applicable Local Verification Ladder, Journey admission, guest execution and provider-free hosted Gate. Documentation-only work uses the applicable documentation checks.
 - [ADR 0058](../adr/0058-remove-actions-usage-observation-from-development-gating.md) excludes Actions usage, billing, balances and estimates from development gating. Read check conclusions needed for validation, not usage views.

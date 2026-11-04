@@ -72,7 +72,7 @@ export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPo
  */
 export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['providerProcessing']['label']): string {
   const separator = label.indexOf('：');
-  return `策略完整性：已验证。当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
+  return `当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }
 
 /** The Decision Layer's form of an instant (V2-UX-LAYER-004), shared with the exported 审阅报告 (Issue #500, S64b). */
@@ -111,16 +111,16 @@ export function runStepIsStale(elapsedMs: number, longestSettledUnitMs: number |
 /**
  * How many content blocks a provenance collection touches (V2-UX-LAYER-006), never the identifiers
  * themselves: whole-block and partial ranges count alike, and two ranges of one block count once.
- * An empty collection reads `无精确范围` rather than `0 个内容块`, which would report a measurement
+ * An empty collection reads `无精确范围` rather than `0 个段落`, which would report a measurement
  * the analysis never made.
  */
 export function analysisBlockCountLabel(ranges: ReadonlyArray<Pick<AnalysisSourceRangeProjection, 'blockId'>>): string {
   const blocks = new Set(ranges.map((range) => range.blockId));
-  return blocks.size === 0 ? '无精确范围' : `${blocks.size} 个内容块`;
+  return blocks.size === 0 ? '无精确范围' : `${blocks.size} 个段落`;
 }
 
 /**
- * An item's provenance as the Decision Layer reads it (V2-UX-LAYER-006): `来自单元 1、2、5 · 25 个内容块`,
+ * An item's provenance as the Decision Layer reads it (V2-UX-LAYER-006): `来自单元 1、2、5 · 25 个段落`,
  * with the block identifiers one step away in its list's technical disclosure. The units are the
  * item's own recorded ordinals, ascending and deduplicated — never inferred from a block identifier —
  * so an item that records no unit reads as its block count alone rather than as an empty unit list.

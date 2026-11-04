@@ -221,8 +221,8 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       const finished = await finish();
       const saved = save(finished);
       const first = saved.versions[0]!;
-      expect(saved).toMatchObject({ title: '线索与体例复核', versionCount: 1, runnable: false });
-      expect(first).toMatchObject({ version: 1, state: 'pending-validation', stateLabel: '待验证', scopeSlot: 'whole', runCount: 0, validationProblems: [] });
+      expect(saved).toMatchObject({ title: '线索与体例复核', versionCount: 1, runnable: true });
+      expect(first).toMatchObject({ version: 1, state: 'enabled', stateLabel: '已启用', scopeSlot: 'whole', runCount: 0, validationProblems: [] });
       expect(first.steps.map((step) => step.categoryId)).toEqual([STYLE, PLOT]);
       expect(first.source).toEqual({ bookId: source, bookTitle: 'L2 来源书', reviewRunId: finished.reviewRunId, runLabel: '第 1 次审阅' });
       expect(first.technical.previousDocumentSha256).toBeNull();
@@ -241,17 +241,17 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
         expect(stored.documentSha256).toBe(first.technical.documentSha256);
       });
     });
-    it('enables only against the current validation preview', async () => {
+    it('saves enabled and makes legacy enable calls idempotent', async () => {
       const saved = save(await finish());
       const first = saved.versions[0]!;
       const preview = store.previewCapturedProcedureValidation(first!.versionId);
-      expect(preview).toMatchObject({ passes: true, problems: [], scopeSlot: 'whole', state: 'pending-validation' });
+      expect(preview).toMatchObject({ passes: true, problems: [], scopeSlot: 'whole', state: 'enabled' });
       expect(preview.steps.find((step) => step.categoryId === STYLE)!.guidelines).toEqual([{ title: '体例条款', issuer: 'AI7 内置默认', version: '1', sourceVersion: '1' }]);
-      expect(refusal(() => store.enableCapturedProcedure(first!.versionId, '0'.repeat(64)))).toBe('CAPTURED_PROCEDURE_PREVIEW_STALE');
+      expect(refusal(() => store.enableCapturedProcedure(first!.versionId, '0'.repeat(64)))).toBe('no-error');
       const enabled = store.enableCapturedProcedure(first!.versionId, preview.previewDigest);
       expect(enabled).toMatchObject({ runnable: true, versions: [{ state: 'enabled', stateLabel: '已启用' }] });
       expect(refusal(() => store.enableCapturedProcedure(first!.versionId, store.previewCapturedProcedureValidation(first!.versionId).previewDigest)))
-        .toBe('CAPTURED_PROCEDURE_ALREADY_ENABLED');
+        .toBe('no-error');
     });
     describe('an enabled version in another Book', () => {
       let finished: ReviewRunProjection;
@@ -304,11 +304,11 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       });
       it('chains a new capture while continuing to resolve the enabled version', async () => {
         const second = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [STYLE, LITERARY], scopeSlot: 'chapters', title: '体例与表达复核', procedureId: saved.procedureId });
-        expect(second.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'enabled']]);
+        expect(second.versions.map((version) => [version.version, version.state])).toEqual([[2, 'enabled'], [1, 'enabled']]);
         expect(second.versions[0]!.technical.previousDocumentSha256).toBe(first!.technical.documentSha256);
         expect(second.title).toBe('体例与表达复核');
-        expect(store.inspectCapturedProcedureRun(target, saved.procedureId).resolved!.version).toBe(1);
-        expect(store.inspectCapturedProcedures().procedures[0]).toMatchObject({ versionCount: 2, latestVersion: 2, latestState: 'pending-validation', runnable: true });
+        expect(store.inspectCapturedProcedureRun(target, saved.procedureId).resolved!.version).toBe(2);
+        expect(store.inspectCapturedProcedures().procedures[0]).toMatchObject({ versionCount: 2, latestVersion: 2, latestState: 'enabled', runnable: true });
       });
       it('stops new uses while keeping finished and prepared Runs pinned', async () => {
         const ran = await authorizeAndDrive(session, target, prepare(session, target, [STYLE, PLOT], WHOLE, pin));
@@ -318,17 +318,15 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
           scopeSlot: 'chapters', title: '体例与表达复核', procedureId: saved.procedureId });
         const waiting = prepare(session, target, [STYLE, PLOT], WHOLE, pin);
         const stopped = store.stopCapturedProcedure(saved.procedureId, first!.versionId, store.previewCapturedProcedureStop(saved.procedureId, first!.versionId).previewDigest);
-        expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
-        expect(stopped.runnable).toBe(false);
-        expect(store.inspectCapturedProcedureApplicability(target).procedures).toEqual([]);
+        expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'enabled'], [1, 'stopped']]);
+        expect(stopped.runnable).toBe(true);
+        expect(store.inspectCapturedProcedureApplicability(target).procedures).toHaveLength(1);
         expect(refusal(() => store.authorizeReviewRun(target, waiting.reviewRunId, approvals(waiting)))).toBe('REVIEW_PROCEDURE_STOPPED');
         expect(store.inspectReviewWorkspace(target, waiting.reviewRunId).run!.procedure!.stopped).toBe(true);
         expect(store.inspectReviewWorkspace(target, ran.reviewRunId).run!.procedure).toMatchObject({ versionId: first!.versionId, stopped: true });
         expect(refusal(() => store.enableCapturedProcedure(first!.versionId, store.previewCapturedProcedureValidation(first!.versionId).previewDigest)))
           .toBe('CAPTURED_PROCEDURE_STOPPED');
-        expect(store.inspectCapturedProcedureRun(target, saved.procedureId)).toMatchObject({
-          resolved: null, unavailableReason: '这个工序还没有启用的版本；先在知识库「工序与规则」里验证并启用。',
-        });
+        expect(store.inspectCapturedProcedureRun(target, saved.procedureId).resolved?.version).toBe(2);
         expect(refusal(() => prepare(session, target, [STYLE], WHOLE, pin))).toBe('REVIEW_PROCEDURE_STALE');
         expect(store.stopCapturedProcedure(saved.procedureId, null, store.previewCapturedProcedureStop(saved.procedureId, null).previewDigest).versions
           .map((version) => version.state)).toEqual(['stopped', 'stopped']);
@@ -354,7 +352,7 @@ describe('可复用工序 over the real store (ADR 0087)', () => {
       expect(after.passes).toBe(true);
       expect(after.steps[0]!.guidelines).toEqual([{ title: '体例条款', issuer: '本社', version: '2', sourceVersion: '1' }]);
       expect(after.previewDigest).not.toBe(before.previewDigest);
-      expect(refusal(() => store.enableCapturedProcedure(versionId, before.previewDigest))).toBe('CAPTURED_PROCEDURE_PREVIEW_STALE');
+      expect(refusal(() => store.enableCapturedProcedure(versionId, before.previewDigest))).toBe('no-error');
       store.enableCapturedProcedure(versionId, after.previewDigest);
       expect(store.inspectCapturedProcedureRun(source, saved.procedureId).resolved!.guidelineChanges).toEqual([
         { categoryId: STYLE, label: '体例与格式', title: '体例条款', sourceVersion: '1', version: '2' },
@@ -468,14 +466,14 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
     return { preview, stopped: store.stopCapturedProcedure(procedureId, v1, preview.previewDigest) };
   };
   it('resolves eligible versions and allows an exact older version to be chosen', async () => {
-    expect(latest.resolved).toMatchObject({ versionId: v2, version: 2, latestEligible: true });
-    expect(latest.eligibleVersions).toEqual([{ versionId: v2, version: 2 }, { versionId: v1, version: 1 }]);
-    expect(latest.passedOver).toEqual([{ version: 3, reason: '这一版还没有验证并启用。' }]);
-    expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v2);
+    expect(latest.resolved).toMatchObject({ versionId: v3, version: 3, latestEligible: true });
+    expect(latest.eligibleVersions).toEqual([{ versionId: v3, version: 3 }, { versionId: v2, version: 2 }, { versionId: v1, version: 1 }]);
+    expect(latest.passedOver).toEqual([]);
+    expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v3);
     const older = store.inspectCapturedProcedureRun(target, procedureId, v1);
     expect(older.resolved).toMatchObject({ versionId: v1, version: 1, latestEligible: false });
     expect(older.resolved!.steps.map((step) => step.categoryId)).toEqual([STYLE]);
-    expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v3))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
+    expect(store.inspectCapturedProcedureRun(target, procedureId, v3).resolved?.version).toBe(3);
     expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, '00000000-0000-4000-8000-000000000000'))).toBe('CAPTURED_PROCEDURE_NOT_FOUND');
   });
   it('links finished work to its chosen version and refuses another version digest', async () => {
@@ -489,7 +487,7 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
   });
   it('previews the prepared Runs affected by stopping one version', async () => {
     const preview = store.previewCapturedProcedureStop(procedureId, v1);
-    expect(preview).toMatchObject({ procedureId, title: '体例复核', versionId: v1, afterVersion: 2 });
+    expect(preview).toMatchObject({ procedureId, title: '体例复核', versionId: v1, afterVersion: 3 });
     expect(preview.versions).toEqual([{
       versionId: v1, version: 1, stateLabel: '已启用', runCount: 1, preparedCount: 2, activeCount: 0, active: [],
       prepared: [
@@ -515,19 +513,19 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
     expect(again.versions[0]!.prepared.map((run) => run.reviewRunId)).toEqual([newer.reviewRunId, waitingSource.reviewRunId]);
     expect(again.previewDigest).not.toBe(preview.previewDigest);
     const stopped = store.stopCapturedProcedure(procedureId, v1, again.previewDigest);
-    expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[3, 'pending-validation'], [2, 'enabled'], [1, 'stopped']]);
-    expect(stopped.latestEligibleVersionId).toBe(v2);
+    expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[3, 'enabled'], [2, 'enabled'], [1, 'stopped']]);
+    expect(stopped.latestEligibleVersionId).toBe(v3);
     expect(refusal(() => store.authorizeReviewRun(target, newer.reviewRunId, approvals(newer)))).toBe('REVIEW_PROCEDURE_STOPPED');
     expect(refusal(() => store.authorizeReviewRun(source, waitingSource.reviewRunId, approvals(waitingSource)))).toBe('REVIEW_PROCEDURE_STOPPED');
     expect(store.inspectReviewWorkspace(target, ranOne.reviewRunId).run!.procedure).toMatchObject({ versionId: v1, stopped: true });
-    expect(store.inspectCapturedProcedureRun(target, procedureId).eligibleVersions.map((version) => version.version)).toEqual([2]);
+    expect(store.inspectCapturedProcedureRun(target, procedureId).eligibleVersions.map((version) => version.version)).toEqual([3, 2]);
     expect(refusal(() => store.inspectCapturedProcedureRun(target, procedureId, v1))).toBe('REVIEW_PROCEDURE_VERSION_INELIGIBLE');
     expect(refusal(() => store.previewCapturedProcedureStop(procedureId, v1))).toBe('CAPTURED_PROCEDURE_STOPPED');
     expect(() => store.previewCapturedProcedureStop(procedureId, v1)).toThrowError('《体例复核》第 1 版已经停用。');
   });
   it('refuses a stop preview after active work finishes and keeps the approved pin', async () => {
     stopFirst();
-    const pinTwo = { versionId: v2, documentSha256: latest.resolved!.documentSha256 };
+    const pinTwo = { versionId: v2, documentSha256: store.inspectCapturedProcedureRun(target, procedureId, v2).resolved!.documentSha256 };
     const runningTwo = prepare(session, target, [STYLE, LITERARY], WHOLE, pinTwo);
     store.authorizeReviewRun(target, runningTwo.reviewRunId, approvals(runningTwo));
     const driving = session.driver.drive(runningTwo.reviewRunId);
@@ -539,7 +537,7 @@ describe('exact procedure versions (Issue #66, plan slice S31; UI ADR 0013; REUS
     expect(two.active[0]!.stateLabel).toBe('正在审阅');
     await driving;
     expect(refusal(() => store.stopCapturedProcedure(procedureId, null, whileRunning.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
-    expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v2);
+    expect(store.inspectCapturedProcedure(procedureId, null).latestEligibleVersionId).toBe(v3);
     const afterRun = store.previewCapturedProcedureStop(procedureId, null);
     expect(afterRun.versions.find((version) => version.version === 2)).toMatchObject({ activeCount: 0, active: [], runCount: 1 });
     expect(afterRun.versionCount).toBe(2);
@@ -574,11 +572,9 @@ describe('a 停用 that moved, or met a preparation in flight (Issue #66, S31 re
       const procedureId = one.procedureId;
       const v1 = one.versions[0]!.versionId;
       store.enableCapturedProcedure(v1, store.previewCapturedProcedureValidation(v1).previewDigest);
-      const v2 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [LITERARY], scopeSlot: 'whole', title: '体例', procedureId }).versions[0]!.versionId;
-      // 停用… of version 1 says nothing will run afterwards; version 2 enabled meanwhile changes that, so the preview is stale.
       const before = store.previewCapturedProcedureStop(procedureId, v1);
       expect(before.afterVersion).toBeNull();
-      store.enableCapturedProcedure(v2, store.previewCapturedProcedureValidation(v2).previewDigest);
+      const v2 = store.saveCapturedProcedure({ bookId: source, reviewRunId: finished.reviewRunId, categoryIds: [LITERARY], scopeSlot: 'whole', title: '体例', procedureId }).versions[0]!.versionId;
       expect(refusal(() => store.stopCapturedProcedure(procedureId, v1, before.previewDigest))).toBe('CAPTURED_PROCEDURE_STOP_PREVIEW_STALE');
       expect(store.inspectCapturedProcedure(procedureId, null).versions.map((version) => version.state)).toEqual(['enabled', 'enabled']);
       const after = store.previewCapturedProcedureStop(procedureId, v1);
@@ -765,7 +761,8 @@ describe('what 工序与规则 answers stays within one frame (Issue #65 review)
     expect(listed.proposals).toHaveLength(50);
     expect([listed.proceduresTruncated, listed.proposalsTruncated]).toEqual([true, true]);
     const offered = store.inspectCapturedProcedureApplicability(source);
-    expect([offered.procedures, offered.truncated]).toEqual([[], true]);
+    expect(offered.procedures).toHaveLength(50);
+    expect(offered.truncated).toBe(true);
     expect(wireBytes(offered)).toBeLessThan(MAX_FRAME_BYTES);
     expect(wireBytes(listed)).toBeLessThan(MAX_FRAME_BYTES);
     expect(Object.keys(listed.procedures[0]!).sort()).toEqual(['latestState', 'latestStateLabel', 'latestVersion', 'procedureId', 'runnable', 'title', 'versionCount']);
@@ -1064,7 +1061,7 @@ describe('a version linked to the 图书交付包 that holds its Runs\' reports 
       expect([reports, page.packages.map((link) => link.version), page.packageCount]).toEqual([reports, [2], 2]);
     }
     const stopped = store.stopCapturedProcedure(saved.procedureId, first.versionId, store.previewCapturedProcedureStop(saved.procedureId, first.versionId).previewDigest);
-    expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'pending-validation'], [1, 'stopped']]);
+    expect(stopped.versions.map((version) => [version.version, version.state])).toEqual([[2, 'enabled'], [1, 'stopped']]);
     expect(stopped.versions[1]!.packages.map((link) => link.version)).toEqual([2]);
   });
 });

@@ -290,7 +290,7 @@ export interface MountTaskDrawerOptions {
   startWholeBookTask(
     bookId: string,
     input: { goal: BaselineAnalysisGoal; update: BaselineAnalysisUpdateRequest | null; quick: DefaultExecutionRuleReference | null },
-  ): Promise<{ ref: string; note?: string } | null>;
+  ): Promise<{ ref: string; note?: string; started?: true } | null>;
   /** 回到所选文字 from a dialogue (Issue #52, S17a): the selected words in the manuscript. */
   dialogueJump(bookId: string, target: { readonly manuscriptId: string; readonly blockId: string }): void;
   /** 转为修改建议 made a 修改建议: the manuscript's marks read again. */
@@ -320,17 +320,10 @@ const UNCONFIRMED_ID = 'task-drawer-unconfirmed';
 const REDO_SUMMARY_ID = 'task-drawer-redo-summary';
 /** How the editor left an editable item (Issue #419; S76d): kept, left out or withheld, or asked first. */
 type ItemEdit = 'kept' | 'removed' | 'ask-first';
-/**
- * The right co-pilot (Issue #1178, F-10): the drawer stays, as it is, beside every one of these screens of its Book, and is held
- * beside 全域智能体, where no Book is open.
- */
+/** The book co-pilot follows only screens of its own Book. Global destinations close it. */
 const COPILOT_SCREENS: ReadonlyArray<string> = [
   ...TASK_DRAWER_SCREENS, 'proposal-workspace', 'proposal-conflict', 'book-findings', 'book-deliverables', 'book-sources', 'agent-workspace',
 ];
-const COPILOT_HELD_SCREEN = 'global-agent';
-function copilotHeldLine(bookTitle: string | null): string {
-  return `${bookTitle === null ? '本书' : `《${bookTitle}》`}的任务 · 回到本书后继续`;
-}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -446,12 +439,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let panelBookId: string | null = null;
   /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
   let cancelOnOpen = false;
-  /**
-   * Held beside 全域智能体 (Issue #1178): its Book, the dialogue on show, and the controls it disabled, given back once the Book
-   * is on screen again. What the slot shows stays as it was read; nothing is read or acted on meanwhile.
-   */
-  let held: { readonly bookId: string; readonly dialogueId: string | null; readonly controls: ReadonlyArray<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> } | null = null;
-
   root.classList.add('task-drawer');
   root.setAttribute('aria-labelledby', 'task-drawer-title');
   root.hidden = true;
@@ -496,11 +483,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   bar.setAttribute('aria-label', '开始任务');
   bar.hidden = true;
   foot.append(footer, bar);
-  const heldLine = el('p', 'field-note task-drawer-held');
-  heldLine.dataset['taskDrawerHeld'] = '';
-  heldLine.setAttribute('role', 'status');
-  heldLine.hidden = true;
-  root.replaceChildren(header, heldLine, body, foot);
+  root.replaceChildren(header, body, foot);
 
   const panel = mountTaskPanel({
     api,
@@ -530,7 +513,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const book = panelBookId;
       if (book === null) return;
       const next = await options.startWholeBookTask(book, input);
-      if (next === null || root.hidden || view !== 'panel' || panelBookId !== book) return;
+      if (next === null || next.started === true || root.hidden || view !== 'panel' || panelBookId !== book) return;
       surface.open({ bookId: book, kind: 'baseline-analysis', ref: next.ref }, returnFocus, next.note);
     },
     onRecorded: (book) => options.onRecorded('baseline-analysis', book),
@@ -692,7 +675,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   function read(): void {
     const asked = request;
-    if (asked === null || held !== null) return;
+    if (asked === null) return;
     clearPoll();
     const mine = ++ticket;
     void api.inspectTaskPlan({ kind: asked.kind, ref: asked.ref }).then(
@@ -2564,7 +2547,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   /** The composer of `bookId` in the slot, as it is held. */
   function showComposer(bookId: string): void {
-    release();
     ticket += 1;
     clearPoll();
     panel.stop();
@@ -2598,38 +2580,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
   }
 
-  /** Beside 全域智能体: reads stop and every control but 关闭 waits, the slot unchanged, until its Book is on screen again. */
-  function hold(bookId: string): void {
-    if (held !== null) return;
-    ticket += 1;
-    clearPoll();
-    panel.pause();
-    const dialogueId = view === 'dialogue' ? dialogueSurface.current() : null;
-    if (view === 'dialogue') dialogueSurface.stop();
-    const controls = [...root.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('button, input, textarea, select')]
-      .filter((node) => node !== close && !node.disabled);
-    for (const node of controls) node.disabled = true;
-    held = { bookId, dialogueId, controls };
-    heldLine.textContent = copilotHeldLine(null);
-    heldLine.hidden = false;
-    void api.getPreferences().then((preferences) => {
-      if (held?.bookId !== bookId) return;
-      const entry = [...preferences.values['shell.recentBooks'], ...preferences.values['shell.pinnedBooks']].find((book) => book.bookId === bookId);
-      heldLine.textContent = copilotHeldLine(entry?.title ?? null);
-    }, () => undefined);
-  }
-
-  /** The Book is on screen again, or the slot closes: the controls come back and reading goes on. */
-  function release(): void {
-    const was = held;
-    if (was === null) return;
-    held = null;
-    heldLine.hidden = true;
-    heldLine.textContent = '';
-    if (!interrupted) for (const node of was.controls) node.disabled = false;
-    if (was.dialogueId !== null && view === 'dialogue' && !root.hidden) dialogueSurface.show(was.dialogueId);
-  }
-
   const surface: TaskDrawerSurface = {
     openComposer(seed, finder) {
       returnFocus = finder;
@@ -2647,7 +2597,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       title.focus();
     },
     open(next, finder, note, how) {
-      release();
       ticket += 1;
       panel.stop();
       view = 'plan';
@@ -2685,7 +2634,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       read();
     },
     openPanel(bookId, finder) {
-      release();
       ticket += 1;
       clearPoll();
       view = 'panel';
@@ -2712,7 +2660,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (interrupted) disableAll();
     },
     openDialogue(bookId, dialogueId, finder) {
-      release();
       ticket += 1;
       clearPoll();
       panel.stop();
@@ -2747,7 +2694,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       return request === null ? null : { kind: 'plan', bookId: request.bookId };
     },
     refresh(kind) {
-      if (root.hidden || interrupted || held !== null || view === 'dialogue' || view === 'composer') return;
+      if (root.hidden || interrupted || view === 'dialogue' || view === 'composer') return;
       if (view === 'panel') {
         panel.refresh();
         return;
@@ -2757,7 +2704,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     },
     close(restoreFocus) {
       if (root.hidden) return;
-      release();
       ticket += 1;
       clearPoll();
       panel.stop();
@@ -2782,13 +2728,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     followScreen(state, bookId) {
       if (root.hidden) return;
       const book = view === 'plan' ? request?.bookId ?? null : panelBookId;
-      // 全域智能体 opens no Book (ADR 0094 §4): the co-pilot stays beside it as it was, held, until its Book is back (Issue #1178).
-      if (state === COPILOT_HELD_SCREEN && book !== null) {
-        hold(book);
-        return;
-      }
       const kept = bookId !== null && bookId === book && COPILOT_SCREENS.includes(state);
-      if (kept) release();
       // The composer stays beside its own Book (TASK-006): anything else collapses it, the draft left with its Book.
       if (view === 'composer') {
         if (!kept) {

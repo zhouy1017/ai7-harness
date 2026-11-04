@@ -7,6 +7,7 @@ import {
   PRE_RUN_REPORT_REASON,
   RUN_REPORT_SCHEMA,
   buildRunReport,
+  foldClaimToolCounters,
   runReportAccounting,
   runReportAccountingDigest,
   runReportAccountingOf,
@@ -19,12 +20,19 @@ import {
   type RunReportUnitRow,
 } from '../../src/service/analysis/run-report.js';
 import { RUN_REPORT_STAGES } from '../../src/shared/protocol.js';
+
 import type {
   AnalysisAssuranceSampleProjection,
   AnalysisGapProjection,
   RunReportStageId,
 } from '../../src/shared/protocol.js';
 
+it('adds stage and claim searches on the same backend without charging claim requests or tokens twice', () => {
+  const stage = { requests: 2, inputTokens: 20, outputTokens: 10, searchCalls: { 'search-tinyfish': 2 }, fetchCount: 1, fetchBytes: 100 };
+  const claims = { requests: 5, inputTokens: 50, outputTokens: 25, searchCalls: { 'search-tinyfish': 3, 'search-brave': 1 }, refusedSearchCalls: 1, fetchCount: 2, fetchBytes: 200 };
+  expect(foldClaimToolCounters(stage, claims)).toEqual({ ...stage, searchCalls: { 'search-tinyfish': 5, 'search-brave': 1 }, refusedSearchCalls: 1, fetchCount: 3, fetchBytes: 300 });
+  expect(foldClaimToolCounters(null, claims)).toMatchObject({ requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: claims.searchCalls });
+});
 const SEED = 's'.repeat(64);
 
 function span(startedAt: string, wallMs: number): RunReportSpan {

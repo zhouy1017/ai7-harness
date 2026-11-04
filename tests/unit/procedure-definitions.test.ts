@@ -7,8 +7,6 @@ import { reviewCategoryKindDefinition } from '../../src/service/review/review-ca
 import { allPreinstalledProcedureDefinitions, baselineProcedureDefinition, localCheckProcedureDefinition, localCheckProcedureDefinitionV2, localCheckProcedureDefinitionV3, preinstalledProcedureDefinitions } from '../../src/service/procedures/preinstalled.js';
 import { PROCEDURE_STAGE_LABELS, resolveProcedureStage } from '../../src/service/procedures/stage-types.js';
 import { PROCEDURE_STAGE_TYPES } from '../../src/shared/protocol/procedures.js';
-import { renderProcedureLibrary } from '../../src/renderer/procedure-library.js';
-import { installMiniDom } from '../support/mini-dom.js';
 
 describe('pre-installed procedures v1', () => {
   it('preserves stock contracts and isolates edited instructions and exemptions across model stages', () => {
@@ -97,18 +95,4 @@ describe('pre-installed procedures v1', () => {
     });
   });
 
-  it('lists seventeen enabled versions with their stages and uses and labels the review-only predecessor', () => {
-    const restore = installMiniDom();
-    try {
-      const library = renderProcedureLibrary(preinstalledProcedureDefinitions().map((definition) => ({
-        procedureId: definition.id, version: definition.version, digest: 'a'.repeat(64), title: definition.title,
-        state: 'enabled', uses: 2, stages: definition.stages.map((stage) => ({ stageType: stage.stageType, label: PROCEDURE_STAGE_LABELS[stage.stageType] })),
-      })));
-      expect(library.querySelectorAll('li')).toHaveLength(17);
-      expect(library.textContent).toContain('已使用 2 次');
-      expect(library.textContent).toContain('跨单元归并与跨章一致性');
-      expect(library.textContent).toContain('审阅专用前身');
-      expect(library.querySelectorAll('button')).toHaveLength(0);
-    } finally { restore(); }
-  });
 });

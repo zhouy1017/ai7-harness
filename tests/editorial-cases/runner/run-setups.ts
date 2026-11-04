@@ -107,9 +107,7 @@ export async function sample1DerivedLibraryItem(store: EditorialStore, roots: Pi
   const path = join(roots.inputRoot, `${randomUUID()}.txt`);
   writeFileSync(path, paragraphs.join('\n\n'));
   const preview = await store.previewLibraryMaterial(path);
-  const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: 'sample1 背景摘录', kind: 'document' });
-  store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: book.bookId } } });
-  store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+  const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: 'sample1 背景摘录', kind: 'document', bookId: book.bookId });
   store.startMaterialIndexing();
   await store.settleMaterialIndexing();
   return material.materialId;

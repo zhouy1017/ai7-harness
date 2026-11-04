@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from './research-evidence-schema.js';
+import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL } from './research-evidence-schema.js';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import {
   MAX_RESEARCH_EVIDENCE_PAGE,
@@ -89,6 +89,23 @@ export function validateResearchEvidenceSchema(db: DatabaseSync): void {
   }
 }
 
+export function initializeResearchEvidenceUnitRevisionSchema(db: DatabaseSync, version: number): void {
+  const tables = RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL;
+  const triggers = RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL;
+  if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name='research_evidence_unit_revisions'").get() === undefined) {
+    requireEvidence(version < 107, 'SCHEMA_INVALID', '外部来源留存修订表缺失。');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const sql of [...Object.values(tables), ...Object.values(triggers)]) db.exec(sql);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+  for (const [name, sql] of [...Object.entries(tables), ...Object.entries(triggers)]) {
+    const row = db.prepare('SELECT sql FROM sqlite_schema WHERE name=?').get(name);
+    requireEvidence(typeof row?.sql === 'string' && fold(row.sql) === fold(sql), 'SCHEMA_INVALID', '外部来源留存修订表结构不兼容。');
+  }
+}
+
 /** One retained citation as the ledger reads it back, its record verified against its digest and its columns. */
 interface StoredEvidence {
   readonly rowid: number;
@@ -161,9 +178,19 @@ export class ResearchEvidenceLedger {
   record(input: { readonly bookId: string; readonly runRecordId: string; readonly unitOrdinal: number; readonly backendId: string | null; readonly unit: RetainedUnit;
     /** Issue #1226: the sources a 备用来源 returned; each such line names that backend and carries `fallbackFrom` and the failure class. */
     readonly fallbackSources?: ReadonlyMap<string, SearchFallbackAttribution> }): string[] {
+    return this.#record(input, null);
+  }
+
+  /** Only the claim owner uses this after verifying the complete aggregate against its durable rounds. */
+  recordClaimUnit(input: Parameters<ResearchEvidenceLedger['record']>[0]): string[] {
+    const prior = this.#db.prepare('SELECT * FROM research_evidence_units WHERE run_record_id=? AND unit_ordinal=?').get(input.runRecordId, input.unitOrdinal) as SqlRow | undefined;
+    return this.#record(input, prior === undefined ? null : this.#latestUnit(prior));
+  }
+
+  #record(input: Parameters<ResearchEvidenceLedger['record']>[0], previous: SqlRow | null): string[] {
     requireEvidence(UUID_PATTERN.test(input.runRecordId) && Number.isSafeInteger(input.unitOrdinal) && input.unitOrdinal >= 1,
       'RESEARCH_EVIDENCE_INVALID', '外部来源留存的运行或单元无效。');
-    requireEvidence(this.#db.prepare('SELECT 1 FROM research_evidence_units WHERE run_record_id = ? AND unit_ordinal = ?').get(input.runRecordId, input.unitOrdinal) === undefined,
+    requireEvidence(previous !== null || this.#db.prepare('SELECT 1 FROM research_evidence_units WHERE run_record_id = ? AND unit_ordinal = ?').get(input.runRecordId, input.unitOrdinal) === undefined,
       'RESEARCH_EVIDENCE_UNIT_RECORDED', '这个单元的外部来源已经留存。');
     const recordedAt = new Date().toISOString();
     const insertContent = this.#db.prepare('INSERT INTO research_evidence_contents(content_sha256, content_text, recorded_at) VALUES (?, ?, ?)');
@@ -173,6 +200,21 @@ export class ResearchEvidenceLedger {
       evidence_id, book_id, run_record_id, unit_ordinal, finding_id, backend_id, query_class, url, captured_at, capture_state,
       content_sha256, page_sha256, snapshot_digest, alignment, anchors_json, translation_json, staleness_state, recorded_at, canonical_json, sha256
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const previousRecord = previous === null ? null : JSON.parse(String(previous.canonical_json)) as Record<string, unknown>;
+    const identity = (record: Record<string, unknown>): string => {
+      const { schema: _schema, evidenceId: _id, bookId: _book, runRecordId: _run, unitOrdinal: _unit,
+        backendId: _backend, recordedAt: _at, stalenessState: _stale, fallbackFrom: _from, fallbackFailure: _failure, ...content } = record;
+      return canonicalJson(content);
+    };
+    const kept = new Map<string, string[]>();
+    for (const id of (previousRecord?.evidenceIds ?? []) as string[]) {
+      const row = this.#db.prepare('SELECT rowid,* FROM research_evidence WHERE evidence_id=?').get(id) as SqlRow | undefined;
+      requireEvidence(row !== undefined && row.run_record_id === input.runRecordId && row.unit_ordinal === input.unitOrdinal,
+        'RESEARCH_EVIDENCE_RECORD_INVALID', '先前的留存来源不属于这个单元。');
+      this.#evidence(row);
+      const key = identity(JSON.parse(String(row.canonical_json)) as Record<string, unknown>);
+      kept.set(key, [...(kept.get(key) ?? []), id]);
+    }
     const ids: string[] = [];
     for (const evidence of input.unit.evidence) {
       if (evidence.content !== null && evidence.contentSha256 !== null) {
@@ -181,6 +223,10 @@ export class ResearchEvidenceLedger {
         if (existing === undefined) insertContent.run(evidence.contentSha256, evidence.content, recordedAt);
         else requireEvidence(existing.content_text === evidence.content, 'RESEARCH_EVIDENCE_DIGEST_MISMATCH', '留存来源的摘要与正文不一致。');
       }
+      const key = identity(researchEvidenceRecord({ evidenceId: '', bookId: input.bookId, runRecordId: input.runRecordId,
+        unitOrdinal: input.unitOrdinal, backendId: input.backendId, stalenessState: 'current', recordedAt, evidence }));
+      const existingId = kept.get(key)?.shift();
+      if (existingId !== undefined) { ids.push(existingId); continue; }
       const prior = evidence.captureState === 'full-text' ? priorFull.get(evidence.url, evidence.capturedAt) as SqlRow | undefined : undefined;
       const stalenessState = prior !== undefined && (prior.content_sha256 !== evidence.contentSha256 || prior.page_sha256 !== evidence.pageSha256) ? 'hash-changed' as const : 'current' as const;
       const evidenceId = randomUUID();
@@ -196,22 +242,68 @@ export class ResearchEvidenceLedger {
         stalenessState, recordedAt, record.json, record.digest);
       ids.push(evidenceId);
     }
+    requireEvidence([...kept.values()].every((ids) => ids.length === 0), 'RESEARCH_EVIDENCE_PREFIX_MOVED', '续行不能删除或改写先前留存的来源。');
+    if (previous !== null) requireEvidence(input.unit.searchCalls >= Number(previous.search_calls) &&
+      input.unit.retentionFetches >= Number(previous.retention_fetches) && input.unit.failedRetrievals >= Number(previous.failed_retrievals),
+    'RESEARCH_EVIDENCE_PREFIX_MOVED', '续行不能减少先前留存的取证账目。');
     const unsupported = input.unit.findings.filter((finding) => finding.sources === 0).length;
     // A unit whose every retained line came from the 备用来源 names that backend; any fallback line names the default it replaced.
     const fallbackLines = input.unit.evidence.flatMap((evidence) => input.fallbackSources?.get(evidence.url) ?? []);
-    const unitBackendId = fallbackLines.length > 0 && fallbackLines.length === input.unit.evidence.length ? fallbackLines[0]!.backendId : input.backendId;
+    const capturedBackends = previous === null ? [] : [...new Set(ids.map((id) => ((value) => value === null ? null : String(value))(this.#db.prepare('SELECT backend_id FROM research_evidence WHERE evidence_id=?').get(id)!.backend_id)))];
+    const unitBackendId = capturedBackends.length === 1 ? capturedBackends[0]! : fallbackLines.length > 0 && fallbackLines.length === input.unit.evidence.length ? fallbackLines[0]!.backendId : input.backendId;
     const unitRecord = canonicalRecord({
       schema: RESEARCH_EVIDENCE_UNIT_SCHEMA, runRecordId: input.runRecordId, unitOrdinal: input.unitOrdinal, bookId: input.bookId,
-      ...(fallbackLines.length === 0 ? {} : { fallbackFrom: fallbackLines[0]!.fallbackFrom, fallbackFailures: [...new Set(fallbackLines.map((line) => line.failureClass))] }),
+      ...(fallbackLines.length === 0 ? previousRecord?.fallbackFrom === undefined ? {} : { fallbackFrom: previousRecord.fallbackFrom, fallbackFailures: previousRecord.fallbackFailures }
+        : { fallbackFrom: fallbackLines[0]!.fallbackFrom, fallbackFailures: [...new Set(fallbackLines.map((line) => line.failureClass))] }),
       backendId: unitBackendId, state: input.unit.state, searchCalls: input.unit.searchCalls, retentionFetches: input.unit.retentionFetches,
       failedRetrievals: input.unit.failedRetrievals, findings: input.unit.findings, evidenceIds: ids, recordedAt,
       ...(input.unit.retentionFailure === undefined ? {} : { retentionFailure: input.unit.retentionFailure }),
     });
-    this.#db.prepare(`INSERT INTO research_evidence_units(run_record_id, unit_ordinal, book_id, backend_id, search_state, search_calls,
+    if (previous === null) {
+      this.#db.prepare(`INSERT INTO research_evidence_units(run_record_id, unit_ordinal, book_id, backend_id, search_state, search_calls,
       retention_fetches, failed_retrievals, unsupported_findings, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(input.runRecordId, input.unitOrdinal, input.bookId, unitBackendId, input.unit.state, input.unit.searchCalls,
         input.unit.retentionFetches, input.unit.failedRetrievals, unsupported, recordedAt, unitRecord.json, unitRecord.digest);
+    } else {
+      const body = JSON.parse(unitRecord.json) as Record<string, unknown>;
+      const content = (record: Record<string, unknown>) => {
+        const { recordedAt: _at, revision: _revision, predecessorSha256: _prior, ...kept } = record;
+        return canonicalJson(kept);
+      };
+      if (content(body) === content(previousRecord!)) return ids;
+      const revision = Number(previous.revision ?? 1) + 1;
+      const next = canonicalRecord({ ...body, revision, predecessorSha256: String(previous.sha256) });
+      this.#db.prepare(`INSERT INTO research_evidence_unit_revisions(run_record_id,unit_ordinal,book_id,backend_id,search_state,search_calls,
+        retention_fetches,failed_retrievals,unsupported_findings,recorded_at,canonical_json,sha256,revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(input.runRecordId,input.unitOrdinal,input.bookId,unitBackendId,input.unit.state,input.unit.searchCalls,input.unit.retentionFetches,
+          input.unit.failedRetrievals,unsupported,recordedAt,next.json,next.digest,revision);
+    }
     return ids;
+  }
+
+  #latestUnit(base: SqlRow): SqlRow {
+    let prior = base;
+    const revisions = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name='research_evidence_unit_revisions'").get() === undefined ? [] :
+      this.#db.prepare('SELECT * FROM research_evidence_unit_revisions WHERE run_record_id=? AND unit_ordinal=? ORDER BY revision').all(base.run_record_id!, base.unit_ordinal!) as SqlRow[];
+    for (const row of [base, ...revisions]) {
+      const json = String(row.canonical_json);
+      requireEvidence(sha256Hex(json) === row.sha256, 'RESEARCH_EVIDENCE_RECORD_INVALID', '外部来源留存记录已损坏。');
+      const record = JSON.parse(json) as Record<string, unknown>;
+      requireEvidence(record.schema === RESEARCH_EVIDENCE_UNIT_SCHEMA && record.bookId === row.book_id && record.bookId === base.book_id &&
+        record.runRecordId === row.run_record_id && record.unitOrdinal === row.unit_ordinal && record.state === row.search_state &&
+        record.backendId === row.backend_id && record.recordedAt === row.recorded_at && record.searchCalls === row.search_calls &&
+        record.retentionFetches === row.retention_fetches && record.failedRetrievals === row.failed_retrievals &&
+        Array.isArray(record.findings) && Array.isArray(record.evidenceIds), 'RESEARCH_EVIDENCE_RECORD_INVALID', '外部来源留存记录已损坏。');
+      if (row !== base) requireEvidence(record.revision === row.revision && Number(row.revision) === Number(prior.revision ?? 1) + 1 &&
+        record.predecessorSha256 === prior.sha256, 'RESEARCH_EVIDENCE_RECORD_INVALID', '外部来源留存修订链已损坏。');
+      prior = row;
+    }
+    return prior;
+  }
+
+  unitStates(runRecordId: string): Map<number, ResearchEvidenceUnitState> {
+    return new Map((this.#db.prepare('SELECT * FROM research_evidence_units WHERE run_record_id=?').all(runRecordId) as SqlRow[])
+      .map((row) => { const current = this.#latestUnit(row); return [Number(current.unit_ordinal), String(current.search_state) as ResearchEvidenceUnitState]; }));
   }
 
   #evidence(row: SqlRow): StoredEvidence {
@@ -328,14 +420,18 @@ export class ResearchEvidenceLedger {
       records.push(record);
     }
     // The latest researched units and their findings, bounded so one read always fits one frame.
+    const unitJson = this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE name='research_evidence_unit_revisions'").get() === undefined ? 'canonical_json' :
+      `(SELECT COALESCE((SELECT r.canonical_json FROM research_evidence_unit_revisions r WHERE r.run_record_id=research_evidence_units.run_record_id
+        AND r.unit_ordinal=research_evidence_units.unit_ordinal ORDER BY r.revision DESC LIMIT 1),research_evidence_units.canonical_json))`;
     const unitRows = this.#db.prepare(`SELECT * FROM research_evidence_units WHERE ${scope}
-      ${input.findingId === undefined ? '' : "AND EXISTS (SELECT 1 FROM json_each(canonical_json, '$.findings') f WHERE json_extract(f.value, '$.findingId') = ?)"}
+      ${input.findingId === undefined ? '' : `AND EXISTS (SELECT 1 FROM json_each(${unitJson}, '$.findings') f WHERE json_extract(f.value, '$.findingId') = ?)`}
       ORDER BY rowid DESC LIMIT ?`)
       .all(...scopeArgs, ...(input.findingId === undefined ? [] : [input.findingId]), MAX_RESEARCH_EVIDENCE_UNITS) as SqlRow[];
     const units: ResearchEvidenceUnitProjection[] = [];
     const findings: ResearchEvidenceFindingProjection[] = [];
     let findingBytes = 0;
-    for (const row of unitRows) {
+    for (const original of unitRows) {
+      const row = this.#latestUnit(original);
       const json = String(row.canonical_json);
       requireEvidence(sha256Hex(json) === String(row.sha256), 'RESEARCH_EVIDENCE_RECORD_INVALID', '外部来源留存记录已损坏。');
       const record = JSON.parse(json) as { schema?: unknown; findings?: unknown; retentionFailure?: 'capture-processing' | 'storage' };

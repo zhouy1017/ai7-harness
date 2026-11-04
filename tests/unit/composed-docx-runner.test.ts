@@ -1,9 +1,14 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { deriveImportFidelityPlan, parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { deriveImportFidelityPlan, parseDocx, parseNativeDocxIntakeBytes, wordIntakeForPinnedReadings, type ParsedDocxBlock } from '../../src/service/docx.js';
+import { compileWordReading } from '../../src/service/docx-marks.js';
+import { wordReadingForDigest } from '../../src/service/import-retention.js';
+import { renderDocxExport, wordMappedDocxSource } from '../../src/service/docx-export.js';
+import { DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } from '../../src/shared/protocol.js';
+import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 
 // The runners' plain-JS twin of the composed-fixture builder (`e2e/composed-docx.mjs`), read through the
 // product's own parser so its retention content is exactly what the Journeys import.
@@ -138,6 +143,75 @@ describe('the runners\' composed-docx helper', () => {
     expect(read.deletions.map((entry) => entry.author)).toEqual([IMPORTED_MARKS_AUTHOR]);
     expect(read.headerReference).toBe(true);
     expect(Object.keys(read.parts).sort()).toEqual(['[Content_Types].xml', 'docProps/core.xml', 'word/_rels/document.xml.rels', 'word/comments.xml', 'word/document.xml', 'word/header1.xml']);
+    const withNote = join(sandbox, 'export-endnote.docx');
+    await composeExportAdmittedDocx(withNote, { ...recipe, endnote: { block: 15, noteSourceBlock: 22 } });
+    const noteBlocks: ParsedDocxBlock[] = [];
+    await parseDocx(withNote, 'export-endnote.docx', (block) => noteBlocks.push(block));
+    expect(noteBlocks.at(-1)?.note).toEqual({ part: 'endnote', noteId: '1', ordinal: 1, referencePosition: 15 });
+    expect(digest(noteBlocks.at(-1)!.text)).toBe(digest(excerpt[21]!));
+    const { unzipSync, strFromU8, strToU8, zipSync } = await import('fflate');
+    const archive = unzipSync(await readFile(withNote));
+    expect(strFromU8(archive['word/_rels/document.xml.rels']!)).toContain('Target="endnotes.xml"');
+    expect(strFromU8(archive['[Content_Types].xml']!)).toContain('PartName="/word/endnotes.xml"');
+    const native = parseNativeDocxIntakeBytes(await readFile(withNote), 'export-endnote.docx');
+    expect(native.kind).toBe('word');
+    if (native.kind !== 'word') throw new Error('expected combined Word revision/endnote intake');
+    for (const reading of Object.values(native.word.readings)) {
+      const earlier = compileWordReading(native.word.graph, native.word.decodedAtoms, reading.reading,
+        native.word.templates, native.word.decodedCommentBodies);
+      expect(wordReadingForDigest(reading, earlier.readingDigest)).toEqual(earlier);
+      expect(() => wordReadingForDigest(reading, '0'.repeat(64))).toThrow('Word');
+      expect(reading.blocks.at(-1)?.kind).toBe('note');
+      expect(reading.blocks.at(-1)?.note).toEqual({ part: 'endnote', noteId: '1', ordinal: 1, referencePosition: 15 });
+      const mode = reading.reading === 'rejected' ? 'suggestions' : 'accepted-baseline';
+      const source = wordMappedDocxSource(await readFile(withNote), native.word, mode);
+      const exported = renderDocxExport({ title: 'Word 注释往返', blocks: reading.blocks, marks: [],
+        options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source }, { emit: true });
+      const output = join(sandbox, `note-export-${mode}.docx`);
+      await writeFile(output, exported.bytes!);
+      const restored: ParsedDocxBlock[] = [];
+      await parseDocx(output, 'note-export.docx', (block) => restored.push(block));
+      expect(restored.map((block) => digest(block.text))).toEqual(reading.blocks.map((block) => digest(block.text)));
+      expect(unzipSync(exported.bytes!)['word/endnotes.xml']).toEqual(archive['word/endnotes.xml']);
+      const editedBlocks = reading.blocks.map((block) => {
+        if (block.kind !== 'note') return block;
+        const text = block.text + '。';
+        return { ...block, text, digest: digest(JSON.stringify({ kind: block.kind, level: block.level, text })) };
+      });
+      const edited = renderDocxExport({ title: 'Word 注释编辑', blocks: editedBlocks, marks: [],
+        options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source }, { emit: true });
+      await writeFile(output, edited.bytes!);
+      const editedRestored: ParsedDocxBlock[] = [];
+      await parseDocx(output, 'note-edited.docx', (block) => editedRestored.push(block));
+      expect(editedRestored.map((block) => digest(block.text))).toEqual(editedBlocks.map((block) => digest(block.text)));
+      expect(edited.fidelity.find((row) => row.key === 'notes')?.status).toBe('degraded');
+    }
+    expect(native.parsed.fidelity.find((row) => row.key === 'notes')?.status).toBe('retained');
+    const xml = strFromU8(archive['word/document.xml']!);
+    const earlier = [...xml.matchAll(/<w:p>[\s\S]*?<\/w:p>/g)][3]![0];
+    const deleted = earlier.replace(/(<w:p>)(<w:pPr>[\s\S]*?<\/w:pPr>)?([\s\S]*)(<\/w:p>)/,
+      (_, start, properties, body, end) => `${start}${properties ?? ''}<w:del w:id="201" w:author="文件作者">${body.replaceAll('w:t', 'w:delText')}</w:del>${end}`);
+    const shifted = parseNativeDocxIntakeBytes(zipSync({ ...archive,
+      'word/document.xml': strToU8(xml.replace(earlier, deleted)) }, { mtime: fixedArchiveTime() }), 'shifted-note.docx');
+    if (shifted.kind !== 'word') throw new Error('expected shifted Word/endnote intake');
+    expect(shifted.word.readings.rejected.blocks.at(-1)?.note?.referencePosition).toBe(15);
+    expect(shifted.word.readings.accepted.blocks.at(-1)?.note?.referencePosition).toBe(14);
+    const prior = Object.fromEntries(Object.values(native.word.readings).map((reading) => [reading.reading,
+      { digest: compileWordReading(native.word.graph, native.word.decodedAtoms, reading.reading,
+        native.word.templates, native.word.decodedCommentBodies).readingDigest }]));
+    const historical = wordIntakeForPinnedReadings(native, { rejected: prior['rejected']!, accepted: prior['accepted']! });
+    expect(historical.parsed.blockCount).toBe(30);
+    expect(historical.parsed.fidelity.find((row) => row.key === 'notes')?.status).toBe('degraded');
+    for (const mode of ['suggestions', 'accepted-baseline'] as const) {
+      const reading = historical.word.readings[mode === 'suggestions' ? 'rejected' : 'accepted'];
+      const exported = renderDocxExport({ title: '历史 Word 固定阅读', blocks: reading.blocks, marks: [],
+        options: DEFAULT_MANUSCRIPT_EXPORT_OPTIONS, source: wordMappedDocxSource(await readFile(withNote), historical.word, mode) }, { emit: true });
+      expect(unzipSync(exported.bytes!)['word/endnotes.xml']).toEqual(archive['word/endnotes.xml']);
+    }
+    const changedStory = parseNativeDocxIntakeBytes(zipSync({ ...archive, 'word/endnotes.xml': strToU8(
+      strFromU8(archive['word/endnotes.xml']!).replace('<w:p>', '<w:p><w:ins w:id="301">').replace('</w:p>', '</w:ins></w:p>')) }, { mtime: fixedArchiveTime() }), 'tracked-note.docx');
+    expect(changedStory.kind).toBe('legacy');
+    if (changedStory.kind === 'legacy') expect(changedStory.word?.kind).toBe('unsupported');
   });
 
   it('writes a field that needs the decision and a footnote the parser reads as a note block', async () => {

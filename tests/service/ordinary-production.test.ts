@@ -1031,7 +1031,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     const bookId = await sample1Book(store, 'L2 正式后台分析');
     const runtime = { routeExecutable: true, placeFree: true, capacity: 2, editorWorkBusy: false, now: Date.now() + 3_600_000, quietMs: 30_000 };
     const selected = production.policy;
-    expect(selected.providerProcessing.version).toBe('v32');
+    expect(selected.providerProcessing.version).toBe('v33');
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'])?.backgroundOrigin).toBe(false);
     expect(liveKindRule(selected, 'baseline-manuscript-analysis', ['unpublished-excerpts'], 'background')?.ruleId)
       .toBe('enrolled-background-manuscript-analysis-processing');
@@ -1086,7 +1086,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(plan.start.needsModelConnection).toBe(true);
     expect(plan.scope.send).not.toBe('不发送任何内容');
     expect(plan.service.decision).toContain('本地正式生产');
-    expect(plan.service.send).toContain(route);
+    expect(plan.service.send).toContain(route === 'opencode-go' ? 'OpenCode Go' : 'DeepSeek 开放平台');
     expect(plan.service.usage).toBe('发送到所选模型服务；模型用量按实际调用记录，未设任务运行预算上限');
     const blocked = await store.inspectTaskPlanWithConnection({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId }, async () => 'missing');
     expect(blocked.start.readiness).toBe('needs-connection');
@@ -1121,7 +1121,7 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(prepared.planEnvelope).toMatchObject({ providerStatus: 'remote-eligible-ordinary-production', dispatchAllowed: true });
     expect(prepared.providerResolutionPlan).toMatchObject({
       remoteBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-flash', credentialSlot: 'deepseek-api-key', credentialReference: reference,
-        providerProcessing: { operationalScope: 'ordinary-production', version: 'v32' } },
+        providerProcessing: { operationalScope: 'ordinary-production', version: 'v33' } },
       executionRoute: { kind: 'deepseek-open-platform', model: 'deepseek-flash', endpoint: OFFICIAL.endpoint },
       outboundDataCategory: 'unpublished-excerpts',
       runBudgetCeiling: 'unset',
@@ -1138,8 +1138,8 @@ describe('ordinary production over exact sample1 with a stub transport (Issue #8
     expect(Object.values(CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES)).not.toContain(reference);
     const binding = store.baselineAnalysisLedger.executionBindingOf(settled.run!.runRecordId)!;
     expect(binding.binding).toMatchObject({ route: 'deepseek-open-platform', model: 'deepseek-flash', outboundDataCategory: 'unpublished-excerpts',
-      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32' } });
-    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v32' });
+      policyPin: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v33' } });
+    expect(settled.resultSetRevision?.policyPin).toMatchObject({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v33' });
   });
 
   it('restarts beside an exact seeded development response, reads no cache file, and sends identical Tasks twice', async () => {
@@ -1390,7 +1390,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     store.selectModelServiceRoute('deepseek-open-platform');
     const openai = store.saveModelServiceConnection('Fast OpenAI', null, 'ready', 'openai-platform');
     expect(openai.connectionTest).toBeNull();
-    expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).toThrowError();
+    expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).not.toThrow();
     const calls: Array<{ url: string; model: string; cap: number }> = [];
     const reads: string[] = [];
     const resolver = { resolve: async (reference: string) => { reads.push(reference); return 'public-synthetic-placeholder'; } };
@@ -1417,7 +1417,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
       expect(result.kind).toBe('translated');
       if (result.kind !== 'translated') throw new Error('production translation failed');
       expect(result.made).toMatchObject({ model: fast.model, route: fast.route, policyRuleId: 'ordinary-production-material-translation',
-        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v32',
+        provenance: { role: 'Fast Interaction Role', endpoint: fast.endpoint, credentialReference: fast.credentialReference, policyVersion: 'v33',
           usage: { inputTokens: 12, outputTokens: 7 }, failureCode: null } });
       expect(calls).toEqual([{ url: fast.endpoint, model: 'gpt-5.6-sol', cap: 512 },
         { url: fast.endpoint, model: fast.model, cap: 512 }, { url: fast.endpoint, model: fast.model, cap: 8192 }]);
@@ -1440,7 +1440,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const record = JSON.parse(String(translations[0]!.canonical_json));
         expect(record.provenance).toMatchObject({ role: 'Fast Interaction Role', route: fast.route, model: fast.model,
           endpoint: fast.endpoint, credentialSlot: fast.credentialSlot, credentialReference: fast.credentialReference,
-          policyVersion: 'v32', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
+          policyVersion: 'v33', usage: { inputTokens: 12, outputTokens: 7, reasoningTokens: 2 }, failureCode: null });
         expect(record.label).toBe('来源译文');
         expect(JSON.stringify(record)).not.toContain('public-synthetic-opaque-reasoning');
       } finally { database.close(); }
@@ -1479,24 +1479,24 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     expect(status.provenance?.failureCode).toBe(status.code);
     expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toEqual(status);
     expect(JSON.stringify(status)).not.toContain('synthetic provider body');
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toBeNull();
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('openai-platform');
     expect(connection.credentialReference).toHaveLength(36);
   });
   // The selected v30 retains the connection-test declaration and actual v25/v26/v27 provenance.
-  it('reads a retained connection-test status from v25, v26 or v27 beside v30 and refuses an unsupported version', async () => {
+  it('reads retained v25/v26/v27/v32 connection-test status beside v33 and refuses an unsupported version', async () => {
     const { store } = await openProductionStore();
     store.saveModelServiceConnection('Retained probe', null, 'ready', 'openai-platform');
     const status = await testModelServiceConnection(store, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: responsesTransport([], 'AI7_OK') },
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v32' } });
+    expect(status).toMatchObject({ outcome: 'passed', provenance: { policyVersion: 'v33' } });
     store.close();
-    for (const policyVersion of ['v25', 'v26', 'v27', 'v24']) {
+    for (const policyVersion of ['v25', 'v26', 'v27', 'v32', 'v24']) {
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       try {
         database.prepare("UPDATE model_service_connections SET connection_test = ? WHERE provider_id = 'openai-platform'")
           .run(JSON.stringify({ ...status, provenance: { ...status.provenance, policyVersion } }));
       } finally { database.close(); }
-      if (policyVersion !== 'v25' && policyVersion !== 'v26' && policyVersion !== 'v27') {
+      if (!['v25', 'v26', 'v27', 'v32'].includes(policyVersion)) {
         await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toThrow('连接测试来历无效。');
         continue;
       }
@@ -1527,7 +1527,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     expect(result.outcome).toBe('cancelled');
   });
 
-  it('invalidates tested state on key replacement and refuses a stale selection before secret release', async () => {
+  it('clears diagnostic status on key replacement, preserves choice, and refuses a stale binding before secret release', async () => {
     const { store } = await openProductionStore();
     const connection = store.saveModelServiceConnection('Exact probe', null, 'ready', 'openai-platform');
     const calls: Array<{ url: string; model: string; cap: number }> = [];
@@ -1548,8 +1548,8 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     } finally { owner.dispose(); }
     store.saveModelServiceConnection('Exact probe', connection.credentialReference, 'ready', 'openai-platform');
     expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toBeNull();
-    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toBeNull();
-    expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).toThrow();
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('openai-platform');
+    expect(() => store.selectFastRoleModel('openai-platform', 'gpt-5.6-luna')).not.toThrow();
   });
 
   it('migrates revision83 without changing Main/reference/history and freezes the prior Fast choice independently', async () => {
@@ -1672,7 +1672,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 104, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 107, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

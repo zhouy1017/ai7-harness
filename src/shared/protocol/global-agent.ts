@@ -1,4 +1,4 @@
-import type { DialogueAttemptProjection, SelectedPolicyIdentity, TrustedOperationalScope } from '../protocol.js';
+import type { DialogueAttemptProjection, SelectedPolicyIdentity, TrustedOperationalScope, MODEL_SERVICE_SETUP_REQUIRED_REASON } from '../protocol.js';
 
 export const GLOBAL_AGENT_POLICY_BLOCKED = '当前处理策略未允许' as const;
 export const GLOBAL_AGENT_TITLE = '全域智能体（记忆与全局指导）' as const;
@@ -97,9 +97,9 @@ export interface GlobalAgentDialogueProjection {
 }
 export interface GlobalAgentProjection {
   readonly operationalScope: TrustedOperationalScope;
-  readonly dialogueState: typeof GLOBAL_AGENT_POLICY_BLOCKED | 'available';
+  readonly dialogueState: typeof GLOBAL_AGENT_POLICY_BLOCKED | typeof MODEL_SERVICE_SETUP_REQUIRED_REASON | 'available';
   /** Whether the scoped tool dialogue is admitted for this launch; it never falls back to the no-tools rule. */
-  readonly scopedDialogueState?: typeof GLOBAL_AGENT_POLICY_BLOCKED | 'available';
+  readonly scopedDialogueState?: typeof GLOBAL_AGENT_POLICY_BLOCKED | typeof MODEL_SERVICE_SETUP_REQUIRED_REASON | 'available';
   /** The procedure library's current enabled versions, for inspection and explicit listing. */
   readonly procedures?: ReadonlyArray<GlobalAgentProcedure>;
   readonly explanation: string;

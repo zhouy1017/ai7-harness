@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 // The generator of the authored fixture `sample1-writing-authored` (Issue #432, plan slice S84a). The passages and the draft below
 // (`tests/support/writing-task.ts`) are the authored part: each passage was written after reading one Analysis Unit of exact
@@ -198,8 +199,8 @@ async function pass(layout: boolean): Promise<boolean> {
     await writeFile(libraryPath, WRITING_LIBRARY_TEXT, 'utf8');
     const preview = await store.previewLibraryMaterial(libraryPath);
     const material = await store.addLibraryMaterial({ previewId: preview.previewId, title: WRITING_LIBRARY_TITLE, kind: 'document' });
-    store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-    store.decideLibraryMaterial({ materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     store.startMaterialIndexing();
     await store.settleMaterialIndexing();
     let library = store.createWritingPreparationWork(bookId, { ...WRITING_LIBRARY_REQUEST, materialIds: [material.materialId] }, launchPolicy);

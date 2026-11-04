@@ -1,3 +1,4 @@
+import { MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_ROW_COLUMNS } from '../../src/service/model-service-connections.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
@@ -14,54 +15,35 @@ let store: EditorialStore | undefined;
 afterEach(() => { store?.close(); store = undefined; });
 
 describe('the model-service channel catalogue', () => {
-  it('lists the six channels and offers for each role exactly the model-table records its policy admits', () => {
+  it('persists independent models on one channel and across channels, and can set both atomically', async () => {
+    const roots = await createServiceTestRoots('ai7-role-models-');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const claude = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
+    store.saveModelServiceConnection('Synthetic Gemini', null, 'ready', 'google-gemini');
+    store.selectMainRoleModel('anthropic-claude', 'account-opus');
+    store.selectFastRoleModel('anthropic-claude', 'account-haiku');
+    const bindings = () => ['main-editorial', 'fast-interaction'].map((role) => store!.getConfiguredModelRoleBinding(role as 'main-editorial' | 'fast-interaction'));
+    expect(bindings()).toMatchObject([{ model: 'account-opus', credentialReference: claude.credentialReference }, { model: 'account-haiku', credentialReference: claude.credentialReference }]);
+    store.markCleanShutdown(); store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(bindings().map((binding) => binding?.model)).toEqual(['account-opus', 'account-haiku']);
+    store.selectMainRoleModel('google-gemini', 'gemini-custom');
+    expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['google-gemini', 'gemini-custom'], ['anthropic-claude', 'account-haiku']]);
+    store.selectBothRoleModels('anthropic-claude', 'claude-custom');
+    expect(bindings().map((binding) => [binding?.route, binding?.model])).toEqual([['anthropic-claude', 'claude-custom'], ['anthropic-claude', 'claude-custom']]);
+    expect(() => store!.selectBothRoleModels('google-gemini', 'invalid model')).toThrow();
+    expect(bindings().map((binding) => binding?.model)).toEqual(['claude-custom', 'claude-custom']);
+  });
+
+  it('offers all catalogue models on admitted channels with protocol capabilities', () => {
     const channels = modelServiceChannels();
     expect(channels.map((channel) => channel.channelId)).toEqual([...MODEL_SERVICE_CHANNELS]);
-    // Every channel is a Model Service route with its own credential since Issue #1225.
-    expect(channels.map((channel) => channel.route)).toEqual([...MODEL_SERVICE_CHANNELS]);
-    for (const role of ['main', 'fast'] as const) {
-      const eligible = channels.flatMap((channel) => channel.models.filter((model) => model[role] === 'eligible').map((model) => `${channel.route}/${model.modelId}`));
-      expect(eligible.sort()).toEqual(CONFIGURED_RUNTIME_MODEL_TABLE.ordinaryProduction[role].map((binding) => `${modelServiceChannelOf(binding.route)}/${binding.model}`).sort());
+    expect(channels.every((channel) => channel.models.some((model) => model.main === 'eligible' && model.fast === 'eligible'))).toBe(true);
+    for (const model of channels.flatMap((channel) => channel.models)) {
+      expect(model.capabilities).toEqual({ text: 'supported', stream: 'supported', functionTools: 'supported' });
     }
   });
 
-  it('names why every other declared model cannot be chosen, and carries no endpoint or credential slot', () => {
-    const channels = modelServiceChannels();
-    const byId = (channelId: string) => channels.find((channel) => channel.channelId === channelId)!;
-    // v32 admits every family (Issue #1221); the official Claude and Gemini models read text on documentation (#1225), the Zen ones do not.
-    expect(byId('anthropic-claude').models.every((model) => model.main === 'eligible' && model.fast === 'eligible')).toBe(true);
-    expect(byId('google-gemini').models.every((model) => model.family === 'google-generate-content' && model.main === 'eligible')).toBe(true);
-    expect(byId('opencode-zen').models.every((model) => model.main === 'untested:text' && model.fast === 'untested:text')).toBe(true);
-    const luna = byId('openai-platform').models.find((model) => model.modelId === 'gpt-5.6-luna')!;
-    // OpenAI Responses for Main has its runtime record (Issue #1225), so it reads eligible for both roles.
-    expect([luna.main, luna.fast]).toEqual(['eligible', 'eligible']);
-    expect(byId('opencode-go').models.find((model) => model.modelId === 'deepseek-v4-flash')!.main).toBe('not-in-runtime-model-table');
-    expect(byId('opencode-zen').models.length).toBeGreaterThan(0);
-    expect(byId('opencode-zen').models.some((model) => model.main === 'eligible' || model.fast === 'eligible')).toBe(false);
-    const text = JSON.stringify(channels);
-    expect(text).not.toMatch(/https?:\/\/|credentialSlot|credentialReference/u);
-  });
-});
-
-describe('the one choice for both roles', () => {
-  it('persists a route and its model for the Main and the Fast role across a reopen', async () => {
-    const roots = await createServiceTestRoots('ai7-model-channels-');
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    for (const route of ['opencode-go', 'deepseek-open-platform'] as const) {
-      const saved = store.saveModelServiceConnection(`Synthetic ${route}`, null, 'needs-attention', route);
-      store.saveModelServiceConnection(saved.connectionName, saved.credentialReference, 'ready', route);
-    }
-    store.selectModelServiceRoute('opencode-go');
-    store.selectFastRoleModel('opencode-go', 'deepseek-v4.1-flash');
-    store.close();
-    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
-    const main = store.getConfiguredModelRoleBinding('main-editorial');
-    const fast = store.getConfiguredModelRoleBinding('fast-interaction');
-    expect([main?.route, main?.model]).toEqual(['opencode-go', 'deepseek-v4.1-flash']);
-    expect(fast).toEqual(main);
-  });
-
-  it('saves and reads a credential reference for each new slot, never a value, and chooses none of them on its own (#1225)', async () => {
+  it('saves and reads a credential reference for each new slot, never a value, and retains the first configured channel', async () => {
     const roots = await createServiceTestRoots('ai7-model-channels-');
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const saved = (['opencode-zen', 'anthropic-claude', 'google-gemini'] as const).map((route) => {
@@ -69,29 +51,29 @@ describe('the one choice for both roles', () => {
       return store!.saveModelServiceConnection(first.connectionName, first.credentialReference, 'ready', route);
     });
     expect(saved.map((connection) => [connection.connectionId, connection.binding.credentialSlot, connection.selected, connection.fastSelected ?? null]))
-      .toEqual([['opencode-zen', 'opencode-zen', false, false], ['anthropic-claude', 'anthropic-claude', false, false], ['google-gemini', 'google-gemini', false, false]]);
+      .toEqual([['opencode-zen', 'opencode-zen', true, true], ['anthropic-claude', 'anthropic-claude', false, false], ['google-gemini', 'google-gemini', false, false]]);
     expect(saved.every((connection) => /^[0-9a-f-]{36}$/u.test(connection.credentialReference))).toBe(true);
     store.close();
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     expect(store.getModelServiceConnections().map((connection) => connection.credentialReference)).toEqual(saved.map((connection) => connection.credentialReference));
     expect(JSON.stringify(store.getModelServiceConnections())).not.toMatch(/secret|apiKey|Bearer/iu);
-    // An untested documentary model is no binding for either role, and the default Go fallback has no credential here.
-    expect([store.getConfiguredModelRoleBinding('main-editorial'), store.getConfiguredModelRoleBinding('fast-interaction')]).toEqual([null, null]);
+    // The configured channel serves both roles without requiring a model-specific test.
+    expect(store.getConfiguredModelRoleBinding('main-editorial')?.route).toBe('opencode-zen');
   });
 
-  it('chooses OpenAI for the Main role only after its passed exact-model test on the current credential (#1225)', async () => {
+  it('chooses OpenAI with configured credentials without requiring a text connection test', async () => {
     const roots = await createServiceTestRoots('ai7-model-channels-');
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     const first = store.saveModelServiceConnection('Synthetic OpenAI', null, 'needs-attention', 'openai-platform');
     let connection = store.saveModelServiceConnection(first.connectionName, first.credentialReference, 'ready', 'openai-platform');
-    expect(() => store!.selectModelServiceRoute('openai-platform')).toThrow(expect.objectContaining({ code: 'MODEL_CONNECTION_TEST_REQUIRED' }));
+    expect(() => store!.selectModelServiceRoute('openai-platform')).not.toThrow();
     store.recordModelConnectionTest(connection, passed(connection));
     store.selectModelServiceRoute('openai-platform');
     expect(store.getConfiguredModelRoleBinding('main-editorial')).toEqual({ route: 'openai-platform', model: 'gpt-5.6-luna', credentialSlot: 'openai-platform',
       credentialReference: connection.credentialReference, endpoint: 'https://api.openai.com/v1/responses' });
-    // Re-entering the credential clears the test, so the choice stays but binds nothing until it is tested again.
+    // Credential rotation clears diagnostic status and preserves the channel choice.
     connection = store.saveModelServiceConnection(connection.connectionName, connection.credentialReference, 'ready', 'openai-platform');
-    expect([connection.selected, store.getConfiguredModelRoleBinding('main-editorial')]).toEqual([true, null]);
+    expect([connection.selected, store.getConfiguredModelRoleBinding('main-editorial')?.route]).toEqual([true, 'openai-platform']);
   });
 
   it('opens a genuine revision-102 store at 103 with every connection row copied (#1225)', async () => {
@@ -107,6 +89,31 @@ describe('the one choice for both roles', () => {
     const anthropic = store.saveModelServiceConnection('Synthetic Claude', null, 'ready', 'anthropic-claude');
     expect(anthropic.binding).toMatchObject({ providerId: 'anthropic-claude', modelId: 'claude-opus-5', credentialSlot: 'anthropic-claude' });
   });
+  it('migrates the model-restricted schema, preserving references and selections, and keeps a dynamic ID through restart', async () => {
+    const roots = await createServiceTestRoots('ai7-channel-migration-');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const connection = store.saveModelServiceConnection('Synthetic OpenAI', null, 'ready', 'openai-platform');
+    store.selectModelServiceRoute('openai-platform');
+    const before = store.getModelServiceConnections();
+    store.markCleanShutdown(); store.close(); store = undefined;
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      db.exec('CREATE TEMP TABLE old_channel_rows AS SELECT rowid AS original_rowid, * FROM model_service_connections');
+      db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_103_SQL);
+      db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
+        SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test FROM old_channel_rows`);
+      db.exec('DROP TABLE old_channel_rows; PRAGMA user_version = 104'); db.exec('COMMIT');
+    } finally { db.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.getModelServiceConnections()).toEqual(before);
+    store.selectFastRoleModel('openai-platform', 'account/new-model');
+    store.markCleanShutdown(); store.close(); store = undefined;
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account/new-model', route: 'openai-platform', credentialReference: connection.credentialReference });
+    expect(store.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('gpt-5.6-luna');
+  });
+
 });
 
 /** A sanitized passed text test of the connection's own model, as the connection-test owner records one; synthetic digest, no answer. */

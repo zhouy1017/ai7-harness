@@ -2,6 +2,18 @@
 
 Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-repository-development-toward-value-first-delivery.md), adopted as the execution standard for every editor-facing surface by [ADR 0077](../adr/0077-adopt-the-editor-facing-surface-specification-as-the-execution-standard.md) on 2026-09-09.** 本文是实现编辑面时的执行标准：它规定每一屏的最终形态、状态、措辞、需要的数据与对应的后端能力。它不是实现证据；实现状态只记在根 `PROGRESS.md` 与 [E2E journeys](../development/e2e-journeys.md)。交付顺序只记在 [development plan](../development/development-plan.md)。
 
+## Wave 23 direct workflows — Owner #1279 / #1284
+
+The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft promotion and mandatory plan-review passages in §§1, 6, 7, 8 and 9. Every Book immediately has analysis, review, evaluation, writing and Agent capabilities. Starting a task prepares and authorizes the exact plan in one action; plan details remain optional. A production document can be the target of a same-type writing task, pinned to its saved manuscript, branch and version; edits require repinning before execution.
+
+Import fidelity and structure choices appear once; ordinary DOCX degradation uses the standard policy without a required checkbox. Export has inline format/annotation choices and opens the native Save dialog directly. Library additions belong to the current Book, or the house without one, and are immediately referable; custom dimensions and captured procedures are enabled on save. Data and Storage, Quality and Learning, Knowledge Base, Model Service, Series and Evaluation Calibration return to their entry screen, including the concrete Book subpage or Settings.
+
+## Wave 23 Book Agent and dialogue — Owner #1279 / #1285
+
+The Book Agent workspace retains the current manuscript position, accepts whole paragraphs and contiguous paragraph selections, and streams validated candidate items using the admitted Book retrieval tools. Completed rounds, including empty results, allow new instructions immediately; a new round replaces the prior unsubmitted proposals and can refine them. Internal change-set JSON belongs to the workspace and is never rendered as dialogue prose. Submitted independent paragraph suggestions are accepted or rejected individually on their manuscript cards.
+
+The right dialogue drawer has a persistent follow-up composer for the pinned selection and retrievable Book context. Each follow-up retains prior questions and answers in the Harness Session Ledger. `转为修改建议` prefills quoted/fenced replacement text, or the answer itself for editing; the editor still explicitly submits the suggestion and decides its application.
+
 ## 0 · 总则
 
 ### 0.1 权威与阅读方式
@@ -51,7 +63,8 @@ Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-reposito
 
 - 中央：连续稿件（VIEW-005 排版），阅读区使用更舒适的视口高度，在窄窗口、缩放及辅助面旁保持可用（ADR 0092），段落左缘 3 px 标记线，行内标记高亮；顶部一次性悬浮提示「回到上次位置 / 分析有新发现」自动消失（COPY-015）。
 - 右缘一列：三个入口 `导航（大纲 + 搜索）· 分析 · 任务` 与一条带章节刻度的位置轨；轨旁三条并行车道标出修改建议、批注、备注与分析未覆盖处；原生滚动条隐藏，滚动时短暂浮现（ED-015 合并后的一个导航、ED-059）。
-- 右侧辅助面（按需，覆盖式）：`导航` 展开大纲与搜索；`分析` 展开当前段落相关的人物 / 事件 / 设定；`任务` 展开任务面（§1.3）。
+- 辅助面按需参与稿件网格布局：`导航` 展开大纲与搜索，`分析` 展开当前段落相关的人物 / 事件 / 设定；宽度不足时移到正文下方，不覆盖正文或标记卡。生产文档的工作流程栏随可用宽度下移；`任务` 展开任务面（§1.3）。编辑页使用一个视口，正文与辅助区各自滚动，保存状态位于底部操作栏之外（Wave 23 #1287）。
+- 稿件顶栏只呈现修订信息、位置、撤销、重做与保存；图书页面跳转由左侧主导航承担（Wave 23 #1287）。
 - 保存菜单「已写入修订日志 ▾」：`保存为里程碑版本…` 等低频动作（ED-052）。
 - 专注模式保留（ED-020）。
 - 精确修订日志序号默认收进原生「查看技术详情」展开控件；修订版、保存、保护与恢复状态仍直接可见，展开不修改记录（ADR 0092）。
@@ -204,7 +217,7 @@ Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-reposito
 七类：`审阅规范文件 · 评估方案 · 工序与规则 · 社级编辑记忆 · 范例（按图书）· 资料库 · 外部来源留存`。图书与任务只选用、记版本。
 
 - 审阅规范文件：来源与原件、编号条款及被引用次数、版本各被哪些审阅用过、哪本书还在用旧版（提示更新）、导入新版本。
-- 工序与规则：这是工序库（ADR 0095 §1）。预装工序（基线分析、审阅、评估与审稿意见、写作）与本社工序按「能做什么」命名，列出阶段、状态 / 版本 / 用于 / 更新一步之外（REUSE-029/030），提供 `改写为新版本`、`新建工序`、`从本次运行捕获`、`运行此工序…`；`快速开始` 默认执行规则（写明快速开始时会做什么、设立者、时间；查看 / 修改 / 停用）；按类的后台处理登记（哪些非即时工作可在空闲时跑、预算上限、停用）。
+- 工序与规则：这是统一的可编辑工序库（ADR 0095 §1），加载时不先显示再覆写静态列表；已有的运行捕获工序在同一目录中保留查看和运行入口（Wave 23 #1287）。预装工序（基线分析、审阅、评估与审稿意见、写作）与本社工序按「能做什么」命名，列出阶段、状态 / 版本 / 用于 / 更新一步之外（REUSE-029/030），提供 `改写为新版本`、`新建工序`、`从本次运行捕获`、`运行此工序…`；`快速开始` 默认执行规则（写明快速开始时会做什么、设立者、时间；查看 / 修改 / 停用）；按类的后台处理登记（哪些非即时工作可在空闲时跑、预算上限、停用）。
 - 范例：按已出版图书组织，结构与文档类型一致（审稿意见 / 新闻稿 / 宣传文章 / 评论文章 …）；本社用 AI7 做的书设为发稿版本后自动归入，学习准入默认「仅本社」，不再询问；以前的书由编辑导入并标明图书、作者、责编。
 - 资料库：编辑自行收集的图书、资料、论文、网页；放入后 AI7 建索引；编辑定归属（某本书 / 书系 / 社级）与学习准入，定了任务才能列进「允许参考」。
 - 外部来源留存：审查时落盘的外部资料（SRC-013 的产物）的跨书索引；归属仍在各书的来源与证据；失效的进待我处理；可复用不重复取回。
@@ -212,15 +225,18 @@ Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-reposito
 
 ### 8.5 质量与学习
 
-反馈历史按图书 / 来源 / 时间 / 编辑维度分组，并可按作者、责编看；深链到原决定与学习回溯。展示默认自动本地学习的开关、适用范围、按书/材料排除与停止今后使用；学习 agent「主动询问原因」的频率设置（经常 / 偶尔 / 关闭）——询问以选项 + 可选输入出现在核红之后，不阻塞，不预选（ADR 0095 §7）；有效决策约 5~10 次或一批 Word 修订后触发智能去噪、去重、归纳，不强制生成规则。记忆显示正反例、置信度、来源链、状态和监督方向；后续审校/润色/对话检索符合范围的记忆并标出实际参考的规则。仅真实未决事项进待我处理（ADR 0094 §3）。
+学习信号中的 `新建记忆…` 按需展开表单，取消不写入记忆；从所选来源新建记忆也默认收起（Wave 23 #1287）。反馈历史按图书 / 来源 / 时间 / 编辑维度分组，并可按作者、责编看；深链到原决定与学习回溯。展示默认自动本地学习的开关、适用范围、按书/材料排除与停止今后使用；学习 agent「主动询问原因」的频率设置（经常 / 偶尔 / 关闭）——询问以选项 + 可选输入出现在核红之后，不阻塞，不预选（ADR 0095 §7）；有效决策约 5~10 次或一批 Word 修订后触发智能去噪、去重、归纳，不强制生成规则。记忆显示正反例、置信度、来源链、状态和监督方向；后续审校/润色/对话检索符合范围的记忆并标出实际参考的规则。仅真实未决事项进待我处理（ADR 0094 §3）。
 
 一级入口「全域智能体（记忆与全局指导）」在未打开书稿时也可用：展示当前学习监督方向、近期记忆与流式对话，提供「指导学习方向」「整理改稿习惯」「跨书检索考据」快捷入口。监督指令立即约束后续归纳/使用并可冻结或修正跑偏记忆；检索明确列出可读书稿、证据、批注范围并尊重排除。进入不授予全库读写、模型发送或 Apply；需要改稿仍回到精确图书（ADR 0094 §4）。
+
+Wave 23 #1286：主操作为「发送问题」，一次点击完成准备与发送；「查看将发送的内容」是可选次级预览，继续与重新回答也直接发起。提问后保留可继续输入的对话区与本会话先前问答。记忆与本次来源共用一套左侧复选框；图书、工序与仍存在的记忆选择（自动跟随修正后的版本；冻结项仍可管理，但不随问题发送）在提问和治理刷新后保留。没有选入图书或工序时使用无工具流式回答。工具名称、监督作用与渠道/模型名称用可读中文与显示名；内部条目、版本、回答标识和原始参数/结果只放在默认折叠的「查看技术详情」。进入全域智能体关闭图书任务抽屉并释放右侧空间，未完成草稿仍留在原图书。
+
 
 ### 8.6 设置
 
 分组 `服务（模型服务 / 用量）· 编辑工作（评估校准与预测）· 本机（数据与存储 / 外观 / 键盘与无障碍）`。
 
-- 模型服务：统一「选择服务渠道 → 保护输入凭据 / 测试连接 → 选择可用模型」；覆盖设计准入的 Zen / Go 与官方服务，未实现或不符合当前策略的条目标明状态。工作台提供简洁渠道/模型切换；高级项可分别指定四角色与回退链。连接卡显示名称、用途、状态，已保存凭据只有 `重新输入 / 移除`；预算偏好默认不设。连接成功不启动任务或授予 Apply，授权边界变化重新预检并确认（ADR 0094 §1）。
+- 模型服务：统一「选择服务渠道 → 保护输入凭据并拉取模型 → 分别选择主编辑与快速交互模型」；支持刷新列表和手动输入模型 ID，连接测试为可选诊断，不阻塞选择（Wave 23 #1282）；覆盖设计准入的 Zen / Go 与官方服务，未实现或不符合当前策略的条目标明状态。工作台及全域智能体顶部提供简洁渠道/模型切换，可指定任一角色或同时指定两个角色，外部点击与 Escape 收起；同一流程内直接填写或更新凭据，提供 `保存并获取模型 / 刷新模型列表 / 测试连接 / 移除凭据`，保存后保持当前渠道和模型；仅显示主编辑与快速交互的当前选择，策略审计信息收在 `查看技术详情`（Wave 23 #1283）。联网检索区分历史评测与当前密钥状态，可在未配主模型时独立测试；首个就绪密钥自动成为默认来源，移除备用来源密钥同时清除备用标记，DeepSeek 支持一键复用官方模型凭据。预算偏好默认不设。连接成功不启动任务或授予 Apply，授权边界变化重新预检并确认（ADR 0094 §1）。
 - 评估校准与预测（EVAL-014）：校准进度（10 本调分记录后生效，只调 AI7 初评）；预测开关（30 本已发稿图书实际数据前不可开）；定价与首印实际数据集中录入。
 - 数据与存储（DSTO-002/004/010、DSTO-016 ~ 018）：平台、运行方式、数据保存在、本机占用、凭据单独保护；**版本**：软件版本与**数据版本**分开显示，数据版本随发布冻结、非必要不改，如需改动升级前自动备份、说明变更、可回退；**导出数据库**（全部图书、稿件与历史、知识库、设置；不含凭据；包里记数据版本）；**导入数据库**先预览（内容 · 数据版本兼容 · 来源），再选 `替换本机全部数据（先自动备份，可回退）` 或 `只导入其中的图书（合并）`；**定期自动备份** 开关默认关（每天一次到本机备份位置，保留 14 天，不含凭据）。
 - 外观、键盘与无障碍、用量：按 VIEW / KEY / MSET-010。
@@ -241,7 +257,7 @@ Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-reposito
 | --- | --- | --- | --- | --- |
 | 发稿 | 稿件 | 里程碑版本（① 保存菜单 / 稿件历史） | `设为发稿版本`（从里程碑选一版 + 发稿范围 + 依据；固定句「仅表示此版本可用于上述发稿范围；AI7 不会发布或发送」） | 提醒录入定价与首印；审稿意见自动归入范例；再改出「自发稿版本后有修改」；更正 / 勘误 / 替代 / 撤回 / 再版 / 归档按维护事项记录 |
 | 交付 | 生产文档（本社配置的类型：新闻稿 / 宣传文章 / 评论文章 / 发布会材料 / 营销要点 …） | 版本（没有里程碑 / 发稿字样） | `交付` = 选一版（当前工作状态先保存为版本）+ 交给谁（本社清单：宣传部 / 编辑部 / 外部媒体 / 其他）+ 备注 → 交付记录 + 导出文件（④） | 交付后再改是新版本，标「交付后有修改」，可再交付；与发稿互不影响；可标「本书不做」 |
-| 图书交付包 | 整本书 | 包 v1、v2 … | 条件表：发稿已设 + 各文档已交付（或标为不做）+ 工作记录齐 → `准备图书交付包` 冻结清单 → `图书交付包已准备 · 暂无导出记录` → 导出为文件夹或压缩包（④） | 任何一项变了生成包 v2，v1 不动；包不是发稿也不是交付 |
+| 图书交付包 | 整本书 | 包 v1、v2 … | 内容情况：发稿已设即可准备；附属文档与审阅报告按实际已有版本纳入，缺失或未完成项目列为不包含和限制，不要求逐类声明不做或先生成报告 → `准备图书交付包` 冻结清单 → `图书交付包已准备 · 暂无导出记录` → 导出为文件夹或压缩包（④） | 任何一项变了生成包 v2，v1 不动；包不是发稿也不是交付 |
 
 **总览页**：三块并排——稿件发稿一行（里程碑列表、`设为发稿版本…`）；文档卡（下一项需要处理 → 七个阶段并行状态 → 交付状态 → 打开 / 处理关口 / 交付 / 再交付）；图书交付包条件摘要。没有百分比（WORK-007）。
 

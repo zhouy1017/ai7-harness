@@ -1,5 +1,5 @@
 import { procedureStageBudget } from '../procedures/execution.js';
-import { PlatformToolSession, bindSearchFallback, platformToolModelProfile, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
+import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factual-claim-ledger.js';
 import { parseFactualClaimVerification } from './factual-claim-contract.js';
@@ -8,7 +8,7 @@ import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '.
 import { learningCurationRule } from './live-kind-admission.js';
 import type { EditorialStore } from '../store.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
-import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit } from './factual-review-evidence.js';
+import { mergeClaimEvidenceUnits, researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit, type SourceTranslator } from './factual-review-evidence.js';
 import { factualFindingId, locatedUnitFindings } from './factual-review-reducers.js';
 import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type FactualReviewUnitResultV2 } from './factual-review-contract-v2.js';
@@ -111,6 +111,7 @@ import {
 import {
   RUN_REPORT_NO_USAGE,
   buildRunReport,
+  foldClaimToolCounters,
   runReportAccounting,
   runReportReflectionNotRun,
   type RunReportAccounting,
@@ -236,6 +237,8 @@ export interface ExecutionOwnerDependencies {
    * store's research evidence ledger. Absent, nothing is retained.
    */
   readonly researchEvidence?: ((input: { bookId: string; runRecordId: string; unitOrdinal: number; backendId: string | null; unit: RetainedUnit; fallbackSources?: ReadonlyMap<string, SearchFallbackAttribution> }) => void) | null;
+  /** Bounded retained-source translation on the existing Fast Interaction owner, when its route is ready. */
+  readonly sourceTranslator?: SourceTranslator;
   /**
    * The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002): the store records the planned
    * level and, when this device reads offline then, the effective 快速整理 with its disclosure. Absent, nothing is recorded.
@@ -558,7 +561,7 @@ export class BaselineAnalysisExecutionOwner {
       let ticket: TransmitTicket | null = null, admitted = false;
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
         systemPrompt: CURATION_CONTRACT.systemPrompt, outboundDataCategory: 'editorial-learning-example',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v33', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.bundle.emittedText]), ruleOutboundCategories: new Set(rule.outboundDataCategories),
         contractCategories: new Set(['editorial-learning-example', 'house-review-preference-excerpt']),
         learningCurationScope: { messageDigest: frozen.bundle.emittedDigest, current } };
@@ -628,7 +631,16 @@ export class BaselineAnalysisExecutionOwner {
     let run: FactualRecheckRun | null = null, harness: PrimaryAgentHarnessHandle | null = null, producer: ModelRequestProducer | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, usage: UsageFacts | null = null;
     try {
-      if (await this.liveCredentialReadiness() !== 'present' || !this.#backgroundIdle || signal.aborted) return;
+      const admitted = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
+      const profile = productionModelProfile(candidate.binding.route, candidate.binding.model);
+      const backend = searchBackend(candidate.search.backendId);
+      if (admitted?.factualRecheck === undefined || platformToolsFromProjection(admitted) === null ||
+        admitted.route !== candidate.binding.route || admitted.model !== candidate.binding.model ||
+        admitted.endpoint !== candidate.binding.endpoint || admitted.credentialSlot !== candidate.binding.credentialSlot ||
+        profile.capabilities.toolCalling !== 'function' || backend.declaration.host !== candidate.search.host ||
+        await this.liveCredentialReadiness(candidate.binding) !== 'present' ||
+        await this.#broker.checkPlanReadiness(backend.declaration.credentialSlot, candidate.search.credentialReference) !== 'present' ||
+        !this.#backgroundIdle || signal.aborted) return;
       run = store.startFactualRecheck(candidate);
       const frozen = run;
       const binding = frozen.binding;
@@ -639,7 +651,6 @@ export class BaselineAnalysisExecutionOwner {
       const rule = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
       const tools = platformToolsFromProjection(rule);
       if (tools === null) throw new ExecutionAdmissionError('FACTUAL_RECHECK_POLICY_MISSING', '单条复核没有联网工具准许。');
-      const backend = searchBackend(frozen.search.backendId);
       producer = this.#deps.requestGovernor.registerProducer({ key: `factual-recheck:${frozen.runRecordId}`, kind: 'analysis-stage', lane: 'background' });
       let ticket: TransmitTicket | null = null, requestOrdinal = 0, admittedPayloadDigest: string | null = null;
       const acceptedOutputDigests = new Set<string>();
@@ -652,7 +663,7 @@ export class BaselineAnalysisExecutionOwner {
       };
       const facts: EgressBindingFacts = { bindingDigest: bound.bindingDigest, route: binding.route, model: binding.model,
         systemPrompt: frozen.prompt, outboundDataCategory: 'unpublished-excerpts',
-        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v32', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+        policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v33', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
         admittedUserMessages: new Set([frozen.message]), ruleOutboundCategories: new Set(rule!.outboundDataCategories),
         factualClaimScope: { stage: 'web-verification', current }, platformTools: tools,
         searchBackend: { backendId: frozen.search.backendId, host: frozen.search.host, endpoint: backend.declaration.endpoint!,
@@ -709,7 +720,8 @@ export class BaselineAnalysisExecutionOwner {
         quote: claim.occurrence.quote, category: claim.producers[0]!.assertion.category, basis: (result?.evidenceRelations ?? []).map((entry) => entry.sourceRef).join('\n') }],
         sources: captures.searches.flatMap(searchHitsOf), pages, searchSnapshotDigest: captures.searches.at(-1) === undefined ? null : researchSnapshotDigest(captures.searches.at(-1)!),
         searchState: result === null ? 'incomplete' : 'completed', searchCalls: captures.searchCalls, fetchAllowed: false, fetch: null,
-        rule: { operationalScope: 'ordinary-production' }, translator: null, now: () => new Date() });
+        rule: { operationalScope: 'ordinary-production', sourceTranslationAllowed: liveKindRule(this.#policy(), FACTUAL_REVIEW_KIND)?.sourceTranslationAllowed === true },
+        translator: current() ? this.#deps.sourceTranslator ?? null : null, now: () => new Date() });
       const round = owner.recordClaimVerification({ sessionId: frozen.session.sessionId, result, evidence,
         state: ambiguousTurnReason(turn.signals) !== null ? 'unknown' : result === null ? 'incomplete' : 'closed' });
       requireCurrent();
@@ -1231,7 +1243,7 @@ export class BaselineAnalysisExecutionOwner {
       cancelRequested: options.cancel === true,
       pauseRequested: false,
       idleYieldRequested: false,
-      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
+      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND || ledger.definition.factualClaims !== undefined,
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
@@ -1672,7 +1684,6 @@ export class BaselineAnalysisExecutionOwner {
     // is business: every model step reaches the transport itself, and nothing reads or writes the developer cache or ledger.
     const validation = live === null || production !== null ? null : (live as DeveloperLiveRuntime).launch.validation;
     const bootstrap = production === null && validation?.family === 'policy-selection' && validation.case === 'wave6-tool-evidence-bootstrap';
-    if (webTools) liveModelProfile = platformToolModelProfile(liveModelProfile, production === null ? 'developer-live' : 'ordinary-production', validation);
     let cache: ProviderResultCache | null = null;
     if (live !== null && production === null && validation !== null) {
       cache = new ProviderResultCache((live as DeveloperLiveRuntime).launch.providerCacheRoot);
@@ -1767,6 +1778,7 @@ export class BaselineAnalysisExecutionOwner {
       claimSession?: FactualClaimSession, contextDefinition: AnalysisKindDefinition = definition, claimMessage?: string) => {
       const definition = contextDefinition;
       const promptContractDigest = definition.promptContractDigest;
+      const perUnitSession = claimSession === undefined && (live !== null || facts.localFixtureProfile?.kind === 'rule');
       const webTools = claimSession?.stage === 'web-verification' || (claimSession === undefined && definition.factualClaims === undefined && facts.webToolsBackend !== undefined && definition.evidenceAssuranceLevel !== 'quick');
       const compositionOptions = claimSession === undefined ? facts.compositionOptions : {
         ...facts.compositionOptions, platformTools: webTools, localTools: false,
@@ -1948,7 +1960,7 @@ export class BaselineAnalysisExecutionOwner {
           promptContractDigest,
           // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
           // accumulating Session, so J-04's proven composition is untouched.
-          ...(claimSession !== undefined ? { sessionMode: 'single' as const } : live === null && facts.localFixtureProfile?.kind !== 'rule' ? {} : { sessionMode: 'per-unit' as const }),
+          ...(claimSession !== undefined ? { sessionMode: 'single' as const } : perUnitSession ? { sessionMode: 'per-unit' as const } : {}),
           ...(firstUnitSessionId === undefined ? {} : { nextSessionId: () => nextUnitSessionId! }),
           adapterFactory: (codes) => {
             // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
@@ -2085,7 +2097,7 @@ export class BaselineAnalysisExecutionOwner {
       })();
       const context = {
         harness, retrieval, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage,
-        ceilingState, bind, finish, beginTurn, closeProducer,
+        ceilingState, bind, finish, beginTurn, closeProducer, freshToolSession: childProfile || perUnitSession,
         get currentBindingDigest() { return currentBindingDigest; },
         get bindingFacts() { return bindingFacts; },
         set bindingFacts(value: EgressBindingFacts | null) { bindingFacts = value; },
@@ -2103,7 +2115,9 @@ export class BaselineAnalysisExecutionOwner {
     };
     type AnalysisContext = Awaited<ReturnType<typeof createContext>>;
     const stageContext = await createContext(harnessSessionId);
-    const context = stageContext; const claimSearchCalls: Record<string, number> = {}; // #1226: a frozen 备用来源's claim sends, for the Run Report.
+    const context = stageContext;
+    // Claim model requests/tokens already belong to their stages. Fold only the tool counters here, for every search backend.
+    const claimTools = { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: {} as Record<string, number>, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 };
     const { harness, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage, ceilingState, retrieval } = context;
     active.transmissions = () => liveAdapter.instance?.transmissions ?? 0;
     active.channel = live === null ? null : route;
@@ -2466,7 +2480,9 @@ export class BaselineAnalysisExecutionOwner {
             requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest });
           return true;
         };
-        context.platformSession?.startUnit(childProfile);
+        // A new technical session may legitimately receive the same provider call IDs (including a
+        // cached contract retry). Its tool receipts must start with it; single-session claims retain theirs.
+        context.platformSession?.startUnit(context.freshToolSession);
         let turn: HarnessTurnOutcome;
         try { turn = await harness.submitUnit(message); } finally { context.recoverPreSend = null; }
         if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
@@ -2705,9 +2721,8 @@ export class BaselineAnalysisExecutionOwner {
               const got = await session.retain(url);
               return 'failed' in got ? got : retainedPageOf(got) ?? { failed: '取回的页面没有可读的正文。' };
             },
-            // No Provider Processing policy names a translation step yet: the rule reads its scope alone, and 来源译文 refuses.
-            rule: { operationalScope: context.bindingFacts?.policy.operationalScope ?? 'unbound' },
-            translator: null,
+            rule: { operationalScope: policy.operationalScope ?? 'unbound', sourceTranslationAllowed: liveKindRule(policy, FACTUAL_REVIEW_KIND)?.sourceTranslationAllowed === true },
+            translator: active.cancelRequested || active.interrupted ? null : this.#deps.sourceTranslator ?? null,
             now: () => new Date(),
           });
           retentionFailure = 'storage';
@@ -3329,7 +3344,8 @@ export class BaselineAnalysisExecutionOwner {
                 sources: [...captures.searches.flatMap(searchHitsOf), ...captures.fetches.map((snapshot) => ({ url: snapshot.url, title: null, snippet: null, via: 'fetch' as const }))],
                 pages, searchSnapshotDigest: captures.searches.at(-1) === undefined ? null : researchSnapshotDigest(captures.searches.at(-1)!),
                 searchState: result === null ? 'incomplete' : 'completed', searchCalls: captures.searchCalls - rounds.reduce((sum, round) => sum + round.evidence.searchCalls, 0), fetchAllowed: false,
-                fetch: null, rule: { operationalScope: policy.operationalScope }, translator: null, now: () => new Date() });
+                fetch: null, rule: { operationalScope: policy.operationalScope, sourceTranslationAllowed: liveKindRule(policy, FACTUAL_REVIEW_KIND)?.sourceTranslationAllowed === true },
+                translator: active.cancelRequested || active.interrupted ? null : this.#deps.sourceTranslator ?? null, now: () => new Date() });
               const relations = result?.evidenceRelations ?? [];
               const groups = independenceGroups(relations.map((relation) => ({ domain: registrableDomain(relation.sourceRef), publisher: null, lineage: relation.lineage })));
               const mapped = mapVerificationOutcome({ level: definition.factualClaims.level, relationsStated: true,
@@ -3337,21 +3353,27 @@ export class BaselineAnalysisExecutionOwner {
                   exact: relation.excerptRef !== null && pages.has(relation.sourceRef) && excerptLocated(pages.get(relation.sourceRef)!.text, relation.excerptRef), group: groups[index] ?? null })) });
               const pending = result !== null && !['证据支持', '疑似错误', '证据冲突'].includes(mapped.outcome) && rounds.length === 0 && claimOwner.claimAllowance(session.sessionId).search > 0;
               const round = claimOwner.recordClaimVerification({ sessionId: session.sessionId, result, evidence,
+                ...(isolated.platformSession!.fallbackSources.size === 0 ? {} : { fallbackSources: [...isolated.platformSession!.fallbackSources] }),
                 state: ambiguousTurnReason(turn.signals) !== null ? 'unknown' : result === null ? 'incomplete' : pending ? 'pending' : 'closed' });
               ledger.checkpointFactualRequests(facts.runRecordId, round);
               rounds = claimOwner.claimRounds(session.sessionId);
             }
+            for (const round of rounds) for (const [url, source] of round.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source);
             retainedByUnit.set(producer.sourceUnitOrdinal, [...(retainedByUnit.get(producer.sourceUnitOrdinal) ?? []), ...rounds.map((round) => round.evidence)]);
-          } finally { for (const [url, source] of isolated.platformSession?.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source); if (facts.webToolsFallback !== undefined) for (const [id, count] of Object.entries(isolated.platformSession?.usage.searchCalls ?? {})) claimSearchCalls[id] = (claimSearchCalls[id] ?? 0) + count; await isolated.finish(); contexts.delete(isolated); }
-        }
-        for (const [unitOrdinal, retained] of retainedByUnit) {
-          this.#deps.researchEvidence?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, unitOrdinal, ...(fallbackSources.size === 0 ? {} : { fallbackSources }),
-            backendId: facts.webToolsBackend!.backendId, unit: { state: retained.some((entry) => entry.state === 'incomplete') ? 'incomplete' : 'completed',
-              searchCalls: retained.reduce((sum, entry) => sum + entry.searchCalls, 0), retentionFetches: 0,
-              failedRetrievals: retained.reduce((sum, entry) => sum + entry.failedRetrievals, 0),
-              findings: retained.flatMap((entry) => entry.findings), evidence: retained.flatMap((entry) => entry.evidence) } });
+          } finally {
+            for (const [url, source] of isolated.platformSession?.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source);
+            const tools = isolated.platformSession?.usage;
+            for (const [id, count] of Object.entries(tools?.searchCalls ?? {})) claimTools.searchCalls[id] = (claimTools.searchCalls[id] ?? 0) + count;
+            claimTools.refusedSearchCalls += tools?.refusedSearchCalls ?? 0;
+            claimTools.fetchCount += tools?.fetchCount ?? 0; claimTools.fetchBytes += tools?.fetchBytes ?? 0;
+            await isolated.finish(); contexts.delete(isolated);
+          }
         }
         if (stopWithoutEnding()) return;
+        for (const [unitOrdinal, retained] of retainedByUnit) {
+          this.#deps.researchEvidence?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, unitOrdinal, ...(fallbackSources.size === 0 ? {} : { fallbackSources }),
+            backendId: facts.webToolsBackend!.backendId, unit: mergeClaimEvidenceUnits(retained) });
+        }
       }
       const closedOutcomes = outcomes
         .filter((outcome): outcome is ClosedUnitOutcome<BaselineUnitResult> => outcome.state === 'closed')
@@ -3620,7 +3642,9 @@ export class BaselineAnalysisExecutionOwner {
         recordedAt: new Date().toISOString(),
         spans: clock.spans(),
         usage: stageUsage,
-        ...(context.platformSession === null ? Object.keys(claimSearchCalls).length === 0 ? {} : { platformTools: { requests: 0, inputTokens: 0, outputTokens: 0, searchCalls: claimSearchCalls, refusedSearchCalls: 0, fetchCount: 0, fetchBytes: 0 }, webToolsBackend: facts.webToolsBackend } : { platformTools: Object.keys(claimSearchCalls).length === 0 ? context.platformSession.usage : { ...context.platformSession.usage, searchCalls: { ...context.platformSession.usage.searchCalls, ...claimSearchCalls } }, webToolsBackend: facts.webToolsBackend }),
+        ...(context.platformSession === null && facts.webToolsBackend === undefined ? {} : {
+          platformTools: foldClaimToolCounters(context.platformSession?.usage ?? null, claimTools),
+          ...(facts.webToolsBackend === undefined ? {} : { webToolsBackend: facts.webToolsBackend }) }),
         unitRows: runReportUnitRows(unitRecords, unitObservations),
         submitted: submittedUnits.length,
         // Exactly the three fields decision 4 names; the adaptation's own digests, codes, and

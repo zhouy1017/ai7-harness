@@ -9,11 +9,9 @@ export type ReviewProviderRule = AdmittedProviderRule;
 
 export const LIVE_REVIEW_UNAVAILABLE = '当前处理策略尚未允许这一审阅类别实时执行。';
 
-export function liveReviewUnavailableReason(entry: ReviewCategoryConfigurationEntry): string {
-  // The selected rule, rather than a capability inferred from the category's current flag, denies
-  // publication-risk. #744 owns its future web declaration together with an admitted web path.
-  return entry.searchEngine || entry.categoryId === 'publication-risk'
-    ? '当前处理策略未允许这一涉及联网核查的类别实时执行；联网审阅接入前暂不可用。'
+export function liveReviewUnavailableReason(_entry: ReviewCategoryConfigurationEntry, policy?: LaunchPolicyProjection): string {
+  return policy?.operationalScope === 'ordinary-production' && policy.providerProcessing.bindingState === 'setup-required'
+    ? '请先在设置 › 模型服务中配置模型凭据。'
     : LIVE_REVIEW_UNAVAILABLE;
 }
 

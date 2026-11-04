@@ -1,3 +1,4 @@
+import { startPreparedTask } from './one-action-start.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_TASK_INTENT_DRAFT_RANGES,
@@ -177,7 +178,7 @@ export function composeOptions(projection: Pick<BaselineAnalysisProjection, 'act
     return {
       mode,
       label: entry.label,
-      meaning: entry.meaning,
+      meaning: entry.meaning.replaceAll('内容块', '段落'),
       available,
       reason: controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason,
       goal: entry.goal as BaselineAnalysisGoal,
@@ -469,14 +470,14 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const quick = el('button', 'quiet', TASK_PANEL_COMPOSE_ACTIONS.quick);
     quick.type = 'button';
     quick.dataset['taskComposeAction'] = 'quick';
-    const prepare = el('button', 'primary', TASK_PANEL_COMPOSE_ACTIONS.prepare);
+    const prepare = el('button', 'primary', '开始分析');
     prepare.type = 'button';
     prepare.dataset['taskComposeAction'] = 'prepare';
     prepare.disabled = working || !chosen.available;
     quick.disabled = working || chosen.quick.rule === null;
     const why = el('p', 'field-note task-panel-compose-why');
     why.id = uid('compose-why');
-    const reason = !chosen.available ? chosen.reason : chosen.quick.rule === null ? chosen.quick.reason : null;
+    const reason = !chosen.available ? chosen.reason : null;
     why.textContent = reason ?? '';
     why.hidden = reason === null;
     if (reason !== null) {
@@ -485,7 +486,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     }
     quick.addEventListener('click', () => void start(chosen, true));
     prepare.addEventListener('click', () => void start(chosen, false));
-    row.append(quick, prepare);
+    row.append(prepare);
     compose.replaceChildren(heading, opener, lede, fieldset, row, why);
   }
 
@@ -565,7 +566,8 @@ export interface ComposerRange {
 export interface TaskComposerSeed {
   readonly bookId: string;
   readonly bookTitle: string;
-  readonly origin: 'composer-selection' | 'composer-book';
+  readonly origin: 'composer-selection' | 'composer-book' | 'composer-deliverable';
+  readonly deliverable?: { manuscriptId: string; branchId: string; revisionId: string; label: string };
   readonly manuscript: null | { readonly revisionLabel: string; readonly journalSequence: number; readonly pending: boolean };
   readonly ranges: ReadonlyArray<ComposerRange>;
   readonly goal?: string;
@@ -575,7 +577,7 @@ export interface TaskComposerSeed {
 }
 
 export interface TaskComposerOptions {
-  readonly api: Pick<RendererApi, 'saveTaskIntentDraft' | 'inspectTaskIntentDrafts' | 'promoteTaskIntentDraft'>;
+  readonly api: Partial<RendererApi> & Pick<RendererApi, 'saveTaskIntentDraft' | 'inspectTaskIntentDrafts' | 'promoteTaskIntentDraft'>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   awaitServiceJob(initial: ServiceJobProjection, onProgress: (job: ServiceJobProjection) => void): Promise<ServiceJobProjection>;
@@ -610,13 +612,14 @@ export interface TaskComposerSurface {
 interface ComposerState {
   bookId: string;
   bookTitle: string;
-  origin: 'composer-selection' | 'composer-book' | 'dialogue-answer';
+  origin: 'composer-selection' | 'composer-book' | 'composer-deliverable' | 'dialogue-answer';
   draftId: string | null;
   ordinal: number | null;
   versionId: string | null;
   goal: string;
   outcomeClass: TaskIntentOutcomeClass | null;
-  target: 'book' | 'ranges';
+  target: 'book' | 'ranges' | 'deliverable';
+  deliverable: NonNullable<TaskComposerSeed['deliverable']> | null;
   ranges: ComposerRange[];
   pin: null | { procedureId: string; versionId: string; title: string | null };
   manuscript: TaskComposerSeed['manuscript'];
@@ -750,7 +753,23 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     const target = el('fieldset', 'task-composer-target');
     target.append(el('legend', undefined, TASK_COMPOSER_TARGET_LEGEND));
     const targetName = uid('target');
-    for (const value of ['ranges', 'book'] as const) {
+    if (current.deliverable !== null) {
+      target.append(el('p', 'task-composer-deliverable', current.deliverable.label));
+      if (editable && api.saveProductionDocumentVersion !== undefined) target.append(button('使用当前版本', 'repin-deliverable', 'quiet', () => void (async () => {
+        if (state !== current || current.deliverable === null || working) return;
+        working = true; syncActions();
+        try {
+          if (!(await options.settle())) return;
+          const saved = await api.saveProductionDocumentVersion!({ documentId: current.deliverable.manuscriptId, branchId: current.deliverable.branchId });
+          const version = saved.document?.versions[0];
+          if (version === undefined) throw new Error('无法读取交付物版本。');
+          current.deliverable = { ...current.deliverable, revisionId: version.revisionId, label: `交付物 · ${saved.documents.types.find((entry) => entry.typeId === saved.typeId)?.label ?? saved.typeId} · ${version.label}` };
+          current.dirty = true;
+        } catch (error) { problem(options.errorMessage(error, '无法重新选择交付物版本。')); }
+        finally { working = false; if (state === current) render(); }
+      })()));
+    }
+    for (const value of current.target === 'deliverable' ? [] : ['ranges', 'book'] as const) {
       const label = el('label', 'task-composer-choice');
       const input = el('input');
       input.type = 'radio';
@@ -836,7 +855,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
       if (event.isComposing || event.keyCode === 229 || composing) return;
       event.preventDefault();
-      if (mode() === 'new') void prepare();
+      if (mode() === 'new') void prepare(true);
       else if (mode() === 'draft') void save();
     });
     goalLabel.append(goalCaption, goal, count);
@@ -878,7 +897,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       input.value = value;
       input.dataset['taskComposerField'] = `outcome-${value}`;
       input.checked = current.outcomeClass === value;
-      input.disabled = !editable || working;
+      input.disabled = !editable || working || current.target === 'deliverable';
       input.addEventListener('change', () => {
         if (!input.checked || state === null) return;
         state.outcomeClass = value;
@@ -1014,11 +1033,12 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
           options.openProcedures(book, only);
         }));
       }
-      row.append(button(TASK_COMPOSER_ACTIONS.prepare, 'prepare', 'primary', () => void prepare()));
+      row.append(button('发起任务', 'prepare', 'primary', () => void prepare(true)));
+      row.append(button('保存草稿', 'save-draft', 'quiet', () => void prepare()));
       row.append(button(TASK_COMPOSER_ACTIONS.cancel, 'close', 'quiet', () => finish()));
     } else if (kind === 'draft') {
       row.append(button(TASK_COMPOSER_ACTIONS.save, 'save', 'secondary', () => void save()));
-      row.append(button(TASK_COMPOSER_ACTIONS.promote, 'promote', 'primary', () => void promote()));
+      row.append(button('发起任务', 'promote', 'primary', () => void runDraft()));
       row.append(button(TASK_COMPOSER_ACTIONS.close, 'close', 'quiet', () => finish()));
     } else {
       const promotion = current.promotion!;
@@ -1046,9 +1066,9 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     for (const node of element.querySelectorAll<HTMLButtonElement>('.task-composer-actions button, .task-composer-add-range, [data-task-composer-action="remove-range"]')) {
       const action = node.dataset['taskComposerAction'];
       node.disabled = working ||
-        (action === 'prepare' && empty) ||
+        ((action === 'prepare' || action === 'save-draft') && empty) ||
         (action === 'save' && (empty || !current.dirty)) ||
-        (action === 'promote' && (current.dirty || current.resolution === null || current.resolution.state === 'unsupported'));
+        (action === 'promote' && (empty || (!current.dirty && current.resolution?.state === 'unsupported')));
     }
     const unsaved = element.querySelector<HTMLElement>('.task-composer-unsaved');
     if (unsaved !== null) unsaved.hidden = !(mode() === 'draft' && current.dirty);
@@ -1091,13 +1111,14 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
   }
 
   function targetInput(current: ComposerState): SaveTaskIntentDraftInput['target'] {
+    if (current.target === 'deliverable' && current.deliverable !== null) return { kind: 'deliverable', manuscriptId: current.deliverable.manuscriptId, branchId: current.deliverable.branchId, revisionId: current.deliverable.revisionId };
     return current.target === 'book'
       ? { kind: 'book' }
       : { kind: 'ranges', ranges: current.ranges.map((range) => range.rangeId !== null ? { kind: 'kept' as const, rangeId: range.rangeId } : { kind: 'new' as const, span: range.span! }) };
   }
 
   /** 准备任务 (TASK-004): a durable draft of exactly what the composer shows; then the composer edits that draft. */
-  async function prepare(): Promise<void> {
+  async function prepare(run = false): Promise<void> {
     if (state === null || working || mode() !== 'new') return;
     if (composing) {
       options.setStatus(TASK_COMPOSER_STATUS.composing, 'error');
@@ -1125,12 +1146,19 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       apply(draft, current.manuscript, current.pin?.title ?? null);
       options.setStatus(TASK_COMPOSER_STATUS.saved, 'success');
       options.onChanged(draft.bookId);
+      if (run) { working = false; await promote(); }
     } catch (error) {
       if (state === current) problem(options.errorMessage(error, TASK_COMPOSER_STATUS.saveFailed));
     } finally {
       working = false;
       if (state !== null) render();
     }
+  }
+
+  async function runDraft(): Promise<void> {
+    if (state?.dirty) await save();
+    if (state?.dirty) return;
+    await promote();
   }
 
   /** 保存修改 (TASK-005): a new version over the one on show; a version saved meanwhile is refused, never overwritten. */
@@ -1179,12 +1207,13 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       problem(TASK_COMPOSER_PROMOTE_SAVE_FIRST);
       return;
     }
+    if (current.resolution?.state === 'choose' && current.choice === null) current.choice = current.resolution.options.findIndex((entry) => entry.available);
     const option = chosenOption(current);
     if (option === null || current.draftId === null || current.versionId === null) {
       problem(current.resolution?.state === 'unsupported' ? current.resolution.reason : TASK_COMPOSER_PICK_CHOICE);
       return;
     }
-    const writing = option.choice.kind === 'writing' ? { audience: current.audience.trim(), channel: current.channel.trim() } : null;
+    const writing = option.choice.kind === 'writing' ? { audience: current.audience.trim() || '本书读者', channel: current.channel.trim() || '图书出版' } : null;
     if (writing !== null && (writing.audience.length === 0 || writing.channel.length === 0)) {
       problem(TASK_COMPOSER_WRITING_FIELDS);
       return;
@@ -1212,7 +1241,8 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       apply(draft, current.manuscript, current.pin?.title ?? null);
       if (draft.promotion === null) throw new Error(TASK_COMPOSER_STATUS.promoteFailed);
       options.setStatus(TASK_COMPOSER_STATUS.prepared, 'success');
-      options.openPlan(draft.bookId, draft.promotion.taskKind, draft.promotion.planRef);
+      await startPreparedTask(api, draft.promotion.taskKind, draft.promotion.planRef);
+      options.setStatus('已发起任务', 'success');
     } catch (error) {
       if (state === current) problem(options.errorMessage(error, TASK_COMPOSER_STATUS.promoteFailed));
     } finally {
@@ -1233,6 +1263,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       goal: draft.version.goal,
       outcomeClass: draft.version.outcomeClass,
       target: draft.version.target,
+      deliverable: draft.version.deliverable ?? null,
       ranges: keptRanges(draft),
       pin: draft.version.procedurePin === null ? null : { ...draft.version.procedurePin, title: pinTitle },
       manuscript,
@@ -1263,8 +1294,9 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
         ordinal: null,
         versionId: null,
         goal: seed.goal ?? '',
-        outcomeClass: seed.outcomeClass ?? null,
-        target: seed.origin === 'composer-selection' || seed.ranges.length > 0 ? 'ranges' : 'book',
+        outcomeClass: seed.outcomeClass ?? (seed.deliverable !== undefined ? 'writing' : 'review'),
+        target: seed.deliverable !== undefined ? 'deliverable' : seed.origin === 'composer-selection' || seed.ranges.length > 0 ? 'ranges' : 'book',
+        deliverable: seed.deliverable ?? null,
         ranges: [...seed.ranges],
         pin: null,
         manuscript: seed.manuscript,

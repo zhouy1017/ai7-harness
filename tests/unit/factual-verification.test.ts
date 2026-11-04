@@ -221,8 +221,9 @@ function retain(db: DatabaseSync, input: { runRecordId: string; url: string; con
     VALUES (?, ?, ?, 1, ?, NULL, '机构', ?, ?, ?, ?, ?, NULL, 'unaligned', '[]', NULL, 'current', ?, ?, ?)`)
     .run(randomUUID(), BOOK, input.runRecordId, FINDING, input.url, input.capturedAt, full ? 'full-text' : 'failed', contentSha, full ? sha(`page:${input.content}`) : null,
       input.capturedAt, JSON.stringify({ sourceTitle: input.url === ARCHIVE ? '档案 - 档案馆' : '馆藏 - 博物馆' }), sha(randomUUID()));
+  const unitJson = JSON.stringify({ schema: 'ai7.research-evidence-unit/1', runRecordId: input.runRecordId, unitOrdinal: 1, bookId: BOOK, backendId: null, state: 'completed', searchCalls: 1, retentionFetches: 0, failedRetrievals: 0, findings: [], evidenceIds: [], recordedAt: input.capturedAt });
   db.prepare(`INSERT OR IGNORE INTO research_evidence_units(run_record_id, unit_ordinal, book_id, backend_id, search_state, search_calls, retention_fetches, failed_retrievals,
-    unsupported_findings, recorded_at, canonical_json, sha256) VALUES (?, 1, ?, NULL, 'completed', 1, 0, 0, 0, ?, '{}', ?)`).run(input.runRecordId, BOOK, input.capturedAt, sha(randomUUID()));
+    unsupported_findings, recorded_at, canonical_json, sha256) VALUES (?, 1, ?, NULL, 'completed', 1, 0, 0, 0, ?, ?, ?)`).run(input.runRecordId, BOOK, input.capturedAt, unitJson, sha(unitJson));
 }
 
 function finding(relations: MaterializedFactualFinding['relations'], corrections: MaterializedFactualFinding['corrections'] = []): MaterializedFactualFinding {

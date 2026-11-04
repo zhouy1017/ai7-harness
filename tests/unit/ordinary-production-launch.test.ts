@@ -151,13 +151,13 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
   const CARRIED = [
     'config/source-checkout-launch-authority.json',
     'docs/policies/active-policy-set.v19.json',
-    'docs/policies/active-policy-set.v23.json',
-    'docs/policies/active-policy-set.v23.schema.json',
+    'docs/policies/active-policy-set.v24.json',
+    'docs/policies/active-policy-set.v24.schema.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v30.json',
     'docs/policies/provider-processing-policy.v30.schema.json',
-    'docs/policies/provider-processing-policy.v32.json',
-    'docs/policies/provider-processing-policy.v32.schema.json',
+    'docs/policies/provider-processing-policy.v33.json',
+    'docs/policies/provider-processing-policy.v33.schema.json',
     'docs/policies/provider-processing-policy.v1.json',
     'docs/policies/provider-processing-policy.v2.json',
     'docs/policies/provider-processing-policy.v24.json',
@@ -195,9 +195,9 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
 
   it('reports 需设置 with no admitted rule until a route is configured, and transmits nothing', async () => {
     const projection = await resolveSourceCheckoutLaunchPolicy(await checkout(), 'ordinary-production', null);
-    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v23' });
+    expect(projection).toMatchObject({ integrityState: 'verified', denialReason: null, operationalScope: 'ordinary-production', activePolicySetVersion: 'v24' });
     expect(projection.providerProcessing).toMatchObject({
-      version: 'v32', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
+      version: 'v33', decision: 'eligible-only', liveTransmissionAllowed: false, bindingState: 'setup-required', admittedRules: [],
     });
   });
 
@@ -225,7 +225,7 @@ describe('the configured binding the resolver reads (#853 v13, carried by #863 v
     const reference = randomUUID();
     const outside = [
       { ...GO, endpoint: 'https://opencode.ai/zen/v1/chat/completions', credentialReference: reference },
-      { ...OFFICIAL, model: 'deepseek-v4-pro', credentialReference: reference },
+      { ...OFFICIAL, model: '', credentialReference: reference },
       { ...GO, credentialSlot: 'deepseek-api-key', credentialReference: reference },
       { route: 'openai-platform', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-5', credentialSlot: 'openai-platform', credentialReference: reference },
     ];
@@ -384,10 +384,14 @@ describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', ()
     }
   });
 
-  it('keeps the slot list it duplicates and refuses CI and a native-carrier override as the store form does', async () => {
-    const source = await (await import('node:fs/promises')).readFile(fileURLToPath(new URL('../../tools/enroll-dev-credential.mjs', import.meta.url)), 'utf8');
-    expect(source).toContain("export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);");
-    // The named form reaches the store only past the same two refusals as the development store form.
-    expect(source).toMatch(/requireEnrollment\(request\.mode !== 'check' && !continuousIntegrationPresent\(deps\.env\)\);\s*const entry = await openEntry\(request\.credentialReference, deps\);/u);
+  it('refuses CI and a native-carrier override before opening a named credential entry', async () => {
+    // @ts-expect-error Plain development tooling has no TypeScript declaration.
+    const helper = await import('../../tools/enroll-dev-credential.mjs');
+    const carrier = vi.fn(async () => { throw new Error('No native credential access is permitted'); });
+    const argv = ['--slot', 'opencode-go', '--credential-reference', randomUUID(), '--from-file', KEY_PATH];
+    for (const env of [{ CI: 'true' }, { NAPI_RS_NATIVE_LIBRARY_PATH: 'synthetic-override' }]) {
+      await expect(helper.storeEnrollment(argv, { env, importKeyring: carrier })).rejects.toThrow(/AI7_ENROLLMENT_INVALID/u);
+    }
+    expect(carrier).not.toHaveBeenCalled();
   });
 });

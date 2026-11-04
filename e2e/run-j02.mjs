@@ -1,11 +1,11 @@
 import { createWriteStream, existsSync, statSync } from 'node:fs';
-import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -354,6 +354,75 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-02', location);
+}
+
+async function observeSearchJump(renderer) {
+  const observed=await renderer.evaluate(`(() => {
+    const trace=[],start=performance.now(),editor=document.querySelector('[data-testid="manuscript-editor"]'),pane=document.querySelector('.editor-window'),host=editor.parentElement;
+    let closed=false,everMatchVisible=false,everDomRange=false,everFrameworkRange=false;
+    const domPoint=(node,offset)=>{
+      if(!node||!editor.contains(node))return null;
+      const block=(node.nodeType===Node.ELEMENT_NODE?node:node.parentElement)?.closest('[data-block-id]');
+      if(!block)return null;
+      const range=document.createRange();range.selectNodeContents(block);range.setEnd(node,offset);
+      return {blockId:block.dataset.blockId,grapheme:[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(range.cloneContents().textContent)].length};
+    };
+    const snapshot=(kind)=>{
+      const selection=getSelection(),state=editor.dataset.selectionSnapshot?JSON.parse(editor.dataset.selectionSnapshot):null,from=state?.from,to=state?.to;
+      const matchingBlocks=[...editor.children].filter(block=>block.textContent.includes(${JSON.stringify(SEARCH_TEXT)})).length;
+      const selectedBlock=state?[...editor.children].find(block=>block.dataset.blockId===state.anchor.blockId):null;
+      const selectedGraphemes=selectedBlock?[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(selectedBlock.textContent)].map(part=>part.segment):[];
+      const domMatches=selection?.toString()===${JSON.stringify(SEARCH_TEXT)},frameworkMatches=state?state.anchor.blockId===state.head.blockId&&selectedGraphemes.slice(Math.min(state.anchor.grapheme,state.head.grapheme),Math.max(state.anchor.grapheme,state.head.grapheme)).join('')===${JSON.stringify(SEARCH_TEXT)}:null;
+      const anchor=domPoint(selection?.anchorNode,selection?.anchorOffset),head=domPoint(selection?.focusNode,selection?.focusOffset);
+      const domPinsMatch=state&&anchor&&head?anchor.blockId===state.anchor.blockId&&anchor.grapheme===state.anchor.grapheme&&head.blockId===state.head.blockId&&head.grapheme===state.head.grapheme:null;
+      everMatchVisible ||= matchingBlocks>0;everDomRange ||= domMatches;everFrameworkRange ||= frameworkMatches===true;
+      return {kind,ms:Math.round(performance.now()-start),matchingBlocks,domMatches,frameworkMatches,domPinsMatch,domCollapsed:selection?.isCollapsed,rangeCharacters:selection?.rangeCount?selection.getRangeAt(0).toString().length:null,selectedCharacters:selection?.toString().length,anchorOffset:selection?.anchorOffset,headOffset:selection?.focusOffset,anchorInEditor:editor.contains(selection?.anchorNode),headInEditor:editor.contains(selection?.focusNode),frameworkFrom:from,frameworkTo:to,documentFocused:document.hasFocus(),editorFocused:editor.contains(document.activeElement),position:Number(document.querySelector('#manuscript-position')?.value),scrollTop:pane.scrollTop,viewportHeight:pane.clientHeight,scrollHeight:pane.scrollHeight,metaLength:document.querySelector('.editor-meta')?.textContent.length,statusLength:document.querySelector('#persistence-status')?.textContent.length,searchError:document.querySelector('#persistence-status')?.textContent==='无法在当前稿件状态中精确定位该匹配。',windowLoads:(host.dataset.windowLoads??'').split(',').map(value=>['navigation-block','navigation-cursor','navigation-window-start','review-settled','unnamed'].includes(value)?value:'other').slice(-12)};
+    };
+    const record=(kind)=>{if(closed)return;trace.push(snapshot(kind));if(trace.length>48)trace.shift();};
+    const selection=()=>record('selection'),scroll=()=>record('scroll'),focus=()=>record('focus'),blur=()=>record('blur');
+    document.addEventListener('selectionchange',selection);pane.addEventListener('scroll',scroll);window.addEventListener('focus',focus);window.addEventListener('blur',blur);
+    const observer=new MutationObserver(()=>record('window'));observer.observe(host,{attributes:true,attributeFilter:['data-window-loads']});
+    globalThis.__ai7SearchJumpObservation={read:()=>({current:snapshot('read'),everMatchVisible,everDomRange,everFrameworkRange,trace:[...trace]}),dispose:()=>{closed=true;observer.disconnect();document.removeEventListener('selectionchange',selection);pane.removeEventListener('scroll',scroll);window.removeEventListener('focus',focus);window.removeEventListener('blur',blur);}};
+    record('start');
+    return Boolean(editor.dataset.selectionSnapshot);
+  })()`);
+  requireJourney(observed,'search-framework-observer-ready');
+}
+
+function searchJumpFailureReason(observed) {
+  if (observed === null) return 'observation-unavailable';
+  if (!observed.everMatchVisible) return 'match-never-in-window';
+  if (observed.everDomRange) {
+    const range = observed.current.matchingBlocks === 0 ? 'window-left'
+      : observed.current.frameworkMatches === false ? 'framework'
+        : observed.current.frameworkMatches === true ? 'dom' : 'no-framework';
+    const lastLoad = observed.current.windowLoads.at(-1);
+    const cause = lastLoad === 'navigation-cursor' ? 'cursor'
+      : lastLoad === 'navigation-block' ? 'block'
+        : lastLoad === 'navigation-window-start' ? 'return'
+          : lastLoad === 'review-settled' ? 'review' : 'other';
+    const windowFocus = observed.current.documentFocused ? 'window-focused' : 'window-unfocused';
+    const editorFocus = observed.current.editorFocused ? 'editor-focused' : 'editor-unfocused';
+    return `range-lost-${range}-${cause}-${windowFocus}-${editorFocus}`;
+  }
+  if (observed.current.frameworkMatches) return 'dom-selection-mismatch';
+  if (observed.current.searchError) return 'navigation-refused';
+  if (!observed.current.documentFocused) return 'window-unfocused';
+  return 'match-without-range';
+}
+
+async function waitForExactSearchRange(renderer) {
+  try {
+    await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+    if(localDebugEnabled())recordDebugDetail('J-02',`search jump observed ${JSON.stringify(await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()'))}`);
+  } catch (error) {
+    const observed=await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()').catch(()=>null);
+    if(localDebugEnabled())recordDebugDetail('J-02',`search jump mismatch ${JSON.stringify(observed)}`);
+    const reason=searchJumpFailureReason(observed);
+    throw journeyCheckFailure('J-02',`search-exact-range-${reason}`,{cause:error});
+  } finally {
+    await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.dispose()').catch(()=>undefined);
+  }
 }
 
 async function waitForChecks(renderer, expression, location, timeout = 60_000) {
@@ -721,7 +790,7 @@ async function importAndOpen(renderer, dataRoot) {
   at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
   await waitForStagedTarget(renderer, dataRoot);
-  await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑内容块')`, 'exact-block-count');
+  await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑段落')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');
@@ -1188,12 +1257,33 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 ${EXPECTED_MATCHES} 处')`, 'search-results', 120_000);
   await assertRenderer(renderer, `document.querySelectorAll('.search-result').length === 24 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结果')?.hidden`, 'search-virtualized');
   await assertRenderer(renderer, `(() => { const encoded = (value) => new TextEncoder().encode(JSON.stringify(value)).length; const rows = Array.from(document.querySelectorAll('.search-result')); const ids = rows.map((row) => row.querySelector('input')?.dataset.matchId); return rows.length === 24 && new Set(ids).size === ids.length && rows.every((row) => { const heading = row.querySelector('.field-note')?.textContent ?? ''; const context = row.querySelector('button')?.textContent ?? ''; return encoded(heading) <= 2048 && encoded(context) <= 2048; }); })()`, 'search-display-frame-bounded-and-identities-unique');
-  await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
+  const readableEditor = `(() => { const pane=document.querySelector('.editor-window'),editor=document.querySelector('[data-testid="manuscript-editor"]'),style=getComputedStyle(pane);return pane.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)>=2*parseFloat(getComputedStyle(editor).lineHeight);})()`;
+  await assertRenderer(renderer, readableEditor, 'search-readable-editor');
+  await assertRenderer(renderer, `(() => { const rows=[...document.querySelectorAll('.outline-list button')];return rows.length>0&&rows.every((row,index)=>{const range=document.createRange();range.selectNodeContents(row);return range.getBoundingClientRect().height<=row.clientHeight+1&&(index===0||row.getBoundingClientRect().top>=rows[index-1].getBoundingClientRect().bottom-1);});})()`, 'outline-long-headings-do-not-overlap');
+  await observeSearchJump(renderer);
+  await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), nodeText: text.data, anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
-  await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'search-arrival-settled');
+  await assertRenderer(renderer, readableEditor, 'search-arrival-readable-editor');
+  await waitForExactSearchRange(renderer);
   await clickButton(renderer, '返回查找前位置', 'search-return');
-  await waitFor(renderer, `(() => { const expected = globalThis.__ai7SearchReturn; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelector('.editor-meta')?.textContent === expected.meta && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'search-return-exact-selection-scroll');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.startsWith('已返回查找前')`, 'search-return-settled');
+  await assertRenderer(renderer, readableEditor, 'search-return-readable-editor');
+  try {
+    await waitFor(renderer, `(() => { const expected = globalThis.__ai7SearchReturn; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelector('.editor-meta')?.textContent === expected.meta && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'search-return-exact-selection-scroll');
+  } catch (error) {
+    if (localDebugEnabled()) {
+      // Observe each original conjunct and layout delta; retain no manuscript or heading text.
+      const observed = await renderer.evaluate(`(() => { const e=globalThis.__ai7SearchReturn,s=getSelection(),pane=document.querySelector('.editor-window'),block=document.querySelector('[data-block-id="'+e.scrollBlockId+'"]');return {metaMatches:document.querySelector('.editor-meta')?.textContent===e.meta,anchorBlockMatches:s?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId===e.blockId,headBlockMatches:s?.focusNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId===e.blockId,anchorOffset:s?.anchorOffset,expectedAnchor:e.anchor,headOffset:s?.focusOffset,expectedHead:e.head,textMatches:s?.toString()===e.text,selectedCharacters:s?.toString().length,expectedCharacters:e.text.length,rangeCharacters:s?.rangeCount?s.getRangeAt(0).toString().length:null,rangeTextMatches:s?.rangeCount?s.getRangeAt(0).toString()===e.text:null,anchorNodeTextMatches:s?.anchorNode?.textContent===e.nodeText,headNodeTextMatches:s?.focusNode?.textContent===e.nodeText,domCollapsed:s?.isCollapsed,scrollBlockPresent:!!block,scrollDelta:block&&pane?block.getBoundingClientRect().top-pane.getBoundingClientRect().top-e.scrollOffset:null,expectedScrollOffset:e.scrollOffset,viewportHeight:pane?.clientHeight,scrollTop:pane?.scrollTop,scrollHeight:pane?.scrollHeight,position:Number(document.querySelector('#manuscript-position')?.value),statusLength:document.querySelector('#persistence-status')?.textContent.length,metaLength:document.querySelector('.editor-meta')?.textContent.length,expectedMetaLength:e.meta?.length};})()`).catch(() => ({ observationUnavailable: true }));
+      recordDebugDetail('J-02', `search return mismatch ${JSON.stringify(observed)}`);
+    }
+    throw error;
+  }
+  if (localDebugEnabled()) {
+    const { data } = await renderer.send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(join(localDebugArtifactRoot('J-02'), 'search-return-readable.png'), Buffer.from(data, 'base64'));
+  }
   await clickButton(renderer, '下一组结果', 'search-next');
   await waitFor(renderer, `document.querySelectorAll('.search-result').length === 1`, 'search-next-results');
   await clickButton(renderer, '上一组结果', 'search-previous');
@@ -1522,9 +1612,9 @@ async function runAccessibilityJourney(renderer) {
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
   // Synchronized delta with Issue #409: at 200% the manuscript keeps the narrow rail beside it — the one
-  // persistent whole-manuscript control — the 导航 panel lies over the manuscript instead of beside it, and
+  // persistent whole-manuscript control — the supporting panel reflows below the text (#1287), and
   // nothing scrolls sideways.
-  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'absolute' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
+  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'relative' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
   at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');
@@ -1595,10 +1685,16 @@ async function runEditorModesJourney(renderer) {
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+  // #1287: the viewport owns the editor height; navigation/analysis never cover text or its mark cards.
+  await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelectorAll('button')).filter(button=>!button.hidden); const status=document.querySelector('#persistence-status').getBoundingClientRect(); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=status.top+1, statusOnScreen:status.bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
+  await assertRenderer(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); if(panel.hidden)document.querySelector('[data-edge-entry="navigation"]').click(); return !panel.hidden; })()`, 'editor-navigation-layout-open');
+  await waitForChecks(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const box=panel.getBoundingClientRect(); const width=document.querySelector('.editor-workspace').clientWidth; return { visible:!panel.hidden && box.width>0 && box.height>0, separate:box.left>=text.right-1 || box.top>=text.bottom-1, readable:width<864 || text.width>=480, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-navigation-no-overlap');
+  await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return document.querySelector('#manuscript-navigation-panel').hidden; })()`, 'editor-navigation-layout-close');
   at('typography-defaults');
   await waitForChecks(renderer, `(() => { const text = document.querySelector('[data-testid="manuscript-editor"]'); const style = text ? getComputedStyle(text) : null; return { fontSize: style?.fontSize === '17px', lineHeight: Math.abs(parseFloat(style?.lineHeight ?? '0') - 17 * 1.9) < 0.6, column: Math.abs(parseFloat(style?.maxWidth ?? '0') - (38 * 17 + 16)) < 1.5, preset: document.documentElement.dataset.readingPreset === 'editing', density: document.documentElement.dataset.density === 'standard' }; })()`, 'typography-defaults', 15_000);
   at('focus-mode-enter');
   await assertRenderer(renderer, `(() => { document.querySelector('[data-edge-entry="analysis"]')?.click(); const panel = document.querySelector('#paragraph-analysis-panel'); const separator = document.querySelector('.editor-workspace > .region-separator'); return panel instanceof HTMLElement && !panel.hidden && panel.getBoundingClientRect().width > 0 && separator instanceof HTMLElement && getComputedStyle(separator).display !== 'none'; })()`, 'analysis-region-open');
+  await waitForChecks(renderer, `(() => { const panel=document.querySelector('#paragraph-analysis-panel').getBoundingClientRect(); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); return { separate:panel.left>=text.right-1 || panel.top>=text.bottom-1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-analysis-no-overlap');
   await assertRenderer(renderer, `(() => { const toggle = document.querySelector('[data-view-command="focus-mode"]'); if (!(toggle instanceof HTMLButtonElement) || toggle.getAttribute('aria-pressed') !== 'false') return false; toggle.focus(); toggle.click(); return true; })()`, 'focus-mode-toggle');
   await waitForChecks(renderer, `(() => { const hidden = (selector) => { const node = document.querySelector(selector); return node === null || getComputedStyle(node).display === 'none'; }; const status = document.querySelector('#persistence-status'); const toggle = document.querySelector('[data-view-command="focus-mode"]'); return { modeOn: document.documentElement.dataset.focusMode === 'on', sidebarHidden: hidden('#app-sidebar'), navigationHidden: hidden('#manuscript-navigation-panel'), analysisHidden: hidden('#paragraph-analysis-panel'), saveMenuShown: !hidden('#manuscript-save-menu') && document.querySelector('#context-actions #manuscript-save-menu') !== null, edgeEntriesHidden: hidden('.edge-entries'), drawerHidden: hidden('#task-drawer'), manuscriptShown: (document.querySelector('[data-testid="manuscript-editor"]')?.getBoundingClientRect().width ?? 0) > 0, statusShown: status instanceof HTMLElement && getComputedStyle(status).display !== 'none', restoreControl: toggle?.getAttribute('aria-pressed') === 'true' && toggle.textContent === '退出专注（Esc）' && toggle.getBoundingClientRect().width > 0 }; })()`, 'focus-mode-entered', 15_000);
   at('focus-mode-esc');
@@ -1637,8 +1733,8 @@ async function runProtectionJourney(renderer) {
   await typeAtWindowEnd(renderer, protectionText(12), 'protection-enter-type');
   await protectionChecks(renderer, `({ shown: p.shown, headline: p.headline === ${JSON.stringify(PROTECTION_HEADLINE)}, boundary: p.lastDurable?.startsWith(${JSON.stringify(`最后确认写入：修订日志序号 ${durable.toLocaleString('zh-CN')} · `)}) === true, atRisk: p.atRisk === 12, retry: p.retry?.startsWith('自动重试：') === true, active: p.document === 'active' && p.readOnly === 'none', writable: p.writable, closeRisk: p.closeRisk === 'true', noEntry: p.journal === ${durable} })`, 'protection-entered');
   at('protection-blocked-action');
-  await assertRenderer(renderer, `(() => { const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回图书工作概览'); if (!(back instanceof HTMLButtonElement) || back.disabled) return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
-  await waitForChecks(renderer, `(() => { const back = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '返回图书工作概览'); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === '返回图书工作概览' && note.textContent.includes('暂不能执行「返回图书工作概览」'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);
+  await assertRenderer(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); if (!(back instanceof HTMLElement) || back.getAttribute('aria-disabled') === 'true') return false; back.focus(); back.click(); return true; })()`, 'protection-blocked-action-click');
+  await waitForChecks(renderer, `(() => { const back = document.querySelector('#app-sidebar [data-nav-book-section="overview"]'); const label = (back?.getAttribute('aria-label') ?? back?.textContent ?? '').trim(); const note = back?.nextElementSibling; return { stayed: document.querySelector('#screen')?.dataset.screen === 'editor', reason: note instanceof HTMLElement && note.dataset.protectionBlocked === label && note.textContent.includes('暂不能执行'), noEntry: ${JOURNAL_SEQUENCE_PROBE} === ${durable} }; })()`, 'protection-blocked-action', 30_000);
   at('protection-blocked-close');
   // The product's own close request (现在关闭 AI7) meets the close guard as the window's close button does; a page script's
   // `window.close()` is not one — Electron may close a page that asks for it without the preventable close event.
@@ -1668,7 +1764,19 @@ async function runProtectionJourney(renderer) {
   at('protection-reversed-recovery');
   requireJourney((await renderer.setJournalFault('off'))?.mode === 'off', 'protection-reversed-off');
   // First acknowledge the exact outstanding command, then its reversal; neither is duplicated or silently discarded.
-  await protectionChecks(renderer, `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`, 'protection-reversed-recovered', 60_000);
+  const reversedRecoveryChecks = `({ cleared: !p.shown && p.document === null, twoEntries: p.journal === ${durable + 3}, exactVisibleLength: document.querySelector('[data-testid="manuscript-editor"]')?.lastElementChild?.textContent.length === ${initialLength + 12}, writable: p.writable, closeRisk: p.closeRisk === 'false' })`;
+  try {
+    await protectionChecks(renderer, reversedRecoveryChecks, 'protection-reversed-recovered', 60_000);
+  } catch (error) {
+    // Ordinary runs expose only which fixed assertion failed; never journal payloads or text.
+    const checks = await renderer.evaluate(`(() => { const p = ${PROTECTION_PROBE}; return ${reversedRecoveryChecks}; })()`);
+    requireJourney(checks.cleared, 'protection-reversed-recovered-mode');
+    requireJourney(checks.twoEntries, 'protection-reversed-recovered-sequence');
+    requireJourney(checks.exactVisibleLength, 'protection-reversed-recovered-visible-length');
+    requireJourney(checks.writable, 'protection-reversed-recovered-writable');
+    requireJourney(checks.closeRisk, 'protection-reversed-recovered-close-risk');
+    throw error;
+  }
   at('protection-capacity-fill');
   const softLimit = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferSoftLimit)`);
   const capacity = await renderer.evaluate(`Number(document.querySelector('#editing-protection')?.dataset.bufferCapacity)`);
@@ -1759,6 +1867,30 @@ async function runStructureJourney(renderer) {
   await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { oneEntry: p.journal === window.__j02Structure.journal + 4, settled: p.closeRisk === 'false' }; })()`, 'structure-merge-written', 30_000);
   const merged = await renderer.evaluate(MANUSCRIPT_TAIL_PROBE);
   requireJourney(merged.blockId === tail.blockId && merged.position === tail.position && merged.totalBlocks === tail.totalBlocks, 'structure-tail-restored');
+
+  at('structure-rapid-queue');
+  await placeStructureCaret(renderer, blockId, 12, 'structure-burst-caret');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02BurstSequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Enter','Enter','Backspace','Backspace','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return !document.querySelector('#persistence-status')?.textContent.includes('上一处分段或合并'); })()`, 'structure-all-keys-accepted-before-ipc');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { whole: p.text === window.__j02Structure.text, ordered: p.journal === window.__j02BurstSequence + 8, settled: p.closeRisk === 'false', bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-burst-durable', 60_000);
+
+  at('structure-queue-retry');
+  requireJourney((await renderer.setJournalFault('fail-next'))?.mode === 'fail-next', 'structure-queue-fault-armed');
+  await placeStructureCaret(renderer, blockId, 12, 'structure-retry-caret');
+  await assertRenderer(renderer, `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); window.__j02RetrySequence = ${JOURNAL_SEQUENCE_PROBE}; for (const key of ['Enter','Enter','Backspace','Backspace']) editor.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); return true; })()`, 'structure-queued-through-write-failure');
+  await waitForChecks(renderer, `(() => { const p = ${STRUCTURE_PROBE}; return { whole: p.text === window.__j02Structure.text, exactRetry: p.journal === window.__j02RetrySequence + 4, settled: p.closeRisk === 'false', bounded: p.blocks <= ${MAX_RENDERER_BLOCKS} }; })()`, 'structure-queue-retry-durable', 60_000);
+
+  at('structure-heading-enter');
+  await placeStructureCaret(renderer, blockId, 0, 'structure-heading-style-caret');
+  await assertRenderer(renderer, `(() => { const style = document.querySelector('select[aria-label="段落样式"]'); style.value = 'heading-2'; style.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`, 'structure-heading-style');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]')?.tagName === 'H3'`, 'structure-heading-written');
+  const headingLength = await renderer.evaluate('window.__j02Structure.text.length');
+  await placeStructureCaret(renderer, blockId, headingLength, 'structure-heading-end');
+  await pressStructureKey(renderer, 'Enter');
+  await waitForChecks(renderer, `(() => { const block = document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]'); return { heading: block?.tagName === 'H3', body: block?.nextElementSibling?.tagName === 'P', empty: block?.nextElementSibling?.textContent === '', settled: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'structure-heading-new-body');
+  await clickButton(renderer, '撤销', 'structure-heading-undo-new-body');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '撤销' && !button.disabled)`, 'structure-heading-undo-body-settled');
+  await clickButton(renderer, '撤销', 'structure-heading-undo-style');
+  await waitFor(renderer, `document.documentElement.dataset.ai7CloseRisk === 'false' && document.querySelector('[data-block-id="' + window.__j02Structure.blockId + '"]')?.tagName === 'P'`, 'structure-heading-back-to-body');
 }
 
 async function main() {

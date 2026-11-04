@@ -179,6 +179,30 @@ describe('undo continuity across an Apply', () => {
 });
 
 describe('recovery over a structural edit', () => {
+  it('changes paragraph styles and creates body text after a heading, with undo/redo and journal recovery', async () => {
+    const target = paragraphs()[0]!;
+    journal(target.blockId, 0, undefined, '〔编辑〕');
+    const text = window().blocks.find((block) => block.blockId === target.blockId)!.text;
+    journal(target.blockId, 0, { kind: 'style', blockKind: 'heading', level: 2 });
+    expect(store.getOutline(book.manuscriptId, book.branchId, null).entries.some((entry) => entry.blockId === target.blockId && entry.level === 2)).toBe(true);
+    const created = newBlockId();
+    journal(target.blockId, graphemesOf(text).length, { kind: 'split', newBlockId: created });
+    expect(window().blocks.find((block) => block.blockId === created)).toMatchObject({ kind: 'paragraph', text: '' });
+    undo();
+    undo();
+    expect(window().blocks.find((block) => block.blockId === target.blockId)).toMatchObject({ kind: 'paragraph', text });
+    expect(store.getOutline(book.manuscriptId, book.branchId, null).entries.some((entry) => entry.blockId === target.blockId)).toBe(false);
+    redo();
+    redo();
+    const expected = window().blocks.map((block) => [block.blockId, block.kind, block.digest]);
+    store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const startup = await store.getStartup();
+    if (startup.state !== 'manuscript-recovery') throw new Error('expected journal recovery');
+    const restored = await store.restoreRecovery(randomUUID(), startup.recovery.attentionId, startup.recovery.attentionVersion, { kind: 'journal' });
+    expect(restored.window.blocks.map((block) => [block.blockId, block.kind, block.digest])).toEqual(expected);
+  });
+
   it('replays a split and a merge from the checkpoint by identity and restores the journal state after an unclean close', async () => {
     const [first, second] = adjacentParagraphs();
     const created = newBlockId();

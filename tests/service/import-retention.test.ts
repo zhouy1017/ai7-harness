@@ -814,6 +814,20 @@ function textBoxChoices(): Row[] {
 }
 
 describe('import retention over the real store (ADR 0086)', () => {
+  it('accepts the default import policy for clean DOCX without recording a degradation decision (#1284)', async () => {
+    await withStore(async (store) => {
+      const staged = await store.stageSelectedManuscript(randomUUID(), sample1Path(roots.codeRoot));
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion,
+        { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '直接导入' }, true);
+      expect(review.reviewDigest).not.toBeNull();
+      expect(review.degradationDecision).toEqual({ state: 'not-required-clean-import', items: [] });
+      const committed = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
+        reviewDigest: review.reviewDigest!, commitId: randomUUID() });
+      const record = store.getBookOverview(committed.bookId).records.find((item) => item.kind === 'import-record');
+      expect(record?.kind === 'import-record' && record.degradationDecision).toBeNull();
+    });
+  });
+
   it('imports exact sample1 without a degradation decision and maps every block of r1 to its source paragraph', async () => {
     await requireExactSample1(roots.codeRoot);
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -900,7 +914,7 @@ describe('import retention over the real store (ADR 0086)', () => {
     });
   }, 120_000);
 
-  it('asks for the degradation decision for a field, not for a note that became a note block, and records it with the review', async () => {
+  it.each([false, true])('imports a field and note under the default policy (inspect legacy preview first: %s)', async (previewFirst) => {
     const { path } = await composed({
       source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 5, title: '降级组稿',
       retention: { field: { block: 1 }, footnote: { block: 3, noteSourceBlock: 9 } },
@@ -908,12 +922,14 @@ describe('import retention over the real store (ADR 0086)', () => {
     await withStore(async (store) => {
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const target = { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '降级组稿' } as const;
+      if (previewFirst) {
       const pending = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, false);
       expect(pending.reviewDigest).toBeNull();
       expect(pending.degradationDecision).toEqual({
         state: 'required-unselected',
         items: [{ categoryKey: 'fields', label: '域（目录等）', count: 1 }],
       });
+      }
       const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, target, true);
       expect(review.degradationDecision.state).toBe('accepted-complete-set');
       const commitId = randomUUID();

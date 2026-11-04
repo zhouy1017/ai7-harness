@@ -753,19 +753,6 @@ async function main() {
     // Synchronized delta with Issue #418 (editor-surfaces §10): 准备任务授权计划 reads 准备任务.
     await assertRenderer(renderer, `!document.querySelector('[data-task-authorization-action="prepare"]') && !Array.from(document.querySelectorAll('.task-authorization-card button')).some((button)=>button.textContent==='准备任务') && document.querySelector('#task-drawer')?.hidden===true`, 'task-no-premature-prepare');
 
-    at('artifact-revision2');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'artifact-install-ready');
-    at('artifact-install');
-    cancellation.throwIfRequested();
-    await click(renderer, '获取并安装（保持停用）', 'artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'artifact-enable-ready');
-    at('artifact-enable');
-    cancellation.throwIfRequested();
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'artifact-enabled');
-    at('artifact-enabled');
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.native-artifact-card'); return card?.dataset.nativeArtifactState==='enabled-for-book' && card.textContent.includes(${JSON.stringify(SIDECAR_REVISION_2_DIGEST)}); })()`, 'artifact-exact-revision2');
-
     at('model-setup-remove');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-library');
@@ -776,26 +763,27 @@ async function main() {
     at('model-settings-ready');
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
+    await renderer.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
     await fill(renderer, '#main-editorial-connection-name', 'J-03 主编辑连接', 'model-name');
     cancellation.throwIfRequested();
     await fill(renderer, '#main-editorial-credential', syntheticSecret, 'model-secret');
     cancellation.throwIfRequested();
     credentialMutationReached = true;
-    await click(renderer, '保护并保存', 'model-save');
+    await click(renderer, '保存并获取模型', 'model-save');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-saved');
     at('model-credential-saved');
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference) && readyConnection?.credentialOperationState === 'ready', 'model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
     cancellation.throwIfRequested();
-    await click(renderer, '移除', 'model-remove');
+    await click(renderer, '移除凭据', 'model-remove');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     at('model-credential-removed');
     const missingConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(missingConnection?.credentialReference === readyConnection.credentialReference && missingConnection?.credentialOperationState === 'missing', 'model-missing-stable-reference');
     credentialRemoved = true;
     cancellation.throwIfRequested();
-    await click(renderer, '返回', 'model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'model-back-library');
     cancellation.throwIfRequested();
     await runSettingsPages(renderer, cancellation);
@@ -988,7 +976,7 @@ async function main() {
       full.terms['可能发送'] === '不发送任何内容' && full.terms['不会读'] === '其他图书；来源材料（来源版本仅作血缘证据，不属于可读范围）' &&
       JSON.stringify(full.steps) === JSON.stringify(['准备任务输入 → 任务输入修订版 r2', '记录运行（不派发） → 运行记录']) &&
       JSON.stringify(full.participation) === JSON.stringify(['预计无需中途参与']) &&
-      full.terms['模型角色'] === '主编辑角色' && full.terms['提供方'] === 'DeepSeek 开放平台 · deepseek-v4-pro' &&
+      full.terms['模型角色'] === '主编辑角色' && full.terms['提供方'] === 'DeepSeek 开放平台' &&
       full.terms['提供方状态'] === '远程模型服务被拒绝（development-ci · v1：0 次实时传输）；这项任务只记录，不派发' &&
       full.terms['会发送'] === '本环境不连接模型服务，不会发送任何内容' && full.terms['发送内容类别'] === '公开或合成材料' &&
       full.terms['用量上限'] === '不发送，没有模型用量' && full.terms['所需时间'] === '暂无可靠估计' &&
@@ -1155,7 +1143,7 @@ async function main() {
       blockedBoundary?.planEnvelopeDigest === authorized.planEnvelope.digest && blockedBoundary?.authorizationId === authorized.authorization.authorizationId &&
       blockedBoundary?.runRecordId === authorized.runRecord.runRecordId && blockedBoundary?.runAuthority === 'record-only-no-dispatch' &&
       blockedBoundary?.launchPolicy?.integrityState === 'verified' && blockedBoundary?.launchPolicy?.operationalScope === 'development-ci' &&
-      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v23' &&
+      blockedBoundary?.launchPolicy?.activePolicySetVersion === 'v24' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.version === 'v1' && blockedBoundary?.launchPolicy?.providerProcessing?.decision === 'deny' &&
       blockedBoundary?.launchPolicy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
       blockedBoundary?.launchPolicy?.providerProcessing?.liveTransmissionAllowed === false &&

@@ -170,15 +170,20 @@ const EVIDENCE_36: CapabilityEvidence = {
 };
 const EVIDENCE_37: CapabilityEvidence = {
   kind: 'vendor-documentation',
+  source: 'https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses',
+  readOn: '2026-11-02',
+};
+const EVIDENCE_38: CapabilityEvidence = {
+  kind: 'vendor-documentation',
   source: 'Tencent Cloud documentation, TokenHub web search (`web_search_options`), cloud.tencent.com/document',
   readOn: '2026-09-10',
 };
-const EVIDENCE_38: CapabilityEvidence = {
+const EVIDENCE_39: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'Xiaomi MiMo API documentation, web search tool, mimo.mi.com',
   readOn: '2026-09-11',
 };
-const EVIDENCE_39: CapabilityEvidence = {
+const EVIDENCE_40: CapabilityEvidence = {
   kind: 'vendor-documentation',
   source: 'Zhipu documentation, web search tool on chat completions, docs.bigmodel.cn',
   readOn: '2026-09-10',
@@ -331,7 +336,7 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
   },
   'opencode-zen': {
     route: 'opencode-zen',
-    endpoint: 'https://opencode.ai/zen/v1/chat/completions',
+    endpoint: 'https://opencode.ai/inference/openai/v1/chat/completions',
     credentialSlot: 'opencode-zen',
     credentialHeader: 'authorization-bearer',
     anthropicVersion: null,
@@ -344,7 +349,7 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
   },
   'opencode-zen-messages': {
     route: 'opencode-zen-messages',
-    endpoint: 'https://opencode.ai/zen/v1/messages',
+    endpoint: 'https://opencode.ai/inference/anthropic/v1/messages',
     credentialSlot: 'opencode-zen',
     credentialHeader: 'authorization-bearer',
     anthropicVersion: null,
@@ -357,7 +362,7 @@ export const GENERATED_ROUTE_PROFILES: Readonly<Record<ConfiguredRouteId, Provid
   },
   'opencode-zen-responses': {
     route: 'opencode-zen-responses',
-    endpoint: 'https://opencode.ai/zen/v1/responses',
+    endpoint: 'https://opencode.ai/inference/openai/v1/responses',
     credentialSlot: 'opencode-zen',
     credentialHeader: 'authorization-bearer',
     anthropicVersion: null,
@@ -1590,7 +1595,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1617,7 +1622,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1644,7 +1649,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1671,7 +1676,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1698,7 +1703,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1725,7 +1730,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1752,7 +1757,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1779,7 +1784,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1806,7 +1811,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1833,7 +1838,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1860,7 +1865,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1887,7 +1892,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1914,7 +1919,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1941,7 +1946,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1968,7 +1973,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -1995,7 +2000,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2022,7 +2027,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2049,7 +2054,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2076,7 +2081,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2103,7 +2108,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2130,7 +2135,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2157,7 +2162,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2184,7 +2189,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2211,7 +2216,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2238,7 +2243,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2265,7 +2270,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2292,7 +2297,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2319,7 +2324,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2346,7 +2351,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2373,7 +2378,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2400,7 +2405,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2427,7 +2432,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2454,7 +2459,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2481,7 +2486,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2508,7 +2513,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2535,7 +2540,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2562,7 +2567,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2589,7 +2594,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2616,7 +2621,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2643,7 +2648,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2670,7 +2675,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2697,7 +2702,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2724,7 +2729,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2751,7 +2756,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2778,7 +2783,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2805,7 +2810,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2832,7 +2837,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2859,7 +2864,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2886,7 +2891,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2913,7 +2918,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2940,7 +2945,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2967,7 +2972,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -2994,7 +2999,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3021,7 +3026,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3048,7 +3053,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3075,7 +3080,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3102,7 +3107,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3129,7 +3134,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3156,7 +3161,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3183,7 +3188,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3210,7 +3215,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3237,7 +3242,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3264,7 +3269,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3291,7 +3296,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3318,7 +3323,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3345,7 +3350,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3372,7 +3377,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       webSearchTool: 'none',
     },
     evidence: {
-      requestShape: EVIDENCE_10,
+      requestShape: EVIDENCE_37,
       reasoningControl: EVIDENCE_14,
       structuredOutput: EVIDENCE_14,
       answerChannel: EVIDENCE_14,
@@ -3406,7 +3411,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_37,
+      webSearchTool: EVIDENCE_38,
     },
     context: { tokens: 960000, evidence: EVIDENCE_11 },
   },
@@ -3433,7 +3438,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_37,
+      webSearchTool: EVIDENCE_38,
     },
     context: { tokens: 192000, evidence: EVIDENCE_11 },
   },
@@ -3460,7 +3465,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_12,
-      webSearchTool: EVIDENCE_38,
+      webSearchTool: EVIDENCE_39,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_12 },
   },
@@ -3487,7 +3492,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_12,
-      webSearchTool: EVIDENCE_38,
+      webSearchTool: EVIDENCE_39,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_12 },
   },
@@ -3514,7 +3519,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_39,
+      webSearchTool: EVIDENCE_40,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_13 },
   },
@@ -3541,7 +3546,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_39,
+      webSearchTool: EVIDENCE_40,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_13 },
   },
@@ -3568,7 +3573,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_39,
+      webSearchTool: EVIDENCE_40,
     },
     context: { tokens: 1000000, evidence: EVIDENCE_13 },
   },
@@ -3595,7 +3600,7 @@ export const GENERATED_MODEL_PROFILES: ReadonlyArray<ProviderModelProfile> = [
       reasoningChannel: EVIDENCE_14,
       usageAttribution: EVIDENCE_14,
       toolCalling: EVIDENCE_14,
-      webSearchTool: EVIDENCE_39,
+      webSearchTool: EVIDENCE_40,
     },
     context: { tokens: 200000, evidence: EVIDENCE_13 },
   },
@@ -3657,82 +3662,138 @@ export const GENERATED_FAMILY_DISPOSITIONS: Readonly<Record<RequestShape, Family
   },
 };
 
-/** Per route: its family, and the models each per-model aspect is `supported` for; every other declared model is `untested`. */
+/** Catalogue rows inherit text, stream and functionTools from their implemented protocol family (#1281). */
 export const GENERATED_ROUTE_DISPOSITIONS: Readonly<Record<ConfiguredRouteId, RouteDispositions>> = {
   'alibaba-model-studio': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash'],
+      stream: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash'],
+      functionTools: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.8-flash'],
+    },
   },
   'anthropic-claude': {
     family: 'anthropic-messages',
     supported: {
       text: ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'],
-      stream: [],
-      functionTools: [],
+      stream: ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'],
+      functionTools: ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'],
     },
   },
   'baidu-qianfan': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['ERNIE-5.1', 'ERNIE-5.0', 'ERNIE-4.5-Turbo-128K'],
+      stream: ['ERNIE-5.1', 'ERNIE-5.0', 'ERNIE-4.5-Turbo-128K'],
+      functionTools: ['ERNIE-5.1', 'ERNIE-5.0', 'ERNIE-4.5-Turbo-128K'],
+    },
   },
   'deepseek-open-platform': {
     family: 'openai-chat-completions',
-    supported: { text: ['deepseek-v4-pro', 'deepseek-flash'], stream: [], functionTools: ['deepseek-v4-pro'] },
+    supported: {
+      text: ['deepseek-v4-pro', 'deepseek-flash'],
+      stream: ['deepseek-v4-pro', 'deepseek-flash'],
+      functionTools: ['deepseek-v4-pro', 'deepseek-flash'],
+    },
   },
   'google-gemini': {
     family: 'google-generate-content',
-    supported: { text: ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'], stream: [], functionTools: [] },
+    supported: {
+      text: ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
+      stream: ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
+      functionTools: ['gemini-3.8-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
+    },
   },
   'minimax': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'],
+      stream: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'],
+      functionTools: ['MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.5'],
+    },
   },
   'moonshot-kimi': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
+      stream: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
+      functionTools: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
+    },
   },
   'openai-platform': {
     family: 'openai-responses',
-    supported: { text: ['gpt-5.6-sol', 'gpt-5.6-luna'], stream: [], functionTools: [] },
+    supported: {
+      text: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+      stream: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+      functionTools: ['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+    },
   },
   'opencode-go': {
     family: 'openai-chat-completions',
     supported: {
-      text: ['deepseek-v4-flash', 'deepseek-v4.1-flash'],
-      stream: ['deepseek-v4.1-flash'],
-      functionTools: ['deepseek-v4.1-flash'],
+      text: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
+      stream: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
+      functionTools: ['deepseek-v4-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6', 'deepseek-v4-flash-vision-exp'],
     },
   },
   'opencode-go-messages': {
     family: 'anthropic-messages',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5'],
+      stream: ['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5'],
+      functionTools: ['qwen3.7-plus', 'qwen3.6-plus', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5'],
+    },
   },
   'opencode-go-responses': {
     family: 'openai-responses',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['grok-4.6', 'gpt-5.6-luna'],
+      stream: ['grok-4.6', 'gpt-5.6-luna'],
+      functionTools: ['grok-4.6', 'gpt-5.6-luna'],
+    },
   },
   'opencode-zen': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['qwen3.8-max', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-5', 'kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code', 'kimi-k3', 'mistral-large-4'],
+      stream: ['qwen3.8-max', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-5', 'kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code', 'kimi-k3', 'mistral-large-4'],
+      functionTools: ['qwen3.8-max', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'minimax-m3', 'minimax-m2.7', 'minimax-m2.5', 'glm-5.3-flash', 'glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-5', 'kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code', 'kimi-k3', 'mistral-large-4'],
+    },
   },
   'opencode-zen-messages': {
     family: 'anthropic-messages',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['claude-fable-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus', 'qwen3.5-plus'],
+      stream: ['claude-fable-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus', 'qwen3.5-plus'],
+      functionTools: ['claude-fable-5-1', 'claude-fable-5', 'claude-opus-5-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-opus-4-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5', 'claude-haiku-5-5', 'claude-haiku-4-5', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-plus', 'qwen3.5-plus'],
+    },
   },
   'opencode-zen-responses': {
     family: 'openai-responses',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano', 'grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-build-0.1', 'muse-spark-1.3', 'muse-spark-1.2'],
+      stream: ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano', 'grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-build-0.1', 'muse-spark-1.3', 'muse-spark-1.2'],
+      functionTools: ['gpt-6-astra', 'gpt-6-sol', 'gpt-6.1-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.5-pro', 'gpt-5.4', 'gpt-5.4-pro', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5.3-codex', 'gpt-5.3-codex-spark', 'gpt-5.2', 'gpt-5.2-codex', 'gpt-5.1', 'gpt-5.1-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'gpt-5', 'gpt-5-codex', 'gpt-5-nano', 'grok-4.7', 'grok-4.6', 'grok-4.5', 'grok-build-0.1', 'muse-spark-1.3', 'muse-spark-1.2'],
+    },
   },
   'tencent-hunyuan': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: { text: ['hy4-preview', 'hy3'], stream: ['hy4-preview', 'hy3'], functionTools: ['hy4-preview', 'hy3'] },
   },
   'xiaomi-mimo': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: ['mimo-v2.5-pro', 'mimo-v2.5'] },
+    supported: {
+      text: ['mimo-v2.5-pro', 'mimo-v2.5'],
+      stream: ['mimo-v2.5-pro', 'mimo-v2.5'],
+      functionTools: ['mimo-v2.5-pro', 'mimo-v2.5'],
+    },
   },
   'zhipu-glm': {
     family: 'openai-chat-completions',
-    supported: { text: [], stream: [], functionTools: [] },
+    supported: {
+      text: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-4.6'],
+      stream: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-4.6'],
+      functionTools: ['glm-5.3', 'glm-5.3-flash', 'glm-5.2', 'glm-4.6'],
+    },
   },
 };

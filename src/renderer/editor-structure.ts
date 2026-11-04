@@ -3,11 +3,13 @@ import type { JournalEditInput } from '../shared/protocol.js';
 /**
  * Enter and Backspace at a paragraph's edge in the bounded window (Issue #1175; ADR 0096 §1). The editor splits or merges the
  * paragraph in its own document at once and keeps a Pending Structure until the journal acknowledges it, so typing goes on
- * without a round trip to wait for. One stands at a time. Before its structural command is sent, the paragraphs it touches are
+ * without a round trip to wait for. Structures queue in key order. Before its structural command is sent, the paragraphs it touches are
  * written to exactly the text they held when the key was pressed, and so is the block a split pushes out of a full window, which
  * leaves the document with the split so the window never holds more than its bound.
  */
 export type PendingStructure =
+  | { readonly kind: 'style'; readonly blockId: string; readonly blockKind: 'paragraph' | 'heading' | 'title'; readonly level: number | null;
+      readonly preText: string; readonly windowStartBlockId: string; readonly held: null }
   | {
       readonly kind: 'split';
       readonly blockId: string;
@@ -46,7 +48,7 @@ export function structuralInput(
   digests: { readonly block: string; readonly merged?: string },
   graphemeCount: (text: string) => number,
 ): JournalEditInput {
-  const at = pending.kind === 'split' ? pending.at : graphemeCount(pending.preText);
+  const at = pending.kind === 'split' ? pending.at : pending.kind === 'style' ? 0 : graphemeCount(pending.preText);
   return {
     clientEditId: crypto.randomUUID(),
     ...base,
@@ -56,7 +58,7 @@ export function structuralInput(
     fromGrapheme: at,
     toGrapheme: at,
     insertText: '',
-    structure: pending.kind === 'split'
+    structure: pending.kind === 'style' ? { kind: 'style', blockKind: pending.blockKind, level: pending.level } : pending.kind === 'split'
       ? { kind: 'split', newBlockId: pending.newBlockId }
       : { kind: 'merge', mergedBlockId: pending.mergedBlockId, mergedBlockDigest: digests.merged! },
   };

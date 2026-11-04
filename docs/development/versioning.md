@@ -6,7 +6,9 @@ Issue [#1015](https://github.com/zhouy1017/ai7-harness/issues/1015) unifies sour
 
 ## Version scheme (ADR 0098)
 
-One `x.y.z` in root `package.json` names the software everywhere — source, build identity, native package metadata, the `vX.Y.Z` / `vX.Y.Z-rc.N` tags of ADR 0093, the development plan's wave targets, PROGRESS, GitHub milestones and Issue placement ([ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)). `x` rises for a new product generation or an incompatible Data Version change; `y` rises by one with every integrated wave, and features enter only through `y`; `z` rises for a fix-only integration between waves or a hotfix of a released version; `-rc.N` precedes a stable tag. A nightly build is identified by version, build number and source commit and has no version of its own. The Commander raises `package.json` and adds the ledger row in each wave's integration PR; the Owner tags; `main` is the release line that fast-forwards to each stable tag. `tools/check-version.mjs`, run by `pnpm run check`, fails when `package.json`, the ledger below, PROGRESS's version line and the plan's wave → version pairs disagree.
+One `x.y.z` in root `package.json` names the software everywhere — source, build identity, native package metadata, the `vX.Y.Z` / `vX.Y.Z-rc.N` tags of ADR 0093, the development plan's wave targets, PROGRESS, GitHub milestones and Issue placement ([ADR 0098](../adr/0098-adopt-one-x-y-z-version-across-releases-and-internal-management.md)). `x` rises for a new product generation or an incompatible Data Version change; `y` rises by one with every integrated wave, and features enter only through `y`; `z` rises for a fix-only integration between waves or a hotfix of a released version; `-rc.N` precedes a stable tag. A nightly build is identified by version, build number and source commit and has no version of its own. The final wave candidate raises `package.json` and adds the ledger row under the Commander's dispatch; the Owner tags; `main` is the release line that fast-forwards to each stable tag. `tools/check-version.mjs`, run by `pnpm run check`, fails when `package.json`, the ledger below, PROGRESS's version line and the plan's wave → version pairs disagree.
+
+Wave 23 targets **0.5.0 Beta** under [#1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [#1280](https://github.com/zhouy1017/ai7-harness/issues/1280). S0–S9 retain `0.4.1`; the dispatched final S10 candidate advances the package/ledger together to `0.5.0`. A candidate row records the built version without claiming integration into `dev` or a release. S10 package build identities and hashes remain attached to their exact tested source heads in [PR #1301](https://github.com/zhouy1017/ai7-harness/pull/1301); [The S10 evidence record](wave23-beta-evidence.md) records retained local Windows acceptance on build563/source537f7365 and product432267ce/build603 with full provider-free checks, guest package/J-04/J-12 and installed/Portable smoke; [Wave integration PR #1302](https://github.com/zhouy1017/ai7-harness/pull/1302) records the final wave head/base, exact-head Gate and dev squash commit; human Beta acceptance remains pending after development integration. S10 evidence continuation adds schema revision 107 additively, keeping Data Version 1 and software `0.5.0`. Upgrade to `1.0.0` only after human testing passes and the Owner explicitly authorizes it; completing Wave 23 does not authorize that upgrade.
 
 ## Version ledger
 
@@ -17,18 +19,18 @@ One `x.y.z` in root `package.json` names the software everywhere — source, bui
 | 0.3.0 | integrated | Wave 22 — desk work and derived deliverables (W22-S1–S10, PRs #1199, #1201–#1203, #1206–#1209, #1211, #1212, #1214, #1216, #1219, #1220, #1222) | `d01b5fc0fb6c95f5b793787d9ae29dcf4a95d16c` ([PR #1224](https://github.com/zhouy1017/ai7-harness/pull/1224)) | none |
 | 0.4.0 | integrated | Wave 22b — the Wave 22 follow-up: Provider Processing v32 / active set v23, the admitted channels made usable, the search 备用来源 and the F-25 / F-27 maintenance sub-wave (W22b-A1–A3, PRs #1241, #1258, #1265; F-25 #1243, #1244; F-27 #1242, #1245–#1249, #1254–#1257, #1263, #1264, #1266, #1269, #1270) | the squash commit of the Wave 22b pull request on `dev`, named in that PR's closure (this row is raised by the candidate under orca-dispatch §5) | none |
 | 0.4.1 | integrated | Hotfix between Wave 22b and Wave 23 — the ordinary-production service failed closed on the duplicated endpoint hosts of the v32 bindings ([#1274](https://github.com/zhouy1017/ai7-harness/issues/1274)); fix only, no feature | the squash commit of the hotfix pull request on `dev`, named in that PR's closure | none |
-| 1.0.0 | planned | Wave 23 — acceptance and closure (`1.0.0-rc.N` before the Owner accepts) | — | — |
+| 0.5.0 | integrated | Wave 23 — functional Beta (S0–S10, #1279, #1280–#1290); human testing pending | the dev squash commit recorded in [PR #1302](https://github.com/zhouy1017/ai7-harness/pull/1302); this row is raised by that integration candidate under orca-dispatch §5 | none |
 
 ## Canonical inputs
 
-Root `package.json.version` owns the software SemVer, currently `0.4.1`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**104** at this head) and service protocol (**191**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
+Root `package.json.version` owns the software SemVer, currently `0.5.0`. Root `package.json.ai7.dataVersion` owns the existing Data Version, currently **1**. `src/service/data-version.ts` reads that value and retains the freeze, schema classification and compatibility checks. Database revision (**107** at this head) and service protocol (**196**) keep their separate meanings. Build identity never enters a store-version ledger, backup manifest or migration decision; an ordinary rebuild does not create a software upgrade.
 
 `pnpm run version:identity` prints this closed shape:
 
 ```json
 {
   "schema": 1,
-  "softwareVersion": "0.4.1",
+  "softwareVersion": "0.5.0",
   "dataVersion": 1,
   "buildNumber": 1234,
   "sourceCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

@@ -27,6 +27,7 @@ describe('host-native offline package inputs', () => {
   it('uses only declared toolsets and the bootstrap Electron, with signing and native rebuilds disabled', async () => {
     const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
     const artifacts = JSON.parse(await readFile(new URL('../../config/dependency-artifacts.json', import.meta.url), 'utf8'));
+    manifest.version = identity.softwareVersion;
     const config = builderConfiguration(manifest, resolve('stage'), identity);
     expect(manifest.devDependencies['electron-builder']).toBe('26.15.3');
     expect(config.asar).toBe(false);
@@ -70,6 +71,7 @@ describe('host-native offline package inputs', () => {
     const root = await mkdtemp(join(tmpdir(), 'ai7-resource-version-'));
     try {
       const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
+      manifest.version = identity.softwareVersion;
       const config = builderConfiguration(manifest, root, identity);
       const appInfo = new AppInfo({ metadata: manifest, config });
       const file = join(root, 'AI7.exe');

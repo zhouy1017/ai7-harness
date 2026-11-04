@@ -361,7 +361,7 @@ interface SheetState {
   /** Its choices in flight (Issue #66, S31 review P2-1): only the newest answer fills the sheet, and 先看计划 waits for it. */
   readonly requests: ProcedureChoiceRequests;
   /** A composite Procedure Definition version opened by 运行此工序… (Issue #1173): its members are the categories, in its order. */
-  definition: { readonly pin: import('../shared/protocol/procedures.js').ProcedureDefinitionPin; readonly title: string; readonly categoryIds: readonly string[] } | null;
+  definition: { readonly composite: boolean; readonly pin: import('../shared/protocol/procedures.js').ProcedureDefinitionPin; readonly title: string; readonly categoryIds: readonly string[] } | null;
 }
 
 /** 运行此工序… names a Procedure Definition version as `id@version`; a Captured Procedure is named by its UUID alone. */
@@ -1380,9 +1380,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     row.dataset['outcome'] = result.states.factualVerification;
     row.dataset['anchor'] = result.anchor.state;
     row.dataset['version'] = String(result.version);
-    const head = el('div', 'fact-lens-row-heading');
-    head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
-    row.append(head);
+    const open = fact.open.get(result.resultId);
+    const finding = run.findings.find((entry) => entry.findingId === result.reviewFindingId);
+    const category = run.categories.find((entry) => entry.categoryId === 'factual-review')!;
+    const card = finding === undefined ? el('article', 'review-finding') : renderFinding(run, category, finding, open === undefined, true);
+    if (finding === undefined) {
+      const head = el('div', 'fact-lens-row-heading');
+      head.append(el('span', 'review-finding-location', factLocationLine(result)), el('blockquote', 'review-finding-quote', reviewQuote(result.quote)));
+      card.append(head);
+    }
+    row.append(card);
     // The three states in their own columns: never one traffic light (FACT-007).
     const states = el('div', 'fact-lens-states');
     for (const [term, value] of factStateLines(result)) {
@@ -1391,10 +1398,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       cell.append(el('span', 'evidence-term', term), el('span', `status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
       states.append(cell);
     }
-    row.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
-    if (result.anchor.label !== null) row.append(el('p', 'fact-lens-anchor', result.anchor.label));
+    card.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
+    if (result.anchor.label !== null) card.append(el('p', 'fact-lens-anchor', result.anchor.label));
     const actions = el('div', 'button-row');
-    const open = fact.open.get(result.resultId);
     const toggle = factButton('fact-workspace', 'quiet', () => {
       const current = fact.open.get(result.resultId);
       if (current !== undefined) {
@@ -1436,9 +1442,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     locate.textContent = '在稿件中查看';
     locate.disabled = working || result.anchor.state === 'stale';
     actions.append(locate);
-    row.append(actions);
+    card.append(actions);
     // The open workspace is the same element across repaints, so what the editor pinned, chose or typed stays.
-    if (open !== undefined) row.append(open.element);
+    if (open !== undefined) card.append(open.element);
     return row;
   }
 
@@ -1457,13 +1463,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       heading.append(batch);
     }
     group.append(heading);
-    if (category.categoryId === 'factual-review' && fact.lens !== null) group.append(renderFactLens(run));
+    const filteredLens = Object.values(fact.filters).some((value) => value !== null);
+    const hasLens = category.categoryId === 'factual-review' && fact.lens !== null && (fact.results.length > 0 || filteredLens);
+    if (hasLens) group.append(renderFactLens(run));
     if (ui.batch?.categoryId === category.categoryId) group.append(renderBatchStrip(run, ui.batch));
-    for (const finding of findings) group.append(renderFinding(run, category, finding));
+    const lensFindings = new Set(fact.results.map((result) => result.reviewFindingId));
+    for (const finding of findings) {
+      // A partial run can retain findings for which no evidence result was produced. Keep their actions available.
+      if (!hasLens || !filteredLens && fact.next === null && !lensFindings.has(finding.findingId)) group.append(renderFinding(run, category, finding));
+    }
     return group;
   }
 
-  function renderFinding(run: ReviewRunProjection, category: ReviewRunCategoryProjection, finding: ReviewFindingProjection): HTMLElement {
+  function renderFinding(run: ReviewRunProjection, category: ReviewRunCategoryProjection, finding: ReviewFindingProjection, showEvidence = true, hasVerification = false): HTMLElement {
     const article = el('article', 'review-finding');
     article.dataset['findingId'] = finding.findingId;
     article.dataset['severity'] = finding.severity;
@@ -1489,14 +1501,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (referencedRules !== null) article.append(referencedRules);
     if (finding.clauseRefs.length === 0) article.append(el('p', 'review-finding-basis', category.basisStatement));
     for (const clause of finding.clauseRefs) article.append(el('p', 'review-finding-basis', reviewClauseLine(clause)));
-    const lines = [finding.stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
+    // Extraction's original non-verdict remains historical; this card's verified result owns the current three states.
+    const stateLine = hasVerification && finding.stateLine === '未外部复核' ? null : finding.stateLine;
+    const lines = [stateLine, finding.anchorState === 'anchor-changed' ? REVIEW_ANCHOR_CHANGED : null]
       .filter((line, index, all): line is string => line !== null && all.indexOf(line) === index);
     for (const line of lines) article.append(el('p', 'review-finding-state', line));
     const retained = research.get(finding.findingId);
     const attached = category.categoryId === 'factual-review' ? evidence.get(finding.findingId) ?? [] : [];
     const sources = attached.length > 0 || category.categoryId !== 'factual-review' || retained === undefined ? null : findingResearchLines(retained, finding, localInstantLabel);
-    if (attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
-    for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
+    if (showEvidence && attached.length > 0) article.append(findingEvidenceList(attached, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
+    if (showEvidence) for (const line of sources ?? []) article.append(el('p', 'review-finding-source', line));
     if (finding.status !== 'pending') article.append(el('p', 'review-finding-status-detail', finding.statusDetail));
     if (finding.ignoreReason !== null) article.append(el('p', 'review-finding-ignore-reason', reviewIgnoreReasonLine(finding.ignoreReason)));
     if (finding.historicalMarker !== null) article.append(el('p', 'review-historical-marker-label review-finding-marker', finding.historicalMarker));
@@ -1510,7 +1524,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       'review-facts',
       el('dt', undefined, '发现'), el('dd', 'technical-identity', `${finding.findingId} · 第 ${finding.ordinal} 条`),
       el('dt', undefined, '标记'), el('dd', 'technical-identity', finding.markId === null ? '无（原文已变）' : `${finding.markId} · ${finding.markStatus ?? '—'} · ${finding.anchorState}`),
-      el('dt', undefined, '内容块'), el('dd', 'technical-identity', `${finding.blockId} · 字素 ${finding.fromGrapheme}–${finding.toGrapheme}`),
+      el('dt', undefined, '段落'), el('dd', 'technical-identity', `${finding.blockId} · 字素 ${finding.fromGrapheme}–${finding.toGrapheme}`),
     ));
     return article;
   }
@@ -1736,7 +1750,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     );
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     section.append(actions);
-    if (exportRunId === run.reviewRunId) section.append(exportSlot);
+    if (report !== null) section.append(exportSlot);
     if (run.report === null) section.append(el('p', 'field-note', REVIEW_REPORT_NONE));
     else section.append(renderReportRecord(run.report));
     return section;
@@ -1806,7 +1820,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const must = el('ol', 'review-report-list');
     if (record.mustItems.items.length === 0) must.append(el('li', undefined, REVIEW_REPORT_NO_MUST_ITEMS));
     for (const item of record.mustItems.items) {
-      const line = el('li', undefined, reviewReportMustItemLine(item));
+      const line = el('li', undefined, reviewReportMustItemLine({ ...item, locationLabel: item.locationLabel.replaceAll('内容块', '段落') }));
       line.dataset['findingId'] = item.findingId;
       must.append(line);
     }
@@ -1837,7 +1851,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const statsBody = el('tbody');
       for (const row of [...record.statistics.rows, { label: REVIEW_REPORT_TOTAL, counts: record.statistics.totals, total: record.statistics.total }]) {
         const tr = el('tr');
-        const name = el('th', undefined, row.label);
+        const name = el('th', undefined, row.label.replaceAll('内容块', '段落'));
         name.scope = 'row';
         tr.append(name, ...row.counts.map((count) => el('td', undefined, String(count))), el('td', undefined, String(row.total)));
         statsBody.append(tr);
@@ -1850,7 +1864,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const [index, entry] of record.findings.entries.entries()) {
         const item = el('li');
         item.dataset['findingIds'] = entry.findingIds.join(' ');
-        item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines(entry).map((line) => el('p', undefined, line)));
+        item.append(el('p', 'review-report-summary-title', reviewReportFindingHeading(index + 1, entry)), ...reviewReportFindingLines({ ...entry, chapterLabel: entry.chapterLabel.replaceAll('内容块', '段落'), locationLabel: entry.locationLabel.replaceAll('内容块', '段落') }).map((line) => el('p', undefined, line)));
         if (entry.sources.length > 0) item.append(findingEvidenceList(entry.sources, options.openSource === undefined ? undefined : (evidenceId) => options.openSource?.(evidenceId)));
         list.append(item);
       }
@@ -2184,7 +2198,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
-      localOptions: { punctuation: 'off', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
+      localOptions: { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
         tables: { characters: true, variantWords: true, bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
       seriesId: null,
       seriesChoices,
@@ -2192,7 +2206,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       categories: new Set(prefill?.categories ?? []),
       materialIds: new Set(),
       selection: prefill?.selection ?? null,
-      scope: prefill?.scope ?? null,
+      scope: prefill?.scope ?? 'whole',
       from: prefill?.from ?? null,
       to: prefill?.to ?? null,
       job: null,
@@ -2255,21 +2269,25 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   /** Fill the sheet from a composite version (Issue #1173): every member ticked, 确定性检查 first; the plan is still read before 开始. */
   async function chooseDefinition(state: SheetState, key: string): Promise<void> {
+    if (projection === null || sheetState !== state || destroyed) return;
+    const ticket = state.requests.ask();
+    sheetUpdate();
     const at = key.lastIndexOf('@');
     try {
       const entry = (await api.procedureLibrary({ action: 'inspect' })).procedures.find((procedure) => procedure.procedureId === key.slice(0, at));
       const pin = entry?.versions.find((version) => version.version === Number(key.slice(at + 1)));
       const document = entry?.documents.find((candidate) => candidate.version === pin?.version);
-      if (pin === undefined || document?.members === undefined) throw new Error('PROCEDURE_DEFINITION_UNAVAILABLE');
-      if (projection === null || sheetState !== state || destroyed) return;
-      state.definition = { pin, title: document.title, categoryIds: document.members.map((member) => member.categoryId) };
+      if (pin === undefined || document === undefined || entry === undefined) throw new Error('PROCEDURE_DEFINITION_UNAVAILABLE');
+      if (projection === null || sheetState !== state || destroyed || !state.requests.current(ticket)) return;
+      state.definition = { composite: document.members !== undefined, pin, title: document.title, categoryIds: document.members?.map((member) => member.categoryId) ?? [entry.executorKind.replace(/^editorial-review\//u, '')] };
       state.categories.clear();
       for (const categoryId of state.definition.categoryIds) state.categories.add(categoryId);
       state.scope ??= 'whole';
     } catch (error) {
-      if (projection === null || sheetState !== state || destroyed) return;
+      if (projection === null || sheetState !== state || destroyed || !state.requests.current(ticket)) return;
       state.problem = options.errorMessage(error, '无法读取所选工序版本；请在「知识库 › 工序与规则」重新运行此工序。');
     }
+    state.requests.settle(ticket);
     renderSheet(projection, state);
   }
 
@@ -2320,38 +2338,28 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
     }
     form.append(procedureField);
-    const recommendationSlot = el('section', 'review-procedure-recommendation');
-    recommendationSlot.dataset['procedureRecommendation'] = '';
-    form.append(recommendationSlot);
-    const recommendations = mountProcedureRecommendation({
-      root: recommendationSlot, api, state: state.recommendation,
-      input: () => ({ goal: '审阅当前稿件', taskKind: 'review-run', scope: state.scope === 'selection' ? 'selection' : state.scope === 'chapters' ? 'chapters' : 'whole', categoryIds: [...state.categories] }),
-      choose: async (candidate) => {
-        await chooseProcedure(state, candidate.procedureId, candidate.versionId);
-        if (state.procedure?.resolved?.versionId !== candidate.versionId) throw new Error('PROCEDURE_CHOICE_UNAVAILABLE');
-        state.recommendation.adopt(candidate);
-        if (projection !== null && sheetState === state) renderSheet(projection, state);
-      },
-      edit: () => sheet.querySelector<HTMLElement>('[data-review-field="scope"], input[name="review-category"]')?.focus(),
-      browse: () => procedureSelect.focus(),
-    });
-    form.addEventListener('change', () => recommendations.refreshIntent());
-    if (state.recommendation.projection === null) void recommendations.load();
-
     const categories = el('fieldset', 'review-category-options');
-    const localSheet = state.categories.has('local-text-check');
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
       const line = el('p', 'field-note review-sheet-definition', `按工序《${state.definition.title}》第 ${state.definition.pin.version} 版依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
       categories.append(line);
     }
-    procedureField.hidden = localSheet;
-    recommendationSlot.hidden = localSheet;
+    procedureField.hidden = state.definition !== null;
     categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
     const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
-    for (const entry of workspace.categories) {
-      if (entry.categoryId === 'local-text-check' || localSheet) continue;
+    const localCategory: ReviewWorkspaceCategoryProjection = {
+      categoryId: 'local-text-check', label: '本地文字检查', description: '单独在本机检查标点、规范字形与异形词；数字检查可选。',
+      output: 'change-suggestion', riskPointsOnly: false, batchApply: true, searchEngine: false, modelFree: true,
+      materialReferencesAllowed: false, basisStatement: '本机确定性检查，不调用模型。', guidelineDocuments: [],
+      procedure: { title: '确定性检查', version: '3' }, available: workspace.manuscript !== null,
+      unavailableReason: workspace.manuscript === null ? '导入稿件后即可检查。' : null,
+      scopes: { whole: workspace.scopeOptions.whole, chapters: workspace.scopeOptions.chapters,
+        changed: { available: false, unavailableReason: '本地文字检查请选择全书、选章或当前选区。' }, selection: { available: true, unavailableReason: null } },
+    };
+    const offeredCategories = workspace.categories.some((entry) => entry.categoryId === localCategory.categoryId)
+      ? workspace.categories : [localCategory, ...workspace.categories];
+    for (const entry of offeredCategories) {
       const label = el('label', 'review-category-option');
       label.dataset['reviewCategoryOption'] = entry.categoryId;
       const input = el('input');
@@ -2375,7 +2383,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         if (input.checked) state.categories.add(entry.categoryId);
         else state.categories.delete(entry.categoryId);
         state.problem = null;
-        updateSheet();
+        renderSheet(workspace, state);
       });
       categories.append(label);
       categoryInputs.set(entry.categoryId, { input, label, reason, entry });
@@ -2580,8 +2588,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    actions.append(start, prepare, quick, cancelPreparation, close);
-    form.append(categories, scopes, materialField, consequences, problem, progress, actions, quickReason);
+    actions.append(start, prepare, cancelPreparation, close);
+    form.append(categories, scopes, materialField, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
@@ -2710,7 +2718,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         scope,
         ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
-        ...(state.definition === null ? {} : { procedureDefinition: state.definition.pin }),
+        ...(state.definition?.composite !== true ? {} : { procedureDefinition: state.definition.pin }),
       });
       state.job = initial;
       sheetUpdate();
@@ -2775,7 +2783,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       options.setStatus(quickNote ?? REVIEW_STATUS_LINES.prepared, 'success');
       // S72 D4: 先看计划 opens the plan the preparation froze in the Task Drawer, which takes focus; closing
       // it brings focus back to this Run's 查看计划. After 开始审阅 the drawer shows the started Run, its plan one step away.
-      options.openPlan(result.run.reviewRunId);
+      if (mode === 'preview') options.openPlan(result.run.reviewRunId);
     } catch (error) {
       if (destroyed) return;
       state.job = null;

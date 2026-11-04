@@ -17,12 +17,12 @@ import type {
 export const SELECTION_TASK_MENU_LABEL = '就这段发起任务…';
 export const SELECTION_TASK_TITLE = '就这段发起任务';
 export const SELECTION_TASK_FIELD = '工序';
-export const SELECTION_TASK_PREPARE = '准备任务';
+export const SELECTION_TASK_PREPARE = '发起任务';
 /**
  * What the Task is given, said before anything is prepared (TASK-002, TASK-003): the paragraph and nothing around it, read the
  * way every range Task reads it, with the plan seen before the start and no quick start.
  */
-export const SELECTION_TASK_NOTE = '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。准备任务先打开计划，由你开始；就选区发起的任务没有快速开始。';
+export const SELECTION_TASK_NOTE = '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。';
 /**
  * The exact context the composer carries (TASK-002; Issue #423 review, P3-6): the Book, the revision and journal position the
  * manuscript stands at — 准备任务 saves the Task's own revision from it — how much is selected, and which paragraph it is in.
@@ -126,16 +126,16 @@ export function selectionTaskGroupNote(procedures: ReadonlyArray<SelectionProced
  * A Production Document's manuscript (Issue #423 review, P3-5): no Task reads a document yet, so neither selection Task is
  * offered there. TASK-001 names Editorial Deliverables as a composer host too — an Owner question recorded on the PR.
  */
-export const SELECTION_TASK_DOCUMENT_REASON = '交付物和制作文档上不能就选区发起任务';
+export const SELECTION_TASK_DOCUMENT_REASON = '在交付物工具栏点击「发起任务」，以当前文档为目标。';
 
 export const SELECTION_TASK_STATUS = {
   reading: '正在读取可以就这段发起的工序…',
   unreadable: '无法读取可以就这段发起的工序。',
-  choose: '选一项工序；准备任务会先打开它的计划。',
+  choose: '选择工序后即可发起任务。',
   pickFirst: '请先选择一项工序。',
   gone: '所选文字所在的段落已不在当前稿件中；请重新选择。',
   preparing: '正在为任务保存修订版…',
-  prepared: '任务计划已准备；可在任务计划里开始任务。',
+  prepared: '任务已开始；可随时查看计划。',
   cancelled: '任务准备已取消；稿件保持不变。',
   failed: '无法准备这项任务。',
   // The house's 可复用工序 on a selection (Issue #423, S77 deferred item a).

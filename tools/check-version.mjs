@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 // "Wave N → x.y.z" pairs — never prose at large, so a wording change elsewhere cannot break it.
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const VERSION = /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/u;
-const STATUSES = new Set(['integrated', 'released', 'planned']);
+const STATUSES = new Set(['integrated', 'released', 'candidate', 'planned']);
 
 /** The ledger rows of `## Version ledger`, in table order: { version, status, scope }. */
 export function parseLedger(markdown) {
@@ -61,12 +61,12 @@ export function checkVersionConsistency({ packageJson, ledgerMarkdown, progressM
   else if (packageVersion !== integrated.version) findings.push(`package-ledger-mismatch:${packageVersion}!=${integrated.version}`);
   if (integrated && planned.some((row) => compare(row.version, integrated.version) <= 0)) findings.push('ledger-planned-not-after-integrated');
   const normalizedProgress = String(progressMarkdown).replace(/\r\n?/gu, '\n');
-  const progress = /integrated [*][*]([0-9]+[.][0-9]+[.][0-9]+)[*][*], next [*][*]([0-9]+[.][0-9]+[.][0-9]+)[*][*]/u.exec(normalizedProgress);
+  const progress = /(?:integrated|candidate) [*][*]([0-9]+[.][0-9]+[.][0-9]+)[*][*](?:, next [*][*]([0-9]+[.][0-9]+[.][0-9]+)[*][*])?/u.exec(normalizedProgress);
   if (!progress) findings.push('progress-version-line-missing');
   else {
     if (integrated && progress[1] !== integrated.version) findings.push(`progress-integrated-mismatch:${progress[1]}`);
     if (planned[0] && progress[2] !== planned[0].version) findings.push(`progress-next-mismatch:${progress[2]}`);
-    if (!planned[0]) findings.push('progress-next-without-planned-row');
+    if (!planned[0] && progress[2]) findings.push('progress-next-without-planned-row');
   }
   for (const row of planned) {
     const wave = /Wave ([0-9]+)/u.exec(row.scope);

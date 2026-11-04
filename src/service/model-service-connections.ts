@@ -104,7 +104,7 @@ const MODEL_SERVICE_ROW_BINDINGS_103 = `(connection_id = 'main-editorial-deepsee
  * Revision 103 (Issue #1225): the OpenCode Zen, Claude 官方 and Gemini 官方 route rows with their v32 models, and an OpenAI row may
  * now be the Main role's choice — revision 84's `provider_id != 'openai-platform' OR selected IS NULL` is gone. CHECKs only.
  */
-export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_connections (
+export const MODEL_SERVICE_CONNECTION_REVISION_103_SQL = `CREATE TABLE model_service_connections (
   connection_id TEXT PRIMARY KEY CHECK(connection_id IN ('main-editorial-deepseek-v4-pro', 'main-editorial-opencode-go', 'openai-platform', 'opencode-zen', 'anthropic-claude', 'google-gemini')),
   role_id TEXT NOT NULL CHECK(role_id = 'main-editorial'),
   connection_name TEXT NOT NULL CHECK(length(connection_name) BETWEEN 1 AND 80),
@@ -126,18 +126,30 @@ export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = `CREATE TABLE model_service_c
   CHECK(${MODEL_SERVICE_ROW_BINDINGS_103})
 ) STRICT`;
 
+/** Channel and credential slot constraints stay exact; model IDs are editor/provider configuration (#1281). */
+const MODEL_SERVICE_CHANNEL_BINDINGS = MODEL_SERVICE_ROW_BINDINGS_103.replace(/\s+AND model_id (?:IN \([^)]*\)|= '[^']*')/gu, '');
+export const MODEL_SERVICE_CONNECTION_REVISION_104_SQL = MODEL_SERVICE_CONNECTION_REVISION_103_SQL
+  .replace(MODEL_SERVICE_ROW_BINDINGS_103, MODEL_SERVICE_CHANNEL_BINDINGS);
+/** model_id retains the Main choice; Fast and the account catalogue have independent storage. */
+export const MODEL_SERVICE_CONNECTION_SCHEMA_SQL = MODEL_SERVICE_CONNECTION_REVISION_104_SQL.replace(
+  '  adapter_revision INTEGER',
+  `  fast_model_id TEXT NOT NULL DEFAULT '' CHECK(length(fast_model_id) <= 128),
+  cached_models TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(cached_models)),
+  adapter_revision INTEGER`,
+);
+
 /** Whether any row, under whichever text the relation holds, falls outside every exact revision-103 binding. */
 export function modelServiceRowsOutsideBindings(db: DatabaseSync): boolean {
-  return db.prepare(`SELECT 1 FROM model_service_connections WHERE NOT (${MODEL_SERVICE_ROW_BINDINGS_103})
+  return db.prepare(`SELECT 1 FROM model_service_connections WHERE NOT (${MODEL_SERVICE_CHANNEL_BINDINGS})
     OR role_id != 'main-editorial' OR adapter_revision != 1 OR configuration_revision != 1 OR approved_fallback_chain != '[]' LIMIT 1`).get() !== undefined;
 }
 
-/** Revision 84 → 103 (Issue #1225): the relation rebuilt from its widened text, every row and column copied in rowid order. */
+/** Upgrade older channel rows, preserving references, diagnostics and both legacy role choices. */
 export function initializeAdmittedChannelsSchema(db: DatabaseSync): void {
   const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
   const sql = fold(asString((db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'model_service_connections'").get() as SqlRow).sql));
   if (sql === fold(MODEL_SERVICE_CONNECTION_SCHEMA_SQL)) return;
-  requireStore(sql === fold(MODEL_SERVICE_CONNECTION_REVISION_84_SQL), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
+  requireStore([MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL].some((text) => sql === fold(text)), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
   const total = (): number => asNumber((db.prepare('SELECT count(*) total FROM model_service_connections').get() as SqlRow).total);
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -145,8 +157,8 @@ export function initializeAdmittedChannelsSchema(db: DatabaseSync): void {
     db.exec('CREATE TEMP TABLE admitted_channels_migration AS SELECT rowid AS original_rowid, * FROM model_service_connections');
     db.exec('DROP TABLE model_service_connections');
     db.exec(MODEL_SERVICE_CONNECTION_SCHEMA_SQL);
-    db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
-      SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test FROM temp.admitted_channels_migration ORDER BY original_rowid`);
+    db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, fast_model_id)
+      SELECT original_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test, model_id FROM temp.admitted_channels_migration ORDER BY original_rowid`);
     db.exec('DROP TABLE temp.admitted_channels_migration');
     requireStore(total() === before, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表迁移未保留全部记录。');
     db.exec('COMMIT');
@@ -164,7 +176,7 @@ export function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'model_service_connections'").get() as SqlRow | undefined;
   requireStore(row !== undefined, 'SCHEMA_MIGRATION_FAILED', '模型服务连接表缺失。');
   const sql = folded(asString(row.sql));
-  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL].some((text) => sql === folded(text))) return;
+  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL, MODEL_SERVICE_CONNECTION_REVISION_72_SQL].some((text) => sql === folded(text))) return;
   requireStore(sql === folded(MODEL_SERVICE_CONNECTION_REVISION_11_SQL), 'SCHEMA_MIGRATION_FAILED', '模型服务连接表结构不兼容。');
   const total = (): number => asNumber((db.prepare('SELECT count(*) total FROM model_service_connections').get() as SqlRow).total);
   db.exec('BEGIN IMMEDIATE');
@@ -195,7 +207,7 @@ export function initializeModelServiceRoutesSchema(db: DatabaseSync): void {
 export function initializeModelSelectionSchema(db: DatabaseSync): void {
   const row = db.prepare("SELECT sql FROM sqlite_schema WHERE name = 'model_service_connections'").get() as SqlRow;
   const fold = (sql: string): string => sql.trim().replace(/\s+/gu, ' ');
-  if (fold(asString(row.sql)) === fold(MODEL_SERVICE_CONNECTION_SCHEMA_SQL) || fold(asString(row.sql)) === fold(MODEL_SERVICE_CONNECTION_REVISION_84_SQL)) return;
+  if ([MODEL_SERVICE_CONNECTION_SCHEMA_SQL, MODEL_SERVICE_CONNECTION_REVISION_104_SQL, MODEL_SERVICE_CONNECTION_REVISION_103_SQL, MODEL_SERVICE_CONNECTION_REVISION_84_SQL].some((text) => fold(asString(row.sql)) === fold(text))) return;
   requireStore(fold(asString(row.sql)) === fold(MODEL_SERVICE_CONNECTION_REVISION_72_SQL), 'SCHEMA_INVALID', '模型服务连接结构不兼容。');
   db.exec('BEGIN IMMEDIATE');
   try {

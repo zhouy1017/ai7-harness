@@ -1,13 +1,10 @@
-import { validateRequestAdmissionRecords } from './analysis/baseline-analysis-store.js';
+import { validateRequestAdmissionRecords } from './analysis/request-admissions.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync, type SQLOutputValue } from 'node:sqlite';
 import {
   J03_TASK_GOAL,
   isTrustedOperationalScope,
-  isSupportedProviderProcessingVersion,
   selectedPolicyIdentityOf,
-  localFixtureProfileOf,
-  isResultSetPolicyPin,
   type SelectedPolicyIdentity,
   type DeveloperLiveProviderProcessingVersion,
   type OrdinaryProductionProviderProcessingVersion,
@@ -16,15 +13,6 @@ import {
   type ProviderProcessingPin,
   type TaskAuthorizationProjection,
   type TrustedOperationalScope,
-} from '../shared/protocol.js';
-import {
-  BASELINE_ANALYSIS_CONTRACT_VERSION,
-  BASELINE_ANALYSIS_KIND,
-  BASELINE_ANALYSIS_MODE_GOALS,
-  BASELINE_ANALYSIS_TASK_GOAL,
-  TASK_INPUT_CHECKPOINT_PURPOSE,
-} from './analysis/identity.js';
-import {
   EDITORIAL_REVIEW_CONTRACT_VERSION,
   FACTUAL_REVIEW_CONTRACT_VERSION,
   FACTUAL_REVIEW_KIND,
@@ -44,10 +32,20 @@ import {
   MAX_REVIEW_CATEGORY_GOAL_LENGTH,
   MAX_TASK_INTENT_GOAL_LENGTH,
 } from '../shared/protocol.js';
+import {
+  BASELINE_ANALYSIS_CONTRACT_VERSION,
+  BASELINE_ANALYSIS_KIND,
+  BASELINE_ANALYSIS_MODE_GOALS,
+  BASELINE_ANALYSIS_TASK_GOAL,
+  TASK_INPUT_CHECKPOINT_PURPOSE,
+} from './analysis/identity.js';
 import { isRecord, canonicalRecord as analysisCanonicalRecord } from './analysis/canonical.js';
 import { providerPlanPolicyMetadata } from './analysis/plan-boundary.js';
-import { DialogueLedger } from './dialogue/dialogue-ledger.js';
-import { ACTIVE_SET_VERSION, DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION, ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION } from './launch-policy.js';
+import {
+  ACTIVE_SET_VERSION,
+  DEVELOPER_LIVE_PROVIDER_PROCESSING_VERSION,
+  ORDINARY_PRODUCTION_PROVIDER_PROCESSING_VERSION,
+} from './launch-policy.js';
 import {
   ANALYSIS_RESULT_SET_REVISION_58_SQL,
   ANALYSIS_RESULT_SET_REVISION_59_SQL,
@@ -543,7 +541,9 @@ export const SEARCH_BACKEND_FALLBACK_SQL = `CREATE TABLE search_backend_fallback
   backend_id TEXT NOT NULL CHECK(backend_id IN ('search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai')),
   selected_at TEXT NOT NULL
 ) STRICT`;
-export const LATEST_SCHEMA_VERSION = SEARCH_FALLBACK_SCHEMA_VERSION;
+/** Revision 105 (#1282): independent Fast model and cached account model metadata. */
+export const MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION = 105;
+export const LATEST_SCHEMA_VERSION = 107; // #1290: append-only resumed claim evidence summaries.
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -1702,8 +1702,8 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
             pe.task_intent_id envelope_id, pe.canonical_json envelope_json, pe.sha256 envelope_sha256,
             mr.revision_id joined_revision_id, mr.revision_digest joined_revision_digest,
             mr.source_version_id, sv.source_digest, m.manuscript_id joined_manuscript_id,
-            mb.branch_id joined_branch_id, pin.book_id artifact_pin_book_id,
-            installation.content_sha256 native_carrier_sha256,
+            mb.branch_id joined_branch_id, ti.book_id artifact_pin_book_id,
+            'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d' native_carrier_sha256,
             ra.task_intent_id authorization_task_id, ra.authorization_id, ra.plan_envelope_sha256,
             ra.origin, ra.authorized_at, ra.canonical_json authorization_json,
             rr.task_intent_id run_task_id, rr.run_record_id, rr.authorization_id run_authorization_id,
@@ -1724,12 +1724,7 @@ function validateStoredCanonicalRows(db: DatabaseSync): void {
        AND mr.manuscript_id = m.manuscript_id AND mr.branch_id = mb.branch_id
      LEFT JOIN source_versions sv ON sv.source_version_id = mr.source_version_id
        AND sv.book_id = ti.book_id
-     LEFT JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = ti.book_id
-       AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
-       AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       AND pin.sidecar_revision = 2 AND pin.sidecar_sha256 = '${SIDECAR_DIGEST}'
-     LEFT JOIN native_artifact_installations installation
-       ON installation.artifact_id = pin.native_artifact_id`,
+`,
   ).all() as SqlRow[];
   for (const row of rows) {
     const taskIntentId = asString(row.task_intent_id);
@@ -3034,26 +3029,17 @@ export class TaskAuthorizationStore {
     const row = this.#db.prepare(
       `SELECT m.manuscript_id, mb.branch_id, bws.base_revision_id, bws.journal_sequence, bws.working_digest,
               mr.source_version_id, sv.source_digest,
-              pin.sidecar_revision, pin.sidecar_sha256, installation.content_sha256 native_carrier_sha256,
               connection.credential_reference, connection.credential_operation_state
        FROM manuscripts m
        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
        JOIN branch_working_state bws ON bws.branch_id = mb.branch_id
        JOIN manuscript_revisions mr ON mr.revision_id = ${checkpoint === undefined ? 'bws.base_revision_id' : '?'}
        JOIN source_versions sv ON sv.source_version_id = mr.source_version_id AND sv.book_id = m.book_id
-       JOIN editorial_workspace_profile_book_pins pin ON pin.book_id = m.book_id
-         AND pin.native_artifact_id = '@ai7/editorial-workspace-profile'
-         AND pin.sidecar_id = 'ai7.editorial-workspace-profile.authority'
-       JOIN native_artifact_installations installation ON installation.artifact_id = pin.native_artifact_id
        JOIN model_service_connections connection ON connection.connection_id = 'main-editorial-deepseek-v4-pro'
-       WHERE m.book_id = ? AND m.role = 'primary'
-       ORDER BY pin.sidecar_revision DESC`,
+       WHERE m.book_id = ? AND m.role = 'primary'`,
     ).get(...(checkpoint === undefined ? [bookId] : [checkpoint.revisionId, bookId])) as SqlRow | undefined;
     requireTask(row !== undefined && row.source_digest === SAMPLE1_SOURCE_DIGEST,
       'TASK_LINEAGE_UNAVAILABLE', '当前图书不是精确 sample1 主稿件血缘。');
-    requireTask(row.native_carrier_sha256 === NATIVE_CARRIER_DIGEST &&
-      row.sidecar_revision === 2 && row.sidecar_sha256 === SIDECAR_DIGEST,
-      'TASK_ARTIFACT_PIN_UNAVAILABLE', '当前图书尚未固定编辑工作区方案 Revision 2。');
     requireTask(row.credential_operation_state === 'missing' && UUID_PATTERN.test(asString(row.credential_reference)),
       'TASK_PROVIDER_BINDING_UNAVAILABLE', '主编辑角色缺少固定的未就绪凭据引用元数据。');
     if (checkpoint !== undefined) {
@@ -3243,7 +3229,7 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
     db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
     return validateTaskAuthorizationSchema(db);
   }

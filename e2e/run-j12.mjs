@@ -743,8 +743,15 @@ async function main() {
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
-    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('当前处理策略未允许')`, 'global-agent-policy-disclosed');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
+    await waitFor(primary, `document.querySelector('.compact-model-selector')?.hidden === false`, 'global-agent-model-selector-visible');
+    await assertRenderer(primary, `(() => { const selector=document.querySelector('.compact-model-selector');
+      selector.open=true; document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      if(selector.open)return false;
+      selector.open=true; document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
+      return !selector.open;
+    })()`, 'model-selector-outside-escape-dismissal');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });
@@ -786,6 +793,24 @@ async function main() {
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
     await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
+    // Wave 23 #1286: entering the global destination closes the book-only drawer and releases its column.
+    await assertRenderer(primary, `(() => { const entry=document.querySelector('[data-edge-entry="tasks"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return true; })()`, 'global-agent-book-drawer-open');
+    await waitFor(primary, `document.querySelector('#task-drawer')?.hidden===false`, 'global-agent-book-drawer-ready');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-from-book');
+    await waitFor(primary, `(() => {
+      const root=document.querySelector('[data-global-agent="destination"]');
+      const submit=root?.querySelector('[data-global-agent-question-form] button[type="submit"]');
+      return root instanceof HTMLElement && getComputedStyle(root).display==='grid' &&
+        getComputedStyle(root.querySelector('.global-agent-composer')).borderTopStyle==='solid' &&
+        submit?.textContent==='发送问题' && submit.classList.contains('primary') &&
+        document.querySelector('#task-drawer')?.hidden===true && document.body.dataset.taskDrawer==='closed' &&
+        getComputedStyle(document.body).paddingRight==='0px';
+    })()`, 'global-agent-styled-drawer-closed');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-to-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-before-book');
+    await clickBook(primary, bookA, 'global-agent-reopen-book');
+    await waitFor(primary, `document.querySelector('[data-screen="editor"]') && document.querySelector('#task-drawer')?.hidden===true`, 'global-agent-book-return-closed');
+
 
     at('serialized-newest-route-wins');
     const racedRoutes = await primary.evaluate(`Promise.allSettled([
@@ -1238,7 +1263,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(editSuffix)})`, 'restart-persisted-edit');
     await assertRenderer(primary, `(() => {
       const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
-      const place=/第 (\\d+) \\/ (\\d+) 个内容块/.exec(notice);
+      const place=/第 (\\d+) \\/ (\\d+) 个段落/.exec(notice);
       return notice.startsWith('回到上次位置 · ') && place!==null &&
         Number(place[1])===${JSON.stringify(pagedAwayPosition)} && Number(place[1])<=Number(place[2]) &&
         !/blk_[0-9a-f]{24}/.test(notice);
@@ -1259,13 +1284,35 @@ async function main() {
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         (anchorSection.compareDocumentPosition(overview.querySelector('.workbench-actions'))&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
-        readings[1].includes('个内容块') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
+        readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'restart-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-library');
     // Identifiers in the technical layer (ADR 0096 §3, #1177): a 书库 card prints no Book identity inline; its 图书 ID and 稳定标识
     // sit behind a closed 查看技术详情.
     await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=card.querySelector('details.technical-details'); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||details.open||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && details.querySelector('summary')?.textContent==='查看技术详情'; }); })()`, 'library-card-identity-disclosed');
+    at('screen-return-origins');
+    // Global destinations return to the exact Book subpage that opened them; settings children return to Settings.
+    await clickBook(primary, bookA, 'return-book-open');
+    await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'return-book-editor-ready');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('review')), 'return-book-review');
+    await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, 'return-book-review-ready');
+    for (const [destination, state] of [['knowledge','knowledge-base'], ['quality','quality-learning'], ['series','series-list']]) {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination(destination)), `return-${destination}-open`);
+      await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${destination}-ready`);
+      await click(primary, '返回', `return-${destination}-back`);
+      await waitFor(primary, `document.querySelector('[data-screen="book-review"]')`, `return-${destination}-source`);
+    }
+    for (const [label, state] of [['数据与存储','data-storage'], ['模型服务','model-service'], ['评估校准与预测','evaluation-calibration']]) {
+      await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), `return-${state}-settings`);
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, `return-${state}-settings-ready`);
+      await click(primary, label, `return-${state}-open`);
+      await waitFor(primary, `document.querySelector('[data-screen="${state}"]')`, `return-${state}-ready`);
+      await click(primary, '返回', `return-${state}-back`);
+      await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, `return-${state}-source`);
+    }
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'return-library');
+    await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'return-library-ready');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'data-storage-open-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'data-storage-open-settings-hub');
     await click(primary, '数据与存储', 'data-storage-open');
@@ -1294,7 +1341,7 @@ async function main() {
     await assertRenderer(primary, `document.querySelector('.data-storage-summary')?.dataset.nativeRevealSuppressedForE2e==='true'`, 'main-owned-zero-argument-reveal');
 
     at('diagnostics-bundle-export');
-    await click(primary, '返回', 'data-storage-return');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'data-storage-return');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'diagnostics-landing');
     // 设置 › 本机 › 诊断 replaces 11a's 即将提供 row (Issue #938 restack onto #934).
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'diagnostics-open-settings');
@@ -1314,9 +1361,9 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v23.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v24.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 191 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 196 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1338,26 +1385,14 @@ async function main() {
     } });
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready-after-dark-pass');
     await assertRenderer(primary, `(() => {
-      const roles=Array.from(document.querySelectorAll('[data-model-role]'));
-      const ids=roles.map((node)=>node.dataset.modelRole);
-      const main=document.querySelector('[data-model-role="main-editorial"]');
-      const statuses=Array.from(document.querySelectorAll('[data-model-role] [role="status"]'));
-      const integrity=document.querySelector('[data-policy-integrity-state="verified"]');
-      return roles.length===4 &&
-        JSON.stringify(ids)===JSON.stringify(['fast-interaction','main-editorial','difficult-escalation','frontier']) &&
-        main?.dataset.modelRoleStatus==='setup-required' &&
-        main.textContent.includes('DeepSeek 开放平台（官方）') && main.textContent.includes('OpenCode Go') && main.textContent.includes('DeepSeek V4.1 Flash') &&
-        main.textContent.includes('已批准备用链') && main.textContent.includes('无') &&
-        JSON.stringify(Array.from(main.querySelectorAll('[data-model-route]')).map((node)=>node.dataset.modelRoute))===JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform','opencode-zen','anthropic-claude','google-gemini']) &&
-        Array.from(main.querySelectorAll('[data-model-route]')).every((node)=>node.dataset.modelRouteInUse==='false'&&node.dataset.modelRouteStatus==='setup-required') &&
-        roles.filter((node)=>node.dataset.modelRole!=='main-editorial').every((node)=>node.dataset.modelRoleStatus==='setup-required'&&!node.textContent.includes('DeepSeek')) &&
-        statuses.length===4 && statuses.every((node)=>node.getAttribute('aria-label')?.includes(node.textContent??'')) &&
-        document.querySelector('.model-service-settings')?.dataset.policyIntegrity==='verified' &&
-        document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0' &&
-        integrity?.textContent.includes('策略完整性：已验证') &&
-        integrity.textContent.includes('零次实时传输') &&
-        document.body.textContent.includes('公开发布许可：不存在');
-    })()`, 'four-role-first-policy-semantics');
+      const screen=document.querySelector('.model-service-settings');
+      const roles=Array.from(screen.querySelectorAll('[data-model-role]'));
+      const technical=screen.querySelector('.model-service-technical');
+      return roles.length===2 && roles.every(node=>['main-editorial','fast-interaction'].includes(node.dataset.modelRole)) &&
+        !screen.querySelector('.model-role-grid') && screen.querySelectorAll('[data-model-route]').length===1 &&
+        technical instanceof HTMLDetailsElement && !technical.open && technical.querySelector('summary')?.textContent==='查看技术详情' &&
+        technical.querySelector('[data-policy-integrity-state="verified"]') && screen.dataset.providerTransmissionCount==='0';
+    })()`, 'inline-model-flow-no-legacy-cards');
     // ADR 0073 §3 and V2-UX-MSET-007 (Issue #435): a configured provider appears as a connection only when a Model Role
     // can bind to it. Since Issue #811 the two production routes are bindable; every other configured provider is named once,
     // in the 尚未支持 list, offers nothing to choose or fill in, and its routes and hosts are named nowhere. Since Issue #1215
@@ -1384,28 +1419,28 @@ async function main() {
       const flow=document.querySelector('[data-model-service-flow]');
       const channels=Array.from(flow?.querySelectorAll('[data-model-channel]')??[]).map((node)=>node.dataset.modelChannel);
       const zen=flow?.querySelector('[data-model-channel="opencode-zen"] input');
-      if(JSON.stringify(channels)!==JSON.stringify(['opencode-zen','opencode-go','anthropic-claude','google-gemini','openai-platform','deepseek-open-platform'])||!(zen instanceof HTMLInputElement))return false;
+      if(JSON.stringify(channels)!==JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform','anthropic-claude','google-gemini','opencode-zen'])||!(zen instanceof HTMLInputElement))return false;
       zen.click();
       const items=Array.from(flow.querySelectorAll('.model-service-flow-ineligible li'));
       // Issue #1225: Zen now offers its credential entry; with no credential saved, no model it lists can be chosen.
       const shown=flow.dataset.flowChannel==='opencode-zen' && Array.from(flow.querySelectorAll('[data-model-choice]')).every((node)=>node.disabled) &&
-        flow.querySelector('[data-action="enter-channel-credential"]')?.textContent==='填写凭据' && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true &&
-        items.length>0 && items.every((item)=>/（(family-not-admitted-by-selected-policy|untested:text|unsupported:text|not-in-runtime-model-table)）/.test(item.textContent) && item.querySelectorAll('input,button').length===0) &&
+        flow.querySelector('[data-action="save-channel-credential"]')?.textContent==='保存并获取模型' && flow.querySelector('input[type="password"]') instanceof HTMLInputElement && !flow.querySelector('[data-action="enter-channel-credential"]') && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true &&
+        items.length===0 && flow.querySelectorAll('[data-model-choice]').length>0 &&
         ${JSON.stringify(unbound.routes)}.every((name)=>!flow.textContent.includes(name));
       flow.querySelector('[data-model-channel="opencode-go"] input').click();
-      return shown && flow.dataset.flowChannel==='opencode-go' && flow.querySelector('[data-model-choice="deepseek-v4.1-flash"]')?.disabled===true;
+      flow.querySelector('[data-model-channel="deepseek-open-platform"] input').click();
+      return shown && flow.dataset.flowChannel==='deepseek-open-platform' && flow.querySelector('[data-model-choice="deepseek-flash"]')?.disabled===true;
     })()`, 'model-service-flow-dispositions');
     await tabUntil(primary, `document.activeElement?.id==='main-editorial-connection-name' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-connection', 16);
     await dispatchTab(primary);
     await assertRenderer(primary, `document.activeElement?.id==='main-editorial-credential' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-credential');
-    await dispatchTab(primary);
-    await assertRenderer(primary, `document.activeElement instanceof HTMLButtonElement && document.activeElement.type==='submit' && document.activeElement.textContent==='保护并保存' && document.activeElement.matches(':focus-visible')`, 'model-settings-keyboard-action');
+    await assertRenderer(primary, `document.querySelector('[data-action="save-channel-credential"]')?.disabled===true`, 'model-settings-empty-credential-disabled');
     const secretOne = randomBytes(48).toString('base64url');
     const secretTwo = randomBytes(48).toString('base64url');
     await fill(primary, '#main-editorial-connection-name', 'J12 主编辑连接', 'model-connection-name');
     await fill(primary, '#main-editorial-credential', secretOne, 'model-credential-first');
     credentialMutationReached = true;
-    await click(primary, '保护并保存', 'model-credential-save');
+    await click(primary, '保存并获取模型', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
     // The one flow (Issue #1215) offers the saved channel's model to both roles, already the choice both hold: nothing to apply.
@@ -1420,23 +1455,26 @@ async function main() {
       return flow.dataset.flowChannel==='deepseek-open-platform' && model instanceof HTMLInputElement && model.checked && !model.disabled &&
         model.closest('label')?.textContent.includes('当前使用中') && use instanceof HTMLButtonElement && use.disabled && test instanceof HTMLButtonElement && !test.disabled;
     })()`, 'model-service-flow-current-choice');
-    // The Main Editorial Role's connection test (ADR 0096 §3, #1177): the Fast role's explicit test, for the route in use and the
-    // Main role's model. Offered, not clicked: this launch admits no live test.
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
-      const route=settings.routeChoice.routes.find((item)=>item.inUse&&item.connection?.credentialOperationState==='ready');
-      const card=document.querySelector('[data-model-role="main-editorial"]');
-      const test=card?.querySelector('[data-action="test-main-role-connection"]');
-      return route!==undefined && test instanceof HTMLButtonElement && !test.disabled && test.textContent==='测试主编辑模型连接' && test.dataset.modelRoute===route.route &&
-        card.querySelector('.model-main-role-test')?.textContent.includes('尚未测试');
-    })`) === true, 'main-role-connection-test-surface');
+    // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
+    await assertRenderer(primary, `(async () => {
+      await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
+      let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
+      const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
+      settings=await window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-fast'});
+      if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='j12-custom-fast')return false;
+      settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
+      return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
+    })()`, 'independent-role-models-without-test');
+    await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
     at('model-service-search-backends');
     const searchSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends)`);
     requireJourney(searchSettings.selectedBackendId === 'search-tinyfish' && JSON.stringify(searchSettings.backends.map((entry)=>entry.backendId)) === JSON.stringify(['search-tinyfish','search-deepseek','search-brave','search-parallel','search-bochaai']), 'search-backend-ranking-default');
     await assertRenderer(primary, `document.querySelector('[data-search-backends]')?.textContent.includes('联网检索') && document.querySelector('[data-search-backend="search-tinyfish"]')?.textContent.includes('30 次/分钟') && document.querySelector('[data-search-backend="search-brave"]')?.textContent.includes('间歇性')`, 'search-backend-measured-profile');
+    await assertRenderer(primary, `Array.from(document.querySelectorAll('[data-search-backend]')).every(card=>card.dataset.selected==='false'&&card.textContent.includes('未配置密钥')&&!card.textContent.includes('已选择')&&Array.from(card.querySelectorAll('button')).find(node=>node.textContent==='测试检索').disabled)`, 'search-keyless-not-ready');
+    // The CI fixture path is called directly; keyless settings controls stay disabled.
     for (const id of ['search-tinyfish','search-deepseek','search-brave','search-parallel','search-bochaai']) {
-      await primary.evaluate(`Array.from(document.querySelector('[data-search-backend="${id}"]').querySelectorAll('button')).find((node)=>node.textContent==='测试检索').click()`);
-      await waitFor(primary, `document.querySelector('[data-search-probe="${id}"]')?.textContent.includes('结果数')`, 'search-probe-fixed-public-stub');
-      await assertRenderer(primary, `(() => { const probe=document.querySelector('[data-search-probe="${id}"]'); return probe.querySelectorAll('a').length<=3 && Array.from(probe.querySelectorAll('a')).every((node)=>node.href.startsWith('https://')&&node.textContent.length<=120); })()`, 'search-probe-output-bounds');
+      requireJourney(await primary.evaluate(`window.ai7.probeSearchBackend({backendId:'${id}'}).then(result=>result.reachable&&result.results.length<=3&&result.results.every(hit=>hit.url.startsWith('https://')&&hit.title.length<=120))`), 'search-probe-fixed-public-stub');
     }
     await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave'})`);
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-saved');
@@ -1447,7 +1485,10 @@ async function main() {
     // candidate are refused, and clearing succeeds. Choosing a keyed fallback is composed service evidence (tests/service/search-fallback.test.ts).
     await assertRenderer(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-search-backend]'));
       return cards.length===5 && cards.every((card)=>{ const control=card.querySelector('[data-action="select-search-fallback"]'); return control instanceof HTMLButtonElement && control.textContent==='设为备用来源' && control.disabled && card.dataset.fallback==='false'; }) &&
-        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源');
+        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源') &&
+        document.querySelector('[data-search-backends]').textContent.includes('设置备用来源后') &&
+        document.querySelector('[data-search-backends]').textContent.includes('余额或套餐额度不足时，直接切换一次') &&
+        document.querySelector('[data-search-backends]').textContent.includes('其他认证错误不会切换');
     })()`, 'search-fallback-control');
     const fallbackRefusals = await primary.evaluate(`Promise.all([
       window.ai7.selectSearchBackend({backendId:'search-brave',role:'fallback'}).then(()=>null,(error)=>error.code),
@@ -1468,9 +1509,7 @@ async function main() {
       return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.textContent.includes('USD 0.75') &&
         card.textContent.includes('不承诺直连调用免费') && JSON.stringify(labels)==='["测试连接"]' && card.querySelector('[data-search-candidate-probe]').textContent==='';
     })()`, 'search-candidate-disclosed-unselectable');
-    await primary.evaluate(`document.querySelector('[data-search-candidate="deepseek-direct-search-v1"] [data-action="probe-search-candidate"]').click()`);
-    await waitFor(primary, `document.querySelector('[data-search-candidate-probe="deepseek-direct-search-v1"]')?.textContent.includes('development-ci')`, 'search-candidate-probe-refused-under-ci');
-    await assertRenderer(primary, `document.querySelector('[data-search-candidate-probe="deepseek-direct-search-v1"]').textContent.includes('不读取凭据') && document.querySelectorAll('[data-search-candidate-probe] a').length===0`, 'search-candidate-refusal-sends-nothing');
+    await assertRenderer(primary, `document.querySelector('[data-action="probe-search-candidate"]')?.disabled===true && !document.querySelector('[data-search-candidate]').textContent.includes('2026-11-01')`, 'search-candidate-keyless-disabled');
     const candidateRefusals = await primary.evaluate(`Promise.all([
       window.ai7.probeSearchBackend({backendId:'search-deepseek',candidateId:'deepseek-direct-search-v1'}).then(()=>null,(error)=>error.code),
       window.ai7.probeSearchBackend({backendId:'search-brave',candidateId:'deepseek-direct-search-v1'}).then(()=>null,(error)=>error.code),
@@ -1513,7 +1552,7 @@ async function main() {
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
         // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-        firstConnection.policy?.activePolicySetVersion === 'v23' &&
+        firstConnection.policy?.activePolicySetVersion === 'v24' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&
@@ -1525,20 +1564,20 @@ async function main() {
     at('model-service-openai-text-contract');
     openAiCredentialMutationReached = true;
     const openAiSecret = randomBytes(48).toString('base64url');
+    await primary.evaluate(`document.querySelector('[data-model-channel="openai-platform"] input').click()`);
     await fill(primary, '#main-editorial-openai-platform-connection-name', 'J12 OpenAI text', 'openai-connection-name');
     await fill(primary, '#main-editorial-openai-platform-credential', openAiSecret, 'openai-synthetic-credential');
-    await click(primary, '保护并保存（OpenAI 官方）', 'openai-protected-save');
+    await click(primary, '保存并获取模型', 'openai-protected-save');
     await waitFor(primary, `document.querySelector('[data-model-route="openai-platform"] [data-credential-state="ready"]')`, 'openai-protected-save-ready');
-    await assertRenderer(primary, `(() => { const card=document.querySelector('[data-model-route="openai-platform"]'); return card.textContent.includes('尚未测试') && card.querySelector('input[type="password"]').value==='' && card.querySelector('[data-action="test-model-connection"]') instanceof HTMLButtonElement; })()`, 'openai-explicit-test-surface');
-    // Issue #1225: GPT-5.6 Sol and Luna are Main choices too, offered to both roles in the flow; with the credential saved and no
-    // passed test, each says 需先测试连接 and 用于主编辑与快速交互 stays off. This launch admits no live test, so the test is offered, not run.
+    await assertRenderer(primary, `(() => { const card=document.querySelector('[data-model-route="openai-platform"]'); return document.querySelector('.model-service-flow-feedback').textContent.includes('尚未测试') && card.querySelector('input[type="password"]').value==='' && document.querySelector('[data-action="test-flow-connection"]') instanceof HTMLButtonElement; })()`, 'openai-explicit-test-surface');
+    // #1281: channel credentials enable all models without a per-model connection-test gate; this CI launch sends no live probe.
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); flow.querySelector('[data-model-channel="openai-platform"] input').click();
       const choices=Array.from(flow.querySelectorAll('[data-model-choice]'));
-      const shown=flow.dataset.flowChannel==='openai-platform' && JSON.stringify(choices.map((node)=>node.dataset.modelChoice))==='["gpt-5.6-sol","gpt-5.6-luna"]' &&
-        choices.every((node)=>!node.disabled&&node.closest('label').textContent.includes('需先测试连接')) &&
-        flow.querySelector('[data-action="test-flow-connection"]')?.disabled===false && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===true;
+      const shown=flow.dataset.flowChannel==='openai-platform' && choices.some((node)=>node.dataset.modelChoice==='gpt-5.6-sol') && choices.some((node)=>node.dataset.modelChoice==='gpt-5.6-luna') &&
+        choices.every((node)=>!node.disabled&&!node.closest('label').textContent.includes('需先测试连接')) &&
+        flow.querySelector('[data-action="test-flow-connection"]')?.disabled===false && flow.querySelector('[data-action="use-model-for-both-roles"]')?.disabled===false;
       flow.querySelector('[data-model-channel="deepseek-open-platform"] input').click();
-      return shown && flow.dataset.flowChannel==='deepseek-open-platform'; })()`, 'openai-main-choice-after-test');
+      return shown && flow.dataset.flowChannel==='deepseek-open-platform'; })()`, 'openai-main-choice-without-test');
     await primary.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
       const route=settings.routeChoice.routes.find((item)=>item.route==='openai-platform');
@@ -1548,14 +1587,15 @@ async function main() {
         settings.roles.find((role)=>role.roleId==='fast-interaction').connection.fastSelected===true;
     })`), 'openai-saved-is-untested-models-independent-fast');
     requireJourney(await primary.evaluate(`window.ai7.testModelServiceConnection({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_UNAVAILABLE')`), 'connection-test-ci-scope-denied');
-    requireJourney(await primary.evaluate(`window.ai7.selectFastRoleModel({route:'openai-platform',modelId:'gpt-5.6-sol'}).then(()=>false,(error)=>error.code==='MODEL_CONNECTION_TEST_REQUIRED')`), 'untested-model-selection-refused');
+    requireJourney(await primary.evaluate(`window.ai7.selectFastRoleModel({route:'openai-platform',modelId:'account-new-model'}).then(()=>true,()=>false)`), 'dynamic-model-selection-without-test');
+    await primary.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
     at('model-service-first-save');
 
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-role-grid')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
+    await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-credential-form')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
     await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
-    await assertRenderer(primary, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.model-role-card')).boxShadow==='none' && getComputedStyle(document.querySelector('[data-model-role] [role="status"]')).borderStyle!=='none'`, 'model-settings-forced-colors');
+    await assertRenderer(primary, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.model-role-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.model-credential-form input')).borderStyle!=='none'`, 'model-settings-forced-colors');
     await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await primary.send('Emulation.clearDeviceMetricsOverride');
@@ -1591,8 +1631,8 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-replace-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-restart-no-redisplay');
     await fill(primary, '#main-editorial-credential', secretTwo, 'model-credential-replacement');
-    await click(primary, '重新输入', 'model-credential-replace');
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('连接名称与凭据保护状态已更新')`, 'model-replacement-ready');
+    await click(primary, '保存并获取模型', 'model-credential-replace');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存')`, 'model-replacement-ready');
     const replacedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(
       replacedConnection?.credentialReference === firstConnection.connection.credentialReference &&
@@ -1858,7 +1898,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-remove-open-settings-hub');
     await click(primary, '模型服务', 'model-remove-open');
     await waitFor(primary, `document.querySelector('[data-credential-state="ready"]')`, 'model-remove-ready');
-    await click(primary, '移除', 'model-remove');
+    await click(primary, '移除凭据', 'model-remove');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'model-removed');
     const removedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(

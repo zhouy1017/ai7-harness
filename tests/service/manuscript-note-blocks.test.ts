@@ -51,6 +51,21 @@ function editNote(book: { manuscriptId: string; branchId: string }, view: Manusc
 }
 
 describe('the note block (#1204)', () => {
+  it('keeps both note links on the absorbing paragraph through a merge and undo', async () => {
+    const { book, view } = await importNotes();
+    const before = view();
+    const [into, absorbed] = before.blocks.slice(1, 3);
+    const note = before.blocks[6]!;
+    const at = [...new Intl.Segmenter('zh-CN', { granularity: 'grapheme' }).segment(into!.text)].length;
+    const merged = store.flushJournalEdit({ ...book, clientEditId: randomUUID(), baseRevisionId: before.revisionId,
+      blockId: into!.blockId, windowStartBlockId: before.blocks[0]!.blockId, baseBlockDigest: into!.digest, expectedJournalSequence: before.journalSequence,
+      fromGrapheme: at, toGrapheme: at, insertText: '', structure: { kind: 'merge', mergedBlockId: absorbed!.blockId, mergedBlockDigest: absorbed!.digest } }).window;
+    expect(merged.blocks.find((block) => block.blockId === into!.blockId)!.noteLinks).toEqual([{ blockId: note.blockId, part: 'footnote', ordinal: 1 }]);
+    expect(merged.blocks.find((block) => block.blockId === note.blockId)!.note).toMatchObject({ referenceBlockId: into!.blockId, referencePosition: 2 });
+    store.undoManuscript(book.manuscriptId, book.branchId, merged.workingDigest);
+    expect(view().blocks.find((block) => block.blockId === absorbed!.blockId)!.noteLinks).toEqual([{ blockId: note.blockId, part: 'footnote', ordinal: 1 }]);
+  });
+
   it('imports a footnote and an endnote as note blocks after the body, each naming the paragraph that refers to it', async () => {
     const path = join(roots.inputRoot, 'staged.docx');
     await composeManuscriptDocx(path, { source: ADMITTED_BASELINE_DOCX, startBlock: 1, blocks: 6, title: '注释组稿', retention: NOTES });
@@ -62,6 +77,8 @@ describe('the note block (#1204)', () => {
     expect(blocks.map((block) => block.kind)).toEqual(['paragraph', 'paragraph', 'paragraph', 'paragraph', 'paragraph', 'paragraph', 'note', 'note']);
     // The body is the excerpt exactly as it read before notes became blocks; each note is its source paragraph's words.
     expect(blocks.slice(0, 6).map((block) => block.digest)).toEqual(source.slice(0, 6).map((block) => block.digest));
+    expect(blocks[2]!.noteLinks).toEqual([{ blockId: blocks[6]!.blockId, part: 'footnote', ordinal: 1 }]);
+    expect(blocks[4]!.noteLinks).toEqual([{ blockId: blocks[7]!.blockId, part: 'endnote', ordinal: 1 }]);
     expect(blocks.slice(6).map((block) => digest(block.text))).toEqual([digest(source[8]!.text), digest(source[9]!.text)]);
     expect(blocks.slice(6).map((block) => block.note)).toEqual([
       { part: 'footnote', ordinal: 1, referenceBlockId: blocks[2]!.blockId, referencePosition: 3 },

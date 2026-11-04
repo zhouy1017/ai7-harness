@@ -9,7 +9,6 @@ import type {
   MaterialIndexReason,
   MaterialSegmentsPageProjection,
   KnowledgeArtifactProjection,
-  PreinstalledProcedureProjection,
   ExemplarBookProjection,
   ExemplarProjection,
   ReadersReportExemplarProjection,
@@ -70,7 +69,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'library',
     label: '资料库',
-    holds: '编辑收集的图书、资料、论文与网页；定了归属与学习准入，任务才能把它列进「允许参考」。',
+    holds: '编辑收集的图书、资料、论文与网页；放入后立即可供任务参考，可随时调整归属与使用范围。',
     pending: null,
   },
   {
@@ -282,20 +281,6 @@ export function exemplarSkippedNote(skipped: ReadonlyArray<string>): string {
 
 export const PROCEDURES_HEADING = '专家经验工序';
 export const RULES_HEADING = '快速开始 · 默认执行规则';
-export const PROCEDURE_STATE_LABELS: Readonly<Record<PreinstalledProcedureProjection['state'], string>> = { enabled: '已启用' };
-/** ADR 0095 §1: a Captured Procedure is the first, review-only form of the Procedure Definition, still readable and runnable. */
-export const PROCEDURE_PREDECESSOR_NOTE = '下方的可复用工序是审阅专用前身，仅用于审阅；已保存的版本仍可查看和运行。';
-
-/** One pre-installed 工序 (Issue #1081, F-26a): what it does, its version and origin, and how many approved runs it served. */
-export function procedureLine(procedure: PreinstalledProcedureProjection): string {
-  return `${procedure.title} · 第 ${procedure.version} 版 · 预装 · 已使用 ${procedure.uses} 次`;
-}
-
-/** Its stages in the order a run takes them, by their product-built names. */
-export function procedureStagesLine(procedure: PreinstalledProcedureProjection): string {
-  return procedure.stages.map((stage) => stage.label).join(' → ');
-}
-
 /**
  * The native artifact in the house's words (editor-surfaces §10): 本社方案 vN in its lifecycle — as the Book card reads it —
  * and how many Books enabled it. Its identity and version identifiers stay in 查看技术详情 (ADR 0071 §1).
@@ -317,7 +302,7 @@ export const LIBRARY_ATTRIBUTE = '定归属…';
 export const LIBRARY_ATTRIBUTE_CONFIRM = '确定归属';
 export const LIBRARY_ELIGIBILITY = '定学习准入…';
 export const LIBRARY_ELIGIBILITY_CONFIRM = '记录决定';
-export const LIBRARY_EMPTY = '资料库里还没有资料。放进来以后，先定归属与学习准入，任务才能把它列进「允许参考」。';
+export const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
 export const LIBRARY_TITLE_LABEL = '标题';
 export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '归属';
@@ -445,7 +430,7 @@ export function libraryDecisionLine(entry: LibraryMaterialDecisionProjection, in
 }
 
 export function libraryAdded(title: string): string {
-  return `已放入资料库：「${title}」；请定归属与学习准入。`;
+  return `已放入资料库：「${title}」；已允许任务参考。`;
 }
 
 export function libraryAttributed(title: string, where: string): string {
@@ -630,9 +615,9 @@ export const CUSTOM_DIMENSIONS_NOTE =
 export const CUSTOM_DIMENSIONS_EMPTY = '还没有自定义分析维度。';
 export const CUSTOM_DIMENSION_NEW = '新建维度…';
 export const CUSTOM_DIMENSION_REVISE = '修改为新版本…';
-export const CUSTOM_DIMENSION_SAVE = '保存为待验证';
+export const CUSTOM_DIMENSION_SAVE = '保存并启用';
 export const CUSTOM_DIMENSION_CANCEL = '取消';
-export const CUSTOM_DIMENSION_ENABLE = '验证并启用';
+export const CUSTOM_DIMENSION_ENABLE = '启用';
 export const CUSTOM_DIMENSION_STOP = '停用';
 export const CUSTOM_DIMENSION_TITLE_LABEL = '维度名称';
 export const CUSTOM_DIMENSION_TEMPLATE_LABEL = '每个单元的提问';
@@ -649,7 +634,7 @@ export function customDimensionVersionLine(version: { version: number; stateLabe
 }
 
 export function customDimensionSavedLine(title: string): string {
-  return `已保存「${title}」的新版本，状态为待验证；验证并启用后才能在分析中运行。`;
+  return `已保存「${title}」的新版本，已启用，可在分析中运行。`;
 }
 
 export function customDimensionEnabledLine(title: string, version: number): string {

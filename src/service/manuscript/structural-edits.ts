@@ -1,19 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES, type JournalEditInput, type JournalStructuralEdit } from '../../shared/protocol.js';
+import { MAX_BLOCK_CODE_UNITS, MAX_BLOCK_GRAPHEMES, type JournalEditInput, type JournalStructuralEdit, type ManuscriptBlockKind } from '../../shared/protocol.js';
 import {
   BLOCK_PATTERN, BoundedStoreError, HISTORY_BATCH, MIGRATION_BATCH, asNumber, asString, fenwickSpan, graphemes, lastWorkingPosition, one,
   requireBounded, stagedBlockLength, workingOffsetPrefix, type SqlRow,
 } from './bounded-kernel.js';
-import { blockDigest, memberPresenceColumns, recoveryCommandEvidenceDigest, recoveryWorkingDigest } from './command-history.js';
+import { blockDigest, blockShapeFromDigest, memberPresenceColumns, recoveryCommandEvidenceDigest, recoveryWorkingDigest } from './command-history.js';
 
 /**
  * Structural edits as ordinary Edit Journal commands (Issue #1175; ADR 0096 §1, ADR 0006). `Enter` at the caret splits a
  * paragraph in two; `Backspace` at a paragraph's start merges it into the paragraph before it. Each is one command group of its
  * own kind with two members — the block whose text changes, and the block that comes into or leaves the working state — and
  * one lineage row: the new block `split-from` the one it came out of, or the absorbed block `merged-into` the one that took its
- * text. 撤销 and 重做 replay the group as one step. Only paragraphs are split or merged; a heading's level, a whole block's
- * insertion or deletion and section moves stay with Structure Adjustment Mode (F-15).
+ * text. 撤销 and 重做 replay the group as one step. A heading can create a plain paragraph at its end; a single block's style
+ * is an ordinary journal edit too (#1288). Multi-heading hierarchy changes and section moves stay with Structure Adjustment Mode (F-15).
  *
  * The marks of the two blocks (ED-044): a mark wholly before the caret stays; a 批注, 备注 or highlight wholly after it — or on
  * the absorbed paragraph — follows its words to the other block exactly; a mark across the caret stays on the first block as a
@@ -92,14 +92,16 @@ function requireParagraph(block: WorkingBlock | undefined, digest: string): asse
 /** The working state with `blockId` split at grapheme `at`: its head stays, its tail becomes `newBlockId` right after it. */
 function splitWorking(db: DatabaseSync, branchId: string, blockId: string, newBlockId: string, at: number, expectedDigest: string): { head: string; tail: string } {
   const block = workingBlock(db, branchId, blockId);
-  requireParagraph(block, expectedDigest);
+  requireBounded(block !== undefined && block.digest === expectedDigest, 'EDIT_BLOCK_CHANGED', '内容块已变化，请刷新窗口。');
   const parts = graphemes(block.text);
+  requireBounded(block.kind === 'paragraph' || ((block.kind === 'heading' || block.kind === 'title') && at === parts.length),
+    'STRUCTURE_INVALID', '标题只能在末尾新建正文段落。');
   requireBounded(Number.isSafeInteger(at) && at >= 0 && at <= parts.length, 'EDIT_RANGE_INVALID', '拆分位置无效。');
   const head = parts.slice(0, at).join('');
   const tail = parts.slice(at).join('');
   shiftPositions(db, branchId, block.position, 1);
   db.prepare('UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ?')
-    .run(head, blockDigest('paragraph', null, head), at, branchId, blockId);
+    .run(head, blockDigest(block.kind as ManuscriptBlockKind, block.level, head), at, branchId, blockId);
   db.prepare(
     `INSERT INTO working_blocks(branch_id, block_id, position, kind, level, text, digest, grapheme_length)
      VALUES (?, ?, ?, 'paragraph', NULL, ?, ?, ?)`,
@@ -112,11 +114,13 @@ function splitWorking(db: DatabaseSync, branchId: string, blockId: string, newBl
 
 /** The working state with `mergedBlockId`, the paragraph right after `intoBlockId`, taken into it. */
 function joinWorking(
-  db: DatabaseSync, branchId: string, intoBlockId: string, mergedBlockId: string, intoDigest: string, mergedDigest: string,
+  db: DatabaseSync, branchId: string, intoBlockId: string, mergedBlockId: string, intoDigest: string, mergedDigest: string, undoHeadingSplit = false,
 ): { intoText: string; mergedText: string; joined: string } {
   const into = workingBlock(db, branchId, intoBlockId);
   const merged = workingBlock(db, branchId, mergedBlockId);
-  requireParagraph(into, intoDigest);
+  if (undoHeadingSplit && (into?.kind === 'heading' || into?.kind === 'title')) {
+    requireBounded(into.digest === intoDigest && merged?.text === '', 'EDIT_BLOCK_CHANGED', '标题后的新段落已变化。');
+  } else requireParagraph(into, intoDigest);
   requireParagraph(merged, mergedDigest);
   requireBounded(merged.position === into.position + 1, 'STRUCTURE_INVALID', '只能与紧邻的上一段合并。');
   const joined = into.text + merged.text;
@@ -124,7 +128,7 @@ function joinWorking(
   requireBounded(joined.length <= MAX_BLOCK_CODE_UNITS && length <= MAX_BLOCK_GRAPHEMES, 'EDIT_TOO_LARGE', '合并后的段落超出安全范围。');
   db.prepare('DELETE FROM working_blocks WHERE branch_id = ? AND block_id = ?').run(branchId, mergedBlockId);
   db.prepare('UPDATE working_blocks SET text = ?, digest = ?, grapheme_length = ? WHERE branch_id = ? AND block_id = ?')
-    .run(joined, blockDigest('paragraph', null, joined), length, branchId, intoBlockId);
+    .run(joined, blockDigest(into.kind as ManuscriptBlockKind, into.level, joined), length, branchId, intoBlockId);
   shiftPositions(db, branchId, merged.position, -1);
   refreshSearch(db, branchId, intoBlockId, joined);
   refreshSearch(db, branchId, mergedBlockId, null);
@@ -165,12 +169,13 @@ function joinMarks(db: DatabaseSync, branchId: string, intoBlockId: string, from
   }
 }
 
-const insertMember = (db: DatabaseSync, groupId: string, position: number, blockId: string, before: string | null, after: string | null): void => {
+const insertMember = (db: DatabaseSync, groupId: string, position: number, blockId: string, before: string | null, after: string | null,
+  kind: ManuscriptBlockKind = 'paragraph', level: number | null = null): void => {
   db.prepare(
     `INSERT INTO manuscript_command_edits(
        command_group_id, position, block_id, before_text, before_digest, after_text, after_digest, before_present, after_present
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(groupId, position, blockId, before ?? '', blockDigest('paragraph', null, before ?? ''), after ?? '', blockDigest('paragraph', null, after ?? ''),
+  ).run(groupId, position, blockId, before ?? '', blockDigest(kind, level, before ?? ''), after ?? '', blockDigest(kind, level, after ?? ''),
     before === null ? 0 : 1, after === null ? 0 : 1);
 };
 
@@ -182,6 +187,7 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
   serviceLifetimeId: string, hooks: StructuralWriteHooks): void {
   const { binding } = hooks;
   const structure = input.structure;
+  const commandKind = structure.kind === 'style' ? 'edit' : structure.kind;
   requireBounded(input.insertText === '' && input.fromGrapheme === input.toGrapheme, 'EDIT_INVALID', '结构编辑不写入文字。');
   const sequence = binding.journalSequence + 1;
   const groupId = randomUUID();
@@ -191,7 +197,7 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
     `INSERT INTO manuscript_command_groups(
        command_group_id, branch_id, ordinal, kind, status, source_group_id, before_working_digest, after_working_digest, created_at
      ) VALUES (?, ?, ?, ?, 'applied', NULL, ?, ?, ?)`,
-  ).run(groupId, binding.branchId, binding.historySequence + 1, structure.kind, binding.workingDigest, '0'.repeat(64), durableAt);
+  ).run(groupId, binding.branchId, binding.historySequence + 1, commandKind, binding.workingDigest, '0'.repeat(64), durableAt);
   let resultingDigest: string;
   if (structure.kind === 'split') {
     requireBounded(BLOCK_PATTERN.test(structure.newBlockId) &&
@@ -199,14 +205,30 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
     'STRUCTURE_INVALID', '新段落标识无效或已被使用。');
     db.prepare('INSERT INTO manuscript_blocks(block_id, manuscript_id, created_revision_id) VALUES (?, ?, ?)')
       .run(structure.newBlockId, binding.manuscriptId, binding.revisionId);
-    const before = workingBlock(db, binding.branchId, input.blockId)?.text ?? '';
+    const original = workingBlock(db, binding.branchId, input.blockId)!;
+    const before = original.text;
     const { head, tail } = splitWorking(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, input.baseBlockDigest);
     splitMarks(db, binding.branchId, input.blockId, structure.newBlockId, input.fromGrapheme, sequence, true);
-    insertMember(db, groupId, 1, input.blockId, before, head);
+    insertMember(db, groupId, 1, input.blockId, before, head, original.kind as ManuscriptBlockKind, original.level);
     insertMember(db, groupId, 2, structure.newBlockId, null, tail);
     db.prepare("INSERT INTO manuscript_block_lineage(block_id, related_block_id, relation, command_group_id) VALUES (?, ?, 'split-from', ?)")
       .run(structure.newBlockId, input.blockId, groupId);
-    resultingDigest = blockDigest('paragraph', null, head);
+    resultingDigest = blockDigest(original.kind as ManuscriptBlockKind, original.level, head);
+  } else if (structure.kind === 'style') {
+    const block = workingBlock(db, binding.branchId, input.blockId);
+    requireBounded(block !== undefined && block.digest === input.baseBlockDigest, 'EDIT_BLOCK_CHANGED', '段落已变化，请刷新窗口。');
+    requireBounded(['paragraph', 'heading', 'title'].includes(block.kind) &&
+      ((structure.blockKind === 'paragraph' && structure.level === null) || (structure.blockKind === 'title' && structure.level === 1) ||
+        (structure.blockKind === 'heading' && Number.isSafeInteger(structure.level) && structure.level! >= 1 && structure.level! <= 6)),
+    'STRUCTURE_INVALID', '段落样式无效。');
+    resultingDigest = blockDigest(structure.blockKind, structure.level, block.text);
+    insertMember(db, groupId, 1, block.blockId, block.text, block.text, block.kind as ManuscriptBlockKind, block.level);
+    db.prepare('UPDATE manuscript_command_edits SET after_digest = ? WHERE command_group_id = ?').run(resultingDigest, groupId);
+    db.prepare('UPDATE working_blocks SET kind = ?, level = ?, digest = ? WHERE branch_id = ? AND block_id = ?')
+      .run(structure.blockKind, structure.level, resultingDigest, binding.branchId, block.blockId);
+    db.prepare('DELETE FROM manuscript_outline WHERE branch_id = ? AND block_id = ?').run(binding.branchId, block.blockId);
+    if (structure.blockKind !== 'paragraph') db.prepare(`INSERT INTO manuscript_outline(branch_id, block_id, position, kind, level, text, digest)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(binding.branchId, block.blockId, block.position, structure.blockKind, structure.level, block.text, resultingDigest);
   } else {
     requireBounded(BLOCK_PATTERN.test(structure.mergedBlockId) && structure.mergedBlockId !== input.blockId, 'STRUCTURE_INVALID', '合并段落标识无效。');
     const { intoText, mergedText, joined } = joinWorking(db, binding.branchId, input.blockId, structure.mergedBlockId, input.baseBlockDigest, structure.mergedBlockDigest);
@@ -218,7 +240,7 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
       .run(structure.mergedBlockId, input.blockId, groupId);
     resultingDigest = blockDigest('paragraph', null, joined);
   }
-  const workingDigest = recoveryWorkingDigest(binding.workingDigest, sequence, structure.kind, groupId, recoveryCommandEvidenceDigest(db, groupId));
+  const workingDigest = recoveryWorkingDigest(binding.workingDigest, sequence, commandKind, groupId, recoveryCommandEvidenceDigest(db, groupId));
   requireBounded(db.prepare('UPDATE manuscript_command_groups SET after_working_digest = ? WHERE command_group_id = ? AND after_working_digest = ?')
     .run(workingDigest, groupId, '0'.repeat(64)).changes === 1, 'HISTORY_CORRUPT', '编辑命令证据无法绑定工作状态链。');
   db.prepare(
@@ -228,7 +250,7 @@ export function writeStructuralEdit(db: DatabaseSync, input: JournalEditInput & 
        resulting_working_digest, durable_at, command_group_id, command_kind, service_lifetime_id
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
   ).run(randomUUID(), input.clientEditId, fingerprint, input.manuscriptId, input.branchId, input.baseRevisionId, sequence, input.blockId,
-    input.fromGrapheme, input.toGrapheme, resultingDigest, workingDigest, durableAt, groupId, structure.kind, serviceLifetimeId);
+    input.fromGrapheme, input.toGrapheme, resultingDigest, workingDigest, durableAt, groupId, commandKind, serviceLifetimeId);
   const state = db.prepare(
     `UPDATE branch_working_state SET journal_sequence = ?, working_digest = ?, history_sequence = ?
      WHERE branch_id = ? AND journal_sequence = ? AND working_digest = ?`,
@@ -268,7 +290,7 @@ export function replayStructuralGroup(db: DatabaseSync, branchId: string, groupI
     const intoDigest = kind === 'split' ? asString(first.after_digest) : asString(first.before_digest);
     const mergedDigest = kind === 'split' ? asString(second.after_digest) : asString(second.before_digest);
     let offset = 0;
-    stale(() => { offset = graphemes(joinWorking(db, branchId, firstId, secondId, intoDigest, mergedDigest).intoText).length; });
+    stale(() => { offset = graphemes(joinWorking(db, branchId, firstId, secondId, intoDigest, mergedDigest, kind === 'split').intoText).length; });
     joinMarks(db, branchId, firstId, secondId, offset, sequence, action === 'redo');
   }
 }
@@ -293,7 +315,9 @@ export function historyStale(db: DatabaseSync, branchId: string, groupId: string
 export function journalHasStructuralEdits(db: DatabaseSync, branchId: string, afterSequence: number, throughSequence: number): boolean {
   return db.prepare(
     `SELECT 1 FROM edit_journal_entries e JOIN manuscript_command_groups g ON g.command_group_id = e.command_group_id
-     WHERE e.branch_id = ? AND e.sequence > ? AND e.sequence <= ? AND g.kind IN ('split', 'merge') LIMIT 1`,
+     WHERE e.branch_id = ? AND e.sequence > ? AND e.sequence <= ? AND (g.kind IN ('split', 'merge') OR EXISTS(
+       SELECT 1 FROM manuscript_command_edits ce WHERE ce.command_group_id = g.command_group_id
+       AND ce.before_text = ce.after_text AND ce.before_digest <> ce.after_digest)) LIMIT 1`,
   ).get(branchId, afterSequence, throughSequence) !== undefined;
 }
 
@@ -336,6 +360,7 @@ export function verifyStructuralReconstruction(
       if (current !== undefined) fail('修订日志重建结果与持久工作状态不一致。');
       return 0;
     }
+    ({ kind, level } = blockShapeFromDigest(result.text, result.digest));
     if (current === undefined || asString(current.kind) !== kind || (current.level === null ? null : asNumber(current.level)) !== level ||
       asString(current.text) !== result.text || asString(current.digest) !== result.digest ||
       blockDigest(kind as 'paragraph', level, result.text) !== result.digest ||

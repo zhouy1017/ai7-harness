@@ -1,6 +1,7 @@
 import type { CallId, GenerateOptions, LlmAdapter, LlmProviderInfo, LlmResolvedModelInfo, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { isRecord, sha256Hex } from '../analysis/canonical.js';
-import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
+import { validModelServiceModelId, type DiscoveredModel } from '../../shared/protocol/model-service.js';
+import { AGENT_WORKSPACE_PROMPT_CONTRACT, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT, DIALOGUE_RETRIEVAL_PROMPT_CONTRACT_DIGEST, parseDialogueMessage } from '../dialogue/contract.js';
 import { GLOBAL_AGENT_PROMPT_CONTRACT, GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST } from '../dialogue/global-agent-session.js';
 import { AI7_FAILURE_CODES, retryBackoffMs, type DshFailureCodes } from './classification.js';
 import type { CredentialBroker, CredentialSlotBinding } from './credential-broker.js';
@@ -196,9 +197,9 @@ function familyStreamEvents(response: DeepSeekTransportResponse, model: Provider
 }
 
 /** A /2 dialogue carries its one admitted question followed only by complete local function-call rounds. */
-function isRetrievalDialogue(payload: AssembledModelPayload): boolean {
+function isRetrievalDialogue(payload: AssembledModelPayload, systemPrompt: string = DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt): boolean {
   const first = payload.messages[0];
-  if (payload.system !== DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt ||
+  if (payload.system !== systemPrompt ||
     !toolSetEqualsPlatformSchemas(payload.tools ?? [], LEGACY_LOCAL_TOOL_SCHEMAS) || first?.role !== 'user' ||
     parseDialogueMessage(messageText(first) ?? '') === null) return false;
   const issued = new Set<string>();
@@ -230,7 +231,12 @@ function isStreamedDialogue(payload: AssembledModelPayload, context: ProviderReq
   const global = context.promptContractDigest === GLOBAL_AGENT_PROMPT_CONTRACT_DIGEST &&
     payload.system === GLOBAL_AGENT_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 && message?.role === 'user' &&
     parseDialogueMessage(messageText(message) ?? '')?.globalSources !== undefined && (payload.tools ?? []).length === 0;
-  return predecessor || retrieval || global;
+  const workspace = context.promptContractDigest === AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST &&
+    payload.system === AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt && payload.messages.length === 1 &&
+    message?.role === 'user' && parseDialogueMessage(messageText(message) ?? '') !== null && (payload.tools ?? []).length === 0;
+  const workspaceRetrieval = context.promptContractDigest === AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST &&
+    isRetrievalDialogue(payload, AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt);
+  return predecessor || retrieval || global || workspace || workspaceRetrieval;
 }
 
 /**
@@ -296,6 +302,42 @@ export function credentialHeaders(profile: ProviderRouteProfile, secret: string)
     case 'x-goog-api-key': return { 'x-goog-api-key': secret };
     default: throw new Error('PROVIDER_CREDENTIAL_HEADER_UNSUPPORTED');
   }
+}
+
+/** Metadata GET only: the configured channel owns the address and authentication, with no manuscript payload. */
+export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
+  const endpoint = profile.route.startsWith('opencode-zen') ? 'https://opencode.ai/inference/v1/models'
+    : profile.endpoint.replace(/\/(?:chat\/completions|responses|messages)\/?$/u, '/models');
+  const url = new URL(endpoint);
+  const result = new Map<string, DiscoveredModel>();
+  const signal = AbortSignal.timeout(10_000);
+  const pages = new Set<string>();
+  for (;;) {
+    if (pages.has(url.href)) throw new Error('MODEL_DISCOVERY_PAGINATION_INVALID');
+    pages.add(url.href);
+    const response = await send(url.href, { method: 'GET', redirect: 'error', signal, headers: {
+      accept: 'application/json', ...credentialHeaders(profile, secret),
+      ...(profile.anthropicVersion === null ? {} : { 'anthropic-version': profile.anthropicVersion }),
+    } });
+    if (!response.ok) throw new Error('MODEL_DISCOVERY_UNAVAILABLE');
+    const body: unknown = await response.json();
+    if (!isRecord(body)) throw new Error('MODEL_DISCOVERY_INVALID');
+    const google = profile.credentialHeader === 'x-goog-api-key';
+    const models = google ? body.models : body.data;
+    if (!Array.isArray(models)) throw new Error('MODEL_DISCOVERY_INVALID');
+    for (const model of models) {
+      if (!isRecord(model) || (google && (!Array.isArray(model.supportedGenerationMethods) || !model.supportedGenerationMethods.includes('generateContent')))) continue;
+      const id = google && typeof model.name === 'string' ? model.name.replace(/^models\//u, '') : model.id;
+      if (typeof id !== 'string' || !validModelServiceModelId(id)) continue;
+      const label = model.displayName ?? model.display_name ?? id;
+      result.set(id, { modelId: id, modelLabel: typeof label === 'string' && label.trim().length > 0 ? label.trim().slice(0, 200) : id });
+    }
+    if (google && typeof body.nextPageToken === 'string' && body.nextPageToken.length > 0) url.searchParams.set('pageToken', body.nextPageToken);
+    else if (profile.credentialHeader === 'x-api-key' && body.has_more === true && typeof body.last_id === 'string') url.searchParams.set('after_id', body.last_id);
+    else break;
+  }
+  if (result.size === 0) throw new Error('MODEL_DISCOVERY_EMPTY');
+  return [...result.values()];
 }
 
 /**
@@ -432,6 +474,8 @@ export type DeepSeekTransport = (
 ) => Promise<DeepSeekTransportResponse>;
 
 export interface DeepSeekAdapterDependencies {
+  /** Settings supplies the channel's credential-scoped metadata discovery; task adapters need none. */
+  readonly discoverModels?: () => Promise<readonly DiscoveredModel[]>;
   readonly transportSettings?: {
     readonly requestDeadlineSeconds: number;
     readonly rateLimitRetry: { readonly honourRetryAfter: boolean; readonly maxRetries: number };
@@ -532,8 +576,9 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     return undefined;
   }
 
-  listModels(): Promise<readonly never[]> {
-    return Promise.resolve([]);
+  async listModels(): Promise<readonly import('@deepseek-ai/dsh-llm').LlmModelInfo[]> {
+    const models = await this.#deps.discoverModels?.() ?? [{ modelId: this.#modelProfile.model, modelLabel: this.#modelProfile.displayName }];
+    return models.map((model) => ({ provider: this.#profile.route, id: model.modelId, name: model.modelLabel }));
   }
 
   resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {

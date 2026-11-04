@@ -463,7 +463,10 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     }
     const originalUser = options.messages.findLast((message) => message.role === 'user' && message.source?.kind === 'user');
     const text = originalUser === undefined ? lastUserMessageText(options) : messageText(originalUser);
-    const dialogue = text === null ? null : parseDialogueMessageHeader(text);
+    const parsedDialogue = text === null ? null : parseDialogueMessage(text);
+    const dialogue = parsedDialogue?.followUp === true
+      ? { kind: parsedDialogue.kind, questionDigest: dialogueQuestionDigest(parsedDialogue.question) }
+      : text === null ? null : parseDialogueMessageHeader(text);
     if (dialogue !== null) {
       yield* this.#dialogue(dialogue, options, failure);
       return;

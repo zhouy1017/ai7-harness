@@ -198,14 +198,14 @@ jobs:
           --candidate "${{ needs.prepare.outputs.commit }}"
           --gate-run "${{ github.run_id }}"
 
-      - name: Leave an unreleased or Owner-reserved candidate open
+      - name: Leave an Owner-reserved candidate open
         if: ${{ !inputs.merge && needs.windows.result == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
           node tools/nightly-queue.mjs report
           --pr "${{ inputs.pr }}" --repo "$GITHUB_REPOSITORY"
-          --reason unreleased
+          --reason reserved
 
   cleanup:
     name: Delete the temporary ref

@@ -6,8 +6,43 @@ import { describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { ANALYSIS_LEDGER_SCHEMA_SQL, ANALYSIS_LEDGER_TRIGGER_SQL } from '../../src/service/task-authorization.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
+import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
+import { probeConfiguredSearchBackend } from '../../src/service/provider/search-service.js';
+import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
 
 describe('the persisted search settings and schema 74', () => {
+  it('tests a configured search key before a Main model exists, using a fixed public query', async () => {
+    const roots = await createServiceTestRoots();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', null);
+      expect(policy.providerProcessing.admittedRules).toEqual([]);
+      const connection = store.saveSearchBackendCredential('search-tinyfish', null, 'ready');
+      const sent: string[] = [];
+      const result = await probeConfiguredSearchBackend({ backendId: 'search-tinyfish', policy, connection,
+        broker: new CredentialBroker({ resolve: async () => 'synthetic-key' }, { developmentReferences: 'refused' }),
+        admitHost: () => () => undefined, fetch: async (url) => {
+          sent.push(String(url));
+          return new Response(JSON.stringify({ results: [{ title: 'Public book day', url: 'https://example.org/day' }] }), { headers: { 'content-type': 'application/json' } });
+        } });
+      expect(result).toMatchObject({ reachable: true, resultCount: 1 });
+      expect(new URL(sent[0]!).searchParams.get('query')).toBe('UNESCO World Book and Copyright Day April 23');
+    } finally { store.close(); await roots.dispose(); }
+  });
+  it('makes the first ready key the default and clears a removed fallback', async () => {
+    const roots = await createServiceTestRoots();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.getSearchBackendSettings().backends.find((entry) => entry.backendId === 'search-tinyfish')!.reachable).toBe(false);
+      store.saveSearchBackendCredential('search-brave', null, 'ready');
+      expect(store.getSearchBackendSettings().selectedBackendId).toBe('search-brave');
+      store.saveSearchBackendCredential('search-parallel', null, 'ready');
+      store.selectSearchBackend('search-parallel', 'fallback');
+      store.saveSearchBackendCredential('search-parallel', null, 'missing');
+      expect(store.getSearchBackendSettings().fallbackBackendId).toBeNull();
+      expect(store.getSearchBackendSettings().selectedBackendId).toBe('search-brave');
+    } finally { store.close(); await roots.dispose(); }
+  });
   it('keeps selection and opaque per-backend credential references across restart', async () => {
     const roots = await createServiceTestRoots();
     let store: EditorialStore | undefined;
@@ -32,7 +67,7 @@ describe('the persisted search settings and schema 74', () => {
       expect(() => store!.selectSearchBackend('search-kimi')).toThrow(/未提供/u);
       store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getSearchBackendSettings().selectedBackendId).toBe('search-brave');
-      expect(store.getSearchBackendConnections().find((row) => row.backendId === 'search-brave')).toEqual(saved.selected ? saved : { ...saved, selected: true, selectedAt: store.getSearchBackendConnections().find((row) => row.backendId === 'search-brave')!.selectedAt });
+      expect(store.getSearchBackendConnections().find((row) => row.backendId === 'search-brave')).toEqual({ ...saved, selected: true, selectedAt: store.getSearchBackendConnections().find((row) => row.backendId === 'search-brave')!.selectedAt });
       const removed = store.saveSearchBackendCredential('search-brave', null, 'missing');
       expect(removed.credentialReference).toBe(first.credentialReference);
       expect(removed.credentialOperationState).toBe('missing');
@@ -78,7 +113,7 @@ describe('the persisted search settings and schema 74', () => {
       expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
       const terminal = new DatabaseSync(path);
       // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(104);
+      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(107);
       expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
       expect(() => terminal.prepare("INSERT INTO search_backend_connections VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow();
       terminal.exec('DROP TABLE search_backend_connections'); terminal.close();

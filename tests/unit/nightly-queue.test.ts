@@ -14,7 +14,6 @@ type QueueRecord = {
   baseRefName: string;
   headRefOid: string;
   headRefName?: string;
-  authorization?: { allowed: boolean } | undefined;
   files?: readonly { path: string; text?: string }[];
 };
 type Candidate = { number: number; title: string; head: string; merge: boolean; reserved: unknown };
@@ -65,13 +64,6 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
   candidateRef: (pr: number, runId: string) => string;
   linkedIssues: (references: unknown, repo: string) => number[];
   closingComment: (options: { pr: number; dev: string; commit: string }) => string;
-  directSliceClosure: (options: {
-    record: { state: string; baseRefName: string };
-    source: string;
-    mergeCommit: string | null;
-    mergerTrusted: boolean;
-    slice: { pr: number; merge: string; directMerge: true };
-  }) => string | null;
   main: (argv: string[]) => number;
 };
 
@@ -83,7 +75,6 @@ const record = (overrides: Partial<QueueRecord> = {}): QueueRecord => ({
   baseRefName: 'dev',
   headRefOid: 'a'.repeat(40),
   headRefName: 'codex/integration-100',
-  authorization: { allowed: true },
   files: [],
   ...overrides,
 });
@@ -134,6 +125,94 @@ describe('the merge helper cannot silently bypass its release inputs', () => {
   });
   it('restricts cleanup to the temporary candidate namespace', () => {
     expect(() => queue.main(['cleanup', '--ref', 'refs/heads/main', '--dry-run'])).toThrow('cleanup-ref-outside-candidate-scope');
+  });
+});
+
+describe('trusted Gate status publication without role comments', () => {
+  it.each([
+    { result: 'success', file: 'src/service/index.ts', passed: true },
+    { result: 'failure', file: 'src/service/index.ts', passed: false },
+    { result: 'cancelled', file: 'src/service/index.ts', passed: false },
+    { result: 'skipped', file: 'docs/agents/orca-dispatch.md', passed: true },
+    { result: 'skipped', file: 'src/service/index.ts', passed: false },
+    { result: 'failure', file: 'docs/agents/orca-dispatch.md', passed: false },
+    { result: 'success', file: 'src/service/index.ts', passed: false, moved: true },
+  ])('publishes the actual candidate outcome: %j', (sample) => {
+    const entry = new URL('../../tools/nightly-queue.mjs', import.meta.url).href;
+    const script = `
+      import assert from 'node:assert/strict';
+      import childProcess from 'node:child_process';
+      import { syncBuiltinESMExports } from 'node:module';
+      const sample = ${JSON.stringify(sample)};
+      const head = 'a'.repeat(40), base = 'b'.repeat(40);
+      const statuses = [];
+      childProcess.spawnSync = (command, args) => {
+        let stdout = '';
+        if (command === 'gh' && args[0] === 'pr' && args[1] === 'view') {
+          stdout = JSON.stringify({ number: 1280, state: 'OPEN', isDraft: false,
+            baseRefName: 'beta/owner-selected', headRefName: 'argon/1280', headRefOid: head,
+            baseRefOid: sample.moved ? 'c'.repeat(40) : base, headRepository: { nameWithOwner: 'owner/repo' } });
+        } else if (command === 'gh' && args[0] === 'api' && args.includes('POST')) {
+          statuses.push(args.find((arg) => arg.startsWith('state=')));
+        } else if (command === 'git' && args[0] === 'fetch') {
+        } else if (command === 'git' && args[0] === 'rev-parse') {
+          stdout = args[1].includes('files-base-') || args[1].endsWith('beta/owner-selected') ? base : head;
+        } else if (command === 'git' && args[0] === 'diff') { stdout = sample.file + '\\0';
+        } else { throw new Error('Unexpected command: ' + command + ' ' + args.join(' ')); }
+        return { status: 0, stdout, stderr: '' };
+      };
+      syncBuiltinESMExports();
+      const queue = await import(${JSON.stringify(entry)});
+      const publish = () => queue.main(['gate-status', '--pr', '1280', '--repo', 'owner/repo',
+        '--head', head, '--expected-dev-tip', base, '--gate-result', sample.result]);
+      if (sample.passed) assert.equal(publish(), 0);
+      else assert.throws(publish, /gate-tests-failed-or-candidate-moved/);
+      assert.deepEqual(statuses, [sample.passed ? 'state=success' : 'state=failure']);
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script],
+      { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+});
+
+describe('reviewed manual full Gate status publication', () => {
+  it.each(['success', 'head-moved', 'base-moved', 'move-after-publish', 'fork', 'main-base', 'main-head',
+    'failure', 'cancelled', 'skipped', 'wrong-job', 'wrong-run', 'wrong-control'])('handles %s from actual same-run evidence', (scenario) => {
+    const entry = new URL('../../tools/nightly-queue.mjs', import.meta.url).href;
+    const script = `
+      import assert from 'node:assert/strict';import childProcess from 'node:child_process';import{syncBuiltinESMExports}from'node:module';
+      const scenario=${JSON.stringify(scenario)},head='a'.repeat(40),base='b'.repeat(40),control='d'.repeat(40),statuses=[];let views=0;
+      Object.assign(process.env,{GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ID:'200',GITHUB_REPOSITORY:'owner/repo',
+        GITHUB_REF:'refs/heads/owner/reviewed-control',GITHUB_WORKFLOW_REF:'owner/repo/.github/workflows/e2e-nightly.yml@refs/heads/owner/reviewed-control',FULL_GATE_CONTROL_SHA:control});
+      const fullName='J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 + J-10 + J-11 + J-16 + J-13 (Windows Server 2025 x64 CI)';
+      childProcess.spawnSync=(command,args)=>{let stdout='';
+        if(command==='gh'&&args[0]==='pr'){views++;stdout=JSON.stringify({number:1290,state:'OPEN',isDraft:false,
+          baseRefName:scenario==='main-base'?'main':'beta/owner-selected',headRefName:scenario==='main-head'?'main':'wave/1290',
+          headRefOid:scenario==='head-moved'||scenario==='move-after-publish'&&views>1?'c'.repeat(40):head,
+          baseRefOid:scenario==='base-moved'?'c'.repeat(40):base,headRepository:{nameWithOwner:scenario==='fork'?'other/repo':'owner/repo'}});
+        }else if(command==='gh'&&args.includes('POST')){statuses.push(args.find(a=>a.startsWith('state=')));
+        }else if(command==='gh'&&args.includes('--paginate')){stdout=JSON.stringify([{jobs:[
+          {name:'Resolve exact Full Gate pull request',status:'completed',conclusion:'success'},
+          {name:scenario==='wrong-job'?'Unrelated job':fullName,status:'completed',conclusion:['failure','cancelled','skipped'].includes(scenario)?scenario:'success'},
+          {name:'Publish E2E Functional Gate result',status:'in_progress',conclusion:null}].map(job=>({...job,run_id:200}))}]);
+        }else if(command==='gh'&&args[0]==='api'){stdout=JSON.stringify({id:scenario==='wrong-run'?201:200,
+          repository:{full_name:'owner/repo'},head_branch:'owner/reviewed-control',head_sha:scenario==='wrong-control'?'e'.repeat(40):control,
+          path:'.github/workflows/e2e-nightly.yml',event:'workflow_dispatch',status:'in_progress',conclusion:null,
+          display_title:'E2E Nightly Full Gate · '+head+' · PR 1290 · '+base});
+        }else if(command==='git'&&args[0]==='fetch'){
+        }else if(command==='git'&&args[0]==='rev-parse'){stdout=args[1].endsWith('beta/owner-selected')?base:head;
+        }else if(command==='git'&&args[0]==='merge-base'){
+        }else throw Error('Unexpected command');return{status:0,stdout,stderr:''};};
+      syncBuiltinESMExports();const queue=await import(${JSON.stringify(entry)});
+      const publish=()=>queue.main(['full-gate-status','--pr','1290','--repo','owner/repo','--head',head,'--expected-dev-tip',base]);
+      if(['success','main-head'].includes(scenario))assert.equal(publish(),0);else assert.throws(publish);
+      assert.deepEqual(statuses,['success','main-head'].includes(scenario)?['state=success']:scenario==='wrong-control'?[]:
+        scenario==='move-after-publish'?['state=success','state=failure']:['state=failure']);
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
   });
 });
 
@@ -223,9 +302,9 @@ describe('waiting for GitHub to state mergeability', () => {
 });
 
 describe('the nightly merge queue filter', () => {
-  it('tests an unreleased candidate without giving a green result merge authority', () => {
-    expect(queue.selectCandidates([record({ authorization: undefined })])[0]?.merge).toBe(false);
-    expect(queue.selectCandidates([record({ headRefName: 'codex/100-legacy-direct-dev' })])[0]?.merge).toBe(false);
+  it('accepts ordinary and custom branch names without role receipts', () => {
+    expect(queue.selectCandidates([record()])[0]?.merge).toBe(true);
+    expect(queue.selectCandidates([record({ headRefName: 'feature/argon', baseRefName: 'beta/custom' })])[0]?.merge).toBe(true);
   });
 
   it('includes slice targets and serializes them with final integrations', () => {
@@ -425,24 +504,6 @@ describe('the Issues a merged pull request links', () => {
   });
 });
 
-describe('the integration closure of an Owner direct-merged slice', () => {
-  it('accepts only a slice merged into the wave as the listed commit by a trusted account', () => {
-    const merge = 'd'.repeat(40);
-    const closure = {
-      record: { state: 'MERGED', baseRefName: 'codex/integration-21c' },
-      source: 'codex/integration-21c',
-      mergeCommit: merge,
-      mergerTrusted: true,
-      slice: { pr: 1191, merge, directMerge: true as const },
-    };
-    expect(queue.directSliceClosure(closure)).toBeNull();
-    expect(queue.directSliceClosure({ ...closure, record: { ...closure.record, state: 'CLOSED' } })).toBe('integration-slice-not-merged');
-    expect(queue.directSliceClosure({ ...closure, record: { ...closure.record, baseRefName: 'dev' } })).toBe('integration-slice-not-merged');
-    expect(queue.directSliceClosure({ ...closure, mergeCommit: 'e'.repeat(40) })).toBe('integration-slice-not-merged');
-    expect(queue.directSliceClosure({ ...closure, mergerTrusted: false })).toBe('integration-slice-merger-untrusted');
-  });
-});
-
 describe('the tree the queue builds', () => {
   it('takes the pull request title, its body, and the head commit own trailers', () => {
     const trailers = queue.coAuthorTrailers(
@@ -557,16 +618,16 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
 
   it('reads the call sites of the queue', async () => {
     const { readFile } = await import('node:fs/promises');
-    const text = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    const text = (await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(callSites(text).map((site) => site.called)).toEqual(['e2e-candidate.yml', 'e2e-nightly.yml']);
   });
 
   it('withholds no scope a called workflow asks to write', async () => {
     const { readFile } = await import('node:fs/promises');
-    const caller = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    const caller = (await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     const withheld: string[] = [];
     for (const site of callSites(caller)) {
-      const called = await readFile(new URL(site.called, WORKFLOWS), 'utf8');
+      const called = (await readFile(new URL(site.called, WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
       for (const block of permissionBlocks(called)) {
         for (const [scope, level] of block) {
           if (level === 'write' && site.granted.get(scope) !== 'write') withheld.push(`${site.called} asks ${scope}: write`);
@@ -578,7 +639,7 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
 
   it('keeps candidate tests read-only and privileged code on trusted dev', async () => {
     const { readFile } = await import('node:fs/promises');
-    const candidate = await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8');
+    const candidate = (await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     const windows = candidate.split('\n  windows:')[1]!.split('\n  merge:')[0]!;
     for (const platform of [windows]) {
       expect(platform).toContain('permissions:\n      contents: read');
@@ -591,7 +652,7 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
       expect(body).toContain('ref: refs/heads/dev');
       expect(body).not.toContain('ref: ${{ needs.prepare.outputs.ref }}');
     }
-    const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    const queueWorkflow = (await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(queueWorkflow).toContain('max-parallel: 1');
     expect(queueWorkflow).toContain("github.ref == 'refs/heads/dev'");
     expect(candidate).toContain('--candidate "${{ needs.prepare.outputs.commit }}"');
@@ -600,14 +661,14 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
 
   it('publishes the existing Gate only from trusted control, with head/base attribution', async () => {
     const { readFile } = await import('node:fs/promises');
-    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const gate = (await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(gate).toContain('pull_request_target:');
-    expect(gate).toContain("- 'codex/integration-*'");
+    expect(gate).toContain('branches-ignore:\n      - main');
     const route = gate.split('\n  route:')[1]!.split('\n  gate:')[0]!;
     const journey = gate.split('\n  gate:')[1]!.split('\n  result:')[0]!;
     const result = gate.split('\n  result:')[1]!;
     expect(route).toContain('ref: refs/heads/dev');
-    expect(route).toContain('gate-reuse');
+    expect(route).not.toContain('gate-reuse');
     expect(route).not.toContain('gate-authorize');
     expect(journey).toContain('ref: ${{ github.event.pull_request.head.sha }}');
     expect(journey).not.toContain('statuses: write');
@@ -615,19 +676,40 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
     expect(result).toContain('statuses: write');
     expect(result).toContain('gate-status');
     expect(result).toContain('--expected-dev-tip "$BASE_SHA"');
-    const refresh = gate.split('\n  authorization:')[1]!;
-    expect(refresh).toContain('ref: refs/heads/dev');
-    expect(refresh).toContain('gate-refresh');
-    expect(refresh).not.toContain('pnpm run e2e:');
-    expect(refresh).toContain('github.event.comment.author_association');
-    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    expect(gate).not.toContain('issue_comment:');
+    expect(gate).not.toContain('gate-refresh');
+    expect(result).toContain("needs.route.result == 'success' && needs.gate.result || 'failure'");
+    const nightly = (await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(nightly).toContain('run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}');
     expect(nightly).toContain('[[ "$SELECTED_REF" =~ ^[a-f0-9]{40}$ ]]');
   });
 
+  it('keeps optional manual full-Gate control pinned and all candidate execution read-only', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const nightly = (await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
+    const resolve = nightly.split('\n  resolve:')[1]!.split('\n  full:')[0]!;
+    const full = nightly.split('\n  full:')[1]!.split('\n  result:')[0]!;
+    const result = nightly.split('\n  result:')[1]!;
+    for (const control of [resolve, result]) {
+      expect(control).toContain('ref: ${{ github.workflow_sha }}');
+      expect(control).toContain('persist-credentials: false');
+      expect(control).not.toContain('ref: ${{ inputs.ref }}');
+    }
+    expect(resolve).toContain('full-gate-candidate');
+    expect(full).toContain('ref: ${{ inputs.ref }}');
+    expect(full).toContain('permissions:\n      contents: read');
+    expect(full).not.toContain('statuses: write');
+    expect(full).toContain('run: pnpm run e2e:all');
+    expect(full).toContain("inputs.pr == '' || needs.resolve.result == 'success'");
+    expect(result).toContain('statuses: write');
+    expect(result).toContain('actions: read');
+    expect(result).toContain('FULL_GATE_CONTROL_SHA: ${{ github.workflow_sha }}');
+    expect(result).toContain('full-gate-status');
+  });
+
   it('never runs a fork candidate under pull_request_target and gives its Journey job no other scope', async () => {
     const { readFile } = await import('node:fs/promises');
-    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const gate = (await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     const route = gate.split('\n  route:')[1]!.split('\n  gate:')[0]!;
     const journey = gate.split('\n  gate:')[1]!.split('\n  result:')[0]!;
     expect(route).toContain('github.event.pull_request.head.repo.full_name == github.repository');
@@ -635,11 +717,11 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
     expect(journey).toContain('permissions:\n      contents: read\n    env:');
   });
 
-  it('lets neither a comment refresh nor a title/body edit rerun or cancel the Journeys', async () => {
+  it('keeps a title/body edit from rerunning or cancelling the Journeys', async () => {
     const { readFile } = await import('node:fs/promises');
-    const gate = await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8');
+    const gate = (await readFile(new URL('e2e.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     const concurrency = gate.split('\nconcurrency:')[1]!.split('\njobs:')[0]!;
-    expect(concurrency).toContain("(github.event_name == 'issue_comment' && 'refresh')");
+    expect(concurrency).not.toContain('issue_comment');
     expect(concurrency).toContain("(github.event.action == 'edited' && !github.event.changes.base && 'edit')");
     for (const job of ['route', 'result']) {
       const body = gate.split(`\n  ${job}:`)[1]!.split(/\n {2}[a-z]+:\n/u)[0]!;
@@ -650,26 +732,26 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
   it('runs the full Gate, every candidate and native packaging on Windows only (ADR 0097)', async () => {
     const { readFile } = await import('node:fs/promises');
     for (const file of ['e2e-nightly.yml', 'e2e-candidate.yml', 'e2e-nightly-queue.yml']) {
-      const text = await readFile(new URL(file, WORKFLOWS), 'utf8');
+      const text = (await readFile(new URL(file, WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
       expect(text, file).not.toContain('macos-15');
       expect(text, file).not.toContain('(macOS 15 arm64)');
       expect(text, file).not.toContain('mac-arm64');
     }
-    const candidate = await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8');
+    const candidate = (await readFile(new URL('e2e-candidate.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(candidate.split('\n  macos:')).toHaveLength(1);
     expect(candidate).toContain("if: ${{ inputs.merge && needs.windows.result == 'success' }}");
     expect(candidate).toContain('needs: [prepare, windows]');
-    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    const nightly = (await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(nightly.match(/- label: /g)).toHaveLength(1);
     expect(nightly).toContain('- label: Windows Server 2025 x64 CI');
   });
 
   it('requires an immutable commit for both direct dispatch and queue-called final dev', async () => {
     const { readFile } = await import('node:fs/promises');
-    const nightly = await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8');
+    const nightly = (await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     const guard = nightly.split('- name: Require the selected immutable checkout')[1]!.split('\n      - name:')[0]!;
     expect(guard).not.toContain('if: ${{');
-    const queueWorkflow = await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8');
+    const queueWorkflow = (await readFile(new URL('e2e-nightly-queue.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(queueWorkflow).toContain('ref: ${{ needs.resolve.outputs.sha }}');
   });
 });

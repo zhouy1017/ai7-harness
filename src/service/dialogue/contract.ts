@@ -66,6 +66,7 @@ export function dialogueRequestDigest(contractDigest: string, kind: DialogueTurn
 }
 
 export interface DialogueMessageInput {
+  readonly followUp?: true;
   readonly globalSources?: ReadonlyArray<GlobalMemoryPin & { readonly text: string }>;
   /** A scoped Global Agent turn's pinned Books and procedures (#1171); absent on the no-tools turn, whose bytes are unchanged. */
   readonly globalScope?: GlobalAgentScope;
@@ -78,6 +79,7 @@ export interface DialogueMessageInput {
 
 /** The one user message a turn sends: its header, the selected words, the question, and for `continue` what was kept. */
 export function buildDialogueMessage(input: DialogueMessageInput): string {
+  if (input.followUp === true) return `AI7 编辑追问\n${canonicalJson({ kind: input.kind, selection: input.selection, question: input.question, kept: input.kept })}`;
   if (input.globalSources !== undefined) return `AI7 全域对话\n${canonicalJson({ kind: input.kind, sources: input.globalSources, question: input.question, kept: input.kept,
     ...(input.globalScope === undefined ? {} : { scope: input.globalScope }) })}`;
   const contract = DIALOGUE_PROMPT_CONTRACT;
@@ -108,6 +110,17 @@ export function questionHoldsContractMarks(question: string): boolean {
  * the stopped answer kept — exactly as `buildDialogueMessage` wrote them, or `null` for any other message.
  */
 export function parseDialogueMessage(text: string): DialogueMessageInput | null {
+  if (text.startsWith('AI7 编辑追问\n')) {
+    try {
+      const value: unknown = JSON.parse(text.slice('AI7 编辑追问\n'.length));
+      if (value === null || typeof value !== 'object') return null;
+      const record = value as Record<string, unknown>;
+      if ((record['kind'] !== 'ask' && record['kind'] !== 'continue') || typeof record['selection'] !== 'string' ||
+          typeof record['question'] !== 'string' || !(record['kept'] === null || typeof record['kept'] === 'string')) return null;
+      const parsed: DialogueMessageInput = { kind: record['kind'], selection: record['selection'], question: record['question'], kept: record['kept'], followUp: true };
+      return buildDialogueMessage(parsed) === text ? parsed : null;
+    } catch { return null; }
+  }
   if (text.startsWith('AI7 全域对话\n')) {
     try {
       const record = JSON.parse(text.slice('AI7 全域对话\n'.length)) as { kind: DialogueTurnKind; sources: DialogueMessageInput['globalSources']; question: string; kept: string | null; scope?: GlobalAgentScope };
@@ -200,3 +213,12 @@ export const AGENT_WORKSPACE_PROMPT_CONTRACT = {
 } as const;
 
 export const AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(AGENT_WORKSPACE_PROMPT_CONTRACT));
+
+/** Workspace successor on routes that admit the Book's local retrieval tools. Legacy fixture contracts remain readable. */
+export const AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT = {
+  ...AGENT_WORKSPACE_PROMPT_CONTRACT,
+  schema: 'ai7.dialogue-prompt-contract/agent-workspace-2',
+  contractVersion: 'ai7.editorial-dialogue/agent-workspace-2',
+  systemPrompt: `${DIALOGUE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt}\n${AGENT_WORKSPACE_FRAGMENT}\n检索只用于理解本书上下文；修改的 anchor 必须仍在所选文字中，不能跨段。`,
+} as const;
+export const AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJson(AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT));

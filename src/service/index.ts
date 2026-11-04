@@ -1,3 +1,5 @@
+import { refreshModelServiceModels } from './provider/model-discovery.js';
+import { randomUUID } from 'node:crypto';
 import { reviewFixtureContractVersion } from './provider/model-fixture.js';
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from './dialogue/global-agent-session.js';
 import { ImportedExemplarError } from './imported-exemplars.js';
@@ -163,6 +165,7 @@ async function dispatch(
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
   probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
+  refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<void> = async () => undefined,
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -204,12 +207,20 @@ async function dispatch(
       store.selectFastRoleModel(request.input.route, request.input.modelId);
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'selectMainRoleModel':
+    case 'selectBothRoleModels':
+      store[request.op](request.input.route, request.input.modelId);
+      await modelServiceChanged();
+      return { id: request.id, ok: true, op: request.op, result: undefined };
+    case 'refreshModelServiceModels':
+      await refreshModels(request.input.route);
+      return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'getModelServiceStoredState':
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels() },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
       };
     case 'saveModelServiceProxy':
       return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
@@ -231,7 +242,7 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels() },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy: policy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
       };
     }
     case 'setModelServiceCredentialState': {
@@ -1311,6 +1322,8 @@ async function dispatch(
         op: request.op,
         result: store.getManuscriptWindow(request.input.manuscriptId, request.input.branchId, request.input.cursor),
       };
+    case 'readManuscriptImageChunk':
+      return { id: request.id, ok: true, op: request.op, result: store.readManuscriptImageChunk(request.input) };
     case 'flushJournalEdit':
       // A write the injection refuses never reaches the store (Issue #951, T0-1).
       journalFaultCall(() => editJournalFault?.beforeJournalWrite());
@@ -1964,7 +1977,7 @@ async function run(): Promise<void> {
     { FastRoleRequests: FastRoleRequestsClass, fastInteractionRoutes },
     { BackgroundAnalysisDispatcher: BackgroundAnalysisDispatcherClass },
     { baselinePromptContractForLaunch },
-    { materialTranslator, MATERIAL_TRANSLATION_KIND },
+    { materialTranslator, MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage, readMaterialTranslationAnswer },
     { AgentWorkspace: AgentWorkspaceClass },
     { ServiceRequestLoop },
   ] =
@@ -2118,8 +2131,8 @@ async function run(): Promise<void> {
     store.initialEvaluationLedger.bindLaunch(launch);
     harness = await mountDormantHarness();
     jobs = new CooperativeJobOwner(store);
-    const [{ searchBackend }, { probeSearchBackend, composeSearchCandidateProbe, SearchCandidateProbeRefusal, SEARCH_BACKEND_PROBE_QUERY, platformToolsFromProjection }, { CredentialBroker }, { readPlatformToolsRule }, { canonicalJson, sha256Hex }, { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES }] = await Promise.all([
-      import('./provider/search-backends/index.js'), import('./provider/search-service.js'), import('./provider/credential-broker.js'), import('./provider/platform-tools.js'), import('./analysis/canonical.js'), import('../shared/provider-configuration.generated.js'),
+    const [{ searchBackend }, { probeConfiguredSearchBackend, composeSearchCandidateProbe, SearchCandidateProbeRefusal }, { CredentialBroker }, { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES }] = await Promise.all([
+      import('./provider/search-backends/index.js'), import('./provider/search-service.js'), import('./provider/credential-broker.js'), import('../shared/provider-configuration.generated.js'),
     ]);
     const probeBroker = new CredentialBroker(createKeyringSecretResolver(), { developmentReferences: production === null ? 'admitted' : 'refused' });
     const probeBackend = async (input: { backendId: string; candidateId?: string }): Promise<import('../shared/protocol.js').SearchBackendProbeProjection> => {
@@ -2137,21 +2150,11 @@ async function run(): Promise<void> {
         const hits = adapter.readResults(200, 'application/json', JSON.stringify({ results: [hit], web: { results: [hit] }, webPages: { value: [hit] }, content: [{ type: 'web_search_tool_result', content: [{ ...hit, type: 'web_search_result' }] }] }));
         return { backendId: id, reachable: true, latencyMs: 0, resultCount: hits?.length ?? 0, results: (hits ?? []).slice(0, 3).map((hit) => ({ title: hit.title, url: hit.url })), failure: null };
       }
-      if (launchForm.trustedOperationalScope !== 'developer-live' && launchForm.trustedOperationalScope !== 'ordinary-production') throw new StoreError('SEARCH_PROBE_NOT_ADMITTED', '当前环境不允许测试检索。');
-      const rule = launchPolicy.providerProcessing.admittedRules.find((entry) => 'platformTools' in entry && entry.platformTools !== null);
-      const tools = platformToolsFromProjection(rule);
-      if (tools === null || rule === undefined) throw new StoreError('SEARCH_PROBE_NOT_ADMITTED', '当前策略未准许测试检索。');
-      const connection = store!.getSearchBackendConnections().find((entry) => entry.backendId === id)!;
-      // A removed production key keeps its row's reference with state `missing`: only a `ready` key is probed.
-      const reference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot]
-        : connection.credentialOperationState === 'ready' ? connection.credentialReference : null;
-      if (reference === null) throw new StoreError('SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
-      return probeSearchBackend({ broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost, binding: {
-        bindingDigest: sha256Hex(canonicalJson({ backendId: id, reference, query: SEARCH_BACKEND_PROBE_QUERY, policy: launchPolicy.providerProcessing.version })),
-        route: rule.route as import('./provider/egress-gate.js').ExecutionRoute, model: rule.model, systemPrompt: '', admittedUserMessages: new Set(), outboundDataCategory: 'public-or-synthetic',
-        policy: { operationalScope: launchForm.trustedOperationalScope, providerProcessingVersion: launchPolicy.providerProcessing.version, liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' } as import('./provider/egress-gate.js').EgressPolicyPin,
-        platformTools: tools, searchBackend: { backendId: id, host: adapter.declaration.host!, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot, credentialReference: reference },
-      } });
+      return probeConfiguredSearchBackend({ backendId: id, policy: launchPolicy,
+        connection: store!.getSearchBackendConnections().find((entry) => entry.backendId === id),
+        developmentReference: CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot],
+        broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost,
+      }).catch((error: unknown) => { throw error instanceof Error && 'code' in error && typeof error.code === 'string' ? new StoreError(error.code, error.message) : error; });
     };
     const guardedStore = store;
     analysisExecution = new BaselineAnalysisExecutionOwner({
@@ -2173,6 +2176,16 @@ async function run(): Promise<void> {
       retrievalIndex: (runRecordId, ledger) => guardedStore.retrievalIndexForRun(runRecordId, ledger),
       // External Evidence Retention (Issue #425, S70): each research unit's retained sources, kept as the unit settles.
       researchEvidence: (input) => { guardedStore.recordResearchEvidence(input); },
+      sourceTranslator: async ({ text }) => {
+        const owner = fastRole?.owner;
+        if (owner === undefined || owner.refusal(MATERIAL_TRANSLATION_KIND) !== null) return null;
+        try {
+          const result = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
+          if (result.kind !== 'answered') return null;
+          const translated = readMaterialTranslationAnswer(result.text, 1)?.[0];
+          return translated === undefined ? null : { text: translated, route: result.binding.route, model: result.binding.model };
+        } catch { return null; }
+      },
       // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).
       factualRunStart: (input) => {
         guardedStore.recordFactualRunAssurance({ ...input,
@@ -2383,7 +2396,8 @@ async function run(): Promise<void> {
         try {
           response = await dispatch(serving.store, serving.harness, serving.jobs, serving.analysisExecution, serving.reviewRuns,
             serving.dialogues, serving.fastRole, serving.agentWorkspace, request, importControl, launchPolicy, connectivity,
-            serving.background, modelServiceChanged, probeBackend);
+            serving.background, modelServiceChanged, probeBackend,
+            (route) => refreshModelServiceModels(openedStore, production, route, createKeyringSecretResolver()));
         } catch (error) {
           if (error instanceof StoreFatalError) throw error;
           response = failureResponse(request.id, error, StoreError);

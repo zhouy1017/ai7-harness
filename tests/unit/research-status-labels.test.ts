@@ -24,7 +24,7 @@ describe('research status (#744)', () => {
     expect(researchPlanLine(backend)).toBe('未联网核查 · TinyFish · 已冻结后端，尚未执行');
   });
   it('shows completion with the frozen backend without claiming verified facts', () => {
-    expect(researchStatusLine(report)).toBe('联网核查已完成 · TinyFish · 已执行检索，事实结论仍需核对来源');
+    expect(researchStatusLine(report)).toBe('联网核查已完成 · TinyFish · 检索 1 次 · 事实结论仍需核对来源');
     expect(researchDecisionLine('允许执行', report)).toContain('允许执行 · 联网核查已完成 · TinyFish');
   });
   it('shows incomplete research with its breaker or refusal reason', () => {

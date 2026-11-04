@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { clarificationPlanBaseDigest } from '../../src/service/provider/clarification-contract.js';
@@ -78,8 +79,8 @@ async function material(text = TEXT, scope: 'book' | 'house' = 'book', choice: '
   writeFileSync(path, text.length > 500 ? text.match(/[\s\S]{1,500}/gu)!.join('\n\n') : text);
   const preview = await store.previewLibraryMaterial(path);
   const item = await store.addLibraryMaterial({ previewId: preview.previewId, title: '合成背景资料', kind: 'document' });
-  store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: scope === 'house' ? { scope } : { scope, bookId } } });
-  store.decideLibraryMaterial({ materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice, reason: null } });
+  setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: scope === 'house' ? { scope } : { scope, bookId } } });
+  setLibraryDecision(store, { materialId: item.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice, reason: null } });
   store.startMaterialIndexing();
   await store.settleMaterialIndexing();
   return item.materialId;
@@ -214,7 +215,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
       answer(kind, prepared);
       const accepted = authorize(kind, prepared);
       expect(owner.admitOrQueue(accepted.dispatchRunRecordId!, accepted.ledger)).toBe('queued');
-      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       holding = false; release();
       await owner.whenIdle();
       expect(accepted.ledger.currentRunState(accepted.dispatchRunRecordId!)).toBe('blocked-before-dispatch');
@@ -228,7 +229,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     const prepared = prepare(kind, [id]);
     answer(kind, prepared);
     const accepted = authorize(kind, prepared);
-    if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    if (change === 'withdrawn') setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     else if (change === 'corrupt') breakIndex(id, 'segments');
     else if (change === 'missing') removeBuild(id);
     else {
@@ -265,7 +266,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     unitBoundary = (settled) => {
       if (!withdrawn && (when === 'between-units' ? settled === 0 : settled === total - 1)) {
         withdrawn = true;
-        if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+        if (change === 'withdrawn') setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
         else if (change === 'missing') removeBuild(id);
         else breakIndex(id, 'segments');
       }
@@ -297,7 +298,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(firstPlan.start.readiness).toBe('ready');
     // The references add to the disclosure; they never take away what the plan already said it does not read or send.
     expect(firstPlan.scope.notRead).toContain('其他图书');
-    expect(firstPlan.service.send).toBe(`所读范围内的稿件正文${kind === 'readers-report' ? '与评估记录' : ''}发往 opencode-go · deepseek-v4.1-flash`);
+    expect(firstPlan.service.send).toBe(`所读范围内的稿件正文${kind === 'readers-report' ? '与评估记录' : ''}发往 OpenCode Go`);
     expect(frozenRows(kind)).toEqual({ lines: [expect.stringContaining('《合成背景资料》')], blocked: false });
     const digest = ledger(kind).definition.promptContractDigest;
     await close(); await open();
@@ -337,7 +338,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
       expect(task.input.record.items.every((item: { score: number }) => item.score === 12)).toBe(true);
       expect(task.input.record.conclusion).toBe('修改后再议');
     }
-    if (change === 'withdrawn') store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    if (change === 'withdrawn') setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     else if (change === 'corrupt') breakIndex(id, 'build');
     else removeBuild(id);
     await close(); await open();
@@ -367,7 +368,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     expect(component(next.taskIntent!.taskIntentId).materialReferences).toBeUndefined();
     const second = await material('后续合成资料。');
     const unavailable = prepare(kind, [second]);
-    store.decideLibraryMaterial({ materialId: second, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+    setLibraryDecision(store, { materialId: second, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
     expect(() => authorize(kind, unavailable)).toThrow('现在不能列进');
   });
   it('refuses excess, duplicate, wrong-book and unadmitted selections before any reference plan is made', async () => {
@@ -443,7 +444,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
       expect(pages.mock.calls.length).toBeGreaterThan(0);
       expect(pages.mock.calls.every((call) => call[2] === 1)).toBe(true);
       // A reference withdrawn since still refuses: the kept text never stands in for the pin's availability.
-      store.decideLibraryMaterial({ materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
+      setLibraryDecision(store, { materialId: id, expectedDecisions: 2, decision: { kind: 'eligibility', choice: 'deferred', reason: null } });
       expect(frozenRows(kind).lines.some((line) => line.includes('现在不能列进'))).toBe(true);
       expect(component(prepared.taskIntent!.taskIntentId).materialReferences).toBeDefined();
     } finally { pages.mockRestore(); }

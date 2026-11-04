@@ -1,6 +1,6 @@
 # Multi-session design workflow
 
-This runbook governs bounded design exploration and candidate freezing. [Orca dispatch](orca-dispatch.md) alone owns repository roles, model pairings, assignment, writer handoff, PR review and integration. An optional exploratory challenge is an advisory research activity; it does not replace the required PR Reviewer or change that Reviewer's repair/test/merge responsibility.
+This runbook governs bounded design exploration and candidate freezing. [Orca dispatch](orca-dispatch.md) alone owns repository roles, model recommendations, assignment, writer handoff, PR review and integration. An optional exploratory challenge is an advisory research activity; it does not add a PR review gate or change the session-assigned writer and merge responsibilities.
 
 ## Invariants
 
@@ -8,7 +8,7 @@ This runbook governs bounded design exploration and candidate freezing. [Orca di
 - Give each writing outcome an Issue and bounded brief. Assign branch/workspace ownership and handoff through Orca dispatch.
 - A freeze limits finishing work to what is already materially underway; it does not authorize new architecture assumptions or broader implementation.
 - Exploration, architecture acceptance and implementation authorization are separate decisions. A design conclusion alone does not authorize scaffolding, dependency installation, product changes or live calls.
-- Current accepted ADRs and contexts outrank summaries. Replaced conflicting instructions are removed under ADR 0089; Git retains history.
+- Current scoped Owner/Issue intent takes precedence over historical wording; accepted ADRs and contexts supply the remaining design baseline. Replaced conflicting instructions are removed under ADR 0089; Git retains history.
 - Archives are queried only for a named historical question, not used as another current design baseline.
 
 ## Exploration states
@@ -66,7 +66,7 @@ Label each item accepted, candidate, proposed, deferred, rejected or evidence-on
 4. Resolve contradictions into a decision question, bounded investigation or ADR proposal.
 5. When useful, commission an independent exploratory challenge and identify its advisory scope.
 6. Present one recommended decision with tradeoffs and rejected alternatives.
-7. Record accepted semantics in their owner, remove conflicting obsolete clauses, and route any concrete document PR through the required Reviewer.
+7. Record accepted semantics in their owner, remove conflicting obsolete clauses, and route any concrete document PR through the session-assigned integration owner.
 
 ## Architecture-to-implementation boundary
 

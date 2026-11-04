@@ -312,7 +312,7 @@ describe('reference-free review on the Go execution path', () => {
     await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
     recordMissingCredentialConnection(store, 'L2 主编辑角色连接');
     for (const category of ['publication-risk']) {
-      expect(() => store.createReviewRunPreparationWork(book.bookId, [category], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy)).toThrowError(/涉及联网核查/u);
+      expect(() => store.createReviewRunPreparationWork(book.bookId, [category], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy)).toThrowError(/当前处理策略尚未允许/u);
     }
     expect(sent).toBe(0);
   });
@@ -324,7 +324,7 @@ describe('reference-free review on the Go execution path', () => {
     const categories = store.inspectReviewWorkspace(book.bookId, null).categories;
     expect(categories.filter((category) => category.available).map((category) => category.categoryId)).toEqual(['typos-and-usage', 'style-and-format', 'factual-review', 'academic-integrity', 'literary-expression']);
     const reason = (id: string) => categories.find((category) => category.categoryId === id)!.unavailableReason;
-    expect(reason('publication-risk')).toMatch(/涉及联网核查/u);
+    expect(reason('publication-risk')).toMatch(/当前处理策略尚未允许/u);
     // The model-free leads stay on their baseline path (here: no baseline yet), never behind the live rule;
     // 书系一致性 and 跨交付物一致性 keep their own configured reasons.
     expect(reason('plot-consistency')).toBe('当前处理策略尚未允许这一审阅类别实时执行。');

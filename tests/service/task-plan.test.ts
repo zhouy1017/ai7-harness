@@ -390,7 +390,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(planA.goal.chips.position).toBe(`第 ${rangeA.startPosition}–${rangeA.endPosition} 段`);
       expect(planA.goal.chips.selectedGraphemes).toBe(revisionGraphemes(revisionId, rangeA));
       expect(planA.scope.reference).toEqual(['上一份基线分析（第 1 份，读的是 r1）']);
-      expect(technical(planA, 'selected-range')).toBe(`内容块 ${rangeA.startPosition}–${rangeA.endPosition}`);
+      expect(technical(planA, 'selected-range')).toBe(`段落 ${rangeA.startPosition}–${rangeA.endPosition}`);
       // The reuse plan unit by unit, and where each unit of the predecessor goes, as the plan records them.
       const reusePlan = preparedA.update!.reusePlan!;
       expect(technical(planA, 'reuse-plan')).toBe(`${preparedA.update!.reusePlanDigest} · ${reusePlan.units.map((unit) => `单元 ${unit.unitOrdinal} ${unit.disposition}（${unit.reason}）`).join('；')}`);
@@ -439,7 +439,7 @@ describe('the Task Drawer plan projection over the real store on exact sample1',
       expect(planB.start.planEnvelopeDigest).not.toBe(preparedA.planEnvelope!.digest);
       expect(planB.goal.chips.position).toBe(`第 ${rangeB.startPosition}–${rangeB.endPosition} 段`);
       expect(planB.goal.chips.selectedGraphemes).toBe(revisionGraphemes(revisionId, rangeB));
-      expect(technical(planB, 'selected-range')).toBe(`内容块 ${rangeB.startPosition}–${rangeB.endPosition}`);
+      expect(technical(planB, 'selected-range')).toBe(`段落 ${rangeB.startPosition}–${rangeB.endPosition}`);
       // Every surface that names the range names the current one: ②A's update projection agrees.
       expect(store.inspectBaselineAnalysis(bookId).update?.selectedRange).toEqual(rangeB);
       // The Task Intent row keeps the range first asked for; the drawer read through to the plan version.

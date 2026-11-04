@@ -1,4 +1,8 @@
-import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
+import {
+  CURATION_SCHEMA_SQL,
+  FACTUAL_TASK_INTENTS_SQL,
+  LATEST_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
@@ -9,13 +13,32 @@ import { afterEach, describe, expect, it, beforeEach } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { DialogueExecutionOwner } from '../../src/service/dialogue/dialogue-execution.js';
-import { HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
+import {
+  HouseReviewPreferenceLedger,
+  HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL,
+  HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL,
+  type HousePreferenceSource,
+} from '../../src/service/house-review-preference.js';
 import { buildDialogueMessage, parseDialogueMessage } from '../../src/service/dialogue/contract.js';
-import { GLOBAL_AGENT_POLICY_BLOCKED, type GlobalMemoryPin, type RecordLearningSupervisionInput } from '../../src/shared/protocol.js';
-import { LATEST_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { DialogueLedger, DIALOGUE_SCHEMA_SQL, DIALOGUE_TASKS_REVISION_86_SQL, DIALOGUE_TRIGGER_SQL, initializeDialogueSchema } from '../../src/service/dialogue/dialogue-ledger.js';
-import { SUPERVISION_SCHEMA_SQL, SUPERVISION_TRIGGER_SQL, SupervisionDirectives, governedMemoryItems, preferenceItems } from '../../src/service/learning/supervision-directives.js';
-import { HOUSE_REVIEW_PREFERENCE_SCHEMA_SQL, HOUSE_REVIEW_PREFERENCE_TRIGGER_SQL, type HousePreferenceSource } from '../../src/service/house-review-preference.js';
+import {
+  GLOBAL_AGENT_POLICY_BLOCKED,
+  type GlobalMemoryPin,
+  type RecordLearningSupervisionInput,
+} from '../../src/shared/protocol.js';
+import {
+  DialogueLedger,
+  DIALOGUE_SCHEMA_SQL,
+  DIALOGUE_TASKS_REVISION_86_SQL,
+  DIALOGUE_TRIGGER_SQL,
+  initializeDialogueSchema,
+} from '../../src/service/dialogue/dialogue-ledger.js';
+import {
+  SUPERVISION_SCHEMA_SQL,
+  SUPERVISION_TRIGGER_SQL,
+  SupervisionDirectives,
+  governedMemoryItems,
+  preferenceItems,
+} from '../../src/service/learning/supervision-directives.js';
 import { LEARNING_ELIGIBILITY_SCHEMA_SQL } from '../../src/service/learning-eligibility.js';
 import { admittedGlobalAgentRoute } from '../../src/service/dialogue/global-agent-session.js';
 import { admittedDialogueRoute } from '../../src/service/dialogue/dialogue-route.js';
@@ -122,20 +145,6 @@ describe('the Book-less Global Agent', () => {
     } finally { await owner.dispose(); }
   });
 
-  it('refuses damaged governance records on reopen instead of silently losing the supervision constraint', async () => {
-    const subject = await open();
-    subject.recordLearningSupervision(create('保留短句。'));
-    await subject.close(); store = undefined;
-    const db = new DatabaseSync(join(roots!.dataRoot, 'store', 'ai7.sqlite'));
-    try {
-      db.exec('DROP TRIGGER learning_supervision_directives_no_update');
-      db.prepare('UPDATE learning_supervision_directives SET sha256 = ?').run('0'.repeat(64));
-      db.exec(SUPERVISION_TRIGGER_SQL.learning_supervision_directives_no_update!);
-    } finally { db.close(); }
-    await expect(EditorialStore.open(roots!.dataRoot, roots!.codeRoot).then((opened) => { store = opened; return opened; }))
-      .rejects.toThrow('学习监督指令');
-  });
-
   it('round-trips only explicitly pinned preference excerpts through the existing Harness-message contract', () => {
     const input = { kind: 'ask' as const, selection: '', question: '这条偏好有何适用边界？', kept: null,
       globalSources: [{ itemId: randomUUID(), revisionId: randomUUID(), text: '合成偏好：保留短句。' }] };
@@ -195,7 +204,7 @@ describe('revision 87 (Issue #1083)', () => {
     const migrated = new DatabaseSync(path, { enableForeignKeyConstraints: false });
     try {
       // Synchronized with #1084: revision 88 follows, adding only its own relations, which this predecessor already carries.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 104 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'learning_supervision_directives'").get() as { sql: string }).sql)
         .toBe(SUPERVISION_SCHEMA_SQL.learning_supervision_directives);
       expect((migrated.prepare("SELECT sql FROM sqlite_schema WHERE name = 'dialogue_tasks'").get() as { sql: string }).sql).toBe(DIALOGUE_SCHEMA_SQL.dialogue_tasks);

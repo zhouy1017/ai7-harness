@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { AGENT_WORKSPACE_CAPABILITIES, agentWorkspaceComposition } from '../../src/service/agent-workspace/capabilities.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from '../../src/service/provider/egress-gate.js';
-import { AGENT_WORKSPACE_ATOMIC_REASON, AGENT_WORKSPACE_MARK_SOURCE_LABEL, AGENT_WORKSPACE_UNAVAILABLE_REASON, AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
-import { AGENT_WORKSPACE_PROMPT_CONTRACT, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RESULT_SCHEMA } from '../../src/service/dialogue/contract.js';
+import { AGENT_WORKSPACE_MARK_SOURCE_LABEL, AGENT_WORKSPACE_UNAVAILABLE_REASON, AgentWorkspace } from '../../src/service/agent-workspace/workspace.js';
+import { AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT, AGENT_WORKSPACE_PROMPT_CONTRACT_DIGEST, AGENT_WORKSPACE_RESULT_SCHEMA } from '../../src/service/dialogue/contract.js';
 import { DialogueExecutionOwner, dialogueLiveRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { DialogueError } from '../../src/service/dialogue/dialogue-ledger.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
@@ -21,6 +21,8 @@ import type { AgentWorkspaceProjection, DialogueSelectionInput } from '../../src
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx } from '../support/composed-fixture.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, requireExactSample1 } from '../support/sample1-baseline.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
+import { typeInto } from '../support/fast-role.js';
+import { readSelectionSpan } from '../../src/shared/selection-span.js';
 
 // One explicit model-request capability per test application.
 // Registered first: the stack-ordered final hook runs after existing consumer teardown.
@@ -127,20 +129,81 @@ async function refusal(operation: () => Promise<unknown>): Promise<{ code: strin
 }
 
 describe('Agent 工作区 over the real store, dialogue owner and harness', () => {
-  it('proposes one change set as a dialogue turn, drops the anchor outside the range and promotes the rest as one atomic group', async () => {
+  it('also isolates legacy workspace tasks without an origin tag, including after restart', async () => {
+    const store = await openStore();
+    const dialogues = localOwner(store);
+    const book = await importSample1Book(store, roots.codeRoot, '旧变更集');
+    const turn = store.askAboutSelection(book.bookId, { selection: paragraphHolding(store, book, FIRST_ANCHOR), question: SET_INSTRUCTION });
+    try {
+      let completed = false;
+      dialogues.beginWorkspaceTurn({ ...turn, settled: () => { completed = true; } });
+      const until = Date.now() + 15_000;
+      while (!completed && Date.now() < until) await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      expect(completed).toBe(true);
+      const before = store.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null);
+      expect(before.origin).toBe('agent-workspace');
+      expect(before.attempts[0]!.fragments).toEqual([]);
+      await dialogues.dispose();
+      store.close();
+      const reopened = await openStore();
+      expect(reopened.inspectDialogue(book.bookId, turn.dialogueId, 0, () => null)).toEqual(before);
+      expect(reopened.inspectBookTasks(book.bookId, () => null).groups.every((group) => group.items.length === 0)).toBe(true);
+    } finally { await dialogues.dispose(); }
+  });
+  it('replaces a completed round directly, including a round with zero proposals', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '连续提议');
+    const selection = paragraphHolding(store, book, FIRST_ANCHOR);
+    const workspace = new AgentWorkspace(store, {
+      requireReady: () => undefined, stop: async () => undefined,
+      beginWorkspaceTurn: (turn) => turn.settled('completed', JSON.stringify({ schema: AGENT_WORKSPACE_RESULT_SCHEMA, items: [] })),
+    });
+    const first = (await workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION })).proposal!;
+    expect(first).toMatchObject({ state: 'ready', candidates: [] });
+    const second = (await workspace.propose(book.bookId, { selection, instruction: ONE_INSTRUCTION })).proposal!;
+    expect(second.state).toBe('ready');
+    expect(second.proposalSetId).not.toBe(first.proposalSetId);
+    expect(second.instruction).toBe(ONE_INSTRUCTION);
+  });
+
+  it('accepts a paragraph longer than the dialogue cap and maps independent edits across paragraphs', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '跨段提议');
+    const first = paragraphHolding(store, book, FIRST_ANCHOR);
+    const padding = first.selectedText.repeat(30).slice(0, 2_010 - first.selectedText.length);
+    for (let at = 0; at < padding.length; at += 100) typeInto(store, book, first.blockId, 0, 0, padding.slice(at, at + 100));
+    const page = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'block', blockId: first.blockId });
+    const index = page.blocks.findIndex((block) => block.blockId === first.blockId);
+    const blocks = page.blocks.slice(index, index + 2);
+    const reading = readSelectionSpan(blocks, 0, graphemesOf(blocks[1]!.text).length);
+    if (reading.kind !== 'span') throw new Error('sample span missing');
+    const pin = reading.pins[0]!;
+    const selection = { ...first, baseRevisionId: page.revisionId, expectedJournalSequence: page.journalSequence,
+      baseBlockDigest: pin.blockDigest, toGrapheme: pin.toGrapheme, selectedText: reading.text, span: reading.pins };
+    expect(pin.toGrapheme).toBeGreaterThan(2_000);
+    const anchor = blocks[1]!.text;
+    const workspace = new AgentWorkspace(store, {
+      requireReady: () => undefined, stop: async () => undefined,
+      beginWorkspaceTurn: (turn) => turn.settled('completed', JSON.stringify({ schema: AGENT_WORKSPACE_RESULT_SCHEMA,
+        items: [{ anchor, proposedText: `${anchor}。`, rationale: '衔接。' }] })),
+    });
+    const { span: _span, ...single } = selection;
+    expect((await workspace.propose(book.bookId, { selection: { ...single, selectedText: blocks[0]!.text }, instruction: SET_INSTRUCTION })).proposal?.state).toBe('ready');
+    const proposal = (await workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION })).proposal!;
+    expect(proposal.candidates).toHaveLength(1);
+    expect(proposal.candidates[0]!.anchor).toMatchObject({ blockId: blocks[1]!.blockId, fromGrapheme: 0, text: anchor });
+    const promotion = await workspace.promote(book.bookId, { proposalSetId: proposal.proposalSetId });
+    expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, promotion.markIds[0]!).blockId).toBe(blocks[1]!.blockId);
+  });
+  it('keeps workspace JSON out of dialogue and promotes independent suggestions', async () => {
     const store = await openStore();
     const dialogues = localOwner(store);
     const workspace = new AgentWorkspace(store, dialogues);
     try {
       const book = await importSample1Book(store, roots.codeRoot, '工作区变更集');
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const selection = paragraphHolding(store, book, FIRST_ANCHOR);
       const digestBefore = store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest;
 
-      // The scope kinds it may name are exactly the two Revision 2 of the profile's authority sidecar makes eligible.
-      const profile = await store.inspectEditorialWorkspaceProfile(book.bookId);
-      expect([...AGENT_WORKSPACE_CAPABILITIES.scopes]).toEqual([...profile.sidecar.revisions[1].authorityCeiling.readableScopeKinds]);
-      expect(profile.sidecar.revisions[1].authorityCeiling).toMatchObject({ networkAccess: false, applyAuthority: false, capabilities: [] });
       // Looking at the workspace writes nothing; it states what it may do.
       const looked = rowCounts();
       const empty = await workspace.inspect(book.bookId);
@@ -187,12 +250,14 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
         db.close();
       }
 
-      // A second round is refused while this one is held.
-      expect((await refusal(() => workspace.propose(book.bookId, { selection, instruction: ONE_INSTRUCTION }))).code).toBe('AGENT_WORKSPACE_ROUND_HELD');
+      expect(dialogue.origin).toBe('agent-workspace');
+      expect(dialogue.attempts.every((attempt) => attempt.fragments.length === 0)).toBe(true);
+      expect(store.inspectBookTasks(book.bookId, () => null, 'admitting', (id) => dialogues.liveText(id)).groups
+        .flatMap((group) => group.items).some((entry) => entry.item.target.kind === 'dialogue' && entry.item.target.dialogueId === proposal.dialogueId)).toBe(false);
 
       const promotion = await workspace.promote(book.bookId, { proposalSetId: proposal.proposalSetId });
       expect(promotion.markIds).toHaveLength(2);
-      expect(promotion.atomicGroupId).toMatch(/^[0-9a-f-]{36}$/u);
+      expect(promotion.atomicGroupId).toBeNull();
       expect(promotion.workspace.proposal).toBeNull();
       for (const [index, markId] of promotion.markIds.entries()) {
         const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
@@ -205,7 +270,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       const workspaceItems = store.inspectProposalWorkspace({ manuscriptId: book.manuscriptId, branchId: book.branchId, resultId: null });
       const grouped = workspaceItems.items.filter((item) => promotion.markIds.includes(item.markId));
       expect(grouped.map((item) => [item.atomicGroupId, item.atomicReason])).toEqual([
-        [promotion.atomicGroupId, AGENT_WORKSPACE_ATOMIC_REASON], [promotion.atomicGroupId, AGENT_WORKSPACE_ATOMIC_REASON]]);
+        [null, null], [null, null]]);
       // The manuscript's text is exactly as it was: nothing is decided or applied until a Mark Card decision.
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest).toBe(digestBefore);
       expect((await refusal(() => workspace.promote(book.bookId, { proposalSetId: proposal.proposalSetId }))).code).toBe('AGENT_WORKSPACE_ROUND_NOT_FOUND');
@@ -220,7 +285,6 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     const workspace = new AgentWorkspace(store, dialogues);
     try {
       const book = await importSample1Book(store, roots.codeRoot, '工作区单项');
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const selection = paragraphHolding(store, book, ONE_ANCHOR);
 
       // One round: only the dialogue ledger gains the rows of its one turn.
@@ -253,7 +317,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     }
   });
 
-  it('refuses before anything is recorded: profile not enabled, a selection not of the primary manuscript, and the dialogue route', async () => {
+  it('opens every imported Book and refuses before recording: a selection not of the primary manuscript, and the dialogue route', async () => {
     const store = await openStore();
     const dialogues = localOwner(store);
     const workspace = new AgentWorkspace(store, dialogues);
@@ -262,12 +326,9 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       const selection = paragraphHolding(store, book, FIRST_ANCHOR);
       const before = rowCounts();
       const closed = await workspace.inspect(book.bookId);
-      expect(closed).toMatchObject({ available: false, unavailableReason: AGENT_WORKSPACE_UNAVAILABLE_REASON, proposal: null });
-      expect(await refusal(() => workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION })))
-        .toEqual({ code: 'AGENT_WORKSPACE_UNAVAILABLE', message: AGENT_WORKSPACE_UNAVAILABLE_REASON });
+      expect(closed).toMatchObject({ available: true, unavailableReason: null, proposal: null });
       expect(changedTables(before, rowCounts())).toEqual({});
 
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const pinned = rowCounts();
       expect((await refusal(() => workspace.propose(book.bookId, { selection: { ...selection, manuscriptId: randomUUID() }, instruction: SET_INSTRUCTION }))).code)
         .toBe('AGENT_WORKSPACE_SCOPE');
@@ -280,26 +341,33 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     }
   });
 
-  it('sends one whole-answer request on the admitted dialogue route under developer-live: the workspace contract, no tool, no stream', async () => {
+  it('streams workspace output with the admitted local retrieval tools through a stubbed transport', async () => {
     const cacheRoot = await mkdtemp(join(tmpdir(), 'ai7-agent-workspace-live-'));
     const store = await openStore();
     try {
       const book = await importSample1Book(store, roots.codeRoot, '工作区实时');
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
       const calls: Array<{ url: string; body: string }> = [];
+      let candidateId = '';
       const content = JSON.stringify({ schema: AGENT_WORKSPACE_RESULT_SCHEMA, items: [{ anchor: SECOND_ANCHOR, proposedText: '以如此重器作比', rationale: '更凝练。' }] });
       const nativeFetch = (async (url: string, init: { body: string }) => {
         calls.push({ url, body: init.body });
-        return { status: 200, headers: new Headers({ 'content-type': 'application/json' }),
-          json: async () => ({ model: JSON.parse(init.body).model, choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 40 } }) };
+        const request = JSON.parse(init.body);
+        const model = request.model;
+        if (calls.length === 2) candidateId = JSON.parse(request.messages.at(-1).content)[0].candidateId;
+        if (calls.length < 3) {
+          const name = calls.length === 1 ? 'retrieve' : 'exact_fetch';
+          const args = calls.length === 1 ? { query: SECOND_ANCHOR, k: 1, sourceKinds: ['manuscript'] } : { candidateId };
+          return new Response(`data: ${JSON.stringify({ model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `workspace-${calls.length}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ model, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+        }
+        return new Response(`data: ${JSON.stringify({ model, choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ model, choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 300, completion_tokens: 40 } })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } });
       }) as unknown as typeof fetch;
       // Actual business (no development validation): the request reaches the stubbed transport itself, and nothing else does.
       const live = dialogueLiveRoute(
         { launch: { runBudgetCeiling: { kind: 'tokens', maxTotalTokens: 500_000 }, providerCacheRoot: cacheRoot, validation: null }, nativeFetch },
         policy, { resolve: async () => 'placeholder-development-key' },
       );
-      const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live });
+      const dialogues = new DialogueExecutionOwner({ requestGovernor, records: store, fixture: null, sessionLogRoot: join(roots.dataRoot, HARNESS_SESSION_LOG_DIRECTORY), live, retrievalIndex: (id) => store.dialogueRetrievalIndex(id) });
       const workspace = new AgentWorkspace(store, dialogues);
       try {
         const selection = paragraphHolding(store, book, FIRST_ANCHOR);
@@ -307,11 +375,13 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
         const ready = (await settled(workspace, book.bookId)).proposal!;
         expect(ready.state).toBe('ready');
         expect(ready.candidates.map((candidate) => candidate.anchor.text)).toEqual([SECOND_ANCHOR]);
-        expect(calls).toHaveLength(1);
+        expect(calls).toHaveLength(3);
+        expect(candidateId).toMatch(/^[0-9a-f]{64}$/u);
         const sent = JSON.parse(calls[0]!.body) as { stream?: unknown; tools?: unknown; messages: Array<{ role: string; content: unknown }> };
-        expect(sent.stream ?? false).toBe(false);
-        expect(sent.tools).toBeUndefined();
-        expect(sent.messages[0]).toMatchObject({ role: 'system', content: AGENT_WORKSPACE_PROMPT_CONTRACT.systemPrompt });
+        expect(sent.stream).toBe(true);
+        expect(sent.tools).toBeDefined();
+        expect(sent.messages[0]).toMatchObject({ role: 'system', content: AGENT_WORKSPACE_RETRIEVAL_PROMPT_CONTRACT.systemPrompt });
+        expect(ready.streamedCharacters).toBeGreaterThan(0);
         const user = JSON.stringify(sent.messages.slice(1));
         expect(user).toContain(SET_INSTRUCTION);
         expect(user).toContain(JSON.stringify(selection.selectedText).slice(1, -1));
@@ -335,7 +405,6 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
       const staged = await store.stageSelectedManuscript(randomUUID(), path);
       const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: '工作区来源' }, false);
       const book = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId: randomUUID() });
-      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
       let sent = 0;
       const nativeFetch = (async () => { sent += 1; throw new Error('nothing may be sent'); }) as unknown as typeof fetch;

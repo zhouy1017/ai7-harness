@@ -8,6 +8,17 @@ export function blockDigest(kind: ManuscriptBlockProjection['kind'], level: numb
   return sha256(canonicalJson({ kind, level, text }));
 }
 
+/** Block digests already bind style. Resolve that immutable shape when later style edits changed the live block. */
+export function blockShapeFromDigest(text: string, digest: string): { kind: ManuscriptBlockProjection['kind']; level: number | null } {
+  const shapes: Array<{ kind: ManuscriptBlockProjection['kind']; level: number | null }> = [
+    { kind: 'paragraph', level: null }, { kind: 'note', level: null }, { kind: 'title', level: 1 },
+    ...Array.from({ length: 6 }, (_, index) => ({ kind: 'heading' as const, level: index + 1 })),
+  ];
+  const shape = shapes.find(({ kind, level }) => blockDigest(kind, level, text) === digest);
+  requireBounded(shape !== undefined, 'HISTORY_CORRUPT', '历史命令的文字与段落样式摘要不一致。');
+  return shape;
+}
+
 /** The canonical header `ai7.recovery-command-evidence/1` hashes before a command group's members. */
 export interface CommandEvidenceHeader {
   readonly schema: 'ai7.recovery-command-evidence/1';
@@ -196,8 +207,8 @@ export function validateCommandHistoryGroup(db: DatabaseSync, groupId: string): 
       requireBounded(
         (row.before_present === 1 || beforeText === '') && (row.after_present === 1 || afterText === '') &&
           shapeValid && beforeLength <= MAX_BLOCK_GRAPHEMES && afterLength <= MAX_BLOCK_GRAPHEMES &&
-          blockDigest(kind, level, beforeText) === asString(row.before_digest) &&
-          blockDigest(kind, level, afterText) === asString(row.after_digest),
+          (blockDigest(kind, level, beforeText) === asString(row.before_digest) || blockShapeFromDigest(beforeText, asString(row.before_digest)) !== undefined) &&
+          (blockDigest(kind, level, afterText) === asString(row.after_digest) || blockShapeFromDigest(afterText, asString(row.after_digest)) !== undefined),
         'HISTORY_CORRUPT',
         '历史命令的前后文字与摘要不一致。',
       );

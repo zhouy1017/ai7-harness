@@ -198,6 +198,7 @@ export interface WritingContractInput {
   readonly exemplars: ReadonlyArray<WritingExemplarInput>;
   /** The 资料库 items under 允许参考 (Issue #428): present exactly in a `/3` contract, one item or more. */
   readonly materials?: ReadonlyArray<WritingMaterialInput>;
+  readonly deliverable?: import('../../shared/protocol.js').TaskIntentDeliverablePin;
 }
 
 /** One passage exactly as the model listed it. */
@@ -335,6 +336,7 @@ function frozenInput(input: WritingContractInput): WritingContractInput {
   });
   const frozen: WritingContractInput = {
     type: { typeId: input.type.typeId, label: input.type.label },
+    ...(input.deliverable === undefined ? {} : { deliverable: { ...input.deliverable } }),
     book: { title: book.title, authors: [...book.authors], editors: [...book.editors], series: [...book.series] },
     audience: input.audience,
     channel: input.channel,
@@ -383,6 +385,7 @@ function referenceLines(input: WritingContractInput): string[] {
     `- 图书：《${oneLine(input.book.title)}》；作者：${named(input.book.authors, '未填写')}；责编：${named(input.book.editors, '未填写')}；书系：${named(input.book.series, '不在任何书系中')}`,
     `- 文档类型：${input.type.label}；受众：${oneLine(input.audience)}；渠道：${oneLine(input.channel)}${input.requirements === null ? '' : `；其他要求：${oneLine(input.requirements)}`}`,
   ];
+  if (input.deliverable !== undefined) lines.push(`- 本次修改目标：${input.deliverable.label}；分析单元来自这份交付物，请按要求修改此类型文档。`);
   if (input.synopsis === null) lines.push('- 梗概与人物：本书尚无基线分析，本次不参考梗概与人物');
   else {
     lines.push(`- 梗概${input.synopsis.excerpt ? '（节选开头）' : ''}：${oneLine(input.synopsis.text)}`);
@@ -409,7 +412,7 @@ function systemPromptOf(input: WritingContractInput): string {
   return [
     `你是 AI7 的写作组件，为本社起草一份「${input.type.label}」。你只处理用户消息中给出的一个分析单元，逐块阅读，找出这份文档可以取用的段落。`,
     '以下是这份文档的参考信息（照录，不得改动）：',
-    ...referenceLines(input).slice(0, 2),
+    ...referenceLines(input).slice(0, input.deliverable === undefined ? 2 : 3),
     '本步只找段落，不写文档、不改写稿件、不调用任何工具、不引用外部资料。',
     '每条段落精确包含以下键：kind（highlight 表示可以用来吸引读者的看点、悬念或场面，character 表示人物，theme 表示主题或背景）、note（这一段说明了什么，不超过 200 字素）、blockOrdinals（它所依据的内容块序号数组，至少 1 个、至多 8 个、不重复）。',
     '内容块序号从 1 开始，按用户消息中列出的顺序计数：先是重叠上下文的内容块，然后是本单元的内容块。',

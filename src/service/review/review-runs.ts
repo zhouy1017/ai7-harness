@@ -1433,7 +1433,7 @@ export class ReviewRunStore {
         const reading = this.#readCategory(bookId, head, entry, baseline, undefined);
         requireReview(reading.unavailableReason === null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${reading.unavailableReason ?? ''}`);
         if (this.#ledgers.baseline().launch.live !== null && entry.executor !== 'baseline-leads') {
-          requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry)}`);
+          requireReview(liveReviewRule(input.launchPolicy, entry) !== null, 'REVIEW_CATEGORY_UNAVAILABLE', `「${entry.label}」：${liveReviewUnavailableReason(entry, input.launchPolicy)}`);
         }
         const plan = reviewCategoryScopePlan(entry.executor, entry.unavailableReason, scope,
           { ...reading.facts, factualSupplement: input.factualDecision !== undefined });
@@ -1952,7 +1952,7 @@ export class ReviewRunStore {
 
   finishCancelled(bookId: string, reviewRunId: string): void {
     for (const task of this.controlTasks(bookId, reviewRunId)) {
-      const runId = this.#runRecordOf(task.taskIntentId);
+      const runId = this.#events(reviewRunId, task.categoryId).findLast((event) => event.state === 'dispatched')?.runRecordId ?? null;
       if (runId === null || task.ledger.currentRunState(runId) !== 'cancelled') continue;
       this.settle(reviewRunId, task.categoryId);
       if (this.step(reviewRunId, task.categoryId).kind === 'write') this.write(reviewRunId, task.categoryId);
@@ -2482,6 +2482,8 @@ export class ReviewRunStore {
     const rows = this.#db.prepare(`SELECT DISTINCT rr.* FROM review_runs rr
       JOIN json_each(rr.canonical_json, '$.categories') c
       JOIN analysis_run_records r ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId')
+      JOIN review_run_category_events e ON e.review_run_id = rr.review_run_id AND e.run_record_id = r.run_record_id
+        AND e.category_id = 'factual-review' AND e.state = 'dispatched'
       JOIN analysis_task_outcomes o ON o.run_record_id = r.run_record_id
       WHERE json_extract(c.value, '$.partialFactualRetentionVersion') = 1
         AND o.classification IN ('failed', 'interrupted') AND o.result_set_revision_id IS NOT NULL`).all() as SqlRow[];
@@ -4186,7 +4188,7 @@ export class ReviewRunStore {
     if (withheld !== null) return { entry, unavailableReason: withheld, facts: none, projection: null };
     const launch = this.#ledgers.baseline().launch;
     if (launch.live !== null && (launch.policy === undefined || liveReviewRule(launch.policy, entry) === null)) {
-      return { entry, unavailableReason: liveReviewUnavailableReason(entry), facts: none, projection: null };
+      return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
     let projection: AnalysisProjection;
     try {
@@ -4416,6 +4418,27 @@ export class ReviewRunStore {
             : state === 'failed' ? FAILED_UNRECORDED_DETAIL
               : last !== null ? UNWRITTEN_DETAIL : UNSTARTED_DETAIL
         : null;
+      // A settled category can retain a complete unit set and an unresolved synthesis.
+      // Read its own immutable revision, including historical Runs, rather than the
+      // category ledger's latest result or the later materialization event's detail.
+      let completionDetail: string | null = null;
+      const materialized = events.find((event) => event.state === 'materialized') ?? null;
+      if (state === 'settled' && category.task !== null && materialized !== null && materialized.runRecordId !== null && materialized.resultSetRevisionId !== null) {
+        const ledger = this.#categoryLedger(category);
+        if (ledger.currentRunState(materialized.runRecordId) === 'completed-with-gaps') {
+          const revision = ledger.inspect(snapshot.bookId, undefined, materialized.resultSetRevisionId).inspectedRevision!.revision;
+          const synthesis = 'crossChapterSynthesis' in revision ? revision.crossChapterSynthesis : undefined;
+          const warning = synthesis?.state === 'gap'
+            ? synthesis.code === 'outcome-unknown' ? '跨章汇总结果待确认' : '跨章检查尚未完成'
+            : '部分检查尚未完成';
+          completionDetail = `${last?.detail ?? ''}已读完 ${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个阅读范围；${warning}；已完成范围的发现仍可处理。`;
+        }
+        const claims = category.executor === 'factual-review-kind' ? ledger.factualVerification.claimProgress(materialized.runRecordId) : null;
+        if (claims !== null && claims.closed < claims.total) completionDetail = [last?.detail ?? '', `已完成核查 ${claims.closed}/${claims.total} 条断言`,
+          ...(claims.unknown === 0 ? [] : [`${claims.unknown} 条结果待确认`]),
+          ...(claims.notStarted === 0 ? [] : [`${claims.notStarted} 条尚未开始联网核查`]),
+          ...(claims.unfinished === 0 ? [] : [`${claims.unfinished} 条联网核查尚未完成`]), '已取得的证据与发现仍可查看。'].filter(Boolean).join('；');
+      }
       return {
         category,
         events,
@@ -4423,9 +4446,9 @@ export class ReviewRunStore {
         // A category the exclusion stopped, or the editor then cancelled, reads the stop's own words (SER-024).
         stateLabel: reviewRunCategoryStopLabel(last?.record.code) ?? idle ?? reviewRunCategoryStateLabel(state, waitingForPlace),
         ...(idle === RUN_WAITING_IDLE_LABEL ? { idleQueued: true as const } : {}),
-        detail: waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail),
+        detail: completionDetail ?? (waitingForPlace ? REVIEW_CATEGORY_PLACE_WAIT_DETAIL : derived ?? (last === null || last.state === 'dispatched' ? null : last.detail)),
         pending,
-        materialized: events.find((event) => event.state === 'materialized') ?? null,
+        materialized,
         retained: events.find((event) => this.#retained(event)) ?? null,
       };
     });

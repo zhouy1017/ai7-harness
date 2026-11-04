@@ -12,6 +12,42 @@ import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, type Loca
 
 /** The two tool names, sorted: the exact set a payload's tools must equal (ADR 0080 §7.2). */
 export const PLATFORM_TOOL_NAMES = ['webfetch', 'websearch'] as const;
+
+/** Text citations preserve balanced URL parentheses, but leave enclosing Markdown/prose punctuation outside the address. */
+function httpsAddressRanges(text: string): Array<{ start: number; end: number }> {
+  return [...text.matchAll(/https:\/\/[^\s<>"'[\]{}，。；：！？、（）《》「」“”]+/gu)].map((match) => {
+    let depth = 0;
+    let end = match[0].length;
+    for (let index = 0; index < end; index += 1) {
+      const character = match[0][index];
+      if (character === '(') depth += 1;
+      else if (character === ')') {
+        if (depth === 0) { end = index; break; }
+        depth -= 1;
+      }
+    }
+    while (end > 0 && '.,;:!?'.includes(match[0][end - 1]!)) end -= 1;
+    return { start: match.index, end: match.index + end };
+  });
+}
+
+/** Every absolute HTTPS address named in text; extraction grants no network admission. */
+export function httpsAddresses(text: string): string[] {
+  return httpsAddressRanges(text).map(({ start, end }) => text.slice(start, end));
+}
+
+/** Source-name matching must not mistake words inside a precise URL for another cited source. */
+export function withoutHttpsAddresses(text: string): string {
+  const pieces: string[] = [];
+  let position = 0;
+  for (const { start, end } of httpsAddressRanges(text)) {
+    pieces.push(text.slice(position, start));
+    position = end;
+  }
+  pieces.push(text.slice(position));
+  return pieces.join('');
+}
+
 export const LOCAL_TOOL_NAMES = ['exact_fetch', 'retrieve'] as const;
 export type LocalToolName = (typeof LOCAL_TOOL_DECLARATION_NAMES)[number] | (typeof GLOBAL_AGENT_SCOPED_TOOL_NAMES)[number];
 export type PlatformToolName = (typeof PLATFORM_TOOL_NAMES)[number] | LocalToolName;

@@ -1,14 +1,44 @@
-import { PROCEDURE_DEFINITION_SCHEMA_SQL, PROCEDURE_DEFINITION_TRIGGER_SQL } from '../../src/service/procedures/definition-store.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
-import { asRevision98 } from '../support/procedure-revisions.js';
-import { asRevision99, asRevision100, asRevision101, asRevision102, asRevision103 } from '../support/structural-revisions.js';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, rm, copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { expect, it, afterEach, beforeEach, describe, vi } from 'vitest';
+import { EditorialStore, StoreError } from '../../src/service/store.js';
+import {
+  FACTUAL_REVIEW_SCHEMA_VERSION,
+  LATEST_SCHEMA_VERSION,
+  ANALYSIS_LEDGER_REVISION_23_SQL,
+  ANALYSIS_LEDGER_REVISION_58_SQL,
+  SCHEDULED_BACKUP_SCHEMA_VERSION,
+} from '../../src/service/task-authorization.js';
+import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
+import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
+import { PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER } from '../support/proposal-conflicts.js';
+import { IMPORT_RETENTION_RELATIONS_DROP_ORDER } from '../support/import-retention.js';
+import { IMPORTED_MARK_RELATIONS_DROP_ORDER } from '../support/imported-marks.js';
+import { EXPORT_LEDGER_RELATIONS_DROP_ORDER } from '../support/manuscript-export.js';
+import { DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER } from '../support/default-execution-rules.js';
+import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';
+import { REIMPORT_GROUP_RELATIONS_DROP_ORDER } from '../support/reimport-groups.js';
+import { PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER } from '../support/production-documents.js';
+import { RUN_CHECKPOINT_RELATIONS_DROP_ORDER } from '../support/run-continuation.js';
+import { asDraftRevision105 } from '../support/draft-revisions.js';
+import {
+  PROCEDURE_DEFINITION_SCHEMA_SQL,
+  PROCEDURE_DEFINITION_TRIGGER_SQL,
+} from '../../src/service/procedures/definition-store.js';
+import { asRevision98 } from '../support/procedure-revisions.js';
+import {
+  asRevision99,
+  asRevision100,
+  asRevision101,
+  asRevision102,
+  asRevision103,
+} from '../support/structural-revisions.js';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalRecord, parseCanonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { writeDatabasePackage } from '../../src/service/database-exports.js';
 import {
@@ -20,17 +50,21 @@ import {
   writeReplacementIntent,
   type ReplacementIntent,
 } from '../../src/service/database-replacement.js';
-import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { ANALYSIS_LEDGER_REVISION_58_SQL, LATEST_SCHEMA_VERSION, SCHEDULED_BACKUP_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
+import {
+  MODEL_SERVICE_CONNECTION_REVISION_104_SQL,
+  MODEL_SERVICE_ROW_COLUMNS,
+} from '../../src/service/model-service-connections.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
-import { MAX_DATABASE_REPLACEMENTS_LISTED } from '../../src/shared/protocol.js';
+import { MAX_DATABASE_REPLACEMENTS_LISTED, FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
 import { fixedArchiveTime } from '../../src/shared/archive-time.js';
 import { ADMITTED_BASELINE_DOCX, composeManuscriptDocx, composeRevisedDocx } from '../support/composed-fixture.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { FACTUAL_REVIEW_TASK_GOAL } from '../../src/shared/protocol.js';
-import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
+import {
+  importSample1Book,
+  pinEditorialWorkspaceProfileRevision2,
+  recordMissingCredentialConnection,
+} from '../support/sample1-baseline.js';
 
 const sourceRead = vi.hoisted(() => ({ path: null as string | null, atEnd: null as (() => Promise<void>) | null }));
 /** While set, every write into a file opened under this directory fails as a full disk fails. */
@@ -133,6 +167,53 @@ async function handmade(name: string, dataVersion: number, schemaRevision: numbe
 const backups = (): string => `${roots.dataRoot}-backups`;
 
 describe('导入数据库 over the real store', () => {
+  it('upgrades real revision-105 draft relations and preserves draft identity through database replacement', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const bookId = createBook(store, '旧版本任务草稿');
+    const draft = store.saveTaskIntentDraft({ bookId, draftId: null, expectedOrdinal: null, origin: 'composer-book', goal: '审阅本书', target: { kind: 'book' }, outcomeClass: 'review' });
+    store.markCleanShutdown(); store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try { asDraftRevision105(db); } finally { db.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const kept = store.inspectTaskIntentDrafts({ bookId, draftId: draft.draftId }).drafts[0]!;
+      expect(kept.version).toEqual(draft.version);
+      const path = await exported(store, 'revision105-drafts.ai7db');
+      const preview = await store.inspectDatabaseImport(path);
+      expect(preview.schemaRevision).toBe(107);
+      await store.prepareDatabaseReplacement(preview.previewId);
+    } finally { store.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try { expect(store.inspectTaskIntentDrafts({ bookId, draftId: draft.draftId }).drafts[0]!.version).toEqual(draft.version); }
+    finally { store.close(); }
+  });
+
+  it('migrates revision 104 preserving both old choices, then retains independent choices through database replacement', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const connection = store.saveModelServiceConnection('Synthetic account', null, 'ready', 'anthropic-claude');
+    store.markCleanShutdown(); store.close();
+    const db = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      db.exec('CREATE TEMP TABLE old_connections AS SELECT rowid AS old_rowid, * FROM model_service_connections');
+      db.exec('DROP TABLE model_service_connections'); db.exec(MODEL_SERVICE_CONNECTION_REVISION_104_SQL);
+      db.exec(`INSERT INTO model_service_connections(rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test)
+        SELECT old_rowid, ${MODEL_SERVICE_ROW_COLUMNS}, selected, fast_selected, connection_test FROM old_connections`);
+      db.exec('DROP TABLE old_connections; PRAGMA user_version = 104');
+    } finally { db.close(); }
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.getConfiguredModelRoleBinding('main-editorial')?.model).toBe('claude-opus-5');
+      expect(store.getConfiguredModelRoleBinding('fast-interaction')?.model).toBe('claude-opus-5');
+      store.selectMainRoleModel('anthropic-claude', 'account-opus');
+      store.selectFastRoleModel('anthropic-claude', 'account-haiku');
+      const preview = await store.inspectDatabaseImport(await exported(store, 'independent-roles.ai7db'));
+      await store.prepareDatabaseReplacement(preview.previewId, T);
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getConfiguredModelRoleBinding('main-editorial')).toMatchObject({ model: 'account-opus', credentialReference: connection.credentialReference });
+      expect(store.getConfiguredModelRoleBinding('fast-interaction')).toMatchObject({ model: 'account-haiku', credentialReference: connection.credentialReference });
+    } finally { store.close(); }
+  });
+
   it('migrates a genuine revision-97 package through replacement before creating an editable version (#1170)', async () => {
     const path = await handmade('revision97.ai7db', 1, 97);
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -147,7 +228,7 @@ describe('导入数据库 over the real store', () => {
         basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
         title: '迁移后的写作', editorInstruction: '简明', stages: original.document.stages } });
       expect(created.procedures.find((entry) => entry.procedureId === original.procedureId)!.documents).toContainEqual(original.document);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -183,7 +264,7 @@ describe('导入数据库 over the real store', () => {
       expect(text() === target.text).toBe(true);
       store.redoManuscript(book.manuscriptId, book.branchId, digest());
       expect(text().startsWith('〔替换前〕')).toBe(true);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision99-migrated.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision99-migrated.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -211,7 +292,7 @@ describe('导入数据库 over the real store', () => {
       store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks).toEqual(before);
       expect(store.saveModelServiceConnection('合成 Claude 连接', null, 'ready', 'anthropic-claude').binding.credentialSlot).toBe('anthropic-claude');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision102-migrated.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision102-migrated.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -246,7 +327,7 @@ describe('导入数据库 over the real store', () => {
       const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest!, commitId: randomUUID() });
       expect(store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null).blocks[position - 1]!.kind).toBe('heading');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision101-migrated.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision101-migrated.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -273,11 +354,12 @@ describe('导入数据库 over the real store', () => {
       store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks).toEqual(before);
       expect(store.getSearchBackendSettings().fallbackBackendId).toBeNull();
+      store.saveSearchBackendCredential('search-tinyfish', null, 'ready');
       const pending = store.saveSearchBackendCredential('search-brave', null, 'needs-attention');
       store.saveSearchBackendCredential('search-brave', pending.credentialReference, 'ready');
       store.selectSearchBackend('search-brave', 'fallback');
       expect(store.getSearchBackendSettings().fallbackBackendId).toBe('search-brave');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.selectSearchBackend(null, 'fallback');
       expect(store.getSearchBackendSettings().fallbackBackendId).toBeNull();
       store.markCleanShutdown();
@@ -314,7 +396,7 @@ describe('导入数据库 over the real store', () => {
       const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest!, commitId: randomUUID() });
       expect(store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null).blocks.map((block) => block.kind).at(-1)).toBe('note');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision100-migrated.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision100-migrated.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -331,7 +413,7 @@ describe('导入数据库 over the real store', () => {
       const procedures = store.procedureLibrary({ action: 'inspect' }).procedures;
       expect([procedures.length, procedures.at(-1)!.procedureId, procedures.at(-1)!.version, procedures.at(-1)!.executorKind])
         .toEqual([17, 'ai7-procedure/full-review', 1, 'review-run']);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision98-migrated.ai7db'))).toMatchObject({ schemaRevision: 104 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision98-migrated.ai7db'))).toMatchObject({ schemaRevision: 107 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -368,7 +450,7 @@ describe('导入数据库 over the real store', () => {
       expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }))
         .toMatchObject({ enabled: false, signals: [], items: [], controlEntries: 1 });
       const preview = await store.inspectDatabaseImport(await exported(store, 'migrated-v96.ai7db'));
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 104, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 107, dataVersion: 1 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -390,7 +472,7 @@ describe('导入数据库 over the real store', () => {
       expect(original.localFixtureProfile).toBeUndefined();
       const packagePath = await exported(store, 'selected-v1.ai7db');
       const preview = await store.inspectDatabaseImport(packagePath);
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 104, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 107, dataVersion: 1 });
       await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
       expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
@@ -1100,3 +1182,64 @@ it('validates and advances a historical reader91 package through the existing re
     expect((await store.inspectDatabaseReplacements()).replacements[0]).toMatchObject({ outcome: 'applied' });
   } finally { await store.close(); }
 });
+
+
+// Revision 20 predates entry positions and kind-coupled review relations. Keep its sole forward-migration fixture here.
+function downgradeToRevision20(databasePath: string): void {
+  const database = new DatabaseSync(databasePath);
+  try {
+    downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_23_SQL);
+    execPre74Fixture(database, `BEGIN IMMEDIATE;
+      ${[...PRODUCTION_DOCUMENT_RELATIONS_DROP_ORDER, ...REIMPORT_GROUP_RELATIONS_DROP_ORDER, ...CLARIFICATION_RELATIONS_DROP_ORDER, ...RUN_CHECKPOINT_RELATIONS_DROP_ORDER, ...DEFAULT_EXECUTION_RULE_RELATIONS_DROP_ORDER, ...EXPORT_LEDGER_RELATIONS_DROP_ORDER, ...IMPORTED_MARK_RELATIONS_DROP_ORDER, ...IMPORT_RETENTION_RELATIONS_DROP_ORDER].map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      ${PROPOSAL_CONFLICT_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      ${PUBLICATION_VERSION_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      ${REVIEW_RUN_RELATIONS_DROP_ORDER.map((relation) => `DROP TABLE ${relation};`).join('\n      ')}
+      DROP TABLE manuscript_effect_receipts;
+      DROP TABLE manuscript_effect_dispatches;
+      DROP TABLE manuscript_effect_approvals;
+      DROP TABLE manuscript_effect_targets;
+      DROP TABLE manuscript_effect_intents;
+      DROP TABLE proposal_decision_reasons;
+      DROP TABLE proposal_item_decisions;
+      DROP TABLE proposal_change_items;
+      DROP TABLE editorial_mark_replies;
+      DROP TABLE editorial_marks;
+      DROP TABLE manuscript_entry_positions;
+      PRAGMA user_version = ${FACTUAL_REVIEW_SCHEMA_VERSION};
+      COMMIT;`);
+  } finally {
+    database.close();
+  }
+}
+
+it('opens a populated revision-20 predecessor with its Book and manuscript intact (#1262)', async () => {
+  const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  let book: Awaited<ReturnType<typeof importSample1Book>>;
+  let blocks: number;
+  try {
+    book = await importSample1Book(first, roots.codeRoot, '旧版样书');
+    const window = first.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+    blocks = window.position.totalBlocks;
+    first.recordManuscriptEntryPosition(book.manuscriptId, book.branchId, window.blocks[2]!.blockId, 1);
+    first.markCleanShutdown();
+  } finally { first.close(); }
+  downgradeToRevision20(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+  const migrated = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(migrated.listBooks(null).items.map(item => item.bookId)).toEqual([book.bookId]);
+    expect(migrated.getManuscriptWindow(book.manuscriptId, book.branchId, null).position.totalBlocks).toBe(blocks);
+    expect(migrated.readManuscriptEntryPosition(book.manuscriptId, book.branchId)).toBeNull();
+    expect(migrated.inspectDataVersion().schemaRevision).toBe(LATEST_SCHEMA_VERSION);
+    migrated.markCleanShutdown();
+  } finally { migrated.close(); }
+}, 300_000);
+
+it('closes the refused unsupported-version database so its data root can be removed immediately (#1262)', async () => {
+  const directory = join(roots.dataRoot, 'store');
+  await mkdir(directory, { recursive: true });
+  const planted = new DatabaseSync(join(directory, 'ai7.sqlite'));
+  planted.exec('PRAGMA user_version = 9999');
+  planted.close();
+  await expect(EditorialStore.open(roots.dataRoot, roots.codeRoot)).rejects.toMatchObject({ code: 'SCHEMA_UNSUPPORTED' });
+  await rm(roots.dataRoot, { recursive: true });
+}, 120_000);

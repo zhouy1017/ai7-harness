@@ -29,7 +29,7 @@ describe('the Agent 工作区 capability declaration', () => {
       network: false,
       apply: false,
       scopes: ['current-book-primary-manuscript-revision', 'current-book-source-version'],
-      safetyLabel: '未联网 · 无文件系统 · 无 shell · 不能应用修改',
+      safetyLabel: '可检索本书 · 修改由你逐条决定',
     });
     expect(Object.isFrozen(AGENT_WORKSPACE_CAPABILITIES)).toBe(true);
     expect(Object.isFrozen(AGENT_WORKSPACE_CAPABILITIES.scopes)).toBe(true);
@@ -79,24 +79,37 @@ describe('the Agent 工作区 capability declaration', () => {
     const picked = /export type AgentWorkspaceApi = Pick<RendererApi,([^>]*)>/u.exec(renderer)![1]!;
     const members = [...picked.matchAll(/'([A-Za-z]+)'/gu)].map((match) => match[1]!);
     expect(members).toEqual(['inspectAgentWorkspace', 'proposeAgentWorkspaceChangeSet', 'promoteAgentWorkspaceProposals', 'discardAgentWorkspaceProposals',
-      'getBookOverview', 'getManuscriptWindow']);
+      'getBookOverview', 'getManuscriptWindow', 'getManuscriptWindowAt']);
     for (const member of members) expect(member).not.toMatch(/apply|effect|export|send|session|chat|conversation|stream|dialog/iu);
   });
 });
 
 describe('the 工作概览 entry to the Agent 工作区', () => {
-  it('sits inside the profile card before its actions row, which stays the card’s last child (J-04 l.1151, J-15 l.863)', () => {
+  it('offers the workspace independently of a profile card', () => {
     const source = readFileSync(new URL('../../src/renderer/index.ts', import.meta.url), 'utf8');
-    const renderer = source.slice(source.indexOf('function renderEditorialWorkspaceProfile('), source.indexOf('function renderBookCreationReview('));
-    const appended = /card\.append\(([\s\S]*?)\);\r?\n {2}host\.replaceChildren\(card\);/u.exec(renderer);
-    expect(appended).not.toBeNull();
-    const children = appended![1]!.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
-    expect(children.at(-1)).toBe('actions');
-    expect(children.at(-2)).toBe('agentEntry');
+    expect(source).not.toContain('renderEditorialWorkspaceProfile');
+    expect(source).toContain('AGENT_WORKSPACE_WORDS.overviewEntry');
+    expect(source).not.toContain('openAgentWorkspaceProfile');
   });
 });
 
 describe('a workspace answer read as a change set', () => {
+  it('previews only completed items while JSON is still streaming', () => {
+    const complete = JSON.stringify(item('可见此事'));
+    const text = `{"schema":"${AGENT_WORKSPACE_RESULT_SCHEMA}","items":[${complete},{"anchor":"再说`;
+    expect(readAgentWorkspaceAnswer(text, SELECTION, true)).toMatchObject({ kind: 'read', candidates: [{ anchor: '可见此事' }] });
+    expect(readAgentWorkspaceAnswer(text, SELECTION).kind).toBe('withheld');
+  });
+  it('extracts JSON surrounded by explanation and folds a long multiline rationale', () => {
+    const text = `说明如下。\n\`\`\`json\r\n${answer([item('可见此事', '可见这件事', '理由\n'.repeat(100))])}\r\n\`\`\`\n请审阅。`;
+    const reading = readAgentWorkspaceAnswer(text, SELECTION);
+    expect(reading.kind).toBe('read');
+    if (reading.kind !== 'read') return;
+    expect(reading.candidates).toHaveLength(1);
+    expect(reading.candidates[0]!.rationale).not.toMatch(/[\r\n]/u);
+    expect([...reading.candidates[0]!.rationale].length).toBeLessThanOrEqual(200);
+    expect(reading.dropped).toEqual([]);
+  });
   it('keeps anchors that stand exactly once inside the selection, with their grapheme range', () => {
     const reading = readAgentWorkspaceAnswer(answer([item('可见此事'), item('再说一遍', '再讲一次')]), SELECTION);
     expect(reading).toEqual({
@@ -123,14 +136,13 @@ describe('a workspace answer read as a change set', () => {
     const reading = readAgentWorkspaceAnswer(answer(items), SELECTION);
     expect(reading.kind).toBe('read');
     if (reading.kind !== 'read') return;
-    expect(reading.candidates.map((candidate) => candidate.anchor)).toEqual(['可见此事非同寻常']);
+    expect(reading.candidates.map((candidate) => candidate.anchor)).toEqual(['可见此事非同寻常', '再说一遍']);
     expect(reading.dropped).toEqual([
       { ordinal: 1, reason: '摘出的文字不在所选范围内' },
       { ordinal: 2, reason: '摘出的文字在所选范围内不止一处，无法确定位置' },
       { ordinal: 4, reason: '与前面的提议重叠' },
       { ordinal: 5, reason: '替换后的文字与原文相同' },
       { ordinal: 6, reason: '提议不是约定的格式' },
-      { ordinal: 7, reason: '理由要是一行，最多 200 个字' },
       { ordinal: 8, reason: '提议没有摘出要替换的文字' },
     ]);
     const many = readAgentWorkspaceAnswer(answer(Array.from({ length: MAX_AGENT_WORKSPACE_ITEMS + 1 }, () => item('不在'))), SELECTION);

@@ -42,7 +42,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       .finally(() => { busy = false; if (section.isConnected) paint(); });
   };
   const action = (label: string, operation: () => void): HTMLButtonElement => {
-    const button = el('button', label); button.type = 'button'; button.disabled = busy;
+    const button = el('button', label); button.type = 'button'; button.className = 'secondary'; button.disabled = busy;
     button.addEventListener('click', operation); return button;
   };
   const paint = (): void => {
@@ -123,7 +123,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     section.append(el('h4', wordOnly ? '学习信号 · Word 原始修改对' : '学习信号 · 从处理记录新建记忆'), el('p', wordOnly
       ? '查看原始修改对及其导入依据，或排除今后的学习使用；尚未用于编辑记忆、审阅偏好或模型任务。'
       : '勾选同一审阅类别的 1–10 条来源，撰写记忆候选；接受后，符合范围的审阅可参考它。原文与改写留在原处理记录中。'));
-    const batch = el('form', ''); batch.dataset['memoryCandidateForm'] = '';
+    const batch = el('form', ''); batch.className = 'memory-candidate-form'; batch.dataset['memoryCandidateForm'] = '';
     const title = el('input', ''); title.name = 'candidate-title'; title.maxLength = 160; title.required = true;
     const titleLabel = el('label', '候选记忆内容'); titleLabel.append(title);
     const scope = el('select', '');
@@ -141,7 +141,10 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       run(() => api.createEditorialMemory({ schema: 'ai7.global-editorial-memory/2', actionId: crypto.randomUUID(), signalIds: sources.map((signal) => signal.signalId),
         applicability: scope.value === 'book' ? { kind: 'book', bookId: first.source.bookId } : { kind: 'house' },
         title: title.value, editorialDimension: first.memoryCandidate!.editorialDimension, confidence: Number(confidence.value) / 100 }));
-    }); if (!wordOnly) section.append(batch);
+    }); if (!wordOnly) {
+      const composer = el('details', ''); composer.className = 'memory-composer';
+      composer.append(el('summary', '从所选来源新建记忆…'), batch); section.append(composer);
+    }
     if (page.signals.length === 0) section.append(el('p', '尚无符合准入的学习信号。'));
     for (const signal of page.signals) {
       const row = el('article', ''); row.className = 'learning-material'; row.dataset['learningSignal'] = signal.signalId;
@@ -157,7 +160,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
           void mountWordTrackedEditDetail({ root: detail, api, ...signal.source, openSourceVersion }).load();
         }), detail);
       } else if (signal.kind === 'manual-edit-journal') {
-        row.append(el('p', `手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个内容块；不代表采纳建议。`));
+        row.append(el('p', `手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个段落；不代表采纳建议。`));
       } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
       if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.memoryCandidate != null) {
         const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;
@@ -167,17 +170,22 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       if (signal.currentEligibility !== 'excluded' && signal.currentEligibility !== 'superseded') row.append(action('排除此材料', () => run(() => api.changeEditorialLearning({ kind: 'material', signalId: signal.signalId }))));
       if (!page.excludedBooks.some((book) => book.bookId === signal.source.bookId)) row.append(action('排除本书', () => run(() => api.changeEditorialLearning({ kind: 'book', bookId: signal.source.bookId, excluded: true, expectedEntries: page.controlEntries }))));
       if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.currentEligibility === 'house') {
-        const form = el('form', '');
-        const titleLabel = el('label', '记忆标题'); const title = el('input', ''); title.maxLength = 160; title.required = true; title.name = 'memory-title'; titleLabel.append(title);
-        const dimensionLabel = el('label', '编辑维度'); const dimension = el('input', ''); dimension.maxLength = 80; dimension.required = true; dimension.name = 'memory-dimension'; dimensionLabel.append(dimension);
-        const confidenceLabel = el('label', '信心（0–100）'); const confidence = el('input', ''); confidence.type = 'number'; confidence.min = '0'; confidence.max = '100'; confidence.value = '50'; confidence.required = true; confidenceLabel.append(confidence);
-        const create = el('button', '新建记忆'); create.type = 'submit'; create.disabled = busy;
-        form.append(titleLabel, dimensionLabel, confidenceLabel, create);
-        form.addEventListener('submit', (event) => {
-          event.preventDefault(); if (!form.reportValidity()) return;
-          run(() => api.createEditorialMemory({ clientMemoryId: crypto.randomUUID(), signalId: signal.signalId, title: title.value, editorialDimension: dimension.value, confidence: Number(confidence.value) / 100 }));
+        const slot = el('div', ''); slot.className = 'memory-form-slot';
+        const open = action('新建记忆…', () => {
+          const form = el('form', ''); form.className = 'memory-create-form';
+          const titleLabel = el('label', '记忆标题'); const title = el('input', ''); title.maxLength = 160; title.required = true; title.name = 'memory-title'; titleLabel.append(title);
+          const dimensionLabel = el('label', '编辑维度'); const dimension = el('input', ''); dimension.maxLength = 80; dimension.required = true; dimension.name = 'memory-dimension'; dimensionLabel.append(dimension);
+          const confidenceLabel = el('label', '信心（0–100）'); const confidence = el('input', ''); confidence.type = 'number'; confidence.min = '0'; confidence.max = '100'; confidence.value = '50'; confidence.required = true; confidenceLabel.append(confidence);
+          const create = el('button', '新建记忆'); create.type = 'submit'; create.disabled = busy;
+          form.append(titleLabel, dimensionLabel, confidenceLabel, create);
+          form.addEventListener('submit', (event) => {
+            event.preventDefault(); if (!form.reportValidity()) return;
+            run(() => api.createEditorialMemory({ clientMemoryId: crypto.randomUUID(), signalId: signal.signalId, title: title.value, editorialDimension: dimension.value, confidence: Number(confidence.value) / 100 }));
+          });
+          const cancel = action('取消', () => { slot.replaceChildren(); open.hidden = false; open.focus(); });
+          form.append(cancel); slot.replaceChildren(form); open.hidden = true; title.focus();
         });
-        row.append(form);
+        open.dataset['memoryAction'] = 'new'; row.append(open, slot);
       }
       section.append(row);
     }

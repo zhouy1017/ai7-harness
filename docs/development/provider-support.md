@@ -6,19 +6,19 @@ Generated from the provider documents under [`config/providers/`](../../config/p
 
 ## Three senses of "supported"
 
-Runtime role choices are reviewed in [`config/providers/runtime-bindings/model-table.json`](../../config/providers/runtime-bindings/model-table.json). The generator resolves their endpoints and credential slots from the provider documents and refuses an unreadable `ordinaryProduction` model or a protocol family outside the role’s declared baseline. `policyBaseline` is exactly the selected policy’s Main/Fast allowed bindings, declared models readable or not, and holds every predecessor’s; `ordinaryProduction` supplies v26 Main/Fast choices, default first. Developer-live still has to match its immutable policy binding exactly. Configuration alone grants no transmission. Settings selector literals remain with F-01; this slice preserves their choices.
+Provider documents and the runtime model table supply catalogue defaults and labels. The selected ordinary-production policy admits channels, rather than individual model IDs (#1281). Unknown model IDs receive a profile from their route protocol; optional context limits and model-specific reasoning or structured-output settings remain unknown unless declared. Developer-live retains its exact approved binding. Live model discovery and role selection are tracked separately in #1282.
 
-- **Declared** — a document declares the route and the model. A declared model whose `answerChannel` is `none` is inert: it can read no response. A declared format is a claim about the request shape and nothing else (ADR 0073 §3).
+- **Declared** — catalogue metadata and historical evidence for a model. Runtime text, stream and function tools inherit the implemented route protocol; optional model-specific settings remain recorded separately.
 - **Live-verified** — a capability whose evidence is `live-test-item`, cited by its item ids.
-- **Bindable** — a route the selected Provider Processing policy admits for an exact role and operation; a declaration alone grants no authority. [Current runtime selection](../policies/README.md#current-runtime-selection) owns the active pins, scope and evidence requirements. Developer-live remains OpenCode Go `opencode-go` · `deepseek-v4.1-flash` under ADR 0067. Ordinary-production saves Main and Fast independently: Main retains Go or DeepSeek 开放平台（官方） `deepseek-open-platform` · `deepseek-flash`; Fast additionally admits OpenAI `gpt-5.6-luna` and `gpt-5.6-sol` only for buffered 来源译文 after a successful exact-binding fixed public connection probe. The separate explicit probe grants no editorial authority, tools or native streaming, and declarations are not account availability or live proof (Issue #1044; Provider Processing v25).
+- **Bindable** — a selected policy channel permits its route, endpoint host, protocol family and credential slot. The editor chooses the exact model ID, and each Run freezes that binding. An account can still reject a model; adapter support is not live validation or account availability. CI and ordinary regression use no provider credentials.
 
-Task research declarations (Issue #744, ADR 0080 rows 15/17) resolve to `webSearch: true`, `searchEngine: user-selected-backend` only when the task declares web research, the [selected policy rule](../policies/README.md#current-runtime-selection) admits AI7 platform tools and the exact route/model has recorded live tool-loop evidence. The admitted web-bearing kinds are 事实核查 and 学术道德与引用 review, writing, and AI7 初评 evaluation (its market section). 审稿意见 and 按我的评分重写评语 declare no web even where their evaluation policy rule allows tools; 出版政策与风险 is eligible under ordinary-production v26 without web and discloses 未联网核查; developer-live v24 keeps it excluded. Other kinds declare no web. The composition pins the effective declaration; the Run freezes the backend. Reports disclose 未联网核查, 联网核查未完成 with the refusal/breaker reason, or 联网核查已完成; completed tool execution alone establishes no supported factual conclusion.
+Task research declarations resolve to `webSearch: true` only when the task declares research, the selected rule admits platform tools, and model/search setup is ready. All four implemented protocol families support AI7 websearch/webfetch and local function tools without per-model live evidence. Existing source scopes, task research declarations, frozen search bindings and final egress checks remain enforced. Provider-free tests establish adapter behavior; they do not claim a live account result.
 
-A capability a document does not declare is absent with `unverified` evidence. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page's "1M" is read as 1,000,000), and `none` where no page read states one.
+Optional model-specific capabilities a document does not declare remain unknown. A context size is the one the vendor page states, in tokens (an input limit where the page states one separately; a page's "1M" is read as 1,000,000), and `none` where no page read states one.
 
 ## Protocol family dispositions
 
-What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1), proven provider-free by the family fixtures under [`tests/fixtures/model/provider-families/`](../../tests/fixtures/model/provider-families/). A declared model is `supported` for text, stream or function tools only where its own capability is declared on evidence and `untested` otherwise; the adapter refuses every demand that is not `supported` by name before any ticket, credential or transport is touched (`src/service/provider/family-dispositions.ts`). A family the selected policy does not admit for a role is refused by name as `family-not-admitted-by-selected-policy`: the selected policy baseline (`policyBaseline` in the runtime model table, which the launch verifier matches against the policy bytes) admits chat completions, Responses, Messages and generateContent for both the Main and the Fast role (Provider Processing v32, ADR 0095 §6), so a model of any declared family reads its own text disposition, and it is chosen only once the runtime model table holds its reviewed `ordinaryProduction` record.
+All four implemented protocol families support text, streaming and function tools, including arbitrary selected model IDs (#1281). Provider-free family fixtures exercise the wire contracts; documentary and live evidence remain historical observations and do not gate runtime capabilities. The selected policy admits channels by route, endpoint host, protocol family and credential slot. Each Run still freezes its exact model, endpoint and credential reference.
 
 | Aspect | `openai-chat-completions` | `anthropic-messages` | `openai-responses` | `google-generate-content` |
 | --- | --- | --- | --- | --- |
@@ -60,7 +60,7 @@ What the adapter implements for each protocol family (Issue #1180, ADR 0094 §1)
 | `qwen3.7-plus` | Qwen3.7 Plus | none | `none` | `none` |
 | `qwen3.8-flash` | Qwen3.8 Flash | none | `none` | `none` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `qwen3.8-max`, `qwen3.7-plus`, `qwen3.8-flash`; stream supported for `qwen3.8-max`, `qwen3.7-plus`, `qwen3.8-flash`; functionTools supported for `qwen3.8-max`, `qwen3.7-plus`, `qwen3.8-flash`.
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
@@ -107,7 +107,7 @@ The shape requires a per-turn output cap; the route declares the same 32,768 as 
 | `claude-sonnet-5` | Claude Sonnet 5 | 1,000,000 | `none` | `provider-tool` |
 | `claude-haiku-4-5` | Claude Haiku 4.5 | 200,000 | `none` | `provider-tool` |
 
-Dispositions (`anthropic-messages`): text supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; stream untested for every model; functionTools untested for every model.
+Dispositions (`anthropic-messages`): text supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; stream supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`; functionTools supported for `claude-opus-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`.
 
 Inert: 0 of 4 (no declared answer channel). Established:
 
@@ -156,7 +156,7 @@ The model ids are written as the reading printed them; the resold `DeepSeek-V4-P
 | `ERNIE-5.0` | ERNIE 5.0 | 128,000 | `none` | `provider-tool` |
 | `ERNIE-4.5-Turbo-128K` | ERNIE 4.5 Turbo 128K | 128,000 | `none` | `provider-tool` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `ERNIE-5.1`, `ERNIE-5.0`, `ERNIE-4.5-Turbo-128K`; stream supported for `ERNIE-5.1`, `ERNIE-5.0`, `ERNIE-4.5-Turbo-128K`; functionTools supported for `ERNIE-5.1`, `ERNIE-5.0`, `ERNIE-4.5-Turbo-128K`.
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
@@ -202,7 +202,7 @@ The production connection's route, unchanged: the one route that sends the DSH a
 | `deepseek-v4-pro` | DeepSeek V4 Pro High | 1,000,000 | `function` | `none` |
 | `deepseek-flash` | DeepSeek V4.1 Flash | 1,000,000 | `none` | `none` |
 
-Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-pro`, `deepseek-flash`; stream untested for every model; functionTools supported for `deepseek-v4-pro`, untested for the other 1.
+Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-pro`, `deepseek-flash`; stream supported for `deepseek-v4-pro`, `deepseek-flash`; functionTools supported for `deepseek-v4-pro`, `deepseek-flash`.
 
 Inert: 0 of 2 (no declared answer channel). Established:
 
@@ -258,7 +258,7 @@ The endpoint is the models collection: the shape addresses the model in the path
 | `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | 1,048,576 | `none` | `none` |
 | `gemini-2.5-pro` | Gemini 2.5 Pro | 1,048,576 | `none` | `none` |
 
-Dispositions (`google-generate-content`): text supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`; stream untested for every model; functionTools untested for every model.
+Dispositions (`google-generate-content`): text supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`; stream supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`; functionTools supported for `gemini-3.8-flash`, `gemini-3.1-pro-preview`, `gemini-2.5-pro`.
 
 Inert: 0 of 3 (no declared answer channel). Established:
 
@@ -306,7 +306,7 @@ Open:
 | `MiniMax-M2.7` | MiniMax M2.7 | none | `none` | `none` |
 | `MiniMax-M2.5` | MiniMax M2.5 | none | `none` | `none` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.5`; stream supported for `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.5`; functionTools supported for `MiniMax-M3`, `MiniMax-M2.7`, `MiniMax-M2.5`.
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
@@ -353,7 +353,7 @@ The search tool is declared per model, for exactly the two the reading names: re
 | `kimi-k2.7-code` | Kimi K2.7 Code | 256,000 | `none` | `none` |
 | `kimi-k2.6` | Kimi K2.6 | 256,000 | `none` | `provider-tool` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`; stream supported for `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`; functionTools supported for `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`.
 
 Inert: 3 of 3 (no declared answer channel). Established:
 
@@ -401,7 +401,7 @@ Buffered text only with max_output_tokens 8192. The explicit synthetic connectio
 | `gpt-5.6-terra` | GPT-5.6 Terra | 1,050,000 | `none` | `provider-tool` |
 | `gpt-5.6-luna` | GPT-5.6 Luna | 1,050,000 | `none` | `provider-tool` |
 
-Dispositions (`openai-responses`): text supported for `gpt-5.6-sol`, `gpt-5.6-luna`, untested for the other 2; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-responses`): text supported for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`; stream supported for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`; functionTools supported for `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`.
 
 Inert: 2 of 4 (no declared answer channel). Established:
 
@@ -458,7 +458,7 @@ The developer-live route of Provider Processing v18 (ADR 0065, ADR 0067), select
 | `kimi-k2.6` | Kimi K2.6（OpenCode Go） | none | `none` | `none` |
 | `deepseek-v4-flash-vision-exp` | DeepSeek V4 Flash Vision Exp（OpenCode Go） | none | `none` | `none` |
 
-Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, untested for the other 9; stream supported for `deepseek-v4.1-flash`, untested for the other 10; functionTools supported for `deepseek-v4.1-flash`, untested for the other 10.
+Dispositions (`openai-chat-completions`): text supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`; stream supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`; functionTools supported for `deepseek-v4-flash`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `kimi-k3`, `kimi-k2.7-code`, `kimi-k2.6`, `deepseek-v4-flash-vision-exp`.
 
 Inert: 9 of 11 (no declared answer channel). Established:
 
@@ -500,7 +500,7 @@ The same plan, account and credential slot over the Anthropic-compatible path. T
 | `minimax-m2.7` | MiniMax M2.7（OpenCode Go） | none | `none` | `none` |
 | `minimax-m2.5` | MiniMax M2.5（OpenCode Go） | none | `none` | `none` |
 
-Dispositions (`anthropic-messages`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`anthropic-messages`): text supported for `qwen3.7-plus`, `qwen3.6-plus`, `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`; stream supported for `qwen3.7-plus`, `qwen3.6-plus`, `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`; functionTools supported for `qwen3.7-plus`, `qwen3.6-plus`, `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`.
 
 Inert: 5 of 5 (no declared answer channel). Established:
 
@@ -526,7 +526,7 @@ The same plan over the OpenAI-compatible Responses path. `max_output_tokens` is 
 | `grok-4.6` | Grok 4.6（OpenCode Go） | none | `none` | `none` |
 | `gpt-5.6-luna` | GPT 5.6 Luna（OpenCode Go） | none | `none` | `none` |
 
-Dispositions (`openai-responses`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-responses`): text supported for `grok-4.6`, `gpt-5.6-luna`; stream supported for `grok-4.6`, `gpt-5.6-luna`; functionTools supported for `grok-4.6`, `gpt-5.6-luna`.
 
 Inert: 2 of 2 (no declared answer channel). Established:
 
@@ -562,7 +562,7 @@ Open:
 
 | | |
 | --- | --- |
-| Endpoint | `https://opencode.ai/zen/v1/chat/completions` |
+| Endpoint | `https://opencode.ai/inference/openai/v1/chat/completions` |
 | Request shape | `openai-chat-completions` |
 | Display name | OpenCode Zen · Chat Completions |
 | Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
@@ -593,18 +593,18 @@ The Zen page's `chat/completions` rows. A spend limit on this gateway ends the R
 | `kimi-k3` | Kimi K3（OpenCode Zen） | none | `none` | `none` |
 | `mistral-large-4` | Mistral Large 4（OpenCode Zen） | none | `none` | `none` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `qwen3.8-max`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k2.5`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `mistral-large-4`; stream supported for `qwen3.8-max`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k2.5`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `mistral-large-4`; functionTools supported for `qwen3.8-max`, `deepseek-v4.1-flash`, `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `minimax-m3`, `minimax-m2.7`, `minimax-m2.5`, `glm-5.3-flash`, `glm-5.3`, `glm-5.2`, `glm-5.1`, `glm-5`, `kimi-k2.5`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `mistral-large-4`.
 
 Inert: 18 of 18 (no declared answer channel). Established:
 
-- every model · `requestShape: openai-chat-completions` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
+- every model · `requestShape: openai-chat-completions` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 ### `opencode-zen-messages`
 
 | | |
 | --- | --- |
-| Endpoint | `https://opencode.ai/zen/v1/messages` |
+| Endpoint | `https://opencode.ai/inference/anthropic/v1/messages` |
 | Request shape | `anthropic-messages` |
 | Display name | OpenCode Zen · Messages |
 | Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
@@ -636,18 +636,18 @@ The Zen page's `/messages` rows. The shape requires a per-turn output cap; the r
 | `qwen3.6-plus` | Qwen3.6 Plus（OpenCode Zen） | none | `none` | `none` |
 | `qwen3.5-plus` | Qwen3.5 Plus（OpenCode Zen） | none | `none` | `none` |
 
-Dispositions (`anthropic-messages`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`anthropic-messages`): text supported for `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-haiku-5-5`, `claude-haiku-4-5`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus`; stream supported for `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-haiku-5-5`, `claude-haiku-4-5`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus`; functionTools supported for `claude-fable-5-1`, `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7`, `claude-opus-4-6`, `claude-opus-4-5`, `claude-sonnet-5-5`, `claude-sonnet-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-haiku-5-5`, `claude-haiku-4-5`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-plus`, `qwen3.5-plus`.
 
 Inert: 19 of 19 (no declared answer channel). Established:
 
-- every model · `requestShape: anthropic-messages` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
+- every model · `requestShape: anthropic-messages` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 ### `opencode-zen-responses`
 
 | | |
 | --- | --- |
-| Endpoint | `https://opencode.ai/zen/v1/responses` |
+| Endpoint | `https://opencode.ai/inference/openai/v1/responses` |
 | Request shape | `openai-responses` |
 | Display name | OpenCode Zen · Responses |
 | Limit reading | `account-limit-terminal` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09 |
@@ -690,23 +690,23 @@ The Zen page's `/responses` rows. `max_output_tokens` is optional on this shape,
 | `muse-spark-1.3` | Muse Spark 1.3（OpenCode Zen） | none | `none` | `none` |
 | `muse-spark-1.2` | Muse Spark 1.2（OpenCode Zen） | none | `none` | `none` |
 
-Dispositions (`openai-responses`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-responses`): text supported for `gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5`, `gpt-5-codex`, `gpt-5-nano`, `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-build-0.1`, `muse-spark-1.3`, `muse-spark-1.2`; stream supported for `gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5`, `gpt-5-codex`, `gpt-5-nano`, `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-build-0.1`, `muse-spark-1.3`, `muse-spark-1.2`; functionTools supported for `gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.5-pro`, `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, `gpt-5.4-nano`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `gpt-5.2`, `gpt-5.2-codex`, `gpt-5.1`, `gpt-5.1-codex`, `gpt-5.1-codex-max`, `gpt-5.1-codex-mini`, `gpt-5`, `gpt-5-codex`, `gpt-5-nano`, `grok-4.7`, `grok-4.6`, `grok-4.5`, `grok-build-0.1`, `muse-spark-1.3`, `muse-spark-1.2`.
 
 Inert: 30 of 30 (no declared answer channel). Established:
 
-- every model · `requestShape: openai-responses` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
+- every model · `requestShape: openai-responses` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02
 - every model · `webSearchTool: none` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09
 
 Readings:
 
 - `zen-page` — `vendor-documentation`, OpenCode Zen https://opencode.ai/docs/zen/ (read as https://opencode.ai/docs/zen.md), Endpoints table and API examples, read 2026-10-09. The Endpoints table prints each model's id and its endpoint under `https://opencode.ai/zen/v1/`; the API examples send `Authorization: Bearer $OPENCODE_API_KEY`. Zen is pay-as-you-go: charged per request against credits, with auto-reload and a monthly usage limit per workspace and member beyond which Zen is not used — the account limit the route reads a limit-shaped response as, the response's own shape being undocumented. The page names no session header, and mentions no tool, web search or web fetch anywhere: the gateway wire API carries no search tool of its own, as the 2026-09-11 reading of the Go, Zen and Tools pages found (ADR 0080 §3, §5.2).
+- `console-inference-20261102` — `vendor-documentation`, https://opencode.ai/docs/zen/ and https://opencode.ai/v2/docs/console/harnesses, read 2026-11-02. Console Endpoints and Harnesses Base URLs document the native OpenAI Chat Completions/Responses and Anthropic Messages APIs under /inference. The Models page documents GET https://opencode.ai/inference/v1/models. AI7 uses its implemented protocol-family readers under Wave23 channel admission; no live account check is claimed.
 
 Open:
 
-- The Zen page's Gemini rows are reached at `https://opencode.ai/zen/v1/models/<id>`; whether that path takes the `:generateContent` request the implemented shape appends is not stated, so no route is declared for them.
-- Excluded from this reading: every limited-time free model the page lists (the `-free` ids and Big Pickle), because a trial that ends is not a supported model, and the Jev rows on `/systemone`, which is not a chat shape.
-- The page names no session header for Zen, so no route sends one; whether any model accepts a request at all is settled only by a named live test item under ADR 0067.
-- Text answer untested for every model (Issue #1225): read again on 2026-10-31, https://opencode.ai/docs/zen/ (`/docs/zen.md` now 404) is titled Models under OpenCode Console, lists all twelve v32-bound ids with endpoints under `https://opencode.ai/inference/openai/v1/` and `https://opencode.ai/inference/anthropic/v1/` instead of the `https://opencode.ai/zen/v1/` endpoints this document and Provider Processing v32 bind, says every text model also works through the other APIs, and states no response format, answer field or usage field. No answer channel is declared until a page states it or a named live item records it; the endpoint change is recorded here, not resolved, because the endpoints are policy bindings.
+- Endpoint drift #1267 is repaired under Wave23 #1279/#1283: the three implemented Zen routes use /inference/openai/v1 or /inference/anthropic/v1, and discovery uses /inference/v1/models. Selected policy v33 already admits these hosts, protocol families and credential slots; its bytes and all predecessor identities remain unchanged.
+- Free-tier chat models require OpenCode and may return HTTP403 from third-party clients; account availability is determined by discovery or an explicit connection test. Jev/SystemOne is not an implemented text protocol.
+- No live Zen connection was performed for this repair. Documentary protocol compatibility does not establish account availability, response quality, cost or live model validation.
 
 ## 腾讯混元
 
@@ -735,7 +735,7 @@ Context is the input limit the page states separately from the window.
 | `hy4-preview` | HY4 Preview | 960,000 | `none` | `provider-tool` |
 | `hy3` | HY3 | 192,000 | `none` | `provider-tool` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `hy4-preview`, `hy3`; stream supported for `hy4-preview`, `hy3`; functionTools supported for `hy4-preview`, `hy3`.
 
 Inert: 2 of 2 (no declared answer channel). Established:
 
@@ -782,7 +782,7 @@ The adapter sends the Bearer form, which the page lists beside `api-key:`.
 | `mimo-v2.5-pro` | MiMo-V2.5-Pro | 1,000,000 | `function` | `provider-tool` |
 | `mimo-v2.5` | MiMo-V2.5 | 1,000,000 | `function` | `provider-tool` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools supported for `mimo-v2.5-pro`, `mimo-v2.5`.
+Dispositions (`openai-chat-completions`): text supported for `mimo-v2.5-pro`, `mimo-v2.5`; stream supported for `mimo-v2.5-pro`, `mimo-v2.5`; functionTools supported for `mimo-v2.5-pro`, `mimo-v2.5`.
 
 Inert: 2 of 2 (no declared answer channel). Established:
 
@@ -829,7 +829,7 @@ Open:
 | `glm-5.2` | GLM-5.2 | 1,000,000 | `none` | `provider-tool` |
 | `glm-4.6` | GLM-4.6 | 200,000 | `none` | `provider-tool` |
 
-Dispositions (`openai-chat-completions`): text untested for every model; stream untested for every model; functionTools untested for every model.
+Dispositions (`openai-chat-completions`): text supported for `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `glm-4.6`; stream supported for `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `glm-4.6`; functionTools supported for `glm-5.3`, `glm-5.3-flash`, `glm-5.2`, `glm-4.6`.
 
 Inert: 4 of 4 (no declared answer channel). Established:
 

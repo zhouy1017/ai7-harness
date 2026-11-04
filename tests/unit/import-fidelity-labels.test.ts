@@ -10,6 +10,7 @@ import {
   commitNote,
   conversionNoteText,
   fidelityCountText,
+  fidelityDetailText,
   fidelityDisclosureSummary,
   fidelityOutcomeLabel,
   fidelityPillText,
@@ -26,6 +27,12 @@ import {
   wordImportModeOption,
   wordIntakeRefusalLabel,
 } from '../../src/renderer/import-fidelity-labels.js';
+
+it('projects historical report terminology without changing its recorded text (#1287)', () => {
+  const recorded = Object.freeze({ detail: '可编辑内容块仅保留文字顺序。' });
+  expect(fidelityDetailText(recorded.detail)).toBe('可编辑段落仅保留文字顺序。');
+  expect(recorded.detail).toBe('可编辑内容块仅保留文字顺序。');
+});
 import { SAMPLE1_V1_REPORT } from '../support/import-retention.js';
 
 // Unit suite for the words of ④ 保真审阅 (Issue #410; ADR 0086). The reports are built by the service's own

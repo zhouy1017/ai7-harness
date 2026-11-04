@@ -741,7 +741,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(prepared.planVersion).toMatchObject({ ordinal: 1, state: 'current', planRevisionId: null, planEnvelopeDigest: prepared.planEnvelope!.digest });
       expect(prepared.planVersion?.materialInputs).toEqual({
         selectedPolicyIdentity: { providerProcessingVersion: 'v1', providerProcessingSha256: 'd9dfe8c13a58649d8d9f607364030468ae71832b94c9436291d29000795d725a',
-          activePolicySetVersion: 'v23', activePolicySetSha256: 'fe666f4a92b7a82503d69b345233cbec7a93846f97e10027524d7e3d3a76f2ab' },
+          activePolicySetVersion: 'v24', activePolicySetSha256: '092a858cac7e0eb03b2a978d3df60a9801185f9825c9ce7d4f24004537b64641' },
         providerBinding: { providerId: 'deepseek-open-platform', modelId: 'deepseek-v4-pro', adapterRevision: 1, configurationRevision: 1, credentialReference },
         artifactPin: { identity: '@ai7/editorial-workspace-profile', version: '1.0.0', nativeCarrierSha256: 'ae485040c8fa602ab2e98ec91dd122201d40a8be41d8a4f86f7cd55ddb1e434d', sidecarRevision: 2, sidecarSha256: '980b565f25bdff29e539365e17344346017b05146a45cfea35c8ed7d528a1bff' },
         selectedRange: null,
@@ -967,9 +967,9 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       expect(prepare(store, bookId, { mode: 'reanalyze-range', selectedRange: { startPosition: 20, endPosition: 20 } }).taskIntent?.taskIntentId)
         .toBe(prepared.taskIntent?.taskIntentId);
       const plan = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId });
-      expect(plan.scope.process).toMatch(/· 重新分析 2 个阅读范围（内容块 15–43），沿用 6 个$/u);
-      expect(plan.steps[0]!.label).toBe('逐章读取（重新读取 内容块 15–43，沿用其余 6 个阅读范围）');
-      expect(plan.notDo.editorial).toContain('不重新读取内容块 15–43以外的正文');
+      expect(plan.scope.process).toMatch(/· 重新分析 2 个阅读范围（段落 15–43），沿用 6 个$/u);
+      expect(plan.steps[0]!.label).toBe('逐章读取（重新读取 段落 15–43，沿用其余 6 个阅读范围）');
+      expect(plan.notDo.editorial).toContain('不重新读取段落 15–43以外的正文');
       expect(plan.notDo.editorial).not.toContain('不重新读取所选范围以外的正文');
       // 重新确认计划 names the range by position, as the plan froze it: once another block stands at 20, it is refused rather than
       // read the neighbour (Issue #423 review, P3-4). Written beside the open store, as a structural change would leave it.

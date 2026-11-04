@@ -34,7 +34,7 @@ function result(run = RUN, id = RESULT): FactualVerificationResultProjection {
 
 // The category's stored finding row: the production render path lists the 事实核查 group, and its Lens, only beside it.
 function finding(): ReviewFindingProjection {
-  return { findingId: 'rvf_000000000000000000000001', categoryId: 'factual-review', categoryLabel: '事实核查', ordinal: 1, severity: 'must', severityLabel: '必须处理',
+  return { findingId: result().reviewFindingId!, categoryId: 'factual-review', categoryLabel: '事实核查', ordinal: 1, severity: 'must', severityLabel: '必须处理',
     output: 'annotation', riskPoint: false, status: 'pending', statusLabel: '待处理', statusDetail: '公开合成状态', blockId: 'blk_777777777777777777777777',
     fromGrapheme: 0, toGrapheme: 8, blockPosition: 0, chapterBlockId: null, chapterTitle: null, quote: '公开合成核查文字', note: '公开合成核查问题',
     replacement: null, clauseRefs: [], stateLine: '未外部复核', markId: RESULT, markStatus: 'open', anchorState: 'exact', ignoreReason: null, historicalMarker: null };
@@ -112,6 +112,27 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
+  it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {
+    const view = mount('settled'); await flush();
+    expect(view.root.textContent).toContain('证据支持');
+    expect(view.root.textContent).not.toContain('未外部复核');
+    expect(view.root.querySelectorAll('.review-finding-quote').length).toBe(1);
+    expect(view.root.querySelectorAll('.fact-lens-row .review-finding').length).toBe(1);
+    expect(view.root.querySelectorAll('.fact-lens-row [data-review-action="mark-handled"]').length).toBe(1);
+    view.root.querySelector('[data-fact-action="fact-workspace"]')!.click(); await flush();
+    expect(view.root.querySelectorAll('.review-finding-quote')).toHaveLength(1);
+    expect(view.root.querySelectorAll('.evidence-workspace')).toHaveLength(1);
+  });
+
+  it('keeps findings actionable when a partial run produced no evidence result', async () => {
+    const view = mount('failed');
+    view.inspectFactualVerification.mockResolvedValue(lens(RUN, [])); await flush();
+    expect(view.root.querySelectorAll('.fact-lens-row').length).toBe(0);
+    expect(view.root.textContent).toContain('未外部复核');
+    expect(view.root.querySelectorAll('.review-finding-quote').length).toBe(1);
+    expect(view.root.querySelectorAll('[data-review-action="mark-handled"]').length).toBe(1);
+  });
+
   it.each(['failed', 'interrupted', 'settled'] as const)('reads actual %s result IDs and opens their exact Evidence Workspace', async (state) => {
     const view = mount(state);
     await flush();

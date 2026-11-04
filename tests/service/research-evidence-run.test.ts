@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,7 +9,7 @@ import { DEVELOPER_LIVE_POLICY_BINDING, resolveSourceCheckoutLaunchPolicy } from
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { parseFactualReviewUnitMessageHeader } from '../../src/service/analysis/factual-review-contract.js';
 import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/assurance-sampling-contract.js';
-import { SOURCE_TRANSLATION_NOT_ADMITTED } from '../../src/service/analysis/factual-review-evidence.js';
+import { SOURCE_TRANSLATION_UNAVAILABLE } from '../../src/service/analysis/factual-review-evidence.js';
 import { RESEARCH_EVIDENCE_INCOMPLETE, RESEARCH_EVIDENCE_READ_ONLY } from '../../src/service/research-evidence.js';
 import { findingResearchLines, researchUnitLine } from '../../src/renderer/research-evidence-labels.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
@@ -211,9 +212,9 @@ describe('a research Run of 事实核查 retains its external evidence', () => {
     // The page AI7 could not get keeps the excerpt the search returned: 来源仅片段, partly matching the quoted words.
     expect(byUrl.get(WIKI)).toMatchObject({ captureState: 'snippet-only', captureLabel: '来源仅片段', pageSha256: null, alignment: 'partial', alignmentLabel: '部分对应',
       saveRefusal: RESEARCH_EVIDENCE_INCOMPLETE });
-    // A non-Chinese source: no translation is produced while no rule names one, and the original is kept as captured.
+    // A non-Chinese source: the rule admits translation, but this isolated owner has no Fast translator; keep the original.
     expect(byUrl.get(ENGLISH)).toMatchObject({ captureState: 'full-text', alignment: 'unaligned', alignmentLabel: '未能对应', anchors: [],
-      translation: { state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED } });
+      translation: { state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE } });
     expect(byUrl.get(ENGLISH)!.passage?.startsWith('The vessel')).toBe(true);
 
     // Every researched unit says how its search ended; unit 1 searched, the others never did.
@@ -300,8 +301,8 @@ describe('a research Run of 事实核查 retains its external evidence', () => {
     store.startMaterialIndexing();
     await store.settleMaterialIndexing();
     expect(() => store.pinMaterialReference(bookId, saved.material.materialId)).toThrow(expect.objectContaining({ code: 'MATERIAL_REFERENCE_UNAVAILABLE' }));
-    store.decideLibraryMaterial({ materialId: saved.material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
-    store.decideLibraryMaterial({ materialId: saved.material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+    setLibraryDecision(store, { materialId: saved.material.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId } } });
+    setLibraryDecision(store, { materialId: saved.material.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
     const pin = store.pinMaterialReference(bookId, saved.material.materialId);
     const watch = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });
     try {

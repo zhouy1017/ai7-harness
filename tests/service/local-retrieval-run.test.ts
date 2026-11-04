@@ -1,3 +1,4 @@
+import { setLibraryDecision } from '../support/library-materials.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -126,8 +127,8 @@ describe('registered local retrieval in a non-web authorized Run', () => {
         writeFileSync(path, text);
         const preview = await s.store.previewLibraryMaterial(path);
         const added = await s.store.addLibraryMaterial({ previewId: preview.previewId, title, kind: 'document' });
-        s.store.decideLibraryMaterial({ materialId: added.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: s.book.bookId } } });
-        s.store.decideLibraryMaterial({ materialId: added.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
+        setLibraryDecision(s.store, { materialId: added.materialId, expectedDecisions: 0, decision: { kind: 'attribution', attribution: { scope: 'book', bookId: s.book.bookId } } });
+        setLibraryDecision(s.store, { materialId: added.materialId, expectedDecisions: 1, decision: { kind: 'eligibility', choice: 'book', reason: null } });
         return added.materialId;
       };
       const pinned = await material('合成词表甲', 'zqxpinned alpha beta\n\nzqxpinned gamma');

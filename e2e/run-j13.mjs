@@ -372,7 +372,7 @@ async function openSeries(renderer, seriesId, name) {
 async function leaveSeries(renderer, name) {
   await click(renderer, '返回书系', `${name}-list`);
   await waitFor(renderer, `document.querySelector('[data-screen="series-list"] .series-list-page')?.dataset.seriesCount !== undefined`, `${name}-listed`);
-  await click(renderer, '返回', `${name}-landing`);
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), `${name}-landing`);
   await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, `${name}-library`);
 }
 
@@ -1228,11 +1228,6 @@ async function main() {
     await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(member)}]`, 'consistency-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'consistency-overview');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="install-disabled"]')`, 'consistency-artifact-install-ready');
-    await click(renderer, '获取并安装（保持停用）', 'consistency-artifact-install');
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'consistency-artifact-enable-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'consistency-artifact-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'consistency-artifact-enabled');
     await backToLibrary(renderer, 'consistency-model');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'consistency-model-open-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'consistency-model-open-settings-hub');
@@ -1241,21 +1236,22 @@ async function main() {
     cancellation.throwIfRequested();
     syntheticSecret = randomBytes(48).toString('base64url');
     credentialRenderer = renderer;
+    await renderer.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
     await fill(renderer, '#main-editorial-connection-name', 'J-13 主编辑连接', 'consistency-model-name');
     await fill(renderer, '#main-editorial-credential', syntheticSecret, 'consistency-model-secret');
     cancellation.throwIfRequested();
     credentialMutationReached = true;
-    await click(renderer, '保护并保存', 'consistency-model-save');
+    await click(renderer, '保存并获取模型', 'consistency-model-save');
     at('model-credential-saved');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'consistency-model-saved');
     const readyConnection = await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(UUID_PATTERN.test(readyConnection?.credentialReference ?? '') && readyConnection?.credentialOperationState === 'ready', 'consistency-model-ready-reference');
     credentialReferenceForCleanup = readyConnection.credentialReference;
-    await click(renderer, '移除', 'consistency-model-remove');
+    await click(renderer, '移除凭据', 'consistency-model-remove');
     at('model-credential-removed');
     await waitFor(renderer, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='setup-required' && document.querySelector('[data-credential-state="missing"]')`, 'consistency-model-removed');
     credentialRemoved = true;
-    await click(renderer, '返回', 'consistency-model-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'consistency-model-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work article.book-summary-item')`, 'consistency-model-library');
 
     at('consistency-offered');
@@ -1822,10 +1818,10 @@ async function main() {
     at('capture-save');
     // 保存为可复用工序: version 1, 待验证 — nothing runs, and the document holds nothing of the Book.
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'capture-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 1 版 · 待验证；在知识库「工序与规则」里验证并启用后才能运行。`)}`, 'capture-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'capture-saved');
     const savedProcedures = await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`);
     const procedureId = savedProcedures?.procedures?.[0]?.procedureId;
-    requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') && savedProcedures.procedures[0].latestState === 'pending-validation',
+    requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') && savedProcedures.procedures[0].latestState === 'enabled',
       'capture-saved-service', savedProcedures?.procedures?.[0]);
     const savedVersion = (await renderer.evaluate(`window.ai7.inspectCapturedProcedure({ procedureId: ${JSON.stringify(procedureId)}, before: null })`))?.versions?.[0];
     // Its source is the Run this stage ran, by identity, not only by the words that name it.
@@ -1856,37 +1852,18 @@ async function main() {
     // previews version 1 — today's 体例条款 the same as the source Run's — and 确认启用 makes it 已启用, solid, runnable.
     await leaveReviewToLibrary(renderer, 'validate-leave');
     await openProcedures(renderer, 'validate');
-    const pending = await readProcedures(renderer, (page) => page.count === '1' && page.proposalCount === '1', 'validate-listed');
-    requireJourney(pending.procedures[0].title === `《${PROCEDURE_TITLE}》` && pending.procedures[0].runnable === 'false' && !pending.procedures[0].run &&
-      pending.procedures[0].latest === 'pending-validation' && pending.procedures[0].pill === '待验证' && pending.procedures[0].pillBorder === 'dashed' &&
-      pending.procedures[0].versions.length === 0 && pending.proposals[0].title === `《${PROPOSAL_TITLE}》` && pending.proposals[0].versionCount === '1',
-    'validate-pending', pending);
+    const enabled = await readProcedures(renderer, (page) => page.count === '1' && page.proposalCount === '1', 'validate-listed');
+    requireJourney(enabled.procedures[0].runnable === 'true' && enabled.procedures[0].run && enabled.procedures[0].latest === 'enabled' && enabled.procedures[0].pill === '已启用', 'capture-saved-enabled', enabled);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'validate-versions');
-    const opened = await readProcedures(renderer, (page) => page.procedures[0]?.versions.length === 1, 'validate-versions-open');
-    // The member Book's third Review Run: its first finished and its second stopped at the 书系检索排除 (S29b) above.
-    requireJourney(opened.procedures[0].versions[0].source.startsWith(`来自《${MEMBER}》第 3 次审阅`) &&
-      JSON.stringify(opened.procedures[0].versions[0].actions) === JSON.stringify(['validate', 'stop']), 'validate-version-words', opened.procedures[0].versions[0]);
-    await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="1"] [data-procedure-action="validate"]`, 'validate-open');
-    const validationPreview = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.validation === 'true', 'validate-preview');
-    requireJourney(JSON.stringify(validationPreview.procedures[0].versions[0].guidelines) === JSON.stringify(['体例条款（AI7 内置默认）第 1 版 · 与来源审阅相同']),
-      'validate-preview-words', validationPreview.procedures[0].versions[0]);
-    await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-validation h5')`, 'validate-preview-focused', 10_000);
-    await clickSelector(renderer, '.captured-procedure-validation [data-procedure-action="confirm-enable"]', 'validate-confirm');
-    const enabled = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'validate-enabled');
-    requireJourney(enabled.procedures[0].runnable === 'true' && enabled.procedures[0].run && enabled.procedures[0].pill === '已启用' &&
-      enabled.procedures[0].pillBorder === 'solid' && enabled.procedures[0].versions[0].validation === null, 'validate-enabled-card', enabled.procedures[0]);
-    await waitFor(renderer, `${status}===${JSON.stringify(`已启用《${PROCEDURE_TITLE}》第 1 版；在一本书的新建审阅里可以按它运行。`)}`, 'validate-enabled-status', 10_000);
+    await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'validate-enabled');
 
     at('capture-run-second-book');
     // A second Book from exact sample1 (this window's picker answer), a distinct intended work, its 方案 enabled. 运行此工序…
     // opens its 审阅 with 新建审阅 filled from version 1 — 体例与格式 ticked and locked, the whole book — and the ordinary plan and
     // 开始任务 run it; the Run pins version 1.
-    await click(renderer, '返回', 'run-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'run-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'run-landing');
     const targetBook = await importSample1(renderer, CAPTURE_TARGET_TITLE, sample1, 'run-import', true);
-    await waitFor(renderer, `document.querySelector('[data-native-artifact-action="enable-current-book"]')`, 'run-profile-ready');
-    await click(renderer, '审阅并为本图书启用 Revision 2', 'run-profile-enable');
-    await waitFor(renderer, `document.querySelector('.native-artifact-card')?.dataset.authoritySidecarActiveRevision==='2'`, 'run-profile-enabled', 60_000);
     await backToLibrary(renderer, 'run-profile');
     await openProcedures(renderer, 'run');
     await readProcedures(renderer, (page) => page.procedures[0]?.run === true, 'run-listed');
@@ -1908,7 +1885,7 @@ async function main() {
     })()`);
     requireJourney(filled.procedure === procedureId && JSON.stringify(filled.checked) === JSON.stringify(['style-and-format']) && filled.enabled.length === 0 &&
       filled.scope === 'whole' && filled.book === targetBook &&
-      JSON.stringify(filled.lines) === JSON.stringify([`按《${PROCEDURE_TITLE}》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划照常先看。`]), 'run-sheet-words', filled);
+      JSON.stringify(filled.lines) === JSON.stringify([`按《${PROCEDURE_TITLE}》第 1 版：体例与格式；范围「全书」。类别已按它选好，计划可按需查看。`]), 'run-sheet-words', filled);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'run-prepare');
     const ran = await startPreparedReview(renderer, 'run-review');
     requireJourney(ran?.state === 'settled' && JSON.stringify(ran.categories.map((category) => category.categoryId)) === JSON.stringify(['style-and-format']) &&
@@ -1927,17 +1904,10 @@ async function main() {
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.procedure-capture [data-capture-field="target"]'); if(!(select instanceof HTMLSelectElement))return false; select.value=${JSON.stringify(procedureId)}; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value===${JSON.stringify(procedureId)}; })()`, 'version-two-target');
     await readCapture(renderer, (read) => read.kept === 'style-and-format,literary-expression', 'version-two-kept');
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'version-two-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 2 版 · 待验证；在知识库「工序与规则」里验证并启用后才能运行。`)}`, 'version-two-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 2 版 · 已启用，可直接运行。`)}`, 'version-two-saved');
     await leaveReviewToLibrary(renderer, 'version-two-validate-leave');
     await openProcedures(renderer, 'version-two-validate');
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'version-two-versions');
-    const waitingTwo = await readProcedures(renderer, (page) => page.procedures[0]?.versions.length === 2, 'version-two-listed');
-    requireJourney(JSON.stringify(waitingTwo.procedures[0].versions.map((version) => [version.version, version.state, version.latestEligible])) ===
-      JSON.stringify([['2', 'pending-validation', 'false'], ['1', 'enabled', 'true']]) && waitingTwo.procedures[0].versions[1].eligiblePill === '最新可用',
-    'version-two-pending', waitingTwo.procedures[0].versions);
-    await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-version="2"] [data-procedure-action="validate"]`, 'version-two-validate');
-    await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.validation === 'true', 'version-two-preview');
-    await clickSelector(renderer, '.captured-procedure-validation [data-procedure-action="confirm-enable"]', 'version-two-confirm');
     const enabledTwo = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'version-two-enabled');
     requireJourney(JSON.stringify(enabledTwo.procedures[0].versions.map((version) => [version.version, version.state, version.latestEligible, version.eligiblePill])) ===
       JSON.stringify([['2', 'enabled', 'true', '最新可用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
@@ -1949,7 +1919,7 @@ async function main() {
     at('procedure-exact-version');
     // The second Book's 新建审阅 fills from version 2, 最新可用, both steps ticked; the version can be changed before the plan:
     // version 1 chosen instead says so, ticks its one step, and the prepared Run pins exactly version 1 (REUSE-054, REUSE-045).
-    await click(renderer, '返回', 'exact-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'exact-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'exact-landing');
     await openBookReview(renderer, CAPTURE_TARGET_TITLE, targetBook, 'exact-review');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'exact-new-review');
@@ -1958,7 +1928,7 @@ async function main() {
     const latestSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '2', 'exact-latest-filled');
     requireJourney(latestSheet.latestEligible === 'true' && JSON.stringify(latestSheet.options) === JSON.stringify(['第 2 版（最新可用）', '第 1 版']) &&
       latestSheet.chosen === 0 && latestSheet.versionDisabled === false && JSON.stringify(latestSheet.checked) === JSON.stringify(['style-and-format', 'literary-expression']) &&
-      latestSheet.lines[0] === `按《${PROCEDURE_TITLE}》第 2 版：体例与格式 → 文学性与表达改进；范围「全书」。类别已按它选好，计划照常先看。`, 'exact-latest-words', latestSheet);
+      latestSheet.lines[0] === `按《${PROCEDURE_TITLE}》第 2 版：体例与格式 → 文学性与表达改进；范围「全书」。类别已按它选好，计划可按需查看。`, 'exact-latest-words', latestSheet);
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure-version"]'); if(!(select instanceof HTMLSelectElement)||select.disabled)return false; select.selectedIndex=1; select.dispatchEvent(new Event('change',{bubbles:true})); const prepare=document.querySelector('dialog.review-sheet [data-review-action="prepare"]'); return prepare instanceof HTMLButtonElement && prepare.disabled && select.disabled && document.querySelector('.review-sheet-procedure')?.dataset.procedureLoading==='true'; })()`, 'exact-choose-version');
     // While the chosen version loads, 先看计划 and the selectors wait: nothing is prepared from the version on show before its
     // answer fills the sheet (S31 review P2-1).
@@ -2021,7 +1991,7 @@ async function main() {
     const allStopped = await readProcedures(renderer, (page) => page.procedures[0]?.runnable === 'false', 'stop-all-stopped');
     requireJourney(!allStopped.procedures[0].run && allStopped.procedures[0].pill === '已停用' && allStopped.procedures[0].pillBorder === 'dotted' &&
       allStopped.procedures[0].stopAll === null, 'stop-all-card', allStopped.procedures[0]);
-    await click(renderer, '返回', 'stop-all-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'stop-all-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'stop-all-landing');
 
     at('procedure-series-fixture-relaunch');
@@ -2046,7 +2016,7 @@ async function main() {
       'series-procedure-source-set', seriesCapture.steps);
     await fill(renderer, 'dialog.procedure-capture [data-capture-field="title"]', SERIES_PROCEDURE_TITLE, 'series-procedure-title');
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'series-procedure-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${SERIES_PROCEDURE_TITLE}》第 1 版 · 待验证；在知识库「工序与规则」里验证并启用后才能运行。`)}`, 'series-procedure-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${SERIES_PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'series-procedure-saved');
     const seriesProcedureId = (await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`))?.procedures?.find((entry) => entry.title === SERIES_PROCEDURE_TITLE)?.procedureId;
     requireJourney(UUID_PATTERN.test(seriesProcedureId ?? '') && seriesProcedureId !== procedureId, 'series-procedure-saved-service');
     await leaveReviewToLibrary(renderer, 'series-procedure-leave');
@@ -2056,11 +2026,8 @@ async function main() {
     const seriesPending = await readProcedures(renderer, (page) => seriesCard(page)?.versions.length === 1, 'series-procedure-listed');
     requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择。',
       'series-procedure-requirement', seriesCard(seriesPending).versions[0]);
-    await clickSelector(renderer, `[data-procedure-id="${seriesProcedureId}"] [data-version="1"] [data-procedure-action="validate"]`, 'series-procedure-validate');
-    await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.validation === 'true', 'series-procedure-preview');
-    await clickSelector(renderer, '.captured-procedure-validation [data-procedure-action="confirm-enable"]', 'series-procedure-confirm');
     await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.state === 'enabled' && seriesCard(page)?.run === true, 'series-procedure-enabled');
-    await click(renderer, '返回', 'series-procedure-back');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'series-procedure-back');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'series-procedure-landing');
 
     at('procedure-series-chosen-apart');
@@ -2076,9 +2043,7 @@ async function main() {
     requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序（自己选类别）', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')?.dataset.recommendationState==='clear' && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===''`, 'recommendation-clear-unselected');
-    await assertRenderer(renderer, `(() => { const slot=document.querySelector('dialog.review-sheet [data-procedure-recommendation]'); return slot?.textContent.includes('书系资料') && slot.textContent.includes('外部 Skill 在此版本没有执行器') && slot.querySelectorAll('[data-recommendation-version-id]').length===1; })()`, 'recommendation-purpose-rationale');
-    await clickSelector(renderer, 'dialog.review-sheet [data-recommendation-action="choose"]', 'recommendation-exact-choice');
+    await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
     // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
     await waitFor(renderer, `${status}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
@@ -2090,7 +2055,7 @@ async function main() {
     requireJourney(JSON.stringify(seriesSheet.checked) === JSON.stringify([]) && seriesBox?.checked === false && seriesBox.disabled === false && seriesBox.apart === 'true' &&
       JSON.stringify(seriesBox.open) === JSON.stringify(['series-consistency']) &&
       JSON.stringify(seriesSheet.lines) === JSON.stringify([
-        `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划照常先看。`,
+        `按《${SERIES_PROCEDURE_TITLE}》第 1 版：书系一致性；范围「全书」。要运行的类别由你勾选，计划可按需查看。`,
         '「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。',
       ]), 'series-sheet-chosen-apart', { sheet: seriesSheet, box: seriesBox });
     // Left unticked, nothing is prepared: the sheet says to choose a category.
@@ -2098,7 +2063,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet .review-sheet-problem')?.textContent==='请至少选择一个审阅类别。' && document.querySelector('dialog.review-sheet')?.open===true`, 'series-sheet-nothing-chosen');
     await clickSelector(renderer, 'dialog.review-sheet input[name="review-category"][value="series-consistency"]', 'series-sheet-tick');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet input[name="review-category"][value="series-consistency"]')?.checked===true`, 'series-sheet-ticked');
-    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')?.dataset.recommendationState==='stale' && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet [data-procedure-recommendation]')===null && document.querySelector('dialog.review-sheet [data-review-field="procedure"]')?.value===${JSON.stringify(seriesProcedureId)}`, 'recommendation-change-keeps-version');
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="prepare"]', 'series-sheet-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'series-prepared', 180_000);
     const seriesRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
@@ -2145,16 +2110,15 @@ async function main() {
     await waitFor(renderer, `${status}===${JSON.stringify('请至少勾选一个类别：不勾，这项工序就没有可以运行的步骤。')} && window.__j13.composer()?.dataset.markComposer === 'task-on-selection'`, 'selection-procedure-pick-category', 15_000);
     await clickSelector(renderer, '[data-mark-composer] input[data-mark-checkbox="series-consistency"]', 'selection-procedure-tick');
     await assertRenderer(renderer, `window.__j13.act('submit')`, 'selection-procedure-submit');
-    await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawerView === 'plan' && drawer.dataset.taskPlanKind === 'review-run' && drawer.dataset.taskPlanStart === 'ready' && window.__j13.composer() === null && (drawer.textContent ?? '').includes('按 1 类审阅所选段落：书系一致性'); })()`, 'selection-procedure-plan', 180_000);
-    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), procedure: workspace.run.procedure })`);
-    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.state === 'prepared' && selectionRun.scope?.kind === 'selection' &&
+    await waitFor(renderer, `window.__j13.composer()===null && window.ai7.inspectReviewWorkspace({reviewRunId:null}).then(page=>page.run?.authorization!==null && page.run?.state!=='prepared')`, 'selection-procedure-started', 180_000);
+    const selectionRun = await renderer.evaluate(`window.ai7.inspectReviewWorkspace({ reviewRunId: null }).then((workspace) => workspace.run === null ? null : { reviewRunId: workspace.run.reviewRunId, state: workspace.run.state, scope: workspace.run.scope, categories: workspace.run.categories.map((category) => category.categoryId), procedure: workspace.run.procedure, authorization: workspace.run.authorization })`);
+    requireJourney(UUID_PATTERN.test(selectionRun?.reviewRunId ?? '') && selectionRun.authorization !== null && selectionRun.state !== 'prepared' && selectionRun.scope?.kind === 'selection' &&
       selectionRun.scope.selection?.fromBlockId === selectionBlock && selectionRun.scope.selection.toBlockId === selectionBlock &&
       JSON.stringify(selectionRun.categories) === JSON.stringify(['series-consistency']) && selectionRun.procedure?.procedureId === seriesProcedureId &&
       selectionRun.procedure.version === 1 && JSON.stringify(selectionRun.procedure.leftOut) === JSON.stringify([]), 'selection-procedure-pinned', selectionRun);
-    // ← 任务: the card names the paragraph and offers 跳到所选文字 beside its next step.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="tasks"]', 'selection-procedure-tasks');
-    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-state="review-prepared"]`;
-    await waitFor(renderer, `(() => { const card = document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card !== null && (card.querySelector('.task-card-title')?.textContent ?? '').endsWith(' · 所选段落') && JSON.stringify(Array.from(card.querySelectorAll('[data-task-action]'), (button) => [button.dataset.taskAction, button.textContent, button.disabled])) === JSON.stringify([['next', '查看计划并开始', false], ['jump', '跳到所选文字', false]]); })()`, 'selection-procedure-card', 30_000);
+    await clickSelector(renderer, '[data-screen="editor"] [data-edge-entry="tasks"]', 'selection-procedure-tasks');
+    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-item-id$="${selectionRun.reviewRunId}"]`;
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card!==null && (card.querySelector('.task-card-title')?.textContent??'').endsWith(' · 所选段落') && card.querySelector('[data-task-action="jump"]')?.disabled===false;})()`, 'selection-procedure-card', 30_000);
     // With the caret put on another paragraph of the window, 跳到所选文字 brings it back onto the Task's paragraph; the panel stays.
     const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(selectionBlock)})?.dataset.blockId ?? null`);
     requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-procedure-away-block');

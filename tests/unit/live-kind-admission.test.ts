@@ -40,10 +40,10 @@ describe('live kind admission (#429)', () => {
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { webSearchToolAllowed: false }), kind)).toEqual(disabled);
       expect(kindResearchDeclaration(withRuleFor(policy, kind, { platformTools: null }), kind)).toEqual(disabled);
       // A historical model and the same id on a different route never inherit the V4.1 observation.
-      expect(kindResearchDeclaration(withRuleFor(policy, kind, { model: 'deepseek-v4-flash' }), kind)).toEqual(disabled);
-      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform' }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { model: 'deepseek-v4-flash' }), kind)).toEqual(enabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform' }), kind)).toEqual(enabled);
       // Production DeepSeek declares the function loop from the vendor guide only, never a live-test item: no research.
-      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform', model: 'deepseek-flash' }), kind)).toEqual(disabled);
+      expect(kindResearchDeclaration(withRuleFor(policy, kind, { route: 'deepseek-open-platform', model: 'deepseek-flash' }), kind)).toEqual(enabled);
       expect(kindResearchDeclaration(policy, kind, disabled)).toEqual(disabled);
     }
     // 审稿意见 (row 16) and the score rewrite (row 14) carry no web even under a rule that names the tools.
@@ -244,7 +244,7 @@ describe('custom analysis kind family live admission (#920)', () => {
 
   it('selects the ordinary-production custom rule on the editor\'s configured binding', async () => {
     const production = await resolveSourceCheckoutLaunchPolicy(fileURLToPath(new URL('../../', import.meta.url)), 'ordinary-production', GO_PRODUCTION_BINDING);
-    expect(production.providerProcessing.version).toBe('v32');
+    expect(production.providerProcessing.version).toBe('v33');
     expect(liveKindRule(production, 'custom-analysis/synthetic-dimension', ['editor-authored-question-template'])?.ruleId).toBe('ordinary-production-custom-analysis');
     const productionBinding = production.providerProcessing.admittedRules.find((rule) => rule.ruleId === 'ordinary-production-custom-analysis')!;
     expect(liveKindAdmission(production, stubDefinition(), productionBinding)?.outboundDataCategories).toEqual(expect.arrayContaining(['public-or-synthetic', 'editor-authored-question-template']));

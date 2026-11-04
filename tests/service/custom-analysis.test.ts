@@ -92,7 +92,6 @@ function refusal(run: () => unknown): string {
 function defineDimension(book: Book, title = CUSTOM_DIMENSION_TITLE): { dimensionId: string; versionId: string } {
   const saved = book.store.saveCustomAnalysisDimension({ dimensionId: null, title, questionTemplate: CUSTOM_DIMENSION_TEMPLATE });
   const dimension = saved.dimensions.find((entry) => entry.title === title)!;
-  book.store.enableCustomAnalysisDimension(dimension.versions[0]!.versionId);
   return { dimensionId: dimension.dimensionId, versionId: dimension.versions[0]!.versionId };
 }
 
@@ -114,23 +113,24 @@ function custom(projection: CustomAnalysisDimensionsProjection, dimensionId: str
 }
 
 describe('the dimension ledger (schema revision 82)', () => {
-  it('versions a dimension 待验证 → 已启用 → 已停用, supersedes its latest, keeps 停用 final and every row immutable', async () => {
+  it('versions a dimension 保存即启用 → 已停用, supersedes its latest, keeps 停用 final and every row immutable', async () => {
     await withBook(async (book) => {
       const first = book.store.saveCustomAnalysisDimension({ dimensionId: null, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE });
       const dimension = first.dimensions[0]!;
-      expect(dimension.versions.map((version) => [version.version, version.state, version.supersedes])).toEqual([[1, 'pending-validation', null]]);
-      expect(dimension.enabledVersion).toBeNull();
+      expect(dimension.versions.map((version) => [version.version, version.state, version.supersedes])).toEqual([[1, 'enabled', null]]);
+      expect(dimension.enabledVersion?.version).toBe(1);
       const v1 = dimension.versions[0]!.versionId;
       expect(refusal(() => book.store.saveCustomAnalysisDimension({ dimensionId: dimension.dimensionId, title: CUSTOM_DIMENSION_TITLE, questionTemplate: CUSTOM_DIMENSION_TEMPLATE })))
         .toBe('CUSTOM_ANALYSIS_DIMENSION_UNCHANGED');
       const enabled = custom(book.store.enableCustomAnalysisDimension(v1), dimension.dimensionId);
       expect(enabled.enabledVersion).toEqual({ versionId: v1, version: 1 });
-      expect(refusal(() => book.store.enableCustomAnalysisDimension(v1))).toBe('CUSTOM_ANALYSIS_DIMENSION_ENABLED');
+      expect(book.store.enableCustomAnalysisDimension(v1).dimensions[0]?.enabledVersion?.version).toBe(1);
       const second = custom(book.store.saveCustomAnalysisDimension({ dimensionId: dimension.dimensionId, title: '单元开篇（修订）', questionTemplate: CUSTOM_DIMENSION_TEMPLATE }), dimension.dimensionId);
       expect(second.title).toBe('单元开篇（修订）');
-      expect(second.versions.map((version) => [version.version, version.state, version.supersedes?.version ?? null])).toEqual([[2, 'pending-validation', 1], [1, 'enabled', null]]);
+      expect(second.versions.map((version) => [version.version, version.state, version.supersedes?.version ?? null])).toEqual([[2, 'enabled', 1], [1, 'enabled', null]]);
       // The newest enabled version is what runs: version 1, until version 2 is enabled.
-      expect(second.enabledVersion).toEqual({ versionId: v1, version: 1 });
+      expect(second.enabledVersion?.version).toBe(2);
+      book.store.stopCustomAnalysisDimension(second.versions[0]!.versionId);
       const stopped = custom(book.store.stopCustomAnalysisDimension(v1), dimension.dimensionId);
       expect(stopped.versions[1]!.state).toBe('stopped');
       expect(stopped.enabledVersion).toBeNull();
@@ -209,7 +209,6 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
       expect(edited.planVersion!.ordinal).toBe(2);
       expect(edited.planEnvelope!.digest).not.toBe(task.planEnvelope!.digest);
       const successor = custom(book.store.saveCustomAnalysisDimension({ dimensionId: first.dimensionId, title: '单元开篇（修订）', questionTemplate: CUSTOM_DIMENSION_TEMPLATE }), first.dimensionId).versions[0]!;
-      book.store.enableCustomAnalysisDimension(successor.versionId);
       const pinned = book.store.inspectTaskPlan({ bookId: book.bookId, kind: 'baseline-analysis', ref: prepared.taskIntentId });
       expect(pinned.goal.chips.procedure).toContain('第 1 版');
       const authorized = book.store.authorizeBaselineAnalysis(book.bookId, prepared.taskIntentId, edited.planEnvelope!.digest);
@@ -324,7 +323,6 @@ describe('同类型重做 / 重新准备 / 重新确认 of a custom Task (Issue 
       expect(plan.redo?.prepare).toMatchObject({ update: null, redoOf: runRecordId });
       // A successor enabled meanwhile is what ②A would run now; the redo keeps the version the Task froze.
       const successor = custom(book.store.saveCustomAnalysisDimension({ dimensionId: first.dimensionId, title: '单元开篇（修订）', questionTemplate: CUSTOM_DIMENSION_TEMPLATE }), first.dimensionId).versions[0]!;
-      book.store.enableCustomAnalysisDimension(successor.versionId);
       const from = { taskIntentId, purpose: 'redo' as const };
       const frozen = book.store.inspectAnalysisTask(book.bookId, taskIntentId).planEnvelope!.promptContractDigest;
       const baseline = vi.spyOn(book.store, 'createBaselineAnalysisPreparationWork');
@@ -408,7 +406,7 @@ describe('baseline and custom analysis on the same launch', () => {
 describe('schema revision 82', () => {
   it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
     // Synchronized with #89: imported-Skill update ledgers follow revision 82 without rebuilding its relations.
-    expect(LATEST_SCHEMA_VERSION).toBe(104);
+    expect(LATEST_SCHEMA_VERSION).toBe(107);
     let bookId = '';
     await withBook(async (book) => {
       bookId = book.bookId;
@@ -441,7 +439,7 @@ describe('schema revision 82', () => {
     const migrated = new DatabaseSync(path);
     try {
       // Synchronized with #89: revision 83 adds imported-Skill update ledgers after this revision's migration.
-      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 104 });
+      expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: LATEST_SCHEMA_VERSION });
       for (const table of ['analysis_result_sets', 'analysis_result_set_revisions'] as const) {
         expect((migrated.prepare(`SELECT sql FROM sqlite_schema WHERE name = '${table}'`).get() as { sql: string }).sql).toBe(ANALYSIS_RESULT_SET_SCHEMA_SQL[table]);
       }

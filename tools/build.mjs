@@ -118,7 +118,9 @@ async function ensureClosedOutputs() {
     'docs/policies/active-policy-set.v22.json',
     'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/active-policy-set.v23.json',
+    'docs/policies/active-policy-set.v24.json',
     'docs/policies/active-policy-set.v23.schema.json',
+    'docs/policies/active-policy-set.v24.schema.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -155,13 +157,17 @@ async function ensureClosedOutputs() {
     'docs/policies/provider-processing-policy.v31.json',
     'docs/policies/provider-processing-policy.v31.schema.json',
     'docs/policies/provider-processing-policy.v32.json',
+    'docs/policies/provider-processing-policy.v33.json',
     'docs/policies/provider-processing-policy.v32.schema.json',
+    'docs/policies/provider-processing-policy.v33.schema.json',
     'notices/ELECTRON_LICENSE',
     'notices/ELECTRON_LICENSES.chromium.html',
     'notices/THIRD_PARTY_NOTICES.md',
     'renderer/index.html',
     'renderer/renderer.js',
     'renderer/styles.css',
+    'renderer/global-agent.css',
+    'renderer/manuscript-source.css',
     'service/index.mjs',
     'shared/data-root.mjs',
     'shared/network-denial.mjs',
@@ -242,7 +248,9 @@ async function ensureClosedOutputs() {
     'docs/policies/active-policy-set.v22.json',
     'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/active-policy-set.v23.json',
+    'docs/policies/active-policy-set.v24.json',
     'docs/policies/active-policy-set.v23.schema.json',
+    'docs/policies/active-policy-set.v24.schema.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -279,7 +287,9 @@ async function ensureClosedOutputs() {
     'docs/policies/provider-processing-policy.v31.json',
     'docs/policies/provider-processing-policy.v31.schema.json',
     'docs/policies/provider-processing-policy.v32.json',
+    'docs/policies/provider-processing-policy.v33.json',
     'docs/policies/provider-processing-policy.v32.schema.json',
+    'docs/policies/provider-processing-policy.v33.schema.json',
   ];
   for (const path of exactPolicyCarriers) {
     const built = await readFile(outputPath(...path.split('/')));
@@ -452,6 +462,8 @@ async function main() {
   });
   await copyFile(resolve(ROOT, 'src', 'renderer', 'index.html'), outputPath('renderer', 'index.html'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'styles.css'), outputPath('renderer', 'styles.css'));
+  await copyFile(resolve(ROOT, 'src', 'renderer', 'global-agent.css'), outputPath('renderer', 'global-agent.css'));
+  await copyFile(resolve(ROOT, 'src', 'renderer', 'manuscript-source.css'), outputPath('renderer', 'manuscript-source.css'));
   // Main checks this exact service/renderer closure before choosing or opening a data root.
   const outputDigests = Object.fromEntries(await Promise.all(IDENTITY_BOUND_OUTPUTS.map(async (path) =>
     [path, createHash('sha256').update(await readFile(outputPath(...path.split('/')))).digest('hex')])));
@@ -487,7 +499,9 @@ async function main() {
     'docs/policies/active-policy-set.v22.json',
     'docs/policies/active-policy-set.v22.schema.json',
     'docs/policies/active-policy-set.v23.json',
+    'docs/policies/active-policy-set.v24.json',
     'docs/policies/active-policy-set.v23.schema.json',
+    'docs/policies/active-policy-set.v24.schema.json',
     'docs/policies/external-export-policy.v1.json',
     'docs/policies/external-export-policy.v2.json',
     'docs/policies/provider-processing-policy.v1.json',
@@ -524,7 +538,9 @@ async function main() {
     'docs/policies/provider-processing-policy.v31.json',
     'docs/policies/provider-processing-policy.v31.schema.json',
     'docs/policies/provider-processing-policy.v32.json',
+    'docs/policies/provider-processing-policy.v33.json',
     'docs/policies/provider-processing-policy.v32.schema.json',
+    'docs/policies/provider-processing-policy.v33.schema.json',
   ]) {
     await copyFile(resolve(ROOT, ...path.split('/')), outputPath(...path.split('/')));
   }
