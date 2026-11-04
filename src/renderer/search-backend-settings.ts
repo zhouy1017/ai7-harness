@@ -36,8 +36,8 @@ export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjec
   if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索`;
   const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
   return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
-    : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}（已开启总是使用选定后端）`
-    : `当前生效来源：兜底 · ${selected.name}（模型渠道没有可用的原生搜索）`;
+    : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}`
+    : `当前生效来源：兜底 · ${selected.name}`;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -109,7 +109,10 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const section = element('section', 'review-section');
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
-  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', `新任务优先使用主编辑模型自带搜索，否则使用已配置的检索后端；已开始的运行继续使用原定来源；${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；${SEARCH_FALLBACK_NOTE}`));
+  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', effectiveSearchSourceLine(projection)));
+  const rules = element('details');
+  rules.append(element('summary', undefined, '查看来源切换规则'), element('p', 'field-note', `新任务优先使用主编辑模型自带搜索，否则使用已配置的检索后端；已开始的运行继续使用原定来源；${SEARCH_FALLBACK_NOTE}`));
+  section.append(rules);
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
