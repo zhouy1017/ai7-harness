@@ -3436,6 +3436,7 @@ export interface LaunchPolicyProjection {
 
 export interface ModelServiceStoredStateProjection {
   proxy: ModelServiceProxySetting;
+  lastProxyProbe?: ProxyProbeResult | null;
   /** The DeepSeek 开放平台（官方） connection, as Issue #712 has always read it; `connections` holds every route's. */
   connection: ModelServiceConnectionProjection | null;
   /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
@@ -3486,10 +3487,16 @@ export interface ModelRoleCardProjection {
 }
 
 export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
+export interface ProxyProbeResult {
+  status: 'available' | 'https-rejected' | 'connection-refused' | 'authentication-required' | 'unreachable';
+  checkedAt: string;
+}
+export type SaveModelServiceProxyInput = ModelServiceProxySetting & { probeRoute?: ModelServiceRouteId };
 
 export interface ModelServiceSettingsProjection {
   searchBackends: SearchBackendSettingsProjection;
   proxy: ModelServiceProxySetting;
+  lastProxyProbe?: ProxyProbeResult | null;
   roles: readonly ModelRoleCardProjection[];
   /** The two routes and the providers not yet supported (Issue #811). */
   routeChoice: {
@@ -6601,7 +6608,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     output: ModelServiceStoredStateProjection;
   };
   saveModelServiceProxy: {
-    input: ModelServiceProxySetting;
+    input: SaveModelServiceProxyInput;
     output: ModelServiceProxySetting;
   };
   /**
@@ -7136,7 +7143,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
-  saveModelServiceProxy(input: ModelServiceProxySetting): Promise<ModelServiceSettingsProjection>;
+  saveModelServiceProxy(input: SaveModelServiceProxyInput): Promise<ModelServiceSettingsProjection>;
   /**
    * Save a route's connection name and credential — the DeepSeek 开放平台（官方） route when `route` is absent, as Issue #712 has
    * always saved it — or, given only `{ route, select: true }`, make that saved route the one new Tasks use (Issue #811).

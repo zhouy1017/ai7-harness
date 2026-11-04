@@ -488,7 +488,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'saveModelServiceProxy': {
-      const input = value.input;
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const { probeRoute, ...input } = value.input;
+      if (probeRoute !== undefined && !(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(probeRoute)) throw new ProtocolError(tentativeId);
       if (!isRecord(input) || !(input.mode === 'direct' && hasExactKeys(input, ['mode']) ||
           input.mode === 'proxy' && hasExactKeys(input, ['mode', 'protocol', 'hostPort']) &&
           (input.protocol === 'http' || input.protocol === 'https') && isBoundedString(input.hostPort, 300))) {
