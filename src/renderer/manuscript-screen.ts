@@ -387,7 +387,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   prepareReplacementButton.disabled = true;
   const searchActions = element('div', 'button-row');
   searchActions.append(searchButton, prepareReplacementButton, cancelJob);
-  const searchSummary = element('p', 'field-note', '范围：全稿。结果会记录查找时的稿件版本。');
+  const searchSummary = element('p', 'field-note', '查找范围：全稿。');
   searchSummary.setAttribute('aria-live', 'polite');
   const exclusionSummary = element(
     'p',
@@ -1670,9 +1670,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     replacementReview.replaceChildren(
       element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
       element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
-      element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版${technicalWords(` ${preview.revisionLabel}`)}${technicalWords(` · 修订日志序号 ${preview.journalSequence}`)}`),
-      element('p', 'field-note', `匹配规则：${preview.matchingRule}`),
-      element('p', 'field-note', `纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`),
+      element('p', 'field-note', `范围：${preview.scopeLabel}${technicalWords(` · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)} · ${preview.matchingRule} · 纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}。`),
       element('p', 'field-note inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结；纳入控件保持锁定。' : '当前预览的纳入控件已锁定；取消预览后可重新选择。'),
     );
     const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');

@@ -15,7 +15,7 @@ export const STRUCTURE_HEADING_TITLE = '选择标题，未选的保留为段落'
 export const STRUCTURE_HEADING_NOTE = '文件没有使用标题样式。以下行按文字规则识别：勾选后作为标题导入，不勾选则保持为段落。';
 export const LONG_PARAGRAPH_LEGEND = '超长段落的处理方式';
 export const SOFT_BREAK_NOTE = '以下段落超出段落上限，已在文件中的软换行处分段：';
-export const STRUCTURE_CHOICE_REQUIRED = '请为超出段落上限的段落选择「按句子分段」或「按长度分为多段」。';
+export const STRUCTURE_CHOICE_REQUIRED = '请选择按句子分段或按长度分段。';
 const RULE_LABELS: Readonly<Record<ImportHeadingRule, string>> = { numbered: '编号行', contents: '目录条目', 'short-line': '独立短行' };
 const METHOD_LABELS: Readonly<Record<LongParagraphMethod, string>> = {
   sentences: '按句子分段，每段不超过上限',
