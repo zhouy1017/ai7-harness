@@ -305,10 +305,13 @@ export function credentialHeaders(profile: ProviderRouteProfile, secret: string)
 }
 
 /** Metadata GET only: the configured channel owns the address and authentication, with no manuscript payload. */
-export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
-  const endpoint = profile.route.startsWith('opencode-zen') ? 'https://opencode.ai/inference/v1/models'
+export function providerModelsEndpoint(profile: ProviderRouteProfile): string {
+  return profile.route.startsWith('opencode-zen') ? 'https://opencode.ai/inference/v1/models'
     : profile.endpoint.replace(/\/(?:chat\/completions|responses|messages)\/?$/u, '/models');
-  const url = new URL(endpoint);
+}
+
+export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
+  const url = new URL(providerModelsEndpoint(profile));
   const result = new Map<string, DiscoveredModel>();
   const signal = AbortSignal.timeout(10_000);
   const pages = new Set<string>();
@@ -411,7 +414,7 @@ export function parseProviderResponse(
 
 const MODEL_REQUEST_NO_SEND = new WeakMap<Error, { readonly request: object; readonly cause: unknown }>();
 
-/** A trusted transport wrapper observed that this exact invocation never entered its native sender. */
+/** A trusted transport observed that this exact invocation never entered its sender or established a connection. */
 export function modelRequestNotSent(request: object, cause: unknown): Error {
   const refusal = new Error('AI7_MODEL_REQUEST_NOT_SENT');
   MODEL_REQUEST_NO_SEND.set(refusal, { request, cause });
@@ -428,6 +431,7 @@ export function classifyTransportError(error: unknown, sent = false, request?: o
   const timeoutCode = code ?? (typeof cause?.code === 'string' ? cause.code : null);
   const name = isRecord(error) && typeof error.name === 'string' ? error.name : null;
   if (code === 'AI7_PROXY_UNREACHABLE') return { code, message: '代理不可达：请检查网络代理设置。' };
+  if (code === AI7_FAILURE_CODES.MODEL_SERVICE_UNREACHABLE) return { code, message: '模型服务不可达：请检查网络或网络代理设置。' };
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) return { code, message: '出站网络在当前产品区间内被禁用。' };
   if (timeoutCode === 'UND_ERR_CONNECT_TIMEOUT') return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '连接在发送请求前超时。' };
   if (name === 'AbortError' || name === 'TimeoutError' || timeoutCode === 'UND_ERR_HEADERS_TIMEOUT' || timeoutCode === 'UND_ERR_BODY_TIMEOUT' || timeoutCode === 'ETIMEDOUT') {

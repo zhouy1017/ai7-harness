@@ -392,8 +392,7 @@ export class FastRoleExecutionOwner {
           };
           const send: DeepSeekTransport = async (url, init) => {
             requireRunning(init.signal);
-            try { return await nativeFetch(url, init); }
-            catch { throw new Error('AI7_OUTCOME_UNKNOWN'); }
+            return nativeFetch(url, init);
           };
           adapter = new DeepSeekOpenAiCompatibleAdapter({
             broker: live.broker,
@@ -505,6 +504,10 @@ export class FastRoleExecutionOwner {
     }
     if (OUTCOME_UNKNOWN_CODES.has(code)) {
       return { kind: 'failed', code, message: `结果待确认：请求可能已经发出，但没有收到完整回答；${kind.label}没有生成任何建议，也不会自动重发。`, outcomeUnknown: true, provenance: provenance(code) };
+    }
+    if (last !== undefined && (last.kind === 'failed' || last.kind === 'interrupted') &&
+        (code === AI7_FAILURE_CODES.MODEL_SERVICE_UNREACHABLE || code === AI7_FAILURE_CODES.PROXY_UNREACHABLE)) {
+      return { kind: 'failed', code, message: last.failure.reason, outcomeUnknown: false, provenance: provenance(code) };
     }
     return { kind: 'failed', code, message: `${kind.label}没有完成（${code}）；没有生成任何建议。`, outcomeUnknown: false, provenance: provenance(code) };
   }

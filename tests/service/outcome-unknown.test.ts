@@ -576,8 +576,26 @@ describe('per-unit unknown after completion', () => {
 // waits; and the dispatcher's own start refuses a plan that would re-send it, whatever changed since its look.
 describe('结果待确认 carried forward', () => {
   it('discloses a baseline re-send after the unknown range is edited and then reverted (#765)', async () => {
-    const store = await openWithRoute();
-    const execution = owner(store);
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    let rereading = false;
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      if (request.stage === 'units') {
+        const header = parseUnitMessageHeader(message);
+        if (header === null) return undefined;
+        if (header.ordinal === 4 && !rereading) return { kind: 'outcome-unknown', message: '合成：回答没有完整传回。' };
+        return [...happy.entries.values()].find((entry) => entry.unitOrdinal === header.ordinal && entry.response.kind === 'unit-result')?.response;
+      }
+      const content = request.stage === 'cross-unit-reduction' ? { schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1', findings: [] }
+        : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+          : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+      return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+    });
+    launchPolicy = captured.policy;
+    const execution = captured.owner;
     try {
       const stopped = await stoppedRun(store, execution, 'L2 sample1 改后还原');
       const { bookId } = stopped;
@@ -599,17 +617,24 @@ describe('结果待确认 carried forward', () => {
         return work.projection!;
       };
       edit(false);
+      rereading = true;
       const changed = sync();
       expect(store.baselineAnalysisLedger.resendUnitsOf(changed)).not.toContain(4);
       execution.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, changed.taskIntent!.taskIntentId, changed.planEnvelope!.digest).dispatchRunRecordId!);
       await execution.whenIdle();
-      expect(store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!.gaps.some((gap) => gap.code === 'outcome-unknown')).toBe(false);
+      const changedRevision = store.inspectBaselineAnalysis(bookId, () => null).resultSetRevision!;
+      expect(changedRevision.gaps.some((gap) => gap.code === 'outcome-unknown')).toBe(false);
+      expect(changedRevision.units.find((unit) => unit.unitOrdinal === 4)).toMatchObject({ state: 'closed' });
+      expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId).ranges).toEqual([]);
+      const historical = store.inspectBaselineAnalysis(bookId, undefined, initial.resultSetRevision!.revisionId).inspectedRevision!.revision;
+      expect(historical.units.find((unit) => unit.unitOrdinal === 4)).toMatchObject({ state: 'gap', originalTextChanged: true });
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: null }).unconfirmed).toBeNull();
       edit(true);
       const reverted = sync();
       expect(store.baselineAnalysisLedger.resendUnitsOf(reverted)).toContain(4);
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: reverted.taskIntent!.taskIntentId }).resend?.units).toContain(4);
       store.markCleanShutdown();
-    } finally { await execution.dispose(); store.close(); }
+    } finally { await execution.dispose(); try { captured.assertMatched(); } finally { store.close(); } }
   }, 300_000);
 
   it('keeps unit 4 outcome-unknown through a later Task cancelled before it, and the dispatcher never re-sends it', async () => {

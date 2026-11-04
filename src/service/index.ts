@@ -1,5 +1,7 @@
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { refreshModelServiceModels } from './provider/model-discovery.js';
+import { PROVIDER_ROUTE_PROFILES, providerModelsEndpoint } from './provider/deepseek-adapter.js';
+import type { ProxyProbeResult } from '../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import { reviewFixtureContractVersion } from './provider/model-fixture.js';
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from './dialogue/global-agent-session.js';
@@ -66,7 +68,7 @@ import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
-import { proxyAwareFetch } from './provider/proxy-setting.js';
+import { proxyAwareFetch, probeProxy } from './provider/proxy-setting.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore, WaitingTaskRun } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
@@ -75,6 +77,9 @@ import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/baseline-analysis-store.js';
 import type { ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
+
+// Session-only, scoped to the open store; never written into the device setting or database.
+const proxyProbes = new WeakMap<EditorialStore, ProxyProbeResult>();
 
 function failureResponse(
   requestId: string,
@@ -221,10 +226,16 @@ async function dispatch(
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), lastProxyProbe: proxyProbes.get(store) ?? null, channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
       };
-    case 'saveModelServiceProxy':
-      return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
+    case 'saveModelServiceProxy': {
+      const { probeRoute, ...input } = request.input;
+      const result = await store.saveModelServiceProxy(input);
+      if (result.mode === 'proxy' && probeRoute !== undefined) {
+        proxyProbes.set(store, await probeProxy(result, providerModelsEndpoint(PROVIDER_ROUTE_PROFILES[probeRoute])));
+      } else proxyProbes.delete(store);
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'saveModelServiceConnection': {
       const result = store.saveModelServiceConnection(
         request.input.connectionName,

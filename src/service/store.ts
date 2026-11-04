@@ -14822,6 +14822,7 @@ export class EditorialStore {
       ranges: listed.ranges.map((range) => ({
         unitOrdinal: range.unitOrdinal!, category: this.#unconfirmedCategory(range.kind), recordedAt: range.recordedAt,
         earlierText: range.heldAtRevisionId !== null && range.heldAtRevisionId !== current,
+        ...(range.rereadFailed ? { rereadFailed: true } : {}),
       })),
       steps: listed.steps.map((step) => ({ stage: step.stage!, category: this.#unconfirmedCategory(step.kind), recordedAt: step.recordedAt })),
       digest: unconfirmedDigest(listed),

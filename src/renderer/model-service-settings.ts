@@ -4,6 +4,14 @@ import { renderSearchBackendSettings } from './search-backend-settings.js';
 import { launchPolicyIntegritySentence } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
 
+const proxyProbeMessages = {
+  available: '代理可用',
+  'https-rejected': '代理不接受 HTTPS 连接，请改用 http://host:port',
+  'connection-refused': '代理不可达：端口没有在监听',
+  'authentication-required': '代理要求认证，当前版本不支持',
+  unreachable: '代理不可达：请检查网络代理设置。',
+};
+
 /** The shell's helpers and routes used by 模型服务. */
 export interface ModelServiceSettingsOptions {
   readonly element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
@@ -38,7 +46,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const input = element('input');
     input.type = 'text';
     input.setAttribute('aria-label', '代理 URL');
-    input.placeholder = 'http://host:port 或 https://host:port';
+    input.placeholder = 'http://127.0.0.1:端口';
     input.autocomplete = 'off';
     input.maxLength = 320;
     input.value = projection.proxy.mode === 'proxy' ? `${projection.proxy.protocol}://${projection.proxy.hostPort}` : '';
@@ -62,15 +70,27 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
           setting = { mode: 'proxy', protocol: url.protocol === 'http:' ? 'http' : 'https', hostPort: `${url.hostname}:${port}` };
         }
         save.disabled = true;
-        renderModelServiceSettingsProjection(await window.ai7.saveModelServiceProxy(setting));
-        setStatus('网络代理已保存；下一次请求生效。', 'success');
+        setStatus('正在保存并探测网络代理…', 'busy');
+        const saved = await window.ai7.saveModelServiceProxy({ ...setting, ...(setting.mode === 'proxy' && modelServiceChannel !== null ? { probeRoute: modelServiceChannel } : {}) });
+        renderModelServiceSettingsProjection(saved);
+        const probe = saved.lastProxyProbe;
+        setStatus(setting.mode === 'proxy' && probe ? proxyProbeMessages[probe.status] : '网络代理已保存；下一次请求生效。',
+          setting.mode === 'proxy' && probe && probe.status !== 'available' ? 'error' : 'success');
       } catch (error) {
         save.disabled = false;
         setStatus(rendererErrorMessage(error, '无法保存网络代理。'), 'error');
       }
     });
     form.append(mode, input, save);
+    section.append(element('p', 'field-note', '绝大多数本机代理（Clash、v2rayN、ProxyBridge 等）用 http://127.0.0.1:端口；只有代理本身提供 TLS 入口时才用 https://。'));
     section.append(form, element('p', 'field-note', '仅用于获准的模型服务请求。此设备的网络代理设置不随数据库导入、导出或备份迁移。代理认证将在后续版本提供。'));
+    if (projection.lastProxyProbe) {
+      const probe = projection.lastProxyProbe;
+      const line = element('p', probe.status === 'available' ? 'success-note' : 'attention-note',
+        `上次探测：${proxyProbeMessages[probe.status]} · ${new Date(probe.checkedAt).toLocaleString()}（本次会话）`);
+      line.dataset['proxyProbeStatus'] = probe.status;
+      section.append(line);
+    }
     return section;
   }
 
