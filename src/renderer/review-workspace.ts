@@ -2439,7 +2439,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     confirmation.addEventListener('change', () => { state.localOptions = { ...state.localOptions, numeralsConfirmed: confirmation.checked }; updateSheet(); });
     confirmationLabel.append(confirmation, el('span', undefined, '我明确选择本次数字依据及 N01、N02；编辑约定不表示国标适用'));
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
-      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点及无附加条件的异形词可生成机械修正，其余生成批注；代码、网址和邮件等会排除。'));
+      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点和无附加条件的异形词可生成机械修正，其余为批注；排除代码、网址和邮件等。'));
     const tables = state.localOptions.tables!;
     for (const [key, label] of [['characters', '通用规范汉字表（2013）及字形对照参考'], ['variantWords', '第一批异形词整理表（GF 1001-2001；附录仅供复核）']] as const) {
       const row = el('label', 'review-field'); const input = el('input'); input.type = 'checkbox'; input.checked = tables[key]; input.dataset['localTable'] = key;
@@ -2454,7 +2454,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       catch (error) { invalidTerms = true; termProblem.textContent = error instanceof Error ? error.message : '请核对本书词表。'; }
       updateSheet();
     });
-    termsLabel.append(el('span', undefined, '本书术语/人名/地名表：每行以制表符分隔 类型、采用写法、待统一异写（多种用 | 分隔）；类型为 term/person/place。明确列出的异写可机械替换，随本次审阅保存。'), terms);
+    termsLabel.append(el('span', undefined, '本书术语、人名与地名表：每行用制表符分隔类型、采用写法和异写，多种异写用 | 分隔；类型为 term/person/place，明确列出的异写可机械替换并随本次审阅保存。'), terms);
     localOptions.append(termsLabel, termProblem);
     if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
       const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';
@@ -2464,7 +2464,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         try {
           const page = await api.inspectHouseWordList!({ versionId: null, entryOffset: 0, historyOffset: 0 });
           house.disabled = page.selected === null || page.selected.enabledCount === 0;
-          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 ${technicalWords(`第${page.selected.ordinal}版`, '版本')}（${page.selected.enabledCount}条启用）；选中后仅生成批注`;
+          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 ${technicalWords(`第${page.selected.ordinal}版`, '版本')} · ${page.selected.enabledCount} 条启用；选中后仅生成批注`;
           house.onchange = () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: house.checked ? page.current : null } }; updateSheet(); };
         } catch { house.disabled = true; houseStatus.textContent = '本社词表读取失败，请重新打开检查选项。'; }
         updateSheet();
