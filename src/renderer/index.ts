@@ -2178,7 +2178,7 @@ function renderImportRecovery(
     support.append(
       element('h3', undefined, '安全清理状态'),
       element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`),
-      element('p', 'field-note', '此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。'),
+      element('p', 'field-note', technicalWords('此状态不包含暂存正文或原始文件路径。请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。', '清理尚未完成，请保留 AI7 数据并重试；重试会继续原操作，不会重复导入或放弃。')),
     );
     const actions = element('div', 'button-row recovery-actions');
     actions.append(button('重试放弃清理', 'primary', () => abandonAndContinue(recovery, recoveryReturn)));
@@ -2208,7 +2208,7 @@ function renderImportRecovery(
       element('p', undefined, `草稿标识：${recovery.draftId}`),
       element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
       element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
-      element('p', 'field-note', '这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求。请保留 Agent Data Root，等待本地核对；不要重复导入或手动删除暂存文件。'),
+      element('p', 'field-note', technicalWords('这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求。请保留 Agent Data Root，等待本地核对；不要重复导入或手动删除暂存文件。', '无法确认清理状态，请保留 AI7 数据等待核对，不要重复导入或删除暂存文件。')),
     );
     content.append(support);
     appendRecoveryReturnAction(content, recoveryReturn);
@@ -3644,8 +3644,7 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
   const content = panel();
   content.append(
     element('p', 'section-label', '新建图书 · 复核'),
-    element('h2', undefined, '复核空图书创建'),
-    element('p', 'lede', '本次提交只创建图书身份与编辑维度集。'),
+    element('h2', undefined, '新建空图书'),
   );
   const identity = element('section', 'source-card');
   const values = element('dl');
@@ -3660,11 +3659,13 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
   ));
   content.append(identity);
   if (technicalLayerVisible) content.append(listSection('将创建的记录', review.recordsToCreate));
-  content.append(listSection('不会做', review.nonEffects));
+  content.append(listSection('不会做', technicalLayerVisible ? review.nonEffects : [
+    '不创建稿件、来源文件或导入记录，也不创建或加入书系；不决定学习准入或授权模型传输；不发稿、导出、发送、交付、发布或授予发布权限。',
+  ]));
   const actions = element('div', 'button-row');
   const commit = button('新建图书', 'primary', async () => {
     commit.disabled = true;
-    setStatus('正在原子创建空图书…', 'busy');
+    setStatus('正在创建图书…', 'busy');
     try {
       const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
       setStatus(result.completionLabel, 'success');
