@@ -70,9 +70,13 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const about = el('section', 'source-card help-about');
   const aboutLine = el('p', 'help-about-line', HELP_ABOUT_LOADING);
   // Whether the Data Version is frozen, in 设置 › 数据与存储's own words (Issue #967).
-  const stateLine = el('p', 'field-note help-data-version-state');
-  const buildLine = el('p', 'field-note help-build-identity');
-  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine, buildLine);
+  const buildContext = el('p', 'field-note');
+  const stateLine = el('span', 'help-data-version-state');
+  const separator = el('span', undefined, ' · ');
+  separator.hidden = true;
+  const buildLine = el('span', 'help-build-identity');
+  buildContext.append(stateLine, separator, buildLine);
+  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, buildContext);
   if (technicalLayerVisible) root.append(about);
   const developer = el('label', 'help-developer-mode');
   const toggle = el('input');
@@ -95,6 +99,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       aboutLine.textContent = helpAboutLine(versions.softwareVersion, versions.dataVersion, protocolVersion);
       stateLine.textContent = dataVersionStateLine(versions);
       buildLine.textContent = buildIdentityLine(identity);
+      separator.hidden = false;
     },
   ).catch(() => { aboutLine.textContent = HELP_ABOUT_FAILED; stateLine.textContent = ''; buildLine.textContent = ''; });
 
