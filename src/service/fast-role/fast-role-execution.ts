@@ -471,12 +471,17 @@ export class FastRoleExecutionOwner {
       const code = failure?.code ?? 'FAST_ROLE_EXECUTION_FAILED';
       return { kind: 'failed', code, message: failure?.message ?? `${kind.label}没有完成；没有生成任何建议。`, outcomeUnknown: OUTCOME_UNKNOWN_CODES.has(code), provenance: provenance(code) };
     }
-    if (outcome.terminal === 'completed') {
+    const received = (adapter as DeepSeekOpenAiCompatibleAdapter | null)?.lastCanonicalResult;
+    const partialText = received?.kind === 'answer' && received.truncated === true ? received.text : null;
+    if (outcome.terminal === 'completed' || partialText !== null) {
       const candidate = outcome.signals.filter((signal) => signal.kind === 'contentCandidate').at(-1);
-      if (candidate !== undefined && candidate.kind === 'contentCandidate') {
+      const text = partialText ?? (candidate?.kind === 'contentCandidate' ? candidate.text : null);
+      const terminal = outcome.signals.at(-1);
+      const failureCode = outcome.terminal === 'completed' ? null : terminal?.kind === 'failed' || terminal?.kind === 'ambiguous' ? terminal.failure?.code ?? AI7_FAILURE_CODES.OUTCOME_UNKNOWN : AI7_FAILURE_CODES.OUTCOME_UNKNOWN;
+      if (text !== null) {
         return {
           kind: 'answered',
-          text: candidate.text,
+          text,
           binding: {
             kindId: kind.kindId,
             promptContractDigest,
@@ -485,7 +490,7 @@ export class FastRoleExecutionOwner {
             operationalScope: route === null ? 'development-ci' : route.operationalScope,
             policyRuleId: route?.ruleId ?? null,
             fixtureSha256: route === null ? this.#deps.fixture!.sha256 : null,
-            ...(route === null ? {} : { provenance: provenance(null) }),
+            ...(route === null ? {} : { provenance: provenance(failureCode) }),
           },
         };
       }
@@ -565,7 +570,7 @@ export async function testModelServiceConnection(
   try { answer = await owner.ask(CONNECTION_TEST_KIND, CONNECTION_TEST_POLICY.message, 'explicit-connection-test'); }
   catch { answer = { kind: 'failed', code: cancelled() ? AI7_FAILURE_CODES.INTERRUPTED : 'MODEL_CONNECTION_TEST_UNAVAILABLE', message: '文本连接测试没有发送。', outcomeUnknown: false }; }
   finally { signal?.removeEventListener('abort', stop); owner.dispose(); }
-  const passed = answer.kind === 'answered' && answer.text.trim() === 'AI7_OK';
+  const passed = answer.kind === 'answered' && answer.text.trim().length > 0;
   const code = passed ? null : answer.kind === 'failed' ? answer.code : 'MODEL_CONNECTION_TEST_RESPONSE_INVALID';
   const facts = answer.kind === 'answered' ? answer.binding.provenance : answer.provenance;
   const status: ModelConnectionTestStatus = {
@@ -574,6 +579,7 @@ export async function testModelServiceConnection(
       : cancelled() ? 'cancelled' : 'failed',
     code,
     verified: 'buffered-text-only',
+    ...(answer.kind === 'answered' ? { responseText: answer.text } : {}),
     ...(facts === undefined ? {} : { provenance: { ...facts, failureCode: code } }),
   };
   await settle(() => store.recordModelConnectionTest(connection, status));

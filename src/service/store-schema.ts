@@ -2080,7 +2080,8 @@ export function readModelConnectionTest(row: SqlRow): ModelConnectionTestStatus 
   requireStore(json.length <= 8192, 'MODEL_CONNECTION_TEST_INVALID', '连接测试状态无效。');
   const value: unknown = JSON.parse(json);
   requireStore(isRecord(value) && hasExactKeys(value, ['modelId', 'credentialUpdatedAt', 'testedAt', 'outcome', 'code', 'verified',
-    ...(value.provenance === undefined ? [] : ['provenance'])]) &&
+    ...(value.provenance === undefined ? [] : ['provenance']), ...(value.responseText === undefined ? [] : ['responseText'])]) &&
+    (value.responseText === undefined || typeof value.responseText === 'string' && value.responseText.isWellFormed() && value.responseText.length <= 4000) &&
     value.credentialUpdatedAt === row.credential_updated_at && typeof value.testedAt === 'string' && value.testedAt.length <= 30 && Number.isFinite(Date.parse(value.testedAt)) &&
     ['passed', 'failed', 'outcome-unknown', 'cancelled'].includes(value.outcome as string) && value.verified === 'buffered-text-only' &&
     (value.code === null || (typeof value.code === 'string' && /^[A-Z0-9_]{1,100}$/u.test(value.code))) &&

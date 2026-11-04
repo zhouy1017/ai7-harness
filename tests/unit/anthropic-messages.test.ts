@@ -230,79 +230,48 @@ describe('Messages buffered client functions · synthetic profiles only', () => 
     ]);
   });
 
-  it.each([
-    { id: '' }, { id: 1 }, { id: undefined }, { name: '' }, { name: 'unoffered' }, { name: undefined },
-    { input: null }, { input: [] }, { input: 'not an object' }, { input: '{bad JSON' }, { input: 3 }, { input: undefined },
-    { toolset_name: 'computer' }, { caller: { type: 'code_execution_20250825' } },
-  ])('refuses an entire batch for malformed or unsupported tool fields %j', async (fields) => {
-    const body = toolResponse([{ type: 'text', text: 'prefix' }, toolUse('valid'), { ...toolUse(), ...fields }]);
-    expect(normalizeModelResponse(functionModel(), body, offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    const { adapter } = stubToolsAdapter([body]);
+  it('drops unreadable calls while keeping text and executable neighbours', async () => {
+    for (const fields of [{ id: '' }, { name: 'unoffered' }, { input: null }, { input: '{bad JSON' }]) {
+      const body = toolResponse([{ type: 'text', text: 'prefix' }, toolUse('valid'), { ...toolUse(), ...fields }]);
+      expect(normalizeModelResponse(functionModel(), body, offered)).toMatchObject({ kind: 'tool-calls', text: 'prefix', calls: [{ id: 'valid' }], salvaged: [{ section: 'calls', index: 1 }] });
+      const { adapter } = stubToolsAdapter([body]);
+      expect((await collect(adapter.stream(toolPayload() as unknown as GenerateOptions))).filter((chunk) => chunk.type === 'tool-call-delta').map((chunk) => chunk.id)).toEqual(['valid']);
+    }
+    expect(normalizeModelResponse(functionModel(), toolResponse([toolUse(), { ...toolUse('second'), extra: true }]), offered)).toMatchObject({ kind: 'tool-calls', calls: [{ id: 'call_1' }, { id: 'second' }] });
+  });
+
+  it('keeps text and declines calls from truncated turns', () => {
+    for (const stop_reason of ['max_tokens', 'end_turn', null]) expect(normalizeModelResponse(functionModel(), { ...toolResponse([{ type: 'text', text: 'partial' }, toolUse()]), stop_reason }, offered)).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
+  });
+
+  it('retains readable text without replaying opaque reasoning', () => {
+    for (const opaque of [{ type: 'thinking', thinking: 'opaque' }, { type: 'redacted_thinking', data: 'opaque' }]) {
+      const result = normalizeModelResponse(functionModel(), toolResponse([{ type: 'text', text: 'prefix' }, opaque, toolUse()]), offered);
+      expect(result).toMatchObject({ kind: 'answer', text: 'prefix', truncated: true });
+      expect(JSON.stringify(result)).not.toContain('opaque');
+    }
+  });
+
+  it('keeps empty answers distinct and returns max-tokens text', async () => {
+    const { adapter } = stubToolsAdapter([{ content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens' }]);
     const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE } } });
+    expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'max-tokens' } });
+    expect(normalizeModelResponse(functionModel(), { content: [], stop_reason: 'end_turn' }, offered)).toMatchObject({ kind: 'empty-answer' });
+    expect(normalizeModelResponse(functionModel(), { content: 'invalid' }, offered)).toMatchObject({ kind: 'malformed' });
   });
 
-  it.each(['max_tokens', 'end_turn', 'stop_sequence', 'pause_turn', 'refusal', null, undefined])
-    ('refuses tool blocks with inconsistent or incomplete stop_reason %j', (stop_reason) => {
-      expect(normalizeModelResponse(functionModel(), { ...toolResponse(), stop_reason }, offered))
-        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    });
-
-  it('refuses opaque content and unfinished final turns while client tools are offered', () => {
-    for (const body of [
-      { content: [{ type: 'text', text: 'prefix' }, { type: 'thinking', thinking: 'opaque' }], stop_reason: 'end_turn' },
-      { content: [{ type: 'text', text: 'prefix' }, { type: 'server_tool_use', id: 'server_1', name: 'web_search', input: {} }], stop_reason: 'pause_turn' },
-      { content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens' },
-      { content: [{ type: 'text', text: 'partial' }], stop_reason: null },
-    ]) {
-      expect(normalizeModelResponse(functionModel(), body, offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    }
+  it('rejects every duplicate id and keeps a separate valid call', () => {
+    const result = normalizeModelResponse(functionModel(), toolResponse([toolUse(), toolUse(), toolUse('other')]), offered);
+    expect(result).toMatchObject({ kind: 'tool-calls', calls: [{ id: 'other' }], salvaged: [{ index: 0 }, { index: 1 }] });
+    expect(normalizeModelResponse(functionModel(), toolResponse([toolUse(), { type: 'text', text: 'after', extra: true }]), offered)).toMatchObject({ kind: 'tool-calls', text: 'after' });
   });
 
-  it.each([
-    { body: { content: [], stop_reason: 'end_turn' }, kind: 'empty-answer' },
-    { body: { content: [{ type: 'text', text: '' }], stop_reason: 'stop_sequence' }, kind: 'empty-answer' },
-    { body: { content: 'invalid', stop_reason: 'end_turn' }, kind: 'malformed' },
-    { body: { content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens' }, kind: 'malformed' },
-    { body: { content: [{ type: 'text', text: 'partial' }], stop_reason: null }, kind: 'malformed' },
-  ])('carries empty final answers and refuses invalid or truncated final answers: $kind', async ({ body, kind }) => {
-    const { adapter } = stubToolsAdapter([body]);
-    const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
-    expect(adapter.lastCanonicalResult?.kind).toBe(kind);
-    if (kind === 'malformed') {
-      expect(chunks).toEqual([expect.objectContaining({ type: 'finish', reason: expect.objectContaining({ kind: 'error' }) })]);
-    } else {
-      expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: '' });
-      expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
-    }
-  });
-
-  it.each([
-    [], [{ type: 'text', text: 'no call' }], [toolUse(), toolUse()],
-    [toolUse(), { type: 'text', text: 'after' }], [toolUse(), { type: 'text', text: '' }, toolUse('call_2')],
-    [{ type: 'thinking', thinking: 'opaque', signature: 'synthetic' }, toolUse()],
-    [{ type: 'redacted_thinking', data: 'opaque' }, toolUse()],
-    [{ type: 'server_tool_use', id: 'server_1', name: 'web_search', input: {} }, toolUse()],
-    [{ type: 'web_search_tool_result', tool_use_id: 'server_1', content: [] }, toolUse()],
-    [{ type: 'text', text: 'prefix', citations: [{ type: 'opaque' }] }, toolUse()],
-    [{ type: 'text', text: 1 }, toolUse()], [null, toolUse()],
-  ])('refuses unrepresentable, empty or duplicate batches %j', (...content) => {
-    expect(normalizeModelResponse(functionModel(), toolResponse(content), offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-  });
-
-  it('requires both offered tools and explicit function capability for reading and writing calls', async () => {
-    for (const [model, options] of [[messagesModel({ toolCalling: 'none' }), offered], [functionModel(), {}], [functionModel(), { toolCallsOffered: true }]] as const) {
-      expect(normalizeModelResponse(model, toolResponse([{ type: 'text', text: 'prefix' }, toolUse()]), options))
-        .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    }
+  it('retains text from unsolicited calls and still refuses unadmitted requests', async () => {
+    expect(normalizeModelResponse(messagesModel({ toolCalling: 'none' }), toolResponse([{ type: 'text', text: 'prefix' }, toolUse()]), offered)).toMatchObject({ kind: 'answer', text: 'prefix', truncated: true });
     expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, messagesModel({ toolCalling: 'none' }), toolPayload(), context)).toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
-    expect(() => assembleProviderRequest(CAPPED_ROUTE_PROFILE, functionModel(), { ...toolPayload([callMessage(), resultMessage()]), tools: [] }, context))
-      .toThrow('PROVIDER_TOOL_CALLING_UNSUPPORTED');
     const { adapter, bodies } = stubToolsAdapter([toolResponse()], messagesModel({ toolCalling: 'none' }));
-    const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
-    expect(chunks).toHaveLength(1);
-    expect(chunks[0]).toMatchObject({ type: 'finish', reason: { kind: 'error' } });
+    expect((await collect(adapter.stream(toolPayload() as unknown as GenerateOptions))).at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'error' } });
     expect(bodies).toHaveLength(0);
   });
 

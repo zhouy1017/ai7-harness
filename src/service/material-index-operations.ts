@@ -354,8 +354,12 @@ export async function internalTranslateMaterial(host: MaterialIndexOperationsHos
       host.transaction(host.authority, () => internalMaterialIndexCall(host, () => {
         if (answer.made.provenance !== undefined) host.materialIndex.recordTranslationAttempt(next, originalSha256, batch, 'translated', answer.made.provenance);
         host.materialIndex.recordTranslations(next, answer.made,
-          batch.map((target, index) => ({ ordinal: target.ordinal, sha256: target.sha256, text: answer.texts[index]! })));
+          batch.flatMap((target, index) => { const text = answer.texts[index]; return text == null ? [] : [{ ordinal: target.ordinal, sha256: target.sha256, text }]; }));
       }));
+      if (answer.texts.some((text) => text === null)) {
+        host.translationFailures.set(materialId, '部分段落未能对齐；已记录可用译文，其余段落可再次生成。');
+        return;
+      }
     }
   } catch (error) {
     host.translationFailures.set(materialId, error instanceof StoreError ? error.message : '来源译文没有完成；已记录的译文保留。');

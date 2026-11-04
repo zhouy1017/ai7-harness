@@ -129,9 +129,11 @@ export async function* messagesSseEvents(response: DeepSeekTransportResponse): A
   let argumentBytes = 0;
   const blocks: Array<Record<string, unknown> & { json?: string }> = [];
   try {
-    for await (const { data } of sseFrames(response)) {
-      const value: unknown = JSON.parse(data);
-      if (!isRecord(value) || typeof value.type !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+    for await (const { event, data } of sseFrames(response)) {
+      if (event === 'ai7-buffered-response') { yield { kind: 'complete', response: JSON.parse(data) }; return; }
+      let value: unknown;
+      try { value = JSON.parse(data); } catch { continue; }
+      if (!isRecord(value) || typeof value.type !== 'string') continue;
       if (value.type === 'ping') continue;
       if (value.type === 'error') {
         const error = isRecord(value.error) ? value.error : {};
@@ -146,21 +148,22 @@ export async function* messagesSseEvents(response: DeepSeekTransportResponse): A
       }
       if (!started) throw new Error('AI7_OUTCOME_UNKNOWN');
       if (value.type === 'content_block_start') {
-        if (value.index !== blocks.length || !isRecord(value.content_block) || typeof value.content_block.type !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+        if (!Number.isSafeInteger(value.index) || (value.index as number) < 0 || (value.index as number) >= 128 || !isRecord(value.content_block) || typeof value.content_block.type !== 'string') continue;
         const block = value.content_block;
-        blocks.push(block.type === 'text' ? { type: 'text', text: '' }
-          : block.type === 'tool_use' ? { type: 'tool_use', id: block.id, name: block.name, json: '' } : { type: block.type });
+        blocks[value.index as number] = block.type === 'text' ? { type: 'text', text: typeof block.text === 'string' ? block.text : '' }
+          : block.type === 'tool_use' ? { type: 'tool_use', id: block.id, name: block.name, input: block.input, json: '' } : { type: block.type };
+        if (block.type === 'text' && typeof block.text === 'string' && block.text.length > 0) yield { kind: 'text', text: block.text };
         continue;
       }
       if (value.type === 'content_block_delta') {
         const block = typeof value.index === 'number' ? blocks[value.index] : undefined;
-        if (block === undefined || value.index !== blocks.length - 1 || !isRecord(value.delta)) throw new Error('AI7_OUTCOME_UNKNOWN');
+        if (block === undefined || !isRecord(value.delta)) continue;
         if (value.delta.type === 'text_delta') {
-          if (block.type !== 'text' || typeof value.delta.text !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+          if (block.type !== 'text' || typeof value.delta.text !== 'string') continue;
           block.text = `${block.text as string}${value.delta.text}`;
           if (value.delta.text.length > 0) yield { kind: 'text', text: value.delta.text };
         } else if (value.delta.type === 'input_json_delta') {
-          if (block.type !== 'tool_use' || typeof value.delta.partial_json !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+          if (block.type !== 'tool_use' || block.json === undefined || typeof value.delta.partial_json !== 'string') continue;
           block.json += value.delta.partial_json;
           argumentBytes += value.delta.partial_json.length;
           if (argumentBytes > 1024 * 1024) throw new Error('AI7_OUTCOME_UNKNOWN');
@@ -170,9 +173,10 @@ export async function* messagesSseEvents(response: DeepSeekTransportResponse): A
       }
       if (value.type === 'content_block_stop') {
         const block = typeof value.index === 'number' ? blocks[value.index] : undefined;
-        if (block === undefined) throw new Error('AI7_OUTCOME_UNKNOWN');
+        if (block === undefined) continue;
         if (block.type === 'tool_use') {
-          const input: unknown = JSON.parse(block.json === '' ? '{}' : block.json!);
+          let input: unknown = null;
+          try { input = block.json === '' ? block.input ?? {} : JSON.parse(block.json!); } catch { /* Reject this call only. */ }
           delete block.json;
           block.input = input;
         }
@@ -184,7 +188,7 @@ export async function* messagesSseEvents(response: DeepSeekTransportResponse): A
         continue;
       }
       if (value.type === 'message_stop') {
-        if (blocks.some((block) => block.json !== undefined)) throw new Error('AI7_OUTCOME_UNKNOWN');
+        for (const block of blocks) { if (block?.json !== undefined) { delete block.json; block.input = null; } }
         yield { kind: 'complete', response: { type: 'message', role: 'assistant', content: blocks, stop_reason: stopReason, usage } };
         return;
       }

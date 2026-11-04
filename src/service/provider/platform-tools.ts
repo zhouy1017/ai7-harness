@@ -1,4 +1,4 @@
-import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
+import { hasKeys, canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { isPublicHostName } from '../../shared/network-denial.js';
 import { GLOBAL_AGENT_SCOPED_TOOL_NAMES, LOCAL_TOOL_DECLARATION_NAMES, type LocalToolsRule } from './local-tools.js';
 
@@ -375,7 +375,7 @@ function pinnedRecordQuery(value: unknown): string | null {
   if (typeof value !== 'string' || !value.isWellFormed()) return null;
   const query = value.normalize('NFC').trim();
   const graphemes = [...GRAPHEMES.segment(query)].length;
-  return graphemes >= 1 && graphemes <= 200 ? query : null;
+  return graphemes >= 1 ? [...GRAPHEMES.segment(query)].slice(0, 200).map(({ segment }) => segment).join('') : null;
 }
 
 /**
@@ -383,26 +383,41 @@ function pinnedRecordQuery(value: unknown): string | null {
  * is NFC-normalized and trimmed; a URL is an absolute `https` URL with no credentials, no fragment, and a public host
  * name, rendered by the WHATWG serializer so that two spellings of one address are one key.
  */
-export function canonicalToolArguments(name: string, args: unknown): PlatformToolArguments | null {
-  if (!isRecord(args)) return null;
+export function canonicalToolArguments(name: string, input: unknown): PlatformToolArguments | null {
+  if (!isRecord(input)) return null;
+  const args = { ...input };
+  const number = (value: unknown, minimum: number, maximum: number, fallback: number): number => {
+    const parsed = typeof value === 'number' || typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+    return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, Math.round(parsed))) : fallback;
+  };
+  args.k = number(args.k, 1, 8, 8);
+  args.radius = number(args.radius, 0, 3, 0);
+  args.version = number(args.version, 1, Number.MAX_SAFE_INTEGER, 1);
+  const token = (value: unknown): string => String(value ?? '').normalize('NFC').trim().toLowerCase();
+  args.mode = /token|分词/u.test(token(args.mode)) ? 'tokenized' : 'exact';
+  args.scope = /book|图书/u.test(token(args.scope)) ? 'book' : /category|类别/u.test(token(args.scope)) ? 'category' : 'house';
+  args.effect = /freeze|冻结/u.test(token(args.effect)) ? 'freeze' : /correct|纠正/u.test(token(args.effect)) ? 'correct' : 'guide';
+  if (Array.isArray(args.sourceKinds)) args.sourceKinds = [...new Set(args.sourceKinds.flatMap((kind) => {
+    const value = token(kind);
+    return /manuscript|稿件|正文/u.test(value) ? ['manuscript'] : /retained|保留/u.test(value) ? ['retained-source'] : /material|资料/u.test(value) ? ['material'] : [];
+  }))];
+  if (Array.isArray(args.sourceKinds) && args.sourceKinds.length === 0) delete args.sourceKinds;
   if (name === 'baseline_facts' || name === 'term_table') {
-    if (!Object.keys(args).every((key) => key === 'query')) return null;
     if (args.query === undefined) return name === 'term_table' ? { tool: name } : null;
     const query = pinnedRecordQuery(args.query);
     return query === null ? null : { tool: name, query };
   }
-  if (name === 'guideline_clause') return Object.keys(args).every((key) => key === 'clauseId') &&
-    (args.clauseId === undefined || (typeof args.clauseId === 'string' && args.clauseId.length > 0 && args.clauseId.length <= 200))
+  if (name === 'guideline_clause') return (args.clauseId === undefined || (typeof args.clauseId === 'string' && args.clauseId.length > 0 && args.clauseId.length <= 200))
     ? { tool: name, ...(args.clauseId === undefined ? {} : { clauseId: args.clauseId }) } : null;
-  if (name === 'read_blocks') return exactKeys(args, ['blockId', 'radius']) && typeof args.blockId === 'string' && args.blockId.length <= 200 &&
+  if (name === 'read_blocks') return hasKeys(args, ['blockId', 'radius']) && typeof args.blockId === 'string' && args.blockId.length <= 200 &&
     Number.isSafeInteger(args.radius) && Number(args.radius) >= 0 && Number(args.radius) <= 3
     ? { tool: name, blockId: args.blockId, radius: args.radius as number } : null;
   if (name === 'search_manuscript') {
-    if (!exactKeys(args, ['query', 'mode']) || typeof args.query !== 'string' || !args.query.isWellFormed() ||
-      args.query.trim().length === 0 || args.query.length > 1000 || (args.mode !== 'exact' && args.mode !== 'tokenized')) return null;
-    return { tool: name, query: args.query.normalize('NFC').trim(), mode: args.mode };
+    if (!hasKeys(args, ['query', 'mode']) || typeof args.query !== 'string' || !args.query.isWellFormed() ||
+      args.query.trim().length === 0 || (args.mode !== 'exact' && args.mode !== 'tokenized')) return null;
+    return { tool: name, query: args.query.normalize('NFC').trim().slice(0, 1000), mode: args.mode };
   }
-  if (name === 'read_procedure') return exactKeys(args, ['procedureId', 'version']) && typeof args.procedureId === 'string' &&
+  if (name === 'read_procedure') return hasKeys(args, ['procedureId', 'version']) && typeof args.procedureId === 'string' &&
     args.procedureId.length > 0 && args.procedureId.length <= 200 && Number.isSafeInteger(args.version) && Number(args.version) >= 1
     ? { tool: name, procedureId: args.procedureId, version: args.version as number } : null;
   if (name === 'propose_learning_supervision') {
@@ -410,35 +425,34 @@ export function canonicalToolArguments(name: string, args: unknown): PlatformToo
     const keys = Object.keys(args);
     const targets = args.targets ?? [];
     if (!['categoryId', 'scope', 'effect', 'text'].every((key) => keys.includes(key)) ||
-        !keys.every((key) => ['categoryId', 'scope', 'bookId', 'effect', 'text', 'targets'].includes(key)) ||
         typeof args.categoryId !== 'string' || !['house', 'category', 'book'].includes(String(args.scope)) ||
         (args.bookId !== undefined && typeof args.bookId !== 'string') || !['guide', 'freeze', 'correct'].includes(String(args.effect)) ||
         typeof args.text !== 'string' || !args.text.isWellFormed() || !Array.isArray(targets) || targets.length > 12 ||
-        !targets.every((pin) => isRecord(pin) && exactKeys(pin, ['itemId', 'revisionId']) && typeof pin.itemId === 'string' && typeof pin.revisionId === 'string')) return null;
+        !targets.every((pin) => isRecord(pin) && hasKeys(pin, ['itemId', 'revisionId']) && typeof pin.itemId === 'string' && typeof pin.revisionId === 'string')) return null;
     const text = args.text.normalize('NFC').trim();
     return text.length === 0 ? null : { tool: name, categoryId: args.categoryId, scope: args.scope as 'house' | 'category' | 'book',
       ...(args.bookId === undefined ? {} : { bookId: args.bookId as string }), effect: args.effect as 'guide' | 'freeze' | 'correct', text,
       targets: (targets as Array<{ itemId: string; revisionId: string }>).map(({ itemId, revisionId }) => ({ itemId, revisionId })) };
   }
-  if (name === 'exact_fetch') return exactKeys(args, ['candidateId']) && typeof args.candidateId === 'string' && /^[0-9a-f]{64}$/u.test(args.candidateId)
+  if (name === 'exact_fetch') return hasKeys(args, ['candidateId']) && typeof args.candidateId === 'string' && /^[0-9a-f]{64}$/u.test(args.candidateId)
     ? { tool: 'exact_fetch', candidateId: args.candidateId } : null;
   if (name === 'retrieve') {
-    if (Object.keys(args).some((key) => !['query', 'k', 'sourceKinds'].includes(key)) || typeof args.query !== 'string') return null;
-    const query = args.query.normalize('NFC').trim();
+    if (typeof args.query !== 'string') return null;
+    const query = args.query.normalize('NFC').trim().slice(0, 1000);
     const k = args.k ?? 8;
-    if (!query.isWellFormed() || query.length === 0 || query.length > 1000 || typeof k !== 'number' || !Number.isSafeInteger(k) || k < 1 || k > 8) return null;
+    if (!query.isWellFormed() || query.length === 0 || typeof k !== 'number' || !Number.isSafeInteger(k) || k < 1 || k > 8) return null;
     const kinds = args.sourceKinds;
     if (kinds !== undefined && (!Array.isArray(kinds) || kinds.length < 1 || kinds.length > 3 || new Set(kinds).size !== kinds.length ||
         !kinds.every((kind) => ['manuscript', 'material', 'retained-source'].includes(String(kind))))) return null;
     return { tool: 'retrieve', query, k, ...(kinds === undefined ? {} : { sourceKinds: [...kinds].sort() as Array<'manuscript' | 'material' | 'retained-source'> }) };
   }
   if (name === 'websearch') {
-    if (!exactKeys(args, ['query']) || typeof args['query'] !== 'string') return null;
-    const query = args['query'].normalize('NFC').trim();
-    return query.length === 0 || query.length > WEBSEARCH_QUERY_MAX_CHARACTERS ? null : { tool: 'websearch', query };
+    if (!hasKeys(args, ['query']) || typeof args['query'] !== 'string') return null;
+    const query = args['query'].normalize('NFC').trim().slice(0, WEBSEARCH_QUERY_MAX_CHARACTERS);
+    return query.length === 0 ? null : { tool: 'websearch', query };
   }
   if (name === 'webfetch') {
-    if (!exactKeys(args, ['url']) || typeof args['url'] !== 'string') return null;
+    if (!hasKeys(args, ['url']) || typeof args['url'] !== 'string') return null;
     const url = canonicalPublicUrl(args['url']);
     return url === null ? null : { tool: 'webfetch', url };
   }

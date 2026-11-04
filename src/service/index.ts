@@ -2194,7 +2194,7 @@ async function run(): Promise<void> {
           const result = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
           if (result.kind !== 'answered') return null;
           const translated = readMaterialTranslationAnswer(result.text, 1)?.[0];
-          return translated === undefined ? null : { text: translated, route: result.binding.route, model: result.binding.model };
+          return translated == null ? null : { text: translated, route: result.binding.route, model: result.binding.model };
         } catch { return null; }
       },
       // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).

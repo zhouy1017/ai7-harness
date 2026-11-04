@@ -126,7 +126,13 @@ export function stripModelJsonFence(text: string): string {
  * With partial enabled, retain only complete values from an unfinished object/array; never invent
  * a string, number or missing field. Callers still validate every recovered entry against its scope.
  */
-export function extractModelJson(text: string, { partial = false }: { partial?: boolean } = {}): Record<string, unknown> | null {
+export function extractModelJson(text: string, { partial = false, arrayKey }: { partial?: boolean; arrayKey?: string } = {}): Record<string, unknown> | null {
+  // Array contracts use the same balanced/partial reader without changing object-only callers.
+  const arrayStart = text.indexOf('[');
+  const objectStart = text.indexOf('{');
+  if (arrayKey !== undefined && arrayStart !== -1 && (objectStart === -1 || arrayStart < objectStart)) {
+    return extractModelJson(`{${JSON.stringify(arrayKey)}:${text.slice(arrayStart)}`, { partial });
+  }
   for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
     const stack: string[] = [];
     const checkpoints: Array<{ end: number; suffix: string }> = [];

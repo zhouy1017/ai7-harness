@@ -350,6 +350,8 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
  */
 export type ProviderResponseOutcome =
   | CanonicalModelResult
+  | { readonly kind: 'partial'; readonly text: string; readonly code: string; readonly message: string; readonly usage: ModelUsage | null; readonly status?: number;
+      readonly salvaged?: Extract<CanonicalModelResult, { kind: 'answer' }>['salvaged'] }
   | (Extract<CanonicalModelResult, { kind: 'malformed' }> & { readonly usage: ModelUsage | null })
   | { readonly kind: 'failure'; readonly code: string; readonly message: string; readonly status: number; readonly usage?: ModelUsage | null };
 
@@ -398,17 +400,20 @@ export function parseProviderResponse(
     return { kind: 'failure', code: codes.CONTEXT_WINDOW_EXCEEDED_CODE, message: '请求超出模型上下文窗口。', status };
   }
   if (status >= 500) return { kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR, message: '模型服务返回服务端错误。', status };
-  if (status !== 200) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
+  if (status < 200 || status >= 300) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
   const normalized = normalizeModelResponse(model, body, options);
   if (model.route === 'openai-platform' && model.capabilities.requestShape === 'openai-responses' && isRecord(body)) {
     // A malformed output may still report billed usage. Reuse the existing usage reader without retaining its body.
     const usageOnly = normalized.kind === 'malformed' ? normalizeModelResponse(model, { ...body, output: [] }, options) : normalized;
     const usage = 'usage' in usageOnly ? usageOnly.usage : null;
     const refusal = Array.isArray(body.output) && body.output.some((item) => isRecord(item) && Array.isArray(item.content) && item.content.some((part) => isRecord(part) && part.type === 'refusal'));
-    if (refusal) return { kind: 'failure', code: 'PROVIDER_REFUSAL', message: '模型拒绝了本次文本请求。', status, usage };
-    if (body.status !== undefined && body.status !== 'completed') return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务没有返回完整的文本结果。', status, usage };
+    if (refusal && normalized.kind !== 'answer' && normalized.kind !== 'tool-calls') return { kind: 'failure', code: 'PROVIDER_REFUSAL', message: '模型拒绝了本次文本请求。', status, usage };
     if (normalized.kind === 'malformed') return { ...normalized, usage };
   }
+  if (normalized.kind === 'answer' && normalized.truncated === true) return {
+    kind: 'partial', text: normalized.text, code: 'MAX_TOKENS', message: '回答未完成；已收到的文字已保留。', usage: normalized.usage, status,
+    ...(normalized.salvaged === undefined ? {} : { salvaged: normalized.salvaged }),
+  };
   return normalized;
 }
 
@@ -669,7 +674,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       // An in-stream account limit is read under the status its error names; every other response under its own.
       let bodyStatus = response.status;
       const dialogueStream = this.#deps.requestShape === 'editorial-dialogue-sse';
-      if (dialogueStream && response.status === 200 && response.replayed !== true) {
+      if (dialogueStream && response.status >= 200 && response.status < 300 && response.replayed !== true) {
         let completed = false;
         // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
         // reading, so the transmission still records its possibly billed request as unknown.
@@ -681,7 +686,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
             yield { type: 'text-delta', index: 0, text: event.text };
           } else if (event.kind === 'error') {
             const refused = parseProviderResponse(event.status, event.body, this.#deps.codes, this.#profile, this.#modelProfile);
-            if (refused.kind !== 'failure' || refused.code !== this.#deps.codes.QUOTA_EXCEEDED_CODE) throw new Error('AI7_OUTCOME_UNKNOWN');
             bodyStatus = event.status;
             body = event.body;
             completed = true;
@@ -695,7 +699,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
           // 结果待确认 (Issue #51, S16c): the service accepted the request and its answer never came back whole — the
           // connection dropped mid-answer, or what arrived does not read — so whether it was processed and billed cannot be
           // known. It is no failure to retry and no answer to read. A refusal's unreadable body is still that refusal.
-          if (response.status === 200) {
+          if (response.status >= 200 && response.status < 300) {
             throw new Error('AI7_OUTCOME_UNKNOWN');
           }
           body = null;
@@ -705,11 +709,15 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       const shape = this.#modelProfile.capabilities.requestShape;
       const parsed = parseProviderResponse(bodyStatus, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0,
-          ...(shape === 'anthropic-messages' || shape === 'google-generate-content'
-            ? { offeredToolNames: (options.tools ?? []).map((tool) => tool.name) } : {}),
+          offeredToolNames: (options.tools ?? []).map((tool) => tool.name),
           ...(shape === 'google-generate-content' ? { callIdSeed: assembly.requestDigest.slice(0, 16) } : {}),
         });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
+      if ((outcome.kind === 'failure' || outcome.kind === 'malformed') && streamed.length > 0) {
+        outcome = { kind: 'partial', text: streamed, usage: 'usage' in outcome ? outcome.usage ?? null : null,
+          code: outcome.kind === 'failure' ? outcome.code : AI7_FAILURE_CODES.INVALID_RESPONSE,
+          message: outcome.kind === 'failure' ? outcome.message : '回答未能完整读出。', status: bodyStatus };
+      }
       if (outcome.kind === 'failure' && this.#profile.limitPolicy === 'rate-limit-retryable' &&
           (outcome.code === AI7_FAILURE_CODES.RATE_LIMIT || (outcome.code === AI7_FAILURE_CODES.PROVIDER_ERROR && outcome.status >= 500 && outcome.status <= 599))) {
         this.#lastRetryDelayMs = retryBackoffMs(response.headers?.get('retry-after') ?? null);
@@ -721,8 +729,12 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
         : classifyTransportError(signal.aborted && !(error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest)
           ? new DOMException('请求已中止。', deadline.signal.aborted ? 'TimeoutError' : 'AbortError') : error, sent, transportRequest);
-      yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? responseStatus : undefined);
-      return;
+      if (streamed.length === 0) {
+        yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? responseStatus : undefined);
+        return;
+      }
+      outcome = { kind: 'partial', text: streamed, code: classified.code, message: classified.message, usage: null,
+        ...(responseStatus === undefined ? {} : { status: responseStatus }) };
     } finally {
       clearTimeout(timer);
     }
@@ -731,7 +743,17 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(outcome.code, outcome.message, outcome.status);
       return;
     }
-    this.#lastResult = outcome;
+    this.#lastResult = outcome.kind === 'partial' ? { kind: 'answer', text: outcome.text, reasoningText: null, usage: outcome.usage, truncated: true,
+      ...(outcome.salvaged === undefined ? {} : { salvaged: outcome.salvaged }) } : outcome;
+    if (outcome.kind === 'partial') {
+      if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
+      if (streamed.length === 0) yield { type: 'text-delta', index: 0, text: outcome.text };
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: outcome.text } };
+      if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
+      if (outcome.code === 'MAX_TOKENS') yield { type: 'finish', reason: { kind: 'max-tokens' } };
+      else yield fail(outcome.code, outcome.message, outcome.status);
+      return;
+    }
     // A response that matched no declared channel is this route's `INVALID_RESPONSE`, exactly as it
     // was before the channels were declared; the canonical result records which channel was missing.
     if (outcome.kind === 'malformed') {
@@ -773,6 +795,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     if (streamed.length === 0) yield { type: 'text-delta', index: 0, text };
     yield { type: 'block-end', index: 0, block: { type: 'text', text } };
     if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
-    yield { type: 'finish', reason: { kind: 'stop' } };
+    yield { type: 'finish', reason: { kind: outcome.kind === 'answer' && outcome.truncated === true ? 'max-tokens' : 'stop' } };
   }
 }

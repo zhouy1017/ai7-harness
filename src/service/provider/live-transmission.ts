@@ -296,7 +296,7 @@ async function send(
     await cache.record(line({ outcome: 'failed', status: null, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
     throw error;
   }
-  if (identity.requestShape === 'editorial-dialogue-sse' && response.status === 200) {
+  if (identity.requestShape === 'editorial-dialogue-sse' && (response.status >= 200 && response.status < 300)) {
     let consumed = false;
     return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')), stream: async function* () {
       if (consumed) throw new Error('AI7_OUTCOME_UNKNOWN');
@@ -304,15 +304,17 @@ async function send(
       const chunks: string[] = [];
       let aggregate: unknown = { model, choices: [{ message: { content: '' }, finish_reason: null }], usage: null };
       let complete = false;
+      let streamError: Extract<DialogueStreamEvent, { kind: 'error' }> | null = null;
       let kept = false;
       try {
         for await (const event of response.stream?.() ?? dialogueSseEvents(response, model)) {
           if (event.kind === 'text') chunks.push(event.text);
           // The capture keeps the chat-completions aggregate alone; an in-stream refusal is never a whole answer here.
           else if (event.kind === 'complete') { aggregate = event.response; complete = true; }
+          else if (event.kind === 'error') streamError = event;
           if (event.kind === 'text') yield event;
         }
-        if (!complete) throw new Error('AI7_OUTCOME_UNKNOWN');
+        if (!complete && streamError === null) throw new Error('AI7_OUTCOME_UNKNOWN');
       } finally {
         if (!complete) {
           aggregate = { model, choices: [{ message: { content: chunks.join('') }, finish_reason: null }], usage: null };
@@ -337,7 +339,8 @@ async function send(
         if (complete && kept) await cache.settle(claimFacts, 'completed');
       }
       // A complete event reaches the adapter only after its protected capture and ledger are durable.
-      yield { kind: 'complete', response: aggregate };
+      if (streamError !== null) yield streamError;
+      else yield { kind: 'complete', response: aggregate };
     } };
   }
   let body: unknown = null;
@@ -346,7 +349,7 @@ async function send(
   } catch {
     // 结果待确认 (Issue #51, S16c): accepted, and its answer never came back whole. The claim becomes a lasting hold before the
     // line is written, so no restart, renamed item or later Run can send it again without a declared retry; nothing is cached.
-    if (response.status === 200) {
+    if ((response.status >= 200 && response.status < 300)) {
       await cache.holdUnknown(claimFacts);
       await cache.record(line({ outcome: 'failed', status: response.status, usage: null, incurredUsage: null, classification: 'outcome-unknown' }));
       return { status: response.status, json: () => Promise.reject(new Error('AI7_OUTCOME_UNKNOWN')) };
@@ -358,8 +361,8 @@ async function send(
   // claim is settled; a crash between the two leaves both, and verified evidence answers. A 200 that cannot be kept leaves its claim
   // standing, so an answer that was paid for is never paid for again by accident.
   const uncertainStatus = response.status >= 500 || response.status === 408;
-  let kept = response.status !== 200 && !uncertainStatus;
-  if (response.status === 200) {
+  let kept = (response.status < 200 || response.status >= 300) && !uncertainStatus;
+  if ((response.status >= 200 && response.status < 300)) {
     try {
       await cache.keep({
         model, requestDigest, requestBody: init.body, status: response.status, response: body, usage, transmittedAt,
@@ -377,7 +380,7 @@ async function send(
   const accountLimit = isProviderAccountLimit(profile, response.status, body);
   const resetWindow = accountLimit ? providerResetWindow(body) : null;
   await cache.record(line({
-    outcome: response.status === 200 ? 'transmitted' : 'failed',
+    outcome: (response.status >= 200 && response.status < 300) ? 'transmitted' : 'failed',
     status: response.status,
     usage,
     incurredUsage: usage,
@@ -385,7 +388,7 @@ async function send(
     ...(uncertainStatus ? { classification: 'outcome-unknown' as const } : {}),
     ...(resetWindow === null ? {} : { resetWindow }),
   }));
-  if (kept) await cache.settle(claimFacts, response.status === 200 ? 'completed' : 'failed');
+  if (kept) await cache.settle(claimFacts, (response.status >= 200 && response.status < 300) ? 'completed' : 'failed');
   return { status: response.status, json: () => Promise.resolve(body) };
 }
 

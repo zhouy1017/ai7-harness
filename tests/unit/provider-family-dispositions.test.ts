@@ -187,7 +187,7 @@ describe('cancellation per family', () => {
         chunks.push(chunk);
         if (chunk.type === 'text-delta') controller.abort();
       }
-      expect(chunks.map((chunk) => chunk.type), row.family).toEqual(['block-start', 'text-delta', 'finish']);
+      expect(chunks.map((chunk) => chunk.type), row.family).toEqual(['block-start', 'text-delta', 'block-end', 'finish']);
       expect(failureOf(chunks)?.code, row.family).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
       expect(touched.transport, row.family).toBe(1);
       expect(adapter.lastRequestNotSent, row.family).toBe(false);
@@ -206,17 +206,20 @@ describe('stream boundaries per family', () => {
     for (const row of ROWS) {
       const { adapter } = harness(declared(row), async () => sse(truncated[row.family]), true);
       expect(failureOf(await collect(adapter.stream(dialogue(declared(row)))))?.code, row.family).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
-      expect(adapter.lastCanonicalResult, row.family).toBeNull();
+      expect(adapter.lastCanonicalResult, row.family).toMatchObject({ kind: 'answer', truncated: true });
     }
   });
 
-  it('refuses a Responses stream whose completed text differs from its deltas, and a Messages call whose arguments do not parse', async () => {
+  it('uses completed Responses text and rejects only unreadable Messages calls', async () => {
     const responses = frames('openai-responses', 'text-stream').map((frame) => frame.replace('"delta":"回答。"', '"delta":"别的。"'));
-    const messages = frames('anthropic-messages', 'tool-stream').map((frame) => frame.replace('"partial_json":"\\"合成\\"}"', '"partial_json":"\\"合成"'));
-    for (const [row, wire] of [[ROWS[0], responses], [ROWS[1], messages]] as const) {
-      const { adapter } = harness(declared(row), async () => sse(wire), true);
-      expect(failureOf(await collect(adapter.stream(dialogue(declared(row)))))?.code, row.family).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
-    }
+    const { adapter } = harness(declared(ROWS[0]), async () => sse(responses), true);
+    const chunks = await collect(adapter.stream(dialogue(declared(ROWS[0]))));
+    expect(failureOf(chunks)).toBeNull();
+    expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: '合成回答。', salvaged: [{ reason: 'completed-text-differs-from-stream' }] });
+    const messages = frames('anthropic-messages', 'tool-stream').map((frame) => frame.replace('"partial_json":"\\\"合成\\\"}"', '"partial_json":"\\\"合成"'));
+    const other = harness(declared(ROWS[1]), async () => sse(messages), true).adapter;
+    const result = await collect(other.stream(dialogue(declared(ROWS[1]))));
+    expect(result.some((chunk) => chunk.type === 'tool-call-delta')).toBe(false);
   });
 
   it('reads an in-stream account limit as the account limit, after text or before it, on every family that names one', async () => {
@@ -237,19 +240,15 @@ describe('Gemini function calls (Issue #1180)', () => {
   const offered = { toolCallsOffered: true, offeredToolNames: [TOOL.name], callIdSeed: '0123456789abcdef' };
   const body = (parts: unknown[], finishReason = 'STOP') => ({ candidates: [{ content: { role: 'model', parts }, finishReason }] });
 
-  it('refuses opaque reasoning, an unoffered name, a non-object argument and an unfinished turn as malformed', () => {
-    for (const parts of [
-      [{ functionCall: { name: TOOL.name, args: {} }, thoughtSignature: 'opaque' }],
-      [{ text: '合成推理', thought: true }, { functionCall: { name: TOOL.name, args: {} } }],
-      [{ functionCall: { name: 'unoffered', args: {} } }],
-      [{ functionCall: { name: TOOL.name, args: [] } }],
-      [{ functionCall: { name: TOOL.name, args: {} } }, { text: '调用之后的文字' }],
-    ]) expect(normalizeModelResponse(gemini, body(parts), offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    expect(normalizeModelResponse(gemini, body([{ functionCall: { name: TOOL.name } }], 'MAX_TOKENS'), offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    // A call without the provider's id cannot be named without the request's seed.
-    expect(normalizeModelResponse(gemini, body([{ functionCall: { name: TOOL.name } }]), { toolCallsOffered: true, offeredToolNames: [TOOL.name] })).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    // And a call nobody offered is never read on a request that offered none.
-    expect(normalizeModelResponse(gemini, body([{ functionCall: { name: TOOL.name } }]))).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  it('rejects opaque or unreadable calls individually and retains adjacent text', () => {
+    for (const bad of [
+      { functionCall: { id: 'bad', name: TOOL.name, args: [] } },
+      { functionCall: { id: 'bad', name: 'unoffered', args: {} } },
+    ]) expect(normalizeModelResponse(gemini, body([bad, { functionCall: { id: 'valid', name: TOOL.name, args: {} } }]), offered)).toMatchObject({ kind: 'tool-calls', calls: [{ id: 'valid' }], salvaged: [{ index: 0 }] });
+    const opaque = normalizeModelResponse(gemini, body([{ text: 'retained' }, { functionCall: { name: TOOL.name, args: {} }, thoughtSignature: 'opaque' }]), offered);
+    expect(opaque).toMatchObject({ kind: 'answer', text: 'retained', truncated: true });
+    expect(JSON.stringify(opaque)).not.toContain('opaque');
+    expect(normalizeModelResponse(gemini, body([{ text: 'partial' }, { functionCall: { name: TOOL.name } }], 'MAX_TOKENS'), offered)).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
   });
 
   it('names two id-less calls of one turn apart and refuses reasoning carried back with a call', () => {

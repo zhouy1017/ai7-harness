@@ -169,12 +169,21 @@ describe('the platform tool set', () => {
 });
 
 describe('canonical tool arguments', () => {
+  it('ignores extra keys, clamps numeric strings and approximates enum values (#1311)', () => {
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', k: '99', extra: true, sourceKinds: ['稿件', '资料', '稿件'] }))
+      .toEqual({ tool: 'retrieve', query: 'alpha', k: 8, sourceKinds: ['manuscript', 'material'] });
+    expect(canonicalToolArguments('read_blocks', { blockId: 'synthetic-block', radius: -4, extra: true }))
+      .toEqual({ tool: 'read_blocks', blockId: 'synthetic-block', radius: 0 });
+    expect(canonicalToolArguments('search_manuscript', { query: 'alpha', mode: '分词检索' }))
+      .toEqual({ tool: 'search_manuscript', query: 'alpha', mode: 'tokenized' });
+    expect(canonicalToolArguments('retrieve', '{unparseable')).toBeNull();
+  });
   it('normalizes a query and refuses anything that is not one', () => {
     expect(canonicalToolArguments('websearch', { query: '  鲁迅 1918 年 狂人日记  ' })).toEqual({ tool: 'websearch', query: '鲁迅 1918 年 狂人日记' });
     expect(canonicalToolArguments('websearch', { query: 'é' })).toEqual({ tool: 'websearch', query: 'é' });
     expect(canonicalToolArguments('websearch', { query: '   ' })).toBeNull();
-    expect(canonicalToolArguments('websearch', { query: 'x'.repeat(1_001) })).toBeNull();
-    expect(canonicalToolArguments('websearch', { query: 'a', extra: 1 })).toBeNull();
+    expect(canonicalToolArguments('websearch', { query: 'x'.repeat(1_001) })).toEqual({ tool: 'websearch', query: 'x'.repeat(1000) });
+    expect(canonicalToolArguments('websearch', { query: 'a', extra: 1 })).toEqual({ tool: 'websearch', query: 'a' });
     expect(canonicalToolArguments('websearch', { q: 'a' })).toBeNull();
     expect(canonicalToolArguments('websearch', 'a')).toBeNull();
     expect(canonicalToolArguments('shell', { query: 'a' })).toBeNull();
@@ -190,7 +199,7 @@ describe('canonical tool arguments', () => {
     ]) {
       expect(canonicalPublicUrl(refused)).toBeNull();
     }
-    expect(canonicalToolArguments('webfetch', { url: 'https://example.org/', extra: true })).toBeNull();
+    expect(canonicalToolArguments('webfetch', { url: 'https://example.org/', extra: true })).toEqual({ tool: 'webfetch', url: 'https://example.org/' });
   });
 
   it('digests equal arguments equally and different ones differently', () => {

@@ -50,14 +50,14 @@ export interface CanonicalToolCall {
  * that did neither.
  */
 export type CanonicalModelResult =
-  | { readonly kind: 'answer'; readonly text: string; readonly reasoningText: string | null; readonly usage: ModelUsage | null }
+  | { readonly kind: 'answer'; readonly text: string; readonly reasoningText: string | null; readonly usage: ModelUsage | null; readonly truncated?: boolean; readonly salvaged?: ReadonlyArray<{ section: string; index: number; reason: string }> }
   | { readonly kind: 'empty-answer'; readonly reasoningPresent: boolean; readonly usage: ModelUsage | null }
   /**
    * The model asked for tools rather than answering (Issue #473). Read only for a profile that declares
    * `toolCalling: 'function'`; for every other profile a `tool_calls` field is not a channel and is never read.
    */
-  | { readonly kind: 'tool-calls'; readonly text: string; readonly calls: ReadonlyArray<CanonicalToolCall>; readonly reasoningText: string | null; readonly usage: ModelUsage | null }
-  | { readonly kind: 'malformed'; readonly reason: MalformedReason };
+  | { readonly kind: 'tool-calls'; readonly text: string; readonly calls: ReadonlyArray<CanonicalToolCall>; readonly reasoningText: string | null; readonly usage: ModelUsage | null; readonly salvaged?: ReadonlyArray<{ section: string; index: number; reason: string }> }
+  | { readonly kind: 'malformed'; readonly reason: MalformedReason; readonly usage?: ModelUsage | null };
 
 function nonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
@@ -140,255 +140,114 @@ function isBlockOfType(block: unknown, type: string): block is Record<string, un
   return isRecord(block) && block.type === type;
 }
 
-/**
- * The chat-completions reading: one choice, one message, the answer a string on it.
- */
-function normalizeMessageContentString(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
-  if (!isRecord(body) || !Array.isArray(body.choices)) return { kind: 'malformed', reason: 'response-not-a-record' };
-  const choice: unknown = body.choices[0];
-  if (body.choices.length === 0 || !isRecord(choice)) return { kind: 'malformed', reason: 'choice-absent' };
-  // `tool_calls` is a channel only when the request offered tools to a function-calling model: to every other request the
-  // response reads exactly as it always has, its `content` an answer and its calls nothing.
-  if (options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function' && isRecord(choice.message) &&
-      Array.isArray(choice.message.tool_calls) && choice.message.tool_calls.length > 0) {
-    return toolCallsOf(profile, body, choice.message);
-  }
-  if (!isRecord(choice.message) || typeof choice.message.content !== 'string') {
-    return { kind: 'malformed', reason: 'answer-channel-absent' };
-  }
-  const usage = usageOf(body);
-  const reasoning = profile.capabilities.reasoningChannel === 'message-reasoning-content' &&
-    typeof choice.message.reasoning_content === 'string' && choice.message.reasoning_content.length > 0
-    ? choice.message.reasoning_content
-    : null;
-  if (choice.message.content.length === 0) return { kind: 'empty-answer', reasoningPresent: reasoning !== null, usage };
-  return { kind: 'answer', text: choice.message.content, reasoningText: reasoning, usage };
+/** Null is an empty channel; arrays contribute only their text parts. */
+function contentText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  return Array.isArray(value) ? value.filter(isRecord).filter((part) => part.type === 'text' || part.type === 'output_text')
+    .map((part) => typeof part.text === 'string' ? part.text : '').join('') : '';
 }
 
-/**
- * The chat-completions tool-call reading (Issue #473): every entry of `message.tool_calls` must be a `function` call with a
- * string id, name, and arguments, or the whole response is `tool-calls-malformed` — a partly readable request for tools is
- * not a request AI7 can answer. `content` beside the calls may be a string or `null`.
- */
-function toolCallsOf(profile: ProviderModelProfile, body: Record<string, unknown>, message: Record<string, unknown>): CanonicalModelResult {
+/** Only complete, unique calls execute. A rejected call cannot erase its neighbours or text. */
+function readableCalls(entries: ReadonlyArray<unknown>, read: (entry: unknown, index: number) => CanonicalToolCall | null,
+  options: NormalizeOptions, executable: boolean) {
+  const candidates = entries.map(read);
+  const ids = entries.map((entry) => !isRecord(entry) ? null : entry.call_id ?? entry.id ?? (isRecord(entry.functionCall) ? entry.functionCall.id : null));
+  const salvaged: Array<{ section: string; index: number; reason: string }> = [];
   const calls: CanonicalToolCall[] = [];
-  for (const entry of message.tool_calls as unknown[]) {
-    if (!isRecord(entry) || entry.type !== 'function' || typeof entry.id !== 'string' || entry.id.length === 0 || !isRecord(entry.function) ||
-        typeof entry.function.name !== 'string' || typeof entry.function.arguments !== 'string') {
-      return { kind: 'malformed', reason: 'tool-calls-malformed' };
+  for (const [index, call] of candidates.entries()) {
+    let valid = executable && call !== null && call.id.length > 0 && call.name.length > 0;
+    if (valid && call !== null) {
+      try { valid = isRecord(JSON.parse(call.arguments)); } catch { valid = false; }
+      valid &&= candidates.filter((other) => other?.id === call.id).length === 1;
+      valid &&= ids.filter((id) => id === call.id).length <= 1;
+      if (options.offeredToolNames !== undefined) valid &&= options.offeredToolNames.includes(call.name);
     }
-    // Two calls under one id would let one result answer both.
-    if (calls.some((call) => call.id === entry.id)) return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    calls.push({ id: entry.id, name: entry.function.name, arguments: entry.function.arguments });
+    if (valid && call !== null) calls.push(call);
+    else salvaged.push({ section: 'calls', index, reason: 'tool-call-rejected' });
   }
-  if (message.content !== null && message.content !== undefined && typeof message.content !== 'string') {
-    return { kind: 'malformed', reason: 'tool-calls-malformed' };
-  }
-  // Whatever reasoning the model wrote beside its calls is kept, declared channel or not: a thinking-mode tool loop hands
-  // it back with the calls (the review of #671; the §7.7 live item confirms the gateway's requirement). It is never read
-  // as an answer.
-  const reasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0 ? message.reasoning_content : null;
-  return { kind: 'tool-calls', text: typeof message.content === 'string' ? message.content : '', calls, reasoningText: reasoning, usage: usageOf(body) };
+  return { calls, salvaged };
 }
 
-/**
- * The Anthropic-compatible reading: the answer is the concatenation of every text block's `text`, in
- * order. A response with no `content` array matched no channel at all and is `content-absent`; a
- * `content` array that yields no text is the empty answer this module exists to distinguish, whether
- * the array carries no text block or a text block that is empty, because both hand the contract layer
- * the same `''` it must never be handed.
- *
- * Text-only reading retains its legacy stop/reasoning semantics. Client-function turns instead
- * validate every block and the stop reason before exposing anything executable: only leading text
- * followed by contiguous client calls fits the aggregate canonical result (Issue #1056).
- */
-function normalizeContentBlocks(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
-  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
-  if (!Array.isArray(body.content)) return { kind: 'malformed', reason: 'content-absent' };
-  const functionsOffered = options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function';
-  if (functionsOffered || body.stop_reason === 'tool_use' || body.content.some((block) => isBlockOfType(block, 'tool_use'))) {
-    if (!functionsOffered) return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    const calls: CanonicalToolCall[] = [];
-    let text = '';
-    for (const block of body.content) {
-      if (isBlockOfType(block, 'text') && typeof block.text === 'string' && calls.length === 0 &&
-          Object.keys(block).every((key) => key === 'type' || key === 'text')) {
-        text += block.text;
-        continue;
-      }
-      // Opaque blocks/fields (including thinking, signatures, server tools and toolsets) cannot round-trip.
-      if (!isBlockOfType(block, 'tool_use') || Object.keys(block).some((key) => !['type', 'id', 'name', 'input'].includes(key)) ||
-          typeof block.id !== 'string' || block.id.length === 0 || typeof block.name !== 'string' ||
-          !(options.offeredToolNames ?? []).includes(block.name) || !isRecord(block.input) || calls.some((call) => call.id === block.id)) {
-        return { kind: 'malformed', reason: 'tool-calls-malformed' };
-      }
-      let argumentsJson: string;
-      try { argumentsJson = JSON.stringify(block.input); } catch { return { kind: 'malformed', reason: 'tool-calls-malformed' }; }
-      calls.push({ id: block.id, name: block.name, arguments: argumentsJson });
-    }
-    if (calls.length > 0) {
-      if (body.stop_reason !== 'tool_use') return { kind: 'malformed', reason: 'tool-calls-malformed' };
-      return { kind: 'tool-calls', text, calls, reasoningText: null, usage: contentBlockUsageOf(body) };
-    }
-    // No tool_use blocks with a tool stop, and no truncated/unfinished final answer masquerading as completion.
-    if (body.stop_reason !== 'end_turn' && body.stop_reason !== 'stop_sequence') return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    const usage = contentBlockUsageOf(body);
-    return text.length === 0 ? { kind: 'empty-answer', reasoningPresent: false, usage } : { kind: 'answer', text, reasoningText: null, usage };
-  }
-  const text = body.content
-    .filter((block): block is Record<string, unknown> => isBlockOfType(block, 'text') && typeof block.text === 'string')
-    .map((block) => block.text as string)
-    .join('');
-  const usage = contentBlockUsageOf(body);
-  const reasoningPresent = profile.capabilities.reasoningChannel === 'content-thinking-blocks' &&
-    body.content.some((block) => isBlockOfType(block, 'thinking'));
-  if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
-  return { kind: 'answer', text, reasoningText: null, usage };
-}
-
-/**
- * The Responses reading: `output` is a list of items rather than of answer parts, so the answer is
- * one level deeper than the shape before it — the `text` of every `output_text` part of every
- * `message` item, in order. A `refusal` part is not answer text: the model declining to answer is
- * the empty answer this module exists to distinguish, not a string for the contract layer to fail to
- * parse. A response with no `output` array matched no channel at all and is `output-absent`.
- *
- * Text-only reading keeps its existing status semantics. Offered/admitted function calls require a
- * completed response and complete call items; a malformed batch or opaque reasoning refuses the whole
- * batch because this payload cannot preserve the reasoning needed for continuation (Issue #1038).
- * `output_text` is not read either — the SDK synthesizes it client-side and the wire body has none.
- */
-function normalizeOutputItems(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
-  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
-  if (!Array.isArray(body.output)) return { kind: 'malformed', reason: 'output-absent' };
-  const text = body.output
-    .filter((item): item is Record<string, unknown> => isBlockOfType(item, 'message'))
-    .flatMap((item): ReadonlyArray<unknown> => (Array.isArray(item.content) ? item.content : []))
-    .filter((part): part is Record<string, unknown> => isBlockOfType(part, 'output_text') && typeof part.text === 'string')
-    .map((part) => part.text as string)
-    .join('');
-  const usage = outputItemUsageOf(body);
-  if (options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function' &&
-      body.output.some((item) => isBlockOfType(item, 'function_call'))) {
-    // A partial batch cannot execute. Reasoning requires opaque replay that the current payload cannot preserve.
-    if (body.status !== 'completed' || body.output.some((item) => isBlockOfType(item, 'reasoning'))) {
-      return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    }
-    const calls: CanonicalToolCall[] = [];
-    for (const item of body.output) {
-      if (!isBlockOfType(item, 'function_call')) continue;
-      if (typeof item.call_id !== 'string' || item.call_id.length === 0 || typeof item.name !== 'string' || item.name.length === 0 ||
-          typeof item.arguments !== 'string' || (item.status !== undefined && item.status !== 'completed') ||
-          calls.some((call) => call.id === item.call_id)) {
-        return { kind: 'malformed', reason: 'tool-calls-malformed' };
-      }
-      // The separate item id is never a correlation id; argument JSON/schema validation belongs to the tool boundary.
-      calls.push({ id: item.call_id, name: item.name, arguments: item.arguments });
-    }
-    return { kind: 'tool-calls', text, calls, reasoningText: null, usage };
-  }
-  const reasoningPresent = profile.capabilities.reasoningChannel === 'output-reasoning-items' &&
-    body.output.some((item) => isBlockOfType(item, 'reasoning'));
-  if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
-  return { kind: 'answer', text, reasoningText: null, usage };
-}
-
-/**
- * The generateContent reading: the answer is the concatenation of the `text` of every part of the
- * first candidate that is not flagged `thought`, in order. A part is not typed the way the two shapes
- * above type their blocks and items — it carries the fields it has — so a thought part is one whose
- * `thought` is exactly `true`, and everything else with a string `text` is answer text.
- *
- * The `candidates` array is where this shape differs from the one before it, and deliberately so: an
- * absent array *and an empty one* are `candidate-absent`, whereas an empty `output` above is the
- * empty answer. An empty `output` is a model that answered with no item; an empty `candidates` is
- * what this shape returns when the prompt was blocked, and no candidate is not an empty answer.
- * `finishReason` and `promptFeedback.blockReason` are not carried, for the reason `stop_reason` and
- * `status` are not carried above — the canonical result gains no field one vendor needs — so a
- * blocked prompt reads as `candidate-absent`, and that reading is the one the first live item on this
- * shape should confirm. A candidate with no `content`, no parts, or no non-thought text is the empty
- * answer this module exists to distinguish, since all three hand the contract layer the same `''`.
- */
-function normalizeCandidateParts(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions): CanonicalModelResult {
-  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
-  if (!Array.isArray(body.candidates) || body.candidates.length === 0) return { kind: 'malformed', reason: 'candidate-absent' };
-  const candidate: unknown = body.candidates[0];
-  // A first entry that is not a record is not a candidate, so the response carries none rather than
-  // carrying one that answered emptily.
-  if (!isRecord(candidate)) return { kind: 'malformed', reason: 'candidate-absent' };
-  const parts: ReadonlyArray<unknown> = isRecord(candidate.content) && Array.isArray(candidate.content.parts)
-    ? candidate.content.parts
-    : [];
-  const functionsOffered = options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function';
-  if (functionsOffered || parts.some((part) => isRecord(part) && part.functionCall !== undefined)) {
-    if (!functionsOffered) return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    return candidateFunctionCallsOf(body, candidate, parts, options);
-  }
-  const text = parts
-    .filter((part): part is Record<string, unknown> => isRecord(part) && part.thought !== true && typeof part.text === 'string')
-    .map((part) => part.text as string)
-    .join('');
-  const usage = candidateUsageOf(body);
-  const reasoningPresent = profile.capabilities.reasoningChannel === 'candidate-thought-parts' &&
-    parts.some((part) => isRecord(part) && part.thought === true);
-  if (text.length === 0) return { kind: 'empty-answer', reasoningPresent, usage };
-  return { kind: 'answer', text, reasoningText: null, usage };
-}
-
-/**
- * The generateContent function-call reading (Issue #1180), for a request that offered functions to a function-calling
- * model: only leading plain text parts, then `functionCall` parts naming an offered function with object `args`, under a
- * `STOP` finish. A thought part, a thought signature, or any other part is opaque reasoning or a server tool this payload
- * cannot carry back, so the whole turn is `tool-calls-malformed`. A call without the optional provider id takes the
- * deterministic `gemini-call-<seed>-<n>` id, and a turn that needs one without a seed refuses rather than inventing it.
- */
-function candidateFunctionCallsOf(body: Record<string, unknown>, candidate: Record<string, unknown>, parts: ReadonlyArray<unknown>,
-  options: NormalizeOptions): CanonicalModelResult {
-  if (candidate.finishReason !== 'STOP') return { kind: 'malformed', reason: 'tool-calls-malformed' };
-  const calls: CanonicalToolCall[] = [];
-  let text = '';
-  for (const part of parts) {
-    if (isRecord(part) && Object.keys(part).join(',') === 'text' && typeof part.text === 'string' && calls.length === 0) {
-      text += part.text;
-      continue;
-    }
-    const call = isRecord(part) && Object.keys(part).join(',') === 'functionCall' && isRecord(part.functionCall) ? part.functionCall : null;
-    if (call === null || Object.keys(call).some((key) => !['name', 'args', 'id'].includes(key)) || typeof call.name !== 'string' ||
-        !(options.offeredToolNames ?? []).includes(call.name) || (call.args !== undefined && !isRecord(call.args)) ||
-        (call.id !== undefined && (typeof call.id !== 'string' || call.id.length === 0))) {
-      return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    }
-    if (call.id === undefined && options.callIdSeed === undefined) return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    const id = typeof call.id === 'string' ? call.id : `${GEMINI_SYNTHETIC_CALL_PREFIX}${options.callIdSeed}-${calls.length + 1}`;
-    if (calls.some((existing) => existing.id === id)) return { kind: 'malformed', reason: 'tool-calls-malformed' };
-    calls.push({ id, name: call.name, arguments: JSON.stringify(call.args ?? {}) });
-  }
-  const usage = candidateUsageOf(body);
-  if (calls.length > 0) return { kind: 'tool-calls', text, calls, reasoningText: null, usage };
-  return text.length === 0 ? { kind: 'empty-answer', reasoningPresent: false, usage } : { kind: 'answer', text, reasoningText: null, usage };
-}
-
-/**
- * Normalize one response body against the channels its model profile declares. Deliberately callable
- * with a body alone: a cached response can be classified without an adapter, a transport, a
- * credential, or a Run, which is what makes replaying a past failure possible at all.
- *
- * The shape is chosen by the declared answer channel and by nothing else — no route, no model id, no
- * endpoint — which is what keeps a second vendor's response shape a row in the profile table.
- */
+/** Normalize received output without changing requests or replaying opaque reasoning. */
 export function normalizeModelResponse(profile: ProviderModelProfile, body: unknown, options: NormalizeOptions = {}): CanonicalModelResult {
-  if (profile.capabilities.answerChannel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
-  if (profile.capabilities.answerChannel === 'content-text-blocks') return normalizeContentBlocks(profile, body, options);
-  if (profile.capabilities.answerChannel === 'output-message-text') return normalizeOutputItems(profile, body, options);
-  if (profile.capabilities.answerChannel === 'candidate-parts-text') return normalizeCandidateParts(profile, body, options);
-  return normalizeMessageContentString(profile, body, options);
+  const channel = profile.capabilities.answerChannel;
+  if (channel === 'none') return { kind: 'malformed', reason: 'answer-channel-not-declared' };
+  if (!isRecord(body)) return { kind: 'malformed', reason: 'response-not-a-record' };
+  let text = '';
+  let reasoning: string | null = null;
+  let reasoningPresent = false;
+  let usage: ModelUsage | null = null;
+  let truncated = false;
+  let entries: ReadonlyArray<unknown> = [];
+  let read: (entry: unknown, index: number) => CanonicalToolCall | null = () => null;
+  let executable = options.toolCallsOffered === true && profile.capabilities.toolCalling === 'function';
+  if (channel === 'content-text-blocks') {
+    if (!Array.isArray(body.content)) return { kind: 'malformed', reason: 'content-absent' };
+    text = contentText(body.content);
+    usage = contentBlockUsageOf(body);
+    truncated = body.stop_reason === 'max_tokens';
+    entries = body.content.filter((part) => isBlockOfType(part, 'tool_use'));
+    reasoningPresent = profile.capabilities.reasoningChannel === 'content-thinking-blocks' && body.content.some((part) => isBlockOfType(part, 'thinking'));
+    executable &&= body.stop_reason === 'tool_use' && body.content.every((part) => isBlockOfType(part, 'text') || isBlockOfType(part, 'tool_use'));
+    read = (part) => isRecord(part) && typeof part.id === 'string' && typeof part.name === 'string' && isRecord(part.input)
+      ? { id: part.id, name: part.name, arguments: JSON.stringify(part.input) } : null;
+  } else if (channel === 'output-message-text') {
+    if (!Array.isArray(body.output) && typeof body.output_text !== 'string') return { kind: 'malformed', reason: 'output-absent' };
+    const output: unknown[] = Array.isArray(body.output) ? body.output : [];
+    text = typeof body.output_text === 'string' ? body.output_text : output.filter((part) => isBlockOfType(part, 'message')).map((part) => contentText(part.content)).join('');
+    usage = outputItemUsageOf(body);
+    truncated = body.status !== undefined && body.status !== 'completed';
+    entries = output.filter((part) => isBlockOfType(part, 'function_call'));
+    reasoningPresent = profile.capabilities.reasoningChannel === 'output-reasoning-items' && output.some((part) => isBlockOfType(part, 'reasoning'));
+    executable &&= body.status === 'completed' && !output.some((part) => isBlockOfType(part, 'reasoning'));
+    read = (part) => isRecord(part) && typeof part.call_id === 'string' && typeof part.name === 'string' && typeof part.arguments === 'string' && (part.status === undefined || part.status === 'completed')
+      ? { id: part.call_id, name: part.name, arguments: part.arguments } : null;
+  } else if (channel === 'candidate-parts-text') {
+    const candidate: unknown = Array.isArray(body.candidates) ? body.candidates[0] : null;
+    if (!isRecord(candidate)) return { kind: 'malformed', reason: 'candidate-absent' };
+    const parts: unknown[] = isRecord(candidate.content) && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
+    text = parts.filter(isRecord).filter((part) => part.thought !== true && typeof part.text === 'string').map((part) => part.text as string).join('');
+    usage = candidateUsageOf(body);
+    truncated = candidate.finishReason !== undefined && candidate.finishReason !== 'STOP';
+    entries = parts.filter((part) => isRecord(part) && part.functionCall !== undefined);
+    reasoningPresent = profile.capabilities.reasoningChannel === 'candidate-thought-parts' && parts.some((part) => isRecord(part) && part.thought === true);
+    executable &&= candidate.finishReason === 'STOP' && !parts.some((part) => isRecord(part) && (part.thought === true || part.thoughtSignature !== undefined));
+    read = (part, index) => {
+      const call = isRecord(part) && isRecord(part.functionCall) ? part.functionCall : null;
+      if (call === null || typeof call.name !== 'string' || (call.args !== undefined && !isRecord(call.args))) return null;
+      const id = typeof call.id === 'string' ? call.id : call.id === undefined && options.callIdSeed !== undefined ? `${GEMINI_SYNTHETIC_CALL_PREFIX}${options.callIdSeed}-${index + 1}` : null;
+      return id === null ? null : { id, name: call.name, arguments: JSON.stringify(call.args ?? {}) };
+    };
+  } else {
+    if (!Array.isArray(body.choices)) return { kind: 'malformed', reason: 'response-not-a-record' };
+    const choice: unknown = body.choices[0];
+    if (!isRecord(choice)) return { kind: 'malformed', reason: 'choice-absent' };
+    if (!isRecord(choice.message) || !Object.hasOwn(choice.message, 'content') && !Array.isArray(choice.message.tool_calls)) return { kind: 'malformed', reason: 'answer-channel-absent' };
+    const message = choice.message;
+    if (message.content !== null && message.content !== undefined && typeof message.content !== 'string' && !Array.isArray(message.content)) return { kind: 'malformed', reason: 'answer-channel-absent' };
+    text = contentText(message.content);
+    usage = usageOf(body);
+    reasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.length > 0 ? message.reasoning_content : null;
+    truncated = choice.finish_reason === 'length';
+    entries = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    executable &&= !truncated;
+    read = (part) => isRecord(part) && part.type === 'function' && typeof part.id === 'string' && isRecord(part.function) && typeof part.function.name === 'string' && typeof part.function.arguments === 'string'
+      ? { id: part.id, name: part.function.name, arguments: part.function.arguments } : null;
+  }
+  const { calls, salvaged } = readableCalls(entries, read, options, executable);
+  if (body.ai7StreamTextMismatch === true) salvaged.push({ section: 'text', index: 0, reason: 'completed-text-differs-from-stream' });
+  const metadata = salvaged.length === 0 ? {} : { salvaged };
+  if (calls.length > 0) return { kind: 'tool-calls', text, calls, reasoningText: reasoning, usage, ...metadata };
+  if (channel === 'message-content-string' && profile.capabilities.reasoningChannel !== 'message-reasoning-content') reasoning = null;
+  if (text.length === 0) return entries.length > 0 && salvaged.length > 0
+    ? { kind: 'malformed', reason: 'tool-calls-malformed', ...(usage === null ? {} : { usage }) }
+    : { kind: 'empty-answer', reasoningPresent: reasoningPresent || reasoning !== null, usage };
+  return { kind: 'answer', text, reasoningText: reasoning, usage, ...metadata, ...(truncated || salvaged.some((entry) => entry.section === 'calls') ? { truncated: true } : {}) };
 }
 
-/** What the request a response answers offered: tools, or not (Issue #473). Absent, as for every replay, it offered none. */
+/** Calls must belong to this exact request's offered functions. */
 export interface NormalizeOptions {
   readonly toolCallsOffered?: boolean;
-  /** Messages and Gemini client calls must name a function actually declared by this request. Other shapes retain their existing reading. */
   readonly offeredToolNames?: ReadonlyArray<string>;
-  /** The request-digest prefix a Gemini call without a provider id is named from; absent, such a call refuses. */
   readonly callIdSeed?: string;
 }

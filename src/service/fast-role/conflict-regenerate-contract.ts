@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { extractModelJson, type SalvagedModelResult, DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
 
 /**
@@ -113,27 +113,16 @@ export function parseConflictRegenerateMessage(text: string): ConflictRegenerate
 }
 
 /**
- * A regeneration answer read: the one text it offers, or why it is withheld. The answer is one JSON object holding exactly
- * `schema` and `text`; anything else, an empty text, or one longer than a 修改建议 may hold withholds it whole.
+ * Read text from an extracted object, or use a plain answer. Empty text and text beyond mark storage bounds are withheld.
  */
 export type ConflictRegenerateReading =
   | { readonly kind: 'read'; readonly salvaged?: SalvagedModelResult['salvaged']; readonly text: string }
   | { readonly kind: 'withheld'; readonly reason: string };
 
 export function readConflictRegenerateAnswer(answer: string): ConflictRegenerateReading {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(answer);
-  } catch {
-    return { kind: 'withheld', reason: '模型的回答不是约定格式的建议文字' };
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return { kind: 'withheld', reason: '模型的回答不是约定格式的建议文字' };
-  const record = parsed as Record<string, unknown>;
-  const keys = Object.keys(record);
-  if (keys.length !== 2 || record['schema'] !== CONFLICT_REGENERATE_RESULT_SCHEMA || typeof record['text'] !== 'string' || !record['text'].isWellFormed()) {
-    return { kind: 'withheld', reason: '模型的回答不是约定格式的建议文字' };
-  }
-  const text = record['text'];
+  const parsed = extractModelJson(answer, { partial: true });
+  const text = parsed === null ? answer.trim() : parsed.text;
+  if (typeof text !== 'string' || !text.isWellFormed()) return { kind: 'withheld', reason: '模型回答无法读出任何可用条目' };
   if (text.trim().length === 0) return { kind: 'withheld', reason: '模型没有给出新的建议文字' };
   if (text.length > MAX_MARK_BODY_CODE_UNITS) return { kind: 'withheld', reason: '模型给出的文字超过修改建议的长度上限' };
   return { kind: 'read', text };
