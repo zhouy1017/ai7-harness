@@ -251,7 +251,7 @@ async function runSettingsPages(renderer, cancellation) {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, modifiers, windowsVirtualKeyCode });
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, modifiers, windowsVirtualKeyCode });
   };
-  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent`;
+  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent?.split(' · ')[0]`;
   const bindings = `window.ai7.getPreferences().then((preferences)=>JSON.stringify(preferences.values['keyboard.bindings']))`;
   const libraryDefault = darwin ? 'Command+Option+2' : 'Alt+2';
   const seriesDefault = darwin ? 'Command+Option+3' : 'Alt+3';
