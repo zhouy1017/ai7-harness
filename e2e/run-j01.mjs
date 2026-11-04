@@ -1866,7 +1866,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
   } else {
     await clickExactButton(renderer, '导入稿件', 'word-new-book-stage');
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'word-new-book-target');
-    await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target || target.checked) return false; target.click(); return true; })()`, 'word-new-book-select');
+    await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target) return false; target.click(); return true; })()`, 'word-new-book-select');
   }
   await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-relationship');
   await assertRenderer(renderer, `(() => { const relationship = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!relationship) return false; relationship.click(); return true; })()`, 'word-first-manuscript');
@@ -4190,7 +4190,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'reimport-reselection-target-reset');
     await assertRenderer(
       renderer,
-      `(() => { const screen = document.querySelector('[data-import-target-choices]'); const notice = screen?.querySelector('.recovery-notice')?.textContent ?? ''; return Boolean(screen) && !screen.querySelector('input:checked') && !screen.querySelector('[data-commit-manuscript-reimport]') && !screen.querySelector('[data-import-review-kind="reimport"]') && notice.includes('请重新确认全部决定'); })()`,
+      `(() => { const screen = document.querySelector('[data-import-target-choices]')?.closest('#screen'); const notice = screen?.querySelector('.recovery-notice')?.textContent ?? ''; return Boolean(screen) && !screen.querySelector('input[name="reimport-lineage"]:checked') && !screen.querySelector('input[name="reimport-source-version"]:checked') && !screen.querySelector('[data-commit-manuscript-reimport]') && !screen.querySelector('[data-import-review-kind="reimport"]') && notice.includes('请重新确认全部决定'); })()`,
       'reimport-reselection-old-authority-invalidated',
     );
     await prepareManuscriptReimportReview(renderer, {

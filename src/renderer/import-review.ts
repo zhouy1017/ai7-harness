@@ -192,7 +192,10 @@ export function createImportReview(options: ImportReviewOptions) {
     }
     const defaultTarget = staged.targetChoices.find((choice) => choice.id === selectedChoiceId);
     let previewOnly = false;
-    const previewAction = (confirm: HTMLButtonElement): HTMLButtonElement => button('查看导入详情', 'quiet', () => { previewOnly = true; confirm.click(); });
+    const previewAction = (confirm: HTMLButtonElement, controls?: { bind(button: HTMLButtonElement): void }): HTMLButtonElement => {
+      const preview = button('查看导入详情', 'quiet', () => { previewOnly = true; confirm.click(); });
+      controls?.bind(preview); return preview;
+    };
     relationshipSelection ??= !staged.editableImport.available || defaultTarget?.kind === 'existing-book' && defaultTarget.manuscriptState === 'populated' ? 'source-only' : 'first-manuscript';
     const content = panel();
     content.append(
@@ -397,7 +400,7 @@ export function createImportReview(options: ImportReviewOptions) {
         }
       });
       const actions = element('div', 'button-row');
-      actions.append(confirm, previewAction(confirm), cancelImport);
+      actions.append(confirm, previewAction(confirm, wordControls ?? undefined), cancelImport);
       form.append(label, title);
       if (relationshipSelection === 'first-manuscript') {
         if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
@@ -439,7 +442,7 @@ export function createImportReview(options: ImportReviewOptions) {
         }
       });
       wordControls.bind(confirm);
-      actions.append(confirm, previewAction(confirm), cancelImport);
+      actions.append(confirm, previewAction(confirm, wordControls), cancelImport);
       content.append(actions);
       revealedControl = confirm;
     } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'source-only') {
