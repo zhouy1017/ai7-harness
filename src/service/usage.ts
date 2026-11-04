@@ -95,6 +95,24 @@ export class UsageLedger {
     this.#db = db;
   }
 
+  /** Compact task-card accounting from immutable outcomes, without loading the full usage table. */
+  taskSummary(target: { runRecordId: string } | { taskIntentIds: readonly string[] }): { calls: number; elapsed: number } | null {
+    const ids = 'runRecordId' in target ? [target.runRecordId] : target.taskIntentIds;
+    if (ids.length === 0) return null;
+    const column = 'runRecordId' in target ? 'run_record_id' : 'task_intent_id';
+    const rows = this.#db.prepare(`SELECT run_record_id, json_extract(canonical_json, '$.report') report
+      FROM analysis_task_outcomes WHERE ${column} IN (${ids.map(() => '?').join(',')})`).all(...ids) as SqlRow[];
+    if (rows.length === 0) return null;
+    let calls = 0, elapsed = 0;
+    for (const row of rows) {
+      const report = typeof row.report === 'string' ? parseUsage(row.report) as RunReportProjection | null : null;
+      if (report === null || report.runRecordId !== row.run_record_id) return null;
+      calls += Object.values(report.usagePerStage).reduce((sum, stage) => sum + stage.requests, 0);
+      elapsed += report.stages.reduce((sum, stage) => sum + (stage.wallMs ?? 0), 0);
+    }
+    return { calls, elapsed };
+  }
+
   inspect(range: UsageRange, groupBy: UsageGrouping, now: Date = new Date(), runOffset = 0, runRecordId?: string): UsageProjection {
     const since = range === 'all' ? null : new Date(now.getTime() - RANGE_MS[range]).toISOString();
     const outcomes = this.#db.prepare(

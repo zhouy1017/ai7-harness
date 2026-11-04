@@ -62,6 +62,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'book-findings': { kind: 'section', section: 'findings' },
   landing: { kind: 'destination', destination: 'library' },
   'global-attention': { kind: 'destination', destination: 'attention' },
+  'task-overview': { kind: 'destination', destination: 'tasks' },
   'series-list': { kind: 'destination', destination: 'series' },
   series: { kind: 'destination', destination: 'series' },
   'knowledge-base': { kind: 'destination', destination: 'knowledge' },

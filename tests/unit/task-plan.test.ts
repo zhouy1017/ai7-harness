@@ -38,7 +38,6 @@ import {
   RESUME_BLOCKED_BINDING,
   RESUME_BLOCKED_CONNECTION,
   RESUME_BLOCKED_OFFLINE,
-  RESUME_BLOCKED_SLOT,
   baselineCancellationImpact,
   evaluationMaterialPlan,
 } from '../../src/service/task-plan.js';
@@ -373,18 +372,17 @@ describe('the Cancellation Impact Summary (CTRL-004)', () => {
   });
 
   it('adds what 续行 waits for to a stopped Run\'s own reasons, sentence after sentence (S76b; CONT-015)', () => {
-    expect(RESUME_BLOCKED_SLOT).toBe('运行名额已满：正在运行的任务结束后再续行。');
     expect(RESUME_BLOCKED_CONNECTION).toBe('模型未连接：续行要发送到模型服务，所需的凭据还没有就绪；连接好之后才能续行。');
     expect(RESUME_BLOCKED_OFFLINE).toBe('离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。');
     const stopped = { runControl: { resume: { reason: null } } } as unknown as TaskPlanProjection;
     expect(withResumeBlockers(stopped, [])).toBe(stopped);
-    expect(withResumeBlockers(stopped, [RESUME_BLOCKED_SLOT, RESUME_BLOCKED_OFFLINE]).runControl?.resume?.reason)
-      .toBe('运行名额已满：正在运行的任务结束后再续行。离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。');
+    expect(withResumeBlockers(stopped, [RESUME_BLOCKED_OFFLINE]).runControl?.resume?.reason)
+      .toBe(RESUME_BLOCKED_OFFLINE);
     const moved = { runControl: { resume: { reason: '计划的关键内容已经变化：模型。' } } } as unknown as TaskPlanProjection;
     expect(withResumeBlockers(moved, [RESUME_BLOCKED_CONNECTION]).runControl?.resume?.reason).toBe(`计划的关键内容已经变化：模型。${RESUME_BLOCKED_CONNECTION}`);
     // A Run under way offers no 续行 to hold back.
     const running = { runControl: { resume: null } } as unknown as TaskPlanProjection;
-    expect(withResumeBlockers(running, [RESUME_BLOCKED_SLOT])).toBe(running);
+    expect(withResumeBlockers(running, [RESUME_BLOCKED_OFFLINE])).toBe(running);
   });
 
   it('says what a stopped Run kept, and that nothing is in flight (S76b)', () => {

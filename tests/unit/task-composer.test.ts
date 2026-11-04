@@ -18,10 +18,8 @@ import {
   TASK_COMPOSER_NOTE,
   TASK_COMPOSER_TITLES,
   TASK_PANEL_COMPOSE_OPEN,
-  TASK_PANEL_DRAFT_KIND,
   taskComposerParkedLine,
   taskComposerRevisionLine,
-  taskPanelCardView,
 } from '../../src/renderer/task-panel-labels.js';
 import { DIALOGUE_PROMOTE_LABEL, dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
 import { taskPlanDraftSentence } from '../../src/renderer/task-drawer-labels.js';
@@ -341,17 +339,5 @@ describe('the composer\'s words', () => {
     expect(dialogueReasoningLine(3)).toBe('正在比对检索到的 3 个段落…');
   });
 
-  it('names a draft\'s card as a draft, never a Task', () => {
-    const view = taskPanelCardView({
-      item: {
-        itemId: `draft:${DRAFT}`, group: 'decisions', state: 'draft-unfinished', blocked: false, at: '2026-10-17T00:00:00.000Z',
-        book: { bookId: BOOK, title: '任务撰写' }, object: { kind: 'draft', goal: '统一全书的人名译法', origin: 'composer-book', ranges: 0 },
-        facts: { progress: null, categories: [], revisionOrdinal: null }, nextStep: 'continue-draft',
-        target: { kind: 'task-intent-draft', bookId: BOOK, draftId: DRAFT }, technical: [],
-      },
-      result: null,
-    });
-    expect(view).toMatchObject({ kindLabel: TASK_PANEL_DRAFT_KIND, title: '任务草稿 · 「统一全书的人名译法」', stateLabel: '任务草稿 · 尚未准备计划' });
-    expect(view.actions).toEqual([{ key: 'next', label: '继续编辑草稿', primary: true }]);
-  });
+
 });

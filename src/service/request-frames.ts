@@ -441,6 +441,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAgent':
     case 'inspectGlobalAttention':
+    case 'inspectTaskOverview':
     case 'runReconnectPreflight':
     case 'inspectDefaultExecutionRules':
     // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
@@ -449,6 +450,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectCapturedProcedures':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
+      break;
+    }
+    case 'controlAllTasks': {
+      const input = requireInput(value.input, ['action'], tentativeId);
+      if (input.action !== 'pause' && input.action !== 'resume') throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'reorderQueuedRun': {
+      const input = requireInput(value.input, ['runRecordId', 'position'], tentativeId);
+      if (!validUuid(input.runRecordId) || !isSafeInteger(input.position, 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'startQuickTasks': {
+      const input = requireInput(value.input, ['tasks'], tentativeId);
+      if (!Array.isArray(input.tasks) || input.tasks.length > 64) throw new ProtocolError(tentativeId);
+      for (const task of input.tasks) {
+        if (!isRecord(task) || !hasExactKeys(task, ['bookId', 'procedureId', ...(task.repeat === undefined ? [] : ['repeat'])]) || !validUuid(task.bookId) || !isBoundedString(task.procedureId, 160)) throw new ProtocolError(tentativeId);
+        if (task.repeat !== undefined && (!isRecord(task.repeat) || !hasExactKeys(task.repeat, ['kind', 'ref']) ||
+          !['baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].includes(String(task.repeat.kind)) || !validUuid(task.repeat.ref))) throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'inspectEvaluationProfiles': {
@@ -2740,9 +2761,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopDialogueAnswer':
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : [], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : value.op === 'stopDialogueAnswer' ? ['cancel'] : [], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
       if (input.question !== undefined && !isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS)) throw new ProtocolError(tentativeId);
+      if (input.cancel !== undefined && typeof input.cancel !== 'boolean') throw new ProtocolError(tentativeId);
       break;
     }
     case 'convertDialogueToChangeSuggestion': {

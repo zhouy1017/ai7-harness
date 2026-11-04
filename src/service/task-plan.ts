@@ -2378,7 +2378,6 @@ export interface BaselineStoppedRunFacts {
 }
 
 /** 续行's own words when the service cannot let the Run go on now (CONT-015): each names what it waits for. */
-export const RESUME_BLOCKED_SLOT = '运行名额已满：正在运行的任务结束后再续行。';
 export const RESUME_BLOCKED_CONNECTION = '模型未连接：续行要发送到模型服务，所需的凭据还没有就绪；连接好之后才能续行。';
 export const RESUME_BLOCKED_OFFLINE = '离线：续行要连到模型服务，而这台设备现在没有网络；联网后再续行。';
 /** The Run's persisted binding no longer reads the same under this launch (CONT-016): the way on is 改计划重做. */

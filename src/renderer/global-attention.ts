@@ -167,6 +167,7 @@ export interface GlobalAttentionSurface {
 }
 
 export interface MountGlobalAttentionOptions {
+  openTasks?(): void;
   /** The screen's panel: the surface appends its heading and groups, and the caller its persistent actions after them. */
   readonly root: HTMLElement;
   readonly reader: GlobalAttentionReader;
@@ -265,11 +266,12 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
       return section;
     }
     const list = el('ol', 'global-attention-items');
-    for (const item of view.items) {
+    for (const item of view.key === 'active' ? view.items.slice(0, 3) : view.items) {
       const entry = group?.items.find((candidate) => candidate.itemId === item.itemId);
       if (entry !== undefined) list.append(itemNode(item, entry));
     }
     section.append(list);
+    if (view.key === 'active') { const all = el('button', 'quiet', '在任务总览里看全部'); all.addEventListener('click', () => options.openTasks?.()); section.append(all); }
     return section;
   }
 

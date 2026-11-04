@@ -1,5 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
@@ -428,6 +429,24 @@ function selectionAt(session: Session, book: Book, from: number, to = from): Rev
     toChapterBlockId: blocks.find((block) => block.position === to)!.blockId
   };
 }
+
+it('repeats a completed selection review with its original categories and paragraphs (#1328)', async () => {
+  await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+    const scope = selectionAt(session, book, 1);
+    const original = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], scope));
+    expect(original.state).toBe('settled');
+    await startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId: 'repeat', repeat: { kind: 'review-run', ref: original.reviewRunId } }] }, {
+      store: session.store, jobs: new CooperativeJobOwner(session.store), policy: launchPolicy, execution: session.owner,
+      credentialReadiness: async () => null, connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => session.owner.busy },
+      driveReview: (id) => { void session.driver.drive(id); },
+    });
+    const repeated = workspace(session, book).run!;
+    expect(repeated.reviewRunId).not.toBe(original.reviewRunId);
+    expect(repeated.categories.map((category) => category.categoryId)).toEqual([TYPOS]);
+    expect(repeated.scope).toEqual(original.scope);
+    expect(session.store.repeatTaskRequest(book.bookId, { kind: 'review-run', ref: repeated.reviewRunId })).toMatchObject({ scope });
+  });
+});
 
 function reviewMarkCount(session: Session, book: Book): number {
   const ids = new Set<string>();

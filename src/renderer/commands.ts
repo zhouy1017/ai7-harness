@@ -51,6 +51,7 @@ export const BOOK_SECTION_COMMANDS = [
 
 /** The remappable commands, in the order the settings table lists them. */
 export const COMMANDS: readonly CommandDefinition[] = [
+  { id: 'nav.tasks', name: COMMAND_NAMES['nav.tasks'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+6', darwin: 'Mod+Alt+6' } },
   { id: 'nav.attention', name: COMMAND_NAMES['nav.attention'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+1', darwin: 'Mod+Alt+1' } },
   { id: 'nav.library', name: COMMAND_NAMES['nav.library'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+2', darwin: 'Mod+Alt+2' } },
   { id: 'nav.series', name: COMMAND_NAMES['nav.series'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+3', darwin: 'Mod+Alt+3' } },

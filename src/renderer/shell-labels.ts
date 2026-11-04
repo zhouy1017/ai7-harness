@@ -14,11 +14,12 @@ export function globalAgentAnswerStatus(attempt: DialogueAttemptProjection | und
 // SVG symbol from the fixed A4 sprite, so a row's text is exactly its label and a
 // collapsed row keeps that label as its accessible name.
 
-export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
+export type ShellDestination = 'attention' | 'tasks' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
 
-/** The six global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
+/** The seven global destinations in their fixed order (IA-007): 待我处理 · 任务 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
 export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: IconId }> = Object.freeze([
   { key: 'attention', label: '待我处理', icon: 'i-inbox' },
+  { key: 'tasks', label: '任务', icon: 'i-task' },
   { key: 'library', label: '书库', icon: 'i-library' },
   { key: 'series', label: '书系', icon: 'i-series' },
   { key: 'knowledge', label: '知识库', icon: 'i-kb' },

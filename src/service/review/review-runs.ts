@@ -1964,9 +1964,14 @@ export class ReviewRunStore {
   }
 
   redoRequest(bookId: string, reviewRunId: string) {
-    const snapshot = this.#runOfBook(bookId, reviewRunId);
     requireReview(!this.#driving.has(reviewRunId) && this.#stoppedFor(reviewRunId) === 'cancelled',
       'ANALYSIS_REDO_STALE', '这次审阅需要先取消，才能改计划重做。');
+    return { ...this.repeatRequest(bookId, reviewRunId), redoOf: reviewRunId };
+  }
+
+  repeatRequest(bookId: string, reviewRunId: string) {
+    const snapshot = this.#runOfBook(bookId, reviewRunId);
+    const captured = readReviewRunProcedurePin(this.#db, reviewRunId);
     const head = this.#head(bookId);
     requireReview(head !== null, 'REVIEW_MANUSCRIPT_ABSENT', NO_MANUSCRIPT_REASON);
     const chapters = this.#chapterOptions(bookId, head).chapters;
@@ -1976,7 +1981,9 @@ export class ReviewRunStore {
     const scope: ReviewRunScopeRequest = { kind: snapshot.scope.kind,
       fromChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.[0] ?? null : from,
       toChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.at(-1) ?? null : to };
-    return { categoryIds: snapshot.categories.map((category) => category.categoryId), scope, redoOf: reviewRunId,
+    return { categoryIds: snapshot.categories.map((category) => category.categoryId), scope,
+      capturedProcedure: captured === null ? null : { versionId: captured.versionId, documentSha256: captured.documentSha256 },
+      procedureDefinition: snapshot.composite?.procedure ?? null, localCheck: snapshot.localPlan?.options,
       materialIds: snapshot.materialReferences?.references.map((reference) => reference.materialId) ?? [] };
   }
 

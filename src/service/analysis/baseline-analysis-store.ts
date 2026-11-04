@@ -1215,6 +1215,10 @@ export class BaselineAnalysisStore {
             // 结果待确认 (Issue #51, S16c): a resumable Run stopped on a sent request whose result cannot be known.
             // It holds them while paused, account-limited, waiting for an answer or left 可续行 too, and is listed so (P2-1).
             outcomeUnknown: (state === 'paused' || state === 'resumable' || state === 'awaiting-clarification') && this.unconfirmedRangesOf(runRecordId).length > 0,
+            ...(row.last_state_json === null ? {} : (() => {
+              const detail = parseCanonicalJson(asString(row.last_state_json)) as { resumeFailure?: string };
+              return typeof detail.resumeFailure === 'string' ? { resumeFailure: detail.resumeFailure } : {};
+            })()),
             ...(state === 'resumable' && row.last_state_json !== null
               ? (() => { const stopReason = resumableStopReasonOf(parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.

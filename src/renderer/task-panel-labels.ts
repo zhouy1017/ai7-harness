@@ -2,21 +2,14 @@ import { technicalWords } from './technical-layer.js';
 import type {
   AnalysisGapProjection,
   BaselineAnalysisResultSetRevisionProjection,
-  BookTaskGroupKey,
   BookTaskItemProjection,
   ReviewFindingProjection,
 } from '../shared/protocol.js';
 import {
-  GLOBAL_ATTENTION_NEXT_STEP_LABELS,
-  globalAttentionStateLabel,
-  GLOBAL_ATTENTION_STATE_PILLS,
   globalAttentionObjectLabel,
   globalAttentionReason,
   globalAttentionTimeLine,
 } from './global-attention-labels.js';
-import type { ReviewPill } from './review-labels.js';
-import { TASK_PLAN_OPEN } from './task-drawer-labels.js';
-import { DIALOGUE_ANSWER_LABEL } from './dialogue-labels.js';
 
 /**
  * The words of the 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044, TASK-045): the
@@ -34,138 +27,12 @@ export function taskPanelScopeLine(total: number): string {
 }
 /** The panel lists only this Book's Tasks (TASK-044); what waits across Books is 待我处理's. */
 export const TASK_PANEL_NOTE = '这里只列这本书的任务；跨书的待办在「待我处理」。';
-export const TASK_PANEL_GROUP_LABELS: Readonly<Record<BookTaskGroupKey, string>> = {
-  waiting: '等你处理',
-  running: '进行中',
-  recent: '最近完成',
-};
-export const TASK_PANEL_EMPTY_LINES: Readonly<Record<BookTaskGroupKey, string>> = {
-  waiting: '没有等你处理的任务。',
-  running: '没有进行中的任务。',
-  recent: '还没有完成的任务。',
-};
-/** A group longer than one answer lists says how many it holds. */
-export function taskPanelMoreLine(group: BookTaskGroupKey, shown: number, total: number): string | null {
-  if (total <= shown) return null;
-  return group === 'recent' ? `只列出最近的 ${shown} 项。` : `共 ${total} 项，这里列出 ${shown} 项。`;
-}
 export const TASK_PANEL_STATUS_LINES = {
   loading: '正在读取这本书的任务…',
   unavailable: '无法读取这本书的任务。',
 } as const;
 
-// ---- one card ---------------------------------------------------------------------------------------------
-
-/** What kind of Task a card is (TASK-044): a dialogue Task (Issue #52, S17a), or one that runs without a dialogue. */
-export const TASK_PANEL_KIND_LABELS = {
-  analysis: '分析任务 · 不需要对话',
-  review: '审阅任务 · 不需要对话',
-  // A ledger Task of another kind (Issue #760, S74c): 评估's three, and the 写作任务.
-  evaluation: '评估任务 · 不需要对话',
-  writing: '写作任务 · 不需要对话',
-  dialogue: '对话任务 · 就所选文字提问',
-} as const;
-
-export const TASK_PANEL_ACTION_LABELS = {
-  pause: '暂停',
-  resume: '续行',
-  cancel: '停止任务',
-  plan: TASK_PLAN_OPEN,
-  result: '查看结果',
-  // A dialogue Task's own two (TASK-044): its latest answer in the floating window, and the dialogue in the foreground.
-  answer: DIALOGUE_ANSWER_LABEL,
-  // A selection Task's own (Issue #423, S77 deferred item d): the caret moved to the paragraph it was started on.
-  jump: '跳到所选文字',
-} as const;
-/** 跳到所选文字 when the paragraph the Task was started on no longer stands in the manuscript: said, nothing moves. */
 export const TASK_PANEL_JUMP_GONE = '所选文字所在的段落已不在当前稿件中，无法跳到。';
-
-/**
- * What a card offers. `pause` and `resume` act on the card, as the drawer's bar does; `cancel` opens the plan with its
- * Cancellation Impact Summary, where the cancellation is confirmed; `plan` and `next` open the plan or the Task's own
- * surface; `result` opens `查看结果`'s floating window; `jump` moves the caret to a selection Task's paragraph.
- */
-export type TaskPanelActionKey = 'pause' | 'resume' | 'cancel' | 'plan' | 'next' | 'result' | 'answer' | 'jump';
-export interface TaskPanelAction {
-  readonly key: TaskPanelActionKey;
-  readonly label: string;
-  readonly primary: boolean;
-}
-
-export interface TaskPanelCardView {
-  readonly kindLabel: string;
-  readonly title: string;
-  readonly stateLabel: string;
-  readonly pill: ReviewPill;
-  readonly reason: string;
-  readonly timeLine: string;
-  readonly actions: ReadonlyArray<TaskPanelAction>;
-}
-
-const action = (key: TaskPanelActionKey, primary = false): TaskPanelAction => ({
-  key,
-  label: key === 'next' ? '' : TASK_PANEL_ACTION_LABELS[key],
-  primary,
-});
-
-/**
- * One Task as a card (TASK-044): its kind, what it is, its state in 待我处理's words with the pill's shape, why it is
- * where it is, when, and what it offers. A Run in flight offers 暂停 while it reads and 取消任务; a stopped one 续行 and
- * 取消任务; a finished one 查看结果 when it formed a result; everything else its own next step, as 待我处理 names it.
- */
-export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardView {
-  const { item } = entry;
-  const next: TaskPanelAction = { key: 'next', label: GLOBAL_ATTENTION_NEXT_STEP_LABELS[item.nextStep], primary: true };
-  let actions: TaskPanelAction[];
-  switch (item.state) {
-    case 'analysis-running':
-      actions = [action('pause', true), action('cancel'), action('plan')];
-      break;
-    case 'analysis-waiting-idle':
-    case 'analysis-yielded':
-    case 'analysis-queued':
-    case 'analysis-pausing':
-      actions = [action('cancel'), action('plan')];
-      break;
-    case 'analysis-paused':
-    case 'analysis-resumable':
-      actions = [action('resume', true), action('cancel'), action('plan')];
-      break;
-    // A dialogue Task offers 回答 and 打开对话 (TASK-044); 回答 once its latest answer settled with something to read.
-    case 'dialogue-answering':
-    case 'dialogue-answered':
-    case 'dialogue-stopped':
-    case 'dialogue-interrupted':
-    case 'dialogue-failed':
-      actions = [...(entry.result !== null ? [action('answer')] : []), next];
-      break;
-    case 'analysis-cancelling':
-    case 'analysis-waiting-capacity':
-    case 'analysis-waiting-network':
-    case 'analysis-waiting-connection':
-    case 'analysis-waiting-slot':
-    case 'analysis-waiting-admission':
-      actions = [action('plan', true)];
-      break;
-    default:
-      actions = item.group === 'recent' && entry.result !== null ? [action('result', true)] : [next];
-  }
-  // A Task started on a selection offers the way to its paragraph in every state (Issue #423, S77 deferred item d).
-  if (entry.selection !== undefined) actions = [...actions, action('jump')];
-  return {
-    kindLabel: item.object.kind === 'review' ? TASK_PANEL_KIND_LABELS.review
-      : item.object.kind === 'draft' ? TASK_PANEL_DRAFT_KIND
-      : item.object.kind === 'dialogue' ? TASK_PANEL_KIND_LABELS.dialogue
-        : item.object.kind === 'task' ? (item.object.taskKind === 'writing' ? TASK_PANEL_KIND_LABELS.writing : TASK_PANEL_KIND_LABELS.evaluation)
-          : TASK_PANEL_KIND_LABELS.analysis,
-    title: globalAttentionObjectLabel(item.object),
-    stateLabel: globalAttentionStateLabel(item),
-    pill: GLOBAL_ATTENTION_STATE_PILLS[item.state],
-    reason: globalAttentionReason(item),
-    timeLine: globalAttentionTimeLine(item.group, item.at),
-    actions,
-  };
-}
 
 // ---- 发起全书任务 -----------------------------------------------------------------------------------------
 
@@ -275,7 +142,6 @@ export function returnChipArrived(place: string): string {
 // ---- The Context-bound Task Composer and Task Intent Drafts (Issue #423, wave 10 slice 7a; TASK-001 to 009, 042, 043, 046) --
 
 /** A draft's card in 等你处理 (TASK-004): no Task yet, nothing started by itself. */
-export const TASK_PANEL_DRAFT_KIND = '任务草稿 · 尚未成为任务';
 /** 发起全书任务's own way to the composer (TASK-001): the editor says what AI7 should do; the procedures below stay for 快速开始. */
 export const TASK_PANEL_COMPOSE_OPEN = '发起全书任务…';
 export const TASK_PANEL_COMPOSE_OPEN_NOTE = '用自己的话说明要做的编辑工作。';

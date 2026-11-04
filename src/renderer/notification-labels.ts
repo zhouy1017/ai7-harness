@@ -45,7 +45,10 @@ export function systemNoticeSuffix(bookTitle: string | null, count: number): str
 }
 
 export function completionLabel(item: GlobalAttentionItemProjection): string {
-  return NOTIFICATION_LABELS[notificationClass(item)];
+  const title = item.book.title === null ? '' : `《${item.book.title}》`;
+  if (item.facts.dialogueCancelled) return `${title}对话已取消`;
+  const kind = item.object.kind === 'analysis' ? '分析' : item.object.kind === 'review' ? '审阅' : item.object.kind === 'dialogue' ? '对话' : item.object.kind === 'task' ? item.object.taskKind === 'writing' ? '写作' : '评估' : '任务';
+  return `${title}${kind}完成${item.state === 'analysis-completed-with-gaps' ? ' · 仍有未完成部分' : ''}`;
 }
 
 /** 设置 › 本机 › 通知 and the quiet completion notice (Issue #937). */

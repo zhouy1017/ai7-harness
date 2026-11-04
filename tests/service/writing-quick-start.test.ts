@@ -1,4 +1,8 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
+import { createNotificationObserver } from '../../src/renderer/notifications.js';
+import { vi } from 'vitest';
 import { withoutRuleFor } from '../support/policy-rules.js';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
@@ -15,7 +19,6 @@ import {
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RESEND,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   SET_RULE_DEVELOPER_LIVE,
   quickStartNoRuleReason,
   ruleDriftReason,
@@ -179,6 +182,39 @@ async function ruledBook(session: Session, title: string) {
 const fell = (reason: string) => ({ outcome: 'fell-back', reasons: [reason], dispatchRunRecordId: null, ledger: null });
 
 describe('the writing 默认执行规则 of one house type (S84b; AUTH-009, TASK-019; #701 review P2-1)', () => {
+  it('starts an overview writing choice through its saved default rule and original instructions (#1328)', async () => {
+    await withSession(async (session) => {
+      const { store, owner } = session; const book = await ruledBook(session, WRITING_BOOK_TITLE);
+      const choice = store.inspectTaskOverview(() => null, 2, () => null, false).quickStarts!.find((choice) => choice.bookId === book.bookId)!;
+      await startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId: choice.procedureId }] }, {
+        store, jobs: new CooperativeJobOwner(store), policy: launchPolicy, execution: owner, driveReview: () => {}, credentialReadiness: async () => null, connectivity: ONLINE().connectivity,
+      });
+      await owner.whenIdle();
+      expect(store.inspectWriting(book.bookId)!.authorization).toMatchObject({ origin: 'default-execution-rule' });
+    });
+  });
+  it('repeats the original writing template and instructions after another task and notifies once', async () => {
+    await withSession(async (session) => {
+      const { store, owner } = session; const bookId = await sample1Book(store, WRITING_BOOK_TITLE);
+      const startedAt = Date.now() - 1000;
+      const original = prepare(store, bookId); await runFromBar(session, bookId, original);
+      const completed = vi.fn(), notify = vi.fn(async () => {});
+      const observe = createNotificationObserver({ api: { notify }, focused: () => true, completed, startedAt });
+      const projection = store.inspectGlobalAttention(() => null, false);
+      observe(projection); observe(projection);
+      expect(completed).toHaveBeenCalledOnce(); expect(notify).toHaveBeenCalledOnce();
+      expect(completed.mock.calls[0]![0].target).toMatchObject({ taskKind: 'writing', ref: original.taskIntent!.taskIntentId });
+      const other = prepare(store, bookId, NEWS_REQUEST); await runFromBar(session, bookId, other);
+      await startQuickTasks({ tasks: [{ bookId, procedureId: 'repeat', repeat: { kind: 'writing', ref: original.taskIntent!.taskIntentId } }] }, {
+        store, jobs: new CooperativeJobOwner(store), policy: launchPolicy, execution: owner, driveReview: () => {},
+        credentialReadiness: async () => null, connectivity: ONLINE().connectivity,
+      });
+      await owner.whenIdle();
+      const repeated = store.inspectWriting(bookId)!;
+      expect(repeated.taskIntent!.taskIntentId).not.toBe(original.taskIntent!.taskIntentId);
+      expect(store.repeatTaskRequest(bookId, { kind: 'writing', ref: repeated.taskIntent!.taskIntentId })).toMatchObject({ request: WRITING_REQUEST });
+    });
+  });
   it('is set from a viewed writing plan for its type, binds what a baseline rule binds, and is named by the Task and the type', async () => {
     await withSession(async (session) => {
       const { store } = session;
@@ -326,7 +362,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       const taskIntentId = again.taskIntent!.taskIntentId;
       const digest = again.planEnvelope!.digest;
       expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId, planEnvelopeDigest: digest, state: 'prepared' });
-      const quick = await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, ONLINE());
+      const quick = await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, { ...ONLINE(), connectivity: { ...ONLINE().connectivity, slotBusy: () => true } });
       expect(quick.outcome).toBe('started');
       expect(quick.reasons).toEqual([]);
       expect(quick.dispatchRunRecordId).not.toBeNull();
@@ -389,7 +425,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
     });
   }, 300_000);
 
-  it('stops at the plan, recording nothing, when offline, when the slot is busy, or when the rule changed or was turned off', async () => {
+  it('stops at the plan, recording nothing, when offline or when the rule changed or was turned off', async () => {
     await withSession(async (session) => {
       const { store } = session;
       const { bookId, rule, reference } = await ruledBook(session, WRITING_BOOK_TITLE);
@@ -401,9 +437,6 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       // Offline: the Task stops at its plan, whose bar offers 联网后开始任务, as the baseline's does (Issue #760, S74c).
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_OFFLINE));
       state.connectivity = 'online';
-      state.busy = true;
-      expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_SLOT_BUSY));
-      state.busy = false;
       // A version the editor did not start under — a stale one — is never used.
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, randomUUID(), runtime)).toEqual(fell(QUICK_START_RULE_CHANGED));
       // A plan that is not the Task's own is refused outright, as 开始任务 refuses it.

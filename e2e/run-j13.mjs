@@ -2121,8 +2121,8 @@ async function main() {
       JSON.stringify(selectionRun.categories) === JSON.stringify(['series-consistency']) && selectionRun.procedure?.procedureId === seriesProcedureId &&
       selectionRun.procedure.version === 1 && JSON.stringify(selectionRun.procedure.leftOut) === JSON.stringify([]), 'selection-procedure-pinned', selectionRun);
     await clickSelector(renderer, '[data-screen="editor"] [data-edge-entry="tasks"]', 'selection-procedure-tasks');
-    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-item-id$="${selectionRun.reviewRunId}"]`;
-    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card!==null && (card.querySelector('.task-card-title')?.textContent??'').endsWith(' · 所选段落') && card.querySelector('[data-task-action="jump"]')?.disabled===false;})()`, 'selection-procedure-card', 30_000);
+    const SELECTION_CARD = `#task-drawer .task-panel .task-overview-card[data-task-item-id$="${selectionRun.reviewRunId}"]`;
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card!==null && (card.querySelector('.task-overview-card-title strong')?.textContent??'').endsWith(' · 所选段落') && card.querySelector('[data-task-action="jump"]')?.disabled===false;})()`, 'selection-procedure-card', 30_000);
     // With the caret put on another paragraph of the window, 跳到所选文字 brings it back onto the Task's paragraph; the panel stays.
     const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(selectionBlock)})?.dataset.blockId ?? null`);
     requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-procedure-away-block');
