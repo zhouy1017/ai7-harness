@@ -91,7 +91,7 @@ it('validates relation strings before canonicalization and never trims an exact 
   expect(parsed).toMatchObject({ ok: true, result: { claimId: 'claim-1', evidenceRelations: [{ ...relation, excerptRef: null }] } });
 });
 
-const invalidOrdinals = [{ toString: 0 }, {}, [], [1], true, null, '', ' '];
+const invalidOrdinals: unknown[] = [{ toString: 0 }, {}, [], [1], true, null, '', ' '];
 it.each(invalidOrdinals.map((unitOrdinal) => ({ unitOrdinal })))('drops only a cross-unit side with a nonnumeric ordinal ($unitOrdinal)', ({ unitOrdinal }) => {
   const parsed = parseCrossUnitResult(JSON.stringify({ findings: [
     { kind: 'contradiction', description: '保留发现', sides: [{ unitOrdinal }, { unitOrdinal: '1' }, { unitOrdinal: 2 }] },
