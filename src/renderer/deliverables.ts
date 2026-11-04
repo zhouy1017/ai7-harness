@@ -50,7 +50,6 @@ import {
   PUBLICATION_ACTUALS_ACTIONS,
   publicationBasisLine,
   publicationChangeNoticeDetail,
-  publicationCountLine,
   publicationDesignateBlockers,
   publicationDesignateReason,
   publicationEventsLine,
@@ -691,18 +690,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       input.disabled = working;
       input.dataset['publicationField'] = name;
       input.placeholder = hint;
-      const count = el('small', 'field-note publication-field-count');
-      count.id = uid(`${name}-count`);
       const problem = el('p', 'publication-field-problem');
       problem.id = uid(`${name}-problem`);
-      input.setAttribute('aria-describedby', `${count.id} ${problem.id}`);
+      input.setAttribute('aria-describedby', problem.id);
       input.addEventListener('input', () => {
         update(input.value);
         state.problem = null;
         sync();
       });
-      wrap.append(input, count, problem);
-      return { wrap, input, count, problem };
+      wrap.append(input, problem);
+      return { wrap, input, problem };
     };
     const scope = field('scope', PUBLICATION_SCOPE_LABEL, PUBLICATION_SCOPE_HINT, state.scope, (text) => { state.scope = text; });
     const basis = field('basis', PUBLICATION_BASIS_LABEL, PUBLICATION_BASIS_HINT, state.basis, (text) => { state.basis = text; });
@@ -737,7 +734,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         [basis, PUBLICATION_BASIS_LABEL, state.basis, MAX_PUBLICATION_BASIS_CHARACTERS],
       ] as const;
       for (const [control, label, value, maximum] of fields) {
-        control.count.textContent = publicationCountLine(value, maximum);
         const fieldProblem = publicationFieldProblem(label, value, maximum);
         control.problem.textContent = fieldProblem ?? '';
         control.problem.hidden = fieldProblem === null;

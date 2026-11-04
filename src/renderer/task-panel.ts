@@ -62,7 +62,6 @@ import {
   taskComposerAnswerHeading,
   taskComposerBookLine,
   taskComposerDraftHeading,
-  taskComposerGoalCount,
   taskComposerParkedLine,
   taskComposerPinLine,
   taskComposerRangeLine,
@@ -831,16 +830,15 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     const goal = el('textarea');
     goal.rows = 3;
     goal.maxLength = MAX_TASK_INTENT_GOAL_LENGTH;
-    goal.placeholder = TASK_COMPOSER_GOAL_PLACEHOLDER;
+    goal.placeholder = `${TASK_COMPOSER_GOAL_PLACEHOLDER} 最多 ${MAX_TASK_INTENT_GOAL_LENGTH} 字`;
+    goal.setAttribute('aria-description', `最多 ${MAX_TASK_INTENT_GOAL_LENGTH} 字`);
     goal.value = current.goal;
     goal.readOnly = !editable;
     goal.dataset['taskComposerField'] = 'goal';
-    const count = el('small', 'field-note task-composer-count', taskComposerGoalCount([...current.goal].length, MAX_TASK_INTENT_GOAL_LENGTH));
     goal.addEventListener('input', () => {
       if (state === null) return;
       state.goal = goal.value;
       state.dirty = true;
-      count.textContent = taskComposerGoalCount([...goal.value].length, MAX_TASK_INTENT_GOAL_LENGTH);
       syncSlot();
       syncActions();
     });
@@ -852,7 +850,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       if (mode() === 'new') void prepare(true);
       else if (mode() === 'draft') void save();
     });
-    goalLabel.append(goalCaption, goal, count);
+    goalLabel.append(goalCaption, goal);
     parts.push(goalLabel);
 
     // Slice 7c's slot (#423 rev 6), right under the goal, and the 工序 its events picked.
