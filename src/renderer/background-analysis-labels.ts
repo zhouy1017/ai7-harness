@@ -1,3 +1,4 @@
+export const BACKGROUND_SUMMARY = '登记后，仅在稿件有已确认改动且空闲时处理，每次不超过预算上限；暂停或撤销不开始新任务，未接入的工序不会运行。';
 import { technicalWords } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.js';
 

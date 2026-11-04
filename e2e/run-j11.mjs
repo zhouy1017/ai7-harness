@@ -115,7 +115,7 @@ const AI7_ITEM_LINES = [
 /** 分析反馈's words the Journey writes: stand-ins of its own, never the manuscript's. */
 const ENTITY_CORRECTION = '（旅程示例）应分作两个人物';
 const SYNOPSIS_REASON = '（旅程示例）少了尾声';
-const METRIC_NOTE = '只统计你明确给出的判断：没有判断的条目不算认可；这是对分析结果的评价，不代表事实核实，也不改变 AI7 的做法。';
+const METRIC_NOTE = '只统计明确判断，没有判断的条目不算认可；评价不代表事实核实，也不改变 AI7 的做法。';
 /** 就地反馈轻问's suggestions and reason (Issue #61): the Journey's own words, never the manuscript's. */
 const SUGGESTION_REJECTED = '（旅程示例一）';
 const SUGGESTION_APPLIED = '（旅程示例二）';

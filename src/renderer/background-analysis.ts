@@ -3,6 +3,7 @@ import { BACKGROUND_ANALYSIS_CEILING_MAX } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
   BACKGROUND_BINDS_SUMMARY,
+  BACKGROUND_SUMMARY,
   BACKGROUND_CANCEL,
   BACKGROUND_CEILING_FIRST,
   BACKGROUND_CEILING_LABEL,
@@ -206,7 +207,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       kindChoice.append(option);
     }
     kindChoice.addEventListener('change', () => { selectedKind = kindChoice.value; lastJson = ''; void load(); });
-    const nodes: HTMLElement[] = [heading, kindChoice, el('p', 'field-note background-analysis-statement', projection.statement)];
+    const nodes: HTMLElement[] = [heading, kindChoice, el('p', 'field-note background-analysis-statement', BACKGROUND_SUMMARY)];
     if (projection.enrollment !== null) {
       const line = el('p', 'background-analysis-enrollment', backgroundEnrollmentLine(projection.enrollment, localInstantLabel));
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
