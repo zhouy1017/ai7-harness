@@ -748,7 +748,7 @@ async function main() {
     await click(primary, '帮助', 'technical-mode-help');
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
     await primary.evaluate(`window.__j12TechnicalReloadMarker=true`);
-    await clickSelector(primary, '.help-developer-mode input', 'technical-mode-off');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-off');
     await waitFor(primary, `window.__j12TechnicalReloadMarker!==true && document.documentElement.dataset.technicalLayerVisible==='false' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-off-reloaded');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
@@ -757,7 +757,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
     await primary.evaluate(`window.__j12TechnicalReloadMarker=true`);
-    await clickSelector(primary, '.help-developer-mode input', 'technical-mode-on');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-on');
     await waitFor(primary, `window.__j12TechnicalReloadMarker!==true && document.documentElement.dataset.technicalLayerVisible==='true' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-on-reloaded');
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
