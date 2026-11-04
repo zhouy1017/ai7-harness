@@ -130,14 +130,14 @@ export function renderDocumentWorkflow(
     if (phase.latest !== null) {
       const line = phaseLatestLine(phase.latest, localInstantLabel(phase.latest.recordedAt));
       if (phase.latest.reason === null) {
-        item.append(el('p', 'field-note document-phase-latest', line));
+        head.append(el('span', 'document-phase-latest', line));
       } else {
         const why = el('details', 'document-phase-reason');
         why.append(el('summary', undefined, DOCUMENT_PHASE_SHOW_REASON), el('p', 'document-phase-latest', line));
         item.append(why);
       }
     }
-    if (phase.moves > 1) item.append(el('p', 'field-note document-phase-moves', phaseMovesLine(phase.moves)));
+    if (phase.moves > 1) head.append(el('span', 'document-phase-moves', phaseMovesLine(phase.moves)));
     if (actions !== null && phase.actions.length > 0) {
       const buttons = el('div', 'button-row compact-actions');
       for (const action of phase.actions) {

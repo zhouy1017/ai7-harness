@@ -432,7 +432,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   milestoneName.id = 'milestone-label';
   milestoneName.maxLength = 80;
   const purposeOptions = element('fieldset', 'milestone-purpose-options');
-  purposeOptions.append(element('legend', undefined, MILESTONE_FORM_WORDS.purpose));
+  purposeOptions.append(element('legend', undefined, `${MILESTONE_FORM_WORDS.purpose} · ${MILESTONE_PURPOSE_NOTE}`));
   const purposeRadios = MILESTONE_PURPOSE_KINDS.map((kind) => {
     const option = element('label', 'milestone-purpose-option');
     option.dataset['purposeKind'] = kind;
@@ -444,7 +444,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     purposeOptions.append(option);
     return radio;
   });
-  const purposeNote = element('small', 'field-note milestone-purpose-note', MILESTONE_PURPOSE_NOTE);
   const customPurposeLabel = element('label', undefined, MILESTONE_FORM_WORDS.customPurpose);
   customPurposeLabel.htmlFor = 'milestone-purpose-custom';
   const customPurpose = element('input');
@@ -489,7 +488,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     milestoneLabel,
     milestoneName,
     purposeOptions,
-    purposeNote,
     customPurposeLabel,
     customPurpose,
     noteLabel,
@@ -1540,7 +1538,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     searchSummary.textContent = `“${page.query}” · 范围：${page.scopeLabel} · 共 ${page.totalMatches.toLocaleString('zh-CN')} 处`;
     for (const match of page.results) {
       const row = element('article', 'search-result');
-      const open = button(match.context, 'quiet', () => void jumpToSearchMatch(match));
+      const open = button(`${match.headingLabel} · ${match.context}`, 'quiet', () => void jumpToSearchMatch(match));
       open.setAttribute('aria-label', `${match.headingLabel}：${match.context}`);
       const includeLabel = element('label', 'match-inclusion');
       const include = element('input');
@@ -1567,7 +1565,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         updateExclusionSummary();
       });
       includeLabel.append(include, document.createTextNode(' 纳入替换'));
-      row.append(element('p', 'field-note', match.headingLabel), open, includeLabel);
+      row.append(open, includeLabel);
       searchResults.append(row);
     }
     previousResults.hidden = page.previousCursor === null;
@@ -1667,11 +1665,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     updateExclusionSummary();
     setInclusionControlsLocked(true);
     replacementReview.hidden = false;
+    const scope = element('p', 'field-note', `范围：${preview.scopeLabel}${technicalWords(` · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)} · ${preview.matchingRule} · 纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}；`);
+    scope.append(element('span', 'inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结，纳入控件保持锁定。' : '当前预览的纳入控件已锁定，取消预览后可重新选择。'));
     replacementReview.replaceChildren(
       element('h4', undefined, preview.state === 'frozen' ? '已冻结替换集' : '替换预览'),
-      element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`),
-      element('p', 'field-note', `范围：${preview.scopeLabel}${technicalWords(` · 绑定修订版 ${preview.revisionLabel} · 修订日志序号 ${preview.journalSequence}`)} · ${preview.matchingRule} · 纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}。`),
-      element('p', 'field-note inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结；纳入控件保持锁定。' : '当前预览的纳入控件已锁定；取消预览后可重新选择。'),
+      element('p', undefined, `查找“${preview.query}”，替换为“${preview.replacement}”`), scope,
     );
     const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');
     exclusions.setAttribute('aria-label', '精确排除匹配标识清单');

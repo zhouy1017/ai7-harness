@@ -128,7 +128,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
 
   const form = el('section', 'agent-workspace-instruction');
   const instructionId = `agent-workspace-instruction-${bookId}`;
-  const label = el('label', undefined, words.instruction);
+  const label = el('label', undefined, `${words.instruction} · ${words.instructionNote}`);
   label.htmlFor = instructionId;
   const instruction = el('textarea');
   instruction.id = instructionId;
@@ -137,7 +137,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   instruction.dataset['agentWorkspaceField'] = 'instruction';
   instruction.value = remembered?.instruction ?? '';
   const propose = actionButton(words.propose, 'propose', 'primary', () => void runPropose());
-  form.append(label, instruction, el('p', 'field-note', words.instructionNote), propose);
+  form.append(label, instruction, propose);
 
   const proposalHost = el('section', 'agent-workspace-proposal');
   proposalHost.hidden = true;
