@@ -887,7 +887,7 @@ async function main() {
     // 已暂停 with where 续行 will go on — and 续行 is offered, since a place of the governor is free.
     await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
     await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'paused-bar');
-    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.field-note')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
+    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.task-plan-activity-status')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='paused' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已暂停'`, 'paused-card-label', 30_000);
     const paused = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const pausedAttempt = paused?.run?.attempt;

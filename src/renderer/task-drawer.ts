@@ -2179,17 +2179,18 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     section.setAttribute('aria-label', TASK_PLAN_ACTIVITY_TITLE);
     section.dataset['taskPlanActivity'] = run.cancelling ? 'cancelling' : run.pausing ? 'pausing'
       : run.continuation !== null ? 'stopped' : run.activity === null ? 'unreported' : 'running';
-    section.append(el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE));
+    const heading = el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE);
+    section.append(heading);
     const activity = run.activity;
     // A stopped Run: nothing is in flight, and what it kept is its continuation point (CONT-015).
     if (run.continuation !== null) {
       section.dataset['taskPlanActivityProgress'] = `${run.continuation.unitsSettled ?? 'unreadable'}/${run.continuation.unitsTotal}`;
-      section.append(el('p', 'field-note', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
+      heading.append(' · ', el('span', 'task-plan-activity-status', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
         plan?.listPages?.['runControl.continuation.pendingAnswerUnits']?.total)));
       return section;
     }
     if (activity === null) {
-      section.append(el('p', 'field-note', TASK_PLAN_ACTIVITY_UNREPORTED));
+      heading.append(' · ', el('span', 'task-plan-activity-status', TASK_PLAN_ACTIVITY_UNREPORTED));
       return section;
     }
     const now = Date.now();
