@@ -1550,7 +1550,7 @@ async function main() {
     requireJourney(composer?.label === '就这段发起任务' && composer.quote === taskWords && composer.field === '工序' && context !== null && context[1] === BOOK.title && Number(context[4]) === wordsTo &&
       composer.chosen === '' && offered.get('') === '请选择' && offered.get('reanalyze-range') === '重新分析这段' &&
       offered.get('review:plot-consistency') === '审阅这段 · 「情节逻辑与前后一致」' && !offered.has('review:factual-review') && composer.submit === '发起任务' &&
-      composer.note === '只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。',
+      composer.note === '任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。',
     'selection-task-composer-words', composer);
     // Nothing is prepared before a Task is chosen.
     await assertRenderer(renderer, `window.__j16.act('submit')`, 'selection-task-submit-empty');
