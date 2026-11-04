@@ -88,6 +88,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -907,10 +908,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       }
       // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
       // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
-      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
+      block.append(element('h5', undefined, action.label));
+      if (technicalLayerVisible) block.append(element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
       const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
-      block.append(expected, technicalDetails('analysis-facts',
+      if (technicalLayerVisible) block.append(expected, technicalDetails('analysis-facts',
         element('dt', undefined, '预期单元血缘'), expectedExact,
         element('dt', undefined, '固定任务目标'), element('dd', 'technical-identity', action.goal)));
       if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
@@ -1045,9 +1047,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
 
   /** The Analysis Result Revision History: every revision in ordinal order, each openable read-only. */
   function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
+    if (!technicalLayerVisible) return;
     const history = projection.history;
     if (history === null) return;
     const section = element('section', 'analysis-history');
+    section.dataset['developerOnly'] = 'true';
     section.dataset['historyLatestOrdinal'] = String(history.latestOrdinal);
     section.dataset['historyCount'] = String(projection.listPages['history.entries']?.total ?? history.entries.length);
     section.dataset['historyResultSetId'] = history.resultSetId;
@@ -1180,7 +1184,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
       element('h3', undefined, '基线稿件分析 · 不修改稿件'),
-      element('span', `status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
+      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.

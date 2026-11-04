@@ -133,8 +133,16 @@ export function stripModelJsonFence(text: string): string {
  * With partial enabled, retain only complete values from an unfinished object/array; never invent
  * a string, number or missing field. Callers still validate every recovered entry against its scope.
  */
-export function extractModelJson(text: string, { partial = false }: { partial?: boolean } = {}): Record<string, unknown> | null {
-  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+export function extractModelJson(text: string, { partial = false, arrayKey }: { partial?: boolean; arrayKey?: string } = {}): Record<string, unknown> | null {
+  // Scan candidate arrays as well as objects: a bracketed prose note is not an empty partial array.
+  const nextStart = (from: number): number => {
+    const object = text.indexOf('{', from);
+    const array = arrayKey === undefined ? -1 : text.indexOf('[', from);
+    return object === -1 ? array : array === -1 ? object : Math.min(object, array);
+  };
+  const resultObject = (value: unknown): Record<string, unknown> | null => isRecord(value) ? value
+    : arrayKey !== undefined && Array.isArray(value) ? { [arrayKey]: value } : null;
+  for (let start = nextStart(0); start !== -1; start = nextStart(start + 1)) {
     const stack: string[] = [];
     const checkpoints: Array<{ end: number; suffix: string }> = [];
     let quoted = false;
@@ -152,14 +160,15 @@ export function extractModelJson(text: string, { partial = false }: { partial?: 
       else if (char === '{' || char === '[') {
         stack.push(char === '{' ? '}' : ']');
         // An empty array is useful even before its first item arrives.
-        if (char === '[' && stack.length === 2) checkpoints.push({ end: at + 1, suffix: [...stack].reverse().join('') });
+        if (char === '[' && (stack.length === 2 || stack.length === 1)) checkpoints.push({ end: at + 1, suffix: [...stack].reverse().join('') });
       } else if (char === '}' || char === ']') {
         if (stack.pop() !== char) break;
         if (stack.length === 0) {
           balanced = true;
           try {
             const value: unknown = JSON.parse(text.slice(start, at + 1));
-            if (isRecord(value)) return value;
+            const result = resultObject(value);
+            if (result !== null) return result;
           } catch { /* Explanatory braces are not a model object. */ }
           start = at;
           break;
@@ -171,7 +180,8 @@ export function extractModelJson(text: string, { partial = false }: { partial?: 
       for (const checkpoint of checkpoints.reverse()) {
         try {
           const value: unknown = JSON.parse(text.slice(start, checkpoint.end) + checkpoint.suffix);
-          if (isRecord(value)) return value;
+          const result = resultObject(value);
+          if (result !== null) return result;
         } catch { /* Discard an unfinished value, keeping the earlier complete entries. */ }
       }
     }

@@ -120,6 +120,7 @@ const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被�
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
+const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 /** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
 const REDO_SUMMARY = Object.freeze([
@@ -456,6 +457,7 @@ const READ_DRAWER = `(() => {
     start: drawer.dataset.taskPlanStart ?? null,
     pill: text(drawer.querySelector('.task-drawer-pill')),
     status: text(drawer.querySelector('.task-bar-status')),
+    statement: text(drawer.querySelector('.task-bar-statement')),
     note: text(drawer.querySelector('.task-bar-note')),
     actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => {
       const described = button.getAttribute('aria-describedby');
@@ -505,14 +507,14 @@ const STOPPED_ACTIONS = Object.freeze([
  * and fail with the last reading, since a bar that is a moment behind the Run settles on its next read.
  */
 async function waitForBar(renderer, expected, name, timeout = 60_000) {
-  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, note: drawer.note, actions: drawer.actions }); })()`;
+  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, statement: drawer.statement, note: drawer.note, actions: drawer.actions }); })()`;
   const deadline = Date.now() + timeout;
   let last = null;
   while (Date.now() < deadline) {
     last = await renderer.evaluate(view).catch(() => null);
     const actual = last === null ? null : JSON.parse(last);
-    const noteMatches = expected.notePrefix === undefined ? actual?.note === expected.note : typeof actual?.note === 'string' && actual.note.startsWith(expected.notePrefix);
-    if (actual !== null && actual.state === expected.state && actual.pill === expected.pill && actual.status === expected.status && noteMatches &&
+    if (actual !== null && actual.state === expected.state && actual.pill === expected.pill && actual.status === expected.status && actual.note === expected.note &&
+      (expected.statement === undefined || actual.statement === expected.statement) &&
       JSON.stringify(actual.actions) === JSON.stringify(expected.actions)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
@@ -521,6 +523,7 @@ async function waitForBar(renderer, expected, name, timeout = 60_000) {
     state: actual?.state === expected.state,
     pill: actual?.pill === expected.pill,
     status: actual?.status === expected.status,
+    statement: expected.statement === undefined || actual?.statement === expected.statement,
     note: expected.notePrefix === undefined ? actual?.note === expected.note : typeof actual?.note === 'string' && actual.note.startsWith(expected.notePrefix),
     actions: JSON.stringify(actual?.actions) === JSON.stringify(expected.actions),
   };
@@ -838,7 +841,7 @@ async function main() {
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
     await openAnalysisOf(renderer, bookId, 'analysis');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .page-content', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, 'analysis-after-dark-pass');
     await startFirstBaseline(renderer, 'ready', 'baseline');
     await waitFor(renderer, runningWith(FIRST_HOLD), 'third-range-in-flight', 180_000);
@@ -1118,7 +1121,8 @@ async function main() {
       (resumable.taskOutcome ?? null) === null,
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行', note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    // This Run has never continued: explain shutdown without inventing a previous continuation time (#1309).
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1146,7 +1150,7 @@ async function main() {
     at('third-book-import');
     // A third Book, reached from the library by way of 工作概览.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'third-overview');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='返回图书列表'&&!button.disabled)`, 'third-overview-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('[data-nav-destination="library"]')?.getAttribute('aria-disabled')!=='true'`, 'third-overview-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-library');
     const thirdBookId = await importSample1(renderer, THIRD_BOOK.title, true, 'third-import');
     requireJourney(thirdBookId !== bookId && thirdBookId !== secondBookId, 'three-books');
@@ -1394,7 +1398,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
-      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行',
+      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
+      statement: SHUTDOWN_STATEMENT,
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
@@ -1550,8 +1555,8 @@ async function main() {
     // of the one notice, so its 2.5 seconds are read from the page and not raced by the steps below.
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
-    await waitFor(renderer, `document.querySelector('[data-quiet-completion-notice]')?.hidden === true`, 'quiet-completion-idle', 10_000);
-    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-quiet-completion-notice]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.noticeClass ?? null, text: notice.querySelector('[role="status"]')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden === true`, 'quiet-completion-idle', 10_000);
+    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
     // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
     // Book's analysis whole again, and 待我处理 no longer naming the stop.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
@@ -1571,10 +1576,10 @@ async function main() {
     // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
-    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-quiet-completion-notice]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
+    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-toast]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
     const quietShown = quietCompletion.shown[0];
     requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === '任务结果已记录' &&
-      quietShown.ms >= 2_250 && quietShown.ms <= 4_500 && quietCompletion.recent === true &&
+      quietShown.ms >= 2_200 && quietShown.ms <= 4_000 && quietCompletion.recent === true &&
       quietCompletion.count === beforeQuietCompletion.count - (beforeQuietCompletion.stop ? 1 : 0),
     'quiet-completion-notice', { before: beforeQuietCompletion, after: quietCompletion });
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });

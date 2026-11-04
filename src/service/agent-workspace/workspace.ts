@@ -72,15 +72,12 @@ function roundProjection(round: HeldRound): AgentWorkspaceProposalProjection {
 }
 
 /** What a settled turn leaves the round, in the editor's words. */
-function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: string, partial = false): Pick<HeldRound, 'state' | 'candidates' | 'dropped' | 'label'> {
-  if (outcome !== 'completed') {
-    return {
-      state: 'failed', candidates: [], dropped: [],
-      label: outcome === 'stopped' ? words.stopped : words.failed,
-    };
-  }
-  const reading = readAgentWorkspaceAnswer(streamed, round.selection.text, partial);
-  if (reading.kind === 'withheld') return { state: 'failed', candidates: [], dropped: [], label: words.withheld(reading.reason) };
+function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: string): Pick<HeldRound, 'state' | 'candidates' | 'dropped' | 'label'> {
+  const incomplete = outcome !== 'completed';
+  const reading = readAgentWorkspaceAnswer(streamed, round.selection.text, true);
+  if (reading.kind === 'withheld') return incomplete && round.candidates.length > 0
+    ? { state: 'ready', candidates: round.candidates, dropped: round.dropped, label: '回答未完成；已收到的提议已保留。' }
+    : { state: 'failed', candidates: [], dropped: [], label: words.withheld(reading.reason) };
   const pins = round.selection.span ?? [{ blockId: round.selection.blockId, fromGrapheme: round.selection.fromGrapheme,
     toGrapheme: round.selection.toGrapheme }];
   let offset = 0;
@@ -114,7 +111,7 @@ function settledRound(round: HeldRound, outcome: DialogueOutcome, streamed: stri
     : dropped.length > 0
       ? words.allDropped(dropped.length)
       : words.empty;
-  return { state: 'ready', candidates, dropped, label };
+  return { state: 'ready', candidates, dropped, label: incomplete ? `${label} 回答未完成。` : label };
 }
 
 export class AgentWorkspace {
@@ -202,7 +199,7 @@ export class AgentWorkspace {
           })))}` } } : {}),
         progress: (streamed) => {
           if (this.#rounds.get(bookId) === round) {
-            const preview = settledRound(round, 'completed', streamed, true);
+            const preview = settledRound(round, 'completed', streamed);
             if (preview.state === 'ready') { round.candidates = preview.candidates; round.dropped = preview.dropped; }
             round.streamedCharacters = [...streamed].length;
             round.label = `正在提出变更集…已收到 ${round.streamedCharacters} 字`;
@@ -223,8 +220,8 @@ export class AgentWorkspace {
 
   /**
    * 提交为修改建议: every candidate of the held round becomes a 修改建议 mark on the words it anchors, attributed to the round's
-   * workspace Task — together in one transaction, independently decidable on their cards. Words the manuscript no
-   * longer holds at an anchor refuse the whole set, and nothing is written. Nothing is decided or applied.
+   * workspace Task — together in one transaction, independently decidable on their cards. Moved anchors are disclosed
+   * and skipped; if none remain placeable the round stays available and promotion refuses. Nothing is decided or applied.
    */
   async promote(bookId: string, input: AgentWorkspaceProposalSetInput): Promise<AgentWorkspacePromotionProjection> {
     const round = this.#requireRound(bookId, input);
@@ -253,10 +250,15 @@ export class AgentWorkspace {
         quote: [...candidate.anchor.text].length > BASIS_QUOTE_CHARACTERS ? `${[...candidate.anchor.text].slice(0, BASIS_QUOTE_CHARACTERS).join('')}…` : candidate.anchor.text,
       }],
     }));
+    let moved = 0;
     const markIds = this.#store.createProducedEditorialMarks(inputs, (placed) => {
-      // A set is one change: when any of its words moved, none of it is placed (the transaction rolls back).
-      require(placed.every((markId) => markId !== null), 'MARK_ANCHOR_CHANGED', words.changed);
-      return placed as ReadonlyArray<string>;
+      moved = placed.filter((markId) => markId === null).length;
+      const kept = placed.filter((markId): markId is string => markId !== null);
+      if (kept.length === 0) {
+        round.label = `${words.changed} ${moved} 项原文位置已变动，未放置。`;
+        require(false, 'AGENT_WORKSPACE_NOTHING_TO_PROMOTE', round.label);
+      }
+      return kept;
     });
     this.#rounds.delete(bookId);
     return {
@@ -265,7 +267,7 @@ export class AgentWorkspace {
       atomicGroupId,
       manuscriptId: round.selection.manuscriptId,
       branchId: round.selection.branchId,
-      label: markIds.length === 1 ? words.promotedOne : words.promotedGroup(markIds.length),
+      label: `${markIds.length === 1 ? words.promotedOne : words.promotedGroup(markIds.length)}${moved > 0 ? ` 另有 ${moved} 项原文位置已变动，未放置。` : ''}`,
       workspace: await this.inspect(bookId),
     };
   }

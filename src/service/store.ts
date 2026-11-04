@@ -4823,7 +4823,8 @@ export class EditorialStore {
         : { units: unconfirmed, stopped: run.state === 'resumable' && ledger.outcomeUnknownOf(run.runRecordId) !== null };
       return {
         unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown,
-        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopReason: run.stopReason, stopAt: run.resumedAt }),
+        ...(run.stopReason === undefined ? {} : { stopReason: run.stopReason }),
+        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopAt: run.resumedAt }),
       };
     });
   }
@@ -14765,7 +14766,8 @@ export class EditorialStore {
          WHERE instr(r.canonical_json, '"outcome-unknown"') > 0
          UNION
          SELECT t.book_id, t.kind FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
-         WHERE o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0
+         WHERE (o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0)
+            OR (o.classification = 'failed' AND o.result_set_revision_id IS NULL AND instr(o.canonical_json, '"outcome-unknown"') > 0)
        ) ORDER BY book_id, kind`,
     ).all(OUTCOME_UNKNOWN_NOT_RESENT) as SqlRow[];
   }
@@ -14787,7 +14789,11 @@ export class EditorialStore {
     const resolvedDigest = sha256(canonicalJson([...resolved].sort()));
     const cached = this.#unconfirmedLists.get(cacheKey);
     if (cached !== undefined && cached.resolved === resolvedDigest) return cached.listed;
-    const kinds = (this.#authority.prepare('SELECT DISTINCT kind FROM analysis_result_sets WHERE book_id = ? ORDER BY kind').all(bookId) as SqlRow[])
+    const kinds = (this.#authority.prepare(
+      `SELECT kind FROM analysis_result_sets WHERE book_id = ?
+       UNION SELECT t.kind FROM analysis_task_intents t JOIN analysis_task_outcomes o ON o.task_intent_id = t.task_intent_id
+       WHERE t.book_id = ? AND o.classification = 'failed' AND o.result_set_revision_id IS NULL ORDER BY kind`,
+    ).all(bookId, bookId) as SqlRow[])
       .map((row) => asString(row.kind)).filter((kind) => unconfirmedSurfaceOf(kind) === surface);
     const ranges: UnconfirmedOutcomeRecord[] = [];
     const steps: UnconfirmedOutcomeRecord[] = [];

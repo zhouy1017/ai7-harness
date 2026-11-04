@@ -9,6 +9,7 @@ interface Surface {
 function node<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
   const value = document.createElement(tag);
   if (text !== undefined) value.textContent = text;
+  if (tag === 'button') value.className = `${value.className} btn`.trim();
   return value;
 }
 

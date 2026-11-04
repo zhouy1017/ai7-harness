@@ -1,4 +1,5 @@
 import { showTransientNotice } from './notifications.js';
+import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
@@ -98,7 +99,7 @@ interface ManuscriptScreenOptions {
   taskDrawer: ReturnType<typeof mountTaskDrawer>;
   interrupted(): boolean;
   attach(content: HTMLElement, surface: ManuscriptScreen): void;
-  setContextActions(content: HTMLElement): void;
+  setContextActions(...content: ReadonlyArray<HTMLElement>): void;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   setCloseRisk(risk: boolean): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -141,6 +142,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -174,7 +176,7 @@ async function copyPlainText(api: RendererApi, text: string): Promise<void> {
 }
 
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
-function panel(): HTMLElement { return element('section', 'panel'); }
+function panel(): HTMLElement { return element('section', 'page-content'); }
 
 /** The Manuscript and Production Document screen owns all mutable editor coordination until destruction. */
 export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
@@ -265,7 +267,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;
-  title.append(meta, chipHost);
+  title.append(meta);
   const save = button('保存当前编辑', 'primary', () => editor?.flush());
   save.disabled = true;
   // The chord comes from the one label source and follows a remap (KEY-011); 保存 keeps its chord, the words are the window's own.
@@ -575,6 +577,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   tasksEntry.dataset['shortcutBase'] = '这本书的任务';
   tasksEntry.title = `这本书的任务（${shortcutHint('view.openTasks') ?? ''}）`;
   const edgeEntries = element('div', 'edge-entries');
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task']] as const) {
+    const label = element('span', 'edge-label', entry.textContent ?? '');
+    entry.replaceChildren(icon(id), label);
+    entry.setAttribute('aria-label', label.textContent ?? '');
+  }
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
   railTrack.append(positionRail);
@@ -702,13 +709,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   if (saveMenu !== undefined) {
     saveMenu.element.id = 'manuscript-save-menu';
     saveMenu.update(null, null);
-    options.setContextActions(saveMenu.element);
+    options.setContextActions(chipHost, saveMenu.element);
     persistenceStatus.setAttribute('role', 'button'); persistenceStatus.tabIndex = 0;
     persistenceStatus.setAttribute('aria-controls', saveMenu.element.id);
     saveMenu.element.addEventListener('toggle', () => {
       if (!destroyed) persistenceStatus.setAttribute('aria-expanded', String((saveMenu.element as HTMLDetailsElement).open));
     });
   }
+  if (saveMenu === undefined) options.setContextActions(chipHost);
   if (entryNotice !== undefined) showTransientNotice(entryNotice);
 
   let currentWindow = initialWindow;

@@ -71,10 +71,10 @@ export function mountProcedureRecommendation(options: ProcedureRecommendationSur
   let busy = false;
   let problem = '';
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
-    const element = document.createElement(tag); if (text !== undefined) element.textContent = text; return element;
+    const element = document.createElement(tag); if (text !== undefined) element.textContent = text; if (tag === 'button') element.className = `${element.className} btn`.trim(); return element;
   };
   function button(text: string, action: string, run: () => void): HTMLButtonElement {
-    const element = node('button', text); element.type = 'button'; element.className = 'quiet';
+    const element = node('button', text); element.type = 'button'; element.className = 'btn ' + ('quiet');
     element.dataset['recommendationAction'] = action; element.disabled = busy; element.addEventListener('click', run); return element;
   }
   function render(): void {

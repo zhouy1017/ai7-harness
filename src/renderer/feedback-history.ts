@@ -1,3 +1,4 @@
+import { filterChoices } from './components/controls.js';
 import type { FeedbackHistoryInput, FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
 import { FEEDBACK_HISTORY_SIGNALS } from '../shared/protocol.js';
 import {
@@ -45,6 +46,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -65,28 +67,19 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
 
   const peopleOf = (entry: FeedbackHistoryEntryProjection): FeedbackHistoryPeopleVersion | null =>
     projection?.books.find((book) => book.bookId === entry.bookId)?.peopleVersions.find((version) => version.version === entry.peopleVersion) ?? null;
-  const select = (filter: 'book' | 'origin' | 'signal' | 'author' | 'editor', choices: ReadonlyArray<readonly [string, string]>): HTMLLabelElement => {
-    const wrapper = el('label', 'feedback-filter');
-    const control = el('select');
+  const select = (filter: 'book' | 'origin' | 'signal' | 'author' | 'editor', choices: ReadonlyArray<readonly [string, string]>): HTMLDivElement => {
+    const wrapper = el('div', 'feedback-filter');
+    const values: Array<readonly [string, string]> = [['', FEEDBACK_HISTORY_ALL], ...choices];
+    if (chosen[filter] !== '' && !choices.some(([value]) => value === chosen[filter])) values.push([chosen[filter], filter === 'book' ? selectedBookLabel : chosen[filter]]);
+    const control = filterChoices({ label: FEEDBACK_HISTORY_FILTERS[filter], choices: values, value: chosen[filter], disabled: loading || opening,
+      change: (value) => {
+        if (loading || opening) return;
+        if (filter === 'book') selectedBookLabel = values.find(([key]) => key === value)?.[1] ?? '所选图书';
+        void request({ ...chosen, [filter]: value }, null, `#feedback-filter-${filter}`);
+      },
+    });
     control.id = `feedback-filter-${filter}`;
     control.dataset['feedbackFilter'] = filter;
-    for (const [value, label] of [['', FEEDBACK_HISTORY_ALL] as const, ...choices]) {
-      const option = el('option', undefined, label);
-      option.value = value;
-      control.append(option);
-    }
-    if (chosen[filter] !== '' && !choices.some(([value]) => value === chosen[filter])) {
-      const option = el('option', undefined, filter === 'book' ? selectedBookLabel : chosen[filter]);
-      option.value = chosen[filter];
-      control.append(option);
-    }
-    control.value = chosen[filter];
-    control.disabled = loading || opening;
-    control.addEventListener('change', () => {
-      if (loading || opening) return;
-      if (filter === 'book') selectedBookLabel = control.selectedOptions[0]?.textContent ?? '所选图书';
-      void request({ ...chosen, [filter]: control.value }, null, `#feedback-filter-${filter}`);
-    });
     wrapper.append(el('span', undefined, FEEDBACK_HISTORY_FILTERS[filter]), control);
     return wrapper;
   };
@@ -162,21 +155,15 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       dimensionFilter(),
       dateFilter('from'), dateFilter('to'),
     );
-    const grouping = el('label', 'feedback-filter');
-    const groupControl = el('select');
-    groupControl.id = 'feedback-group-by';
-    for (const [value, label] of Object.entries(FEEDBACK_HISTORY_GROUPS)) {
-      const option = el('option', undefined, label);
-      option.value = value;
-      groupControl.append(option);
-    }
-    groupControl.value = groupBy;
-    groupControl.disabled = loading || opening;
-    groupControl.addEventListener('change', () => {
-      if (loading || opening || !Object.hasOwn(FEEDBACK_HISTORY_GROUPS, groupControl.value)) return;
-      groupBy = groupControl.value as Group;
-      paint('#feedback-group-by');
+    const grouping = el('div', 'feedback-filter');
+    const groupControl = filterChoices({ label: '分组方式', choices: Object.entries(FEEDBACK_HISTORY_GROUPS), value: groupBy, disabled: loading || opening,
+      change: (value) => {
+        if (loading || opening || !Object.hasOwn(FEEDBACK_HISTORY_GROUPS, value)) return;
+        groupBy = value as Group;
+        paint('#feedback-group-by');
+      },
     });
+    groupControl.id = 'feedback-group-by';
     grouping.append(el('span', undefined, '分组方式'), groupControl);
     filters.append(grouping);
     parts.push(filters);

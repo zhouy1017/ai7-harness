@@ -529,7 +529,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-15', at, representative: '#screen[data-screen="knowledge-base"] > .panel', returnTo: SIDEBAR.destination('knowledge') });
+    await runJ14DarkPass({ renderer, journey: 'J-15', at, representative: '#screen[data-screen="knowledge-base"] > .page-content', returnTo: SIDEBAR.destination('knowledge') });
     await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready-after-dark-pass');
     requireJourney(opened.tab === 'guidelines' && JSON.stringify(opened.tabs) === JSON.stringify(KNOWLEDGE_TABS.map((label, index) => [label, String(index === 0)])) &&
       JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&

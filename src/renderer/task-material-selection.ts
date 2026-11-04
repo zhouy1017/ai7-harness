@@ -1,3 +1,4 @@
+import { createButton } from './components/controls.js';
 import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, type WritingTaskMaterialProjection, type RendererApi } from '../shared/protocol.js';
 
 /** Keep only still-offered choices, in offer order, within the same whole-item bounds the service enforces. */
@@ -94,10 +95,10 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
   const status = document.createElement('span'); status.setAttribute('role', 'status');
   label.append(status, input);
   const selection = window.getSelection()?.toString() ?? '';
-  const useSelection = document.createElement('button');
+  const useSelection = createButton();
   useSelection.type = 'button'; useSelection.textContent = '使用当前选中文字';
   useSelection.addEventListener('click', () => { input.value = (window.getSelection()?.toString() || selection).slice(0, 1_000); });
-  const search = document.createElement('button');
+  const search = createButton();
   search.type = 'button'; search.textContent = '检索相似段落';
   const results = document.createElement('ul');
   search.addEventListener('click', () => {
@@ -109,7 +110,7 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
       for (const candidate of page.candidates) {
         const item = items.find((offer) => offer.materialId === candidate.sourceId);
         const row = document.createElement('li');
-        const choice = document.createElement('button');
+        const choice = createButton();
         choice.type = 'button';
         choice.textContent = `${item?.title ?? '资料'} · 第 ${candidate.anchor.segmentOrdinal ?? 1} 段 · ${candidate.anchor.start}–${candidate.anchor.end}`;
         choice.disabled = item === undefined || selected.has(candidate.sourceId) || taskMaterialSelectionReason(item, items, selected) !== null;

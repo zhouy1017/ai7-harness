@@ -1,7 +1,7 @@
 /**
  * 设置 › 本机 › 键盘与无障碍 › 快捷键's words (Issue #936, plan slice 11c; V2-UX-KEY-002, KEY-003, KEY-011, KEY-013). Pure, so
- * the unit suite pins every line. Accessibility needs no switch here: keyboard operation, visible focus, system zoom and native
- * accessibility appearance are always on (KEY-013).
+ * the unit suite pins every line. Keyboard operation, visible focus, system zoom and native accessibility appearance are always
+ * on (KEY-013); the local reduced-motion preference is separate from developer-only shortcut rebinding (#1331).
  */
 
 export const KEYBOARD_TITLE = '键盘与无障碍';

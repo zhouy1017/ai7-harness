@@ -1,4 +1,4 @@
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
 import {
   GLOBAL_ATTENTION_HEADING,
@@ -7,6 +7,7 @@ import {
   GLOBAL_ATTENTION_STATUS_LINES,
   GLOBAL_ATTENTION_TECHNICAL_ITEM,
   globalAttentionEntryView,
+  globalAttentionGroupCounts,
   globalAttentionView,
   type GlobalAttentionGroupView,
   type GlobalAttentionItemView,
@@ -29,6 +30,16 @@ import {
 export const GLOBAL_ATTENTION_POLL_MS = 5_000;
 
 type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention'>;
+
+/** Ordinary attention counts only the reachable items in this bounded reading, like a Book-filtered list. */
+export function visibleGlobalAttention(projection: GlobalAttentionProjection, developerMode: boolean): GlobalAttentionProjection {
+  if (developerMode) return projection;
+  const groups = projection.groups.map((group) => {
+    const items = group.items.filter((item) => item.target.kind !== 'learning-materials');
+    return { ...group, items, total: items.length };
+  });
+  return { ...projection, groups, actionableCount: groups.reduce((count, group) => count + (globalAttentionGroupCounts(group.key) ? group.total : 0), 0) };
+}
 
 export type GlobalAttentionReading =
   | { readonly kind: 'projection'; readonly projection: GlobalAttentionProjection }
@@ -106,6 +117,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -140,7 +152,7 @@ export function mountGlobalAttentionEntry(options: { button: HTMLButtonElement; 
   };
   paint(null);
   options.reader.subscribe((reading) => {
-    if (reading.kind === 'projection') paint(reading.projection.actionableCount);
+    if (reading.kind === 'projection') paint(visibleGlobalAttention(reading.projection, technicalLayerVisible).actionableCount);
   });
   button.addEventListener('click', () => options.open());
 }
@@ -212,7 +224,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     open.addEventListener('click', () => void openItem(view.itemId, open));
     const title = el('h4', 'global-attention-object');
     title.append(el('span', 'global-attention-book', view.book), ' · ', el('span', 'global-attention-object-name', view.object));
-    const pill = el('span', `status-pill review-pill review-pill-${view.pill.tone} global-attention-pill`, view.stateLabel);
+    const pill = el('span', `state-term status-pill review-pill review-pill-${view.pill.tone} global-attention-pill`, view.stateLabel);
     pill.id = stateId;
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;
@@ -261,7 +273,8 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     return section;
   }
 
-  function paint(projection: GlobalAttentionProjection): void {
+  function paint(reading: GlobalAttentionProjection): void {
+    const projection = visibleGlobalAttention(reading, technicalLayerVisible);
     const key = JSON.stringify(projection);
     if (key === painted) return;
     painted = key;

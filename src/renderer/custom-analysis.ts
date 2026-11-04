@@ -51,6 +51,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -183,7 +184,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       heading.append(el('h3', undefined, dimension.title));
       if (dimension === firstAnswer) heading.append(el('span', 'custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE));
       if (book?.taskState != null) {
-        const state = el('span', 'status-pill custom-task-state', book.taskState.stateLabel);
+        const state = el('span', 'state-term status-pill custom-task-state', book.taskState.stateLabel);
         state.dataset['taskState'] = book.taskState.state;
         heading.append(state);
       }
@@ -354,7 +355,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         item.dataset['versionId'] = version.versionId;
         item.dataset['version'] = String(version.version);
         item.dataset['versionState'] = version.state;
-        item.append(el('span', `status-pill custom-dimension-state-${version.state}`, version.stateLabel),
+        item.append(el('span', `state-term status-pill custom-dimension-state-${version.state}`, version.stateLabel),
           el('span', undefined, ` ${customDimensionVersionLine(version)}`), el('p', 'custom-dimension-template', version.questionTemplate));
         const actions = el('div', 'button-row');
         if (version.state === 'pending-validation') {

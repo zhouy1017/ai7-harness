@@ -1231,7 +1231,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'book-reopened-open-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .page-content', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis-after-dark-pass');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
@@ -1513,18 +1513,7 @@ async function main() {
         !card.querySelector('.analysis-conflict-list, [data-analysis-conflict-kind]');
     })()`, 'analysis-provenance-surface');
 
-    // V2-UX-LAYER-005, asserted where the rule is hardest to keep: the settled result set is the
-    // longest thing this workbench ever renders, and the workbench's own way out must survive it. The
-    // three actions are read by label, enabled state and container — never by document position — and
-    // the region is asserted to be genuinely sticky rather than merely to carry the class.
-    await assertRenderer(renderer, `(() => {
-      const region=document.querySelector('.book-analysis .workbench-actions');
-      if(!region) return false;
-      const buttons=Array.from(region.querySelectorAll(':scope > button'));
-      return JSON.stringify(buttons.map((button)=>button.textContent))===JSON.stringify(${JSON.stringify(ANALYSIS_DESTINATION_ACTIONS)}) &&
-        buttons.every((button)=>!button.disabled) &&
-        getComputedStyle(region).position==='sticky';
-    })()`, 'workbench-actions-persistent');
+    await assertRenderer(renderer, `!document.querySelector('.book-analysis .workbench-actions') && !!document.querySelector('[data-nav-book-section="manuscript"]') && !!document.querySelector('[data-nav-book-section="overview"]')`, 'workbench-sidebar-navigation');
 
     // The Run Liveness Signal, asserted where this Journey is deterministic: after settlement. While
     // the card is `executing` the runner may see the signal line, but a deterministic Run settles too
@@ -2946,6 +2935,7 @@ async function main() {
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
     // Nine categories and none preselected, the unavailable two saying why; four scopes and none
     // preselected; the four consequence lines; the quick start waits for a Default Execution Rule.
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.every(box=>!box.checked) && boxes.some(box=>box.value==='local-text-check'&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences').length===0 && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='查看计划'; })()`, 'review-sheet-contract');
@@ -3197,7 +3187,7 @@ async function main() {
     requireJourney(sources?.bookId === imported.bookId && sources.staleAfterDays === 90 && sources.records.length === 0 && sources.next === null &&
       sources.units.length === 0 && sources.findings.length === 0 && sources.statement === '这本书还没有留存的外部来源：外部来源只在联网核查的运行中留存。',
     'sources-provider-free-reading', sources);
-    await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && JSON.stringify(Array.from(view.querySelectorAll('.workbench-actions button')).map((item)=>item.textContent))===JSON.stringify(['打开稿件','工作概览']); })()`, 'sources-nothing-to-save');
+    await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && !view.querySelector('.workbench-actions') && !!document.querySelector('[data-nav-book-section="manuscript"]'); })()`, 'sources-nothing-to-save');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'sources-back-to-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-back-manuscript');
     await openReviewDestination(renderer, 'sources-back-to-review');

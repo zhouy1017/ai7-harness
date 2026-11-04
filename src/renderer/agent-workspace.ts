@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
 import {
   MAX_DIALOGUE_QUESTION_CHARACTERS,
@@ -45,6 +46,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -102,7 +104,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   root.dataset['agentWorkspaceState'] = 'loading';
   const header = el('header', 'agent-workspace-header');
   const back = actionButton(words.back, 'back', 'quiet', () => options.back());
-  header.append(el('p', 'section-label', words.section(options.bookTitle)), el('h2', undefined, words.heading), back);
+  header.append(el('h2', undefined, words.heading), back);
   const safety = el('p', 'agent-workspace-safety');
   safety.dataset['agentWorkspaceSafety'] = '';
   const body = el('div', 'agent-workspace-body');
@@ -119,8 +121,8 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   pages.setAttribute('role', 'group');
   pages.setAttribute('aria-label', words.pick);
   const pageControls = el('div', 'button-row');
-  const previous = actionButton(words.previousPage, 'previous-page', 'quiet', () => void loadPage(page?.previousCursor ?? null));
-  const next = actionButton(words.nextPage, 'next-page', 'quiet', () => void loadPage(page?.nextCursor ?? null));
+  const previous = windowStep(actionButton(words.previousPage, 'previous-page', 'quiet', () => void loadPage(page?.previousCursor ?? null)), 'before', "向前浏览");
+  const next = windowStep(actionButton(words.nextPage, 'next-page', 'quiet', () => void loadPage(page?.nextCursor ?? null)), 'after', "向后浏览");
   pageControls.append(previous, next);
   const chosen = el('p', 'agent-workspace-selection', words.noSelection);
   chosen.dataset['agentWorkspaceSelection'] = 'none';

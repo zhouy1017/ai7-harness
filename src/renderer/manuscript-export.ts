@@ -47,6 +47,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -58,7 +59,7 @@ function renderExportFidelityRow(row: ExportFidelityRowProjection): HTMLElement 
   item.dataset['exportCount'] = String(row.count);
   const name = el('span', 'export-fidelity-name', row.label);
   name.append(el('span', 'count', exportCountText(row.count)));
-  const pill = el('span', `status-pill export-status-${row.status}`, exportPillText(row));
+  const pill = el('span', `state-term status-pill export-status-${row.status}`, exportPillText(row));
   const detail = el('p', 'export-fidelity-detail', row.detail);
   const positions = exportPositionsLine(row);
   if (positions !== null) detail.append(el('span', 'export-fidelity-positions', positions));

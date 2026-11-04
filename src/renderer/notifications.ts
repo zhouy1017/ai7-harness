@@ -1,13 +1,45 @@
+import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
 export const QUIET_NOTICE_MS = 2_500;
+export function showTransientNotice(message: string): void { showToast(message); }
 
-let showMessage: (message: string) => void = () => {};
-
-/** Show a transient editor notice in the same capsule as completion notices. */
-export function showTransientNotice(message: string): void { showMessage(message); }
+/** Persistent status and transient notices share the same renderer entry point. */
+export function createStatusSurface(surface: HTMLElement): (message: string, tone?: 'busy' | 'success' | 'error') => void {
+  let error: string | null = null;
+  let busy: string | null = null;
+  const paint = (): void => {
+    surface.textContent = [error, busy].filter((message) => message !== null).join(' · ');
+    surface.hidden = error === null && busy === null;
+    surface.dataset['tone'] = error !== null ? 'error' : 'busy';
+    if (error !== null) {
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'btn small quiet status-dismiss';
+      dismiss.setAttribute('aria-label', '关闭错误提示');
+      dismiss.title = '关闭错误提示';
+      dismiss.addEventListener('click', () => { error = null; paint(); });
+      surface.append(dismiss);
+    }
+  };
+  return (message, tone) => {
+    if (tone === 'error') { error = message; busy = null; }
+    else if (tone === 'busy') busy = message;
+    else {
+      busy = null;
+      showToast(message, tone === undefined ? {} : { tone });
+    }
+    paint();
+    // Keep the latest ordinary status available to existing status readers.
+    if (surface.hidden) {
+      surface.textContent = message;
+      if (tone) surface.dataset['tone'] = tone;
+      else delete surface.dataset['tone'];
+    }
+  };
+}
 
 /** Observe the existing attention projection; history and its count remain owned by that projection. */
 export function createNotificationObserver(options: {
@@ -34,46 +66,7 @@ export function createNotificationObserver(options: {
   };
 }
 
-/** One in-app notice, replaced by the latest completion and dismissed after 2.5 seconds. */
+/** Completion notices share the ordinary transient-message capsule. */
 export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => void): (item: GlobalAttentionItemProjection) => void {
-  const host = document.createElement('aside');
-  host.dataset['quietCompletionNotice'] = 'true';
-  host.setAttribute('aria-label', QUIET_NOTICE_WORDS.region);
-  host.hidden = true;
-  const status = document.createElement('span');
-  status.setAttribute('role', 'status');
-  const view = document.createElement('button');
-  view.type = 'button';
-  view.textContent = QUIET_NOTICE_WORDS.view;
-  const close = document.createElement('button');
-  close.type = 'button';
-  close.textContent = QUIET_NOTICE_WORDS.close;
-  host.append(status, view, close);
-  // Reuse shell surface roles without adding another styling owner.
-  host.className = 'panel button-row quiet-completion-notice status-pill';
-  document.body.append(host);
-  let current: GlobalAttentionItemProjection | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const hide = (): void => { clearTimeout(timer); host.hidden = true; current = null; delete status.dataset['entryNotice']; };
-  showMessage = (message) => {
-    clearTimeout(timer);
-    current = null;
-    view.hidden = true;
-    status.textContent = message;
-    status.dataset['entryNotice'] = 'visible';
-    host.hidden = false;
-    timer = setTimeout(hide, QUIET_NOTICE_MS);
-  };
-  close.addEventListener('click', hide);
-  view.addEventListener('click', () => { const item = current; hide(); if (item) open(item); });
-  return (item) => {
-    clearTimeout(timer);
-    current = item;
-    view.hidden = false;
-    delete status.dataset['entryNotice'];
-    status.textContent = completionLabel(item);
-    host.dataset['noticeClass'] = item.state;
-    host.hidden = false;
-    timer = setTimeout(hide, QUIET_NOTICE_MS);
-  };
+  return (item) => showToast(completionLabel(item), { tone: item.state, action: { label: QUIET_NOTICE_WORDS.view, run: () => open(item) } });
 }

@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import type { EvaluationCalibrationBookProjection, EvaluationCalibrationCursor, EvaluationCalibrationProjection, RendererApi } from '../shared/protocol.js';
 import { formatPriceFen, parseFirstPrint, parsePriceYuan } from '../shared/evaluation-calibration.js';
 import {
@@ -49,6 +50,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -183,7 +185,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     }
     if (projection.nextCursor !== null) {
       const nextCursor = projection.nextCursor;
-      const next = action('下一页图书', 'secondary', 'next', () => void page(nextCursor));
+      const next = windowStep(action('下一页图书', 'secondary', 'next', () => void page(nextCursor)), 'after', "向后浏览图书");
       next.disabled = busy;
       pages.append(next);
     }

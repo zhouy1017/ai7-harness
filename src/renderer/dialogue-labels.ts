@@ -1,5 +1,4 @@
 import type { DialogueAnswerState, DialogueAttemptKind, DialogueAttemptProjection, DialogueProjection } from '../shared/protocol.js';
-import { technicalWords } from './technical-layer.js';
 
 /**
  * The words of 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044, TASK-046): the
@@ -91,7 +90,7 @@ export function dialogueIncompleteLine(attempt: Pick<DialogueAttemptProjection, 
         ? `AI7 关闭时回答被中断；${kept}`
         : `回答被中断；${kept}`;
     case 'failed':
-      return `回答没有完成${technicalWords(`（${attempt.causeCode ?? '原因未知'}）`, ` · ${attempt.causeCode ?? '原因未知'}`)}；${kept}`;
+      return attempt.fragmentTotal > 0 ? '回答未完成；已收到的文字已保留，可以继续回答。' : '回答未完成；没有收到可保留的文字。';
     default:
       return null;
   }

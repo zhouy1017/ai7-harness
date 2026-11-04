@@ -394,8 +394,8 @@ const PAGE_HELPERS = `(() => {
     field: (name) => block()?.querySelector('form.publication-designate [data-publication-field="' + name + '"]') ?? null,
     radios: () => Array.from(block()?.querySelectorAll('form.publication-designate input[type="radio"][name="publication-milestone"]') ?? []),
     summary: () => Array.from(block()?.querySelectorAll('form.publication-designate dl.publication-designate-summary > dd') ?? []).map((value) => value.textContent ?? ''),
-    status: () => document.querySelector('#persistence-status')?.textContent ?? '',
-    tone: () => document.querySelector('#persistence-status')?.dataset.tone ?? '',
+    status: () => document.querySelector('[data-toast]')?.textContent ?? '',
+    tone: () => document.querySelector('[data-toast]')?.dataset.tone ?? '',
     journal: () => {
       const node = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
       return node === undefined ? null : Number((node.textContent ?? '').slice('修订日志序号 '.length));
@@ -1173,7 +1173,7 @@ async function main() {
     // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
     await openDeliverables(renderer, 'before-milestone');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .panel', returnTo: SIDEBAR.section('deliverables') });
+    await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .page-content', returnTo: SIDEBAR.section('deliverables') });
     await waitForDeliverables(renderer, 'before-milestone-after-dark-pass');
     await assertRenderer(renderer, `(() => {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
@@ -1181,9 +1181,9 @@ async function main() {
       const designate = window.__j07.action('designate');
       const reason = document.getElementById(designate?.getAttribute('aria-describedby') ?? '');
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
-      return page?.dataset.bookId === ${JSON.stringify(bookId)} && page.querySelector(':scope > .section-label')?.textContent === '工作 · 交付物' &&
-        page.querySelector(':scope > h2')?.textContent === ${JSON.stringify(EXCERPT.title)} && page.lastElementChild?.classList.contains('workbench-actions') &&
-        JSON.stringify(actions) === '["打开稿件","工作概览"]' && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
+      return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
+        page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
+        actions.length === 0 && block.querySelector(':scope > h3')?.firstChild?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
         designate instanceof HTMLButtonElement && designate.disabled && designate.getAttribute('aria-label') === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
@@ -1558,7 +1558,7 @@ async function main() {
     await openDesignateForm(renderer, 'zoom');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root = document.documentElement; const block = window.__j07.block(); const parts = [block, block?.querySelector('ol.milestone-list'), block?.querySelector('ol.publication-versions'), window.__j07.form(), document.querySelector('[data-screen="book-deliverables"] .workbench-actions')]; const statement = window.__j07.form()?.querySelector('.publication-statement'); return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2 && statement instanceof HTMLElement && statement.getBoundingClientRect().width > 0; })()`, 'deliverables-reflow-at-200', 10_000);
+    await waitFor(renderer, `(() => { const root = document.documentElement; const block = window.__j07.block(); const parts = [block, block?.querySelector('ol.milestone-list'), block?.querySelector('ol.publication-versions'), window.__j07.form(), document.querySelector('[data-nav-book-section="manuscript"]')]; const statement = window.__j07.form()?.querySelector('.publication-statement'); return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2 && statement instanceof HTMLElement && statement.getBoundingClientRect().width > 0; })()`, 'deliverables-reflow-at-200', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 
@@ -1660,7 +1660,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const block = window.__j07.documents();
       const cards = Array.from(block.querySelectorAll('li.production-document-card'));
-      return block.querySelector(':scope > h3')?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
+      return block.querySelector(':scope > h3')?.firstChild?.textContent === '交付 · 生产文档' && block.dataset.documentSources === '1' &&
         JSON.stringify(cards.map((card) => card.dataset.documentTypeId + ':' + card.querySelector('h4')?.textContent + ':' + card.dataset.documentState)) === ${JSON.stringify(JSON.stringify(DOCUMENT_TYPES.map(([typeId, label]) => `${typeId}:${label}:none`)))} &&
         cards.every((card) => card.querySelector('.document-state-none')?.textContent === '尚未创建' &&
           window.__j07.cardAction(card.dataset.documentTypeId, 'create')?.disabled === false &&
@@ -1714,7 +1714,7 @@ async function main() {
     for (const [name, value] of Object.entries(surface)) requireJourney(value === true, `document-surface-${name}`);
     // #1287: opening navigation gives the document text its own readable cell and reflows the workflow below it.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'document-navigation-layout-open');
-    await waitFor(renderer, `(() => { const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const panel=document.querySelector('#manuscript-navigation-panel').getBoundingClientRect(); const lens=document.querySelector('.document-lens').getBoundingClientRect(); const workspace=document.querySelector('.editor-workspace'); const status=document.querySelector('#persistence-status').getBoundingClientRect(); const actions=document.querySelector('.window-actions').getBoundingClientRect(); return panel.width>0 && panel.height>0 && (panel.left>=text.right-1 || panel.top>=text.bottom-1) && lens.top>=text.bottom-1 && (workspace.clientWidth<864 || text.width>=480) && actions.bottom<=status.top+1 && document.documentElement.scrollHeight<=innerHeight+2; })()`, 'document-navigation-no-overlap');
+    await waitFor(renderer, `(() => { const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const panel=document.querySelector('#manuscript-navigation-panel').getBoundingClientRect(); const lens=document.querySelector('.document-lens').getBoundingClientRect(); const workspace=document.querySelector('.editor-workspace'); const actions=document.querySelector('.window-actions').getBoundingClientRect(); return panel.width>0 && panel.height>0 && (panel.left>=text.right-1 || panel.top>=text.bottom-1) && lens.top>=text.bottom-1 && (workspace.clientWidth<864 || text.width>=480) && actions.bottom<=innerHeight+1 && document.documentElement.scrollHeight<=innerHeight+2; })()`, 'document-navigation-no-overlap');
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'document-navigation-layout-close');
     const documentTexts = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]'), (block) => block.textContent ?? '')`);
     const draftParagraphs = await admittedParagraphs(DRAFT);
@@ -2561,7 +2561,7 @@ async function main() {
     requireJourney(invalid.refusal === '定价要是大于 0 的金额，最多两位小数。' && invalid.focus === 'price' && invalid.books[0]?.[1] === 'missing', 'actuals-invalid-words', invalid);
     requireJourney(await writeField('price', '45'), 'actuals-price-write');
     await clickSelector(renderer, '[data-screen="evaluation-calibration"] [data-calibration-action="save"]', 'actuals-save');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。'`, 'actuals-saved-status');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '定价与首印已录入。'`, 'actuals-saved-status');
     const saved = await readCalibration(renderer, (page) => page.books[0]?.[1] === 'recorded', 'actuals-saved');
     requireJourney(JSON.stringify(saved.books) === JSON.stringify([[bookId, 'recorded', '第 33 次发稿版本 · 定价 ¥45.00 · 首印 3,000 册', false]]) &&
       saved.prediction === '已录入实际数据的已发稿图书 1 / 30 本 · 满 30 本后才能打开' && saved.focus === 'open' && saved.refusal === null, 'actuals-saved-words', saved);
@@ -2609,7 +2609,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, 'actuals-preferences-with-form');
     await waitFor(renderer, `!document.querySelector('[data-calibration-switch="calibration"]')?.checked && !document.querySelector('[data-calibration-switch="calibration"]')?.disabled && document.querySelector('[data-calibration-field="price"]')?.value === '55'`, 'actuals-preferences-form-kept');
     await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-off-page-save');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。' && document.activeElement?.dataset.calibrationAction === 'open'`, 'actuals-off-page-saved');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '定价与首印已录入。' && document.activeElement?.dataset.calibrationAction === 'open'`, 'actuals-off-page-saved');
     await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-saved-next-page');
     await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('.calibration-book')?.dataset.actualsState === 'recorded' && document.querySelector('.calibration-book-line')?.textContent.includes('¥55.00')`, 'actuals-saved-target');
     // The twenty additional Books designated above also exercise the parent's real exemplar catalogue paging.
@@ -2719,6 +2719,7 @@ async function main() {
       JSON.stringify(writingBefore.buttons) === JSON.stringify([['new', '新建文档…', false]]), 'writing-section-words', writingBefore);
     await clickSelector(renderer, '[data-screen="book-deliverables"] .writing-task [data-writing-action="new"]', 'writing-new');
     const writingSheet = await readWriting((page) => page.open, 'writing-sheet-open');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].writing-task-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'writing-shared-nonmodal-sheet');
     requireJourney(JSON.stringify(writingSheet.similarMaterials) === JSON.stringify([[1, '相似段落检索', 1_000,
       [['使用当前选中文字', 'button', false], ['检索相似段落', 'button', false]]]]), 'writing-sheet-retrieval-control', writingSheet.similarMaterials);
     requireJourney(JSON.stringify(writingSheet.types) === JSON.stringify(WRITING_TYPES.map(([typeId, label]) => [typeId, label, false, false])) &&

@@ -1,3 +1,4 @@
+import { createSheet, sheetContent } from './components/sheet.js';
 import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
@@ -171,6 +172,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -303,6 +305,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   root.classList.add('evaluation');
   const initialMaterialIds = new Set<string>();
   let seriesId: string | null = null;
+  let initialSheetOpen = false;
   const reportMaterialIds = new Map<ReadersReportTemplate, Set<string>>();
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
@@ -507,7 +510,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (latest === null) heading.append(' · ', el('span', 'evaluation-initial-none', EVALUATION_AI7_NONE));
     section.append(heading);
     const initialBlocked = page.materialReferences?.blocked.initial === true;
-    section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
+    const configuration: HTMLElement[] = [materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked))];
+    if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'attention-note', initial.task.historicalMarker));
     if (page.market.series.length > 0 && initial.prepare.allowed) {
       const row = el('label', 'evaluation-field');
       row.append(el('span', undefined, '参考什么'));
@@ -519,7 +523,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       select.disabled = busy;
       select.addEventListener('change', () => { seriesId = select.value || null; });
       row.append(select);
-      section.append(row);
+      configuration.push(row);
     }
     if (initial.task !== null) {
       const taskLine = el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task));
@@ -579,7 +583,18 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         row.append(open);
       }
     }
-    section.append(row);
+    const sheet = createSheet('evaluation-sheet');
+    const sheetTitle = el('h3', undefined, '新建评估');
+    sheetTitle.id = 'new-evaluation-title';
+    sheet.setAttribute('aria-labelledby', sheetTitle.id);
+    const close = action('关闭', 'quiet', 'close-initial-sheet', () => sheet.close());
+    row.append(close);
+    sheetContent(sheet, sheetTitle, configuration, row);
+    const open = action('新建评估', 'primary', 'new-evaluation', () => { initialSheetOpen = true; sheet.show(); sheet.querySelector<HTMLElement>('button, input, select')?.focus(); });
+    open.disabled = busy;
+    sheet.open = initialSheetOpen;
+    sheet.addEventListener('close', () => { initialSheetOpen = false; open.focus({ preventScroll: true }); });
+    section.append(open, sheet);
     return section;
   };
 
@@ -606,7 +621,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const card = el('div', 'evaluation-market-list');
         card.dataset['marketList'] = key;
         const title = el('h4', undefined, EVALUATION_MARKET_LISTS[key]);
-        title.append(' ', el('span', 'status-pill evaluation-market-ai7', EVALUATION_MARKET_AI7));
+        title.append(' ', el('span', 'state-term status-pill evaluation-market-ai7', EVALUATION_MARKET_AI7));
         const list = el('ul');
         for (const line of market[key]) list.append(el('li', undefined, line));
         card.append(title, list);
@@ -644,7 +659,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     // 预测 · 低确定性 (EVAL-009, EVAL-010): a block of its own, never a promise.
     const prediction = el('div', 'evaluation-prediction');
     const title = el('h4', undefined, EVALUATION_PREDICTION_HEADING);
-    title.append(' ', el('span', 'status-pill evaluation-prediction-pill', EVALUATION_PREDICTION_NOT_PROMISE));
+    title.append(' ', el('span', 'state-term status-pill evaluation-prediction-pill', EVALUATION_PREDICTION_NOT_PROMISE));
     const rows = el('dl', 'evaluation-prediction-rows');
     const row = (key: keyof typeof EVALUATION_PREDICTION_LABELS, lines: ReadonlyArray<string>): void => {
       const term = el('dt', undefined, EVALUATION_PREDICTION_LABELS[key]);
@@ -982,6 +997,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         throw new Error(EVALUATION_AI7_STATUS.failed);
       }
       workspace = { ...result, record: workspace.record };
+      initialSheetOpen = false;
       setStatus(EVALUATION_AI7_STATUS.prepared, 'success');
       paint(null, true);
       const ref = result.initial.task?.taskIntentId ?? null;
@@ -1116,7 +1132,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       score.value = content.score === null ? '' : String(content.score);
       score.disabled = readOnly || content.notRated !== null;
       score.dataset['evaluationField'] = 'score';
-      const band = el('span', 'status-pill evaluation-band', content.score === null ? '' : evaluationBandLabel(profile, content.score, item.fullMarks));
+      const band = el('span', 'state-term status-pill evaluation-band', content.score === null ? '' : evaluationBandLabel(profile, content.score, item.fullMarks));
       band.hidden = content.score === null;
       const invalid = el('span', 'evaluation-score-invalid', evaluationScoreInvalidLine(item.fullMarks));
       invalid.id = `evaluation-score-invalid-${record.recordId}-${item.itemId}`;

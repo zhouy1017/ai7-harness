@@ -742,6 +742,7 @@ async function main() {
     // The live processing indicator (ADR 0096 §3, #1177) replaces the static 「本地处理 · 未联网」: this launch sends nothing.
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
+    await assertRenderer(primary, `(() => { const links=Array.from(document.querySelectorAll('.sidebar-link')); return links.length>0 && links.every((link)=>link.querySelector('svg[data-icon] use') && link.title) && !document.querySelector('button:not([class]), button[class=""]') && Array.from(document.querySelectorAll('button')).every((button)=>button.classList.contains('btn')); })()`, 'shared-svg-and-buttons');
     // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');
@@ -749,6 +750,24 @@ async function main() {
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
     await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-off');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && !document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'technical-mode-off-applied');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="settings"] [data-settings-entry]').length===6 && !document.querySelector('[data-settings-entry="usage"]') && !document.querySelector('[data-settings-entry="evaluation-calibration"]') && !document.querySelector('[data-settings-entry="diagnostics"]')`, 'ordinary-settings-six-rows');
+    await click(primary, '键盘与无障碍', 'ordinary-keyboard-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
+    await waitFor(primary, `document.documentElement.dataset.reducedMotion==='true' && localStorage.getItem('ai7.reducedMotion')==='true'`, 'ordinary-reduced-motion-applied');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
+    await click(primary, '模型服务', 'ordinary-model-entry');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && !document.querySelector('[data-action="select-main-role-model"]') && !document.querySelector('[data-search-backend]') && !document.querySelector('.model-service-current-roles')`, 'ordinary-model-single-view');
+    await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const test=flow?.querySelector('[data-action="test-flow-connection"]'); return flow instanceof HTMLElement && test instanceof HTMLButtonElement && flow.getBoundingClientRect().top>=0 && test.getBoundingClientRect().bottom<=innerHeight; })()`, 'ordinary-model-one-screen');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]'), node=>node.textContent).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-tabs');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]').length===1 && document.querySelector('[data-screen="quality-learning"] [role="tab"]')?.textContent==='反馈历史'`, 'ordinary-quality-feedback-only');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='反馈历史已打开'`, 'ordinary-quality-loaded');
+    await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
@@ -757,6 +776,10 @@ async function main() {
     await click(primary, '帮助', 'technical-mode-restore-help');
     await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-on');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'technical-mode-on-applied');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'developer-keyboard-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'developer-keyboard-settings-ready');
+    await click(primary, '键盘与无障碍', 'developer-keyboard-entry');
+    await waitFor(primary, `document.querySelector('[data-keyboard-change]') && Array.from(document.querySelectorAll('.keyboard-table th[data-developer-only="true"]')).some(node=>getComputedStyle(node,'::after').content.includes('开发者'))`, 'developer-keyboard-badge');
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
@@ -1289,7 +1312,7 @@ async function main() {
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
       return JSON.stringify(labels)===JSON.stringify(['稿件','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
-        (anchorSection.compareDocumentPosition(overview.querySelector('.workbench-actions'))&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
+        anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
         readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
@@ -1384,7 +1407,7 @@ async function main() {
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .panel', returnToScreen: async () => {
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .page-content', returnToScreen: async () => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
       await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
       // 设置 paints its hub after the click, so the 模型服务 row is waited for and followed once it is there (#935).
@@ -1424,6 +1447,8 @@ async function main() {
     })()`, 'model-service-unbound-provider-absent');
     await assertRenderer(primary, `(() => {
       const flow=document.querySelector('[data-model-service-flow]');
+      const badges=[flow?.querySelector('[data-action="select-main-role-model"]'),document.querySelector('[data-search-backends] h3')];
+      if(!badges.every(node=>node instanceof HTMLElement && getComputedStyle(node,'::after').content.includes('开发者')))return false;
       const channels=Array.from(flow?.querySelectorAll('[data-model-channel]')??[]).map((node)=>node.dataset.modelChannel);
       const zen=flow?.querySelector('[data-model-channel="opencode-zen"] input');
       if(JSON.stringify(channels)!==JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform','anthropic-claude','google-gemini','opencode-zen'])||!(zen instanceof HTMLInputElement))return false;

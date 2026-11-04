@@ -1,4 +1,6 @@
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
+import { createSheet, sheetContent } from './components/sheet.js';
+import { filterChoices } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
@@ -217,7 +219,7 @@ import {
  * ②B 审阅 (Issue #417; editor-surfaces §4, V2-UX-REV-001 to REV-013, MARK-010, FIND-002): the Book-level
  * review destination. One card holds the coverage matrix, the 审阅记录 and 新建审阅, and below them the
  * opened Review Run — its plan before the one approval, then each category's progress, its findings as
- * they become actionable (REV-008), and its versioned Report. 新建审阅 is a native modal sheet.
+ * they become actionable (REV-008), and its versioned Report. 新建审阅 uses the shared non-modal sheet.
  *
  * Everything here reads the service's projection and asks the service again after every action: a
  * finding's status, a Run's state and every count come from the records, never from this surface. A
@@ -382,6 +384,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -405,7 +408,7 @@ function uid(prefix: string): string {
 }
 
 function pillElement(text: string, pill: ReviewPill): HTMLElement {
-  const node = el('span', `status-pill review-pill review-pill-${pill.tone}`, text);
+  const node = el('span', `state-term status-pill review-pill review-pill-${pill.tone}`, text);
   node.dataset['pillTone'] = pill.tone;
   node.dataset['pillShape'] = pill.shape;
   return node;
@@ -470,13 +473,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   const live = el('p', 'review-live');
   live.setAttribute('role', 'status');
   live.setAttribute('aria-live', 'polite');
-  const sheet = el('dialog', 'review-sheet');
+  const sheet = createSheet('review-sheet');
   const sheetTitleId = uid('sheet-title');
   sheet.setAttribute('aria-labelledby', sheetTitleId);
   host.append(live, sheet);
   options.root.append(
-    el('p', 'section-label', REVIEW_SECTION_LABEL),
-    el('h2', undefined, options.bookTitle),
+    el('h2', undefined, REVIEW_SECTION_LABEL),
     el('p', 'lede', REVIEW_LEDE),
     host,
   );
@@ -1229,20 +1231,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     filters.setAttribute('role', 'group');
     filters.setAttribute('aria-label', '筛选发现');
     const filterSelect = (name: FilterName, choices: ReadonlyArray<readonly [string, string]>): HTMLElement => {
-      const label = el('label', 'review-filter');
+      const label = el('div', 'review-filter');
       label.append(el('span', undefined, REVIEW_FILTER_LABELS[name]));
-      const select = el('select');
-      select.dataset['reviewFilter'] = name;
-      select.append(new Option(REVIEW_FILTER_ALL, ''));
-      for (const [value, text] of choices) select.append(new Option(text, value));
-      select.value = query.filters[FILTER_KEYS[name]] ?? '';
-      select.disabled = working;
-      select.addEventListener('change', () => {
-        // The options are the projection's own values, so the filter names only what a finding can be.
-        query.filters = { ...query.filters, [FILTER_KEYS[name]]: select.value === '' ? null : select.value } as Filters;
-        query.pages = 1;
-        refresh(true);
+      const select = filterChoices({ label: REVIEW_FILTER_LABELS[name], choices: [['', REVIEW_FILTER_ALL], ...choices],
+        value: query.filters[FILTER_KEYS[name]] ?? '', disabled: working,
+        change: (value) => {
+          query.filters = { ...query.filters, [FILTER_KEYS[name]]: value === '' ? null : value } as Filters;
+          query.pages = 1;
+          refresh(true);
+        },
       });
+      select.dataset['reviewFilter'] = name;
       label.append(select);
       return label;
     };
@@ -1356,19 +1355,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     filters.setAttribute('role', 'group');
     filters.setAttribute('aria-label', '筛选核查结果');
     const select = (name: keyof FactualVerificationLensFilters, choices: ReadonlyArray<readonly [string, string]>): HTMLElement => {
-      const label = el('label', 'review-filter');
+      const label = el('div', 'review-filter');
       label.append(el('span', undefined, FACT_LENS_FILTER_LABELS[name === 'chapterBlockId' ? 'chapter' : name]));
-      const control = el('select');
-      control.dataset['factFilter'] = name;
-      control.append(new Option(FACT_LENS_FILTER_ALL, ''));
-      for (const [value, text] of choices) control.append(new Option(text, value));
-      control.value = fact.filters[name] ?? '';
-      control.disabled = working;
-      control.addEventListener('change', () => {
-        fact.filters = { ...fact.filters, [name]: control.value === '' ? null : control.value } as FactualVerificationLensFilters;
-        fact.pages = 1;
-        refresh(true);
+      const control = filterChoices({ label: FACT_LENS_FILTER_LABELS[name === 'chapterBlockId' ? 'chapter' : name],
+        choices: [['', REVIEW_FILTER_ALL], ...choices], value: fact.filters[name] ?? '', disabled: working,
+        change: (value) => {
+          fact.filters = { ...fact.filters, [name]: value || null } as FactualVerificationLensFilters;
+          fact.pages = 1;
+          refresh(true);
+        },
       });
+      control.dataset['factFilter'] = name;
       label.append(control);
       return label;
     };
@@ -1416,7 +1413,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     for (const [term, value] of factStateLines(result)) {
       const cell = el('span', 'fact-lens-state');
       cell.dataset['stateTerm'] = term;
-      cell.append(el('span', 'evidence-term', term), el('span', `status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
+      cell.append(el('span', 'evidence-term', term), el('span', `state-term status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
       states.append(cell);
     }
     card.append(states, el('p', 'fact-lens-level', factLevelLine(result)), el('p', 'fact-lens-decision', `${factDecisionLine(result.decision)} · ${factActionLine(result)}`));
@@ -1924,7 +1921,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   async function act(busy: string, failure: string, run: () => Promise<void>, onError?: (error: unknown) => boolean): Promise<void> {
     if (destroyed || working) return;
     working = true;
-    for (const control of card?.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button[data-review-action], select[data-review-filter]') ?? []) control.disabled = true;
+    for (const control of card?.querySelectorAll<HTMLButtonElement>('button[data-review-action], [data-review-filter] button, [data-fact-filter] button') ?? []) control.disabled = true;
     options.setStatus(busy, 'busy');
     try {
       await run();
@@ -2240,7 +2237,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       definition: null,
     };
     renderSheet(projection, sheetState);
-    sheet.showModal();
+    sheet.show();
     if (procedureId !== null && PROCEDURE_DEFINITION_KEY.test(procedureId)) {
       await chooseDefinition(sheetState, procedureId);
       return;
@@ -2686,7 +2683,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       else delete cancelPreparation.dataset['serviceJobId'];
     }
     sheetUpdate = updateSheet;
-    sheet.replaceChildren(form);
+    sheetContent(sheet, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== title && node !== actions), actions, form);
     updateSheet();
   }
 

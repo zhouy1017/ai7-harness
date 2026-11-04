@@ -2374,8 +2374,14 @@ export class BaselineAnalysisStore {
       const unknown = report?.unitRows.filter((unit) => unit.gapCode === 'outcome-unknown') ?? [];
       if (unknown.length === 0) continue;
       const runRecordId = asString(row.run_record_id);
-      const facts = this.loadExecutionPlan(runRecordId);
-      const keys = unitContentKeys(facts.manifest);
+      // This history walk is kind-generic and must not require today's execution route
+      // or interpret another kind's mode through this ledger's definition.
+      const envelopeDigest = this.#envelopeDigestOfRun(runRecordId);
+      const version = envelopeDigest === undefined ? undefined : this.#planVersionByEnvelopeDigest(envelopeDigest);
+      requireAnalysis(version !== undefined, 'ANALYSIS_RECORD_INVALID', '失败运行的计划版本缺失。');
+      const manifest = this.#planRecords(asString(row.task_intent_id), 'any', version.ordinal)['coverage-manifest'] as CoverageManifestProjection;
+      requireAnalysis(manifestDigestIsExact(manifest), 'ANALYSIS_RECORD_INVALID', '失败运行的覆盖清单记录无效。');
+      const keys = unitContentKeys(manifest);
       const recordedAt = asString(row.recorded_at);
       latestKeys = new Set(keys);
       latestKeysAt = recordedAt;
@@ -2720,6 +2726,12 @@ export class BaselineAnalysisStore {
       latestOrdinal: latest.ordinal,
       entries,
     } as BaselineAnalysisHistoryProjection;
+  }
+
+  /** Read immutable result history without revalidating a later prepared Task's current configuration. */
+  inspectRevision(bookId: string, revisionId: string): NonNullable<AnalysisProjection['resultSetRevision']> {
+    const rows = this.#revisionRows(bookId);
+    return this.#inspectedRevision(rows, revisionId, rows.length === 0 ? 0 : asNumber(rows.at(-1)!.ordinal)).revision;
   }
 
   /** The predecessor facts a reuse plan is derived against, read from the immutable revision rows and the plan version its Run bound. */

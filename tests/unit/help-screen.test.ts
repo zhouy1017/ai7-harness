@@ -5,6 +5,7 @@ import { mountHelp, THIRD_PARTY_LICENSES, type ThirdPartyLicense } from '../../s
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { SERVICE_PROTOCOL_VERSION } from '../../src/shared/protocol.js';
 import { HELP_ABOUT_FAILED } from '../../src/renderer/help-labels.js';
+import { helpUsageSections } from '../../src/renderer/help-text.js';
 
 // #939 slice 11f: drive the mounted 帮助 screen through its own data attributes — tab switching by click and by arrow
 // key, the 关于 line, and the license filter — with the same minimal DOM the other renderer surfaces use.
@@ -40,6 +41,17 @@ function dispatch(node: MiniElement, key: string): void {
 }
 
 describe('the mounted 帮助 screen', () => {
+  it('describes only the pages available in the selected mode', () => {
+    const ordinary = helpUsageSections(false).map((section) => section.paragraphs.join(''));
+    const developer = helpUsageSections(true).map((section) => section.paragraphs.join(''));
+    expect(ordinary.join('')).toContain('审阅规范文件、范例、资料库');
+    expect(ordinary.join('')).not.toContain('诊断');
+    expect(ordinary.join('')).not.toContain('检索排除');
+    expect(developer.join('')).toContain('外部来源留存');
+    expect(developer.join('')).toContain('学习回溯');
+    expect(developer.join('')).toContain('检索排除');
+  });
+
   it('shows the 关于 line from the same versions 数据与存储 reads, protocol included', async () => {
     const { root, find } = mounted();
     expect((root as unknown as MiniElement).dataset['helpReady']).toBe('true');

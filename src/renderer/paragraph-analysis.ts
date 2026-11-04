@@ -1,3 +1,4 @@
+import { createButton } from './components/controls.js';
 import type { ParagraphAnalysisProjection } from '../shared/protocol.js';
 import { PARAGRAPH_ANALYSIS_LABELS, PARAGRAPH_ANALYSIS_WORDS } from './paragraph-analysis-labels.js';
 import { technicalWords } from './technical-layer.js';
@@ -53,7 +54,7 @@ export function mountParagraphAnalysis(options: {
       if (items.length === 0) continue;
       const section = document.createElement('section'); const heading = document.createElement('h4'); heading.textContent = PARAGRAPH_ANALYSIS_LABELS[kind]; section.append(heading);
       for (const item of items) {
-        const line = words(item.label); const link = document.createElement('button'); link.type = 'button'; link.textContent = PARAGRAPH_ANALYSIS_WORDS.open; link.addEventListener('click', () => options.openItem(item, revision.revisionId)); line.append(' ', link); section.append(line);
+        const line = words(item.label); const link = createButton(); link.type = 'button'; link.textContent = PARAGRAPH_ANALYSIS_WORDS.open; link.addEventListener('click', () => options.openItem(item, revision.revisionId)); line.append(' ', link); section.append(line);
       }
       root.append(section);
     }

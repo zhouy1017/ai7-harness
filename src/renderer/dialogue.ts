@@ -76,6 +76,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -150,7 +151,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const heading = el('h4', 'dialogue-attempt-heading', dialogueAttemptHeading(attempt));
     heading.id = uid('attempt');
     section.setAttribute('aria-labelledby', heading.id);
-    const state = el('span', `status-pill review-pill dialogue-state dialogue-state-${attempt.state}`, DIALOGUE_STATE_LABELS[attempt.state]);
+    const state = el('span', `state-term status-pill review-pill dialogue-state dialogue-state-${attempt.state}`, DIALOGUE_STATE_LABELS[attempt.state]);
     state.dataset['dialogueStateLabel'] = attempt.state;
     const head = el('div', 'dialogue-attempt-head');
     head.append(heading, state);

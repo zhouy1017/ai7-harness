@@ -4452,7 +4452,7 @@ export class ReviewRunStore {
       if (state === 'settled' && category.task !== null && materialized !== null && materialized.runRecordId !== null && materialized.resultSetRevisionId !== null) {
         const ledger = this.#categoryLedger(category);
         if (ledger.currentRunState(materialized.runRecordId) === 'completed-with-gaps') {
-          const revision = ledger.inspect(snapshot.bookId, undefined, materialized.resultSetRevisionId).inspectedRevision!.revision;
+          const revision = ledger.inspectRevision(snapshot.bookId, materialized.resultSetRevisionId);
           const synthesis = 'crossChapterSynthesis' in revision ? revision.crossChapterSynthesis : undefined;
           const warning = synthesis?.state === 'gap'
             ? synthesis.code === 'outcome-unknown' ? '跨章汇总结果待确认' : '跨章检查尚未完成'

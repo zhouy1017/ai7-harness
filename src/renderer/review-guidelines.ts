@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
@@ -39,6 +40,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -156,8 +158,8 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
           const controls = el('div', 'button-row');
           for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
             const name = `merged-clause-${version.digest}-${step}`;
-            const button = action(step === 1 ? `${label} · ${version.clausePage + 1} / ${version.clausePages}` : label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
-              { digest: version.digest, page: version.clausePage + step }, name));
+            const button = windowStep(action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
+              { digest: version.digest, page: version.clausePage + step }, name)), step < 0 ? 'before' : 'after', step < 0 ? '向前浏览条款' : '向后浏览条款');
             button.disabled = busy || preview !== null || version.clausePage + step < 0 || version.clausePage + step >= version.clausePages;
             controls.append(button);
           }
@@ -225,10 +227,10 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
   const clauseControls = (shown: ReviewGuidelineDocumentProjection | ReviewGuidelinePreviewProjection, isPreview: boolean): HTMLElement => {
     const row = el('div', 'button-row');
     for (const [step, label, name] of [[-1, '上一页', 'clauses-previous'], [1, '下一页', 'clauses-next']] as const) {
-      const button = action(step === 1 ? `${label} · ${shown.clausePage + 1} / ${shown.clausePages}` : label, 'secondary', name, () => {
+      const button = windowStep(action(label, 'secondary', name, () => {
         if (isPreview && 'previewId' in shown) void turnPreview(shown, shown.clausePage + step, name);
         else if ('versionsBefore' in shown) void turn(shown, shown.versionsBefore, shown.clausePage + step, name);
-      });
+      }), step < 0 ? 'before' : 'after', step < 0 ? '向前浏览条款' : '向后浏览条款');
       button.disabled = busy || (!isPreview && preview !== null) || shown.clausePage + step < 0 || shown.clausePage + step >= shown.clausePages;
       row.append(button);
     }

@@ -141,6 +141,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -303,7 +304,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const title = el('h4', 'task-card-title', view.title);
     title.id = uid('card');
     item.setAttribute('aria-labelledby', title.id);
-    const pill = el('span', `status-pill review-pill task-card-pill review-pill-${view.pill.tone}`, view.stateLabel);
+    const pill = el('span', `state-term status-pill review-pill task-card-pill review-pill-${view.pill.tone}`, view.stateLabel);
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;
     const head = el('div', 'task-card-head');
@@ -791,7 +792,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       words.append(el('span', 'task-composer-range-quote', range.text), el('footer', undefined, taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1)));
       item.append(words);
       if (range.stateLabel !== null) {
-        const label = el('span', `status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
+        const label = el('span', `state-term status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
         label.dataset['rangeStateLabel'] = range.state;
         item.append(label);
       }

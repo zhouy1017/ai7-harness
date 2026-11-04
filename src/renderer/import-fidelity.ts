@@ -33,6 +33,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -88,7 +89,7 @@ function fidelityRow(category: FidelityCategoryProjection, choice: HTMLElement |
   const name = el('div', 'fidelity-name');
   name.setAttribute('role', 'cell');
   name.append(document.createTextNode(category.label), el('span', 'count', fidelityCountText(category.count)));
-  const status = el('div', `status-pill status-${category.status}`, fidelityPillText(category));
+  const status = el('div', `state-term status-pill status-${category.status}`, fidelityPillText(category));
   status.setAttribute('role', 'cell');
   const detail = el('div', 'fidelity-detail', fidelitySurfaceDetail(category));
   detail.setAttribute('role', 'cell');

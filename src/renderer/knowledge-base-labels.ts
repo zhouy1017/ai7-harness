@@ -31,6 +31,7 @@ export type KnowledgeBaseTab = 'guidelines' | 'evaluation' | 'rules' | 'memory' 
 export interface KnowledgeBaseTabView {
   readonly tab: KnowledgeBaseTab;
   readonly label: string;
+  readonly developerOnly?: true;
   /** What the class holds, said once at the top of its panel. */
   readonly holds: string;
   /** Why it shows nothing yet, for the classes a later slice brings; `null` for the classes that work now. */
@@ -51,13 +52,15 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'evaluation',
     label: '评估方案',
+    developerOnly: true,
     holds: '评估按这里的评分项、满分、档位、风险项与结论打分；每一版评估都记下它用的方案版本。',
     pending: null,
   },
-  { tab: 'rules', label: '工序与规则', holds: '专家经验工序与「快速开始」的默认执行规则。', pending: null },
+  { tab: 'rules', label: '工序与规则', developerOnly: true, holds: '专家经验工序与「快速开始」的默认执行规则。', pending: null },
   {
     tab: 'memory',
     label: '社级编辑记忆',
+    developerOnly: true,
     holds: '社里沉淀下来的编辑经验，供审阅与写作参考。',
     pending: null,
   },
@@ -76,6 +79,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'external',
     label: '外部来源留存',
+    developerOnly: true,
     holds: '审查时留存的外部资料的跨书索引；归属仍在各书的来源与证据。',
     pending: '尚未提供：外部来源留存随外部核查的留存一起到来。',
   },
@@ -83,6 +87,10 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
 
 export function knowledgeBaseTabView(tab: KnowledgeBaseTab): KnowledgeBaseTabView {
   return KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === tab)!;
+}
+
+export function visibleKnowledgeBaseTabs(developerMode: boolean): ReadonlyArray<KnowledgeBaseTabView> {
+  return developerMode ? KNOWLEDGE_BASE_TAB_VIEWS : KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.developerOnly !== true);
 }
 
 // ---- 审阅规范文件 ----------------------------------------------------------------------------------------------------

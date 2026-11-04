@@ -305,6 +305,7 @@ export function recordModelConnectionTest(host: ModelSearchSettingsHost, connect
   const sanitized: ModelConnectionTestStatus = {
     modelId: result.modelId, credentialUpdatedAt: result.credentialUpdatedAt, testedAt: result.testedAt,
     outcome: result.outcome, code: result.code, verified: 'buffered-text-only',
+    ...(typeof result.responseText === 'string' && result.responseText.isWellFormed() ? { responseText: result.responseText.slice(0, 4000).replace(/[\uD800-\uDBFF]$/u, '') } : {}),
     ...(facts === undefined ? {} : { provenance: {
       role: facts.role, route: facts.route, model: facts.model, endpoint: facts.endpoint, credentialSlot: facts.credentialSlot,
       credentialReference: facts.credentialReference, policyVersion: facts.policyVersion, bindingDigest: facts.bindingDigest,

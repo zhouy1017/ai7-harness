@@ -1,3 +1,4 @@
+import { filterChoices as renderFilterChoices } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import type {
   LearningAuditBookProjection,
@@ -109,6 +110,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -251,31 +253,23 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     return note;
   };
 
-  const select = (filter: 'book' | 'series' | 'kind' | 'standing', choices: ReadonlyArray<readonly [string, string]>): HTMLLabelElement => {
-    const wrapper = el('label', 'feedback-filter learning-audit-filter');
-    const control = el('select');
+  const select = (filter: 'book' | 'series' | 'kind' | 'standing', choices: ReadonlyArray<readonly [string, string]>): HTMLDivElement => {
+    const wrapper = el('div', 'feedback-filter learning-audit-filter');
+    const control = renderFilterChoices({ label: LEARNING_AUDIT_FILTERS[filter], choices: [['', LEARNING_AUDIT_ALL], ...choices], value: chosen[filter], disabled: busy,
+      change: (value) => {
+        if (busy) return;
+        void request({ ...chosen, query: liveQuery(), [filter]: value }, null, `#learning-audit-filter-${filter}`);
+      },
+    });
     control.id = `learning-audit-filter-${filter}`;
     control.dataset['learningAuditFilter'] = filter;
-    for (const [value, label] of [['', LEARNING_AUDIT_ALL] as const, ...choices]) {
-      const option = el('option', undefined, label);
-      option.value = value;
-      control.append(option);
-    }
-    control.value = chosen[filter];
-    control.disabled = busy;
-    if ((filter === 'book' && filterChoices.booksTruncated) || (filter === 'series' && (filterChoices.seriesTruncated || filterChoices.seriesUnavailable))) {
-      control.setAttribute('aria-describedby', `learning-audit-cut-${filter}`);
-    }
-    control.addEventListener('change', () => {
-      if (busy) return;
-      void request({ ...chosen, query: liveQuery(), [filter]: control.value }, null, `#learning-audit-filter-${filter}`);
-    });
+    if ((filter === 'book' && filterChoices.booksTruncated) || (filter === 'series' && (filterChoices.seriesTruncated || filterChoices.seriesUnavailable))) control.setAttribute('aria-describedby', `learning-audit-cut-${filter}`);
     wrapper.append(el('span', undefined, LEARNING_AUDIT_FILTERS[filter]), control);
     return wrapper;
   };
 
-  const dateFilter = (filter: 'from' | 'to'): HTMLLabelElement => {
-    const wrapper = el('label', 'feedback-filter learning-audit-filter');
+  const dateFilter = (filter: 'from' | 'to'): HTMLDivElement => {
+    const wrapper = el('div', 'feedback-filter learning-audit-filter');
     const control = el('input');
     control.type = 'date';
     control.id = `learning-audit-filter-${filter}`;
@@ -437,7 +431,7 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     }
     head.append(
       el('span', 'learning-origin', learningOriginLine(material, localInstantLabel)),
-      el('span', `status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
+      el('span', `state-term status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
     );
     item.append(head);
     const reason = material.excerpt.at(-1);

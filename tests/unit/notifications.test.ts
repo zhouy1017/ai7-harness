@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, mountQuietNotice, showTransientNotice } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountQuietNotice } from '../../src/renderer/notifications.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
@@ -170,35 +170,93 @@ describe('renderer projection observer', () => {
 });
 
 describe('quiet notice lifetime', () => {
-  it('replaces the notice and dismisses the latest one after 2.5 seconds', () => {
+  it.each(['error', 'busy'] as const)('keeps %s visible beyond the transient lifetime without a toast', (tone) => {
     const restore = installMiniDom();
     vi.useFakeTimers();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update(tone === 'error' ? '模型服务不可达' : '正在测试连接…', tone);
+      vi.advanceTimersByTime(10_000);
+      expect(surface.hidden).toBe(false);
+      expect(surface.dataset['tone']).toBe(tone);
+      expect(miniDocument.body.querySelector('[data-toast]') === null).toBe(true);
+    } finally { vi.useRealTimers(); restore(); }
+  });
+
+  it('keeps an unacknowledged error when a later success notice expires', () => {
+    const restore = installMiniDom();
+    vi.useFakeTimers();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update('凭据被拒', 'error');
+      update('正在测试连接…', 'busy');
+      expect(surface.textContent).toContain('凭据被拒');
+      expect(surface.textContent).toContain('正在测试连接…');
+      update('其他设置已保存', 'success');
+      expect(surface.textContent).toBe('凭据被拒');
+      expect(surface.dataset['tone']).toBe('error');
+      const toast = miniDocument.body.querySelector('[data-toast]')!;
+      expect(toast.textContent).toBe('其他设置已保存');
+      vi.advanceTimersByTime(2_500);
+      expect(toast.hidden).toBe(true);
+      expect(surface.textContent).toBe('凭据被拒');
+      expect(surface.hidden).toBe(false);
+      surface.querySelector('button')!.click();
+      expect(surface.hidden).toBe(true);
+      update('正在测试连接…', 'busy');
+      expect(surface.textContent).toBe('正在测试连接…');
+      expect(surface.dataset['tone']).toBe('busy');
+    } finally { vi.useRealTimers(); restore(); }
+  });
+
+  it('replaces the one notice, pauses its remaining reading time on hover and focus, and dismisses without touching the record', async () => {
+    const restore = installMiniDom();
+    vi.useFakeTimers();
+    let hovering = false;
+    vi.stubGlobal('document', {
+      body: miniDocument.body,
+      get activeElement() { return miniDocument.activeElement; },
+      createElement: (tag: string) => Object.assign(miniDocument.createElement(tag), { matches: () => hovering }),
+    });
     try {
       const open = vi.fn();
       const show = mountQuietNotice(open);
       show(item({ group: 'recent', state: 'analysis-completed' }));
-      vi.advanceTimersByTime(2_000);
-      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
-      show(latest);
-      expect(miniDocument.body.children).toHaveLength(1);
       const host = miniDocument.body.children[0]!;
-      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
-      showTransientNotice('回到上次位置。');
-      expect(miniDocument.body.children).toHaveLength(1);
-      expect(host.children[0]?.textContent).toBe('回到上次位置。');
-      expect(host.children[1]?.hidden).toBe(true);
-      show(latest);
-      expect(host.children[1]?.hidden).toBe(false);
-      vi.advanceTimersByTime(2_499);
+      vi.advanceTimersByTime(2_000);
+      hovering = true;
+      host.dispatchEvent({ type: 'mouseenter' });
+      vi.advanceTimersByTime(20_000);
+      expect(host.hidden).toBe(false);
+      hovering = false;
+      host.dispatchEvent({ type: 'mouseleave' });
+      vi.advanceTimersByTime(499);
       expect(host.hidden).toBe(false);
       vi.advanceTimersByTime(1);
       expect(host.hidden).toBe(true);
+
+      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
+      const original = structuredClone(latest);
+      show(item({ group: 'recent', state: 'analysis-completed' }));
       show(latest);
-      host.children[1]!.click();
+      expect(miniDocument.body.children).toHaveLength(1);
+      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
+      const view = host.children[1]!;
+      view.focus();
+      host.dispatchEvent({ type: 'focusin' });
+      vi.advanceTimersByTime(20_000);
+      expect(host.hidden).toBe(false);
+      view.click();
       expect(host.hidden).toBe(true);
       expect(open).toHaveBeenCalledWith(latest);
+      expect(latest).toEqual(original);
     } finally {
       vi.useRealTimers();
+      vi.unstubAllGlobals();
       restore();
     }
   });

@@ -18,6 +18,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, css?: string, text?: 
   const node = document.createElement(tag);
   if (css !== undefined) node.className = css;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 function button(text: string, action: () => void, name: string): HTMLButtonElement {
@@ -50,7 +51,7 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
     const heading = el('div', 'guideline-heading');
     heading.append(el('h3', undefined, unknown ? EVALUATION_PROFILE_UNKNOWN_LABEL : profile.title));
     if (!unknown) heading.append(el('span', 'status-pill evaluation-profile-pill', evaluationProfilePill(profile)));
-    if (current) heading.append(el('span', 'status-pill', '当前使用'));
+    if (current) heading.append(el('span', 'state-term status-pill', '当前使用'));
     heading.append(el('span', 'evaluation-profile-use', evaluationProfileUse(profile)));
     if (unknown) {
       card.append(heading, el('p', 'field-note', EVALUATION_PROFILE_UNKNOWN_NOTE));
@@ -118,7 +119,7 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
   refusal.setAttribute('role', 'alert');
   const saveButton = button('保存为新版本', () => undefined, 'save');
   saveButton.type = 'submit';
-  saveButton.className = 'primary';
+  saveButton.className = 'btn ' + ('primary');
   const paintItems = (): void => {
     fields.replaceChildren();
     const marks = profileFullMarks(draft.length);

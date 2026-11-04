@@ -202,6 +202,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -262,8 +263,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   const writingSlot = el('div', 'deliverables-writing-slot');
   host.append(blockSlot, exportSlot, documentsSlot, writingSlot, packageSlot);
   options.root.append(
-    el('p', 'section-label', DELIVERABLES_SECTION_LABEL),
-    el('h2', undefined, options.bookTitle),
+    el('h2', undefined, DELIVERABLES_SECTION_LABEL),
     el('p', 'lede', DELIVERABLES_LEDE),
     host,
   );

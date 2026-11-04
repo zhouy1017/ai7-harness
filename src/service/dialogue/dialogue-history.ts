@@ -38,6 +38,7 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
   const last = endSeq ?? log.events.length - 1;
   let message: DialogueMessageInput | null = null;
   let streamed = '';
+  const blockStarts = new Map<number, number>();
   const exactCalls = new Set<string>();
   const exactFetched = new Map<string, RetrievalCandidate>();
   const toolCalls: Array<{ callId: string; name: string; arguments: string; result: string | null; isError: boolean }> = [];
@@ -63,7 +64,12 @@ export function attemptTurn(log: StoredHarnessLog, startSeq: number, endSeq: num
       const text = textOf(data.content);
       if (text !== null) message = parseDialogueMessage(text);
     } else if (event.type === 'assistant/chunk' && data !== null) {
-      const chunk = data.chunk as { type?: unknown; text?: unknown } | undefined;
+      const chunk = data.chunk as { type?: unknown; text?: unknown; index?: number; blockType?: string; block?: { type?: string; text?: string } } | undefined;
+      if (chunk?.type === 'block-start' && chunk.blockType === 'text' && chunk.index !== undefined) blockStarts.set(chunk.index, streamed.length);
+      if (chunk?.type === 'block-end' && chunk.block?.type === 'text' && typeof chunk.block.text === 'string' && chunk.index !== undefined) {
+        const start = blockStarts.get(chunk.index);
+        if (start !== undefined) streamed = streamed.slice(0, start) + chunk.block.text;
+      }
       if (chunk?.type === 'text-delta' && typeof chunk.text === 'string') streamed += chunk.text;
     }
   }
@@ -128,7 +134,7 @@ export function attemptState(attempt: StoredDialogueAttempt): DialogueAnswerStat
 
 /** The reading an attempt's streamed text is split by (DIALOG-006, 012): in flight, cut short, or whole. */
 export function fragmentReading(state: DialogueAnswerState): FragmentReading {
-  return state === 'answering' ? 'streaming' : state === 'completed' ? 'settled' : 'cut';
+  return state === 'answering' ? 'streaming' : state === 'completed' ? 'settled' : state === 'failed' ? 'incomplete' : 'cut';
 }
 
 export interface ResolvedAttempt {
@@ -207,7 +213,7 @@ export function dialogueProjection(
       kind: entry.attempt.kind,
       state: entry.state,
       ...(entry.queued === true ? { queued: true } : {}),
-      fragments: workspace ? [] : entry.fragments.slice(from).map((fragment) => ({ text: fragment.text, breakAfter: fragment.breakAfter })),
+      fragments: workspace ? [] : entry.fragments.slice(from).map((fragment) => ({ ...fragment })),
       fragmentsFrom: from,
       fragmentTotal: entry.fragments.length,
       source: entry.source,
@@ -236,11 +242,11 @@ export function dialogueProjection(
     actions: {
       stop: !workspace && latestState === 'answering',
       // 继续回答 goes on from complete fragments the answer kept; 重新回答 asks again (DIALOG-014). Both need the question.
-      continue: !workspace && known && latest !== undefined && (latestState === 'stopped' || latestState === 'interrupted') && latest.fragments.length > 0,
+      continue: !workspace && known && latest !== undefined && (latestState === 'stopped' || latestState === 'interrupted' || latestState === 'failed') && latest.fragments.length > 0,
       regenerate: !workspace && known && latestState !== null && latestState !== 'answering',
       // An Incomplete Dialogue Answer is no completed answer and is never converted (DIALOG-013); a 修改建议 stands in one
       // paragraph, so a question across paragraphs (Issue #1176) is converted to a Task Intent Draft instead.
-      convert: !workspace && latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && !citations.unverified && task.span === undefined,
+      convert: !workspace && latestState === 'completed' && latest !== undefined && latest.fragments.length > 0 && task.span === undefined,
     },
   };
 }

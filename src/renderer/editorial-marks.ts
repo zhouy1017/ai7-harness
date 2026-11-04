@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
@@ -273,6 +274,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -1035,7 +1037,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const kindLabel = el('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]);
     const source = el('span', 'editorial-mark-source', `${markSourceLine(card)} · ${markTimeLabel(card.createdAt)}`);
     source.dataset['markSource'] = card.source.kind;
-    const state = el('span', 'status-pill', markStateLabel(card));
+    const state = el('span', 'state-term status-pill', markStateLabel(card));
     state.dataset['markState'] = card.suggestion?.decision?.disposition ?? card.status;
     const dismiss = actionButton('close', '关闭', 'quiet', () => {
       closeFloating();
@@ -1865,7 +1867,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const status = el('p', 'muted');
     status.setAttribute('aria-live', 'polite');
     const row = el('div', 'button-row');
-    const next = el('button', 'quiet', '下一页书系');
+    const next = windowStep(el('button', 'quiet', '向后浏览书系'), 'after', '向后浏览书系');
     const reset = el('button', 'quiet', '回到第一页');
     const retry = el('button', 'quiet', '重试读取书系');
     const cancel = el('button', 'quiet', '取消');

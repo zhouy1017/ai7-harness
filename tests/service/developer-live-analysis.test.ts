@@ -391,6 +391,32 @@ async function ledgerLines(root: string): Promise<Array<Record<string, unknown>>
 vi.setConfig({ hookTimeout: 60_000 });
 
 describe('the developer-live scope over exact sample1 with a stub transport', { timeout: 60_000 }, () => {
+  it('persists salvaged truncated units and gaps only an unusable answer without resending (#1311 H4)', async () => {
+    const { store, bookId, prepared, responses, named, calls } = await liveScenario();
+    const execution = owner(store, stubTransport({ calls, responses, named, override: (ordinal) => {
+      if (ordinal > 4) return null;
+      const answer = responses.get(ordinal)!;
+      const content = ordinal === 4 ? 'unfinished text without JSON'
+        : ordinal === 1 ? answer.text.slice(0, -1) + ',"unfinished":"' : answer.text;
+      return { status: 200, body: { choices: [{ finish_reason: ordinal === 3 ? 'stop' : 'length', message: { content,
+        ...(ordinal === 3 ? { tool_calls: [{ id: 'rejected', type: 'function', function: { name: 'unoffered', arguments: 'unparseable' } }] } : {}) } }],
+        usage: { prompt_tokens: 30, completion_tokens: 20 } } };
+    } }));
+    const settled = await runLive(store, bookId, prepared, execution);
+    expect(settled.resultSetRevision!.coverage).toMatchObject({ unitsClosed: 7, unitsTotal: 8, gapCount: 1 });
+    expect(settled.resultSetRevision!.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[4, 'contract-invalid']]);
+    const units = settled.resultSetRevision!.units;
+    for (const ordinal of [1, 2, 3]) {
+      const unit = units.find((entry) => entry.unitOrdinal === ordinal)!;
+      expect(unit.state).toBe('closed');
+      expect(unit.state === 'closed' && unit.salvaged).toEqual(expect.arrayContaining([
+        expect.objectContaining({ reason: ordinal === 3 ? 'tool-call-rejected' : 'truncated' }),
+      ]));
+    }
+    expect(calls.filter((call) => /^分析单元 [1-4]\//mu.test((JSON.parse(call.body) as { messages: Array<{ content: string }> }).messages.at(-1)!.content))).toHaveLength(4);
+    await store.close();
+  });
+
   it('keeps a frozen old-model plan readable and refuses its execution after the V4.1 rebind', async () => {
     const store = await openLiveStore(roots.dataRoot);
     const legacyLaunch = liveBinding(CEILING);
@@ -835,13 +861,17 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const secondCalls: StubCall[] = [];
     const refused = await runLive(store, reimported.bookId, progress.projection!, owner(store, stubTransport({ calls: secondCalls, responses, named })));
     expect(secondCalls).toHaveLength(0);
-    const unitGaps = refused.resultSetRevision!.gaps.filter((gap) => gap.unitOrdinal !== null);
+    // Every unit attempt was refused: #1307 keeps its gaps without a result revision.
+    expect(refused.run?.state).toBe('failed');
+    expect(refused.taskOutcome?.classification).toBe('failed');
+    expect(refused.resultSetRevision).toBeNull();
+    const unitGaps = store.baselineAnalysisLedger.unitCheckpoints(refused.run!.runRecordId)
+      .flatMap(({ unit }) => unit.closed.state === 'gap' ? [unit.closed.gap] : []);
     expect(unitGaps.map((gap) => gap.unitOrdinal)).toEqual(Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => index + 1));
     const lines = await ledgerLines(cacheRoot);
     expect(lines.slice(0, FULL_CHAIN_TURNS).every((line) => (line.validation as { decision: string }).decision === 'first-capture')).toBe(true);
     // Every later line is a refusal that sent nothing, incurred nothing, and names the capture it rests on: each unit — and its
-    // safe retry — is the first import's question asked again; this Run's reflection reflects on other accounting (every
-    // range a gap), so it is the same step with a different input, which only a declared input delta could send.
+    // safe retry — is the first import's question asked again. A failed Run does not dispatch a reflection.
     const refusals = lines.slice(FULL_CHAIN_TURNS);
     for (const line of refusals) {
       expect(line).toMatchObject({ outcome: 'refused', status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
@@ -852,7 +882,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
         [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
         [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
       ]).flat(),
-      ['first-baseline/reflection', 'PROVIDER_VALIDATION_SIMILAR_EVIDENCE', [`S40/first-baseline/${FULL_CHAIN_TURNS}`]],
     ]);
     await store.close();
   });

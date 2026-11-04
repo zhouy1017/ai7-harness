@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   HELP_ABOUT_HEADING, HELP_ENTRY, HELP_LICENSE_TEXT_ABSENT, HELP_TABS, helpAboutLine, helpLicenseCount,
 } from '../../src/renderer/help-labels.js';
-import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS } from '../../src/renderer/help-text.js';
+import { HELP_PRIVACY_SECTIONS, helpUsageSections } from '../../src/renderer/help-text.js';
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from '../../src/renderer/shell-labels.js';
 
 // #939 slice 11f: 帮助's words. The entry sits beside 设置, the tabs are fixed, the 关于 line carries the three version
@@ -38,6 +38,7 @@ describe('the 帮助 entry and tabs', () => {
 });
 
 describe('使用帮助', () => {
+  const HELP_USAGE_SECTIONS = helpUsageSections(true);
   it('mirrors the destinations and Book sections with their exact labels', () => {
     const text = HELP_USAGE_SECTIONS.map((section) => `${section.heading}${section.paragraphs.join('')}`).join('\n');
     const usedDestinations = SHELL_DESTINATIONS.filter((entry) => ['library', 'attention', 'series', 'knowledge'].includes(entry.key));

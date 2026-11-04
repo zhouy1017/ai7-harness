@@ -8,10 +8,10 @@ import { mountProcedureRecommendation, ProcedureRecommendationSelection } from '
 export async function mountEditableProcedureLibrary(root: HTMLElement, api: RendererApi,
   openRun: (book: BookSummaryProjection, kind: string, procedure: ProcedureDefinitionPin) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string, capturedCatalog?: HTMLElement): Promise<void> {
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
-    const result = document.createElement(tag); if (text !== undefined) result.textContent = text; return result;
+    const result = document.createElement(tag); if (text !== undefined) result.textContent = text; if (tag === 'button') result.className = `${result.className} btn`.trim(); return result;
   };
   const action = (label: string, run: () => Promise<void> | void): HTMLButtonElement => {
-    const button = node('button', label); button.type = 'button'; button.className = 'secondary';
+    const button = node('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary');
     button.addEventListener('click', () => { button.disabled = true; void Promise.resolve().then(run).catch(showError).finally(() => { button.disabled = false; }); });
     return button;
   };
@@ -67,7 +67,7 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
       });
     };
     renderStages();
-    const save = node('button', '保存为新版本'); save.type = 'submit'; save.className = 'primary';
+    const save = node('button', '保存为新版本'); save.type = 'submit'; save.className = 'btn ' + ('primary');
     form.append(stageList, save, action('取消', () => formSlot.replaceChildren()));
     form.addEventListener('submit', (event) => {
       event.preventDefault(); save.disabled = true;
@@ -133,7 +133,7 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
       const versions = node('select');
       for (const version of entry.versions) versions.append(new Option(`${technicalWords(`第 ${version.version} 版`, '版本')}`, String(version.version)));
       card.dataset['procedureState'] = entry.stopped ? 'stopped' : 'enabled'; card.dataset['procedureRuns'] = String(entry.uses);
-      const pill = node('span', entry.stopped ? '已停用' : '已启用'); pill.className = `status-pill procedure-state-${entry.stopped ? 'stopped' : 'enabled'}`;
+      const pill = node('span', entry.stopped ? '已停用' : '已启用'); pill.className = `state-term status-pill procedure-state-${entry.stopped ? 'stopped' : 'enabled'}`;
       const stages = node('span', entry.document.stages.map((stage) => PROCEDURE_STAGE_LABELS[stage.stageType]).join(' → ')); stages.className = 'procedure-stages';
       const context = node('p', `${entry.preInstalled ? '预装' : '本社工序'} · 已使用 ${entry.uses} 次 · `); context.append(stages);
       card.append(pill, node('h4', `${entry.document.title} · ${technicalWords(`第 ${entry.version} 版`, '版本')}`), context,
