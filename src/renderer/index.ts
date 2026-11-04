@@ -4010,7 +4010,6 @@ function renderSettingsHub(): void {
     keyboard: renderKeyboardSettings,
     notifications: () => void renderNotificationSettings(),
   };
-  let visibleRowCount = 0;
   for (const group of SETTINGS_HUB_GROUPS) {
     const rows = group.rows.filter((row) => technicalLayerVisible || row.developerOnly !== true);
     if (rows.length === 0) continue;
@@ -4021,7 +4020,6 @@ function renderSettingsHub(): void {
     section.setAttribute('aria-labelledby', heading.id);
     const list = element('ul', 'settings-rows');
     for (const row of rows) {
-      visibleRowCount += 1;
       const item = element('li', 'settings-row');
       item.dataset['settingsEntry'] = row.route;
       const open = pages[row.route];
@@ -4045,7 +4043,6 @@ function renderSettingsHub(): void {
     section.append(heading, list);
     content.append(section);
   }
-  content.dataset['settingsRowCount'] = String(visibleRowCount);
   if (technicalLayerVisible) mountLearningAskFrequency(content, window.ai7);
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
