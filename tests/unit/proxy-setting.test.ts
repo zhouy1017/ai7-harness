@@ -4,6 +4,7 @@ import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { buildConnector } from 'undici';
 import { admittedProxyRequest, armSingleHostAllowance, guardedConnect, guardedLookup } from '../../src/shared/network-denial.js';
 import {
   ProxyConnectionEvidence, createProxyDispatcher, parseProxyUrl, proxyAwareFetch, readProxySetting, writeProxySetting, type ProxyDispatcherFactory,
@@ -83,7 +84,7 @@ describe('per-request native-fetch dispatcher', () => {
     const fetch = proxyAwareFetch(native, async () => setting, factory);
     await (await fetch(modelUrl)).text();
     expect(factory).not.toHaveBeenCalled();
-    expect(native.mock.calls[0]?.[1]).not.toHaveProperty('dispatcher');
+    expect(native.mock.calls[0]?.[1]).toHaveProperty('dispatcher');
     setting = parseProxyUrl('http://proxy.invalid:8080');
     const response = await fetch(modelUrl);
     expect(factory).toHaveBeenCalledOnce();
@@ -140,8 +141,10 @@ describe('per-request native-fetch dispatcher', () => {
     expect(classifyTransportError(failure, true).code).toBe('AI7_OUTCOME_UNKNOWN');
     expect(classifyTransportError(Object.assign(new Error('forged'), { code: 'TRANSPORT_FAILED', requestSent: false }), true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
     expect(native).not.toHaveBeenCalled();
-    const bodyTimeout = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code: 'UND_ERR_BODY_TIMEOUT' } }); }, async () => ({ mode: 'direct' }));
-    expect(classifyTransportError(await bodyTimeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
+    for (const code of ['UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT']) {
+      const responseTimeout = proxyAwareFetch(async () => { throw new TypeError('private', { cause: { code } }); }, async () => ({ mode: 'direct' }));
+      expect(classifyTransportError(await responseTimeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
+    }
     const timeout = proxyAwareFetch(async () => { throw new DOMException('private', 'TimeoutError'); }, async () => ({ mode: 'direct' }));
     expect(classifyTransportError(await timeout(modelUrl).catch((error: unknown) => error), true).code).toBe('AI7_OUTCOME_UNKNOWN');
   });
@@ -196,6 +199,54 @@ describe('physical proxy no-send proof through the production connector (#1131)'
   const modelRequest = () => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   const codes = { QUOTA_EXCEEDED_CODE: 'quota', INVALID_CREDENTIAL_CODE: 'credential', CONTEXT_WINDOW_EXCEEDED_CODE: 'context' };
 
+  it.each(['UND_ERR_CONNECT_TIMEOUT', 'ECONNREFUSED', 'ENOTFOUND'])('proves an observed direct connector failure (%s) sent nothing (#1305)', async (code) => {
+    const connector = vi.fn<ReturnType<typeof buildConnector>>((_options, callback) => {
+      callback(Object.assign(new Error('private host details'), { code }), null);
+    });
+    const reports: Array<string | null> = [];
+    const fetch = proxyAwareFetch(globalThis.fetch, async () => ({ mode: 'direct' }), createProxyDispatcher,
+      (value) => { reports.push(value); }, connector);
+    const init = modelRequest();
+    const failure = await fetch(modelUrl, init).catch((error: unknown) => error);
+    expect(connector).toHaveBeenCalledOnce();
+    expect(classifyTransportError(failure, true, init)).toEqual({ code: 'MODEL_SERVICE_UNREACHABLE', message: '模型服务不可达：请检查网络或网络代理设置。' });
+    expect(classifyTransportError(failure, true, modelRequest()).code).toBe('AI7_OUTCOME_UNKNOWN');
+    expect(reports).toEqual(['model-service-unreachable']);
+    expect(JSON.stringify(failure)).not.toMatch(/private|model.invalid/u);
+  });
+
+  it('keeps a direct response-body failure unknown after a socket was established (#1305)', async () => {
+    const port = await listen((socket) => socket.once('data', () => {
+      socket.write('HTTP/1.1 200 OK\r\nContent-Length: 64\r\n\r\n{"choices":');
+      setImmediate(() => socket.destroy());
+    }));
+    const connector = buildConnector({});
+    const fetch = proxyAwareFetch(globalThis.fetch, async () => ({ mode: 'direct' }), createProxyDispatcher, undefined,
+      (options, callback) => connector({ ...options, hostname: '127.0.0.1', host: '127.0.0.1', port: String(port) }, callback));
+    const init = modelRequest();
+    const response = await fetch('http://model.invalid:443/v1/messages', init);
+    const failure = await response.text().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+
+  it('keeps a direct reconnect failure unknown if the first socket already carried the request (#1305)', async () => {
+    const port = await listen((socket) => socket.once('data', () => {
+      socket.end('HTTP/1.1 421 Misdirected Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+    }));
+    const connector = buildConnector({});
+    let connections = 0;
+    const fetch = proxyAwareFetch(globalThis.fetch, async () => ({ mode: 'direct' }), createProxyDispatcher, undefined,
+      (options, callback) => {
+        if (++connections > 1) { callback(new Error('reconnect failed'), null); return; }
+        connector({ ...options, hostname: '127.0.0.1', host: '127.0.0.1', port: String(port) }, callback);
+      });
+    const init = modelRequest();
+    const failure = await fetch('http://model.invalid:443/v1/messages', init).catch((error: unknown) => error);
+    expect(connections).toBe(2);
+    expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+
   it('proves a refused proxy connection sent nothing, for that exact request only', async () => {
     const reports: Array<string | null> = []; const init = modelRequest();
     const failure = await proxiedFetch(await closedPort(), reports)(modelUrl, init).then(() => null, (error: unknown) => error);
@@ -203,6 +254,17 @@ describe('physical proxy no-send proof through the production connector (#1131)'
     expect(classifyTransportError(failure, true, modelRequest()).code).toBe('AI7_OUTCOME_UNKNOWN');
     expect(reports).toEqual(['proxy-unreachable']);
     expect(JSON.stringify(failure)).not.toMatch(/127\.0\.0\.1|model\.invalid/u);
+  });
+
+  it('proves a reset TLS handshake to a plaintext proxy sent no model request (#1305)', async () => {
+    let handshakes = 0;
+    const port = await listen((socket) => socket.once('data', () => { handshakes += 1; socket.destroy(); }));
+    const fetch = proxyAwareFetch(globalThis.fetch, async () => parseProxyUrl(`https://127.0.0.1:${port}`));
+    const init = modelRequest();
+    const failure = await fetch(modelUrl, init).catch((error: unknown) => error);
+    expect(handshakes).toBe(1);
+    expect(classifyTransportError(failure, true, init).code).toBe('AI7_PROXY_UNREACHABLE');
+    expect(classifyTransportError(failure, true, modelRequest()).code).toBe('AI7_OUTCOME_UNKNOWN');
   });
 
   it('proves a CONNECT the proxy itself answered 407 sent nothing', async () => {

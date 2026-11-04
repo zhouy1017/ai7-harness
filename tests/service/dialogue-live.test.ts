@@ -22,7 +22,7 @@ import { ADR_0091_PUBLIC_SAMPLEBOOKS } from '../../src/shared/public-samplebooks
 import { sha256Hex } from '../../src/service/analysis/canonical.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from '../../src/service/harness/session-log.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
+import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_SESSION_HEADER } from '../../src/service/provider/deepseek-adapter.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, ProviderResultCache, isItemLine, type ProviderCacheEntry, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { loadModelFixture } from '../../src/service/provider/model-fixture.js';
@@ -476,6 +476,19 @@ describe('the admitted dialogue route, read from the selected policy', () => {
 });
 
 describe('就这段提问… on the live route (provider-free)', () => {
+  it.each(['MODEL_SERVICE_UNREACHABLE', 'AI7_PROXY_UNREACHABLE'])('preserves %s through the dialogue sender (#1305)', async (code) => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '连接不可达对话');
+    const nativeFetch: typeof fetch = async (_url, init) => {
+      throw modelRequestNotSent(init!, Object.assign(new Error('connection refused'), { code }));
+    };
+    const dialogues = liveOwner(store, liveRoute(nativeFetch, { validation: null }));
+    try {
+      const { projection } = await ask(store, dialogues, book.bookId, selectionOf(store, book));
+      expect(projection.attempts[0]).toMatchObject({ state: code === 'AI7_PROXY_UNREACHABLE' ? 'interrupted' : 'failed', causeCode: code });
+    } finally { await dialogues.dispose(); store.close(); }
+  });
+
   it('production dialogue sends repeated input twice without opening a development cache, then uses the newly selected route', async () => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '正式使用对话');
