@@ -991,7 +991,7 @@ async function main() {
     await runJ14DarkPass({ renderer, journey: 'J-16', at, representative: '#screen[data-screen="editor"] .editor-window', returnTo: SIDEBAR.section('manuscript') });
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookId)}] .ProseMirror [data-block-id]')`, 'panel-manuscript-after-dark-pass', 120_000);
     const opened = await openPanel(renderer, 'panel-open');
-    requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.note === PANEL_NOTE && opened.compose.heading === '发起全书任务' &&
+    requireJourney(opened.title === '任务' && opened.scope === '这本书 · 0 项' && opened.compose.heading === '发起全书任务' &&
       JSON.stringify(opened.compose.modes) === JSON.stringify([['first-baseline', true, false]]) && opened.compose.prepare === 'enabled' &&
       opened.compose.quick === null && opened.compose.why === null &&
       JSON.stringify(['waiting', 'running', 'recent'].map((key) => [opened.groups[key]?.heading, opened.groups[key]?.count, opened.groups[key]?.empty, opened.groups[key]?.cards.length])) ===

@@ -30,7 +30,6 @@ import {
   TASK_COMPOSER_ADD_RANGE_SAME,
   TASK_COMPOSER_ANSWER_NOTE,
   TASK_COMPOSER_ANSWER_TRUNCATED,
-  TASK_COMPOSER_BOOK_TARGET_NOTE,
   TASK_COMPOSER_CONTEXT_HEADING,
   TASK_COMPOSER_COPY_RANGES_DROPPED,
   TASK_COMPOSER_GOAL_LABEL,
@@ -75,7 +74,6 @@ import {
   TASK_PANEL_COMPOSE_NONE,
   TASK_PANEL_EMPTY_LINES,
   TASK_PANEL_GROUP_LABELS,
-  TASK_PANEL_NOTE,
   TASK_PANEL_STATUS_LINES,
   taskPanelCardView,
   taskPanelMoreLine,
@@ -192,12 +190,11 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   const element = el('section', 'task-panel');
   element.dataset['taskPanel'] = 'loading';
   const scope = el('p', 'section-label task-panel-scope');
-  const note = el('p', 'field-note task-panel-note', TASK_PANEL_NOTE);
   // An unfinished draft another Book holds (TASK-006): said once, with 返回继续.
   const parkedHost = el('div', 'task-panel-parked');
   const compose = el('section', 'task-panel-compose');
   const groups = el('div', 'task-panel-groups');
-  element.append(scope, parkedHost, compose, groups, note);
+  element.append(scope, parkedHost, compose, groups);
 
   let bookId: string | null = null;
   let tasks: BookTasksProjection | null = null;
@@ -315,7 +312,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     head.append(title, pill);
     const actions = el('div', 'button-row compact-actions task-card-actions');
     for (const entryAction of view.actions) actions.append(actionButton(entry, entryAction));
-    item.append(el('p', 'task-card-kind', view.kindLabel), head, el('p', 'task-card-reason', view.reason), el('p', 'field-note task-card-time', view.timeLine), actions);
+    item.append(el('p', 'task-card-kind', view.kindLabel), head, el('p', 'task-card-reason', `${view.reason} · ${view.timeLine}`), actions);
     return item;
   }
 
@@ -785,7 +782,6 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       target.append(label);
     }
     context.append(target);
-    if (current.target === 'book') context.append(el('p', 'field-note task-composer-book-note', TASK_COMPOSER_BOOK_TARGET_NOTE));
     const ranges = el('ul', 'task-composer-ranges');
     if (current.ranges.length === 0) ranges.append(el('li', 'field-note task-composer-no-ranges', TASK_COMPOSER_NO_RANGES));
     for (const range of current.ranges) {

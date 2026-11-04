@@ -220,7 +220,7 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelector('h3')!.textContent).toBe(TASK_COMPOSER_TITLES.book);
     expect(field('target-book')!.checked).toBe(true);
     expect(field('target-ranges')!.disabled).toBe(true);
-    expect(root.querySelector('.task-composer-book-note')).not.toBeNull();
+    expect(root.querySelector('.task-composer-note')!.textContent).toContain('不会读取稿件');
     expect(root.querySelector('.task-composer-no-ranges')).not.toBeNull();
     expect(root.querySelector('[data-task-composer-action="procedures"]')).toBeNull();
     expect(TASK_PANEL_COMPOSE_OPEN).toBe('发起全书任务…');

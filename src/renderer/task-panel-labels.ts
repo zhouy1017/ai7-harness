@@ -342,7 +342,7 @@ export const TASK_COMPOSER_ACTIONS = {
   resume: '返回继续',
 } as const;
 /** What 准备任务 does (TASK-004): a durable draft, and nothing else. */
-export const TASK_COMPOSER_NOTE = '准备任务只把这些存为任务草稿：不调用模型、不发送任何内容，也不会开始任务；准备计划后它才成为任务，由你开始。';
+export const TASK_COMPOSER_NOTE = '保存草稿不会读取稿件、调用模型或发送内容；准备计划后由你开始任务。';
 export function taskComposerDraftHeading(ordinal: number): string {
   return `任务意图草稿 · ${technicalWords(`第 ${ordinal} 版`, '版本')}`;
 }
