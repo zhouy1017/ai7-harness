@@ -3702,7 +3702,7 @@ async function main() {
     requireJourney(JSON.stringify(rangeBefore?.resultSetRevision) === JSON.stringify(realRevision) &&
       rangeBefore.updateControls?.target?.revisionId === realRevision.revisionId && recordedRangeOption?.unitOrdinal === 1 &&
       recordedRangeOption.startPosition === SAMPLE1_UNIT_RANGES[0][0] && recordedRangeOption.endPosition === SAMPLE1_UNIT_RANGES[0][1] &&
-      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'range-recorded-predecessor-readable');
+      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }), 'range-recorded-predecessor-readable');
     const recordedSelectedRange = { startPosition: recordedRangeOption.startPosition, endPosition: recordedRangeOption.endPosition };
     await assertRenderer(renderer, `(() => {
       const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
@@ -3726,7 +3726,7 @@ async function main() {
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
       rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
       JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
-      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }) &&
+      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }) &&
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
         JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&

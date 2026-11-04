@@ -190,7 +190,7 @@ The #1311 H2 synchronized replay uses the explicit `replay-compat` index at `tes
 
 That replay binds the retained baseline prompt contract /1 the recorded Run was asked under (#826); its plan pins no sampling contract, so it samples under sampling /1 as recorded. Every other baseline Run in J-04 or another Journey asks under the current prompt contract /2 and the baseline's sampling contract /2.
 
-#826 then relaunches the same Book under the current contracts with the reviewed `sample1-recorded-v41-range` fixture and runs 重新分析所选范围 over unit 1. The closure recomputes units 1 and 2; unit 2 reads unit 1's last block as overlap. The plan reuses the other six /1 results by lineage: reused 6, recomputed 2, invalidated 1, bypassed 1. Its plan pins sampling /2.
+#826 then relaunches the same Book under the current contracts with the reviewed `sample1-recorded-v41-range` fixture and runs 重新分析所选范围 over unit 1. The closure recomputes units 1 and 2; unit 2 reads unit 1's last block as overlap. The plan reuses the other six /1 results by lineage: reused 6, recomputed 2, invalidated 0, bypassed 2. H2 restores unit 1 as a compatible closed predecessor, so selecting the two-unit closure now bypasses both predecessors instead of invalidating the former gap. Its plan pins sampling /2.
 
 The six replayed entries are real 2026-10-13 captures, converted with the exact-sample1 source proof:
 
