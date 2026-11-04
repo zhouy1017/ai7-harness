@@ -116,7 +116,7 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     expect(retained.assurance?.resultSchema).toBe(current.assurance?.resultSchema);
   });
 
-  it('parses a unit result identically under either contract: the parser and result schema are unchanged', () => {
+  it('shares salvage behavior across frozen prompt versions without changing the result schema', () => {
     const unit = { ordinal: 1, blockIds: [`blk_${'a'.repeat(24)}`], overlapBlockIds: [] } as never;
     const bare = JSON.stringify({
       schema: 'ai7.baseline-manuscript-analysis.unit-result/1', unitOrdinal: 1, synopsis: '合成概述。', entities: [], events: [],

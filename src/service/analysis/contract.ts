@@ -13,7 +13,7 @@ import type { ManifestBlockInput } from './coverage-manifest.js';
  * for manuscript-internal structure and coverage. One typed partial result per Analysis Unit —
  * structural synopsis, entities/aliases/terms, events and chronology, relationships, internal-setting
  * claims, exact source ranges, confidence, conflicts, unresolved items. AI7 validates every model
- * `contentCandidate` against this schema before persistence; an invalid unit is an exact gap.
+ * `contentCandidate` before persistence, salvaging independent entries and recording every exclusion.
  *
  * The prompt contract is frozen text. Its digest binds the Execution Binding and the deterministic
  * fixture key; changing one character of it changes every request digest, which is the intent.

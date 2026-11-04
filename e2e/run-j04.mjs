@@ -18,7 +18,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
 // and is reconfirmed as version 2.
 // Issue #387 adds a separate fresh Book replaying the reviewed 2026-10-12 V4.1 capture, including its
-// truthful schema-invalid unit 1 gap, under the retained prompt contract /1 it was asked under. Issue #826 then
+// seven recovered string notes in unit 1 under the retained prompt contract /1 it was asked under. Issue #826 then
 // relaunches that Book under the current contracts and replays the reviewed 2026-10-13 range recomputation of units
 // 1 and 2: eight units closed, six of them reused from the /1 revision. Existing authored/synthetic retry and
 // incremental scenarios remain intact.
@@ -3551,20 +3551,13 @@ async function main() {
     const recorded = await readBaseline(renderer);
     const realRevision = recorded?.resultSetRevision;
     const realReport = recorded?.taskOutcome?.report;
-    recordDebugDetail('J-04', 'H2_RECORDED_SUMMARY ' + JSON.stringify({ run: recorded?.run?.state, classification: recorded?.taskOutcome?.classification,
-      coverage: realRevision?.coverage, counts: { entities: realRevision?.synthesis?.entities.length, events: realRevision?.synthesis?.events.length,
-        relationships: realRevision?.synthesis?.relationships.length, settingClaims: realRevision?.synthesis?.settingClaims.length },
-      units: realRevision?.units.map((unit) => ({ ordinal: unit.unitOrdinal, state: unit.state, salvaged: unit.salvaged })),
-      crossUnit: realRevision?.crossUnitReduction, sampling: realRevision?.assuranceSample, usage: realRevision?.usage,
-      stages: realReport?.usagePerStage, reflection: { state: realReport?.ifRedone?.state, reason: realReport?.ifRedone?.reason, count: realReport?.ifRedone?.items.length },
-      resultDigest: realRevision?.digest, reportDigest: realReport?.reportDigest, accountingDigest: realReport?.accountingDigest }));
     requireJourney(recorded?.run?.state === 'completed' && recorded.taskOutcome?.classification === 'completed' &&
       realRevision?.ordinal === 1 && realRevision.units.every((unit) => unit.state === 'closed') && realRevision.gaps.length === 0 &&
       realRevision.units[0].unresolved.length === 7 && realRevision.units[0].salvaged?.filter((entry) => entry.reason === 'string-note-wrapped').length === 7 &&
       realRevision.coverage.state === 'complete' && realRevision.coverage.unitsClosed === 8 && realRevision.coverage.unitsTotal === 8, 'recorded-salvaged-unit-closure');
-    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
-      realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
-      realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
+    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 93 &&
+      realRevision.synthesis.events.length === 69 && realRevision.synthesis.relationships.length === 60 &&
+      realRevision.synthesis.settingClaims.length === 76 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
       realRevision.synthesis.relationships.some((relationship) => relationship.subject === '郑雄' && relationship.object === '曾本之') &&
       realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction?.state === 'closed' &&
       realRevision.assuranceSample?.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
@@ -3589,7 +3582,7 @@ async function main() {
       realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
       recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
     'recorded-zero-new-incurred-transmissions');
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed' && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===8 && document.querySelector('[data-analysis-unit="1"] .technical-identity')`, 'recorded-visible-salvage');
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed' && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===8 && document.querySelector('[data-analysis-unit="1"]')?.textContent.includes('string-note-wrapped')`, 'recorded-visible-salvage');
     at('restart-immutable');
     await closeOwnedBrowser();
     await launchForCleanup();
@@ -3603,7 +3596,7 @@ async function main() {
       'recorded-restart-preserves-result-and-report');
 
     // #1161 rev6: a separate, unedited sample1 Book owns the genuine paused-/1 execution formerly simulated in L2.
-    // Keep the completed recorded Book above intact. This replay truthfully keeps unit1's schema gap and units2/3 closed.
+    // Keep the completed recorded Book above intact. This replay keeps all three units closed and unit 1's salvage metadata.
     at('recorded-retained-pause');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
@@ -3649,7 +3642,7 @@ async function main() {
     // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
     // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
     // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
-    // repair, the three sampling /2 turns from the second — so unit 1, schema-invalid under /1, now closes. No recorded
+    // repair, the three sampling /2 turns from the second — so unit 1 closes under /2 with six typed notes. No recorded
     // reflection was ever asked with this replay's accounting (the real Run replayed its units from the development cache
     // and recorded no usage for them), so the reflection settles as the disclosed fixture mismatch it is.
     at('reanalyze-range-select');

@@ -14,6 +14,7 @@ const blockId = `blk_${'a'.repeat(24)}`;
 const expected = { unitOrdinal: 1, blockCount: 1 };
 const assertion = { quote: '合成引文', blockOrdinal: 1, assertionClass: 'real-world-fact' as const, category: '史实' as const,
   severity: 'C' as const, question: '合成问题', basis: '合成依据' };
+const approxAssertion = { ...assertion, assertionClass: ' REAL WORLD FACT ', category: ' history ', severity: ' low ' };
 const relation = { sourceRef: 'https://example.org/evidence', relation: '支持', excerptRef: '合成摘录', lineage: 'original' };
 type Parsed = { ok: true; result: SalvagedModelResult } | { ok: false; code: string; detail: string };
 interface ParserCase {
@@ -31,10 +32,10 @@ const cases: ParserCase[] = [
   { name: 'custom', schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, section: 'rows', good: { answer: '合成回答', blockOrdinal: '1', quote: '合成引文' }, bad: { answer: '坏条目', blockOrdinal: 2, quote: '合成引文' },
     parse: (text) => parseCustomAnalysisUnitResult(text, expected) },
   { name: 'reflection', schema: RUN_REPORT_REFLECTION_RESULT_SCHEMA, section: 'items', good: { suggestion: '合成建议' }, bad: null, parse: parseRunReportReflectionResult },
-  { name: 'factual-v1', schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, section: 'assertions', good: assertion, bad: { ...assertion, blockOrdinal: 2 }, parse: (text) => parseFactualReviewUnitResult(text, expected) },
-  { name: 'factual-v2', schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, section: 'assertions', good: assertion, bad: { ...assertion, blockOrdinal: 2 }, parse: (text) => parseFactualReviewUnitResultV2(text, expected) },
-  { name: 'claim-extraction', schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, section: 'assertions', good: assertion, bad: { ...assertion, quote: '\ud800' }, parse: (text) => parseFactualClaimExtraction(text, expected) },
-  { name: 'claim-verification', schema: FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA, section: 'evidenceRelations', good: relation, bad: { ...relation, sourceRef: 'http://example.org' },
+  { name: 'factual-v1', schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, section: 'assertions', good: approxAssertion, bad: { ...assertion, blockOrdinal: 2 }, parse: (text) => parseFactualReviewUnitResult(text, expected) },
+  { name: 'factual-v2', schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, section: 'assertions', good: approxAssertion, bad: { ...assertion, blockOrdinal: 2 }, parse: (text) => parseFactualReviewUnitResultV2(text, expected) },
+  { name: 'claim-extraction', schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, section: 'assertions', good: approxAssertion, bad: { ...assertion, quote: '\ud800' }, parse: (text) => parseFactualClaimExtraction(text, expected) },
+  { name: 'claim-verification', schema: FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA, section: 'evidenceRelations', good: { ...relation, relation: 'SUPPORT', lineage: '原始来源' }, bad: { ...relation, sourceRef: 'http://example.org' },
     envelope: { claimId: 'claim-1' }, parse: (text) => parseFactualClaimVerification(text, { claimId: 'claim-1', assertion }) },
 ];
 
@@ -46,6 +47,11 @@ for (const entry of cases) describe(`${entry.name} per-entry salvage (#1311 H2)`
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect((parsed.result as Record<string, unknown>)[entry.section]).toHaveLength(1);
+    const item = ((parsed.result as Record<string, unknown>)[entry.section] as object[])[0];
+    const normalized: Record<string, object> = { baseline: { kind: 'person' }, 'cross-unit': { kind: 'contradiction', confidence: 'medium' }, sampling: { disposition: '需降级' },
+      'factual-v1': { assertionClass: 'real-world-fact', category: '史实', severity: 'C' }, 'factual-v2': { assertionClass: 'real-world-fact', category: '史实', severity: 'C' },
+      'claim-extraction': { assertionClass: 'real-world-fact', category: '史实', severity: 'C' }, 'claim-verification': { relation: '支持', lineage: 'original' } };
+    if (normalized[entry.name] !== undefined) expect(item).toMatchObject(normalized[entry.name]!);
     expect(parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ section: entry.section, index: 0 })]));
   });
   it('accepts extra keys, missing optional fields and a fenced answer with surrounding prose', () => {
