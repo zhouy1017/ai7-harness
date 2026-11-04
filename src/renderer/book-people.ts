@@ -114,12 +114,10 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       el('dt', undefined, BOOK_PEOPLE_FIELD_LABELS.editors), value('editors', bookPeopleNamesLine(people.editors)),
       el('dt', undefined, BOOK_PEOPLE_FIELD_LABELS.related), value('related', bookPeopleRelatedLine(people.related)),
     );
-    view.append(
-      heading,
-      values,
-      el('p', 'field-note book-people-recorded', bookPeopleRecordedLine(people, people.recordedAt === null ? null : localInstantLabel(people.recordedAt))),
-      el('p', 'field-note book-people-note', BOOK_PEOPLE_NOTE),
-    );
+    const context = el('p', 'field-note');
+    context.append(el('span', 'book-people-recorded', bookPeopleRecordedLine(people, people.recordedAt === null ? null : localInstantLabel(people.recordedAt)).replace(/。$/u, '')), '；',
+      el('span', 'book-people-note', BOOK_PEOPLE_NOTE));
+    view.append(heading, values, context);
     if (draft === null) {
       const row = el('div', 'button-row compact-actions');
       const edit = actionButton('edit', 'secondary', () => openForm());

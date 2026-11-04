@@ -1259,7 +1259,7 @@ async function main() {
       const values = Array.from(section.querySelectorAll('dd[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
       return section.querySelector('h3')?.textContent === '人员' && section.dataset.peopleVersion === '0' &&
         JSON.stringify(values) === '["authors:未填写","editors:未填写","related:未填写"]' &&
-        section.querySelector('.book-people-recorded')?.textContent === '尚未填写作者、责编和相关人。' &&
+        section.querySelector('.book-people-recorded')?.textContent === '尚未填写作者、责编和相关人' &&
         section.querySelector('.book-people-note')?.textContent === ${JSON.stringify(PEOPLE_NOTE)} &&
         section.querySelector('[data-people-action="edit"]')?.textContent === '编辑人员…';
     })()`, 'people-empty-section');
