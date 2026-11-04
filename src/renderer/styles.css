@@ -1,5 +1,6 @@
 @import './global-agent.css';
 @import './manuscript-source.css';
+@import './fonts.css';
 
 :root {
   color-scheme: light;
@@ -34,7 +35,11 @@
   --shadow: rgba(35, 32, 28, .1);
   --backdrop: rgba(35, 32, 28, .35);
 
-  font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  /* Keep rem-based layout dimensions stable; the UI text size belongs on body. */
+  font-size: 16px;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   color: var(--text);
   background: var(--shell);
   font-synthesis: none;
@@ -105,6 +110,7 @@
 .quiet-completion-notice[hidden] { display: none; }
 
 body {
+  font-size: 14px;
   margin: 0;
   min-height: 100dvh;
   display: flex;
@@ -114,7 +120,7 @@ body {
 
 button, input { font: inherit; }
 
-button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
+button:focus-visible, input:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
 }
@@ -151,12 +157,12 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-book[hidden] { display: none; }
 .sidebar-book-row { display: flex; align-items: center; gap: .2rem; }
 .sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; row-gap: 0; }
-.sidebar-book-row .nav-label { flex: 1 1 calc(100% - 2.6rem); font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.sidebar-book-row .nav-label { flex: 1 1 calc(100% - 2.6rem); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
 .nav-state { flex: 1 1 100%; padding-left: 2.45rem; color: var(--text-subdued); font-size: .78rem; font-weight: 400; }
 .sidebar-pin { flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--action-text); font-size: 1rem; cursor: pointer; }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
-.sidebar-book-title { display: flex; align-items: center; gap: .55rem; margin: 0; padding: 0 .5rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.02rem; font-weight: 700; overflow-wrap: anywhere; }
+.sidebar-book-title { display: flex; align-items: center; gap: .55rem; margin: 0; padding: 0 .5rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.02rem; font-weight: 700; overflow-wrap: anywhere; }
 .sidebar-book-title::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 7px; background: var(--action-primary); color: var(--action-primary-text); font-size: .95rem; }
 .sidebar-group + .sidebar-group { margin-top: .35rem; }
 .sidebar-foot { display: grid; gap: .2rem; margin-top: auto; padding-top: .7rem; border-top: 1px solid var(--boundary); }
@@ -181,7 +187,7 @@ body { padding-left: var(--sidebar-width); }
 .context-identity { flex: 1 1 14rem; min-width: 0; }
 .context-position { margin: 0; color: var(--text-subdued); font-size: .78rem; font-weight: 700; letter-spacing: .08em; }
 .context-title { margin: .05rem 0 0; font-size: 1.3rem; font-weight: 700; overflow-wrap: anywhere; }
-.context-title[data-context-book="true"] { font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.context-title[data-context-book="true"] { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
 .context-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 .context-actions:empty { display: none; }
 .preferences-notice { flex: 1 1 100%; margin: 0; }
@@ -203,7 +209,7 @@ body { padding-left: var(--sidebar-width); }
 .screen { flex: 1 0 auto; width: min(1280px, calc(100% - 4rem)); margin: 2rem auto 1rem; }
 .panel { background: var(--surface); border: 1px solid var(--boundary); border-radius: 16px; box-shadow: 0 14px 40px var(--shadow); padding: clamp(1.5rem, 3vw, 2.5rem); }
 .hero { display: grid; grid-template-columns: 1.3fr .7fr; gap: 3rem; align-items: center; min-height: 420px; }
-.hero h2, .panel h2 { margin: 0 0 .7rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 2rem; }
+.hero h2, .panel h2 { margin: 0 0 .7rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 2rem; }
 .hero-steps { margin: 1.5rem 0; padding-left: 1.25rem; color: var(--text-subdued); line-height: 1.9; }
 .hero-note { border-left: 3px solid var(--boundary); padding: .9rem 1rem; background: var(--surface-subdued); color: var(--text-subdued); }
 .recent-work { grid-column: 1 / -1; border-top: 1px solid var(--boundary); padding-top: 1.25rem; }
@@ -393,7 +399,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-finding-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; }
 .review-finding-location { color: var(--text-subdued); font-size: .86rem; }
 .review-risk-point { padding: .1rem .5rem; border: 1px dashed var(--status-blocked); border-radius: 6px; color: var(--status-blocked); font-size: .84rem; font-weight: 800; }
-.review-finding-quote { margin: .5rem 0 .3rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.review-finding-quote { margin: .5rem 0 .3rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
 .review-finding p { margin: .3rem 0 0; }
 .review-finding-replacement { font-weight: 700; }
 .review-finding-basis { color: var(--text-subdued); font-size: .9rem; }
@@ -426,7 +432,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 /* 新建审阅: a native modal sheet, so the page behind it is inert and focus stays inside until it closes. */
 .review-sheet { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; padding: 1.2rem 1.4rem; border: 1px solid var(--boundary); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 18px 50px var(--shadow); overflow-wrap: anywhere; }
 .review-sheet::backdrop { background: var(--backdrop); }
-.review-sheet h3 { margin: 0 0 .4rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
+.review-sheet h3 { margin: 0 0 .4rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
 .review-sheet fieldset { margin-top: 1rem; }
 .review-category-options, .review-scope-options { display: grid; gap: .5rem; min-width: 0; }
 .review-category-option, .review-scope-option { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); cursor: pointer; }
@@ -534,7 +540,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .proposal-conflict-unit[data-unit-kind="conflict"] .proposal-conflict-unit-label { font-weight: 800; }
 .proposal-conflict-cell { min-width: 0; }
 .proposal-conflict-cell-label { display: none; color: var(--text-subdued); font-size: .78rem; }
-.proposal-conflict-words { font-family: "Noto Serif CJK SC", "Songti SC", serif; white-space: pre-wrap; }
+.proposal-conflict-words { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; white-space: pre-wrap; }
 .proposal-conflict-cell[data-conflict-pane="current"] .proposal-conflict-words { font-weight: 700; }
 .proposal-conflict-cell[data-conflict-pane="proposed"] .proposal-conflict-words { font-style: italic; }
 .proposal-conflict-paths { min-width: 0; margin: 1rem 0 0; padding: .8rem .9rem; border: 1px solid var(--boundary); border-radius: 10px; }
@@ -625,7 +631,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-unavailable .quiet { min-height: 32px; padding: .2rem .4rem; }
 .task-plan-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .55rem 0 0; padding: 0; list-style: none; }
 .task-plan-chip { max-width: 100%; padding: .1rem .55rem; border: 1px solid var(--status-progress); border-radius: 999px; background: var(--status-progress-surface); color: var(--status-progress); font-size: .82rem; font-weight: 700; }
-.task-plan-chip-book { font-family: "Noto Serif CJK SC", "Songti SC", serif; }
+.task-plan-chip-book { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
 .task-plan-saved { margin-top: .5rem; }
 .task-plan-drift { margin: 0; }
 .task-plan-drift h3 { margin: 0 0 .35rem; font-size: 1rem; }
@@ -775,7 +781,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .developer-proposal-form { display: grid; gap: .5rem; }
 .procedure-capture { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; padding: 1.2rem 1.4rem; border: 1px solid var(--boundary); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 18px 50px var(--shadow); overflow-wrap: anywhere; }
 .procedure-capture::backdrop { background: var(--backdrop); }
-.procedure-capture h3 { margin: 0 0 .4rem; font-family: "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
+.procedure-capture h3 { margin: 0 0 .4rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
 .procedure-capture fieldset { display: grid; gap: .5rem; min-width: 0; margin-top: 1rem; }
 .procedure-capture-step, .procedure-capture-kind, .procedure-capture-scope-option { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .4rem .6rem; padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); }
 .procedure-capture-step:has(input:checked), .procedure-capture-kind:has(input:checked), .procedure-capture-scope-option:has(input:checked) { border-color: var(--selection-boundary); box-shadow: inset 0 0 0 1px var(--selection-boundary); background: var(--surface-subdued); }
@@ -1407,7 +1413,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .recovery-decision-actions { justify-content: flex-end; }
 .recovery-return-actions { justify-content: flex-end; margin-top: 1rem; }
 .recovery-viewer { max-width: 920px; margin: 0 auto; }
-.recovery-readonly-blocks { max-height: min(65vh, 720px); overflow: auto; padding: 1.5rem clamp(1rem, 5vw, 4rem); border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); font-family: "Noto Serif CJK SC", "Songti SC", serif; line-height: 1.9; }
+.recovery-readonly-blocks { max-height: min(65vh, 720px); overflow: auto; padding: 1.5rem clamp(1rem, 5vw, 4rem); border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; line-height: 1.9; }
 .recovery-readonly-blocks h1 { font-size: 2rem; }
 .recovered-state-marker { padding: .2rem .55rem; border: 1px solid var(--status-attention); border-radius: 999px; background: var(--status-attention-surface); color: var(--status-attention); }
 
@@ -1507,20 +1513,23 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 /* Manuscript reading typography (Issue #951; VIEW-004/005): the face, size, leading, column and alignment come from the local
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
-  min-height: 480px; max-width: calc(var(--manuscript-column, 44) * 1em + 1rem); margin: 0 auto;
-  line-height: var(--manuscript-line-height, 1.9); font-family: var(--manuscript-font-family, "Noto Serif CJK SC", "Songti SC", serif);
-  font-size: var(--manuscript-font-size, 1.05rem); text-align: var(--manuscript-align, start); caret-color: var(--status-good);
+  min-height: 480px; max-width: calc(var(--manuscript-column, 36) * 1em); margin: 0 auto;
+  line-height: var(--manuscript-line-height, 1.95); font-family: var(--manuscript-font-family, "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif);
+  font-size: var(--manuscript-font-size, 17px); text-align: var(--manuscript-align, justify); caret-color: var(--status-good);
 }
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
 .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { margin-top: 1.8em; line-height: 1.5; }
-.ProseMirror p { margin: 1em 0; }
+.ProseMirror p { margin: 1em 0; text-indent: 2em; }
+.ProseMirror { text-justify: inter-character; text-justify: inter-ideograph; }
+.ProseMirror:focus, .ProseMirror:focus-visible { outline: none; }
+.ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { font-family: "Noto Serif SC", serif; }
 /* A note block (Issue #1204): its label above, its words edited like a paragraph's. */
 .ProseMirror .manuscript-note { margin: 1em 0; font-size: .92em; }
-.ProseMirror .manuscript-note > p { margin: .2em 0 0; }
+.ProseMirror .manuscript-note > p { margin: .2em 0 0; text-indent: 0; }
 .ProseMirror .manuscript-note-label { display: block; font-size: .82em; opacity: .75; user-select: none; }
 .ProseMirror .manuscript-note-label[data-note-reference] { cursor: pointer; text-decoration: underline dotted; }
 .ProseMirror [data-block-id] { border-left: 2px solid transparent; padding-left: .65rem; }
-.ProseMirror [data-block-id]:focus-within { border-left-color: var(--boundary); }
+
 /* A paragraph carrying an open mark shows a 3 px margin line in that mark's color; the text does not shift. */
 .ProseMirror [data-block-id][data-mark-line] { border-left-width: 3px; padding-left: calc(.65rem - 1px); }
 .ProseMirror [data-block-id][data-mark-line="change-suggestion"] { border-left-color: var(--mark-suggestion); }
@@ -1549,7 +1558,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror .editorial-mark-active { outline: 2px solid var(--focus); outline-offset: 1px; }
 .ProseMirror .editorial-mark-previewed { text-decoration: line-through; text-decoration-color: var(--mark-suggestion); color: var(--text-subdued); }
 .ProseMirror .editorial-mark-preview { margin-left: .15em; text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); border-radius: 2px; }
-.ProseMirror .editorial-mark-preview-label { margin: 0 .2em 0 .35em; padding: 0 .45em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: var(--surface); font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: .7rem; font-weight: 700; vertical-align: middle; user-select: none; }
+.ProseMirror .editorial-mark-preview-label { margin: 0 .2em 0 .35em; padding: 0 .45em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: var(--surface); font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: .7rem; font-weight: 700; vertical-align: middle; user-select: none; }
 .editorial-mark-layer { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 4; font-size: .92rem; line-height: 1.6; }
 .editorial-mark-menu-layer { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-size: .92rem; line-height: 1.6; }
 .editorial-mark-menu { position: fixed; max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: auto; }
@@ -1586,7 +1595,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editorial-mark-drifted { margin: .6rem 0 0; padding: .45rem .6rem; border: 1px dashed var(--status-attention); border-radius: 6px; background: var(--status-attention-surface); }
 /* ADR 0085 §2 beside an available 接受并应用: a quiet line with its own border, never an alarm. */
 .editorial-mark-safe-merge { margin: .45rem 0 0; padding: .35rem .55rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); }
-.editorial-mark-quote { margin: .3rem 0 .6rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: "Noto Serif CJK SC", "Songti SC", serif; overflow-wrap: anywhere; }
+.editorial-mark-quote { margin: .3rem 0 .6rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; overflow-wrap: anywhere; }
 .editorial-mark-field { display: grid; gap: .2rem; margin: .5rem 0; font-weight: 700; }
 .editorial-mark-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid var(--boundary); border-radius: 6px; font: inherit; font-weight: 400; resize: vertical; }
 .editorial-mark-field textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -1837,10 +1846,10 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   .review-runs > li[aria-current="true"] { border-width: 2px; }
   .review-sheet::backdrop { background: Canvas; opacity: .6; }
   .book-review select:focus-visible, .book-review textarea:focus-visible, .review-finding:focus-visible, .review-run h4:focus-visible { outline-color: Highlight; }
-  button:focus-visible, input:focus-visible, .ProseMirror:focus-visible {
+  button:focus-visible, input:focus-visible {
     outline-color: Highlight;
   }
-  .ProseMirror [data-block-id]:focus-within { border-left-color: Highlight; }
+
   /* Color cannot carry a mark's kind here, so the line under the text does: solid for a suggestion,
      double for a comment, dotted for a private note, and an outline for a highlight. */
   .ProseMirror .editorial-mark { color: CanvasText; background: Canvas; border-bottom: 2px solid CanvasText; forced-color-adjust: none; }
@@ -2288,7 +2297,7 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
   border-radius: 6px;
   background: var(--surface-subdued);
   color: var(--action-text);
-  font-family: "Noto Serif CJK SC", "Songti SC", serif;
+  font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
   font-size: .85rem;
   font-weight: 700;
 }
@@ -2298,7 +2307,7 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
   flex: 1 1 auto;
 }
 .shell-book-picker-title {
-  font-family: "Noto Serif CJK SC", "Songti SC", serif;
+  font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
   font-size: .86rem;
   font-weight: 700;
   overflow-wrap: anywhere;
