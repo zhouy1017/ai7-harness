@@ -1538,7 +1538,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     searchSummary.textContent = `“${page.query}” · 范围：${page.scopeLabel} · 共 ${page.totalMatches.toLocaleString('zh-CN')} 处`;
     for (const match of page.results) {
       const row = element('article', 'search-result');
-      const open = button(`${match.headingLabel} · ${match.context}`, 'quiet', () => void jumpToSearchMatch(match));
+      const open = button('', 'quiet', () => void jumpToSearchMatch(match));
+      open.append(element('span', 'search-result-heading', match.headingLabel), ' · ', element('span', 'search-result-context', match.context));
       open.setAttribute('aria-label', `${match.headingLabel}：${match.context}`);
       const includeLabel = element('label', 'match-inclusion');
       const include = element('input');

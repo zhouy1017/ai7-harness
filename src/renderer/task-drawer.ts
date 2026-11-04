@@ -1688,7 +1688,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const text = el('span', 'task-plan-assurance-text');
       const consequence = [option.consequence, option.requirement].filter((line): line is string => line !== null)
         .map((line) => line.replace(/。$/u, '')).join('；');
-      text.append(el('strong', undefined, `${option.label} · ${consequence}。`));
+      text.append(el('strong', undefined, option.label), ' · ', el('span', 'task-plan-assurance-consequence', `${consequence}。`));
       label.append(input, text);
       block.append(label);
     }

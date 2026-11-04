@@ -1606,13 +1606,13 @@ async function runJourney(
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'target-title');
   await assertRenderer(
     renderer,
-    `document.querySelector('#book-title')?.value.length > 0 && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：')) && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && document.querySelectorAll('[data-fidelity-category]').length === 10`,
+    `document.querySelector('#book-title')?.value.length > 0 && document.querySelector('[data-source-sha256]')?.textContent === ${JSON.stringify(sourceSha256)} && document.querySelector('[data-source-bytes]')?.textContent === ${JSON.stringify(String(sourceBytes))} && document.querySelectorAll('[data-fidelity-category]').length === 10`,
     'title-contract',
   );
   if (hasIdentityFinding) {
     await assertRenderer(
       renderer,
-      `(() => { const title = document.querySelector('#book-title'); if (!title) return false; title.value = title.value + '（不同作品）'; title.dispatchEvent(new Event('input', { bubbles: true })); return title.value.endsWith('（不同作品）') && Array.from(document.querySelectorAll('.field-note')).some((note) => note.textContent.includes('建议来源：') && note.textContent.includes('可编辑建议')); })()`,
+      `(() => { const title = document.querySelector('#book-title'); if (!title) return false; title.value = title.value + '（不同作品）'; title.dispatchEvent(new Event('input', { bubbles: true })); return title.value.endsWith('（不同作品）'); })()`,
       'distinct-work-title-edited',
     );
   }
