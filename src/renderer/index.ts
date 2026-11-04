@@ -2461,9 +2461,8 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
     fidelity.append(categories);
     detail.append(fidelity);
     if (record.degradationDecision) {
-      detail.append(element('p', 'field-note', record.degradationDecision.summaryLabel));
       const acceptedDisclosure = element('details', 'degradation-disclosure');
-      acceptedDisclosure.append(element('summary', undefined, '查看受影响类别、示例与导出后果'));
+      acceptedDisclosure.append(element('summary', undefined, `${record.degradationDecision.summaryLabel} · 查看受影响类别、示例与导出后果`));
       const accepted = element('ul', 'degradation-list');
       for (const item of record.degradationDecision.acceptedItems) {
         const category = record.fidelityCategories.find((candidate) => candidate.key === item.categoryKey);
