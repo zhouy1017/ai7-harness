@@ -2343,7 +2343,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         versionLabel.append(el('span', undefined, SHEET_PROCEDURE_VERSION_LABEL), versionSelect);
         procedureField.append(versionLabel);
       }
-      for (const line of sheetProcedureLines(state.procedure)) procedureField.append(el('p', 'field-note review-sheet-procedure-line', line));
+      const procedureLines = sheetProcedureLines(state.procedure);
+      if (procedureLines.length > 0) {
+        const list = el('ul');
+        for (const line of procedureLines) list.append(el('li', 'review-sheet-procedure-line', line));
+        procedureField.append(list);
+      }
     }
     form.append(procedureField);
     const categories = el('fieldset', 'review-category-options');

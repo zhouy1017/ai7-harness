@@ -380,7 +380,7 @@ export function sheetProcedureLines(run: CapturedProcedureRunProjection): string
 
 /** The pin a Run shows (ADR 0087 §4): never moved by a later version or a 停用. */
 export function runProcedureLine(procedure: ReviewRunProcedureProjection): string {
-  const note = procedure.missing ? '（本机没有这一版；这次审阅仍记着它）' : procedure.stopped ? '（这一版已停用；这次审阅仍记着它）' : '';
+  const note = procedure.missing ? ' · 本机缺少此版本，审阅记录保留' : procedure.stopped ? ' · 已停用，审阅记录保留' : '';
   return `按可复用工序《${procedure.title}》${technicalWords(`第 ${procedure.version} 版`, '版本')}${note}`;
 }
 
