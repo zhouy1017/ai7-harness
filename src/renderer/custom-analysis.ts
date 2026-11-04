@@ -197,8 +197,13 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
         open.dataset['analysisAction'] = 'custom-open-plan';
         actions.append(open);
       }
+      if (book?.unavailableReason != null) {
+        const reason = el('span', 'custom-unavailable', book.unavailableReason);
+        reason.id = `custom-unavailable-${dimension.dimensionId}`;
+        start.setAttribute('aria-describedby', reason.id);
+        actions.append(reason);
+      }
       card.append(actions);
-      if (book?.unavailableReason != null) card.append(el('p', 'field-note custom-unavailable', book.unavailableReason));
       if (book?.latest == null) {
         const none = el('p', 'custom-not-run', CUSTOM_TAB_NOT_RUN);
         none.dataset['customEmpty'] = 'not-run';

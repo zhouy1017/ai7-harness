@@ -225,11 +225,11 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const actions = el('div', 'button-row library-actions');
     const add = action(LIBRARY_ADD, 'secondary', 'add', () => void choose());
     add.disabled = busy || preview !== null || chooser !== null;
+    if (listed.length === 0 && preview === null) actions.append(el('span', 'library-empty', LIBRARY_EMPTY));
     actions.append(add);
     const parts: HTMLElement[] = [actions];
     if (refusal !== null && refusal.materialId === null && preview === null) parts.push(alert(refusal.message));
     if (preview !== null) parts.push(previewSection(preview));
-    if (listed.length === 0 && preview === null) parts.push(el('p', 'field-note library-empty', LIBRARY_EMPTY));
     const list = el('div', 'library-list');
     for (const material of listed) list.append(card(material));
     parts.push(list);

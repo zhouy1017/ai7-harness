@@ -253,7 +253,7 @@ async function readKnowledge(renderer, predicate, name) {
 // book, handed to 放入资料… through the picker control of the relaunched window.
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const LIBRARY_TITLE = '样书一';
-const LIBRARY_EMPTY = '资料库暂无资料；放入后默认归属当前图书或本社，可供任务参考。';
+const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 /** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
 const READ_LIBRARY = `(() => {
   const root = document.querySelector('[data-screen="knowledge-base"] .library-materials');
