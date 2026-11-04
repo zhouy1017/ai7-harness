@@ -76,7 +76,7 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
       el('h4', undefined, '档位'), bands,
       el('h4', undefined, '风险项 · 低 / 中 / 高，不计入总分'), el('p', 'evaluation-profile-risks', profile.risks.map((risk) => risk.label).join('、')),
       el('h4', undefined, '结论'), el('p', 'evaluation-profile-conclusions', profile.conclusions.map((entry) => entry.label).join(' · ')),
-      el('h4', undefined, '就绪清单'), readiness, ...(readiness.childElementCount === 0 ? [el('p', 'field-note', '尚未设置默认就绪清单。')] : []), technicalDisclosure(details));
+      el('h4', undefined, readiness.childElementCount === 0 ? '就绪清单 · 尚未设置' : '就绪清单'), readiness, technicalDisclosure(details));
     if (current) {
       const start = button('新建版本', () => {
         start.disabled = true;
