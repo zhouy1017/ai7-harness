@@ -980,8 +980,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规'
         : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销';
       local.append(el('p', 'field-note', `${localBoundary}；本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
-      if (technicalLayerVisible) for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
-      for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}${technicalWords(` · ${exclusion.candidateId}`)}。`));
+      if (technicalLayerVisible && Object.keys(run.localCheck.counts ?? {}).length > 0) {
+        const counts = el('ul');
+        for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) counts.append(el('li', undefined, `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
+        local.append(counts);
+      }
+      if (run.localCheck.excluded.length > 0) {
+        const exclusions = el('ul');
+        exclusions.setAttribute('aria-label', '未生成批注');
+        for (const exclusion of run.localCheck.excluded) exclusions.append(el('li', undefined, `${exclusion.reason}${technicalWords(` · ${exclusion.candidateId}`)}`));
+        local.append(el('strong', undefined, '未生成批注'), exclusions);
+      }
       section.append(local);
       if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {
         local.append(actionButton('scope-cancel', 'secondary', () => void cancelRun(run)));
@@ -995,12 +1004,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       pin.dataset['procedureStopped'] = String(run.procedure.stopped);
       pin.dataset['procedureMissing'] = String(run.procedure.missing);
       pin.append(el('p', 'field-note review-procedure-line', runProcedureLine(run.procedure)));
-      for (const entry of run.procedure.leftOut) {
-        // A Series step the editor did not choose (S31b; REUSE-050), told apart from one the Book could not take.
-        const view = runProcedureLeftOutView(entry);
-        const line = el('p', 'field-note review-procedure-left-out', view.text);
-        Object.assign(line.dataset, view.data);
-        pin.append(line);
+      if (run.procedure.leftOut.length > 0) {
+        const leftOut = el('ul');
+        for (const entry of run.procedure.leftOut) {
+          // A Series step the editor did not choose (S31b; REUSE-050), told apart from one the Book could not take.
+          const view = runProcedureLeftOutView(entry);
+          const line = el('li', 'review-procedure-left-out', view.text);
+          Object.assign(line.dataset, view.data);
+          leftOut.append(line);
+        }
+        pin.append(leftOut);
       }
       section.append(pin);
     }
