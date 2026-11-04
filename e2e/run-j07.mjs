@@ -1960,7 +1960,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const custom = window.__j07.delivery('news-release').querySelector('[data-delivery-field="custom"]'); custom.value = ${JSON.stringify(DELIVERY_CUSTOM)}; custom.dispatchEvent(new Event('input', { bubbles: true })); return window.__j07.cardAction('news-release', 'confirmDeliver').disabled === false; })()`, 'redeliver-custom-written');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-document-type-id="news-release"] [data-document-action="confirmDeliver"]', 'redeliver-confirm');
     await waitFor(renderer, `window.__j07.deliveries('news-release').length === 2 && window.__j07.exportCard() === null`, 'redelivered', 120_000);
-    await assertRenderer(renderer, `document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-action="open"]')`, 'redeliver-export-optional');
+    await assertRenderer(renderer, `document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-menu] > summary')`, 'redeliver-export-optional');
     await assertRenderer(renderer, `(() => {
       const card = window.__j07.card('news-release');
       const records = window.__j07.deliveries('news-release');
