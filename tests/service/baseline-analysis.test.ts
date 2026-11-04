@@ -1736,10 +1736,65 @@ it.each(['recovered', 'still-not-json', 'schema-invalid'] as const)('retries bas
       const gap = settled.resultSetRevision!.gaps.find((gap) => gap.unitOrdinal === 5)!;
       expect(gap.parseFailure).toMatchObject({ code: outcome === 'schema-invalid' ? 'schema-invalid' : 'not-json', detail: expect.any(String) });
       expect(gap.parseFailure!.detail.length).toBeGreaterThan(0);
-      expect(gap.reason).not.toContain(gap.parseFailure!.detail);
+      expect(gap.reason).not.toMatch(/schema-invalid|not-json/u);
       const unit = settled.resultSetRevision!.units.find((unit) => unit.unitOrdinal === 5)!;
       expect(unit.state === 'gap' && unit.gap.parseFailure).toEqual(gap.parseFailure);
     }
+    store.markCleanShutdown();
+  } finally { await owner.dispose(); store.close(); }
+}, 300_000);
+
+
+it('closes all eight units and records only the one out-of-unit reference in technical details (#1311 H2)', async () => {
+  const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+  const entries = new Map(happy.entries);
+  const target = [...entries.values()].find((entry) => entry.unitOrdinal === 1 && entry.response.kind === 'unit-result');
+  if (target?.response.kind !== 'unit-result') throw new Error('Expected baseline response');
+  const body = JSON.parse(target.response.text) as { entities: Array<{ sourceRanges: unknown[] }> };
+  const rangeCount = body.entities[0]!.sourceRanges.length;
+  body.entities[0]!.sourceRanges.push({ blockId: `blk_${'f'.repeat(24)}`, fromGrapheme: null, toGrapheme: null });
+  entries.set(fixtureEntryKey(target.unitOrdinal, target.requestDigest, target.attempt ?? undefined), { ...target, response: { ...target.response, text: JSON.stringify(body) } });
+  const controlled = { ...happy, entries };
+  const store = await openWithRoute(roots.dataRoot, controlled);
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: controlled, secretResolver: fakeSecretResolver() });
+  try {
+    const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 H2 单条范围抢救');
+    recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    const { settled } = await runToSettled(store, owner, bookId, null);
+    expect(settled.run?.state).toBe('completed');
+    expect(settled.resultSetRevision?.coverage).toMatchObject({ unitsClosed: 8, unitsTotal: 8, gapCount: 0 });
+    const unit = settled.resultSetRevision!.units[0]!;
+    expect(unit.state === 'closed' && unit.salvaged).toEqual([{ section: 'entities.0.sourceRanges', index: rangeCount, reason: 'range-out-of-unit' }]);
+    expect(unit.state === 'closed' && unit.entities[0]!.sourceRanges).toHaveLength(rangeCount);
+    store.markCleanShutdown();
+  } finally { await owner.dispose(); store.close(); }
+}, 300_000);
+
+
+it('records a sampling gap only for unanswered refs and estimates precision over answered refs (#1311 H2)', async () => {
+  const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+  const entries = new Map(happy.entries);
+  const target = [...entries.values()].find((entry) => entry.response.kind === 'unit-result' && Array.isArray(JSON.parse(entry.response.text).dispositions));
+  if (target?.response.kind !== 'unit-result') throw new Error('Expected sampling response');
+  const body = JSON.parse(target.response.text) as { dispositions: Array<{ ref: string; disposition: string }> };
+  const omitted = body.dispositions.pop()!;
+  expect(body.dispositions.length).toBeGreaterThan(0);
+  entries.set(fixtureEntryKey(target.unitOrdinal, target.requestDigest), { ...target, response: { ...target.response, text: JSON.stringify(body) } });
+  const controlled = { ...happy, entries };
+  const store = await openWithRoute(roots.dataRoot, controlled);
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture: controlled, secretResolver: fakeSecretResolver() });
+  try {
+    const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 H2 抽检缺答');
+    recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    const { settled } = await runToSettled(store, owner, bookId, null);
+    const sample = settled.resultSetRevision!.assuranceSample;
+    expect(sample.state).toBe('closed-with-gaps');
+    expect(sample.dispositions).toHaveLength(body.dispositions.length);
+    const missingRef = String(Number(/\d+/u.exec(omitted.ref)![0]) - 1);
+    expect(sample.reason).toContain(`仅缺少发现 ${missingRef}`);
+    expect(sample.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ reason: `disposition-missing:${missingRef}` })]));
+    expect(sample.precision.reduce((sum, tier) => sum + tier.sampled, 0)).toBe(sample.dispositions.length);
+    expect(settled.resultSetRevision!.coverage).toMatchObject({ unitsClosed: 8, gapCount: 0 });
     store.markCleanShutdown();
   } finally { await owner.dispose(); store.close(); }
 }, 300_000);

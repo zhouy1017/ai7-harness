@@ -2200,6 +2200,8 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
     runRecordId: run.runRecordId,
+    executionSpanCount: run.attempt?.spans.length ?? 0,
+    ...(stopped?.stopReason === undefined ? {} : { stopReason: stopped.stopReason, stopAt: stopped.stopAt }),
     cancelling,
     pausing,
     cancel: {
@@ -2348,6 +2350,8 @@ export interface BaselineStoppedRunFacts {
    * with it, or form what it kept into its partial revision when it is cancelled. Read by the service.
    */
   readonly bindingHolds: boolean;
+  readonly stopReason?: import('../shared/protocol.js').ResumableStopReason;
+  readonly stopAt?: string;
   /** The provider's account limit stopped the Run (Issue #51, S16b), in the provider's words; absent or `null` otherwise. */
   readonly accountLimit?: { readonly condition: string; readonly unitOrdinal: number | null } | null;
   /**

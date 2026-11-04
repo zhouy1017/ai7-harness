@@ -82,17 +82,11 @@ describe('Factual Review Contract /2 is additive', () => {
       corrections: [{ assertionRef: 1, variants: [{ text: '改正后的文字', rationale: '来源记载不同。' }] }] });
     expect(ok.ok).toBe(true);
     // A v1 answer is not a v2 answer; an assertion without its relations, a forged mark, an unknown relation or source fail.
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: 1, assertions: [assertion] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [assertion] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [{ ...relation, exactFetch: { sourceKind: 'manuscript', sourceId: 'x', digest: 'y' } }] }] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [{ ...relation, relation: '确证' }] }] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [{ ...relation, sourceRef: 'http://plain.example.org' }] }] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [] }],
-      corrections: [{ assertionRef: 1, variants: [] }] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [] }],
-      corrections: [{ assertionRef: 2, variants: [{ text: '改', rationale: '理由' }] }] }).ok).toBe(false);
-    expect(parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [] }],
-      corrections: [{ assertionRef: 1, variants: [{ text: '字'.repeat(201), rationale: '理由' }] }] }).ok).toBe(false);
+    const badRelation = parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [relation, { ...relation, sourceRef: 'http://plain.example.org' }] }],
+      corrections: [{ assertionRef: 2, variants: [{ text: '改', rationale: '理由' }] }] });
+    expect(badRelation).toMatchObject({ ok: true, result: { assertions: [{ evidenceRelations: [relation] }], corrections: [] } });
+    const forged = parse({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, assertions: [{ ...assertion, evidenceRelations: [{ ...relation, exactFetch: { sourceKind: 'manuscript', sourceId: 'x', digest: 'y' } }] }] });
+    expect(forged.ok && 'evidenceRelations' in forged.result.assertions[0]! && forged.result.assertions[0]!.evidenceRelations[0]!.exactFetch).toBeUndefined();
     // In-Book relations are marked by Exact Fetch alone: found verbatim, or not.
     const inBook = { sourceRef: `retrieval:${'b'.repeat(64)}`, relation: '支持' as const, excerptRef: '原文一句', lineage: null };
     const result = { schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: 1, corrections: [], assertions: [{ ...assertion, evidenceRelations: [inBook, relation] }] } as never;

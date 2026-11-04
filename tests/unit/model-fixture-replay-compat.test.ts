@@ -28,7 +28,7 @@ it.each(['sample1-recorded-v41-writing-draft', 'sample1-recorded-v41-editorial-w
   const prompt = recording.capture!.taskPromptContractDigest!;
   const stage = fixture.replayCompatibility?.find((entry) => entry.stage === 'writing-synthesis');
   expect(stage?.contentKey).toBe(fixtureReplayContentKey(SAMPLE1_PUBLIC_SAMPLEBOOK.sha256, prompt, { stageContractDigest: prompt }));
-  const adapter = new Ai7LocalDeterministicAdapter(fixture, prompt, { QUOTA_EXCEEDED_CODE: 'QUOTA_EXCEEDED', INVALID_CREDENTIAL_CODE: 'INVALID_CREDENTIAL', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT_WINDOW_EXCEEDED' }, { replaySourceDigest: SAMPLE1_PUBLIC_SAMPLEBOOK.sha256 });
+  const adapter = new Ai7LocalDeterministicAdapter(fixture, prompt, { QUOTA_EXCEEDED_CODE: 'QUOTA_EXCEEDED', INVALID_CREDENTIAL_CODE: 'INVALID_CREDENTIAL', CONTEXT_WINDOW_EXCEEDED_CODE: 'CONTEXT_WINDOW_EXCEEDED' }, { sourceDigest: SAMPLE1_PUBLIC_SAMPLEBOOK.sha256 });
   let content = false;
   for await (const chunk of adapter.stream({ provider: LOCAL_DETERMINISTIC_ROUTE, model: LOCAL_DETERMINISTIC_MODEL,
     messages: [{ role: 'user', content: [{ type: 'text', text: `写作综合 8/8 · 段落摘要 ${'f'.repeat(64)}` }] }] } as Parameters<Ai7LocalDeterministicAdapter['stream']>[0])) {

@@ -4821,7 +4821,10 @@ export class EditorialStore {
       const unconfirmed = stopped ? ledger.unconfirmedRangesOf(run.runRecordId) : [];
       const outcomeUnknown = unconfirmed.length === 0 ? null
         : { units: unconfirmed, stopped: run.state === 'resumable' && ledger.outcomeUnknownOf(run.runRecordId) !== null };
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown };
+      return {
+        unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown,
+        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopReason: run.stopReason, stopAt: run.resumedAt }),
+      };
     });
   }
 

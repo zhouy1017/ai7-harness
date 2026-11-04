@@ -1,7 +1,7 @@
-import { type SalvagedModelResult, boundedText, CONFIDENCE_LEVELS, stripModelJsonFence, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, CONFIDENCE_LEVELS, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
 import type { AnalysisSourceRangeProjection } from '../../shared/protocol.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
-import type { AnalysisConfidence, BaselineUnitResult } from './contract.js';
+import { CONFIDENCE_ALIASES, salvageSourceRanges, type AnalysisConfidence, type BaselineUnitResult } from './contract.js';
 
 /**
  * Baseline Cross-Unit Reduction Contract v1 (ADR 0066): the second product-built, exact-versioned
@@ -266,8 +266,8 @@ export function parseCrossUnitMessageHeader(text: string): CrossUnitMessageHeade
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const closed = Number(match[1]);
-  const total = Number(match[2]);
+  const closed = modelNumber(match[1]);
+  const total = modelNumber(match[2]);
   if (!Number.isSafeInteger(closed) || closed < 2 || !Number.isSafeInteger(total) || total < closed) return null;
   return { closed, total, unitSetDigest: match[3]! };
 }
@@ -287,7 +287,7 @@ export function parseCrossUnitCitedBlocks(text: string): Map<number, string[]> {
     const match = CITED_BLOCKS_LINE_PATTERN.exec(line);
     if (match === null) continue;
     const blockIds = match[2]!.split(contract.blockIdSeparator).filter((blockId) => BLOCK_ID_PATTERN.test(blockId));
-    cited.set(Number(match[1]), blockIds);
+    cited.set(modelNumber(match[1]), blockIds);
   }
   return cited;
 }
@@ -353,73 +353,49 @@ export function crossUnitRequestDigest(promptContractDigest: string, setDigest: 
  */
 export function parseCrossUnitResult(
   text: string,
-  expected: { closedOrdinals: ReadonlyArray<number>; citedBlocksByUnit: ReadonlyMap<number, ReadonlyArray<string>> },
+  expected: { closedOrdinals: ReadonlyArray<number>; citedBlocksByUnit: ReadonlyMap<number, ReadonlyArray<string>>; blockLengths?: ReadonlyMap<string, number> },
 ): CrossUnitResultParse {
-  const body = stripModelJsonFence(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): CrossUnitResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'findings', 'notes'])) return invalid('跨单元结果键集合不符合契约 v1。');
-  if (parsed.schema !== BASELINE_CROSS_UNIT_RESULT_SCHEMA) return invalid('跨单元结果 schema 不是契约 v1。');
-  if (!Array.isArray(parsed.findings) || parsed.findings.length > MAX_FINDINGS) return invalid('跨单元发现集合缺失或超出边界。');
-  if (!Array.isArray(parsed.notes) || parsed.notes.length > MAX_NOTES || !parsed.notes.every((note) => boundedText(note, MAX_DESCRIPTION_GRAPHEMES))) {
-    return invalid('跨单元备注不符合契约 v1。');
-  }
-  const closedOrdinals = new Set(expected.closedOrdinals);
-  const findings: CrossUnitFinding[] = [];
-  for (const [index, candidate] of (parsed.findings as unknown[]).entries()) {
-    const label = `第 ${index + 1} 项跨单元发现`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['kind', 'description', 'sides', 'confidence'])) return invalid(`${label}的键集合不符合契约 v1。`);
-    if (!CROSS_UNIT_FINDING_KINDS.includes(candidate.kind as CrossUnitFindingKind)) return invalid(`${label}的类别不在闭合集合内。`);
-    if (!boundedText(candidate.description, MAX_DESCRIPTION_GRAPHEMES)) return invalid(`${label}的描述缺失或超出边界。`);
-    if (!CONFIDENCE_LEVELS.includes(candidate.confidence as AnalysisConfidence)) return invalid(`${label}的置信度不在闭合集合内。`);
-    if (!Array.isArray(candidate.sides) || candidate.sides.length < 2 || candidate.sides.length > MAX_SIDES) return invalid(`${label}的涉及方数量不符合契约 v1。`);
-    const sides: CrossUnitFindingSide[] = [];
-    for (const side of candidate.sides as unknown[]) {
-      if (!isRecord(side) || !hasExactKeys(side, ['unitOrdinal', 'sourceRanges'])) return invalid(`${label}的涉及方键集合不符合契约 v1。`);
-      if (!Number.isSafeInteger(side.unitOrdinal) || (side.unitOrdinal as number) < 1) return invalid(`${label}的涉及方单元序号无效。`);
-      const unitOrdinal = side.unitOrdinal as number;
-      if (!closedOrdinals.has(unitOrdinal)) {
-        return { ok: false, code: 'unit-out-of-set', detail: `${label}引用了本次归纳单元集之外的单元 ${unitOrdinal}。` };
-      }
-      const cited = new Set(expected.citedBlocksByUnit.get(unitOrdinal) ?? []);
-      if (!Array.isArray(side.sourceRanges) || side.sourceRanges.length > MAX_SIDE_RANGES) return invalid(`${label}的来源范围集合超出边界。`);
-      for (const range of side.sourceRanges as unknown[]) {
-        if (!isRecord(range) || !hasExactKeys(range, ['blockId', 'fromGrapheme', 'toGrapheme'])) return invalid(`${label}的来源范围不符合契约 v1。`);
-        if (typeof range.blockId !== 'string' || !BLOCK_ID_PATTERN.test(range.blockId)) return invalid(`${label}的来源范围内容块标识无效。`);
-        if (!cited.has(range.blockId)) {
-          return { ok: false, code: 'range-out-of-unit', detail: `${label}引用了单元 ${unitOrdinal} 未列出的内容块。` };
-        }
-        const from = range.fromGrapheme;
-        const to = range.toGrapheme;
-        const bothNull = from === null && to === null;
-        if (!bothNull && !(Number.isSafeInteger(from) && Number.isSafeInteger(to) && (from as number) >= 0 && (to as number) >= (from as number))) {
-          return invalid(`${label}的来源范围字素位置无效。`);
-        }
-      }
-      sides.push({
-        unitOrdinal,
-        sourceRanges: (side.sourceRanges as AnalysisSourceRangeProjection[])
-          .map((range) => ({ blockId: range.blockId, fromGrapheme: range.fromGrapheme, toGrapheme: range.toGrapheme })),
-      });
-    }
-    if (new Set(sides.map((side) => side.unitOrdinal)).size < 2) return invalid(`${label}没有落在两个不同的单元上。`);
-    findings.push({
-      kind: candidate.kind as CrossUnitFindingKind,
-      description: candidate.description as string,
-      sides,
-      confidence: candidate.confidence as AnalysisConfidence,
-    });
-  }
-  const result: BaselineCrossUnitResult = {
-    schema: BASELINE_CROSS_UNIT_RESULT_SCHEMA,
-    findings,
-    notes: parsed.notes as string[],
+  const reader = ModelResultReader.read(text, BASELINE_CROSS_UNIT_RESULT_SCHEMA);
+  if (reader === null) return ModelResultReader.failure(text);
+  const parsed = reader.value;
+  const closed = new Set(expected.closedOrdinals);
+  const notes = reader.array(parsed.notes, 'notes', MAX_NOTES).flatMap((value, index) => {
+    const note = reader.text(value, MAX_DESCRIPTION_GRAPHEMES, 'notes', index);
+    if (note === null) { reader.drop('notes', index, 'entry-invalid'); return []; }
+    return [note];
+  });
+  const kinds: Readonly<Record<string, CrossUnitFindingKind>> = {
+    矛盾: 'contradiction', 连续性断裂: 'continuity-break', 别名分歧: 'alias-identity-divergence', 身份分歧: 'alias-identity-divergence', 时序冲突: 'chronology-conflict',
   };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  const findings: CrossUnitFinding[] = [];
+  for (const [index, candidate] of reader.array(parsed.findings, 'findings', MAX_FINDINGS).entries()) {
+    if (!hasKeys(candidate, ['description'])) { reader.drop('findings', index, 'entry-invalid'); continue; }
+    const description = reader.text(candidate.description, MAX_DESCRIPTION_GRAPHEMES, 'findings', index);
+    if (description === null) { reader.drop('findings', index, 'description-invalid'); continue; }
+    const sides: CrossUnitFindingSide[] = [];
+    const section = `findings.${index}.sides`;
+    for (const [sideIndex, side] of reader.array(candidate.sides, section, MAX_SIDES).entries()) {
+      const ordinal = hasKeys(side, ['unitOrdinal']) ? modelNumber(side.unitOrdinal) : NaN;
+      if (!hasKeys(side, ['unitOrdinal']) || !Number.isSafeInteger(ordinal) || !closed.has(ordinal)) {
+        reader.drop(section, sideIndex, 'unit-out-of-set'); continue;
+      }
+      const sourceRanges = salvageSourceRanges(reader, side.sourceRanges, new Set(expected.citedBlocksByUnit.get(ordinal) ?? []),
+        `${section}.${sideIndex}.sourceRanges`, MAX_SIDE_RANGES, expected.blockLengths);
+      sides.push({ unitOrdinal: ordinal, sourceRanges });
+    }
+    const rawKind = typeof candidate.kind === 'string' ? candidate.kind.trim().toLowerCase().replace(/[\s_]+/gu, '-') : '';
+    const kind = CROSS_UNIT_FINDING_KINDS.find((kind) => kind === rawKind) ?? (Object.hasOwn(kinds, rawKind) ? kinds[rawKind] : undefined);
+    if (kind === undefined || new Set(sides.map((side) => side.unitOrdinal)).size < 2) {
+      notes.push(description);
+      reader.drop('findings', index, kind === undefined ? 'kind-downgraded-to-note' : 'sides-downgraded-to-note');
+      continue;
+    }
+    if (kind !== candidate.kind) reader.drop('findings', index, 'enum-normalized');
+    findings.push({ kind, description, sides, confidence: reader.enum(candidate.confidence, CONFIDENCE_LEVELS, CONFIDENCE_ALIASES, 'low', 'findings', index) });
+  }
+  const hadEntries = [parsed.findings, parsed.notes].some((value) => Array.isArray(value) && value.length > 0);
+  if (findings.length + notes.length === 0 && (hadEntries || !reader.empty('findings') && !reader.empty('notes'))) {
+    return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
+  }
+  return reader.finish<BaselineCrossUnitResult>({ schema: BASELINE_CROSS_UNIT_RESULT_SCHEMA, findings, notes });
 }
