@@ -1223,7 +1223,7 @@ async function main() {
       const custom = section.querySelector('#milestone-purpose-custom');
       const save = window.__j07.milestoneSave();
       return section.querySelector('label[for="milestone-label"]')?.textContent === '标签' &&
-        section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途' &&
+        section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。' &&
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
         radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
