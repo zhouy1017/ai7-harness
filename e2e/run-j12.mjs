@@ -1867,10 +1867,10 @@ async function main() {
     await click(primary, '按所选方式导入', 'database-merge-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'merge'`, 'database-merge-pending');
     const mergeLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const mergeBackup = /^本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[1] ?? '' : '')?.[1];
+    const mergeBackup = /本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(mergeLines) && mergeLines[0] === `已准备好把「${replaceBackup}」里的 1 本图书合并到本机。` && mergeBackup !== undefined &&
-        mergeLines[2] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
+      Array.isArray(mergeLines) && mergeLines[0]?.startsWith(`已准备好把「${replaceBackup}」里的 1 本图书合并到本机；`) && mergeBackup !== undefined &&
+        mergeLines[1] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
       'database-merge-pending-words',
       mergeLines,
     );
@@ -1905,10 +1905,10 @@ async function main() {
     await click(primary, '确认回退', 'database-roll-back-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'roll-back'`, 'database-roll-back-pending');
     const rollBackLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const rollBackBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[1] ?? '' : '')?.[1];
+    const rollBackBackup = /本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(rollBackLines) && rollBackLines[0] === `已准备好回退到「${replaceBackup}」。` && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
-        rollBackLines[2] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
+      Array.isArray(rollBackLines) && rollBackLines[0]?.startsWith(`已准备好回退到「${replaceBackup}」；`) && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
+        rollBackLines[1] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
       'database-roll-back-pending-words',
       rollBackLines,
     );
