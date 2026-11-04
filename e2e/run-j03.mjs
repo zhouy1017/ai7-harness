@@ -334,6 +334,8 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'series-back');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'series-back-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen');
+  await waitFor(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-reopen-screen');
+  await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-reopen-preference');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-remap-persisted');
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-one');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-one-restored');
