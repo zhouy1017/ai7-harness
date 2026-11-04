@@ -75,7 +75,7 @@ export function renderStructureReview(structure: ImportStructureProjection | und
   if (structure.softBreakSplits.length > 0) {
     const splits = el('div', 'structure-splits');
     splits.dataset['softBreakSplits'] = String(structure.softBreakSplits.length);
-    splits.append(el('p', 'field-note', SOFT_BREAK_NOTE), ...structure.softBreakSplits.map((paragraph) => el('p', 'structure-lineage', lineageLine(paragraph))));
+    splits.append(el('h4', undefined, SOFT_BREAK_NOTE), ...structure.softBreakSplits.map((paragraph) => el('p', 'structure-lineage', lineageLine(paragraph))));
     section.append(splits);
   }
   let method: LongParagraphMethod | null = stated?.longParagraphs ?? null;
