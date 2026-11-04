@@ -130,8 +130,9 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   licensesPanel.setAttribute('role', 'tabpanel');
   licensesPanel.tabIndex = 0;
   licensesPanel.setAttribute('aria-labelledby', 'help-tab-licenses');
-  licensesPanel.append(el('h3', undefined, HELP_TABS[2]!.label));
-  licensesPanel.append(el('p', 'field-note', HELP_LICENSE_LOCAL_NOTE));
+  const licensesHeading = el('h3', undefined, HELP_TABS[2]!.label);
+  licensesHeading.append(' · ', el('span', undefined, HELP_LICENSE_LOCAL_NOTE));
+  licensesPanel.append(licensesHeading);
   const filterLabel = el('label', 'field-note', HELP_LICENSE_FILTER_LABEL);
   filterLabel.htmlFor = 'help-license-filter';
   const filter = el('input');
