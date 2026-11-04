@@ -30,7 +30,7 @@ export function calibrationOffsetWaiting(threshold: number): string {
 export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';
 /** The heading of the per-item offsets, with the Books they rest on. */
 export function calibrationBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'basisBooks'>): string {
-  return `校准依据：${offset.basisBooks} 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。`;
+  return `校准依据：${offset.basisBooks} 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。`;
 }
 /**
  * Why the basis may hold fewer Books than 调分记录 counts: a Book with a from-初评 version that cannot be read counts toward the
@@ -41,8 +41,8 @@ export function calibrationWithoutBasisLine(offset: Pick<NonNullable<EvaluationC
 }
 /** One item's offset: `+1.5`, `−0.5`, `0`, or that no Book gives it a value, with the Books it rests on. */
 export function calibrationOffsetLine(item: NonNullable<EvaluationCalibrationProjection['calibration']['offset']>['items'][number]): string {
-  if (item.offset === null) return `${item.label}：暂无数据（没有书同时有你的定稿分数和 AI7 初评分数）`;
-  return `${item.label}：${formatCalibrationOffset(item.offset)}（依据 ${item.books} 本书，满分 ${item.fullMarks}，调整后不超出 0 到 ${item.fullMarks}）`;
+  if (item.offset === null) return `${item.label}：暂无同时含定稿和初评分数的图书`;
+  return `${item.label}：${formatCalibrationOffset(item.offset)} · 依据 ${item.books} 本书 · 满分 ${item.fullMarks} · 调整范围 0–${item.fullMarks}`;
 }
 
 /** Books left out of the count because their evaluation records are damaged (Issue #702 review); `null` when none are. */

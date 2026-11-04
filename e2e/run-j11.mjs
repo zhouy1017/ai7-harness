@@ -3165,12 +3165,12 @@ async function main() {
     await click(renderer, '评估校准与预测', 'calibration-disclosed-open');
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 2 / 2 本 · 已生效'`, 'calibration-disclosed-active');
     const disclosed = await renderer.evaluate(`JSON.stringify((() => { const root = document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration'); return [root.querySelector('.calibration-offset')?.dataset.calibrationOffset ?? null, root.querySelector('.calibration-offset-basis')?.textContent ?? null, Array.from(root.querySelectorAll('.calibration-offset-list li'), (line) => [line.dataset.itemId, line.dataset.offset, line.textContent]), root.querySelector('.calibration-off-effect')?.textContent ?? null, root.querySelector('.calibration-offset-without-basis')?.textContent ?? null]; })())`);
-    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。', [
-      ['literary-quality', '0.5', '文学品质与作者声音：+0.5（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['theme-and-context', '0', '主题、价值与社会文化语境：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['chinese-language', '0', '中文语言与表达：0（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
-      ['readers-and-market', '-2', '读者与市场潜力：−2（依据 1 本书，满分 20，调整后不超出 0 到 20）'],
+    requireJourney(disclosed === JSON.stringify(['computed', '校准依据：1 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。', [
+      ['literary-quality', '0.5', '文学品质与作者声音：+0.5 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['theme-and-context', '0', '主题、价值与社会文化语境：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['structure-and-coherence', '0', '结构、叙事逻辑与连贯：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['chinese-language', '0', '中文语言与表达：0 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
+      ['readers-and-market', '-2', '读者与市场潜力：−2 · 依据 1 本书 · 满分 20 · 调整范围 0–20'],
     ], null, '其中 1 本书有从 AI7 初评开始的版本已损坏，不计入校准依据。']), 'calibration-disclosed-words', disclosed);
     const disclosedService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.threshold, answer.calibration.unreadableBooks, answer.calibration.active, answer.calibration.offset.basisBooks, answer.calibration.offset.booksWithoutBasis, answer.calibration.offset.items.map((entry) => [entry.itemId, entry.offset, entry.books])]))`);
     requireJourney(disclosedService === JSON.stringify([2, 2, 0, true, 1, 1, [['literary-quality', 0.5, 1], ['theme-and-context', 0, 1], ['structure-and-coherence', 0, 1], ['chinese-language', 0, 1], ['readers-and-market', -2, 1]]]), 'calibration-disclosed-service', disclosedService);
