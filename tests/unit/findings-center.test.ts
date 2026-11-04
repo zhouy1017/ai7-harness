@@ -50,15 +50,15 @@ it('confirms all eligible findings in the selected category across list windows'
     createTextNode: (text: string) => { const node = new MiniElement('#text'); node.textContent = text; return node; },
   });
   try {
-    const items: BookFindingsProjection['items'] = ['a', 'b', 'a'].map((category, index) => ({
-      id: String(index), category, categoryLabel: category, severity: '提示', status: '待处理', summary: '合成发现',
+    const items: BookFindingsProjection['items'] = Array.from({ length: 41 }, (_, index) => ({
+      id: String(index), category: index === 0 || index === 40 ? 'a' : 'b', categoryLabel: '合成类别', severity: '提示', status: '待处理', summary: '合成发现',
       target: { kind: 'review', reviewRunId: 'run', findingId: String(index), blockId: 'block' },
-      suggestion: { manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '原文', replacement: '修订' },
+      ...([0, 1, 40].includes(index) ? { suggestion: { manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '原文', replacement: '修订' } } : {}),
     }));
     const read = vi.fn(async (offset: number): Promise<BookFindingsProjection> => ({
-      bookId: 'book', total: 3, offset, next: offset === 0 ? 2 : null, pageSize: 2,
-      groups: ['a', 'b'].map((category) => ({ category, label: category, count: category === 'a' ? 2 : 1, bySeverity: {}, byStatus: {} })),
-      items: items.slice(offset, offset + 2),
+      bookId: 'book', total: 41, offset, next: offset === 0 ? 40 : null, pageSize: 40,
+      groups: ['a', 'b'].map((category) => ({ category, label: category, count: category === 'a' ? 2 : 39, bySeverity: {}, byStatus: {} })),
+      items: items.slice(offset, offset + 40),
     }));
     const apply = vi.fn(async () => undefined);
     const root = miniDocument.createElement('div'); miniDocument.body.append(root);
@@ -73,7 +73,7 @@ it('confirms all eligible findings in the selected category across list windows'
     batch()!.click();
     expect(apply).not.toHaveBeenCalled();
     root.querySelectorAll('button').find((button) => button.textContent === '确认应用')!.click();
-    expect(apply).toHaveBeenCalledWith([items[0], items[2]]);
+    expect(apply).toHaveBeenCalledWith([items[0], items[40]]);
     await Promise.resolve();
     await vi.waitFor(() => expect(root.getAttribute('aria-busy')).toBeNull());
   } finally { vi.unstubAllGlobals(); restore(); }

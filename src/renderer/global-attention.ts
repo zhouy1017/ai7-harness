@@ -23,11 +23,11 @@ import {
  *
  * One reader serves both: the entry and the screen paint the same answer. It reads on each screen change and
  * each time the window gains focus, and slowly on its own only while a Run is in flight (the projection's
- * `running`), so a quiet library costs nothing. Reading grants and changes nothing (V2-UX-ATTN-008): opening
+ * `running`), with a two-second follow even while idle. Reading grants and changes nothing (V2-UX-ATTN-008): opening
  * an item is only navigation, and every decision is still the record's.
  */
 
-/** How often the reader reads again on its own, and only while a Run is in flight. */
+/** Keep new and changed items following while the service is available. */
 export const GLOBAL_ATTENTION_POLL_MS = 2_000;
 
 type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention'>;
@@ -72,7 +72,7 @@ export function createGlobalAttentionReader(api: AttentionApi): GlobalAttentionR
     latest = reading;
     for (const listener of listeners) listener(reading);
     clearPoll();
-    // A slow poll only while a Run is in flight: the view follows it to its end, and stops when it ends.
+    // Follow newly queued work as well as runs already in flight.
     if (!interrupted) {
       pollTimer = window.setTimeout(() => {
         pollTimer = undefined;
