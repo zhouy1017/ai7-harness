@@ -4146,6 +4146,7 @@ export async function runApplication(): Promise<void> {
       return {
         searchBackends: await service!.call('getSearchBackendSettings', {}),
         proxy: state.proxy,
+        lastProxyProbe: state.lastProxyProbe ?? null,
         roles: [
           fastInteraction,
           {
