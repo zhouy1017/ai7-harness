@@ -112,10 +112,11 @@ function initialChannel(projection: ModelServiceSettingsProjection, chosen: Mode
 function credentialStep(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection, options: ModelServiceFlowOptions): HTMLElement {
   const step = el('div', 'model-service-flow-step model-route-option');
   step.dataset['flowStep'] = 'credential';
-  step.append(el('h4', undefined, '2. 填写凭据并获取模型'));
+  const heading = el('h4', undefined, '2. 填写凭据并获取模型');
+  step.append(heading);
   const option = channel.route === null ? undefined : projection.routeChoice.routes.find((candidate) => candidate.route === channel.route);
   if (option === undefined) {
-    step.append(el('p', 'field-note', '当前版本尚未接入此渠道。'));
+    heading.append(' · 当前版本尚未接入此渠道');
     return step;
   }
   const channelStatus = el('p', undefined, option.connection === null ? `${channel.channelLabel}：${option.statusLabel}` : `${channel.channelLabel}：${option.statusLabel} · 连接名称：${option.connection.connectionName}`);
@@ -189,7 +190,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const current = currentModelServiceChoice(projection);
   const preferred = options.modelId || (current?.route === channel.route ? current.modelId : null);
   const group = el('fieldset', 'model-service-flow-models');
-  group.append(el('legend', undefined, '选择模型，再指定使用角色'));
+  const legend = el('legend', undefined, '选择模型，再指定使用角色');
+  if (offered.length === 0) legend.append(` · ${ready ? technicalLayerVisible ? '刷新列表或手动输入模型' : '刷新模型列表' : '保存凭据后获取模型'}`);
+  group.append(legend);
   let checked: ModelServiceChannelModelProjection | null = null;
   let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
@@ -229,7 +232,6 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
     group.append(label);
   }
-  if (offered.length === 0) group.append(el('p', 'field-note', technicalLayerVisible ? '尚未获取模型列表；保存凭据后刷新，或手动输入模型 ID。' : '保存凭据后获取可用模型。'));
   const chooseCustom = (): void => {
     const modelId = custom.value.trim();
     checked = modelId.length === 0 ? null : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
