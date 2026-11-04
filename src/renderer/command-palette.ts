@@ -16,6 +16,7 @@ export function createCommandPalette(options: {
   const input = document.createElement('input'); input.type = 'search'; input.placeholder = '搜索命令、图书或工序'; input.setAttribute('aria-label', '搜索命令');
   const list = document.createElement('div'); list.className = 'command-palette-results';
   const title = document.createElement('h2'); title.textContent = '命令面板';
+  title.id = 'command-palette-title'; sheet.setAttribute('aria-labelledby', title.id);
   const close = document.createElement('button'); close.type = 'button'; close.className = 'btn quiet'; close.textContent = '关闭'; close.addEventListener('click', () => sheet.close());
   sheetContent(sheet, title, [input, list], close);
   let entries: Entry[] = [], opener: HTMLElement | null = null, generation = 0;
