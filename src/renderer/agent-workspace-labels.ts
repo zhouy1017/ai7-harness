@@ -3,7 +3,6 @@
 // is the capability declaration's own line, read from the service, never written here.
 
 export const AGENT_WORKSPACE_WORDS = Object.freeze({
-  section: (bookTitle: string) => `《${bookTitle}》 · Agent 工作区`,
   heading: 'Agent 工作区',
   lede: '就所选稿件范围提出修改。提议先列在这里；提交后成为修改建议，是否采纳和应用由你在每张修改建议卡上决定。',
   safety: '修改方式',

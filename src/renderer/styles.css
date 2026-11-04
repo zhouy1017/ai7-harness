@@ -2388,13 +2388,14 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 @media (max-width: 1119.98px) {
   .editor-workspace:has(> .manuscript-navigator:not([hidden])),
   .editor-workspace.document-workspace:has(> .manuscript-navigator:not([hidden])) { grid-template-columns: minmax(0, 1fr) 3.4rem; grid-template-rows: minmax(0, 1fr); }
-  .editor-workspace > .manuscript-navigator { position: absolute; z-index: 8; inset: 0 3.4rem 0 auto; width: min(21rem, calc(100% - 3.4rem)); border: 1px solid var(--boundary); }
+  .editor-workspace > .manuscript-navigator { position: absolute; grid-area: auto; z-index: 8; inset: 0 3.4rem 0 auto; width: min(21rem, calc(100% - 3.4rem)); border: 1px solid var(--boundary); }
   .editor-workspace > .region-separator { display: none !important; }
 }
 
-/* Keep one card surface. A grouping that contains cards is an unframed layout section. */
-.content :is([class*="-card"], .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset) { border-width: 1px; border-radius: 10px; box-shadow: none; }
-.content :is([class*="-card"], .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset):has(:is([class*="-card"], .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset)) { border: 0; border-radius: 0; box-shadow: none; background: transparent; padding: 0; }
+/* Only page-card surfaces participate in flattening; card parts and floating dialogs do not.
+   A grouping that contains page cards is an unframed layout section. */
+.content :is(.analysis-feedback-card, .baseline-analysis-card, .custom-dimension-card, .default-rule-card, .document-workflow-card, .evidence-card, .guideline-card, .learning-card, .model-role-card, .native-artifact-card, .onboarding-card, .production-document-card, .research-evidence-card, .review-workspace-card, .roundtrip-card, .source-card, .task-authorization-card, .task-card, .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset) { border-width: 1px; border-radius: 10px; box-shadow: none; }
+.content :is(.analysis-feedback-card, .baseline-analysis-card, .custom-dimension-card, .default-rule-card, .document-workflow-card, .evidence-card, .guideline-card, .learning-card, .model-role-card, .native-artifact-card, .onboarding-card, .production-document-card, .research-evidence-card, .review-workspace-card, .roundtrip-card, .source-card, .task-authorization-card, .task-card, .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset):has(:is(.analysis-feedback-card, .baseline-analysis-card, .custom-dimension-card, .default-rule-card, .document-workflow-card, .evidence-card, .guideline-card, .learning-card, .model-role-card, .native-artifact-card, .onboarding-card, .production-document-card, .research-evidence-card, .review-workspace-card, .roundtrip-card, .source-card, .task-authorization-card, .task-card, .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset)) { border: 0; border-radius: 0; box-shadow: none; background: transparent; padding: 0; }
 
 .context-actions .return-chip-host { margin: 0; min-width: 0; }
 .context-actions .return-chip { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

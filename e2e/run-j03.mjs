@@ -50,6 +50,33 @@ async function assertShellFrame(renderer, name) {
   })()`, name);
 }
 
+// Mount the affected card shapes against the real renderer stylesheet. Their named
+// header/action/line parts are not nested page cards; genuine card groups still flatten.
+async function assertCardFrames(renderer) {
+  await assertRenderer(renderer, `(() => {
+    const content=document.querySelector('.content'), host=document.createElement('div');
+    if(!content) return false;
+    document.body.append(host);
+    try {
+      const cards=[['editorial-mark-card','editorial-mark-card-header'],['evidence-card','evidence-card-actions'],['production-document-card','document-card-line']].map(([name,part])=>{
+        const card=document.createElement('article'), child=document.createElement('div');
+        card.className=name; child.className=part; child.append(document.createElement('button')); card.append(child);
+        if(name==='editorial-mark-card') card.dataset.markKind='annotation';
+        if(name==='evidence-card') card.dataset.checkState='candidate';
+        host.append(card); return card;
+      });
+      const frame=(card)=>{const s=getComputedStyle(card);return [s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth,s.borderTopStyle,s.backgroundColor,s.paddingTop,s.paddingRight,s.paddingBottom,s.paddingLeft,s.boxShadow];};
+      const before=cards.map(frame);
+      content.append(host);
+      if(!cards.every((card,i)=>JSON.stringify(frame(card))===JSON.stringify(before[i]))) return false;
+      const group=document.createElement('section'); group.className='source-card';
+      host.append(group); group.append(cards[2]);
+      const s=getComputedStyle(group);
+      return s.borderTopWidth==='0px' && s.paddingTop==='0px' && s.backgroundColor==='rgba(0, 0, 0, 0)' && JSON.stringify(frame(cards[2]))===JSON.stringify(before[2]);
+    } finally { host.remove(); }
+  })()`, 'shell-card-frames-survive');
+}
+
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -827,6 +854,7 @@ async function main() {
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
     await assertShellFrame(renderer, 'shell-frame-manuscript');
+    await assertCardFrames(renderer);
     for (const section of ['overview', 'analysis', 'review', 'evaluation', 'deliverables']) {
       await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section(section)), `shell-frame-open-${section}`);
       await waitFor(renderer, `document.querySelector('[data-screen="book-${section}"]')`, `shell-frame-ready-${section}`);

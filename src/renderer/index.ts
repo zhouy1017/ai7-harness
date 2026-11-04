@@ -1977,7 +1977,6 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   content.dataset['readOnly'] = 'true';
   content.dataset['blockCount'] = String(projection.blocks.length);
   content.append(
-    element('p', 'section-label', `${projection.bookTitle} · 历史修订版 · 永久只读`),
     element('h2', undefined, `稿件修订版${technicalWords(` ${projection.revisionLabel}`)}`),
     element('p', 'lede', `${projection.position.label}。此窗口不装载编辑器，也不提供写入、修订日志、替换、撤销/重做或里程碑操作。`),
   );
@@ -2498,7 +2497,6 @@ async function renderBookWorkbenchChooser(
     content.classList.add('book-workbench-chooser');
     content.dataset['currentBookId'] = currentOverview.book.bookId;
     content.append(
-      element('p', 'section-label', `${currentOverview.book.title} · 图书工作台`),
       element('h2', undefined, '在另一本图书工作台打开'),
       element('p', 'lede', '选择会创建或显示目标图书已有的工作台；当前图书工作台保持打开。'),
     );
