@@ -52,7 +52,6 @@ import {
   analysisFourSentences,
   ANALYSIS_ENTITY_KIND_LABELS,
   analysisProvenanceSummary,
-  analysisKindSubtitle,
   ANALYSIS_EDITORIAL_NOT_DO,
   runStepIsStale,
   RUN_LIVENESS_STAGE_LABELS,
@@ -1022,11 +1021,6 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (quickStart?.rule) quick.dataset['ruleVersionId'] = quickStart.rule.ruleVersionId;
       // Only a quick start on offer joins the actions a preparation holds and gives back.
       actionButtons.push(quick);
-      const quickNote = element('p', 'field-note analysis-quick-note', quickRule !== null
-        ? `按默认执行规则「${quickRule.name}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`
-        : quickStart?.reason ?? '这种更新没有快速开始；请先看计划。');
-      quickNote.id = `analysis-quick-note-${mode}`;
-      quickNote.dataset['quickStart'] = quickRule !== null ? 'available' : 'unavailable';
       const choice = element('div', 'analysis-update-choice');
       choice.id = `analysis-update-choice-${mode}`;
       choice.hidden = true;
@@ -1063,7 +1057,6 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // full rank, and only the result set's own identity and kind step down into the disclosure.
     section.append(
       element('h4', undefined, '历次分析'),
-      element('p', 'field-note', `共 ${projection.listPages['history.entries']?.total ?? history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
       technicalDetails('analysis-facts',
         element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
     );
@@ -1194,9 +1187,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.
-    card.append(heading, element('p', 'field-note', analysisKindSubtitle(
-      projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
-    )));
+    card.append(heading);
     card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
     if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
       const report = projection.taskOutcome.report;

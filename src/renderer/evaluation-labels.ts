@@ -75,7 +75,7 @@ export const EVALUATION_VERDICT = '总评';
 export const EVALUATION_CONCLUSION_LEGEND = '结论（由你选定）';
 export const EVALUATION_RECOMMEND_BLOCKED = '有「高」风险还没有经人工复核，「推荐出版」暂不能选。';
 export const EVALUATION_VERSIONS_HEADING = '版本';
-export const EVALUATION_EMPTY = '这本书还没有评估。开始评估后，按本社评估方案逐项打分，定稿后留作记录。';
+export const EVALUATION_EMPTY = '这本书还没有评估。';
 export const EVALUATION_STATUS = {
   /** Leaving the manuscript for 评估 from its 工作 group (Issue #429 review): its edits are saved first. */
   leaving: '正在保存稿件并打开评估…',
@@ -240,7 +240,7 @@ export function evaluationProfileUse(profile: { records: number; books: number }
 // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) --------------------------------------
 
 export const EVALUATION_AI7_HEADING = 'AI7 初评';
-export const EVALUATION_AI7_LEDE = 'AI7 按本社评估方案通读全书，给每一项一个初评分数和评语，供你打分时参考；记录保存的是你的评分，结论由你选定。';
+export const EVALUATION_AI7_LEDE = 'AI7 通读全书并提供初评分数和评语，评分与结论由你决定。';
 export const EVALUATION_AI7_NONE = 'AI7 还没有为这本书做初评。';
 export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' };
 export const EVALUATION_AI7_OPEN_PLAN = '查看计划并开始';
@@ -345,7 +345,7 @@ export function evaluationAi7ConclusionLine(profile: Pick<EvaluationProfileProje
 
 export const READERS_REPORT_HEADING = '审稿意见';
 export const READERS_REPORT_LEDE =
-  '从定稿的评估起草审稿意见：总体评价、主要优点、主要问题、修改建议与结论。草稿在稿件编辑面上由你修改，保存为版本后可导出为 DOCX；它是草稿，不会交付或发送，也不改变评估记录。';
+  '根据定稿评估起草审稿意见，修改并保存后可导出，草稿不会自动发送或改变评估。';
 export const READERS_REPORT_ACTIONS = {
   prepare: '起草',
   openPlan: '查看计划并开始',
@@ -387,9 +387,9 @@ export function readersReportDraftLine(draft: NonNullable<EvaluationReadersRepor
 // ---- 市场 (Issue #429, plan slice S81b2; V2-UX-EVAL-009, EVAL-010) ------------------------------------------------------
 
 export const EVALUATION_MARKET_HEADING = '市场定位与策略';
-export const EVALUATION_MARKET_LEDE = '「读者与市场潜力」一项的展开：目标读者、卖点与渠道是 AI7 从所读书稿的题材与写法推断的，不是书稿里写明的；可比图书与定价首印来自本社数据。';
+export const EVALUATION_MARKET_LEDE = '目标读者、卖点与渠道由 AI7 推断，可比图书与定价首印来自本社数据。';
 /** The producing Run owns the research status; a market section alone establishes no web research. */
-export const EVALUATION_MARKET_OFFLINE = '市场部分是否检索外网，以产生这一版的运行报告为准；没有检索记录时为「未联网核查」。市场判断仍需人工核对。';
+export const EVALUATION_MARKET_OFFLINE = '联网情况以运行报告为准，无检索记录即未联网核查；市场判断仍需人工核对。';
 export const EVALUATION_MARKET_LISTS = { readers: '目标读者', sellingPoints: '差异化卖点', channels: '渠道与策略' } as const;
 /** Said beside AI7's market words: whose they are, and what they rest on. */
 export const EVALUATION_MARKET_AI7 = 'AI7 · 据书稿题材推断';
@@ -465,7 +465,7 @@ export function evaluationPricingLines(pricing: EvaluationPricingProjection): st
 // ---- 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008) ---------------------------------------------------
 
 export const EVALUATION_REWRITE_HEADING = '按我的评分重写评语';
-export const EVALUATION_REWRITE_LEDE = '你改过 AI7 的分数后，AI7 可以按你保存的分数和调分原因重写各项评语与总评；分数一个也不改，重写的评语要你采用后才记入这一版。';
+export const EVALUATION_REWRITE_LEDE = 'AI7 可按你保存的分数和调分原因重写评语，分数不变，评语经你采用后才记入这一版。';
 export const EVALUATION_REWRITE_ACTIONS = {
   prepare: '按我的评分重写评语',
   openPlan: '查看计划并开始',

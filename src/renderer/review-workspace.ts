@@ -136,7 +136,6 @@ import {
   REVIEW_EXPORT_NEEDS_REPORT,
   REVIEW_FILTER_ALL,
   REVIEW_FILTER_LABELS,
-  REVIEW_FILTER_NOTE,
   REVIEW_IGNORE_LABEL,
   REVIEW_IGNORE_NOTE,
   REVIEW_LEDE,
@@ -166,7 +165,6 @@ import {
   REVIEW_SCOPE_LEGEND,
   REVIEW_SECTION_LABEL,
   REVIEW_SEVERITY_PILLS,
-  REVIEW_SHEET_NOTE,
   REVIEW_SHEET_TITLE,
   REVIEW_STATUS_LINES,
   REVIEW_STATUS_PILLS,
@@ -1268,7 +1266,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
       filters.append(more);
     }
-    section.append(filters, el('p', 'field-note', REVIEW_FILTER_NOTE));
+    section.append(filters);
     if ((run.excludedTotal ?? 0) > 0) {
       const details = el('details', 'review-excluded');
       details.open = excludedOpen;
@@ -2299,7 +2297,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     form.noValidate = true;
     const title = el('h3', undefined, REVIEW_SHEET_TITLE);
     title.id = sheetTitleId;
-    form.append(title, el('p', 'field-note', REVIEW_SHEET_NOTE));
+    form.append(title);
 
     // 按已保存的工序 (Issue #65, S30; ADR 0087 §4): fills the categories and the scope; the plan is still read before 开始审阅.
     const procedureField = el('div', 'review-sheet-procedure');
