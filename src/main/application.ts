@@ -4243,17 +4243,6 @@ export async function runApplication(): Promise<void> {
         throw new ServiceCallError('MODEL_SERVICE_STATE_UNCERTAIN', '凭据已受保护，但连接状态需要处理。');
       }
       await service!.call('refreshModelServiceModels', { route });
-      const searchBackendId = `search-${route.startsWith('deepseek-') ? 'deepseek' : route.startsWith('openai-') ? 'openai' : route.startsWith('anthropic-') ? 'anthropic' : ''}`;
-      if (searchBackendId !== 'search-') {
-        const search = await service!.call('getSearchBackendSettings', {});
-        if (search.backends.some((backend) => backend.backendId === searchBackendId)) {
-          const existing = search.backends.find((backend) => backend.backendId === searchBackendId)!.connection;
-          const pendingSearch = await service!.call('saveSearchBackendCredential', { backendId: searchBackendId, credentialReference: existing.credentialReference, credentialOperationState: 'needs-attention' });
-          try { await protectedSecretStore.copy(pending.credentialReference, pendingSearch.credentialReference!); }
-          catch { throw new ServiceCallError('PROTECTED_SECRET_WRITE_FAILED', '模型渠道凭据未能同步到联网检索。'); }
-          await service!.call('saveSearchBackendCredential', { backendId: searchBackendId, credentialReference: pendingSearch.credentialReference, credentialOperationState: 'ready' });
-        }
-      }
       return settingsProjection();
     };
     /** Remove a route's credential — the DeepSeek 开放平台（官方） route's when none is named — keeping its connection 需设置. */
