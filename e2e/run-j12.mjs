@@ -765,6 +765,7 @@ async function main() {
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]'), node=>node.textContent).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-tabs');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]').length===1 && document.querySelector('[data-screen="quality-learning"] [role="tab"]')?.textContent==='反馈历史'`, 'ordinary-quality-feedback-only');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='反馈历史已打开'`, 'ordinary-quality-loaded');
     await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
