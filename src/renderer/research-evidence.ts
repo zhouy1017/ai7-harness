@@ -8,7 +8,6 @@ import {
   SOURCES_STATUS,
   SOURCE_ORIGINAL_LABEL,
   SOURCE_SAVE_ACTION,
-  SOURCE_SAVE_NOTE,
   SOURCE_TRANSLATION_MACHINE,
   SOURCE_UNITS_HEADING,
   researchUnitLine,
@@ -84,7 +83,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
       save.disabled = saving !== null;
       save.addEventListener('click', () => void saveAsMaterial(record));
       actions.append(save);
-      article.append(actions, el('p', 'field-note', SOURCE_SAVE_NOTE));
+      article.append(actions);
     } else {
       article.append(el('p', 'field-note research-evidence-save-refusal', record.saveRefusal));
     }
@@ -105,7 +104,9 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
 
   const draw = (): void => {
     if (last === null) return;
-    const children: HTMLElement[] = [el('p', 'field-note research-evidence-statement', last.statement)];
+    const canSave = records.some((record) => record.saveRefusal === null);
+    const children: HTMLElement[] = [el('p', 'field-note research-evidence-statement', canSave
+      ? `${last.statement.replace(/。$/u, '')}；保存到本机资料库不会发送或授予任务读取。` : last.statement)];
     if (last.units.length > 0) {
       const units = el('section', 'research-evidence-units');
       units.append(el('h3', undefined, SOURCE_UNITS_HEADING));
