@@ -552,10 +552,9 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       if (draft.missingChecks.length > 0) label.append(` · 尚缺：${draft.missingChecks.join('、')}`);
       section.append(label);
     }
-    section.append(el('p', 'field-note', draft.scopeStatement));
     const group = el('fieldset', 'correction-variants');
     const name = uid('variant');
-    group.append(el('legend', undefined, draft.variants.length === 0 ? `更正方案 · ${CORRECTION_NO_VARIANTS}` : '更正方案'));
+    group.append(el('legend', undefined, `更正方案 · ${draft.variants.length === 0 ? `${draft.scopeStatement.replace(/。$/u, '')}；${CORRECTION_NO_VARIANTS}` : draft.scopeStatement}`));
     const choices: Array<{ id: string; label: string; text: string | null; rationale: string | null; lines: string[] }> = [
       ...draft.variants.map((variant, index) => ({ id: variant.variantId, label: `方案 ${index + 1}：${variant.text}`, text: variant.text, rationale: variant.rationale,
         lines: [variant.rationale, ...variant.unresolved.map((line) => `未解决：${line}`), ...variant.limitations.map((line) => `局限：${line}`)] })),
