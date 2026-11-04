@@ -17,9 +17,9 @@ export const LONG_PARAGRAPH_LEGEND = '超长段落的处理方式';
 export const SOFT_BREAK_NOTE = '以下段落超出段落上限，已在文件中的软换行处分段：';
 export const STRUCTURE_CHOICE_REQUIRED = '请为超出段落上限的段落选择「按句子分段」或「按长度分为多段」。';
 const RULE_LABELS: Readonly<Record<ImportHeadingRule, string>> = { numbered: '编号行', contents: '目录条目', 'short-line': '独立短行' };
-const METHOD_LABELS: Readonly<Record<LongParagraphMethod, { label: string; hint: string }>> = {
-  sentences: { label: '按句子分段', hint: '在句末标点处分为若干段，每段不超过段落上限。' },
-  blocks: { label: '按长度分为多段', hint: '按段落上限依次切分，切分处可能在句中。' },
+const METHOD_LABELS: Readonly<Record<LongParagraphMethod, string>> = {
+  sentences: '按句子分段，每段不超过上限',
+  blocks: '按长度分段，可能在句中切开',
 };
 
 export function lineageLine(paragraph: ImportSplitParagraphProjection): string {
@@ -100,7 +100,7 @@ export function renderStructureReview(structure: ImportStructureProjection | und
       radio.disabled = stated !== undefined;
       radio.addEventListener('change', () => { if (radio.checked) method = option; });
       const copy = el('span');
-      copy.append(el('strong', undefined, METHOD_LABELS[option].label), el('small', undefined, METHOD_LABELS[option].hint));
+      copy.append(el('strong', undefined, METHOD_LABELS[option]));
       label.append(radio, copy);
       fieldset.append(label);
     }

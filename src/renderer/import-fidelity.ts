@@ -74,7 +74,9 @@ function textBoxChoice(
       if (radio.checked) onChange(option.disposition);
     });
     const copy = el('span');
-    copy.append(el('strong', undefined, option.label), el('small', undefined, option.hint));
+    copy.append(el('strong', undefined, option.disposition === 'retain'
+      ? '保留文本框，稿件中不显示，导出时恢复'
+      : '并入正文，接在原位置后，导出不再保留文本框'));
     label.append(radio, copy);
     fieldset.append(label);
   }
