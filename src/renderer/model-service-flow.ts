@@ -305,7 +305,8 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
   const section = el('section', 'review-section model-service-flow');
   section.dataset['modelServiceFlow'] = 'true';
   section.setAttribute('aria-label', '选择模型');
-  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型；${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
+  const effect = MODEL_SERVICE_ROUTE_EFFECT_LABEL.replace('切换路线', '更换模型服务').replace('已在进行的任务保持原有绑定', '进行中的任务不变').replace('。没有自动备用路线。', '，也没有自动备用服务。');
+  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `两个角色可分别选择模型；${effect}`));
   const channels = el('fieldset', 'model-service-flow-channels');
   channels.append(el('legend', undefined, '1. 渠道'));
   const steps = el('div');
