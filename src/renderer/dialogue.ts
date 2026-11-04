@@ -167,9 +167,9 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const incomplete = dialogueIncompleteLine(attempt);
     if (incomplete !== null || attempt.convertedMarkIds.length > 0) {
       const status = el('span');
-      if (incomplete !== null) status.append(el('span', 'dialogue-incomplete', attempt.convertedMarkIds.length > 0 ? incomplete.replace(/。$/u, '') : incomplete));
+      if (incomplete !== null) status.append(el('span', 'dialogue-incomplete', incomplete));
       if (attempt.convertedMarkIds.length > 0) {
-        if (incomplete !== null) status.append('；');
+        if (incomplete !== null) status.append(' ');
         status.append(el('span', 'dialogue-converted', dialogueConvertedLine(attempt.convertedMarkIds.length)));
       }
       head.append(status);
