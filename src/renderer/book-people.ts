@@ -139,8 +139,6 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
     const form = el('form', 'book-people-form');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
-    const hint = el('small', 'field-note', BOOK_PEOPLE_NAMES_HINT);
-    hint.id = uid('names-hint');
     const field = (key: 'authors' | 'editors'): HTMLElement => {
       const label = el('label', 'book-people-field');
       const input = el('input');
@@ -148,12 +146,13 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
       input.value = current[key];
       input.disabled = working;
       input.dataset['peopleField'] = key;
-      input.setAttribute('aria-describedby', hint.id);
+      input.placeholder = '多个名字用、分隔';
+      input.setAttribute('aria-description', BOOK_PEOPLE_NAMES_HINT);
       input.addEventListener('input', () => { current[key] = input.value; current.problem = null; sync(); });
       label.append(el('span', undefined, BOOK_PEOPLE_FIELD_LABELS[key]), input);
       return label;
     };
-    form.append(field('authors'), field('editors'), hint);
+    form.append(field('authors'), field('editors'));
     const related = el('fieldset', 'book-people-related');
     related.append(el('legend', undefined, BOOK_PEOPLE_FIELD_LABELS.related));
     if (current.related.length === 0) related.append(el('p', 'field-note', BOOK_PEOPLE_RELATED_NONE));

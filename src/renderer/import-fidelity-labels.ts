@@ -150,16 +150,16 @@ export function conversionNoteText(conversion: ManuscriptConversionProjection): 
 // ---- the text-box choice (ADR 0086 §2) ---------------------------------------------------------------
 
 export const TEXT_BOX_CHOICE_LEGEND = '文本框怎样进来';
-export const TEXT_BOX_CHOICE_OPTIONS: ReadonlyArray<{ disposition: TextBoxDisposition; label: string; hint: string }> = [
+export const TEXT_BOX_CHOICE_OPTIONS: ReadonlyArray<{ disposition: TextBoxDisposition; label: string; controlLabel: string }> = [
   {
     disposition: 'retain',
     label: '保留为文本框',
-    hint: '稿件中不显示，导出时恢复。',
+    controlLabel: '保留文本框，稿件中不显示，导出时恢复',
   },
   {
     disposition: 'merge',
     label: '并入正文',
-    hint: '文本框中的段落进入稿件，紧接在锚定它的段落之后；导出时不再写出原文本框。',
+    controlLabel: '并入正文，接在原位置后，导出不再保留文本框',
   },
 ];
 
