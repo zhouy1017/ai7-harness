@@ -91,21 +91,21 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
   input.maxLength = 1_000;
   input.rows = 2;
   input.setAttribute('aria-label', '相似段落检索');
-  label.append(input);
+  const status = document.createElement('span'); status.setAttribute('role', 'status');
+  label.append(status, input);
   const selection = window.getSelection()?.toString() ?? '';
   const useSelection = document.createElement('button');
   useSelection.type = 'button'; useSelection.textContent = '使用当前选中文字';
   useSelection.addEventListener('click', () => { input.value = (window.getSelection()?.toString() || selection).slice(0, 1_000); });
   const search = document.createElement('button');
   search.type = 'button'; search.textContent = '检索相似段落';
-  const status = document.createElement('p'); status.className = 'field-note'; status.setAttribute('role', 'status');
   const results = document.createElement('ul');
   search.addEventListener('click', () => {
     if (search.disabled || input.value.trim().length === 0) return;
-    search.disabled = true; status.textContent = '正在本机检索…'; results.replaceChildren();
+    search.disabled = true; status.textContent = ' · 正在本机检索…'; results.replaceChildren();
     void api.searchReferableMaterials({ bookId, query: input.value, k: 8 }).then((page) => {
       if (!root.isConnected) return;
-      status.textContent = page.candidates.length === 0 ? '没有找到相似段落。' : '以下是检索候选，预览只供选择参考资料。';
+      status.textContent = page.candidates.length === 0 ? ' · 没有找到相似段落。' : ' · 以下是检索候选，预览只供选择参考资料。';
       for (const candidate of page.candidates) {
         const item = items.find((offer) => offer.materialId === candidate.sourceId);
         const row = document.createElement('li');
@@ -116,15 +116,15 @@ export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMat
         choice.addEventListener('click', () => {
           if (choice.disabled || item === undefined) return;
           const reason = taskMaterialSelectionReason(item, items, selected);
-          if (reason !== null) { status.textContent = reason; choice.disabled = true; return; }
+          if (reason !== null) { status.textContent = ` · ${reason}`; choice.disabled = true; return; }
           choice.disabled = true;
           if (!selected.has(candidate.sourceId)) choose(candidate.sourceId);
         });
         const preview = document.createElement('p'); preview.textContent = candidate.preview;
         row.append(choice, preview); results.append(row);
       }
-    }).catch(() => { status.textContent = '这次检索没有完成，请稍后重试。'; }).finally(() => { search.disabled = false; });
+    }).catch(() => { status.textContent = ' · 这次检索没有完成，请稍后重试。'; }).finally(() => { search.disabled = false; });
   });
-  root.append(label, useSelection, search, status, results);
+  root.append(label, useSelection, search, results);
   return root;
 }

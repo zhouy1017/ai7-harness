@@ -308,7 +308,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
   const heading = el('h3', undefined, KEYBOARD_SHORTCUTS_HEADING);
   const actions = el('div', 'button-row');
   actions.append(resetAll);
-  root.append(el('p', 'field-note keyboard-always-on', KEYBOARD_ALWAYS_ON), heading, el('p', 'field-note', KEYBOARD_LEDE), actions, table);
+  root.append(heading, el('p', 'field-note keyboard-always-on', `${KEYBOARD_ALWAYS_ON.replace(/。$/u, '')}；${KEYBOARD_LEDE}`), actions, table);
   void (async () => {
     setStatus(KEYBOARD_STATUS_LINES.loading, 'busy');
     try {
