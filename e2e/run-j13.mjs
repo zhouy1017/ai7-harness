@@ -979,10 +979,10 @@ async function main() {
     const firstSide = await bookSide(renderer, first, 'first-side');
     requireJourney(firstSide.none === null && firstSide.memberships.length === 1 && firstSide.memberships[0][0] === seriesId &&
       firstSide.memberships[0][1].startsWith(`书系「${SERIES}」 · `) && firstSide.memberships[0][1].endsWith(' 加入') &&
-      firstSide.summary === '书系成员变更记录（1）' && JSON.stringify(firstSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`]]), 'first-side-words', firstSide);
+      firstSide.summary === '书系成员变更记录 · 1' && JSON.stringify(firstSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`]]), 'first-side-words', firstSide);
     await backToLibrary(renderer, 'first-side');
     const secondSide = await bookSide(renderer, second, 'second-side');
-    requireJourney(secondSide.memberships.length === 1 && secondSide.summary === '书系成员变更记录（3）' &&
+    requireJourney(secondSide.memberships.length === 1 && secondSide.summary === '书系成员变更记录 · 3' &&
       JSON.stringify(secondSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`], ['remove', `移出书系「${SERIES}」`], ['add', `加入书系「${SERIES}」`]]), 'second-side-words', secondSide);
     await backToLibrary(renderer, 'second-side');
     const outsideSide = await bookSide(renderer, outside, 'outside-side');
@@ -1020,7 +1020,7 @@ async function main() {
     'restart-series-words', after);
     await leaveSeries(renderer, 'restart-series');
     const firstAfter = await bookSide(renderer, first, 'restart-first');
-    requireJourney(firstAfter.none === '不在任何书系中。' && firstAfter.summary === '书系成员变更记录（2）' &&
+    requireJourney(firstAfter.none === '不在任何书系中。' && firstAfter.summary === '书系成员变更记录 · 2' &&
       JSON.stringify(firstAfter.history.map(([kind]) => kind)) === JSON.stringify(['remove', 'add']), 'restart-first-words', firstAfter);
     await backToLibrary(renderer, 'restart-first');
 
