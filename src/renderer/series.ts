@@ -292,7 +292,7 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
 
   return {
     async load(): Promise<void> {
-      root.replaceChildren(el('p', 'field-note', SERIES_STATUS.loading));
+      root.replaceChildren();
       projection = await api.inspectSeriesList({ after: null });
       paint(options.focusSeriesId === null ? null : `[data-series-id="${options.focusSeriesId}"] [data-series-action="open"]`);
     },
@@ -736,7 +736,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
 
   return {
     async load(): Promise<SeriesProjection> {
-      root.replaceChildren(el('p', 'field-note', SERIES_STATUS.loading));
+      root.replaceChildren();
       projection = await api.inspectSeries({ seriesId: options.seriesId });
       paint(null);
       return projection;

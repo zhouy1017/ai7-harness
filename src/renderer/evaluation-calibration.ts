@@ -330,7 +330,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
 
   return {
     async load(): Promise<void> {
-      root.replaceChildren(el('p', 'field-note', CALIBRATION_STATUS.loading));
+      root.replaceChildren();
       projection = await readPage();
       if (!root.isConnected) return;
       const focus = options.focusBookId;
