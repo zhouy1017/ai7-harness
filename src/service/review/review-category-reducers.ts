@@ -162,10 +162,12 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
+      const retainedFinding = { ...finding, note };
+      if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,
         findingOrdinal: (outcome.result.acceptedIndexes?.[index] ?? index) + 1,
-        finding: annotation ? { quote: finding.quote, blockOrdinal: finding.blockOrdinal, severity: finding.severity, note, ...(finding.clauseId === undefined ? {} : { clauseId: finding.clauseId }) } : { ...finding, note },
+        finding: retainedFinding,
         blockId: blockId ?? '',
         blockText: block?.text ?? null,
         location,

@@ -176,6 +176,7 @@ describe('a review category reduction', () => {
     { name: 'never searches outside the unit', texts: ['没有', '仍然没有'], ordinal: 1, outside: true, state: 'quote-not-found' },
     { name: 'rejects an identical resolved replacement', texts: ['没有', '目标'], ordinal: 1, replacement: '目标', state: 'replacement-identical' },
     { name: 'preserves Exact Fetch exclusion after recovery', texts: ['没有', '目标'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
+    { name: 'preserves Exact Fetch exclusion before whole-block fallback', texts: ['没有', '仍然没有'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
   ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state }) => {
     const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
     const unit = { ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: repeatedId ? [inputs[1]!.blockId] : [] };
