@@ -68,10 +68,10 @@ export const MANUSCRIPT_MIN_WIDTH_PX = 480;
 
 /** Each face with a stable CJK fallback chain, so a missing glyph is drawn by a face of the same kind (VIEW-004). */
 const FONT_STACKS: Readonly<Record<ManuscriptFontFamily, string>> = Object.freeze({
-  serif: '"Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif',
+  serif: '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "SimSun", serif',
   kai: '"Kaiti SC", "STKaiti", "KaiTi", "Noto Serif CJK SC", "Songti SC", serif',
   fangsong: '"FangSong", "STFangsong", "Fangsong SC", "Noto Serif CJK SC", "Songti SC", serif',
-  sans: '"Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+  sans: '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
 });
 
 export interface ViewState {

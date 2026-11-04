@@ -1,0 +1,29 @@
+/* Noto SC release fonts, OFL-1.1; provenance and full notices: assets/fonts. */
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url('./fonts/NotoSansSC-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url('./fonts/NotoSansSC-Bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Serif SC";
+  src: url('./fonts/NotoSerifSC-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Noto Serif SC";
+  src: url('./fonts/NotoSerifSC-Bold.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600 900;
+  font-display: swap;
+}

@@ -68,7 +68,7 @@ describe('the preferences registry', () => {
     expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
       'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
       'editor.density': 'standard',
-      'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.9, columnWidth: 38, alignment: 'start' },
+      'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' },
       'layout.regions': { supportingWidth: null, drawerWidth: null, hidden: [] }, 'analysis.lastViewedRevision': {}, 'onboarding.state': null, 'learning.askFrequency': 'occasionally' });
     for (const definition of Object.values(PREFERENCE_KEYS)) expect(definition.validate(definition.default)).toBe(true);
   });
