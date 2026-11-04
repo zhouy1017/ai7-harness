@@ -21,7 +21,7 @@ import { readActionDefaults, rememberActionDefaults } from './action-defaults.js
 export interface ManuscriptExportSurface {
   /** Open the card for one version; `opener` gets focus back when the card closes. */
   open(target: ManuscriptExportTargetInput, label: string | null, opener: HTMLElement | null): void;
-  menu(target: ManuscriptExportTargetInput, label: string | null): HTMLElement;
+  menu(target: ManuscriptExportTargetInput | (() => ManuscriptExportTargetInput), label: string | null): HTMLElement;
   /** Whether a call of the card is in flight, so the destination does not redraw under it. */
   busy(): boolean;
   /** Close the card without a word, unless a call of it is in flight: what it exports is no longer on show. */
@@ -187,7 +187,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     busy = true; activeTarget = target; receipt = null; reviewed = null; problem = null; phase = 'reviewing'; render();
     const selected = { ...switches };
     try {
-      await rememberActionDefaults({ exportFormat: format, ...selected });
+      await rememberActionDefaults({ exportFormat: format, ...selected }).catch(() => options.setStatus('未能记住导出选项，本次仍会继续导出。', 'error'));
       options.setStatus(EXPORT_STATUS_LINES.choosing, 'busy');
       const review = await api.reviewManuscriptExport({ target, options: selected, format });
       if (destroyed) return;
@@ -224,20 +224,22 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
   render();
   return {
     open(target, _label, source) { opener = source; void exportFile(target); },
-    menu(target, label) {
-      const menu = el('details', 'export-menu'); menu.dataset['exportMenu'] = target.kind;
+    menu(targetOrRead, label) {
+      const target = (): ManuscriptExportTargetInput => typeof targetOrRead === 'function' ? targetOrRead() : targetOrRead;
+      const menu = el('details', 'export-menu'); menu.dataset['exportMenu'] = target().kind;
       const summary = el('summary', undefined, '导出 ▾'); menu.append(summary);
+      const body = el('div', 'export-menu-body'); menu.append(body);
       for (const [value, name] of [['docx', 'DOCX'], ['pdf', 'PDF'], ['markdown', 'Markdown']] as const) {
         const button = el('button', 'quiet', name); button.type = 'button'; button.dataset['exportAction'] = 'open';
-        button.dataset['exportTarget'] = target.kind; button.dataset['exportFormatAction'] = value;
+        button.dataset['exportTarget'] = target().kind; button.dataset['exportFormatAction'] = value;
         button.setAttribute('aria-label', `导出 ${label ?? '稿件'} · ${name}`);
-        button.addEventListener('click', () => { if (busy) return; format = value; opener = summary; menu.open = false; void exportFile(target); }); menu.append(button);
+        button.addEventListener('click', () => { if (busy) return; format = value; opener = summary; menu.open = false; void exportFile(target()); }); body.append(button);
       }
       const settings = el('details', 'export-menu-options'); settings.append(el('summary', undefined, '导出选项'));
       for (const key of EXPORT_OPTION_ORDER) { const label = el('label', 'export-option'); const box = el('input'); box.type = 'checkbox'; box.checked = switches[key];
-        box.addEventListener('change', () => { switches = { ...switches, [key]: box.checked }; void rememberActionDefaults({ [key]: box.checked }); });
+        box.addEventListener('change', () => { switches = { ...switches, [key]: box.checked }; void rememberActionDefaults({ [key]: box.checked }).catch(() => options.setStatus('未能记住导出选项。', 'error')); });
         menu.addEventListener('toggle', () => { box.checked = switches[key]; }); label.append(box, el('span', undefined, EXPORT_OPTION_LABELS[key])); settings.append(label); }
-      menu.append(settings);
+      body.append(settings);
       return menu;
     },
     busy: () => busy,

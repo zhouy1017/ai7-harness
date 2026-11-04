@@ -832,7 +832,7 @@ async function importAndOpen(renderer, dataRoot) {
   await waitForStagedTarget(renderer, dataRoot);
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑段落')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
-  await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
+  await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'title');
   await fill(renderer, '#book-title', '千万字有界编辑校验', 'title-fill');

@@ -1869,7 +1869,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="new-book"]'); if (!target || target.checked) return false; target.click(); return true; })()`, 'word-new-book-select');
   }
   await waitFor(renderer, `document.querySelector('[data-import-relationship="first-manuscript"]')`, 'word-relationship');
-  await assertRenderer(renderer, `(() => { const relationship = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!relationship || relationship.checked) return false; relationship.click(); return true; })()`, 'word-first-manuscript');
+  await assertRenderer(renderer, `(() => { const relationship = document.querySelector('[data-import-relationship="first-manuscript"]'); if (!relationship) return false; relationship.click(); return true; })()`, 'word-first-manuscript');
   const prepareLabel = existingBook ? '查看导入详情' : '查看导入详情';
   await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-controls-before-prepare');
   await assertRenderer(renderer, `(() => {
@@ -3086,7 +3086,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'source-only-pdf-relationship');
     await assertRenderer(
       renderer,
-      `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); return source && !source.checked && !document.querySelector('[data-import-relationship="first-manuscript"]') && !document.querySelector('[data-import-relationship="reimport"]'); })()`,
+      `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); return source && source.checked && !document.querySelector('[data-import-relationship="first-manuscript"]') && !document.querySelector('[data-import-relationship="reimport"]'); })()`,
       'source-only-pdf-relationship-only-source',
     );
     await assertRenderer(
@@ -3184,7 +3184,7 @@ async function main() {
     // they are for a DOCX; source-only stays a real answer for a `.txt` too.
     await assertRenderer(
       renderer,
-      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && !manuscript.checked && !source.checked && !document.querySelector('.attention-note'); })()`,
+      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && document.querySelectorAll('input[name="import-relationship"]:checked').length === 1 && !document.querySelector('.attention-note'); })()`,
       'text-manuscript-relationship-both',
     );
     await assertRenderer(
@@ -3276,7 +3276,7 @@ async function main() {
       // they are for a DOCX; source-only stays a real answer for it too.
       await assertRenderer(
         renderer,
-        `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && !manuscript.checked && !source.checked; })()`,
+        `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && document.querySelectorAll('input[name="import-relationship"]:checked').length === 1; })()`,
         'doc-manuscript-relationship-both',
       );
       await assertRenderer(

@@ -190,6 +190,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let viewportObserver: ResizeObserver | undefined;
 
   let destroyed = false;
+  let currentWindow = initialWindow;
   let editor: BoundedEditor | undefined;
   let editorialMarks: EditorialMarksSurface | undefined;
   let manuscriptRail: PositionRail | undefined;
@@ -505,7 +506,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const exportRoot = element('aside', 'manuscript-export-slot'); content.append(exportRoot);
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
     setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });
-  const exportMenu = manuscriptExport.menu(isDocument ? { kind: 'document', documentId: initialWindow.manuscriptId, revisionId: initialWindow.revisionId } : { kind: 'current' }, null);
+  const exportMenu = manuscriptExport.menu(() => isDocument ? { kind: 'document', documentId: currentWindow.manuscriptId, revisionId: currentWindow.revisionId } : { kind: 'current' }, null);
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';
   analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);
@@ -718,7 +719,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   }
   if (saveMenu === undefined) options.setContextActions(chipHost, exportMenu);
 
-  let currentWindow = initialWindow;
   if (!isDocument) {
     const currentBlock = (): string | null => {
       const focused = editor?.captureContinuity();
