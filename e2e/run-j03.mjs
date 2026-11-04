@@ -814,7 +814,7 @@ async function main() {
     await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-row-pin');
     await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-row-pinned');
     await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
-    await clickSelector(renderer, `[data-nav-book="${crossBookId}"]`, 'book-row-open');
+    await assertRenderer(renderer, `(() => { const link=document.querySelector('[data-nav-book="${crossBookId}"]'); if(!(link instanceof HTMLAnchorElement))return false; link.click(); return true; })()`, 'book-row-open');
     await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-row-route');
     await assertRenderer(renderer, `document.querySelector('[data-nav-book][aria-current="true"]')?.dataset.navBook===${JSON.stringify(crossBookId)}`, 'book-row-current');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'book-row-library');
