@@ -27,7 +27,7 @@ export const IMPORTED_SKILL_UPDATE_NOT_ENABLED = '采纳只生成一个待验证
 export const IMPORTED_SKILL_UPDATE_NONE = '还没有检查过更新。';
 export function importedSkillUpdateRelationLine(relation: ImportedSkillUpdateCheckProjection['relation']): string {
   return relation === 'newer' ? '这是一个新的版本：保留后生成一个更新，待你处理。'
-    : relation === 'same-as-current' ? '这就是此 Skill 保留的来源版本，没有新的更新。'
+    : relation === 'same-as-current' ? '这就是已保留的文件，没有新的更新。'
       : '这个版本已经在此 Skill 的版本历史里；请用「回到此版本」，不会再生成更新。';
 }
 export const IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS: Readonly<Record<ImportedSkillUpdateDisposition, string>> = {

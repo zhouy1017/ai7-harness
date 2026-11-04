@@ -1288,12 +1288,12 @@ async function openWordSourceVersion(bookId: string, sourceVersionId: string): P
     let overview = await window.ai7.getBookOverview({ bookId, historyCursor: null });
     while (!overview.records.some((record) => record.kind === 'source' && record.sourceVersionId === sourceVersionId)) {
       const cursor = overview.historyPage.nextCursor;
-      if (cursor === null) throw new Error('保留的 Word 来源版本不在这本图书的历史中。');
+      if (cursor === null) throw new Error('保留的 Word 原文件不在这本图书的历史中。');
       overview = await window.ai7.getBookOverview({ bookId, historyCursor: cursor });
     }
     renderBookOverview(overview);
     const source = screen.querySelector<HTMLButtonElement>(`[data-record-kind="source"][data-record-id="${CSS.escape(sourceVersionId)}"]`);
-    if (source === null) throw new Error('原始来源版本的精确记录暂时无法打开。');
+    if (source === null) throw new Error('原文件记录暂时无法打开。');
     source.click();
   });
 }

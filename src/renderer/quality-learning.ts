@@ -132,9 +132,9 @@ export function mountWordTrackedEditDetail(options: {
     const next = action('下一页修改详情', 'secondary', 'word-detail-next', () => {
       if (!busy && page?.nextCursor !== null && page?.nextCursor !== undefined) void read(page.nextCursor, 'next');
     }); next.disabled = busy || page?.nextCursor == null;
-    const source = action('查看保留的原始来源版本', 'secondary', 'word-detail-source', () => {
+    const source = action('查看保留的原文件', 'secondary', 'word-detail-source', () => {
       if (busy || page === null) return;
-      void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原始来源版本。'; });
+      void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原文件。'; });
     }); source.disabled = busy || page === null;
     navigation.append(back, next, source);
   };
