@@ -152,8 +152,9 @@ export function mountBookPeople(options: MountBookPeopleOptions): { destroy(): v
     };
     form.append(field('authors'), field('editors'));
     const related = el('fieldset', 'book-people-related');
-    related.append(el('legend', undefined, BOOK_PEOPLE_FIELD_LABELS.related));
-    if (current.related.length === 0) related.append(el('p', 'field-note', BOOK_PEOPLE_RELATED_NONE));
+    const relatedHeading = el('legend', undefined, BOOK_PEOPLE_FIELD_LABELS.related);
+    if (current.related.length === 0) relatedHeading.append(` · ${BOOK_PEOPLE_RELATED_NONE}`);
+    related.append(relatedHeading);
     current.related.forEach((person, index) => {
       const row = el('div', 'book-people-related-row');
       row.dataset['relatedIndex'] = String(index);

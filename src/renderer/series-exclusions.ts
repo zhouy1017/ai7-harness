@@ -363,7 +363,7 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     heading.tabIndex = -1;
     section.append(heading);
     const shown = exclusions!;
-    if (shown.history.length === 0) section.append(el('p', 'field-note', EXCLUSIONS_HISTORY_EMPTY));
+    if (shown.history.length === 0) heading.append(` · ${EXCLUSIONS_HISTORY_EMPTY}`);
     else {
       const list = el('ol', 'series-exclusion-revisions');
       for (const revision of shown.history) list.append(revisionNode(revision));

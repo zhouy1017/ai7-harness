@@ -889,9 +889,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function renderRuns(next: ReviewWorkspaceProjection): HTMLElement {
     const section = el('section', 'review-runs-section');
-    section.append(el('h4', undefined, `${REVIEW_RUNS_HEADING}${next.runsTruncated ? ` · ${reviewRunsTruncatedLine(next.runs.length)}` : ''}`));
+    const heading = el('h4', undefined, `${REVIEW_RUNS_HEADING}${next.runsTruncated ? ` · ${reviewRunsTruncatedLine(next.runs.length)}` : ''}`);
+    section.append(heading);
     if (next.runs.length === 0) {
-      section.append(el('p', 'field-note', REVIEW_NO_RUNS));
+      heading.append(` · ${REVIEW_NO_RUNS}`);
       return section;
     }
     const list = el('ol', 'review-runs');

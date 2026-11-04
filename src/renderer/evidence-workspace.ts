@@ -298,8 +298,9 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderSources(): HTMLElement {
     const section = el('section', 'evidence-sources');
     section.dataset['totalSources'] = String(projection?.totalSources ?? 0);
-    section.append(el('h6', undefined, EVIDENCE_SOURCES_HEADING));
-    if (sources.length === 0) section.append(el('p', 'field-note', EVIDENCE_SOURCES_NONE));
+    const heading = el('h6', undefined, EVIDENCE_SOURCES_HEADING);
+    if (sources.length === 0) heading.append(` · ${EVIDENCE_SOURCES_NONE}`);
+    section.append(heading);
     for (const card of sources) section.append(renderCard(card));
     if (nextCursor !== null) section.append(button(EVIDENCE_SOURCES_MORE, 'more-sources', 'secondary', () => void moreSources()));
     return section;
