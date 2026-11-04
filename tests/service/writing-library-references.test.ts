@@ -631,7 +631,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
     });
   }, 300_000);
 
-  it('refuses a copied draft and unavailable references; 新建文档 prepares new pins', async () => {
+  it('withholds a copied passage and refuses unavailable references; 新建文档 prepares new pins', async () => {
     const { fixture, entries } = await memoryFixture();
     let bookId = '';
     let listedId = '';
@@ -646,7 +646,7 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       store.startMaterialIndexing();
       await store.settleMaterialIndexing();
 
-      // A draft that copies twelve characters of the item is refused whole under the 范例's rules: a gap with its own reason.
+      // Only the copied passage is withheld; the independent draft sections remain available.
       const copying = prepare(store, bookId, { ...WRITING_REQUEST, materialIds: [listed.materialId] });
       answerWriting(entries, copying, {
         ...AUTHORED_WRITING_DRAFT,
@@ -654,13 +654,11 @@ describe('写作任务 lists 资料库 items under 允许参考 and reads them t
       });
       const refused = await run(session, bookId, copying);
       answerWritingReflection(entries, refused.taskOutcome!.report!.accountingDigest);
-      expect(refused.resultSetRevision!.writing.draft).toBeNull();
-      expect(refused.resultSetRevision!.writing.synthesis).toEqual({
-        state: 'gap',
-        reason: `${WRITING_MATERIAL_REFUSAL_PREFIX}草稿与资料库资料《参考资料甲》有连续 12 个字以上相同；资料只参照，不复制，这份草稿不予采用。`,
-      });
-      expect(refused.taskOutcome!.classification).toBe('completed-with-gaps');
-      expect(store.inspectWritingTask(bookId).task!.refusal).toBe(refused.resultSetRevision!.writing.synthesis.reason);
+      expect(refused.resultSetRevision!.writing.draft).toMatchObject({ sections: AUTHORED_WRITING_DRAFT.sections,
+        withheld: [{ section: AUTHORED_WRITING_DRAFT.sections.length, paragraph: 0 }] });
+      expect(refused.resultSetRevision!.writing.synthesis).toEqual({ state: 'closed', reason: null });
+      expect(refused.taskOutcome!.classification).toBe('completed');
+      expect(store.inspectWritingTask(bookId).task!.refusal).toBeNull();
 
       // The next Task lists it too, and is left prepared.
       const next = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '再写一版', materialIds: [listed.materialId] });

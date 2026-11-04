@@ -3496,8 +3496,8 @@ export class BaselineAnalysisExecutionOwner {
               crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
             } else if (step !== null) {
               const validated = prepareRetrievalResult(candidate.text, retrieval);
-              const parsed = validated.rejected.length > 0 ? { ok: false as const, code: 'not-exact-fetched', detail: '未经精确取文' }
-                : step.parse(validated.text, closedOutcomes, crossUnitContext);
+              const parsed = step.parse(validated.text, closedOutcomes, crossUnitContext);
+              if (parsed.ok) markRetrievalResult(parsed.result, validated.rejected);
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
@@ -3556,13 +3556,19 @@ export class BaselineAnalysisExecutionOwner {
       // the four stage totals partition the Run's own work.
       clock.open('reduction');
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
+      const synthesisUnavailable = ['evaluation', 'evaluation-rewrite', 'readers-report'].includes(definition.kind) &&
+        definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed'
+        ? `未完成：没有形成可用的综合结果 · ${majorityGapReason([{ code: 'synthesis-unavailable', reason: crossUnit.reason }]) ?? '没有收到可用的模型回答。'}` : null;
+
       // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
       // range review that closed everything it was asked to read completed, without qualification.
       if (terminalClassification === 'completed' && reduced.gaps.some((gapEntry) => gapEntry.code !== 'out-of-scope')) {
         terminalClassification = reduced.coverage.unitsClosed === 0 ? 'failed' : 'completed-with-gaps';
       }
       // A kind whose book-level step is its result (Issue #432 review): no closed step, no complete Run.
-      if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
+      if ((terminalClassification === 'completed' || terminalClassification === 'completed-with-gaps') && synthesisUnavailable !== null) {
+        terminalClassification = 'failed';
+      } else if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
         terminalClassification = 'completed-with-gaps';
       }
       clock.close();
@@ -3625,7 +3631,8 @@ export class BaselineAnalysisExecutionOwner {
         usage.outputTokens += context.platformSession.usage.outputTokens;
       }
       const noClosedReason = terminalClassification === 'failed'
-        ? `未完成：没有单元读成 · ${majorityGapReason(reduction.gaps) ?? '没有收到可用的模型回答。'}` : null;
+        ? synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? synthesisUnavailable
+          : `未完成：没有单元读成 · ${majorityGapReason(reduction.gaps) ?? '没有收到可用的模型回答。'}` : null;
       const revision = noClosedReason !== null ? null : ledger.persistRevision({
         facts,
         attemptId,
@@ -3699,7 +3706,7 @@ export class BaselineAnalysisExecutionOwner {
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },
         sample,
         findingCounts: definition.findingCounts(reduction),
-        terminalFailure: noClosedReason === null ? null : { code: 'NO_CLOSED_UNITS', reason: noClosedReason },
+        terminalFailure: noClosedReason === null ? null : { code: synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? 'SYNTHESIS_UNAVAILABLE' : 'NO_CLOSED_UNITS', reason: noClosedReason },
       };
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,

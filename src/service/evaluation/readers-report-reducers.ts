@@ -124,6 +124,7 @@ export function reduceReadersReport(input: ReadersReportReductionInput): Readers
         problems: [...synthesis.problems],
         suggestions: [...synthesis.suggestions],
         conclusion: synthesis.conclusion,
+        ...(synthesis.withheld === undefined ? {} : { withheld: synthesis.withheld }),
       },
       synthesis: synthesisState,
     },

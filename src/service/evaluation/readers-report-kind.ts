@@ -126,6 +126,7 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
       promptContractDigest,
       resultSchema: READERS_REPORT_SYNTHESIS_RESULT_SCHEMA,
       step: {
+        requiredForCompletion: true,
         label: SYNTHESIS_LABEL,
         minimumClosedUnits: 1,
         notEnoughReason: '没有读完的阅读范围，全书综合未发起，AI7 没有写出审稿意见草稿。',
