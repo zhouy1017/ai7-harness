@@ -106,13 +106,13 @@ export const LEARNING_LINEAGE_NOT_YET = '尚未生成';
 export const LEARNING_LINEAGE_TASKS_NONE = '尚未被任何任务使用';
 /** What the forward stages are, and why two are empty: said once, so an empty stage never reads as a hidden one. */
 export const LEARNING_LINEAGE_WHY_EMPTY =
-  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。';
+  '学习信号来自这条材料参与生成的本社审阅偏好版本，任务是实际参考这些版本的审阅；目前没有编辑撰写的候选或已启用记忆，并非被隐藏，模型自动归纳尚未提供。';
 /**
  * Candidate and active states are independent: an editor's proposed memory is real before explicit acceptance.
  */
 export function learningLineageWhy(activeMemories: number, memoryCandidates = 0): string {
   return activeMemories === 0 && memoryCandidates === 0 ? LEARNING_LINEAGE_WHY_EMPTY
-    : `学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；当前有 ${memoryCandidates} 条编辑撰写的候选、${activeMemories} 条已启用记忆。候选须明确接受后使用，来源受限时暂停使用；模型自动归纳尚未提供。`;
+    : `学习信号来自这条材料参与生成的本社审阅偏好版本，任务是实际参考这些版本的审阅；当前有 ${memoryCandidates} 条编辑撰写的候选、${activeMemories} 条已启用记忆；候选须明确接受后使用，来源受限时暂停使用，模型自动归纳尚未提供。`;
 }
 export function learningLineageMemories(count: number): string {
   return `${count} 条你明确新建的编辑记忆引用了它；停止今后使用后，这些记忆会暂停使用，记录原样保留。`;
