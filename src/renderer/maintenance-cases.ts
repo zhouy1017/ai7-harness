@@ -502,7 +502,9 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     why.id = uid('step-reason');
     confirm.setAttribute('aria-describedby', why.id);
     const sync = (): void => {
-      const blocker = panelBlocker(current, panel);
+      const emptyChoice = panel === 'link-proposal' && projection.choices.proposals.length === 0 ? MAINTENANCE_NO_PROPOSALS
+        : panel === 'link-publication' && projection.choices.publications.length === 0 ? MAINTENANCE_NO_PUBLICATIONS : null;
+      const blocker = emptyChoice ?? panelBlocker(current, panel);
       why.textContent = blocker ?? '';
       why.hidden = blocker === null;
       confirm.disabled = working || blocker !== null;
@@ -535,12 +537,10 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
       return fieldset;
     };
     if (panel === 'link-proposal') {
-      if (projection.choices.proposals.length === 0) form.append(el('p', 'field-note maintenance-no-choice', MAINTENANCE_NO_PROPOSALS));
-      else form.append(radios(MAINTENANCE_PROPOSALS_LEGEND, projection.choices.proposals.map((proposal) => ({ value: proposal.markId, label: proposal.label, detail: proposal.stateLabel })),
+      if (projection.choices.proposals.length > 0) form.append(radios(MAINTENANCE_PROPOSALS_LEGEND, projection.choices.proposals.map((proposal) => ({ value: proposal.markId, label: proposal.label, detail: proposal.stateLabel })),
         current.choice, (value) => { current.choice = value; }));
     } else if (panel === 'link-publication') {
-      if (projection.choices.publications.length === 0) form.append(el('p', 'field-note maintenance-no-choice', MAINTENANCE_NO_PUBLICATIONS));
-      else form.append(radios(MAINTENANCE_PUBLICATIONS_LEGEND, projection.choices.publications.map((publication) => ({ value: publication.publicationVersionId, label: publication.label, detail: null })),
+      if (projection.choices.publications.length > 0) form.append(radios(MAINTENANCE_PUBLICATIONS_LEGEND, projection.choices.publications.map((publication) => ({ value: publication.publicationVersionId, label: publication.label, detail: null })),
         current.choice, (value) => { current.choice = value; }));
       if (projection.choices.publicationsAfter !== null) form.append(inspectionButton(current, '后续发稿版本', 'afterPublicationOrdinal', projection.choices.publicationsAfter));
       if (current.inspection?.afterPublicationOrdinal !== undefined) form.append(inspectionButton(current, '返回最早的可选版本', 'afterPublicationOrdinal', null));
