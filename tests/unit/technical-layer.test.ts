@@ -1,3 +1,5 @@
+import { recoveryIdentityRows } from '../../src/renderer/technical-layer-labels.js';
+import { globalAttentionObjectLabel } from '../../src/renderer/global-attention-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { collectTechnicalDisclosures, initializeTechnicalLayer, metadataWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { reviewBasisWords } from '../../src/renderer/review-basis.js';
@@ -45,6 +47,16 @@ describe('technical layer presentation (#1315)', () => {
     expectNoTechnicalText(root);
     expect(disclosure.textContent).toBe('');
     expect(metadata.textContent).toContain('全稿 0%');
+  });
+
+  it('scans recovery and attention identity metadata in ordinary mode', () => {
+    setTechnicalLayerVisible(false);
+    const root = document.createElement('section');
+    for (const [term, value] of recoveryIdentityRows({ bookTitle: '合成图书', bookId: 'a'.repeat(32), manuscriptId: 'b'.repeat(32), branchName: '主分支', branchId: 'c'.repeat(32) })) {
+      const row = document.createElement('p'); row.textContent = term + '：' + value; root.append(row);
+    }
+    expectNoTechnicalText(root);
+    expect(globalAttentionObjectLabel({ kind: 'recovery', branchName: '自定义分支' } as Parameters<typeof globalAttentionObjectLabel>[0])).toBe('稿件');
   });
 
   it('offers one entry including later disclosures and removes records when their page leaves', () => {

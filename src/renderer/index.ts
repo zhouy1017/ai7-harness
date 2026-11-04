@@ -160,7 +160,7 @@ import {
 import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
 import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
-import { bookIdentityRows } from './technical-layer-labels.js';
+import { bookIdentityRows, recoveryIdentityRows } from './technical-layer-labels.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
@@ -1760,11 +1760,9 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   // front of the screen's primary decision — the choice a recovery screen exists to present. The
   // candidates' own disclosures sit after their radio and cost the reader nothing.
   const durableBoundary = instantValue(recovery.lastDurableEditBoundary.durableAt);
-  durableBoundary.prepend(`修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · `);
+  if (technicalLayerVisible) durableBoundary.prepend(`修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · `);
   identityDetails.append(
-    element('dt', undefined, '图书'), element('dd', undefined, `${recovery.bookTitle} · ${recovery.bookId}`),
-    element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
-    element('dt', undefined, '分支'), element('dd', undefined, `${recovery.branchName} · ${recovery.branchId}`),
+    ...recoveryIdentityRows(recovery).flatMap(([term, value]) => [element('dt', undefined, term), element('dd', technicalLayerVisible && term === '稿件' ? 'technical-identity' : undefined, value)]),
     element('dt', undefined, '最后持久写入边界'), durableBoundary,
     element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent),
   );

@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import { metadataWords } from './technical-layer.js';
 /**
  * Identifiers live in the technical layer (ADR 0096 §3, ADR 0071 §1; Issue #1177): a Book identifier, a revision or decision
@@ -25,4 +26,11 @@ export function proposalPreparationLine(bookTitle: string, decisionRecorded: boo
 /** The proposal workspace's identities of one view, behind its disclosure; an absent value is left out. */
 export function proposalIdentityRows(values: Readonly<Record<string, string | null | undefined>>): ReadonlyArray<readonly [string, string]> {
   return Object.entries(values).flatMap(([label, value]) => value === null || value === undefined ? [] : [[label, value] as const]);
+}
+
+/** Recovery still names the affected Book; its branch and exact identities belong to developer mode. */
+export function recoveryIdentityRows(recovery: { bookTitle: string; bookId: string; manuscriptId: string; branchName: string; branchId: string }): ReadonlyArray<readonly [string, string]> {
+  return technicalLayerVisible ? [
+    ['图书', recovery.bookTitle + ' · ' + recovery.bookId], ['稿件', recovery.manuscriptId], ['分支', recovery.branchName + ' · ' + recovery.branchId],
+  ] : [['图书', recovery.bookTitle], ['稿件', '当前稿件']];
 }
