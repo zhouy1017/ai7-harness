@@ -124,7 +124,11 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   pageControls.append(previous, next);
   const chosen = el('p', 'agent-workspace-selection', words.noSelection);
   chosen.dataset['agentWorkspaceSelection'] = 'none';
-  pick.append(el('h3', undefined, words.pick), pages, pageControls, chosen);
+  const pickHeading = el('h3', undefined, words.pick);
+  const noManuscript = el('span', undefined, ` · ${words.noManuscript}`);
+  noManuscript.hidden = true;
+  pickHeading.append(noManuscript);
+  pick.append(pickHeading, pages, pageControls, chosen);
 
   const form = el('section', 'agent-workspace-instruction');
   const instructionId = `agent-workspace-instruction-${bookId}`;
@@ -198,10 +202,13 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
       const anchor = (await api.getBookOverview({ bookId, historyCursor: null })).manuscriptAnchor;
       if (destroyed) return;
       if (anchor === null) {
-        pages.replaceChildren(el('p', 'field-note', words.noManuscript));
+        pages.replaceChildren();
+        noManuscript.hidden = false;
         pageControls.hidden = true;
         return;
       }
+      noManuscript.hidden = true;
+      pageControls.hidden = false;
       entryBlockId = anchor.entry?.blockId ?? null;
       const sameEntry = remembered?.entryBlockId === entryBlockId;
       const blockId = restore ? (sameEntry ? remembered?.blockId : undefined) ?? anchor.entry?.blockId : undefined;

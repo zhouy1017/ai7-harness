@@ -239,7 +239,9 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
           if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= revision.unitPage.nextOrdinal!) throw new Error(TASK_RESULT_UNAVAILABLE);
           showAnalysis({ ...revision, units: [...revision.units, ...page.units], unitPage: {
             ...revision.unitPage, shown: revision.units.length + page.units.length, nextOrdinal: page.next } });
-        } catch { if (!closed) body.replaceChildren(el('p', 'field-note', TASK_RESULT_UNAVAILABLE)); }
+        } catch {
+          if (!closed && more.isConnected) { more.textContent = '读取失败 · 重试'; more.disabled = false; }
+        }
       });
       body.append(more);
     }
