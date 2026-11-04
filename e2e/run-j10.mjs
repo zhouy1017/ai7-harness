@@ -467,7 +467,7 @@ const READ_DRAWER = `(() => {
       rows: Object.fromEntries(Array.from(activity.querySelectorAll('dd[data-task-plan-activity-row]')).map((cell) => [cell.dataset.taskPlanActivityRow, cell.textContent])),
     },
     impact: impact === null ? null : {
-      heading: text(impact.querySelector('h4')),
+      heading: impact.querySelector('h4')?.firstChild?.textContent ?? null,
       lines: Array.from(impact.querySelectorAll('li')).map((line) => line.textContent),
       confirm: text(impact.querySelector('[data-task-drawer-control="confirm-cancel-run"]')),
       keep: text(impact.querySelector('[data-task-drawer-control="keep-running"]')),

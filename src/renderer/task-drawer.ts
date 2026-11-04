@@ -2156,10 +2156,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (plan !== null) {
       const path = 'runControl.cancel.impact';
       const meta = plan.listPages?.[path];
-      const count = el('p', 'field-note', taskPageShown(TASK_PAGE_NAMES[path]!, meta?.shown ?? run.cancel.impact.length, meta?.total ?? run.cancel.impact.length));
+      const count = el('span', undefined, taskPageShown(TASK_PAGE_NAMES[path]!, meta?.shown ?? run.cancel.impact.length, meta?.total ?? run.cancel.impact.length));
       count.dataset['cancelImpactCount'] = '';
       count.setAttribute('aria-live', 'polite');
-      section.insertBefore(count, lines);
+      heading.append(' · ', count);
       const more = pageControl(plan, path, TASK_PAGE_NAMES[path]!);
       if (more !== null) section.insertBefore(more, actions);
     }
