@@ -63,7 +63,7 @@ export const NOTIFICATION_SETTINGS_WORDS = Object.freeze({
 });
 
 export const QUIET_NOTICE_WORDS = Object.freeze({
-  region: '最近完成提示',
+  region: '提示',
   view: '查看结果',
   close: '关闭提示',
 });

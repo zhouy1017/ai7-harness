@@ -18,7 +18,7 @@ import { findingEvidenceSources } from '../shared/report-wording.js';
  */
 export const SOURCES_TITLE = '来源与证据';
 export const SOURCES_ENTRY_LABEL = '来源与证据';
-export const SOURCES_LEDE = '联网核查的运行留存的外部来源：AI7 自己取回的页面全文，取不到时只有检索返回的片段。来源不是事实结论；对应只说明引文的词句在不在取回的文字里。';
+export const SOURCES_LEDE = '来源可能是完整页面或检索片段；引文对应只核对词句，不代表事实结论。';
 export const SOURCES_STATUS = {
   leaving: '正在保存并打开来源与证据…',
   loading: '正在读取来源与证据…',
