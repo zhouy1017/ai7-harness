@@ -214,6 +214,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     element.dataset['anchor'] = result.anchor.state;
     const heading = el('h6', undefined, EVIDENCE_WORKSPACE_HEADING);
     heading.id = headingId;
+    heading.append(' · ', el('span', 'evidence-no-mutation', EVIDENCE_NO_MUTATION));
     const header = el('div', 'evidence-header');
     const wording = el('div', 'evidence-wording');
     wording.append(el('span', 'evidence-term', EVIDENCE_WORDING_LABEL), el('blockquote', 'evidence-quote', result.quote));
@@ -240,7 +241,6 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     children.push(renderSources(), renderMatrix(), renderConflicts(current), renderSummary(current), renderHistory(current), renderDecision(current));
     const correctionSection = renderCorrection(current);
     if (correctionSection !== null) children.push(correctionSection);
-    children.push(el('p', 'field-note evidence-no-mutation', EVIDENCE_NO_MUTATION));
     element.replaceChildren(...children);
     restoreFocus(key);
   }
