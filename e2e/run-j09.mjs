@@ -1708,17 +1708,21 @@ async function main() {
     let overview = await overviewReading();
     const overviewItem = (book) => overview.groups.flatMap(group=>group.items).find(item=>item.bookId===book && !['completed','cancelled','stopped'].includes(item.state));
     const overviewIds = overviewBooks.slice(0, 3).map(book=>overviewItem(book).itemId);
-    const overviewAction = async (id, action) => clickSelector(renderer, `.task-overview-card[data-task-item="${id}"] [data-task-action="${action}"]`, `overview-${action}`);
+    const overviewAction = async (id, action) => {
+      const selector = `.task-overview-card[data-task-item="${id}"] [data-task-action="${action}"]`;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.disabled===false`, `overview-${action}-ready`);
+      await clickSelector(renderer, selector, `overview-${action}`);
+    };
+    const overviewPauseRecorded = async (id) => waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.flatMap(g=>g.items).some(i=>i.itemId===${JSON.stringify(id)} && ['analysis-pausing','analysis-paused'].includes(i.attention.state)))()`, 'overview-pause-recorded');
     await waitFor(renderer, `document.querySelector('.task-overview-card[data-task-item="${overviewIds[2]}"] .task-overview-card-line')?.textContent.startsWith('第 1 位')`, 'overview-first-position-visible');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
     await overviewAction(overviewIds[0], 'pause');
+    await overviewPauseRecorded(overviewIds[0]);
     await writeFile(holdPath, '2', 'utf8');
-    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}) && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000).catch(async (error) => {
-      if (localDebugEnabled()) recordDebugDetail('J-09', 'overview-pause ' + JSON.stringify(await renderer.evaluate(`(async () => { const p=await window.ai7.inspectTaskOverview(); return { groups:p.groups.map(g=>({key:g.key,items:g.items.map(i=>({id:i.itemId,book:i.bookId,state:i.state,source:i.attention.state,position:i.queuePosition,progress:i.progress}))})),status:document.querySelector('#persistence-status')?.textContent,toast:document.querySelector('[data-toast]')?.textContent }; })()`)));
-      throw error;
-    });
+    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])} && i.attention.state==='analysis-paused') && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000);
     // Put the same third task back in the queue before adding the fourth, then prove 置顶 wins the next release.
     await overviewAction(overviewIds[2], 'pause');
+    await overviewPauseRecorded(overviewIds[2]);
     await writeFile(holdPath, '3', 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}))()`, 'overview-third-paused', 60000);
     await overviewAction(overviewIds[0], 'resume');
@@ -1734,6 +1738,7 @@ async function main() {
     await overviewAction(fourth.itemId, 'top');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items[0]?.itemId===${JSON.stringify(fourth.itemId)})()`, 'overview-fourth-top');
     await overviewAction(overviewIds[0], 'pause');
+    await overviewPauseRecorded(overviewIds[0]);
     await writeFile(holdPath, '4', 'utf8');
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
     await overviewAction(fourth.itemId, 'run');
