@@ -1,6 +1,7 @@
 import { baselineAnalysisKindDefinition, factualReviewKindDefinition } from '../../src/service/analysis/kind-definition.js';
 import { factualReviewUnitRecordV2, factualReviewUnitResultOfRecordV2 } from '../../src/service/analysis/factual-review-contract-v2.js';
 import { carryPositionalResult } from '../../src/service/analysis/reused-result.js';
+import { factualClaimKindDefinition, parseFactualClaimExtraction } from '../../src/service/analysis/factual-claim-contract.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { BASELINE_UNIT_RESULT_SCHEMA, type BaselineUnitResult } from '../../src/service/analysis/contract.js';
@@ -31,6 +32,14 @@ function manifestOf(blocks: ManifestBlockInput[]) {
 }
 
 describe('remapReusedResult', () => {
+  it('distinguishes unreadable claim extraction from a parsed invalid schema', () => {
+    const expected = { unitOrdinal: 1, blockCount: 1 };
+    expect(parseFactualClaimExtraction('plain text answer', expected)).toMatchObject({ ok: false, code: 'not-json' });
+    for (const text of ['{}', 'null', '[]']) {
+      expect(parseFactualClaimExtraction(text, expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
+    }
+  });
+
   it('remaps own and overlap block identities by position and leaves everything else intact', () => {
     const shared = [block('A', 'heading', 0, 1), block('a', 'paragraph', 700), block('b', 'paragraph', 600), block('c', 'paragraph', 500)];
     const predecessor = manifestOf(shared);
@@ -58,6 +67,10 @@ describe('remapReusedResult', () => {
     const salvageOnly = { assertions: [], salvaged: result.salvaged };
     const factual = factualReviewKindDefinition();
     expect(factual.unitRecord(factual.unitResultOfRecord(salvageOnly, 2))).toEqual(salvageOnly);
+    const claim = factualClaimKindDefinition('standard');
+    const claimResult = claim.unitResultOfRecord(salvageOnly, 2);
+    expect(claim.unitRecord(claimResult)).toEqual(salvageOnly);
+    expect(claim.remapReusedResult(claimResult, predecessorUnit, newUnit)).toMatchObject({ salvaged: result.salvaged });
     const v2 = factualReviewUnitResultOfRecordV2({ ...salvageOnly, corrections: [] }, 2);
     expect(factualReviewUnitRecordV2(v2)).toEqual({ ...salvageOnly, corrections: [] });
     expect(carryPositionalResult(v2, predecessorUnit, newUnit).salvaged).toEqual(result.salvaged);

@@ -1732,6 +1732,14 @@ it.each(['recovered', 'still-not-json', 'schema-invalid'] as const)('retries bas
     expect(settled.run!.attempt!.spans.filter((span) => span.unitOrdinal === 5).map((span) => span.attemptIndex))
       .toEqual(outcome === 'schema-invalid' ? [1] : [1, 2]);
     expect(settled.resultSetRevision!.gaps.filter((gap) => gap.unitOrdinal === 5)).toHaveLength(outcome === 'recovered' ? 0 : 1);
+    if (outcome !== 'recovered') {
+      const gap = settled.resultSetRevision!.gaps.find((gap) => gap.unitOrdinal === 5)!;
+      expect(gap.parseFailure).toMatchObject({ code: outcome === 'schema-invalid' ? 'schema-invalid' : 'not-json', detail: expect.any(String) });
+      expect(gap.parseFailure!.detail.length).toBeGreaterThan(0);
+      expect(gap.reason).not.toContain(gap.parseFailure!.detail);
+      const unit = settled.resultSetRevision!.units.find((unit) => unit.unitOrdinal === 5)!;
+      expect(unit.state === 'gap' && unit.gap.parseFailure).toEqual(gap.parseFailure);
+    }
     store.markCleanShutdown();
   } finally { await owner.dispose(); store.close(); }
 }, 300_000);

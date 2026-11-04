@@ -1612,13 +1612,14 @@ export class BaselineAnalysisExecutionOwner {
       outputTokens: turnUsage?.outputTokens ?? 0,
     };
     active.progress.completedAttempts += 1;
-    const gap = (reason: string): RunReportReflectionOutcome => ({ ifRedone: { state: 'gap', items: [], reason }, usage });
+    const gap = (reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): RunReportReflectionOutcome =>
+      ({ ifRedone: { state: 'gap', items: [], reason, ...(parseFailure === undefined ? {} : { parseFailure }) }, usage });
     const candidate = result.signals.find((signal) => signal.kind === 'contentCandidate');
     if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
       context.acceptedOutputDigests.add(candidate.digest);
       if (canonical?.kind === 'empty-answer') return gap(runReportReflectionEmptyAnswerGapReason(canonical.reasoningPresent));
       const parsed = parseRunReportReflectionResult(candidate.text);
-      if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+      if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
       return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null }, usage };
     }
     if (result.terminal === 'completed') return gap('运行反思的技术回合完成但没有模型输出。');
@@ -2547,14 +2548,15 @@ export class BaselineAnalysisExecutionOwner {
         if (live === null) active.progress.attemptState = null;
       };
       // A unit that settles as a gap, with what the Run Report records about it.
-      const settleGap = (unit: CoverageManifestUnitProjection, requestDigest: string, observation: RunReportUnitObservation, code: AnalysisGapProjection['code'], reason: string): void => {
+      const settleGap = (unit: CoverageManifestUnitProjection, requestDigest: string, observation: RunReportUnitObservation, code: AnalysisGapProjection['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): void => {
         unitObservations.set(unit.ordinal, observation);
         outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code, reason });
         unitRecords.push({
           unitOrdinal: unit.ordinal,
           requestDigest,
           lineage: { kind: 'recomputed' },
-          closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
+          closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds],
+            ...(parseFailure === undefined ? {} : { parseFailure }) } },
         });
       };
       /**
@@ -2578,7 +2580,7 @@ export class BaselineAnalysisExecutionOwner {
         const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
         const observation: RunReportUnitObservation = { unitOrdinal: unit.ordinal, attempts: s.attempts, wallMs: s.wallMs, usage: s.usage };
-        const gap = (code: AnalysisGapProjection['code'], reason: string): void => settleGap(unit, requestDigest, observation, code, reason);
+        const gap = (code: AnalysisGapProjection['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): void => settleGap(unit, requestDigest, observation, code, reason, parseFailure);
         if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate' && s.attempt.canonical?.kind === 'empty-answer') {
           // The model was reached and answered in the channel its profile declares, and the channel
           // was empty. That is not a contract the model broke — there is nothing to parse — so the
@@ -2640,7 +2642,7 @@ export class BaselineAnalysisExecutionOwner {
             });
           } else {
             acceptedOutputDigests.add(candidate.digest);
-            gap('contract-invalid', unparsableAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+            gap('contract-invalid', unparsableAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
           }
         } else if (turn.terminal === 'completed') {
           gap('contract-invalid', '技术回合完成但没有模型输出。');
@@ -3069,7 +3071,20 @@ export class BaselineAnalysisExecutionOwner {
           adaptedUnitOrdinals.push(unit.ordinal);
           if (context.currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '契约重试期间执行绑定发生变化。');
           acceptedOutputDigests.add(contractCandidate.digest);
-          attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, context);
+          if (definition.factualClaims === undefined) {
+            attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, context);
+          } else {
+            // The extraction schema fixes each session to one send. A completed not-json answer alone
+            // admits this distinct, single-send retry session; neither reservation is refunded.
+            const retrySession = ledger.factualVerification.admitClaimSession({ sessionId: randomUUID(), runRecordId: facts.runRecordId,
+              stage: 'claim-extraction', scopeId: `${unit.ordinal}:contract-retry`, ledgerDigest: null,
+              sourceMessageDigest: sha256Hex(message), promptContractDigest, limits: { model: 1, tool: 0, search: 0 } });
+            const retryContext = await createContext(retrySession.sessionId, undefined, unit.ordinal, retrySession);
+            try {
+              await retryContext.bind(bindingDigest, bindingFactsForRun);
+              attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, retryContext);
+            } finally { await retryContext.finish(); contexts.delete(retryContext); }
+          }
           if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return;
           attempts = contractAttemptIndex;
           unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
@@ -3427,8 +3442,8 @@ export class BaselineAnalysisExecutionOwner {
         const requestDigest = step === null
           ? crossUnitRequestDigest(reductionContract, unitSetDigest(closedOutcomes))
           : step.requestDigest(closedOutcomes, crossUnitContext);
-        const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
-          ({ state: 'gap', code, reason, requestDigest });
+        const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): CrossUnitOutcome =>
+          ({ state: 'gap', code, reason, requestDigest, ...(parseFailure === undefined ? {} : { parseFailure }) });
         if (live !== null && (step !== null ? admitted?.crossUnitSynthesisAllowed !== true : policy.providerProcessing.crossUnitReductionAllowed !== true)) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
           // never forms a request at all. The verified developer-live document names the baseline's reduction; a
@@ -3491,7 +3506,7 @@ export class BaselineAnalysisExecutionOwner {
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
-                : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
+                : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)), { code: parsed.code, detail: parsed.detail });
             } else {
               const parsed = parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
@@ -3500,7 +3515,7 @@ export class BaselineAnalysisExecutionOwner {
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage,
                     ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }
-                : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+                : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
             }
           } else if (turn.terminal === 'completed') {
             crossUnit = gap('contract-invalid', named('跨单元归纳的技术回合完成但没有模型输出。'));
@@ -3591,7 +3606,11 @@ export class BaselineAnalysisExecutionOwner {
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
       // every finding component comes through byte for byte. The `reduction` stage resumes here.
       clock.open('reduction');
-      const reduction = applyAssuranceSample(reduced, sample);
+      const sampledReduction = applyAssuranceSample(reduced, sample);
+      const reduction = { ...sampledReduction, gaps: sampledReduction.gaps.map((gap) => {
+        const recorded = unitRecords.find((unit) => unit.unitOrdinal === gap.unitOrdinal)?.closed;
+        return recorded?.state === 'gap' && recorded.gap.parseFailure !== undefined ? { ...gap, parseFailure: recorded.gap.parseFailure } : gap;
+      }) };
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {
         if (!unitRecords.some((record) => record.unitOrdinal === gapEntry.unitOrdinal)) {
@@ -3748,7 +3767,7 @@ export class BaselineAnalysisExecutionOwner {
       const next = kept.ended ? undefined : assuranceSamplingTurns(kept.draw.sampled)[kept.nextTurn - 1];
       return assuranceSampleOutcome(kept.draw, kept.dispositions,
         kept.sampled.turnsWithUsage === 0 ? null : { inputTokens: kept.sampled.inputTokens, outputTokens: kept.sampled.outputTokens },
-        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')]);
+        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')], kept.parseFailures);
     }
     if (context.stopped || active.interrupted) return assuranceSampleNotRun(context.stoppedReason ?? '运行在单元阶段结束前停止，保证抽样未发起。');
     if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
@@ -3767,6 +3786,7 @@ export class BaselineAnalysisExecutionOwner {
     const draw = prior?.draw ?? drawn;
     const dispositions = [...(prior?.dispositions ?? [])];
     const gapReasons = [...(prior?.gapReasons ?? [])];
+    const parseFailures = [...(prior?.parseFailures ?? [])];
     const sampled = { ...(prior?.sampled ?? { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }) };
     const turns = assuranceSamplingTurns(draw.sampled);
     const settledTurns = [...(prior?.turns ?? [])];
@@ -3777,7 +3797,8 @@ export class BaselineAnalysisExecutionOwner {
     }))) throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的抽样回合无法核对；未发送。');
     const save = (nextTurn: number, ended: boolean): void => {
       context.stages.sampling = { inputDigest, contractDigest, draw, nextTurn, ended,
-        turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled } };
+        turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled },
+        ...(parseFailures.length === 0 ? {} : { parseFailures: [...parseFailures] }) };
       context.checkpoint();
     };
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
@@ -3865,6 +3886,7 @@ export class BaselineAnalysisExecutionOwner {
           }
           const parsed = parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) });
           if (!parsed.ok) {
+            parseFailures.push({ unitOrdinal: turn.unitOrdinal, code: parsed.code, detail: parsed.detail });
             gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));
             continue;
           }
@@ -3918,7 +3940,7 @@ export class BaselineAnalysisExecutionOwner {
     }
     context.clock.close();
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
-    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
+    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons, parseFailures);
   }
 }
 

@@ -43,8 +43,10 @@ function readObject(text: string): Record<string, unknown> | null {
 
 /** Reuse the established assertion limits and class/reference parser, without accepting an old contract response. */
 export function parseFactualClaimExtraction(text: string, expected: { unitOrdinal: number; blockCount: number }) {
-  const value = readObject(text);
-  if (value?.schema !== FACTUAL_CLAIM_EXTRACTION_CONTRACT) return { ok: false as const, code: 'schema-invalid' as const, detail: '结果不符合断言抽取契约。' };
+  let value: unknown;
+  try { value = JSON.parse(stripModelJsonFence(text)); }
+  catch { return { ok: false as const, code: 'not-json' as const, detail: '断言抽取结果不是有效 JSON。' }; }
+  if (!isRecord(value) || value.schema !== FACTUAL_CLAIM_EXTRACTION_CONTRACT) return { ok: false as const, code: 'schema-invalid' as const, detail: '结果不符合断言抽取契约。' };
   const parsed = parseFactualReviewUnitResult(canonicalJson({ ...value, schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA }), expected);
   if (!parsed.ok) return parsed;
   const result = { ...parsed.result, schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT };
@@ -102,8 +104,12 @@ export function factualClaimKindDefinition(level: 'standard' | 'strict'): Analys
     executionSteps: ['逐单元抽取断言', '冻结精确断言及其出处', '逐断言联网取证', '归并已定位发现'],
     parseUnitResult: (text, unit) => parseFactualClaimExtraction(text, { unitOrdinal: unit.ordinal, blockCount: unit.overlapBlockIds.length + unit.blockIds.length }),
     requestDigest: (ordinal, digest) => sha256Hex(canonicalJson({ promptContractDigest, ordinal, digest })),
-    unitRecord: (result) => ({ assertions: (result as { assertions: readonly FactualUnitAssertion[] }).assertions }),
-    unitResultOfRecord: (record, unitOrdinal) => ({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal, assertions: record.assertions }),
+    unitRecord: (result) => {
+      const extraction = result as SalvagedModelResult & { assertions: readonly FactualUnitAssertion[] };
+      return { assertions: extraction.assertions, ...(extraction.salvaged === undefined ? {} : { salvaged: extraction.salvaged }) };
+    },
+    unitResultOfRecord: (record, unitOrdinal) => ({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal, assertions: record.assertions,
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged }) }),
     reduce: (input) => {
       const reduction = reduceFactualReview({ ...input, outcomes: input.outcomes as readonly FactualUnitOutcome[],
         research: new FixtureReplayResearchCapability(), exactOccurrences: true });
