@@ -715,3 +715,74 @@ describe('结果待确认 carried forward', () => {
     }
   }, 300_000);
 });
+
+
+describe('zero closed units (#1307)', () => {
+  async function capturedRun(closedUnits: number) {
+    const happy = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-happy');
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, { baselineAnalysisRoute: null,
+      induceUnprovableReconciliation: false, persistLegacyReviewedDraft: false, induceReimportProofTamper: false,
+      induceAbandonObjectRemovalFailure: false, interruptAfterAbandonObjectRemoval: false });
+    const captured = capturedOrdinaryExecution(store, roots.codeRoot, roots.dataRoot, requestGovernor, (request, message) => {
+      const header = parseUnitMessageHeader(message);
+      if (request.stage === 'units' && header !== null) return header.ordinal > closedUnits
+        ? { kind: 'outcome-unknown', message: '合成：回答没有完整传回。' }
+        : resolveFixtureEntry(happy.entries, header.ordinal, unitRequestDigest(BASELINE_PROMPT_CONTRACT_DIGEST, header.ordinal, header.unitDigest), request.attemptIndex)?.response;
+      const content = request.stage === 'cross-unit-reduction' ? { schema: 'ai7.baseline-manuscript-analysis.cross-unit-result/1', findings: [] }
+        : request.stage === 'assurance-sampling' ? { schema: 'ai7.analysis.assurance-sampling-result/1', dispositions: parseAssuranceSamplingListedRefs(message)
+          .map((ref) => ({ ref, disposition: '成立', reason: '合成回归抽样。' })) }
+          : request.stage === 'run-report-reflection' ? { schema: 'ai7.analysis.run-report-reflection-result/1', items: [] } : null;
+      return content === null ? undefined : { kind: 'unit-result', text: JSON.stringify(content), usage: { inputTokens: 10, outputTokens: 5 } };
+    });
+    launchPolicy = captured.policy;
+    const run = await stoppedRun(store, captured.owner, 'L2 sample1 零闭合终态');
+    return { store, captured, ...run };
+  }
+
+  it.each([0, 1])('classifies a run with %i closed units and retains unknown outcomes', async (closedUnits) => {
+    const { store, captured, bookId, runRecordId } = await capturedRun(closedUnits);
+    try {
+      const result = store.inspectBaselineAnalysis(bookId, () => null);
+      const expected = closedUnits === 0 ? 'failed' : 'completed-with-gaps';
+      expect(result.run?.state).toBe(expected);
+      expect(result.taskOutcome?.classification).toBe(expected);
+      expect(result.taskOutcome?.report?.units.gaps).toBe(8 - closedUnits);
+      if (closedUnits === 0) {
+        expect(result.resultSetRevision).toBeNull();
+        expect(result.taskOutcome?.resultSetRevisionId).toBeNull();
+        expect(result.taskOutcome?.report?.failures).toContainEqual({ stage: 'units', code: 'NO_CLOSED_UNITS', reason: expect.stringContaining('该单元结果未知') });
+      } else expect(result.resultSetRevision?.coverage.unitsClosed).toBe(1);
+      expect(store.baselineAnalysisLedger.unitCheckpoints(runRecordId).filter((entry) => entry.unit.closed.state === 'gap')).toHaveLength(8 - closedUnits);
+      expect(captured.requests.filter((request) => request.stage === 'units')).toHaveLength(8);
+      let progress = store.createBaselineAnalysisPreparationWork(bookId, closedUnits === 0 ? BASELINE_ANALYSIS_TASK_GOAL : BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'],
+        closedUnits === 0 ? null : { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
+      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+      const next = progress.projection!;
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: next.taskIntent!.taskIntentId }).resend?.units).toHaveLength(8 - closedUnits);
+      expect(captured.requests.filter((request) => request.stage === 'units')).toHaveLength(8);
+      store.markCleanShutdown();
+    } finally { await captured.owner.dispose(); try { captured.assertMatched(); } finally { store.close(); } }
+  }, 300_000);
+
+  it('keeps completed-with-gaps when closed units are all reused and new work only has gaps', async () => {
+    const { store, captured, bookId } = await capturedRun(7);
+    try {
+      const unit = store.inspectBaselineAnalysis(bookId, () => null).coverageManifest!.units[7]!;
+      let progress = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-range'],
+        { mode: 'reanalyze-range', selectedRange: { startPosition: unit.startPosition, endPosition: unit.endPosition } }, launchPolicy);
+      while (!progress.done) progress = store.advanceBaselineAnalysisPreparationWork(progress.workId!);
+      const next = progress.projection!;
+      expect(next.update?.reusePlan?.counts).toMatchObject({ reused: 7, recomputed: 1 });
+      captured.owner.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, next.taskIntent!.taskIntentId, next.planEnvelope!.digest).dispatchRunRecordId!);
+      await captured.owner.whenIdle();
+      const result = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(result.run?.state).toBe('completed-with-gaps');
+      expect(result.resultSetRevision?.coverage).toMatchObject({ unitsClosed: 7, unitsReused: 7 });
+      expect(result.resultSetRevision?.ordinal).toBe(2);
+      expect(result.taskOutcome?.report?.units).toMatchObject({ reused: 7, recomputed: 1, gaps: 1 });
+      // Only the explicitly authorized range is sent again; the seven closed units are reused.
+      expect(captured.requests.filter((request) => request.stage === 'units')).toHaveLength(9);
+      store.markCleanShutdown();
+    } finally { await captured.owner.dispose(); try { captured.assertMatched(); } finally { store.close(); } }
+  }, 300_000);
+});

@@ -1,3 +1,4 @@
+import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
 import * as requestAdmissionOperations from './request-admission-operations.js';
 import * as clarificationOperations from './clarification-operations.js';
 import * as runCheckpointOperations from './run-checkpoint-operations.js';
@@ -1211,7 +1212,7 @@ export class BaselineAnalysisStore {
     }
     const outcomes = (this.#db.prepare(
       `SELECT o.outcome_id, o.task_intent_id, o.run_record_id, o.classification, o.recorded_at, o.result_set_revision_id,
-              t.book_id, t.mode, b.title book_title, r.ordinal revision_ordinal
+              o.canonical_json, t.book_id, t.mode, b.title book_title, r.ordinal revision_ordinal
        FROM analysis_task_outcomes o
        JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
        JOIN books b ON b.book_id = t.book_id
@@ -1219,18 +1220,22 @@ export class BaselineAnalysisStore {
        WHERE t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps'${scope?.cancelled === true ? ", 'cancelled'" : ''}) AND o.recorded_at >= ?
          AND (? IS NULL OR t.book_id = ?)
        ORDER BY o.recorded_at DESC, o.outcome_id LIMIT ?`,
-    ).all(kind, since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => ({
-      bookId: asString(row.book_id),
-      bookTitle: asString(row.book_title),
-      taskIntentId: asString(row.task_intent_id),
-      mode: asString(row.mode) as BaselineAnalysisTaskMode,
-      outcomeId: asString(row.outcome_id),
-      runRecordId: asString(row.run_record_id),
-      classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
-      recordedAt: asString(row.recorded_at),
-      revisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
-      revisionOrdinal: row.revision_ordinal === null ? null : asNumber(row.revision_ordinal),
-    }));
+    ).all(kind, since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => {
+      const report = this.#outcomeProjection(row).report;
+      return {
+        bookId: asString(row.book_id),
+        bookTitle: asString(row.book_title),
+        taskIntentId: asString(row.task_intent_id),
+        mode: asString(row.mode) as BaselineAnalysisTaskMode,
+        outcomeId: asString(row.outcome_id),
+        runRecordId: asString(row.run_record_id),
+        classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
+        recordedAt: asString(row.recorded_at),
+        revisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
+        revisionOrdinal: row.revision_ordinal === null ? null : asNumber(row.revision_ordinal),
+        ...(report === null ? {} : { completion: analysisRunSummary(report) }),
+      };
+    });
     return { tasks, outcomes };
   }
 
@@ -1280,10 +1285,13 @@ export class BaselineAnalysisStore {
     }
     // A stop is named only on an interrupted outcome recorded since S16a (Issue #51); every earlier one reads as it was.
     const stop = classification === 'interrupted' ? runStopOf(record.stop) : null;
+    const completion = report === null ? null : analysisRunSummary(runReportProjection(report));
     return {
       outcomeId: asString(row.outcome_id),
       classification,
-      label: stop === null ? OUTCOME_LABELS[classification] : BUDGET_REACHED_OUTCOME_LABEL,
+      label: classification === 'completed-with-gaps' && completion !== null
+        ? completedWithGapsLabel(completion.gaps, completion.total)
+        : stop === null ? OUTCOME_LABELS[classification] : BUDGET_REACHED_OUTCOME_LABEL,
       recordedAt: asString(row.recorded_at),
       resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       safeNextAction: asString(record.safeNextAction),
@@ -2217,7 +2225,9 @@ export class BaselineAnalysisStore {
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
             : current.state === 'resumable' && this.outcomeUnknownOf(runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL
-            : blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : RUN_STATE_LABELS[current.state],
+            : blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL
+              : current.state === 'completed-with-gaps' ? completedWithGapsLabel(Number(currentRecord.gapCount ?? 0), Number(currentRecord.unitsTotal ?? 0))
+                : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
@@ -2274,8 +2284,7 @@ export class BaselineAnalysisStore {
    * them would send again — the background dispatcher never starts one over them (CTRL-007, CONT-011).
    */
   latestUnconfirmedRangesOf(bookId: string): number[] {
-    const latest = this.#revisionRows(bookId).at(-1);
-    return latest === undefined ? [] : this.#unknownGapOrdinals(latest);
+    return this.unconfirmedOutcomesOf(bookId).ranges.flatMap((range) => range.unitOrdinal === null ? [] : [range.unitOrdinal]);
   }
 
   /**
@@ -2303,8 +2312,6 @@ export class BaselineAnalysisStore {
    * its Run has begun, as `resendUnitsByContentOf` is: the history then holds the Task's own revision, which never counts against it.
    */
   resendUnitsOf(projection: BaselineAnalysisProjection): number[] {
-    const plan = projection.update?.reusePlan ?? null;
-    if (plan === null) return [];
     return this.resendUnitsByContentOf(projection);
   }
 
@@ -2334,6 +2341,33 @@ export class BaselineAnalysisStore {
     const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
     const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
     let latestKeys: Set<string> | null = null;
+    let latestKeysAt = '';
+    // Zero-closure failures have no revision, but their sent requests remain unconfirmed (#1307).
+    const failed = this.#db.prepare(
+      `SELECT o.* FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+       WHERE t.book_id = ? AND t.kind = ? AND o.classification = 'failed' AND o.result_set_revision_id IS NULL
+       ORDER BY o.recorded_at, o.rowid`,
+    ).all(bookId, kind) as SqlRow[];
+    for (const row of failed) {
+      const report = this.#outcomeProjection(row).report;
+      const unknown = report?.unitRows.filter((unit) => unit.gapCode === 'outcome-unknown') ?? [];
+      if (unknown.length === 0) continue;
+      const runRecordId = asString(row.run_record_id);
+      const facts = this.loadExecutionPlan(runRecordId);
+      const keys = unitContentKeys(facts.manifest);
+      const recordedAt = asString(row.recorded_at);
+      latestKeys = new Set(keys);
+      latestKeysAt = recordedAt;
+      const heldAt = checkpointOf.get(asString(row.task_intent_id)) as SqlRow;
+      for (const unit of unknown) {
+        const contentKey = keys[unit.unitOrdinal - 1]!;
+        outstanding.set(contentKey, {
+          key: unconfirmedOutcomeKey(kind, runRecordId, { contentKey }), kind, runRecordId,
+          taskIntentId: asString(row.task_intent_id), classification: 'failed', recordedAt,
+          unitOrdinal: unit.unitOrdinal, heldAtRevisionId: asString(heldAt.revision_id), contentKey, stage: null,
+        });
+      }
+    }
     for (const row of rows) {
       const record = parseCanonicalJson(asString(row.canonical_json));
       const unknown = isRecord(record) && Array.isArray(record.gaps)
@@ -2348,11 +2382,14 @@ export class BaselineAnalysisStore {
         continue;
       }
       const keys = unitContentKeys(facts.manifest);
-      latestKeys = new Set(keys);
+      if (asString(row.created_at) >= latestKeysAt) {
+        latestKeys = new Set(keys);
+        latestKeysAt = asString(row.created_at);
+      }
       const keyOf = new Map(facts.manifest.units.map((unit, index) => [unit.ordinal, keys[index]!] as const));
       for (const unit of facts.unitStates) {
         const key = keyOf.get(unit.unitOrdinal);
-        if (key === undefined) continue;
+        if (key === undefined || (outstanding.get(key)?.recordedAt ?? '') > asString(row.created_at)) continue;
         if (unit.state === 'closed') outstanding.delete(key);
         else if (isRecord(record) && Array.isArray(record.gaps) && record.gaps.some((gap: unknown) =>
           isRecord(gap) && gap.unitOrdinal === unit.unitOrdinal && gap.code === 'contract-invalid')) {
@@ -2368,6 +2405,7 @@ export class BaselineAnalysisStore {
         const contentKey = keyOf.get(gap.unitOrdinal);
         if (contentKey === undefined) continue;
         const earlier = outstanding.get(contentKey);
+        if (earlier !== undefined && earlier.recordedAt > asString(row.created_at)) continue;
         // Carried forward: the same request, still unconfirmed, now at this revision's ordinal.
         if (gap.carried && earlier !== undefined) {
           outstanding.set(contentKey, { ...earlier, unitOrdinal: gap.unitOrdinal, heldAtRevisionId });
