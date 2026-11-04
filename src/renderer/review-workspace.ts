@@ -1303,7 +1303,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const empty = run.findings.length === 0 ? (filtered ? REVIEW_NO_FILTERED_FINDINGS : REVIEW_NO_FINDINGS) : null;
       const filter = filtered ? reviewFilteredLine(run.findingsTotal) : null;
       const status = [filter, empty].filter((line): line is string => line !== null).map((line) => line.replace(/。$/u, '')).join('；');
-      section.append(el('p', `field-note${filtered ? ' review-filtered' : ''}${empty === null ? '' : ' review-no-findings'}`, `${status}。`));
+      heading.append(' · ', el('span', `${filtered ? 'review-filtered' : ''}${empty === null ? '' : ' review-no-findings'}`.trim(), `${status}。`));
     }
     for (const category of run.categories) {
       const findings = run.findings.filter((finding) => finding.categoryId === category.categoryId);
@@ -2353,14 +2353,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     form.append(procedureField);
     const categories = el('fieldset', 'review-category-options');
+    const categoryLegend = el('legend', undefined, REVIEW_CATEGORY_LEGEND);
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
-      const line = el('p', 'field-note review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
+      const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
-      categories.append(line);
+      categoryLegend.append(' · ', line);
     }
     procedureField.hidden = state.definition !== null;
-    categories.append(el('legend', undefined, REVIEW_CATEGORY_LEGEND));
+    categories.append(categoryLegend);
     const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
     const localCategory: ReviewWorkspaceCategoryProjection = {
       categoryId: 'local-text-check', label: '本地文字检查', description: '单独在本机检查标点、规范字形与异形词；数字检查可选。',
