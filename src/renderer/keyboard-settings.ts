@@ -1,6 +1,8 @@
 import type { PreferencesRendererApi } from '../shared/preferences.js';
 import type { KeyboardBindings } from '../shared/preferences.js';
 import type { RendererApi } from '../shared/protocol.js';
+import { technicalLayerVisible } from './technical-layer.js';
+import { reducedMotion, chooseReducedMotion } from './appearance.js';
 import {
   COMMANDS,
   COMMAND_CONTEXT_NAMES,
@@ -226,7 +228,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
   const commandRows = (body: HTMLElement, group: CommandDefinition['group']): void => {
     const heading = el('tr', 'keyboard-group');
     const headingCell = el('th', undefined, COMMAND_GROUP_NAMES[group]);
-    headingCell.colSpan = 4;
+    headingCell.colSpan = technicalLayerVisible ? 4 : 3;
     headingCell.scope = 'colgroup';
     heading.append(headingCell);
     body.append(heading);
@@ -265,7 +267,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
         void save(next, keyboardResetLine(command.name, sequenceLabel(command.defaults[platform], platform)));
       });
       actions.append(change, reset, captureHost);
-      row.append(name, el('td', undefined, COMMAND_CONTEXT_NAMES[command.context]), chord, actions);
+      row.append(name, el('td', undefined, COMMAND_CONTEXT_NAMES[command.context]), chord, ...(technicalLayerVisible ? [actions] : []));
       body.append(row);
     }
   };
@@ -275,7 +277,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
     const grid = el('table', 'keyboard-table');
     const header = el('thead');
     const headerRow = el('tr');
-    for (const heading of KEYBOARD_COLUMNS) {
+    for (const heading of technicalLayerVisible ? KEYBOARD_COLUMNS : KEYBOARD_COLUMNS.slice(0, 3)) {
       const cell = el('th', undefined, heading);
       cell.scope = 'col';
       headerRow.append(cell);
@@ -309,7 +311,15 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
   const heading = el('h3', undefined, KEYBOARD_SHORTCUTS_HEADING);
   const actions = el('div', 'button-row');
   actions.append(resetAll);
-  root.append(el('p', 'field-note keyboard-always-on', KEYBOARD_ALWAYS_ON), heading, el('p', 'field-note', KEYBOARD_LEDE), actions, table);
+  const motion = el('label', 'preference-toggle');
+  const reduce = el('input');
+  reduce.type = 'checkbox';
+  reduce.checked = reducedMotion();
+  reduce.dataset['reducedMotion'] = 'true';
+  reduce.addEventListener('change', () => chooseReducedMotion(reduce.checked));
+  motion.append(reduce, ' 减少动效');
+  root.append(motion, el('p', 'field-note keyboard-always-on', KEYBOARD_ALWAYS_ON), heading,
+    ...(technicalLayerVisible ? [el('p', 'field-note', KEYBOARD_LEDE), actions] : []), table);
   void (async () => {
     setStatus(KEYBOARD_STATUS_LINES.loading, 'busy');
     try {

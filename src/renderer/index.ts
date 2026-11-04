@@ -6,7 +6,7 @@ import { createKnowledgeBase } from './knowledge-base.js';
 import { createDataStorage } from './data-storage.js';
 import { mountManuscriptScreen, documentContextOf, type ManuscriptScreen } from './manuscript-screen.js';
 import { mountGlobalAgent } from './global-agent.js';
-import { createAppearance } from './appearance.js';
+import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
@@ -4761,6 +4761,7 @@ const { renderModelServiceSettings } = createModelServiceSettings({
 
 async function initializeRenderer(): Promise<void> {
   resetTechnicalLayer();
+  initializeReducedMotion();
   await appearance.ready;
   try {
     const location = await window.ai7.getProductDataLocation();

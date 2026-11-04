@@ -108,7 +108,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     content.append(
       element('p', 'section-label', '设置 · 模型服务'),
       element('h2', undefined, '模型服务'),
-      element('p', 'lede', '选择渠道，保存凭据并获取模型，再分别指定主编辑与快速交互模型。'),
+      element('p', 'lede', technicalLayerVisible ? '选择渠道，保存凭据并获取模型，再分别指定主编辑与快速交互模型。' : '选渠道 → 填密钥 → 选模型 → 测试'),
     );
     content.append(modelServiceFlow(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
@@ -121,7 +121,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
       currentRoles.append(line);
     }
-    content.append(currentRoles);
+    if (technicalLayerVisible) content.append(currentRoles);
     const unsupported = element('section', 'review-section model-unsupported-providers');
     unsupported.dataset['unsupportedProviders'] = 'true';
     unsupported.setAttribute('aria-label', '尚未支持的模型服务');
@@ -172,7 +172,15 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     }
     const actions = element('div', 'button-row');
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
-    content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }), renderModelServiceProxyBlock(projection), technicalDisclosure(technical), actions);
+    if (technicalLayerVisible) content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }));
+    const proxy = renderModelServiceProxyBlock(projection);
+    if (technicalLayerVisible) content.append(proxy);
+    else {
+      const details = element('details', 'model-service-proxy-options');
+      details.append(element('summary', undefined, '网络代理'), proxy);
+      content.append(details);
+    }
+    content.append(technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
   }
 

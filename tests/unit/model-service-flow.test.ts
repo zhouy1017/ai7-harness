@@ -10,7 +10,7 @@ import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 // 设置 › 模型服务's one flow and the header's compact selector (Issue #1215), over the real generated channel catalogue and a
 // synthetic settings projection: no credential value exists anywhere in it, and every API call is a stub.
 let restore: () => void;
-beforeEach(() => { restore = installMiniDom(); });
+beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(true); });
 afterEach(() => restore());
 
 function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelServiceRouteId | null = ready[0] ?? null, fast: ModelServiceRouteId | null = inUse): ModelServiceSettingsProjection {
@@ -295,6 +295,19 @@ it('scans every channel model catalogue in ordinary mode (#1315)', () => {
   setTechnicalLayerVisible(false);
   try { for (const channel of MODEL_SERVICE_ROUTES) expectNoTechnicalText(flow(settings([channel])).node); }
   finally { setTechnicalLayerVisible(true); }
+});
+
+it('offers one ordinary model view and saves both underlying roles without a test prerequisite (#1331)', async () => {
+  setTechnicalLayerVisible(false);
+  const { node, calls } = flow(settings(['opencode-go'], 'opencode-go', null));
+  expect(node.querySelectorAll('select')).toHaveLength(2);
+  expect(node.querySelector('[data-action="select-main-role-model"]')).toBeNull();
+  expect(node.querySelector('[data-action="select-fast-role-model"]')).toBeNull();
+  expect(node.querySelector('[data-custom-model-id]')).toBeNull();
+  expect(node.textContent).toContain('AI7 使用的模型');
+  button(node, 'use-model-for-both-roles').click();
+  await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));
+  expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
 });
 
 it('scans connection-test feedback and the repainted model page when discovery uses the raw ID as its label', async () => {
