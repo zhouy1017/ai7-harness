@@ -21,7 +21,6 @@ import {
   USAGE_PRICES_LEDE,
   USAGE_RANGE_HEADING,
   USAGE_MORE_RUNS,
-  USAGE_RUNS_SHOWN,
   USAGE_COLUMNS,
   USAGE_PRICE_FIELDS,
   USAGE_STATUS_LINES,
@@ -148,7 +147,8 @@ export function mountUsage(options: MountUsageOptions): void {
         const cell = el('td');
         cell.colSpan = 5;
         const details = el('details', 'usage-runs');
-        details.append(el('summary', undefined, usageRunsSummary(row.runCount)));
+        const summary = el('summary', undefined, usageRunsSummary(row.runCount));
+        details.append(summary);
         const list = el('ul');
         const appendRuns = (links: readonly UsageRunLinkProjection[]): void => {
           for (const run of links) {
@@ -167,7 +167,10 @@ export function mountUsage(options: MountUsageOptions): void {
         appendRuns(row.runs);
         details.append(list);
         let shown = row.runs.length;
-        const count = el('p', 'field-note', USAGE_RUNS_SHOWN(shown, row.runCount));
+        const updateSummary = (total: number): void => {
+          summary.textContent = `${usageRunsSummary(total)}${list.children.length < total ? ` · 已列出 ${list.children.length} 次` : ''}`;
+        };
+        updateSummary(row.runCount);
         const more = el('button', 'secondary', USAGE_MORE_RUNS);
         more.type = 'button';
         more.dataset['usageMoreRuns'] = row.key;
@@ -184,12 +187,12 @@ export function mountUsage(options: MountUsageOptions): void {
             appendRuns(next?.runs.filter((run) => !known.has(run.runRecordId)) ?? []);
             shown += next?.runs.length ?? 0;
             const total = next?.runCount ?? row.runCount;
-            count.textContent = USAGE_RUNS_SHOWN(list.children.length, total);
+            updateSummary(total);
             more.hidden = shown >= total || (next?.runs.length ?? 0) < USAGE_ROW_RUN_LINKS;
           }).catch((error: unknown) => setStatus(errorMessage(error, USAGE_STATUS_LINES.moreFailed), 'error'))
             .finally(() => { more.disabled = false; });
         });
-        details.append(count, more);
+        details.append(more);
         cell.append(details);
         runs.append(cell);
         body.append(runs);
