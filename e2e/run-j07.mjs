@@ -1174,7 +1174,7 @@ async function main() {
     // Before any milestone 设为发稿版本 is there, unavailable, with its reason in words beside it (PUB-002).
     await openDeliverables(renderer, 'before-milestone');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .panel', returnTo: SIDEBAR.section('deliverables') });
+    await runJ14DarkPass({ renderer, journey: 'J-07', at, representative: '#screen[data-screen="book-deliverables"] > .page-content', returnTo: SIDEBAR.section('deliverables') });
     await waitForDeliverables(renderer, 'before-milestone-after-dark-pass');
     await assertRenderer(renderer, `(() => {
       const page = document.querySelector('[data-screen="book-deliverables"] > .book-deliverables');
@@ -1182,9 +1182,9 @@ async function main() {
       const designate = window.__j07.action('designate');
       const reason = document.getElementById(designate?.getAttribute('aria-describedby') ?? '');
       const actions = Array.from(page?.querySelectorAll(':scope > .workbench-actions button') ?? []).map((item) => item.textContent);
-      return page?.dataset.bookId === ${JSON.stringify(bookId)} && page.querySelector(':scope > .section-label')?.textContent === '工作 · 交付物' &&
-        page.querySelector(':scope > h2')?.textContent === ${JSON.stringify(EXCERPT.title)} && page.lastElementChild?.classList.contains('workbench-actions') &&
-        JSON.stringify(actions) === '["打开稿件","工作概览"]' && block.querySelector(':scope > h3')?.textContent === '发稿 · 稿件' &&
+      return page?.dataset.bookId === ${JSON.stringify(bookId)} && !page.querySelector(':scope > .section-label') &&
+        page.querySelector(':scope > h2')?.textContent === '工作 · 交付物' && !page.querySelector('.workbench-actions') &&
+        actions.length === 0 && block.querySelector(':scope > h3')?.textContent === '发稿 · 稿件' &&
         block.dataset.publicationState === 'no-milestone' && window.__j07.items().length === 0 && block.querySelector('.milestone-list-empty') !== null &&
         designate instanceof HTMLButtonElement && designate.disabled && designate.textContent === '设为发稿版本…' && reason?.textContent === '先保存里程碑版本' &&
         window.__j07.form() === null && window.__j07.versions().length === 0 && block.querySelector('.publication-actuals-prompt') === null &&
@@ -1559,7 +1559,7 @@ async function main() {
     await openDesignateForm(renderer, 'zoom');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root = document.documentElement; const block = window.__j07.block(); const parts = [block, block?.querySelector('ol.milestone-list'), block?.querySelector('ol.publication-versions'), window.__j07.form(), document.querySelector('[data-screen="book-deliverables"] .workbench-actions')]; const statement = window.__j07.form()?.querySelector('.publication-statement'); return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2 && statement instanceof HTMLElement && statement.getBoundingClientRect().width > 0; })()`, 'deliverables-reflow-at-200', 10_000);
+    await waitFor(renderer, `(() => { const root = document.documentElement; const block = window.__j07.block(); const parts = [block, block?.querySelector('ol.milestone-list'), block?.querySelector('ol.publication-versions'), window.__j07.form(), document.querySelector('[data-nav-book-section="manuscript"]')]; const statement = window.__j07.form()?.querySelector('.publication-statement'); return parts.every((part) => part instanceof HTMLElement && part.scrollWidth <= part.clientWidth + 2) && root.scrollWidth <= root.clientWidth + 2 && statement instanceof HTMLElement && statement.getBoundingClientRect().width > 0; })()`, 'deliverables-reflow-at-200', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
 

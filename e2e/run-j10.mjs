@@ -831,7 +831,7 @@ async function main() {
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
     await openAnalysisOf(renderer, bookId, 'analysis');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .page-content', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, 'analysis-after-dark-pass');
     await startFirstBaseline(renderer, 'ready', 'baseline');
     await waitFor(renderer, runningWith(FIRST_HOLD), 'third-range-in-flight', 180_000);
@@ -1140,7 +1140,7 @@ async function main() {
     at('third-book-import');
     // A third Book, reached from the library by way of 工作概览.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'third-overview');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='返回图书列表'&&!button.disabled)`, 'third-overview-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('[data-nav-destination="library"]')?.getAttribute('aria-disabled')!=='true'`, 'third-overview-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-library');
     const thirdBookId = await importSample1(renderer, THIRD_BOOK.title, true, 'third-import');
     requireJourney(thirdBookId !== bookId && thirdBookId !== secondBookId, 'three-books');

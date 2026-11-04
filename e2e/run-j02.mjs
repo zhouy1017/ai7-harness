@@ -550,6 +550,44 @@ async function openNavigation(renderer, location) {
   await assertRenderer(renderer, `(() => { const pane = document.querySelector('.editor-window'); pane.scrollTop = 0; return true; })()`, `${location}-scroll-back`);
 }
 
+async function clickVisibleControl(renderer, selector, name) {
+  const point = await renderer.evaluate(`(() => {
+    const node=document.querySelector(${JSON.stringify(selector)});
+    if(!(node instanceof HTMLElement)) return null;
+    node.scrollIntoView({block:'nearest'});
+    const r=node.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
+    return r.width>0 && r.height>0 && node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
+  })()`);
+  requireJourney(point !== null, name);
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+  await renderer.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+}
+
+async function assertSupportingOverlays(renderer) {
+  // Cover both the narrow container's former second row and the wider second column.
+  for (const width of [640, 1100]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
+    for (const [entry, id] of [['navigation','manuscript-navigation-panel'], ['analysis','paragraph-analysis-panel']]) {
+      await assertRenderer(renderer, `(() => { const node=document.querySelector('[data-edge-entry="${entry}"]'); if(node.getAttribute('aria-expanded')==='true') node.click(); return true; })()`, `overlay-${width}-${entry}-reset`);
+      await clickVisibleControl(renderer, `[data-edge-entry="${entry}"]`, `overlay-${width}-${entry}-open`);
+      await waitForChecks(renderer, `(() => {
+        const panel=document.querySelector('#${id}'), box=panel.getBoundingClientRect();
+        const workspace=document.querySelector('.editor-workspace').getBoundingClientRect();
+        const edge=document.querySelector('.editor-edge').getBoundingClientRect();
+        return { visible:!panel.hidden, readable:box.width>=240 && box.height>=100,
+          inside:box.top>=workspace.top-1 && box.bottom<=workspace.bottom+1 && box.left>=workspace.left-1 && box.right<=edge.left+1,
+          painted:panel.contains(document.elementFromPoint(box.left+20,box.top+20)) };
+      })()`, `overlay-${width}-${entry}-bounds`);
+      if (entry === 'navigation') {
+        await clickVisibleControl(renderer, '#manuscript-search', `overlay-${width}-search-click`);
+        await assertRenderer(renderer, `document.activeElement?.id==='manuscript-search'`, `overlay-${width}-search-focused`);
+      }
+      await clickVisibleControl(renderer, `[data-edge-entry="${entry}"]`, `overlay-${width}-${entry}-close`);
+      await waitFor(renderer, `document.querySelector('#${id}').hidden`, `overlay-${width}-${entry}-closed`);
+    }
+  }
+}
+
 async function clickButton(renderer, label, location) {
   await assertRenderer(
     renderer,
@@ -1609,12 +1647,16 @@ async function runAccessibilityJourney(renderer) {
   await renderer.evaluate(`(async () => { const surface = document.querySelector('.editor-window'); globalThis.__ai7BeforeFineScroll = document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId; surface.scrollTop = Math.floor((surface.scrollHeight - surface.clientHeight) / 2); await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); surface.scrollTop = surface.scrollHeight; })()`);
   await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')?.firstElementChild?.dataset.blockId !== globalThis.__ai7BeforeFineScroll`, 'fine-scroll-window-crossing');
   at('j14-zoom-200-reflow');
+  await assertSupportingOverlays(renderer);
   await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
   // Synchronized delta with Issue #409: at 200% the manuscript keeps the narrow rail beside it — the one
-  // persistent whole-manuscript control — the supporting panel reflows below the text (#1287), and
+  // persistent whole-manuscript control — the supporting panel overlays the text below 1120px (#1319), and
   // nothing scrolls sideways.
-  await assertRenderer(renderer, `(() => { const columns = getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' '); const edge = document.querySelector('.editor-edge').getBoundingClientRect(); const panel = document.querySelector('#manuscript-navigation-panel'); return columns.length === 2 && edge.width <= 64 && getComputedStyle(panel).position === 'relative' && document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2; })()`, 'zoom-200-reflow');
+  await assertRenderer(renderer, `getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' ').length === 2`, 'zoom-200-columns');
+  await assertRenderer(renderer, `document.querySelector('.editor-edge').getBoundingClientRect().width <= 64`, 'zoom-200-rail-width');
+  await assertRenderer(renderer, `getComputedStyle(document.querySelector('#manuscript-navigation-panel')).position === 'absolute'`, 'zoom-200-overlay');
+  await assertRenderer(renderer, `document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2`, 'zoom-200-no-horizontal-scroll');
   at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
   await assertRenderer(renderer, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.editor-shell')).boxShadow === 'none' && getComputedStyle(document.querySelector('button')).borderStyle !== 'none'`, 'forced-colors');

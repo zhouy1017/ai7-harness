@@ -1315,7 +1315,7 @@ async function main() {
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
       return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
-        (anchorSection.compareDocumentPosition(overview.querySelector('.workbench-actions'))&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
+        anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
         readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
@@ -1410,7 +1410,7 @@ async function main() {
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .panel', returnToScreen: async () => {
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .page-content', returnToScreen: async () => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
       await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
       // 设置 paints its hub after the click, so the 模型服务 row is waited for and followed once it is there (#935).

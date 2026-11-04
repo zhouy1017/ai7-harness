@@ -418,7 +418,7 @@ async function main() {
     }
     await loopback.close();
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-08', at, representative: '#screen[data-screen="landing"] > .panel', returnTo: SIDEBAR.destination('library') });
+    await runJ14DarkPass({ renderer, journey: 'J-08', at, representative: '#screen[data-screen="landing"] > .page-content', returnTo: SIDEBAR.destination('library') });
     await importBook(renderer, '恢复边界甲', 'book-a', true);
     await saveMilestone(renderer, '中断前检查点', 'checkpoint-one');
     await saveMilestone(renderer, '中断前复核快照', 'checkpoint-two');

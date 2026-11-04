@@ -2247,7 +2247,7 @@ export function classifyJourneyResult(result, journey) {
  * 跟随系统. `returnTo` is the sidebar row that leads back to that screen; a Journey whose screen no row reaches passes
  * `returnToScreen`. Neither touches a record: only the local appearance preference changes, and it ends at 跟随系统.
  */
-export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .panel', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
+export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .page-content', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
   // Which screen was showing, as a check label's word: its own `data-screen` when that is a code word, else `other`; `none`
   // before the renderer has painted its first screen or when it cannot be read.
   const SCREEN_WORD = `(() => { const state = document.querySelector('#screen')?.dataset.screen; return typeof state !== 'string' ? 'none' : /^[a-z][a-z0-9-]{0,39}$/u.test(state) ? state : 'other'; })()`;
@@ -2307,11 +2307,13 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
     const style = getComputedStyle(screen);
     const rgb = (value) => (value.match(/[\\d.]+/g) ?? []).slice(0, 3).map(Number);
     const luminance = (values) => values.map((n) => { const s = n / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
-    const color = rgb(style.color), background = rgb(style.backgroundColor);
+    let backdrop = screen;
+    while (backdrop.parentElement && getComputedStyle(backdrop).backgroundColor === 'rgba(0, 0, 0, 0)') backdrop = backdrop.parentElement;
+    const color = rgb(style.color), background = rgb(getComputedStyle(backdrop).backgroundColor);
     const l1 = luminance(color), l2 = luminance(background);
     const hex = (values) => '#' + values.map((v) => v.toString(16).padStart(2, '0')).join('');
     return hex(color) === root.getPropertyValue('--text').trim() &&
-      [root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
+      [root.getPropertyValue('--shell').trim(), root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
       (Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05) >= 4.5;
   })()`, 'j14-dark-pass-theme-applied');
   at('j14-dark-pass-forced-colors-wins');

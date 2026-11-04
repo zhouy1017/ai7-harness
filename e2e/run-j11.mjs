@@ -1562,7 +1562,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'evaluation-overview');
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评）'`, 'evaluation-overview-line');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-11', at, representative: '#screen[data-screen="book-overview"] > .panel', returnTo: SIDEBAR.section('overview') });
+    await runJ14DarkPass({ renderer, journey: 'J-11', at, representative: '#screen[data-screen="book-overview"] > .page-content', returnTo: SIDEBAR.section('overview') });
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'editing' && document.querySelector('.book-evaluation-summary p')?.textContent === '第 2 版 · 编辑评分中 · 修订版 r1 · 总分 67.5 / 80 · 优秀（1 项不评）'`, 'evaluation-overview-line-after-dark-pass');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'evaluation-profile-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'evaluation-profile-landing');

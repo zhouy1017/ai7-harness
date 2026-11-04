@@ -856,7 +856,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('series')), 'series-destination');
     const empty = await readSeriesList(renderer, () => true, 'series-empty-page');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-13', at, representative: '#screen[data-screen="series-list"] > .panel', returnTo: SIDEBAR.destination('series') });
+    await runJ14DarkPass({ renderer, journey: 'J-13', at, representative: '#screen[data-screen="series-list"] > .page-content', returnTo: SIDEBAR.destination('series') });
     await readSeriesList(renderer, () => true, 'series-empty-page-after-dark-pass');
     requireJourney(empty.lede === SERIES_LEDE && empty.empty === '还没有书系。' && empty.items.length === 0 && !empty.form, 'series-empty-words', empty);
     requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [], nextCursor: null }), 'series-empty-service');

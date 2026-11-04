@@ -1726,7 +1726,7 @@ async function runJourney(
     'content-contract',
     () => assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
       'import-completion',
     ),
   );
@@ -2034,7 +2034,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   // Back in 书库 the window holds no Book: its groups go, and it is 最近打开 with where it was last seen. Pinning it and
   // unpinning it again move the row and change nothing else (IA-009).
   const recentRow = `document.querySelector('#app-sidebar [data-nav-books="recent"] [data-nav-book=${JSON.stringify(bookId)}]')`;
-  await waitFor(renderer, `document.querySelector('#app-sidebar .sidebar-book')?.hidden === true && ${recentRow}?.querySelector('.nav-label')?.textContent === ${JSON.stringify(title)} && ${recentRow}?.querySelector('.nav-state')?.textContent === '上次在「工作概览」'`, 'empty-book-sidebar-recent');
+  await waitFor(renderer, `document.querySelector('#app-sidebar .sidebar-book')?.hidden === true && ${recentRow}?.querySelector('.nav-label')?.textContent === ${JSON.stringify(title)} && !${recentRow}?.querySelector('.nav-state') && ${recentRow}?.getAttribute('aria-label')?.includes('上次在「工作概览」') && getComputedStyle(${recentRow}.querySelector('.nav-label')).whiteSpace==='nowrap'`, 'empty-book-sidebar-recent');
   await assertRenderer(renderer, `(() => { const pin=document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]'); if(!(pin instanceof HTMLButtonElement))return false; pin.focus(); return document.activeElement===pin; })()`, 'empty-book-sidebar-pin-focus');
   await assertRenderer(renderer, sidebarNavigate(`#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]`), 'empty-book-sidebar-pin');
   await waitFor(renderer, `document.querySelector('#app-sidebar [data-nav-books="pinned"] [data-nav-pin=${JSON.stringify(bookId)}]')?.getAttribute('aria-pressed') === 'true' && !${recentRow} && document.activeElement === document.querySelector('#app-sidebar [data-nav-pin=${JSON.stringify(bookId)}]')`, 'empty-book-sidebar-pinned');
@@ -3220,7 +3220,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
       'text-manuscript-completion-wording',
     );
     await clickExactButton(renderer, '来源版本与来源记录', 'text-manuscript-view-source');
@@ -3316,7 +3316,7 @@ async function main() {
       );
       await assertRenderer(
         renderer,
-        `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+        `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
         'doc-manuscript-completion-wording',
       );
       await clickExactButton(renderer, '来源版本与来源记录', 'doc-manuscript-view-source');

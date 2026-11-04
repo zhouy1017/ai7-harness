@@ -29,6 +29,7 @@ export function createSaveMenu(form: HTMLElement, exportManuscript: () => void):
     const protectedNow = protection === 'active' || protection === 'read-only';
     const line = latest.state === null ? SAVE_MENU_WORDS.confirming : saveMenuPersistenceLine(latest.state, latest.changedSince);
     summary.textContent = `${protectedNow ? SAVE_MENU_WORDS.unconfirmed : line} ▾`;
+    summary.title = summary.textContent;
     menu.dataset['persistence'] = !protectedNow && latest.state !== null && persistenceConfirmed(latest.state) ? 'confirmed' : 'unconfirmed';
   };
   const observer = new MutationObserver(render);
