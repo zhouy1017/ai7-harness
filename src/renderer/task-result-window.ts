@@ -105,6 +105,9 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   const bar = el('header', 'task-result-bar');
   const kind = el('span', 'task-result-kind', TASK_RESULT_KIND);
   const title = el('h3', 'task-result-title', globalAttentionObjectLabel(entry.item.object));
+  const loading = el('span', undefined, ` · ${TASK_RESULT_LOADING}`);
+  loading.setAttribute('role', 'status');
+  title.append(loading);
   title.id = uid('title');
   title.tabIndex = -1;
   section.setAttribute('aria-labelledby', title.id);
@@ -117,7 +120,6 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   close.dataset['taskResultAction'] = 'close';
   bar.append(kind, title, pill, close);
   const body = el('div', 'task-result-body');
-  body.append(el('p', 'field-note', TASK_RESULT_LOADING));
   const foot = el('footer', 'task-result-foot');
   const open = el('button', 'secondary', isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
   open.type = 'button';
@@ -318,9 +320,11 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
         manuscriptId = workspace.manuscript?.manuscriptId ?? null;
         showReview(workspace.run);
       }
+      loading.remove();
       section.dataset['taskResult'] = 'ready';
     } catch (error) {
       if (closed) return;
+      loading.remove();
       section.dataset['taskResult'] = 'unavailable';
       body.replaceChildren(el('p', 'attention-note', options.errorMessage(error, TASK_RESULT_UNAVAILABLE)));
     }
