@@ -329,10 +329,8 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   const render = (): void => {
     section.replaceChildren(el('h3', undefined, CUSTOM_DIMENSIONS_HEADING), el('p', 'field-note', CUSTOM_DIMENSIONS_NOTE));
     const fixed = el('ul', 'custom-dimension-fixed');
-    for (const line of CUSTOM_DIMENSION_FIXED_LINES) fixed.append(el('li', undefined, line));
-    const fixedDetails = el('details');
-    fixedDetails.append(el('summary', undefined, '查看分析范围与输出'), fixed);
-    section.append(fixedDetails);
+    for (const line of CUSTOM_DIMENSION_FIXED_LINES) fixed.append(el('li', 'field-note', line));
+    section.append(fixed);
     if (projection === null) return;
     section.dataset['dimensionCount'] = String(projection.dimensions.length);
     if (editing === null) section.append(form(null));

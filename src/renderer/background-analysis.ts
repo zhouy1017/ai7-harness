@@ -207,10 +207,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       kindChoice.append(option);
     }
     kindChoice.addEventListener('change', () => { selectedKind = kindChoice.value; lastJson = ''; void load(); });
-    const guidance = el('details');
-    guidance.dataset['backgroundDetails'] = 'guidance';
-    guidance.append(el('summary', undefined, '后台处理如何运行'), el('p', 'background-analysis-statement', BACKGROUND_SUMMARY));
-    const nodes: HTMLElement[] = [heading, kindChoice, guidance];
+    const nodes: HTMLElement[] = [heading, kindChoice, el('p', 'field-note background-analysis-statement', BACKGROUND_SUMMARY)];
     if (projection.enrollment !== null) {
       const line = el('p', 'background-analysis-enrollment', backgroundEnrollmentLine(projection.enrollment, localInstantLabel));
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;

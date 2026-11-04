@@ -83,9 +83,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       }
     });
     form.append(mode, input, save);
-    const proxyHelp = element('details');
-    proxyHelp.append(element('summary', undefined, '代理说明'), element('p', 'field-note', '本机代理通常使用 http://127.0.0.1:端口，仅在代理支持 TLS 时使用 https://；代理只用于获准的模型请求，设置不随数据库迁移，暂不支持代理认证。'));
-    section.append(form, proxyHelp);
+    section.append(form, element('p', 'field-note', '本机代理通常使用 http://127.0.0.1:端口，仅在代理支持 TLS 时使用 https://；代理只用于获准的模型请求，设置不随数据库迁移，暂不支持代理认证。'));
     if (projection.lastProxyProbe) {
       const probe = projection.lastProxyProbe;
       const line = element('p', probe.status === 'available' ? 'success-note' : 'attention-note',

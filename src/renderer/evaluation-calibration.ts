@@ -112,8 +112,6 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const calibrationSection = el('section', 'calibration-section calibration-calibration');
     const calibrationSwitch = switchNode('calibration', CALIBRATION_SWITCH, calibration.enabled, false, (on) =>
       void savePreferences({ predictionEnabled: prediction.enabled, calibrationEnabled: on }, 'calibration'));
-    const method = el('details');
-    method.append(el('summary', undefined, '校准方法'), el('p', 'calibration-method', CALIBRATION_METHOD));
     // The house offset as computed now (EVAL-011a): its basis and each item's offset past the gate, or what it waits for.
     const offsetNode = el('div', 'calibration-offset');
     offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
@@ -143,7 +141,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       ...(calibrationUnreadableLine(calibration.unreadableBooks) === null ? []
         : [el('p', 'field-note calibration-unreadable', calibrationUnreadableLine(calibration.unreadableBooks)!)]),
       el('p', 'field-note', CALIBRATION_SCOPE),
-      method,
+      el('p', 'field-note calibration-method', CALIBRATION_METHOD),
       // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
       ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
       offsetNode,

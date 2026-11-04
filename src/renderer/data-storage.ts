@@ -42,6 +42,7 @@ export function createDataStorage(options: DataStorageOptions) {
       content.append(
         element('p', 'section-label', '设置 · 数据与存储'),
         element('h2', undefined, '数据与存储摘要'),
+        element('p', 'lede', '查看位置不会更改存储、导出内容或授予文件系统权限。'),
       );
       const summary = element('section', 'source-card');
       const values = element('dl');
