@@ -42,7 +42,6 @@ export function createDataStorage(options: DataStorageOptions) {
       content.append(
         element('p', 'section-label', '设置 · 数据与存储'),
         element('h2', undefined, '数据与存储摘要'),
-        element('p', 'lede', '这里显示当前运行实例实际使用的本机产品数据位置。查看位置不会更改存储、导出内容或授予文件系统权限。'),
       );
       const summary = element('section', 'source-card');
       const values = element('dl');
@@ -60,10 +59,12 @@ export function createDataStorage(options: DataStorageOptions) {
         element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
       );
       // The shell's own file stays on this machine (Issue #934): it is not a record and 导出数据库 does not carry it.
-      summary.append(element('h3', undefined, '产品数据位置'), values, element('p', 'field-note preferences-local-line', PREFERENCES_LOCAL_LINE.replace('（侧栏收起状态、置顶与最近打开的图书等）', '')));
+      summary.append(element('h3', undefined, '产品数据位置'), values);
       const locationNote = projection.syncWarning === null ? projection.channelDescription
         : `${projection.channelDescription.replace(/。$/u, '')}；${projection.syncWarning}`;
-      summary.append(element('p', 'field-note', locationNote));
+      const locationContext = element('p', 'field-note');
+      locationContext.append(element('span', 'preferences-local-line', PREFERENCES_LOCAL_LINE.replace('（侧栏收起状态、置顶与最近打开的图书等）', '').replace(/。$/u, '')), '；', locationNote);
+      summary.append(locationContext);
       if (projection.dataLocationException !== null) summary.dataset['dataLocationException'] = projection.dataLocationException;
       const credentials = element('section', 'review-section');
       credentials.append(
