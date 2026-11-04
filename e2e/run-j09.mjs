@@ -1686,7 +1686,10 @@ async function main() {
     at('task-overview-continuous-enqueue');
     const overviewBooks = [];
     for (const title of ['任务总览甲', '任务总览乙', '任务总览丙', '任务总览丁']) {
-      await toLibrary(renderer, 'overview-import');
+      // The existing picker control is consumed once per launch.
+      await closeOwnedBrowser();
+      await launchForCleanup();
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'overview-import-launch');
       overviewBooks.push(await importSample1(renderer, title, true, 'overview-import'));
     }
     await writeFile(holdPath, '1', 'utf8');
@@ -1731,6 +1734,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
 
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');

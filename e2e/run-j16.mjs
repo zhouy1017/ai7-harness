@@ -1000,6 +1000,10 @@ async function main() {
         JSON.stringify([['等你处理', '0', '这里暂时没有任务。', 0], ['进行中', '0', '这里暂时没有任务。', 0], ['最近完成', '0', '这里暂时没有任务。', 0]]),
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
+    // Opt out through the shared sheet so the explicit result-window steps below own their focus.
+    await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-result-popup-preference');
+    await clickSelector(renderer, '#task-drawer [data-task-overview-auto-result]', 'panel-result-popup-off');
+    await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');
 
     at('panel-prepare');
     // The primary action prepares and starts in the panel, with no plan drawer.
@@ -1009,7 +1013,7 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'`, 'panel-no-plan-wall');
     at('panel-stop-wording');
     const running = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' &&
-      cardsOf(panel, 'running')[0].reason === `第 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个单元`, 'panel-running', 180_000);
+      cardsOf(panel, 'running')[0].reason.startsWith(`第 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个单元`), 'panel-running', 180_000);
     requireJourney(running.running === 'true' && cardsOf(running, 'running')[0].pill === '运行中' && statesOf(running, 'waiting').length === 0 &&
       JSON.stringify(cardsOf(running, 'running')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消', 'enabled']]),
     'panel-running-card', running);

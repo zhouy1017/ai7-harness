@@ -2673,6 +2673,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       redoOnOpen = how?.redo === true;
       root.dataset['taskDetailView'] = how?.view ?? 'plan';
       if (how?.view) { mode = how.view === 'run' ? 'compact' : 'full'; syncModeButtons(); }
+      for (const button of modeButtons) button.textContent = how?.view ? button.dataset['taskDrawerMode'] === 'compact' ? '运行' : '计划' : TASK_DRAWER_MODES[button.dataset['taskDrawerMode'] as TaskDrawerMode];
       showView();
       if (request?.ref !== next.ref || request?.bookId !== next.bookId || request?.kind !== next.kind) startWhen = 'now';
       request = next;

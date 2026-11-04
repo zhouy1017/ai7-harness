@@ -1,4 +1,4 @@
-import { composeTaskOverview } from './task-overview.js';
+import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -14961,13 +14961,22 @@ export class EditorialStore {
       .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
     const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, 'slot', dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
     const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
-    return composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
+    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
       if (item.runRecordId === null || !['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
       const report = this.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: item.runRecordId }).detail?.report;
       if (!report) return null;
       return { calls: Object.values(report.usagePerStage).reduce((sum, stage) => sum + stage.requests, 0),
         elapsed: report.stages.reduce((sum, stage) => sum + (stage.wallMs ?? 0), 0) };
     });
+    return estimateTaskStarts({ ...overview, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
+      if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
+      const facts = this.executionLedgerForRun(item.runRecordId).loadExecutionPlan(item.runRecordId);
+      const current = progress(item.runRecordId);
+      const unit = facts.manifest.units.find((unit) => unit.ordinal === current?.currentUnitOrdinal);
+      return { ...item, progress: { done: current?.unitsSettled ?? 0, total: facts.manifest.units.length,
+        currentUnitLabel: unit?.headingText ?? null, elapsedMs: current === null ? null : Math.max(0, Date.now() - Date.parse(item.at)),
+        modelWaiting: current?.attemptState === 'awaiting-response' } };
+    }) })) });
   }
 
   /**

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { taskOverviewApi } from '../../src/renderer/task-overview-api.js';
-import { composeTaskOverview } from '../../src/service/task-overview.js';
+import { composeTaskOverview, estimateTaskStarts } from '../../src/service/task-overview.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../../src/shared/protocol.js';
 
 function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttentionItemProjection['state'], id: string): GlobalAttentionItemProjection {
@@ -16,6 +16,16 @@ describe('task overview', () => {
     expect(result.groups.find((group) => group.key === 'queued')!.items.map((item) => item.itemId)).toEqual(['first', 'second']);
     expect(result.groups.find((group) => group.key === 'recent')!.items.map((item) => item.state)).toEqual(['completed', 'cancelled']);
     expect(result.queuedCount).toBe(2);
+  });
+  it('estimates a queued start from measured recent unit throughput and omits it without measurements', () => {
+    const running = task('active', 'analysis-running', 'running'); running.facts.progress = { stage: 'units', unitsSettled: 4, unitsTotal: 8 };
+    const queued = task('active', 'analysis-waiting-capacity', 'queued'); queued.facts.progress = { stage: 'units', unitsSettled: 0, unitsTotal: 8 };
+    const completed = task('recent', 'analysis-completed', 'done'); completed.facts.completion = { gaps: 0, total: 8, reason: null };
+    const attention: GlobalAttentionProjection = { groups: [{ key: 'active', items: [running, queued, completed], total: 3 }], actionableCount: 0, running: true, processing: { state: 'local' } };
+    const projection = composeTaskOverview(attention, 1, (id) => id === 'queued' ? 1 : null, undefined, [], false, (item) => item.itemId === 'done' ? { elapsed: 60000, calls: 8 } : null);
+    expect(estimateTaskStarts(projection, Date.parse(completed.at)).groups[1]!.items[0]!.eta).toBe(30000);
+    const noUsage = { ...projection, groups: projection.groups.map((group) => ({ ...group, items: group.items.map((item) => ({ ...item, usage: null })) })) };
+    expect(estimateTaskStarts(noUsage).groups[1]!.items[0]!.eta).toBeNull();
   });
   it('scopes existing drawer commands to the selected Book even when the contextBridge API is frozen', async () => {
     const inspectTaskPlan = vi.fn(); const taskOverviewCall = vi.fn().mockResolvedValue({ bookId: 'other' });

@@ -480,6 +480,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       groups.replaceChildren(el('p', 'field-note task-panel-loading', TASK_PANEL_STATUS_LINES.loading));
       overview?.destroy();
       overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus,
+        onChanged: () => { options.onRecorded(next); read(true); },
         openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, false, view === 'redo'); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
         jumpToSelection: (item) => { if (item.selection) options.jumpToSelection({ item: item.attention, result: item.result, selection: item.selection }); },
         openBook: () => {}, openResult: (item) => { const entry = tasks?.groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === item.itemId); if (entry) options.openResult(entry); },

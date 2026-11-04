@@ -46,3 +46,33 @@ export function composeTaskOverview(attention: GlobalAttentionProjection, capaci
   });
   return { groups, capacity, books, queueFrozen, runningCount: groups[0]!.total, queuedCount: groups[1]!.total, actionableCount: groups[2]!.total };
 }
+
+/** Approximate FIFO start times from measured same-kind unit throughput; unknown work leaves the estimate absent. */
+export function estimateTaskStarts(projection: TaskOverviewProjection, now = Date.now()): TaskOverviewProjection {
+  if (projection.queueFrozen) return projection;
+  const items = projection.groups.flatMap((group) => group.items);
+  const samples = new Map<string, number[]>();
+  for (const item of items) {
+    const units = item.attention.facts.completion?.total;
+    if (item.state !== 'completed' || !units || !item.usage || item.usage.elapsed <= 0 || now - Date.parse(item.at) > 7 * 86400000) continue;
+    const rates = samples.get(item.taskKind) ?? []; rates.push(item.usage.elapsed / units); samples.set(item.taskKind, rates);
+  }
+  if (samples.size === 0) return projection;
+  const remaining = (item: TaskOverviewItemProjection): number | null => {
+    const rates = samples.get(item.taskKind);
+    if (!rates?.length || !item.progress) return null;
+    return Math.max(0, item.progress.total - item.progress.done) * rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
+  };
+  const slots: number[] = [];
+  for (const item of projection.groups.find((group) => group.key === 'running')!.items) { const duration = remaining(item); if (duration === null) return projection; slots.push(duration); }
+  while (slots.length < projection.capacity) slots.push(0);
+  let known = true;
+  const queued = projection.groups.find((group) => group.key === 'queued')!.items.map((item) => {
+    if (!known) return item;
+    const earliest = Math.min(...slots), slot = slots.indexOf(earliest), duration = remaining(item);
+    if (duration === null) { known = false; return item; }
+    slots[slot] = earliest + duration;
+    return { ...item, eta: earliest };
+  });
+  return { ...projection, groups: projection.groups.map((group) => group.key === 'queued' ? { ...group, items: queued } : group) };
+}

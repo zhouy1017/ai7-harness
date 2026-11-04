@@ -1173,7 +1173,8 @@ function renderGlobalAttention(bookId?: string | null): void {
 function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' = 'run'): void {
   overviewDrawerBookId = item.bookId;
   const finder = () => [...screen.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId) ?? null;
-  if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
+  if (item.target.kind === 'task-intent-draft') taskDrawer.openDraft(item.target.bookId, item.target.draftId, finder);
+  else if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
   else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo' });
 }
 async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
@@ -1186,6 +1187,8 @@ function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
   const content = panel(); content.classList.add('task-overview');
   const surface = mountTaskOverview({ root: content, api: window.ai7, setStatus,
+    onChanged: () => globalAttentionReader.refresh(),
+    onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
     openTarget: openOverviewTask,
     openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
     jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },

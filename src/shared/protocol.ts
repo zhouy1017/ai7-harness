@@ -4683,7 +4683,8 @@ export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', '
   'editTaskPlan', 'editBaselineAnalysisPlan', 'resolveUnconfirmedOutcomes', 'startTaskWhenOnline', 'startTaskWhenIdle',
   'startBaselineAnalysisWhenOnline', 'setDefaultExecutionRule', 'inspectBookTasks', 'inspectBaselineAnalysis',
   'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
-  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis'] as const;
+  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
+  'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft'] as const;
 export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
 export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
