@@ -109,8 +109,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const section = element('section', 'review-section');
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
-  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务优先使用主编辑模型自带搜索，否则使用已配置的检索后端；已开始的运行继续使用原定来源。'),
-    element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；${SEARCH_FALLBACK_NOTE}`));
+  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', `新任务优先使用主编辑模型自带搜索，否则使用已配置的检索后端；已开始的运行继续使用原定来源；${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
@@ -135,8 +134,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     card.dataset['selected'] = String(selected);
     card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
     card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${selected ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
-      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`));
-    if (backend.note !== null) card.append(element('p', 'field-note', backend.note));
+      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%${backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
     const actions = element('div', 'button-row');
     const choose = button('选择后端', 'quiet', () => void (async () => {
       try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
@@ -178,7 +176,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       })());
       save.disabled = true; remove.disabled = !keyed;
       secret.addEventListener('input', () => { save.disabled = secret.value.trim().length === 0; });
-      card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
+      card.append(secret);
       actions.append(save, remove);
       const service = backend.backendId.slice('search-'.length);
       const source = projection.routeChoice.routes.find((route) => route.route.startsWith(`${service}-`))?.connection;
