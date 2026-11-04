@@ -1397,7 +1397,7 @@ async function main() {
       state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行',
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
     const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const keptAnswer = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredRestart?.run?.state === 'resumable' && answeredRestart.run.runRecordId === queuedRun.run.runRecordId &&
@@ -1429,7 +1429,7 @@ async function main() {
     const answeredPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredPlan?.clarifications?.[0]?.state === 'answered' && answeredPlan.clarifications[0].answer?.optionId === 'retry' &&
       answeredPlan.clarifications[0].answer.note === QUESTION_NOTE, 'answer-record', answeredPlan?.clarifications ?? null);
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
 
     // ---- The Run Budget Ceiling (Issue #51, S16a; MODEL-013, MODEL-015 to MODEL-017) ----------------------------------
     at('relaunch-for-budget');
