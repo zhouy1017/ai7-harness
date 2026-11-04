@@ -181,7 +181,7 @@ const DELIVERY_EDIT = '〔交付后修订〕';
 const DOCUMENT_EXPORT_FILE = '新闻稿 · 版本 2.docx';
 const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
 const DELIVERY_UNSAVED = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
-const DELIVERY_CURRENT_TEXT = '现在的文字（交付时先保存为版本 3）';
+const DELIVERY_CURRENT_TEXT = '现在的文字 · 交付时先保存为版本 3';
 // Issue #416 (S67a): 图书交付包 — prepared once with a purpose, again unchanged, and once more with a new purpose.
 const PACKAGE_PURPOSE = '交出版社存档';
 const PACKAGE_PURPOSE_2 = '交印厂付印';

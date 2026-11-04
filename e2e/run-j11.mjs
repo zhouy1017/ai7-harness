@@ -1855,7 +1855,7 @@ async function main() {
     // editor's, no risk and no conclusion chosen for them.
     requireJourney(settledInitial.initial.latest === '第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀' &&
       JSON.stringify(settledInitial.initial.items) === JSON.stringify(AI7_ITEM_LINES) &&
-      settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议（由你选定）' &&
+      settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议' &&
       JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['prepare-initial', '查看计划', false], ['start-initial', '重新初评', false], ['open-initial-task', '查看任务', false]]) &&
       settledInitial.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && settledInitial.startFromInitial === null,
     'initial-evaluation-latest-words', settledInitial.initial);
