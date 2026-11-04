@@ -11,7 +11,8 @@ import { FastRoleRequests, fastInteractionRoutes, polishWordsOf, regenerationReg
 import { EDITORIAL_POLISH_PROMPT_CONTRACT, buildEditorialPolishMessage } from '../../src/service/fast-role/polish-contract.js';
 import { CONFLICT_REGENERATE_PROMPT_CONTRACT, buildConflictRegenerateMessage } from '../../src/service/fast-role/conflict-regenerate-contract.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
-import { OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
+import { modelRequestNotSent, OPENCODE_GO_ROUTE_PROFILE } from '../../src/service/provider/deepseek-adapter.js';
+import { proxyAwareFetch } from '../../src/service/provider/proxy-setting.js';
 import { OPENCODE_GO_MODEL } from '../../src/service/provider/egress-gate.js';
 import { PROVIDER_LEDGER_FILE, isItemLine, type ProviderLedgerLine } from '../../src/service/provider/provider-result-cache.js';
 import { EditorialStore } from '../../src/service/store.js';
@@ -215,6 +216,20 @@ describe('润色这段 on the live route (provider-free)', () => {
     expect(second.kind === 'editorial-polish' && second.polish).toMatchObject({ state: 'failed', outcomeUnknown: true });
     expect(calls).toHaveLength(1);
     expect((await ledgerLines()).map((line) => [line.outcome, line.classification ?? null])).toEqual([['failed', 'outcome-unknown'], ['refused', null]]);
+  });
+
+  it.each(['MODEL_SERVICE_UNREACHABLE', 'AI7_PROXY_UNREACHABLE'])('keeps %s out of the unknown-outcome polish state (#1305)', async (code) => {
+    const transport = code === 'MODEL_SERVICE_UNREACHABLE'
+      ? proxyAwareFetch(globalThis.fetch, async () => ({ mode: 'direct' }), undefined, undefined,
+        (_options, callback) => callback(new Error('observed connector failure'), null))
+      : async (_url: unknown, init?: RequestInit) => { throw modelRequestNotSent(init!, Object.assign(new Error('proxy refused'), { code })); };
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: live(transport, { validation: null }) });
+    const fast = new FastRoleRequests(owner, store);
+    try {
+      const result = await settled(fast, fast.polish(book.bookId, { selection: polishSelectionOf(store, book) }).taskId);
+      expect(result.kind === 'editorial-polish' && result.polish).toMatchObject({ state: 'failed', outcomeUnknown: false, markIds: [],
+        label: expect.stringContaining(code === 'MODEL_SERVICE_UNREACHABLE' ? '模型服务不可达' : '代理不可达') });
+    } finally { await owner.dispose(); }
   });
 
   it('sends nothing when the credential is absent', async () => {

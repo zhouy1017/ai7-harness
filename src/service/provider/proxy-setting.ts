@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { Client, ProxyAgent, type Dispatcher, buildConnector } from 'undici';
+import { Agent, Client, ProxyAgent, type Dispatcher, buildConnector } from 'undici';
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../../shared/data-root.js';
 import { admittedProxyRequest } from '../../shared/network-denial.js';
 import { modelRequestNotSent } from './deepseek-adapter.js';
@@ -155,10 +155,27 @@ function responseTimedOut(error: unknown): Error | null {
     : null;
 }
 
+/** Keep the per-call dispatcher alive until the response is consumed or cancelled. */
+function observedResponse(response: Response, finish: () => void): Response {
+  if (response.body === null) { finish(); return response; }
+  const reader = response.body.getReader();
+  return new Response(new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const next = await reader.read();
+        if (next.done) { finish(); controller.close(); }
+        else controller.enqueue(next.value);
+      } catch { finish(); controller.error(new Error('模型服务传输失败。')); }
+    },
+    async cancel(reason) { try { await reader.cancel(reason); } finally { finish(); } },
+  }), { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+
 /** Captured fetch only. Called by admitted transports; no global dispatcher or host allowance is changed. */
 export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<ModelServiceProxySetting>,
   factory: ProxyDispatcherFactory = createProxyDispatcher,
-  report: (failure: 'proxy-unreachable' | 'model-service-unreachable' | null) => void = () => undefined): typeof fetch {
+  report: (failure: 'proxy-unreachable' | 'model-service-unreachable' | null) => void = () => undefined,
+  directConnector: ReturnType<typeof buildConnector> = buildConnector({})): typeof fetch {
   return async (input, init) => {
     const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     const beforeSend = (): void => {
@@ -172,8 +189,27 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
     const setting = await read();
     beforeSend();
     if (setting.mode === 'direct') {
-      try { const response = await nativeFetch(input, { ...init, redirect: 'manual' }); report(null); return response; }
+      let connectionFailed = false;
+      let connected = false;
+      const dispatcher = new Agent({ connect: (options, callback) => directConnector(options, (error, socket) => {
+        if (error !== null) { connectionFailed = true; callback(error, null); }
+        else { connected = true; callback(null, socket!); }
+      }) });
+      const finish = (): void => { void dispatcher.destroy().catch(() => undefined); };
+      try {
+        const response = await nativeFetch(input, { ...init, redirect: 'manual', dispatcher } as RequestInit);
+        report(null);
+        return observedResponse(response, finish);
+      }
       catch (error) {
+        finish();
+        // Any established socket in this call (including before a native reconnect) rules out a no-send proof.
+        // Neither a native rejection nor its error code can substitute for this connector observation.
+        if (connectionFailed && !connected) {
+          report('model-service-unreachable');
+          const unreachable = Object.assign(new Error('模型服务不可达：请检查网络或网络代理设置。'), { code: 'MODEL_SERVICE_UNREACHABLE' });
+          throw init === undefined ? unreachable : modelRequestNotSent(init, unreachable);
+        }
         const preserved = interruptedOrDenied(error) ?? responseTimedOut(error);
         if (preserved !== null) throw preserved;
         report('model-service-unreachable'); throw Object.assign(new Error('模型服务不可达。'), { code: 'TRANSPORT_FAILED' });
@@ -192,18 +228,7 @@ export function proxyAwareFetch(nativeFetch: typeof fetch, read: () => Promise<M
       const response = await token.run(() => nativeFetch(input, { ...init, redirect: 'manual', dispatcher } as RequestInit));
       if (response.status === 407) { proxyFailed = true; throw new Error(PROXY_UNREACHABLE); }
       report(null);
-      if (response.body === null) { finish(); return response; }
-      const reader = response.body.getReader();
-      return new Response(new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          try {
-            const next = await reader.read();
-            if (next.done) { finish(); controller.close(); }
-            else controller.enqueue(next.value);
-          } catch { finish(); controller.error(new Error('模型服务传输失败。')); }
-        },
-        async cancel(reason) { try { await reader.cancel(reason); } finally { finish(); } },
-      }), { status: response.status, statusText: response.statusText, headers: response.headers });
+      return observedResponse(response, finish);
     } catch (error) {
       finish();
       const preserved = interruptedOrDenied(error);
