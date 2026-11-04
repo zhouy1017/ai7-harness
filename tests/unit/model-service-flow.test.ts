@@ -274,7 +274,8 @@ describe('the one model-service flow', () => {
     expect(banner).toContain(`OpenCode Go / ${model.modelLabel}`);
     if (code !== null) expect(banner).not.toContain(code);
     const painted = flow(answer).node;
-    expect(painted.querySelector(`[data-connection-test-outcome="${outcome}"]`)!.textContent).toContain(model.modelLabel);
+    expect(painted.querySelector(`[data-model-choice="${model.modelId}"]`)!.checked).toBe(true);
+    expect(painted.querySelector(`[data-connection-test-outcome="${outcome}"]`)!.textContent).toContain('文本连接测试');
     expect(painted.querySelector('.model-service-flow-feedback .technical-details')!.textContent).toContain(code ?? '无');
   });
 
