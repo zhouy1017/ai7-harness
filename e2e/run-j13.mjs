@@ -591,7 +591,7 @@ const READ_CAPTURE = `(() => {
   return {
     kind: dialog.dataset.captureKind ?? null,
     kept: dialog.dataset.captureKept ?? null,
-    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.textContent ?? null]),
+    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.firstChild?.textContent ?? null]),
     kinds: Array.from(dialog.querySelectorAll('[data-capture-kind]'), (label) => [label.dataset.captureKind, label.querySelector('input')?.disabled ?? null, label.querySelector('input')?.checked ?? null]),
     why: dialog.querySelector('.procedure-capture-why p')?.textContent ?? null,
     extract: Array.from(dialog.querySelectorAll('.procedure-capture-extract li'), (item) => item.textContent),

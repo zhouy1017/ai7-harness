@@ -101,7 +101,8 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
   const heading = el('h3', undefined, CAPTURE_TITLE);
   heading.id = titleId;
   heading.tabIndex = -1;
-  form.append(heading, el('p', 'field-note', captureSourceLine(capture.runLabel, capture.sourceScopeLabel)));
+  heading.append(' · ', captureSourceLine(capture.runLabel, capture.sourceScopeLabel));
+  form.append(heading);
 
   const state = {
     kept: new Set(capture.steps.filter((step) => step.eligible).map((step) => step.categoryId)),
@@ -126,10 +127,10 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
     const words = el('span', 'procedure-capture-step-text', captureStepLine(step));
     label.append(box, words);
     if (!step.eligible) {
-      const why = el('small', 'field-note', step.excludedReason ?? '');
+      const why = el('span', undefined, step.excludedReason ?? '');
       why.id = uid('excluded');
       box.setAttribute('aria-describedby', why.id);
-      label.append(why);
+      words.append(' · ', why);
     }
     box.addEventListener('change', () => {
       if (box.checked) state.kept.add(step.categoryId);
@@ -175,11 +176,12 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
     radio.value = kind;
     radio.checked = kind === state.kind;
     radio.disabled = !available;
-    const consequence = el('small', 'field-note', CAPTURE_RESULT_CONSEQUENCES[kind]);
+    const consequence = el('span', undefined, CAPTURE_RESULT_CONSEQUENCES[kind]);
     consequence.id = uid('consequence');
     radio.setAttribute('aria-describedby', consequence.id);
-    const name = el('span', undefined, kind === capture.classification.recommended ? `${CAPTURE_RESULT_LABELS[kind]}（推荐）` : CAPTURE_RESULT_LABELS[kind]);
-    label.append(radio, name, consequence);
+    const name = el('span', undefined, kind === capture.classification.recommended ? `${CAPTURE_RESULT_LABELS[kind]} · 推荐` : CAPTURE_RESULT_LABELS[kind]);
+    name.append(' · ', consequence);
+    label.append(radio, name);
     radio.addEventListener('change', () => {
       if (!radio.checked) return;
       state.kind = kind;
