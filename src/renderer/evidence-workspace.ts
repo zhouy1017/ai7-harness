@@ -251,14 +251,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     article.dataset['checkState'] = card.checkState;
     article.dataset['relation'] = card.relation;
     article.tabIndex = -1;
-    article.append(el('h6', undefined, sourceCardTitle(card)));
+    const heading = el('h6', undefined, sourceCardTitle(card));
+    if (card.excluded) heading.append(' · 已排除，来源及核查历史保留');
+    article.append(heading);
     if (card.sourceKind === 'web') article.append(el('p', 'technical-identity evidence-card-url', card.sourceRef));
     // An excerpt is shown only when it was obtained exactly; a candidate is never quoted (EVID-004, EVID-005).
     if (card.excerpt !== null) article.append(el('blockquote', 'evidence-excerpt', card.excerpt));
     article.append(facts(sourceCardFacts(card, options.instant)));
     const actions = el('div', 'button-row evidence-card-actions');
-    if (card.excluded) article.append(el('p', 'field-note', '已排除；来源及核查历史保留。'));
-    else if (projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
+    if (!card.excluded && projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
       const exclude = el('input');
       exclude.type = 'checkbox'; exclude.checked = excludedSources.has(card.sourceRef); exclude.disabled = working;
       exclude.addEventListener('change', () => {
@@ -284,9 +285,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       render();
     });
     const pinLabel = el('label', 'evidence-pin');
-    pinLabel.append(pin, el('span', undefined, isPinned ? EVIDENCE_UNPIN : EVIDENCE_PIN));
+    pinLabel.append(pin, el('span', undefined, isPinned ? EVIDENCE_UNPIN : pinned.length >= EVIDENCE_MATRIX_MAX_PINNED ? `${EVIDENCE_PIN} · ${EVIDENCE_PIN_FULL}` : EVIDENCE_PIN));
     actions.append(pinLabel);
-    if (!isPinned && pinned.length >= EVIDENCE_MATRIX_MAX_PINNED) actions.append(el('span', 'field-note', EVIDENCE_PIN_FULL));
     if (card.evidenceId !== null) {
       const evidenceId = card.evidenceId;
       actions.append(button(EVIDENCE_OPEN_SOURCE, 'open-source', 'quiet', () => options.openSource(evidenceId)));
@@ -397,8 +397,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       const line = el('p', 'evidence-decision-recorded', factDecisionLine(recorded));
       line.dataset['decisionId'] = recorded.decisionId;
       line.dataset['superseded'] = recorded.superseded ? 'true' : 'false';
+      if (recorded.superseded) line.append(` · ${DECISION_SUPERSEDED}`);
       section.append(line);
-      if (recorded.superseded) section.append(el('p', 'field-note', DECISION_SUPERSEDED));
     }
     const card = current.decisionCard;
     const latest = current.decisions.at(-1);
@@ -547,8 +547,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     if (draft.label !== null) {
       const label = el('p', 'correction-assurance-label', draft.label);
       label.dataset['assuranceIncomplete'] = 'true';
+      if (draft.missingChecks.length > 0) label.append(` · 尚缺：${draft.missingChecks.join('、')}`);
       section.append(label);
-      if (draft.missingChecks.length > 0) section.append(el('p', 'field-note', `尚缺：${draft.missingChecks.join('、')}`));
     }
     section.append(el('p', 'field-note', draft.scopeStatement));
     const group = el('fieldset', 'correction-variants');
@@ -578,7 +578,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       });
       const body = el('span', 'correction-variant-body');
       body.append(el('span', undefined, choice.label));
-      for (const line of choice.lines) body.append(el('span', 'field-note', line));
+      if (choice.lines.length > 0) body.append(el('span', 'field-note', choice.lines.map((line) => line.replace(/。$/u, '')).join('；') + '。'));
       label.append(input, body);
       group.append(label);
       const variant = draft.variants.find((entry) => entry.variantId === choice.id);

@@ -149,11 +149,10 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
         item.dataset['exclusionId'] = exclusion.exclusionId;
         item.dataset['targetKind'] = exclusion.target.kind;
         item.dataset['targetId'] = exclusion.target.id;
-        item.append(
-          el('p', 'series-exclusion-line', exclusionLine(exclusion, localInstantLabel)),
-          el('p', 'field-note series-exclusion-reason', exclusionReasonLine(exclusion.reason)),
-          el('p', 'field-note series-exclusion-continuing', exclusion.target.continuing),
-        );
+        const context = el('p', 'field-note');
+        context.append(el('span', 'series-exclusion-reason', exclusionReasonLine(exclusion.reason).replace(/。$/u, '')), '；',
+          el('span', 'series-exclusion-continuing', exclusion.target.continuing));
+        item.append(el('p', 'series-exclusion-line', exclusionLine(exclusion, localInstantLabel)), context);
         if (!exclusion.target.read) item.append(el('p', 'field-note series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
         const buttons = el('div', 'button-row');
         const edit = action(EXCLUSIONS_CHANGE_OPEN, 'quiet', 'change-open', () => {
@@ -390,8 +389,9 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     item.dataset['action'] = revision.action;
     const details = el('details', 'series-change-impact');
     details.append(el('summary', undefined, EXCLUSIONS_HISTORY_IMPACT), ...revision.impact.map((group) => impactGroup(group, 'h6')));
-    item.append(el('p', 'series-exclusion-revision-line', exclusionRevisionLine(revision)),
-      el('p', 'field-note', exclusionRevisionByline(revision, localInstantLabel)), details);
+    const line = el('p', 'series-exclusion-revision-line', exclusionRevisionLine(revision));
+    line.append(` · ${exclusionRevisionByline(revision, localInstantLabel)}`);
+    item.append(line, details);
     return item;
   };
 
