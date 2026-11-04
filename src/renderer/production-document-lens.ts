@@ -115,10 +115,10 @@ export function renderDocumentLens(
     }
     versions.replaceChildren(versionsHeading, list);
     if (shown.versionsTruncated || standing.changedSinceVersion) {
-      const status = el('p', 'field-note');
+      const status = el('span');
       if (shown.versionsTruncated) status.append(standing.changedSinceVersion ? DOCUMENT_VERSIONS_TRUNCATED.replace(/。$/u, '') : DOCUMENT_VERSIONS_TRUNCATED);
       if (standing.changedSinceVersion) status.append(...(shown.versionsTruncated ? ['；'] : []), el('span', 'document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
-      versions.append(status);
+      versionsHeading.append(' · ', status);
     }
     if (shown.deliveries.length > 0) {
       versions.append(el('h4', undefined, DOCUMENT_DELIVERIES_HEADING));
