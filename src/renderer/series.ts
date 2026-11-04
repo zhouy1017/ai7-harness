@@ -166,10 +166,10 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
         paint('#series-title');
       });
       open.disabled = busy;
+      if (projection.series.length === 0) toolbar.append(el('span', 'series-empty', SERIES_EMPTY));
       toolbar.append(open);
     } else nodes.push(formNode());
-    if (projection.series.length === 0) nodes.push(el('p', 'field-note series-empty', SERIES_EMPTY));
-    else {
+    if (projection.series.length > 0) {
       const list = el('ul', 'series-list');
       for (const entry of projection.series) {
         const item = el('li', 'series-item');

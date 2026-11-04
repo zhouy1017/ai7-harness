@@ -11,7 +11,6 @@ import {
   guidelineFixedStatement,
   guidelineImported,
   guidelineMergedVersionLine,
-  guidelineMergedVersionsMore,
   guidelineMergedVersionsSummary,
   guidelineOlderBooks,
   guidelinePreviewChanges,
@@ -140,7 +139,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     // review; ADR 0079 §1.5).
     if (document.mergedVersionCount > 0) {
       const merged = el('details', 'guideline-merged-versions');
-      merged.append(el('summary', undefined, guidelineMergedVersionsSummary(document.mergedVersionCount)));
+      merged.append(el('summary', undefined, `${guidelineMergedVersionsSummary(document.mergedVersionCount)}${document.mergedVersionCount > document.mergedVersions.length ? ` · 已列 ${document.mergedVersions.length} 个` : ''}`));
       const mergedRows = el('ul', 'guideline-version-list');
       for (const version of document.mergedVersions) {
         const row = el('li', undefined, guidelineMergedVersionLine(version));
@@ -177,9 +176,6 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
           controls.append(button);
         }
         merged.append(controls);
-      }
-      if (document.mergedVersionCount > document.mergedVersions.length) {
-        merged.append(el('p', 'field-note', guidelineMergedVersionsMore(document.mergedVersions.length, document.mergedVersionCount)));
       }
       node.append(merged);
     }
