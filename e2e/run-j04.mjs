@@ -2234,7 +2234,7 @@ async function main() {
         card.querySelectorAll('[data-analysis-axis]').length===4 && axis('freshness')==='superseded' && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' && axis('assurance')==='qualified-with-open-conflicts' &&
         card.querySelectorAll('[data-analysis-unit]').length===8 && card.querySelectorAll('[data-analysis-unit-lineage="recomputed"]').length===8 &&
         card.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement &&
-        card.textContent.includes('历史修订版 Revision 1（只读）') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
+        card.textContent.includes('历史分析结果 · Revision 1 · 只读') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
         card.querySelector('[data-analysis-action="close-revision"]') instanceof HTMLButtonElement &&
         card.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="1"]')?.disabled===true && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'history-open-surface');

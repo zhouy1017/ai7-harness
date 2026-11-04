@@ -346,7 +346,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       { label: BACKGROUND_SCOPE_LABEL, value: scope.label },
       { label: BACKGROUND_WHAT_LABEL, value: offer.what },
       { label: BACKGROUND_WHEN_LABEL, value: offer.when },
-      ...offer.binds,
+      ...offer.binds.map((entry) => entry.label === '预算上限' ? { ...entry, value: entry.value.replace('（必填）', ' · 必填') } : entry),
     ]);
     const scopeValue = what.querySelector('dd');
     const scopes = el('fieldset', 'background-analysis-scopes');

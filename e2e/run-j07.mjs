@@ -1214,7 +1214,7 @@ async function main() {
     await openManuscript(renderer, 'before-milestone');
 
     at('milestone-needs-a-purpose');
-    // 标签 / 用途 / 说明（可选）: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
+    // 标签 / 用途 / 说明 · 可选: the purpose is five unselected cards, and 保存里程碑版本 waits for a label and a
     // purpose with its reason beside it (V2-UX-MILE-003); 自行输入 asks for the editor's own words.
     await openMilestoneForm(renderer, 'first');
     await assertRenderer(renderer, `(() => {
@@ -1224,7 +1224,7 @@ async function main() {
       const save = window.__j07.milestoneSave();
       return section.querySelector('label[for="milestone-label"]')?.textContent === '标签' &&
         section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途' &&
-        section.querySelector('label[for="milestone-note"]')?.textContent === '说明（可选）' &&
+        section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
         radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
         save instanceof HTMLButtonElement && save.disabled;

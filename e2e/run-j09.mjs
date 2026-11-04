@@ -76,7 +76,7 @@ const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，�
 const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后台分析。';
 /** Issue #864: the ceiling 登记 requires in this Journey, its words before and after, and 暂停's line. */
 const BACKGROUND_CEILING_TOKENS = 300000;
-const BACKGROUND_CEILING_REQUIRED = '登记时由你设定（必填）；书系或全部图书按书平分';
+const BACKGROUND_CEILING_REQUIRED = '登记时由你设定 · 必填；书系或全部图书按书平分';
 const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
 const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
