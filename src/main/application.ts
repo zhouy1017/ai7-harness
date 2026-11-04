@@ -3810,7 +3810,7 @@ export async function runApplication(): Promise<void> {
         await fontWindow.loadFile(resolve(__dirname, '..', 'renderer', 'index.html'));
         typography = await fontWindow.webContents.executeJavaScript<{
           fontsCheck: boolean; bundledFacesLoaded: boolean; fontSize: string; lineHeight: string;
-          textIndent: string; textAlign: string; textJustify: string; outlineStyle: string; columnWidth: string; uiFontSize: string;
+          textIndent: string; textAlign: string; textJustify: string; outlineStyle: string; columnWidth: string; uiFontSize: string; rootFontSize: string;
         }>(`(async () => {
           const faces = ['17px "Noto Serif SC"', '700 17px "Noto Serif SC"', '14px "Noto Sans SC"', '700 14px "Noto Sans SC"'];
           const loaded = await Promise.all(faces.map(face => document.fonts.load(face, '中文编辑')));
@@ -3824,11 +3824,13 @@ export async function runApplication(): Promise<void> {
             bundledFacesLoaded: loaded.every(entries => entries.length > 0 && entries.every(face => face.status === 'loaded')),
             fontSize: style.fontSize, lineHeight: style.lineHeight, textIndent: style.textIndent,
             textAlign: style.textAlign, textJustify: style.textJustify, outlineStyle: frame.outlineStyle,
-            columnWidth: frame.maxWidth, uiFontSize: getComputedStyle(document.documentElement).fontSize };
+            columnWidth: frame.maxWidth, uiFontSize: getComputedStyle(document.body).fontSize,
+            rootFontSize: getComputedStyle(document.documentElement).fontSize };
         })()`);
         requireDesktop(typography.fontsCheck && typography.bundledFacesLoaded && typography.fontSize === '17px' &&
           parseFloat(typography.lineHeight) / 17 >= 1.9 && typography.textIndent === '34px' &&
-          typography.textAlign === 'justify' && typography.outlineStyle === 'none');
+          typography.textAlign === 'justify' && typography.outlineStyle === 'none' &&
+          typography.uiFontSize === '14px' && typography.rootFontSize === '16px');
       } finally { fontWindow.destroy(); }
       const report = { softwareVersion, buildIdentity, channel, electron: process.versions.electron, node: process.versions.node,
         modules: process.versions.modules, keyringCarrier: 'loaded', dataRoot, writable: true, store_versions: 'readable', typography };
