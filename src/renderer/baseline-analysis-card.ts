@@ -917,7 +917,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       let selectedRange: BaselineAnalysisSelectedRange | null = null;
       if (mode === 'reanalyze-range') {
         const fieldset = element('fieldset', 'analysis-range-options');
-        fieldset.append(element('legend', undefined, '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）'));
+        fieldset.append(element('legend', undefined, '选择要重新分析的连续范围'));
         const appendOptions = (options: typeof controls.actions['reanalyze-range']['options']): void => {
           for (const option of options) {
             const row = element('div', 'analysis-range-option');
