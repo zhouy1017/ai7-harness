@@ -1,5 +1,4 @@
 import { analysisRunSummary } from '../shared/analysis-run-summary.js';
-import { technicalReviewBasis } from '../shared/review-basis.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
@@ -2543,7 +2542,7 @@ export function reviewRunPlan(input: {
     scope: {
       process: `《${bookTitle}》${position}${reading === null ? '' : ` · ${groupedCount(reading.graphemes)} 字`} · ${categories.length} 个类别` +
         (spans === null ? (selection ? '；只在所选段落上标出发现' : '') : selection ? `；读取 ${spans} 作为上下文，只在所选段落上标出发现` : `；读取 ${spans}`),
-      reference: [...categories.map((category) => isLocal(category) ? technicalReviewBasis(category.basis) : category.modelFree
+      reference: [...categories.map((category) => isLocal(category) ? category.basisStatement : category.modelFree
         ? `${category.label}：基线分析的前后不一致线索与未决事项`
         : category.guidelineDocuments.length === 0
           ? `${category.label}：${category.procedure.title}（第 ${category.procedure.version} 版）`

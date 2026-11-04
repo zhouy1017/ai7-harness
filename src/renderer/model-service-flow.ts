@@ -1,5 +1,5 @@
 import { technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { metadataWords, modelLabelWords } from './technical-layer.js';
 import {
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   type ModelServiceChannelId,
@@ -195,7 +195,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
-    const note = el('p', 'field-note', modelConnectionTestLabel(own, checked?.modelLabel));
+    const note = el('p', 'field-note', modelConnectionTestLabel(own, checked === null ? undefined : modelLabelWords(checked)));
     if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [
       el('p', 'field-note', modelCapabilityLabel(checked)),
@@ -213,7 +213,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
     if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; }
     radio.addEventListener('change', () => { checked = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
-    label.append(radio, metadataWords(` ${model.modelLabel}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`));
+    label.append(radio, metadataWords(` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`));
     group.append(label);
   }
   if (offered.length === 0) group.append(el('p', 'field-note', technicalLayerVisible ? '尚未获取模型列表；保存凭据后刷新，或手动输入模型 ID。' : '保存凭据后获取可用模型。'));
@@ -275,7 +275,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     details.append(el('summary', undefined, `不可在此选择的模型（${others.length}）`));
     const list = el('ul');
     for (const model of others) {
-      const item = el('li', undefined, metadataWords(`${model.modelLabel} · ${modelRolesLabel(model)}`));
+      const item = el('li', undefined, metadataWords(`${modelLabelWords(model)} · ${modelRolesLabel(model)}`));
       item.dataset['modelDisposition'] = model.main;
       list.append(item);
     }

@@ -83,3 +83,11 @@ export function collectTechnicalDisclosures(root: HTMLElement): void {
 export function identityWords(text: string, className?: string): string {
   return !technicalLayerVisible && className?.split(/\s+/u).includes('technical-identity') ? '' : text;
 }
+
+/** Account discoveries sometimes use the raw ID as their label; ordinary settings show readable words. */
+export function modelLabelWords(model: { modelId: string; modelLabel: string }): string {
+  if (technicalLayerVisible) return model.modelLabel;
+  const label = model.modelLabel === model.modelId ? model.modelId.split(/[-_/:]+/u)
+    .map((word) => /^(gpt|glm)$/iu.test(word) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1)).join(' ') : model.modelLabel;
+  return metadataWords(label);
+}

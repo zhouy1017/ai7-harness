@@ -1,7 +1,7 @@
 import { recoveryIdentityRows } from '../../src/renderer/technical-layer-labels.js';
 import { globalAttentionObjectLabel } from '../../src/renderer/global-attention-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { collectTechnicalDisclosures, initializeTechnicalLayer, metadataWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { collectTechnicalDisclosures, initializeTechnicalLayer, metadataWords, modelLabelWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { reviewBasisWords } from '../../src/renderer/review-basis.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
@@ -49,6 +49,7 @@ describe('technical layer presentation (#1315)', () => {
     expect(metadata.textContent).toContain('全稿 0%');
     expect(metadata.textContent).not.toContain('版本8');
     expect(metadata.textContent).not.toContain('当前修订版');
+    expect(modelLabelWords({ modelId: 'account/synthetic-model', modelLabel: 'account/synthetic-model' })).toBe('Account Synthetic Model');
   });
 
   it('scans recovery and attention identity metadata in ordinary mode', () => {

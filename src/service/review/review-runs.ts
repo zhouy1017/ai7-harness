@@ -1,5 +1,4 @@
 import { researchBackendName } from '../../shared/research-status.js';
-import type { ReviewCategoryBasis } from '../../shared/review-basis.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
@@ -1025,7 +1024,8 @@ export interface ReviewRunPlanFacts {
     readonly output: ReviewCategoryConfigurationEntry['output'];
     readonly riskPointsOnly: boolean;
     readonly modelFree: boolean;
-    readonly basis: ReviewCategoryBasis;
+    /** Frozen record wording for plan/hash serialization; public renderer projections use basis fields. */
+    readonly basisStatement: string;
     readonly procedure: { readonly title: string; readonly version: string };
     readonly guidelineDocuments: ReadonlyArray<{ readonly title: string; readonly issuer: string; readonly version: string }>;
     readonly state: ReviewRunCategoryState;
@@ -2005,7 +2005,7 @@ export class ReviewRunStore {
         output: category.entry.output,
         riskPointsOnly: category.entry.riskPointsOnly,
         modelFree: category.executor === 'baseline-leads' || category.executor === 'local-text-check',
-        basis: reviewCategoryBasis(category.entry),
+        basisStatement: category.basisStatement,
         procedure: { title: category.entry.procedure.title, version: category.entry.procedure.version },
         guidelineDocuments: category.entry.guidelineDocuments.map((document) => ({ title: document.title, issuer: document.issuer, version: document.version })),
         state: categoryView.state,
@@ -4746,7 +4746,11 @@ export class ReviewRunStore {
         output: category.entry.output,
         riskPointsOnly: category.entry.riskPointsOnly,
         batchApply: category.entry.batchApply,
-        basis: reviewCategoryBasis(category.entry),
+        basis: { ...reviewCategoryBasis(category.entry),
+          ...(category.executor !== 'local-text-check' || snapshot.localPlan === undefined ? {} : { localChecks: {
+            punctuationEnabled: snapshot.localPlan.options.punctuation === 'chinese-prose', numerals: numeralBasis(snapshot.localPlan.options),
+          } }),
+        },
         state: categoryView.state,
         stateLabel: categoryView.stateLabel,
         detail: categoryView.detail,

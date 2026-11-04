@@ -6,6 +6,7 @@ export interface ReviewCategoryBasis {
   readonly modelChannelSearchLabel?: string;
   readonly guidelineDocuments: ReadonlyArray<{ readonly documentId: string; readonly title: string; readonly issuer: string; readonly version: string }>;
   readonly procedure: { readonly title: string; readonly version: string };
+  readonly localChecks?: { readonly punctuationEnabled: boolean; readonly numerals: 'disabled' | 'out-of-applicability' | 'national-standard' | 'editor-convention' };
   readonly seriesKnowledge?: boolean;
   readonly seriesScopes?: ReadonlyArray<{ readonly title: string }>;
   readonly deliverables?: {
@@ -16,7 +17,11 @@ export interface ReviewCategoryBasis {
 
 export function technicalReviewBasis(entry: ReviewCategoryBasis): string {
   const procedure = `工序：${entry.procedure.title}（第 ${entry.procedure.version} 版）`;
-  if (entry.executor === 'local-text-check') return `依据：GB/T 15834-2011、GB/T 15835-2011 的有限条款识别或编辑明确选择的数字约定 · ${procedure} · 本机确定性检查，不调用模型 · 不表示整部标准合规`;
+  if (entry.executor === 'local-text-check') {
+    const statement = `依据：GB/T 15834-2011、GB/T 15835-2011 的有限条款识别或编辑明确选择的数字约定 · ${procedure} · 本机确定性检查，不调用模型 · 不表示整部标准合规`;
+    const checks = entry.localChecks;
+    return checks === undefined ? statement : statement + `；标点：${checks.punctuationEnabled ? '编辑确认中文正文' : '未启用'}；数字：${checks.numerals === 'editor-convention' ? '编辑约定' : checks.numerals === 'national-standard' ? '编辑声明在适用范围内' : checks.numerals === 'out-of-applicability' ? '不在声明的适用范围内，未检查' : '未启用'}`;
+  }
   if (entry.deliverables !== undefined) {
     const named = entry.deliverables.participants.map((document) => `${document.typeLabel}《${document.title}》${document.versionLabel}（文档 ${document.documentId} · 修订 ${document.revisionId}）`
       + (document.laterSaves === 0 ? '' : `；定稿后另有 ${document.laterSaves} 次保存，未参与`)

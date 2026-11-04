@@ -1,4 +1,3 @@
-import { technicalReviewBasis } from '../shared/review-basis.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -5374,7 +5373,7 @@ export class EditorialStore {
     const binding: DefaultExecutionRuleBinding | null = first == null || bindings.some((value) => value === null) ? null : {
       ...first,
       artifactPin: { ...first.artifactPin, identity: pattern, nativeCarrierSha256: canonicalRecord(bindings).digest,
-        sidecarSha256: canonicalRecord(review.categories.map((category) => ({ categoryId: category.categoryId, procedure: category.procedure, basis: technicalReviewBasis(category.basis) }))).digest },
+        sidecarSha256: canonicalRecord(review.categories.map((category) => ({ categoryId: category.categoryId, procedure: category.procedure, basis: category.basisStatement }))).digest },
       expectedOutcome: `审阅类别：${review.categories.map((category) => category.categoryId).sort().join('、')}`,
     };
     const allowed = tasks.every((task) => task.ledger.launch.live === null ||
