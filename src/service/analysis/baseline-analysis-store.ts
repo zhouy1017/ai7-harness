@@ -3301,9 +3301,12 @@ export class BaselineAnalysisStore {
     const configuredRows = rows.filter((entry) => !production || (entry.credential_operation_state === 'ready' && typeof entry.credential_reference === 'string'));
     const row = selectedRow ?? configuredRows[0];
     const adapterId = usingNative ? native.id : asString(row?.backend_id ?? '');
+    const nativeAdmitted = native?.shipped === true && platformToolsFromProjection(admitted) !== null &&
+      admitted.platformTools?.websearch.backends.some((backend) => backend.id === native.id) === true;
     requireAnalysis(adapterId.length > 0, 'SEARCH_CREDENTIAL_MISSING', native === undefined
       ? '当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
-      : '当前模型渠道自带联网搜索，可一键启用；请前往 设置 › 联网检索。');
+      : nativeAdmitted ? '当前模型渠道自带联网搜索，可一键启用；请前往 设置 › 联网检索。'
+      : '当前模型渠道的原生搜索为候选接口 · 未实测；请前往 设置 › 联网检索 的后端列表，保存一个可用后端的密钥。');
     const adapter = searchBackend(adapterId);
     const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id),
       selectedAt: usingNative ? asString(modelConnection!.credential_updated_at) : asString(row!.selected_at),

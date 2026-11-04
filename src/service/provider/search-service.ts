@@ -411,19 +411,17 @@ export async function composeSearchCandidateProbe(input: {
 }): Promise<SearchBackendProbeProjection> {
   let candidate: import('./search-backends.js').SearchBackendCandidate;
   try { candidate = searchBackendCandidate(input.backendId, input.candidateId); } catch { throw new SearchCandidateProbeRefusal('SEARCH_CANDIDATE_UNKNOWN', '没有这一联网检索候选接口；未发送任何内容。'); }
-  const basePolicy = input.launchPolicy.providerProcessing.searchConnectionTest;
+  const policy = input.launchPolicy.providerProcessing.searchConnectionTest;
   const native = candidate.fetch === null;
   // Only an ordinary-production click can read the corresponding model connection; no candidate enters Task admission.
   const connection = () => native ? input.modelConnection?.(candidate.backendId) : input.connection(candidate.backendId);
   const model = native && input.operationalScope === 'ordinary-production' ? input.modelConnection?.(candidate.backendId) : undefined;
-  const policy = !native || basePolicy === undefined ? basePolicy : { ...basePolicy, backendId: candidate.backendId, candidateId: candidate.candidateId,
-    endpoint: candidate.search.endpoint, protocol: candidate.search.protocol, headerForm: candidate.search.headerForm,
-    credentialSlot: model?.credentialSlot ?? candidate.credentialSlot, arguments: candidate.search.probeArguments, argumentsCanonicalSha256: sha256Hex(canonicalJson(candidate.search.probeArguments)) };
   const decision = evaluateSearchCandidateProbe({ operationalScope: input.operationalScope, providerProcessingVersion: input.launchPolicy.providerProcessing.version, policy,
     configurationDigest: searchBackendCandidateConfigurationDigest(candidate.backendId, candidate.candidateId), connection, ...(model === undefined ? {} : { model: model.modelId }),
     candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: model?.credentialSlot ?? candidate.credentialSlot, arguments: candidate.search.probeArguments },
     developmentReference: (reference) => DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()) });
-  if (decision.decision === 'refuse') throw new SearchCandidateProbeRefusal(decision.code, decision.detail);
+  if (decision.decision === 'refuse') throw new SearchCandidateProbeRefusal(decision.code, decision.code === 'SEARCH_CANDIDATE_PROBE_POLICY_MISMATCH'
+    ? '当前策略未授权此后端的连接测试；候选接口仍未实测，未发送任何内容。' : decision.detail);
   const { ticket } = decision;
   try {
     return await probeSearchCandidate({ ticket, policy: policy!, broker: input.broker, fetch: input.fetch, admitHost: input.admitHost,

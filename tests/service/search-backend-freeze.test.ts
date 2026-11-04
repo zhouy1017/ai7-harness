@@ -40,7 +40,7 @@ describe('a review Run freezes its search backend', () => {
     } finally { store.close(); await roots.dispose(); }
   });
 
-  it.each(['opencode-go', 'openai-platform'] as const)('explains missing search setup for %s, leaving unmeasured native search unavailable', async (route) => {
+  it.each(['opencode-go', 'openai-platform', 'anthropic-claude'] as const)('explains missing search setup for %s, leaving unmeasured native search unavailable', async (route) => {
     const roots = await createServiceTestRoots();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -55,7 +55,7 @@ describe('a review Run freezes its search backend', () => {
       expect(() => {
         let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
         while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
-      }).toThrow(route === 'opencode-go' ? /当前模型渠道不自带联网搜索.*联网检索.*保存一个后端密钥/u : /当前模型渠道自带联网搜索，可一键启用.*设置.*联网检索/u);
+      }).toThrow(route === 'opencode-go' ? /当前模型渠道不自带联网搜索.*联网检索.*保存一个后端密钥/u : /当前模型渠道的原生搜索为候选接口 · 未实测.*设置.*联网检索.*后端列表/u);
     } finally { store.close(); await roots.dispose(); }
   });
 
