@@ -541,7 +541,7 @@ export const REVIEW_SCOPE_STOP_NOTE = '这次审阅所依据的书系材料已�
 export const REVIEW_INFLUENCE_STOP_NOTE = '这次审阅参考的本社审阅偏好中有学习材料已停止今后使用，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能重新执行（不含该影响），或取消任务；不能继续审阅或重试。';
 /** 为什么会影响这个结果 (Issue #912; LAUD-004): the version each category read, and the materials behind it. */
 export const REVIEW_INFLUENCE_HEADING = '为什么会影响这个结果';
-export const REVIEW_INFLUENCE_NOTE = '本社审阅偏好只供参考，不是规则或事实证据。这里列出这次审阅读到的版本，以及它出自哪些已判定的反馈；打开来源链可以看到每条反馈后来影响了什么。';
+export const REVIEW_INFLUENCE_NOTE = '本社审阅偏好只供参考，不是规则或事实证据；这里列出本次读取的版本和来源反馈，可打开来源链查看后续影响。';
 
 export function reviewInfluenceLine(entry: { readonly categoryLabel: string; readonly ordinal: number; readonly sourceCount: number }): string {
   return `${entry.categoryLabel}：参考本社审阅偏好 v${entry.ordinal}（来源：${entry.sourceCount} 条已判定反馈）`;

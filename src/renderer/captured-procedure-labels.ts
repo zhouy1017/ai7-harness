@@ -131,10 +131,10 @@ export function proposalSavedLine(title: string, version: number): string {
 // ---- 知识库 › 工序与规则 --------------------------------------------------------------------------------------
 
 export const PROCEDURES_SECTION_HEADING = '可复用工序' as const;
-export const PROCEDURES_SECTION_NOTE = '从完成的审阅保存下来的工序。保存后即可在新建审阅里按它运行。' as const;
-export const PROCEDURES_EMPTY = '还没有可复用工序。在一次完成的审阅里点「将以上工序保存为可复用工序」就能保存。' as const;
+export const PROCEDURES_SECTION_NOTE = '已完成的审阅可保存为工序，供新建审阅使用。' as const;
+export const PROCEDURES_EMPTY = '还没有可复用工序，可从已完成的审阅保存。' as const;
 export const PROPOSALS_SECTION_HEADING = '开发建议' as const;
-export const PROPOSALS_SECTION_NOTE = '需要 AI7 新增能力的做法，只记在本机。可以导出为文件交给开发流程；AI7 不会发送它，也不会安装或启用任何插件。' as const;
+export const PROPOSALS_SECTION_NOTE = '开发建议只保存在本机，可导出交给开发流程；AI7 不会发送，也不会安装或启用插件。' as const;
 export const PROPOSALS_EMPTY = '还没有开发建议。' as const;
 export const PROCEDURE_ACTIONS = {
   validate: '启用',
@@ -150,7 +150,7 @@ export const PROCEDURE_ACTIONS = {
 } as const;
 export const PROCEDURE_RUN_BOOK_LABEL = '在哪本书里运行' as const;
 export const PROCEDURE_RUN_NOTE = '会打开这本书的「新建审阅」，按这个工序选好类别；你看过计划后，再由你开始。' as const;
-export const PROCEDURE_STOP_NOTE = '停用后这一版不会再被选用，也不能再启用；按它运行过的审阅仍然记着它。要再用，请从一次新的审阅重新保存。' as const;
+export const PROCEDURE_STOP_NOTE = '停用后不能再选用或启用，按它运行过的审阅仍记着它；如需再用，请从新审阅保存。' as const;
 
 export function procedureVersionLine(version: Pick<CapturedProcedureVersionProjection, 'version' | 'stateLabel' | 'steps' | 'scopeSlot'>): string {
   return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.steps.length} 步 · 范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[version.scopeSlot]}」`;
