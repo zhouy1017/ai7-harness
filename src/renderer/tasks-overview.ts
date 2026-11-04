@@ -62,6 +62,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   headingRow.append(heading, start); if (!options.bookId) headingRow.append(all);
   const context = el('p', 'task-overview-context'); const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups'); const confirm = el('div', 'task-overview-confirm'); confirm.hidden = true; confirm.setAttribute('role', 'alert');
   const note = el('p', 'field-note', '队列顺序保存在本次使用中；重新启动后按发起顺序排列。');
+  if (options.bookId) { heading.hidden = true; context.hidden = true; note.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
   const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, context, filters, host, confirm, note, sheet);
   start.addEventListener('click', () => { if (sheet.open) sheet.close(); else { paintSheet(); sheet.show(); } });
   function paintSheet(): void {
@@ -81,6 +82,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   }
   function filter(label: string, active: boolean, action: () => void): HTMLButtonElement { const node = el('button', 'quiet task-overview-filter', label); node.setAttribute('aria-pressed', String(active)); node.addEventListener('click', action); return node; }
   function paintFilters(): void {
+    if (options.bookId) { filters.replaceChildren(); return; }
     const rows: HTMLElement[] = [];
     if (!options.bookId) { const row = el('div', 'task-overview-filter-row'); row.append(el('span', undefined, '图书'), filter('全部', selectedBook === 'all', () => { selectedBook = 'all'; remember(); })); for (const book of projection?.books ?? []) row.append(filter(book.title, selectedBook === book.bookId, () => { selectedBook = book.bookId; remember(); })); rows.push(row); }
     const types = el('div', 'task-overview-filter-row'); types.append(el('span', undefined, '类型')); for (const type of ['all', '分析', '审阅', '评估', '写作', '对话', '工序']) types.append(filter(type === 'all' ? '全部' : type, selectedType === type, () => { selectedType = type; remember(); }));
