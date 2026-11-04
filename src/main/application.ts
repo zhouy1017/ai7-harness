@@ -3799,6 +3799,8 @@ export async function runApplication(): Promise<void> {
       await openProtectedSecretStore(); // Loads the carrier; never reads or writes a credential.
       const versions = await service.call('inspectDataVersion', {});
       requireDesktop(typeof versions.dataVersion === 'number' && versions.history.length > 0);
+      // Keep Electron alive after the probe window closes, until the report is flushed.
+      app.once('window-all-closed', () => undefined);
       // Exercise the packaged stylesheet and font bytes in Chromium, not installed system faces.
       const fontWindow = new BrowserWindow({ show: false, webPreferences: {
         sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false, session: productSession,

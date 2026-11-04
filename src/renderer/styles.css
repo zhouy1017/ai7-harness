@@ -1556,7 +1556,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror .editorial-mark-active { outline: 2px solid var(--focus); outline-offset: 1px; }
 .ProseMirror .editorial-mark-previewed { text-decoration: line-through; text-decoration-color: var(--mark-suggestion); color: var(--text-subdued); }
 .ProseMirror .editorial-mark-preview { margin-left: .15em; text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); border-radius: 2px; }
-.ProseMirror .editorial-mark-preview-label { margin: 0 .2em 0 .35em; padding: 0 .45em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: var(--surface); font-family: "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: .7rem; font-weight: 700; vertical-align: middle; user-select: none; }
+.ProseMirror .editorial-mark-preview-label { margin: 0 .2em 0 .35em; padding: 0 .45em; border: 1px solid var(--mark-suggestion); border-radius: 999px; color: var(--mark-suggestion); background: var(--surface); font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; font-size: .7rem; font-weight: 700; vertical-align: middle; user-select: none; }
 .editorial-mark-layer { position: absolute; top: 0; left: 0; width: 100%; height: 0; z-index: 4; font-size: .92rem; line-height: 1.6; }
 .editorial-mark-menu-layer { position: fixed; inset: 0; z-index: 40; pointer-events: none; font-size: .92rem; line-height: 1.6; }
 .editorial-mark-menu { position: fixed; max-height: calc(100vh - 16px); overflow-y: auto; pointer-events: auto; }
