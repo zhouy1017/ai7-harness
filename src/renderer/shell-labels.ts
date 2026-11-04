@@ -151,7 +151,7 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
     { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。', developerOnly: true },
   ] },
   { key: 'local', label: '本机', rows: [
-    { route: 'data-storage', label: '数据与存储', note: '数据位置、立即备份、定期自动备份、导出与导入数据库。' },
+    { route: 'data-storage', label: '数据与存储', note: '数据位置、定期自动备份、导出与导入数据库。' },
     { route: 'appearance', label: '外观', note: '跟随系统、浅色或深色。' },
     { route: 'keyboard', label: '键盘与无障碍', note: '快捷键列表与减少动效。' },
     { route: 'notifications', label: '通知', note: '窗口不在前台时的系统通知。' },

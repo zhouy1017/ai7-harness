@@ -247,7 +247,7 @@ const taskDrawer = mountTaskDrawer({
   },
   openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
   openConnectionSettings: () => void renderModelServiceSettings(),
-  openRules: () => void renderKnowledgeBase('rules'),
+  openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
   openTaskTarget: (target) => void leaveThen(() => openGlobalAttentionTarget(target)),
   openTaskResult: (entry, backToPanel) => openTaskResult(entry, backToPanel),
@@ -817,7 +817,7 @@ const shell = mountShell({
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
     else if (destination === 'global-agent') void leaveThen(() => renderGlobalAgent());
     else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
-    else void leaveThen(() => renderQualityLearning('learning', null));
+    else void leaveThen(() => renderQualityLearning());
   },
   openSection: (book, section) => {
     if (authorityInterrupted) return;
@@ -1005,7 +1005,7 @@ function restoreCurrentScreen(): () => void | Promise<void> {
   const state = screen.dataset['screen'];
   if (state === 'settings') return renderSettingsHub;
   if (state === 'data-storage') return renderDataAndStorage;
-  if (state === 'quality-learning') return () => renderQualityLearning('learning', null);
+  if (state === 'quality-learning') return () => renderQualityLearning();
   if (state === 'knowledge-base') return () => renderKnowledgeBase();
   if (state === 'model-service') return renderModelServiceSettings;
   if (state === 'series-list' || state === 'series') return () => renderSeriesList(null);
@@ -1305,7 +1305,7 @@ async function renderLearningMaterialTarget(target: LearningMaterialTarget, book
       const content = panel();
       content.append(element('h2', undefined, `《${bookTitle}》 · Word 修改来源`));
       const reader = mountWordTrackedEditDetail({ root: content, api: window.ai7, ...target, openSourceVersion: openWordSourceVersion });
-      content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
+      if (technicalLayerVisible) content.append(button('查看学习准入与排除', 'secondary', () => void renderQualityLearning('learning', target.bookId)));
       replaceScreen('word-import-detail', content, { bookId: target.bookId, title: bookTitle, section: 'history' });
       await reader.load();
       return;
@@ -2994,7 +2994,7 @@ function renderBookDeliverables(bookId: string, bookTitle: string, openCase?: { 
     setStatus,
     errorMessage: rendererErrorMessage,
     // 录入定价与首印… (Issue #430, S82): 设置 › 评估校准与预测 with this Book's entry open.
-    openActuals: (bookId) => void renderEvaluationCalibration(bookId),
+    ...(technicalLayerVisible ? { openActuals: (bookId: string) => void renderEvaluationCalibration(bookId) } : {}),
     // 打开 a Production Document (Issue #415): its own surface, read like the manuscript's window.
     openDocument: async (documentNow, type, notice) => {
       const opened = await window.ai7.getManuscriptWindow({ manuscriptId: documentNow.documentId, branchId: documentNow.branchId, cursor: null });

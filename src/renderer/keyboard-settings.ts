@@ -279,6 +279,7 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
     const headerRow = el('tr');
     for (const heading of technicalLayerVisible ? KEYBOARD_COLUMNS : KEYBOARD_COLUMNS.slice(0, 3)) {
       const cell = el('th', undefined, heading);
+      if (technicalLayerVisible && heading === KEYBOARD_COLUMNS.at(-1)) cell.dataset['developerOnly'] = 'true';
       cell.scope = 'col';
       headerRow.append(cell);
     }

@@ -52,8 +52,6 @@ export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSec
   ]);
 }
 
-export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = helpUsageSections(true);
-
 /** 隐私说明: local-first by default, what may leave the machine and under which policy, and what never does. */
 export const HELP_PRIVACY_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
   { heading: '本机处理', paragraphs: [

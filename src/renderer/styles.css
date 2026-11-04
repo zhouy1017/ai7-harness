@@ -204,7 +204,7 @@ body { padding-left: var(--sidebar-width); }
 .settings-row .secondary { min-width: 10rem; text-align: left; }
 .settings-row .field-note { flex: 1 1 16rem; margin: 0; }
 .settings-coming-soon { padding: .1rem .55rem; border: 1px dashed var(--boundary-strong); border-radius: 999px; color: var(--text-subdued); font-size: .82rem; font-weight: 700; }
-.settings-row [data-developer-only="true"]::after, .knowledge-tabs [data-developer-only="true"]::after, .series-exclusions .exclusions-heading[data-developer-only="true"]::after { content: "开发者"; display: inline-flex; margin-left: .55rem; padding: .08rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .72rem; font-weight: 700; vertical-align: middle; }
+[data-developer-only="true"]::after { content: "开发者"; display: inline-flex; margin-left: .55rem; padding: .08rem .45rem; border: 1px solid var(--boundary); border-radius: 999px; background: var(--surface); color: var(--text-subdued); font-size: .72rem; font-weight: 700; vertical-align: middle; }
 .library-home { display: grid; grid-template-columns: 1.3fr .7fr; gap: 1.5rem 3rem; align-items: center; }
 
 .screen { flex: 1 0 auto; width: min(1280px, calc(100% - 4rem)); margin: 2rem auto 1rem; }

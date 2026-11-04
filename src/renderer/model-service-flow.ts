@@ -198,6 +198,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   use.type = 'button';
   use.dataset['action'] = 'use-model-for-both-roles';
   const customLabel = el('label', undefined, '手动输入模型 ID');
+  customLabel.dataset['developerOnly'] = 'true';
   const custom = el('input');
   custom.type = 'text'; custom.maxLength = 128; custom.dataset['customModelId'] = 'true';
   custom.disabled = !ready;
@@ -264,6 +265,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
   ] as const) {
     const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
+    button.dataset['developerOnly'] = 'true';
     button.addEventListener('click', () => void (async () => {
       if (checked === null || channel.route === null) return;
       button.disabled = true;
@@ -353,7 +355,7 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
     radio.name = 'model-service-flow-channel';
     radio.value = channel.channelId;
     radio.checked = channel.channelId === channelId;
-    radio.addEventListener('change', () => { channelId = channel.channelId; options.chooseChannel(channelId); paint(); });
+    radio.addEventListener('change', () => selectChannel(channel.channelId));
     const offered = channel.models.filter(bothEligible).length;
     label.append(radio, ` ${channel.channelLabel} · ${offered === 0 ? '暂无可选模型' : channel.route !== null && credentialReady(projection, channel.route) ? '凭据已保存' : '需设置凭据'}`);
     if (technicalLayerVisible) channels.append(label);
@@ -365,8 +367,12 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
   }
   if (!technicalLayerVisible) {
     channelSelect.value = channelId;
-    channelSelect.addEventListener('change', () => { channelId = channelSelect.value as ModelServiceChannelId; paint(); });
+    channelSelect.addEventListener('change', () => selectChannel(channelSelect.value as ModelServiceChannelId));
     channels.append(channelSelect);
+  }
+  function selectChannel(selected: ModelServiceChannelId): void {
+    channelId = selected;
+    paint(); // Records the channel before building any credential or model controls.
   }
   paint();
   section.append(channels, steps);

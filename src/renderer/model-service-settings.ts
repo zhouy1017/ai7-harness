@@ -118,6 +118,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     currentRoles.setAttribute('aria-label', '当前角色模型');
     for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
       const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`} · ${role.statusLabel}`);
+      line.dataset['developerOnly'] = 'true';
       line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
       currentRoles.append(line);
     }

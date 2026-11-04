@@ -64,12 +64,15 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       return;
     }
     if (tab === 'rules') {
+      const { content } = knowledgeBasePage(tab, tabFocused);
       setStatus('正在读取工序与规则…', 'busy');
       try {
         const [rules, procedures] = await Promise.all([window.ai7.inspectDefaultExecutionRules(), window.ai7.inspectKnowledgeProcedures()]);
+        if (!content.isConnected || !technicalLayerVisible) return;
         renderKnowledgeBaseProjection(rules, tabFocused, procedures);
         setStatus('工序与规则已打开');
       } catch (error) {
+        if (!content.isConnected || !technicalLayerVisible) return;
         setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
       }
       return;
@@ -285,7 +288,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
    * audit of every material's lineage and 停止今后使用.
    */
-  async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false,
+  async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'feedback', bookId: string | null = null, tabFocused = false,
     openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
     if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
       await renderQualityLearning('feedback', null);

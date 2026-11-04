@@ -45,6 +45,9 @@ import {
   type GlobalAttentionStateKey,
 } from '../../src/shared/protocol.js';
 import { TASK_PLAN_STATE_PILLS } from '../../src/renderer/task-drawer-labels.js';
+import { mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionReading, type GlobalAttentionReader } from '../../src/renderer/global-attention.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
 // Unit suite for 待我处理's words (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009):
 // every group heading, state, reason and safe next step byte for byte; the next steps pinned to the words the
@@ -99,6 +102,38 @@ function projection(groups: Partial<Record<GlobalAttentionGroupKey, ReadonlyArra
 }
 
 describe('the entry and the screen', () => {
+  it('filters shelved learning targets from both the ordinary attention badge and its items, restoring them in developer mode', () => {
+    const restore = installMiniDom();
+    setTechnicalLayerVisible(false);
+    try {
+      const learning = item('learning-materials-pending', { itemId: 'learning', group: 'decisions',
+        object: { kind: 'learning-materials', pending: 1, deferred: 0 }, nextStep: 'decide-learning-materials', target: { kind: 'learning-materials', bookId: 'book' } });
+      const data = projection({ decisions: [learning, item('analysis-prepared', { itemId: 'plan', group: 'decisions' })],
+        exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] });
+      const listeners = new Set<(reading: GlobalAttentionReading) => void>();
+      const reader: GlobalAttentionReader = { refresh: () => { for (const listener of listeners) listener({ kind: 'projection', projection: data }); },
+        subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, interrupt: () => undefined };
+      const entry = document.createElement('button');
+      const root = document.createElement('main');
+      miniDocument.body.append(root as unknown as MiniElement);
+      mountGlobalAttentionEntry({ button: entry, reader, open: () => undefined });
+      const surface = mountGlobalAttention({ root, reader, technicalDetails: () => document.createElement('details'),
+        setStatus: () => undefined, errorMessage: (_error, fallback) => fallback, open: async () => undefined, openNetworkProxySettings: () => undefined });
+      surface.start();
+      expect(entry.dataset['attentionCount']).toBe('2');
+      expect(entry.getAttribute('aria-label')).toContain('2 项需要你处理');
+      expect(root.querySelector('[data-attention-item="learning"]')).toBeNull();
+      expect(root.querySelector('[data-attention-item="plan"]')).not.toBeNull();
+      expect(root.querySelector('[data-attention-count]')!.dataset['attentionCount']).toBe('2');
+      setTechnicalLayerVisible(true); reader.refresh();
+      expect(entry.dataset['attentionCount']).toBe('3');
+      expect(root.querySelector('[data-attention-item="learning"]')).not.toBeNull();
+      expect(root.querySelector('[data-attention-count]')!.dataset['attentionCount']).toBe('3');
+      expect(data.actionableCount).toBe(3);
+      surface.destroy();
+    } finally { setTechnicalLayerVisible(true); restore(); }
+  });
+
   it('names 待我处理 and shows the count only while the first two groups hold anything', () => {
     expect(GLOBAL_ATTENTION_ENTRY_LABEL).toBe('待我处理');
     expect(globalAttentionEntryView(null)).toEqual({ text: '待我处理', badge: null, accessibleName: '待我处理' });
