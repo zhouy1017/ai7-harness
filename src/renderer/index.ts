@@ -4362,8 +4362,8 @@ function renderLanding(
       const data = element('li');
       data.append(element('strong', undefined, labels.dataStep), ...(technicalLayerVisible ? [element('p', 'onboarding-data-location', location.canonicalRoot)] : []),
         button(labels.dataOpen, 'quiet', () => void renderDataAndStorage()));
-      if (location.dataLocationException !== null) data.append(element('p', 'field-note', location.channelDescription));
-      if (location.syncWarning !== null) data.append(element('p', 'field-note', location.syncWarning));
+      const warnings = [location.dataLocationException === null ? null : location.channelDescription, location.syncWarning].filter((line): line is string => line !== null);
+      if (warnings.length > 0) data.append(element('p', 'field-note', `${warnings.map((line) => line.replace(/。$/u, '')).join('；')}。`));
       const model = element('li');
       model.append(element('strong', undefined, labels.modelStep), element('p', undefined, labels.modelNote),
         button(labels.modelOpen, 'secondary', () => void renderModelServiceSettings()));

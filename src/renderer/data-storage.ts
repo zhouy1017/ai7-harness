@@ -60,10 +60,11 @@ export function createDataStorage(options: DataStorageOptions) {
         element('dt', undefined, '本机占用'), element('dd', undefined, projection.footprint.label),
       );
       // The shell's own file stays on this machine (Issue #934): it is not a record and 导出数据库 does not carry it.
-      summary.append(element('h3', undefined, '产品数据位置'), values, element('p', 'field-note preferences-local-line', PREFERENCES_LOCAL_LINE));
-      summary.append(element('p', 'field-note', projection.channelDescription));
+      summary.append(element('h3', undefined, '产品数据位置'), values, element('p', 'field-note preferences-local-line', PREFERENCES_LOCAL_LINE.replace('（侧栏收起状态、置顶与最近打开的图书等）', '')));
+      const locationNote = projection.syncWarning === null ? projection.channelDescription
+        : `${projection.channelDescription.replace(/。$/u, '')}；${projection.syncWarning}`;
+      summary.append(element('p', 'field-note', locationNote));
       if (projection.dataLocationException !== null) summary.dataset['dataLocationException'] = projection.dataLocationException;
-      if (projection.syncWarning !== null) summary.append(element('p', 'field-note', projection.syncWarning));
       const credentials = element('section', 'review-section');
       credentials.append(
         element('h3', undefined, '凭据与产品数据分开'),
