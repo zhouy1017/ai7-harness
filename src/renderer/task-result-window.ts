@@ -282,12 +282,12 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
       state.append(label);
       const incomplete = dialogueIncompleteLine(latest);
       if (incomplete !== null) state.append('；', incomplete);
+      if (latest.source === 'missing' || latest.source === 'damaged') {
+        state.append(' · ', latest.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING);
+      }
       parts.push(state);
       const answer = el('div', 'task-result-dialogue-answer');
       answer.dataset['dialogueAnswer'] = latest.attemptId;
-      if (latest.source === 'missing' || latest.source === 'damaged') {
-        answer.append(el('p', 'field-note', latest.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
-      }
       for (const fragment of latest.fragments) answer.append(el('span', `dialogue-fragment${fragment.breakAfter ? ' dialogue-fragment-break' : ''}`, fragment.text));
       parts.push(answer);
     }
