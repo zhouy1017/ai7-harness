@@ -554,7 +554,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
    */
   function renderExportOptions(current: ExportState): HTMLElement {
     const fieldset = el('fieldset', 'export-options package-export-options');
-    fieldset.append(el('legend', undefined, EXPORT_OPTIONS_LEGEND));
+    const legend = el('legend', undefined, EXPORT_OPTIONS_LEGEND);
+    legend.append(' · ', el('span', undefined, PACKAGE_EXPORT_OPTIONS_NOTE));
+    fieldset.append(legend);
     for (const key of PACKAGE_EXPORT_OPTION_ORDER) {
       const option = el('label', 'export-option');
       const box = el('input');
@@ -569,7 +571,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       option.append(box, words);
       fieldset.append(option);
     }
-    fieldset.append(el('p', 'field-note', PACKAGE_EXPORT_OPTIONS_NOTE));
     return fieldset;
   }
 
