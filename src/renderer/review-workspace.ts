@@ -392,7 +392,7 @@ export function findingReferencedRules(finding: Pick<ReviewFindingProjection, 'r
   disclosure.dataset['referencedRules'] = '';
   disclosure.append(el('summary', 'status-pill', '已参考规则'));
   for (const rule of finding.referencedRuleVersions ?? []) disclosure.append(el('p', 'field-note',
-    `${rule.text}（本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}）`));
+    `${rule.text}${technicalWords(` · 本社审阅偏好 v${rule.ordinal} · ${rule.versionId} · 行 ${rule.lineIndex + 1}`)}`));
   return disclosure;
 }
 
