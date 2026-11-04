@@ -12,5 +12,6 @@ export const anthropicBackend = createBackend('search-anthropic', (declaration, 
   for (const block of json['content']) if (isRecord(block) && block['type'] === 'web_search_tool_result' && Array.isArray(block['content'])) {
     for (const item of block['content']) if (isRecord(item) && item['type'] === 'web_search_result') hits.push(item);
   }
-  return resultsOf(hits);
+  const results = resultsOf(hits);
+  return results?.length ? results : null;
 });

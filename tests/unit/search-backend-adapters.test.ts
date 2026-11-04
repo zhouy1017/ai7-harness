@@ -121,9 +121,9 @@ describe('unmeasured provider search candidates', () => {
     expect(adapter.readResults(200, 'application/json', JSON.stringify({ output: [
       { type: 'message', content: [{ type: 'output_text', annotations: [{ type: 'url_citation', title: 'Citation', url: 'https://www.unesco.org/en/days/world-book-and-copyright' }] }] },
       { type: 'web_search_call', action: { sources: [{ title: 'Source', url: 'https://www.unesco.org/en/about-us' }] } },
-    ] }))).toMatchObject([{ title: 'Citation' }, { title: 'Source' }]);
+    ] }))).toMatchObject([{ title: 'Citation', url: 'https://www.unesco.org/en/days/world-book-and-copyright' }, { title: 'Source', url: 'https://www.unesco.org/en/about-us' }]);
     expect(adapter.readResults(503, 'application/json', '{}')).toBeNull();
-    expect(adapter.readResults(200, 'application/json', JSON.stringify({ output: [] }))).toEqual([]);
+    expect(adapter.readResults(200, 'application/json', JSON.stringify({ output: [] }))).toBeNull();
   });
 
   it('builds the Messages web_search request and reads tool result entries without dropping valid neighbors', () => {
@@ -135,6 +135,6 @@ describe('unmeasured provider search candidates', () => {
       { type: 'web_search_result', title: 'Source', url: 'https://www.unesco.org/en/days/world-book-and-copyright' }, null,
     ] }] }))).toMatchObject([{ title: 'Source', url: 'https://www.unesco.org/en/days/world-book-and-copyright' }]);
     expect(adapter.readResults(500, 'application/json', '{}')).toBeNull();
-    expect(adapter.readResults(200, 'application/json', JSON.stringify({ content: [] }))).toEqual([]);
+    expect(adapter.readResults(200, 'application/json', JSON.stringify({ content: [] }))).toBeNull();
   });
 });

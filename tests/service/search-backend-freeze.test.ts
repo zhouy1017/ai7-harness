@@ -40,12 +40,12 @@ describe('a review Run freezes its search backend', () => {
     } finally { store.close(); await roots.dispose(); }
   });
 
-  it('refuses a production Run without its selected backend key, naming the backend and 设置', async () => {
+  it.each(['opencode-go', 'openai-platform'] as const)('explains missing search setup for %s, leaving unmeasured native search unavailable', async (route) => {
     const roots = await createServiceTestRoots();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
-      const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: randomUUID() };
-      store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', 'opencode-go');
+      const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === route)!, credentialReference: randomUUID() };
+      store.saveModelServiceConnection('合成 Go 连接', configured.credentialReference, 'ready', route);
       const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
       expect(policy.providerProcessing.version).toBe('v33');
       const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
@@ -55,7 +55,7 @@ describe('a review Run freezes its search backend', () => {
       expect(() => {
         let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
         while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
-      }).toThrow(/当前模型渠道不自带联网搜索.*联网检索.*保存一个后端密钥/u);
+      }).toThrow(route === 'opencode-go' ? /当前模型渠道不自带联网搜索.*联网检索.*保存一个后端密钥/u : /当前模型渠道自带联网搜索，可一键启用.*设置.*联网检索/u);
     } finally { store.close(); await roots.dispose(); }
   });
 
@@ -70,21 +70,54 @@ describe('a review Run freezes its search backend', () => {
       store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '随模型渠道搜索');
       await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      const category = store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'factual-review')!;
+      expect(category.available).toBe(true);
+      expect(category.basisStatement).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
       const connections = store.getSearchBackendConnections();
-      const nativeReference = store.saveSearchBackendCredential('search-deepseek', connections.find((row) => row.backendId === 'search-deepseek')!.credentialReference, 'ready').credentialReference!;
+      const prepare = () => {
+        let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+        while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+        return store.factualReviewLedger.inspect(book.bookId).providerResolutionPlan!;
+      };
+      expect(prepare()).toMatchObject({ webToolsBackend: { backendId: 'search-deepseek' }, searchCredentialReference: configured.credentialReference });
+      store.saveSearchBackendCredential('search-deepseek', connections.find((row) => row.backendId === 'search-deepseek')!.credentialReference, 'ready');
       const selectedReference = connections.find((row) => row.backendId === 'search-tinyfish')!.credentialReference;
       const fallbackReference = connections.find((row) => row.backendId === 'search-brave')!.credentialReference;
       store.saveSearchBackendCredential('search-tinyfish', selectedReference, 'ready');
       store.saveSearchBackendCredential('search-brave', fallbackReference, 'ready');
       store.selectSearchBackend('search-tinyfish');
       store.selectSearchBackend('search-brave', 'fallback');
-      const work = (() => { let value = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
-        while (!value.done) value = store.advanceReviewRunPreparationWork(value.workId!); return value; })();
-      expect(work.projection!.run!.categories[0]?.taskIntentId).toBeDefined();
-      const frozen = store.factualReviewLedger.inspect(book.bookId).providerResolutionPlan!;
-      expect(frozen.webToolsBackend?.backendId).toBe('search-deepseek');
-      expect(frozen.searchCredentialReference).toBe(nativeReference);
+      const frozen = prepare();
+      expect(frozen.webToolsBackend).toMatchObject({ backendId: 'search-deepseek', selectionSource: 'model-channel' });
+      expect(frozen.searchCredentialReference).toBe(configured.credentialReference);
       expect(frozen.webToolsFallback).toBeUndefined();
+      store.selectSearchBackend('search-tinyfish', undefined, true);
+      const overridden = prepare();
+      expect(overridden.webToolsBackend).toMatchObject({ backendId: 'search-tinyfish', selectionSource: 'configured-backend' });
+      expect(overridden.searchCredentialReference).toBe(store.getSearchBackendConnections().find((row) => row.backendId === 'search-tinyfish')!.credentialReference);
+      expect(overridden.webToolsFallback?.backendId).toBe('search-brave');
+      store.selectSearchBackend('search-tinyfish', undefined, false);
+      expect(prepare().webToolsBackend?.backendId).toBe('search-deepseek');
+    } finally { store.close(); await roots.dispose(); }
+  });
+
+  it.each([true, false])('uses configured Brave for OpenCode Go when selected=%s', async (selected) => {
+    const roots = await createServiceTestRoots();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((row) => row.route === 'opencode-go')!, credentialReference: randomUUID() };
+      store.saveModelServiceConnection('合成 Go', configured.credentialReference, 'ready', 'opencode-go');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+      const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
+      store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
+      const book = await importSample1Book(store, roots.codeRoot, 'Go 检索兜底');
+      const brave = store.saveSearchBackendCredential('search-brave', null, 'ready');
+      store.selectSearchBackend(selected ? 'search-brave' : 'search-tinyfish');
+      let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+      while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+      expect(store.factualReviewLedger.inspect(book.bookId).providerResolutionPlan).toMatchObject({
+        webToolsBackend: { backendId: 'search-brave', selectionSource: 'configured-backend' }, searchCredentialReference: brave.credentialReference,
+      });
     } finally { store.close(); await roots.dispose(); }
   });
 
@@ -177,7 +210,7 @@ describe('a review Run freezes its search backend', () => {
     } finally { store.close(); await roots.dispose(); }
   });
 
-  it('requires search setup for 初评 on official DeepSeek, which inherits protocol function tools', async () => {
+  it('uses official DeepSeek model credentials for 初评 without search setup', async () => {
     const roots = await createServiceTestRoots();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
@@ -188,10 +221,11 @@ describe('a review Run freezes its search backend', () => {
       store.baselineAnalysisLedger.bindLaunch(launch); store.initialEvaluationLedger.bindLaunch(launch);
       const book = await importSample1Book(store, roots.codeRoot, '初评检索凭据就绪');
       await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
-      expect(() => {
-        let progress = store.createInitialEvaluationPreparationWork(book.bookId, policy);
-        while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
-      }).toThrow(/密钥|联网检索/u);
+      let progress = store.createInitialEvaluationPreparationWork(book.bookId, policy);
+      while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
+      expect(store.initialEvaluationLedger.inspect(book.bookId).providerResolutionPlan).toMatchObject({
+        webToolsBackend: { backendId: 'search-deepseek', selectionSource: 'model-channel' }, searchCredentialReference: configured.credentialReference,
+      });
     } finally { store.close(); await roots.dispose(); }
   });
 

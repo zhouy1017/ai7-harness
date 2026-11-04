@@ -45,5 +45,6 @@ export function searchBackendConfigurationDigest(id: string): string {
 
 export function searchBackendCandidateConfigurationDigest(backendId: string, candidateId: string): string {
   searchBackendCandidate(backendId, candidateId);
-  return candidateConfigurationDigestOf(documents.find((entry) => entry['backendId'] === backendId)!);
+  const document = documents.find((entry) => entry['backendId'] === backendId)!;
+  return document['candidate'] === undefined ? searchBackendConfigurationDigest(backendId) : candidateConfigurationDigestOf(document);
 }

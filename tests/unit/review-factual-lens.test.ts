@@ -71,7 +71,8 @@ let surfaces: ReviewWorkspaceSurface[];
 beforeEach(() => {
   restoreDom = installMiniDom();
   surfaces = [];
-  vi.stubGlobal('window', { setTimeout, clearTimeout });
+  vi.stubGlobal('window', { setTimeout, clearTimeout, getSelection: () => null });
+  Object.defineProperty(MiniElement.prototype, 'options', { configurable: true, get(this: MiniElement) { return this.querySelectorAll('option'); } });
   vi.stubGlobal('Option', class extends MiniElement { constructor(text: string, value: string) { super('option'); this.textContent = text; this.value = value; } });
   Object.defineProperty(MiniElement.prototype, 'prepend', { configurable: true, value(this: MiniElement, ...nodes: MiniElement[]) {
     const previous = [...this.children]; this.replaceChildren(...nodes, ...previous);
@@ -83,6 +84,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const surface of surfaces) surface.destroy();
+  Reflect.deleteProperty(MiniElement.prototype, 'options');
   Reflect.deleteProperty(MiniElement.prototype, 'prepend');
   Reflect.deleteProperty(MiniElement.prototype, 'replaceWith');
   restoreDom();
@@ -112,6 +114,22 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
+  it('shows the native model-channel search source in the new-review dialog', async () => {
+    const view = mount();
+    const next = workspace();
+    const available = { available: true, unavailableReason: null };
+    next.newReview = available; next.scopeOptions.whole = available;
+    next.categories = [{ categoryId: 'factual-review', label: '事实核查', description: '核对公开来源', output: 'annotation', riskPointsOnly: false,
+      batchApply: false, searchEngine: true, modelFree: false, materialReferencesAllowed: false,
+      basisStatement: '将使用 DeepSeek 开放平台（官方） 自带的联网搜索；是否完成以本次运行的核查状态为准',
+      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, ...available,
+      scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    Object.assign(view.root.querySelector('dialog')!, { showModal: vi.fn(), close: vi.fn() });
+    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    expect(view.root.querySelector('[data-review-category-option="factual-review"] .review-category-basis')!.textContent).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
+  });
+
   it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {
     const view = mount('settled'); await flush();
     expect(view.root.textContent).toContain('证据支持');

@@ -153,3 +153,38 @@ describe('the candidate connection test outside ordinary-production', () => {
     });
   });
 });
+
+// #1312: official native candidates use their own model channel's saved credential; no search credential is configured.
+describe('native search candidate connection tests', () => {
+  const candidates = [
+    { backendId: 'search-openai', candidateId: 'openai-native-search-v1', route: 'openai-platform', body: { output: [{ type: 'web_search_call', action: { sources: [{ title: 'UNESCO', url: 'https://www.unesco.org/' }] } }] } },
+    { backendId: 'search-anthropic', candidateId: 'anthropic-native-search-v1', route: 'anthropic-claude', body: { content: [{ type: 'web_search_tool_result', content: [{ type: 'web_search_result', title: 'UNESCO', url: 'https://www.unesco.org/' }] }] } },
+  ] as const;
+  it.each(candidates)('tests $backendId with its model credential and fixed public query once', async (candidate) => {
+    await withStore(async (store, codeRoot) => {
+      store.saveModelServiceConnection('合成官方渠道', '11111111-1111-4111-8111-111111111111', 'ready', candidate.route);
+      const connection = store.getModelServiceRouteConnection(candidate.route)!;
+      const h = harness({ status: 200, body: JSON.stringify(candidate.body) });
+      const result = await composeSearchCandidateProbe({ ...candidate, operationalScope: 'ordinary-production', launchPolicy: await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production'),
+        connection: () => { throw new Error('native probe must not read search credentials'); },
+        modelConnection: () => ({ ...connection, modelId: connection.binding.modelId, credentialSlot: connection.binding.credentialSlot }),
+        broker: h.broker, fetch: h.fetch, admitHost: h.admitHost });
+      expect(result).toMatchObject({ reachable: true, results: [{ title: 'UNESCO', url: 'https://www.unesco.org/' }], candidate: { candidateId: candidate.candidateId, outcome: 'succeeded' } });
+      expect(JSON.parse(h.sent[0]!.init.body!)).toMatchObject({ model: connection.binding.modelId });
+      expect(h.sent[0]!.init.body).toContain('UNESCO World Book and Copyright Day April 23');
+      expect(h.counts).toEqual({ secretReads: 1, sends: 1, hosts: 1, released: 1 });
+      expect(store.getSearchBackendConnections().every((row) => row.credentialOperationState === 'missing')).toBe(true);
+    });
+  });
+  it.each(candidates)('keeps $backendId nonselectable and refuses CI before credentials', async (candidate) => {
+    await withStore(async (store, codeRoot) => {
+      const h = harness({ status: 200, body: '{}' });
+      await expect(composeSearchCandidateProbe({ ...candidate, operationalScope: 'development-ci', launchPolicy: await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production'),
+        connection: () => { throw new Error('must not read'); }, modelConnection: () => { throw new Error('must not read'); },
+        broker: h.broker, fetch: h.fetch, admitHost: h.admitHost })).rejects.toMatchObject({ code: 'SEARCH_CANDIDATE_PROBE_SCOPE_REFUSED' });
+      expect(() => store.selectSearchBackend(candidate.backendId)).toThrow(/未提供/u);
+      expect(() => store.selectSearchBackend(candidate.backendId, 'fallback')).toThrow(/未提供/u);
+      expect(h.counts.secretReads + h.counts.sends).toBe(0);
+    });
+  });
+});

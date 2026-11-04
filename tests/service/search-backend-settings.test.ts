@@ -74,6 +74,20 @@ describe('the persisted search settings and schema 74', () => {
     } finally { store?.close(); await roots.dispose(); }
   });
 
+  it('persists the default-off source override when switching the selected backend and reopening', async () => {
+    const roots = await createServiceTestRoots();
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      expect(store.getSearchBackendSettings().alwaysUseSelectedBackend).toBe(false);
+      store.selectSearchBackend('search-brave', undefined, true);
+      store.selectSearchBackend('search-parallel');
+      store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getSearchBackendSettings()).toMatchObject({ selectedBackendId: 'search-parallel', alwaysUseSelectedBackend: true });
+      store.selectSearchBackend('search-parallel', undefined, false);
+      expect(store.getSearchBackendSettings().alwaysUseSelectedBackend).toBe(false);
+    } finally { store.close(); await roots.dispose(); }
+  });
+
   it('discloses the DeepSeek direct-search candidate as unmeasured and unselectable beside the unchanged ranked backends (Issue #1055)', async () => {
     const roots = await createServiceTestRoots();
     let store: EditorialStore | undefined;
@@ -81,7 +95,7 @@ describe('the persisted search settings and schema 74', () => {
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       const settings = store.getSearchBackendSettings();
       expect(settings.backends.map((entry) => entry.backendId)).toEqual(['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai']);
-      expect(settings.candidates).toHaveLength(1);
+      expect(settings.candidates).toHaveLength(3);
       const [candidate] = settings.candidates;
       expect(candidate).toMatchObject({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1', revision: 1, measurement: 'not-measured', selectable: false,
         endpoint: 'https://api.deepseek.com/v1/tools/search', protocol: 'deepseek-direct-search', capabilities: { search: true, fetch: true }, price: 'USD 0.75 / 1000 次' });
@@ -113,7 +127,7 @@ describe('the persisted search settings and schema 74', () => {
       expect(store.getSearchBackendConnections()).toHaveLength(5); store.close(); store = undefined;
       const terminal = new DatabaseSync(path);
       // Synchronized delta with #66 and #89: revisions 81 (imported Skill relations) and 83 (their updates) follow revision 80 (Task Intent Drafts).
-      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(107);
+      expect(terminal.prepare('PRAGMA user_version').get()!.user_version).toBe(108);
       expect(String(terminal.prepare("SELECT sql FROM sqlite_schema WHERE name = 'analysis_plan_records'").get()!.sql)).toContain('web-tools-backend');
       expect(() => terminal.prepare("INSERT INTO search_backend_connections VALUES ('search-kimi', NULL, 'missing', NULL, 'now')").run()).toThrow();
       terminal.exec('DROP TABLE search_backend_connections'); terminal.close();

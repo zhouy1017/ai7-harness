@@ -40,7 +40,7 @@ describe('Data Version 1 frozen at the 1.0.0 boundary', () => {
     expect(DATA_VERSION_FROZEN).toBe(true);
     // The baseline is a literal: when a later slice adds a revision, LATEST moves past it and the classification must follow.
     expect(DATA_VERSION_BASELINE_REVISION).toBe(83);
-    expect(LATEST_SCHEMA_VERSION).toBe(107);
+    expect(LATEST_SCHEMA_VERSION).toBe(108);
     expect(DATA_VERSION).toBe(1);
     expect(DATA_VERSION).toBe(dataVersionAt(LATEST_SCHEMA_VERSION));
   });

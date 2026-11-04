@@ -48,6 +48,7 @@ import {
   FACTUAL_REVIEW_KIND,
   MODEL_SERVICE_CONNECTION_IDS,
   modelServiceChannelOf,
+  MODEL_SERVICE_ROUTE_BINDINGS,
   type EvidenceAssuranceLevel,
   type ProcedureDefinitionPin,
   type FrozenWebToolsBackend,
@@ -101,7 +102,7 @@ import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
 import { SEARCH_BACKENDS } from '../provider/search-backends.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
-import { freezeSearchFallback } from '../provider/search-backend-settings.js';
+import { freezeSearchFallback, readSearchOverride } from '../provider/search-backend-settings.js';
 import {
   STOCK_TYPOS_LEAF_FIXTURE,
   STOCK_TYPOS_LEAF_FIXTURE_SHA256,
@@ -723,6 +724,11 @@ export class BaselineAnalysisStore {
 
   get launch(): LaunchBinding {
     return this.#launch;
+  }
+
+  /** The source a new research Task would freeze, also used by the new-review sheet. */
+  currentResearchBackend(): FrozenWebToolsBackend | undefined {
+    return this.#currentSearchPlan(this.#definition, null).webToolsBackend;
   }
 
   /** Whether a preparation is in flight, which only this instance holds; the store keeps such a ledger (Issue #649). */
@@ -3287,21 +3293,24 @@ export class BaselineAnalysisStore {
     const production = this.#launch.live.scope === 'ordinary-production';
     const rows = this.#db.prepare('SELECT * FROM search_backend_connections').all() as SqlRow[];
     const selected = rows.find((entry) => entry.selected === 1);
-    const native = SEARCH_BACKENDS.find((entry) => entry.shipped && this.#launch.live!.route.includes(entry.service));
-    const nativeRow = native === undefined ? undefined : rows.find((entry) => entry.backend_id === native.id && (!production || entry.credential_operation_state === 'ready') &&
-      (!production || typeof entry.credential_reference === 'string'));
-    const usingNative = nativeRow !== undefined;
+    const channel = modelServiceChannelOf(this.#launch.live.route);
+    const native = SEARCH_BACKENDS.find((entry) => channel?.startsWith(`${entry.service}-`));
+    const modelReady = production && this.#db.prepare("SELECT 1 FROM model_service_connections WHERE credential_reference = ? AND credential_operation_state = 'ready'").get(this.#launch.live.credentialReference) !== undefined;
+    const usingNative = !readSearchOverride(this.#db) && native?.shipped === true && modelReady;
     const selectedRow = selected !== undefined && (!production || (selected.credential_operation_state === 'ready' && typeof selected.credential_reference === 'string')) ? selected : undefined;
     const configuredRows = rows.filter((entry) => !production || (entry.credential_operation_state === 'ready' && typeof entry.credential_reference === 'string'));
-    const adapterId = nativeRow === undefined ? asString((selectedRow ?? configuredRows[0])?.backend_id ?? '') : native!.id;
+    const row = selectedRow ?? configuredRows[0];
+    const adapterId = usingNative ? native.id : asString(row?.backend_id ?? '');
     requireAnalysis(adapterId.length > 0, 'SEARCH_CREDENTIAL_MISSING', native === undefined
       ? '当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
-      : '当前模型渠道自带联网搜索，可在 设置 › 联网检索 复用模型凭据启用。');
-    const row = nativeRow ?? selectedRow ?? configuredRows[0]!;
+      : '当前模型渠道自带联网搜索，可一键启用；请前往 设置 › 联网检索。');
     const adapter = searchBackend(adapterId);
-    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at),
-      selectionSource: usingNative ? 'model-channel' as const : 'configured-backend' as const, ...(usingNative ? { sourceLabel: adapter.declaration.displayName } : {}) };
-    const searchCredentialReference = production ? asString(row.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
+    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id),
+      selectedAt: usingNative ? '' : asString(row!.selected_at),
+      selectionSource: usingNative ? 'model-channel' as const : 'configured-backend' as const,
+      ...(usingNative ? { sourceLabel: channel === null ? native.displayName : MODEL_SERVICE_ROUTE_BINDINGS[channel].providerLabel } : {}) };
+    const searchCredentialReference = usingNative ? this.#launch.live.credentialReference
+      : production ? asString(row!.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
     const webToolsFallback = production && !usingNative ? freezeSearchFallback(this.#db, searchFallbackTermsOf(policy), adapter.declaration.id) : undefined;
     return { webToolsBackend, searchCredentialReference, ...(webToolsFallback === undefined ? {} : { webToolsFallback }) };
   }

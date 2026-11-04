@@ -54,7 +54,7 @@ describe('the closed DeepSeek direct-search candidate namespace', () => {
     const outcome = searchBackendOutcome(declarations, SEARCH_BACKEND_EVALUATION.profiles, SEARCH_BACKEND_EVALUATION.cnyPerUsd);
     expect(outcome.excluded).toContainEqual({ backendId: 'search-deepseek', reason: 'not-measured' });
     const candidate = searchBackendCandidateOf(document())!;
-    expect([candidate.measurement, candidate.search.endpoint, candidate.fetch.endpoint, candidate.price.amount, candidate.price.per])
+    expect([candidate.measurement, candidate.search.endpoint, candidate.fetch!.endpoint, candidate.price.amount, candidate.price.per])
       .toEqual(['not-measured', 'https://api.deepseek.com/v1/tools/search', 'https://api.deepseek.com/v1/tools/fetch', 0.75, 1000]);
     expect(() => searchBackendCandidate('search-brave', candidate.candidateId)).toThrow('SEARCH_CANDIDATE_UNKNOWN');
     expect(() => searchBackendCandidate('search-deepseek', 'deepseek-direct-search-v2')).toThrow('SEARCH_CANDIDATE_UNKNOWN');

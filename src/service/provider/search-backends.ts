@@ -96,10 +96,10 @@ export interface SearchBackendCandidate {
   readonly displayName: string;
   readonly measurement: 'not-measured';
   readonly search: {
-    readonly endpoint: string; readonly host: string; readonly method: 'POST'; readonly protocol: 'deepseek-direct-search'; readonly headerForm: 'authorization-bearer';
+    readonly endpoint: string; readonly host: string; readonly method: 'POST'; readonly protocol: 'deepseek-direct-search' | 'openai-responses-web-search' | 'anthropic-messages-web-search'; readonly headerForm: SearchBackendHeaderForm;
     readonly probeArguments: { readonly query: string; readonly count: number; readonly need_content: false };
   };
-  readonly fetch: { readonly endpoint: string; readonly host: string; readonly method: 'POST'; readonly protocol: 'deepseek-direct-fetch'; readonly headerForm: 'authorization-bearer' };
+  readonly fetch: { readonly endpoint: string; readonly host: string; readonly method: 'POST'; readonly protocol: 'deepseek-direct-fetch'; readonly headerForm: 'authorization-bearer' } | null;
   readonly credentialSlot: SearchBackendId;
   readonly price: SearchBackendDeclaration['price'];
   readonly priceSource: SearchBackendDeclaration['priceSource'];
@@ -224,7 +224,17 @@ export function searchBackendDeclarationOf(document: unknown): SearchBackendDecl
 
 /** A document's candidate namespace, read whole after the generator validated it; `null` when the document declares none. */
 export function searchBackendCandidateOf(document: unknown): SearchBackendCandidate | null {
-  if (!isRecord(document) || document['candidate'] === undefined) return null;
+  if (!isRecord(document)) return null;
+  if (document['candidate'] === undefined) {
+    const declaration = searchBackendDeclarationOf(document);
+    if (!['openai-responses-web-search', 'anthropic-messages-web-search'].includes(declaration.protocol ?? '') || document['measurement'] !== undefined) return null;
+    return Object.freeze({ backendId: declaration.id, candidateId: `${declaration.service}-native-search-v1`, revision: 1,
+      displayName: declaration.displayName, measurement: 'not-measured' as const,
+      search: { endpoint: declaration.endpoint!, host: declaration.host!, method: 'POST' as const,
+        protocol: declaration.protocol as 'openai-responses-web-search' | 'anthropic-messages-web-search', headerForm: declaration.headerForm,
+        probeArguments: { query: 'UNESCO World Book and Copyright Day April 23', count: 3, need_content: false as const } },
+      fetch: null, credentialSlot: declaration.credentialSlot, price: declaration.price, priceSource: declaration.priceSource });
+  }
   const declaration = searchBackendDeclarationOf(document);
   const candidate = document['candidate'];
   requireConfiguration(isRecord(candidate) && typeof candidate['candidateId'] === 'string' && Number.isInteger(candidate['revision']) &&

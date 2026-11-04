@@ -24,5 +24,5 @@ export const openaiBackend = createBackend('search-openai', (declaration, query,
   if (parsed === null) return null;
   const unique = new Map<string, typeof parsed[number]>();
   for (const hit of parsed) if (!unique.has(hit.url)) unique.set(hit.url, hit);
-  return [...unique.values()];
+  return unique.size === 0 ? null : [...unique.values()];
 });

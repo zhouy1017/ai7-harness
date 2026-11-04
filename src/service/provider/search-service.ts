@@ -8,7 +8,7 @@ import { EgressTicketBook, evaluateSearchCandidateProbe, evaluateSearchServiceCa
 import { deepseekDirectSearchRequest, readDeepseekDirectSearch } from './search-backends/deepseek.js';
 import { toolArgumentsDigest, type PlatformToolArguments, type PlatformToolsRule } from './platform-tools.js';
 import { PlatformToolHttpError, deadlineSignal, readBoundedBody, type PlatformToolFetch } from './platform-tool-http.js';
-import { anonymousSearchInterface, searchBackendCandidate } from './search-backends.js';
+import { anonymousSearchInterface, searchBackendCandidate, SEARCH_BACKENDS } from './search-backends.js';
 import type { LaunchPolicyProjection, SearchBackendConnectionProjection, SearchBackendProbeProjection, SearchCandidateId, SearchCandidateProbeOutcome, SearchConnectionTestPolicy } from '../../shared/protocol.js';
 
 /**
@@ -254,6 +254,7 @@ export async function probeConfiguredSearchBackend(input: {
   if (policy.integrityState !== 'verified' || (policy.operationalScope !== 'developer-live' && policy.operationalScope !== 'ordinary-production')) {
     throw new SearchServiceError('SEARCH_PROBE_NOT_ADMITTED', '当前环境不允许测试检索。');
   }
+  if (!SEARCH_BACKENDS.some((entry) => entry.id === input.backendId && entry.shipped)) throw new SearchServiceError('SEARCH_BACKEND_NOT_SHIPPED', '候选接口请使用测试连接。');
   const adapter = searchBackend(input.backendId);
   const rule = policy.providerProcessing.admittedRules.find((entry) => entry.platformTools !== null);
   const tools = platformToolsFromProjection(rule ?? { webSearchToolAllowed: true, platformTools: policy.providerProcessing.settingsSearchTools });
@@ -350,7 +351,8 @@ export async function probeSearchCandidate(input: {
     const candidate = searchBackendCandidate(ticket.backendId, ticket.candidateId);
     return await input.broker.releaseTo({ bindingDigest: ticket.bindingDigest, modelRole: 'Main Editorial Role', slot: ticket.credentialSlot,
       credentialReference: ticket.credentialReference, isCurrent: input.isCurrent }, ticket, async (credential) => {
-      const request = deepseekDirectSearchRequest(candidate, ticket.arguments, credential);
+      const request = candidate.fetch !== null ? deepseekDirectSearchRequest(candidate, ticket.arguments, credential)
+        : searchBackend(ticket.backendId).request(ticket.arguments.query, { credential, count: ticket.arguments.count, ...(ticket.model === undefined ? {} : { model: ticket.model }) });
       if (request.url !== ticket.endpoint || new URL(request.url).hostname !== ticket.host) throw new SearchServiceError('PLATFORM_TOOL_TICKET_REFUSED', '连接测试的请求不是票据所冻结的请求；未发送。');
       const deadline = deadlineSignal(policy.timeoutMilliseconds);
       let release: (() => void) | undefined;
@@ -361,8 +363,16 @@ export async function probeSearchCandidate(input: {
         status = response.status;
         const bytes = await readBoundedBody(response, policy.responseMaxBytes);
         if (status !== 200) return qualified('http-rejected', status);
-        const hits = readDeepseekDirectSearch(new TextDecoder().decode(bytes));
-        if (hits === null) return qualified('malformed-response', status);
+        const body = new TextDecoder().decode(bytes);
+        const hits = candidate.fetch !== null ? readDeepseekDirectSearch(body) : searchBackend(ticket.backendId).readResults(status, 'application/json', body);
+        if (hits === null) {
+          let emptyNativeResponse = false;
+          if (candidate.fetch === null) try {
+            const parsed: unknown = JSON.parse(body);
+            emptyNativeResponse = isRecord(parsed) && Array.isArray(parsed[candidate.search.protocol === 'openai-responses-web-search' ? 'output' : 'content']);
+          } catch { /* an unreadable body remains a malformed response */ }
+          return qualified(emptyNativeResponse ? 'succeeded-empty' : 'malformed-response', status);
+        }
         const results = hits.slice(0, policy.resultsMaximum).map((hit) => ({ title: boundedProbeTitle(hit.title, policy.titleMaximumCharacters), url: hit.url }))
           .filter((hit) => hit.url.length <= policy.urlMaximumCharacters && /^https?:\/\//u.test(hit.url));
         return qualified(hits.length === 0 ? 'succeeded-empty' : 'succeeded', status, results, hits.length);
@@ -397,20 +407,28 @@ export async function composeSearchCandidateProbe(input: {
   readonly broker: CredentialBroker;
   readonly fetch: PlatformToolFetch;
   readonly admitHost: TicketHostAdmission;
+  readonly modelConnection?: (backendId: string) => { credentialReference: string; credentialOperationState: string; modelId: string; credentialSlot: string } | undefined;
 }): Promise<SearchBackendProbeProjection> {
   let candidate: import('./search-backends.js').SearchBackendCandidate;
   try { candidate = searchBackendCandidate(input.backendId, input.candidateId); } catch { throw new SearchCandidateProbeRefusal('SEARCH_CANDIDATE_UNKNOWN', '没有这一联网检索候选接口；未发送任何内容。'); }
-  const policy = input.launchPolicy.providerProcessing.searchConnectionTest;
+  const basePolicy = input.launchPolicy.providerProcessing.searchConnectionTest;
+  const native = candidate.fetch === null;
+  // Only an ordinary-production click can read the corresponding model connection; no candidate enters Task admission.
+  const connection = () => native ? input.modelConnection?.(candidate.backendId) : input.connection(candidate.backendId);
+  const model = native && input.operationalScope === 'ordinary-production' ? input.modelConnection?.(candidate.backendId) : undefined;
+  const policy = !native || basePolicy === undefined ? basePolicy : { ...basePolicy, backendId: candidate.backendId, candidateId: candidate.candidateId,
+    endpoint: candidate.search.endpoint, protocol: candidate.search.protocol, headerForm: candidate.search.headerForm,
+    credentialSlot: model?.credentialSlot ?? candidate.credentialSlot, arguments: candidate.search.probeArguments, argumentsCanonicalSha256: sha256Hex(canonicalJson(candidate.search.probeArguments)) };
   const decision = evaluateSearchCandidateProbe({ operationalScope: input.operationalScope, providerProcessingVersion: input.launchPolicy.providerProcessing.version, policy,
-    configurationDigest: searchBackendCandidateConfigurationDigest(candidate.backendId, candidate.candidateId), connection: () => input.connection(candidate.backendId),
-    candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: candidate.credentialSlot, arguments: candidate.search.probeArguments },
+    configurationDigest: searchBackendCandidateConfigurationDigest(candidate.backendId, candidate.candidateId), connection, ...(model === undefined ? {} : { model: model.modelId }),
+    candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: model?.credentialSlot ?? candidate.credentialSlot, arguments: candidate.search.probeArguments },
     developmentReference: (reference) => DEVELOPMENT_CREDENTIAL_REFERENCES.has(reference.toLowerCase()) });
   if (decision.decision === 'refuse') throw new SearchCandidateProbeRefusal(decision.code, decision.detail);
   const { ticket } = decision;
   try {
     return await probeSearchCandidate({ ticket, policy: policy!, broker: input.broker, fetch: input.fetch, admitHost: input.admitHost,
       // Removing or replacing the key between the click and the read retargets nothing: the frozen reference must still be the ready one.
-      isCurrent: () => { const now = input.connection(candidate.backendId); return now?.credentialOperationState === 'ready' && now.credentialReference === ticket.credentialReference; } });
+      isCurrent: () => { const now = connection(); return now?.credentialOperationState === 'ready' && now.credentialReference === ticket.credentialReference; } });
   } catch (error) {
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'SEARCH_CANDIDATE_PROBE_FAILED';
     throw new SearchCandidateProbeRefusal(code === 'CREDENTIAL_MISSING' ? 'SEARCH_CREDENTIAL_MISSING' : code, '连接测试未完成：凭据未释放或请求未发送；请检查本页保存的密钥后重试。');

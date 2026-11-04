@@ -1,3 +1,4 @@
+import { researchPlanLine } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
@@ -846,6 +847,7 @@ interface BaselineReading {
 
 /** What one category of the configuration can do now, read once per projection or preparation. */
 interface CategoryReading {
+  readonly researchSourceLine?: string;
   readonly entry: ReviewCategoryConfigurationEntry;
   /** Why the category cannot run at all now; `null` when it can. */
   readonly unavailableReason: string | null;
@@ -4191,8 +4193,14 @@ export class ReviewRunStore {
       return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
     let projection: AnalysisProjection;
+    let researchSourceLine: string | undefined;
     try {
-      projection = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId).inspect(bookId, progress);
+      const ledger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
+      projection = ledger.inspect(bookId, progress);
+      if (entry.searchEngine) {
+        const source = ledger.currentResearchBackend();
+        if (source?.selectionSource === 'model-channel') researchSourceLine = researchPlanLine(source);
+      }
     } catch (error) {
       if (error instanceof AnalysisError) return { entry, unavailableReason: error.message, facts: none, projection: null };
       throw error;
@@ -4235,6 +4243,7 @@ export class ReviewRunStore {
       unavailableReason: entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null,
       facts,
       projection,
+      ...(researchSourceLine === undefined ? {} : { researchSourceLine }),
       unread,
     };
   }
@@ -4262,7 +4271,8 @@ export class ReviewRunStore {
       searchEngine: entry.searchEngine,
       modelFree: entry.executor === 'baseline-leads' || entry.executor === 'local-text-check',
       materialReferencesAllowed: entry.executor === 'review-category-contract',
-      basisStatement: reviewCategoryBasisStatement(entry),
+      basisStatement: reading.researchSourceLine === undefined ? reviewCategoryBasisStatement(entry)
+        : reviewCategoryBasisStatement(entry).replace('使用用户所选的联网检索后端', reading.researchSourceLine),
       guidelineDocuments: entry.guidelineDocuments.map((document) => ({
         documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauseCount: document.clauses.length,
       })),
