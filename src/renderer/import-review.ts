@@ -102,9 +102,9 @@ export function createImportReview(options: ImportReviewOptions) {
     const group = element('fieldset'); group.dataset['wordImportControls'] = projection.compatibility;
     group.append(element('legend', undefined, 'Word 修订导入方式'));
     if (projection.compatibility === 'unsupported') {
-      group.append(element('p', undefined, '此文件含当前不支持的修订结构，不能作为首份稿件导入；来源材料继续按原有导入边界处理。'));
+      group.append(element('p', undefined, `此文件含当前不支持的修订结构，不能作为首份稿件导入；定位到 ${projection.locationCount} 处，完整原始文件仍留在本机暂存中，来源材料继续按原有导入边界处理。`));
       const reasons = element('ul'); for (const code of projection.reasonCodes) reasons.append(element('li', undefined, wordIntakeRefusalLabel(code)));
-      group.append(reasons, element('p', 'field-note', `定位到 ${projection.locationCount} 处；完整原始文件仍留在本机暂存中。`));
+      group.append(reasons);
       return { elements: [group], choice: () => undefined, allowed: () => false,
         bind: (control) => { control.disabled = true; }, setBusy: () => undefined };
     }
@@ -973,7 +973,7 @@ export function createImportReview(options: ImportReviewOptions) {
 
     const mappingsHost = element('section', 'review-section');
     mappingsHost.dataset['reimportMappings'] = 'loading';
-    mappingsHost.append(element('h3', undefined, '章节对应'), element('p', 'field-note', '正在读取持久比较事实…'));
+    mappingsHost.append(element('h3', undefined, '章节对应'), element('p', 'field-note', '正在读取对应关系…'));
     content.append(mappingsHost);
     void Promise.resolve().then(async () => {
       try {
@@ -1040,15 +1040,16 @@ export function createImportReview(options: ImportReviewOptions) {
             const host = element('div', 'reimport-group-side');
             host.dataset['reimportSide'] = label;
             if (part.count === 0) {
-              host.append(element('p', 'field-note', `${label}：这里没有段落。`));
+              host.append(element('h5', undefined, `${label}：这里没有段落`));
               return host;
             }
+            const remaining = part.count - part.excerpts.length;
+            host.append(element('h5', undefined, remaining > 0 ? `${label} · 另有 ${remaining} 段` : label));
             for (const excerpt of part.excerpts) {
-              const line = element('p', 'field-note', `${label}第 ${excerpt.position} 段：${excerpt.text}${excerpt.truncated ? '…' : ''}`);
+              const line = element('blockquote', 'reimport-excerpt', `第 ${excerpt.position} 段：${excerpt.text}${excerpt.truncated ? '…' : ''}`);
               line.dataset['reimportExcerptPosition'] = String(excerpt.position);
               host.append(line);
             }
-            if (part.count > part.excerpts.length) host.append(element('p', 'field-note', `另有 ${part.count - part.excerpts.length} 段。`));
             return host;
           };
           row.append(side('当前', group.current), side('新文件', group.staged));
