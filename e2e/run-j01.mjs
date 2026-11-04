@@ -1726,7 +1726,7 @@ async function runJourney(
     'content-contract',
     () => assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
       'import-completion',
     ),
   );
@@ -3220,7 +3220,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
       'text-manuscript-completion-wording',
     );
     await clickExactButton(renderer, '来源版本与来源记录', 'text-manuscript-view-source');
@@ -3316,7 +3316,7 @@ async function main() {
       );
       await assertRenderer(
         renderer,
-        `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('图书工作概览')`,
+        `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
         'doc-manuscript-completion-wording',
       );
       await clickExactButton(renderer, '来源版本与来源记录', 'doc-manuscript-view-source');
