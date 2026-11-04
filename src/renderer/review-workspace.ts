@@ -131,7 +131,6 @@ import {
   REVIEW_COST_BEFORE_PLAN,
   REVIEW_COVERAGE_COLUMNS,
   REVIEW_COVERAGE_HEADING,
-  REVIEW_COVERAGE_NOTE,
   REVIEW_COVERAGE_PILLS,
   REVIEW_EXPORT_NEEDS_REPORT,
   REVIEW_FILTER_ALL,
@@ -887,7 +886,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       body.append(tr);
     }
     table.append(head, body);
-    section.append(heading, el('p', 'field-note', REVIEW_COVERAGE_NOTE), table);
+    section.append(heading, table);
     return section;
   }
 
@@ -2369,14 +2368,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.value = entry.categoryId;
       input.checked = state.categories.has(entry.categoryId);
       const text = el('span', 'review-category-text');
-      const description = el('span', 'review-category-description', entry.description);
-      description.id = uid('category-description');
       const basis = el('span', 'review-category-basis', reviewBasisWords(entry.basis));
       basis.id = uid('category-basis');
       const reason = el('span', 'review-category-reason');
       reason.id = uid('category-reason');
-      input.setAttribute('aria-describedby', `${description.id} ${basis.id} ${reason.id}`);
-      text.append(el('strong', undefined, entry.label), description, basis, reason);
+      input.setAttribute('aria-describedby', `${basis.id} ${reason.id}`);
+      text.append(el('strong', undefined, entry.label), basis, reason);
       label.append(input, text);
       input.addEventListener('change', () => {
         if (input.checked && entry.categoryId === 'local-text-check') state.categories.clear();

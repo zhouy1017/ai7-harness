@@ -17,7 +17,7 @@ import {
  * a candidate is always said to be unchecked.
  */
 export const FACT_LENS_HEADING = '事实核查 · 核查结果';
-export const FACT_LENS_NOTE = '每条断言的三项状态分开显示：引文完整性、断言支持、事实核查。核查结果是证据评估，不是事实定论，也不构成审阅决定。';
+export const FACT_LENS_NOTE = '分别显示引文、支持与核查状态；证据评估不构成事实定论或审阅决定。';
 export const FACT_LENS_MORE = '显示更多核查结果';
 export const FACT_LENS_EMPTY_FILTERED = '没有符合筛选的核查结果。';
 export const FACT_LENS_FILTER_LABELS = {
