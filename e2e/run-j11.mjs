@@ -974,7 +974,7 @@ const READ_AUDIT = `(() => {
       record: enabled(reinclude.querySelector('[data-learning-audit-action="reinclude-record"]')),
     },
     focus: active instanceof HTMLElement && root.contains(active)
-      ? [active.closest('[data-material-key]')?.dataset.materialKey ?? null, active.dataset.learningAuditAction ?? active.tagName, active.closest('.learning-remediation-preview') !== null]
+      ? [active.closest('[data-material-key]')?.dataset.materialKey ?? null, active.dataset.learningAuditAction ?? (active.dataset.learningAuditFilter === undefined ? active.tagName : 'filter:' + active.dataset.learningAuditFilter), active.closest('.learning-remediation-preview') !== null]
       : null,
   };
 })()`;
@@ -2841,7 +2841,7 @@ async function main() {
     const auditBook = await readAudit(renderer, (page) => page.rows.length === 3 && page.rows.every(([, standing]) => standing === 'book'), 'learning-audit-book-only');
     requireJourney(auditBook.books[0] === `《${THIRD.title}》 · 3 条` && JSON.stringify(auditBook.rows.map(([key, , pill]) => [key, pill])) ===
       JSON.stringify([[auditFirst, '仅纳入当前图书'], [auditSecond, '仅纳入当前图书'], [auditThird, '仅纳入当前图书']]) &&
-      JSON.stringify(auditBook.focus) === JSON.stringify([null, 'SELECT', false]), 'learning-audit-book-words', auditBook);
+      JSON.stringify(auditBook.focus) === JSON.stringify([null, 'filter:standing', false]), 'learning-audit-book-words', auditBook);
     await choose(renderer, '#learning-audit-filter-standing', '', 'learning-audit-filter-all');
     await readAudit(renderer, (page) => page.rows.length === 40, 'learning-audit-filter-cleared');
     await fill(renderer, '#learning-audit-query', '分页原因3', 'learning-audit-query');
