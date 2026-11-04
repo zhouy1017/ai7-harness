@@ -2398,3 +2398,10 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 
 .context-actions .return-chip-host { margin: 0; min-width: 0; }
 .context-actions .return-chip { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Long milestone names must not widen the single-line header. */
+.context-identity { flex-basis: 12rem; }
+.context-actions { min-width: 0; max-width: 50%; }
+.context-actions .editor-save-menu { flex: 1 1 auto; min-width: 0; }
+.context-actions .editor-save-menu > summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-actions .return-chip { max-width: min(12rem, 100%); }

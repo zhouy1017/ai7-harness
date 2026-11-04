@@ -1617,7 +1617,6 @@ async function runAccessibilityJourney(renderer) {
   await assertRenderer(renderer, `getComputedStyle(document.querySelector('.editor-workspace')).gridTemplateColumns.split(' ').length === 2`, 'zoom-200-columns');
   await assertRenderer(renderer, `document.querySelector('.editor-edge').getBoundingClientRect().width <= 64`, 'zoom-200-rail-width');
   await assertRenderer(renderer, `getComputedStyle(document.querySelector('#manuscript-navigation-panel')).position === 'absolute'`, 'zoom-200-overlay');
-  if (localDebugEnabled()) recordDebugDetail('J-02', `A5 reflow ${JSON.stringify(await renderer.evaluate(`(() => ({ width:innerWidth, scroll:document.documentElement.scrollWidth, overflowing:[...document.querySelectorAll('body *')].filter(n=>n.getBoundingClientRect().right>innerWidth+2).slice(0,20).map(n=>({tag:n.tagName,class:n.className,id:n.id,width:n.getBoundingClientRect().width,right:n.getBoundingClientRect().right})) }))()`))}`);
   await assertRenderer(renderer, `document.documentElement.scrollWidth <= document.documentElement.clientWidth + 2`, 'zoom-200-no-horizontal-scroll');
   at('j14-forced-colors');
   await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
