@@ -248,16 +248,17 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     if (findings.length === 0) {
       parts.push(el('p', 'field-note', REVIEW_RESULT_NONE));
     } else {
-      parts.push(table(TASK_RESULT_COLUMNS.review, findings.map((finding) => {
+      const results = table(TASK_RESULT_COLUMNS.review, findings.map((finding) => {
         const row = el('tr');
         row.dataset['taskResultFinding'] = finding.findingId;
         const place = el('td', 'task-result-place');
         place.append(reviewResultPlaceLine(finding), ' ', jumpButton(finding.blockPosition === null ? null : finding.blockId, finding.markId));
         row.append(el('td', undefined, String(finding.ordinal)), el('td', undefined, finding.categoryLabel), el('td', undefined, reviewResultFindingLine(finding)), place);
         return row;
-      })));
+      }));
       const more = reviewResultMoreLine(findings.length, run.findingsTotal);
-      if (more !== null) parts.push(el('p', 'field-note', more));
+      if (more !== null) results.prepend(el('caption', undefined, more));
+      parts.push(results);
     }
     body.replaceChildren(...parts);
   }
@@ -271,8 +272,12 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     place.append(jumpButton(dialogue.range.blockId, null));
     parts.push(place);
     if (latest !== undefined) {
-      const state = el('p', 'task-result-dialogue-state', DIALOGUE_STATE_LABELS[latest.state]);
-      state.dataset['dialogueState'] = latest.state;
+      const state = el('p', 'task-result-dialogue-state');
+      const label = el('span', undefined, DIALOGUE_STATE_LABELS[latest.state]);
+      label.dataset['dialogueState'] = latest.state;
+      state.append(label);
+      const incomplete = dialogueIncompleteLine(latest);
+      if (incomplete !== null) state.append('；', incomplete);
       parts.push(state);
       const answer = el('div', 'task-result-dialogue-answer');
       answer.dataset['dialogueAnswer'] = latest.attemptId;
@@ -281,8 +286,6 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
       }
       for (const fragment of latest.fragments) answer.append(el('span', `dialogue-fragment${fragment.breakAfter ? ' dialogue-fragment-break' : ''}`, fragment.text));
       parts.push(answer);
-      const incomplete = dialogueIncompleteLine(latest);
-      if (incomplete !== null) parts.push(el('p', 'field-note', incomplete));
     }
     body.replaceChildren(...parts);
   }
