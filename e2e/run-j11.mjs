@@ -1716,7 +1716,7 @@ async function main() {
     const unchanged = await readFeedback(renderer, (page) => typeof page.card?.refusal === 'string', 'feedback-unchanged-refused');
     requireJourney(unchanged.card.refusal === '反馈没有变化。' && rowOf(unchanged, 'entities/0')[2] === '2' &&
       JSON.stringify(unchanged.card.judgments) === JSON.stringify([['accurate', true], ['inaccurate', false], ['incomplete', false]]), 'feedback-unchanged-words', unchanged);
-    await waitFor(renderer, `${notice} === '反馈没有变化。'`, 'feedback-unchanged-status');
+    await waitFor(renderer, `${status} === '反馈没有变化。'`, 'feedback-unchanged-status');
     await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="cancel-feedback"]`, 'feedback-unchanged-cancel');
     await readFeedback(renderer, (page) => page.card === null, 'feedback-unchanged-closed');
 
