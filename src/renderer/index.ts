@@ -106,7 +106,7 @@ import { KEYBOARD_SECTION_LABEL, KEYBOARD_TITLE } from './keyboard-labels.js';
 import { mountUsage } from './usage.js';
 import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_RUN_REPORT_ABSENT, usageRunIdentity } from './usage-labels.js';
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
-import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_LEDE, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
+import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
   EVALUATION_LEDE,
   EVALUATION_STATUS,
@@ -3833,7 +3833,6 @@ async function renderEvaluationCalibration(focusBookId: string | null): Promise<
   content.append(
     element('p', 'section-label', `设置 · ${CALIBRATION_PAGE_GROUP}`),
     element('h2', undefined, CALIBRATION_PAGE_TITLE),
-    element('p', 'field-note', CALIBRATION_PAGE_LEDE),
     host,
     back,
   );
