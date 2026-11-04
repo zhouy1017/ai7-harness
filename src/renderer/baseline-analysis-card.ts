@@ -1054,7 +1054,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // How many revisions there are and which one is latest are decisions, not identities: they stay at
     // full rank, and only the result set's own identity and kind step down into the disclosure.
     section.append(
-      element('h4', undefined, '历次分析'),
+      element('h4', undefined, `历次分析 · 共 ${projection.listPages['history.entries']?.total ?? history.entries.length} 份 · 最新第 ${history.latestOrdinal} 份`),
       technicalDetails('analysis-facts',
         element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
     );

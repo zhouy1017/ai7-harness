@@ -2202,11 +2202,11 @@ async function main() {
       return !section.querySelector('.field-note.technical-identity') &&
         section.querySelectorAll(':scope > details.technical-details').length===1 && (!setExact.open || setExact.hidden) &&
         setExact.textContent.includes(${JSON.stringify(revision.resultSetId)}) && setExact.textContent.includes('baseline-manuscript-analysis') &&
-        Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='共 4 份分析 · 最新的是第 4 份') &&
+        section.querySelector(':scope > h4')?.textContent==='历次分析 · 共 4 份 · 最新第 4 份' &&
         // Synchronized delta (#406): an entry's two readings speak of 份 and 阅读范围; Revision ordinals,
         // lineage counts and the exact creation instant are in the entry's own disclosure.
-        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent+lines[1].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
-        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===2) &&
+        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
+        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===1) &&
         // Synchronized delta (#406): each entry also opens the report of the Run that produced it — its
         // own Run's, bound to its own revision, closed by default — so the entry's own identity
         // disclosure is counted as a direct child and the report's is its own.
