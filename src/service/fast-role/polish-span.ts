@@ -43,7 +43,7 @@ export function placeSpanSuggestions(suggestions: ReadonlyArray<EditorialPolishS
   for (const suggestion of suggestions) {
     const first = starts.findLastIndex((start) => start <= suggestion.fromGrapheme);
     const originals = suggestion.original.split(SELECTION_SPAN_SEPARATOR);
-    const replacements = suggestion.replacement.split(SELECTION_SPAN_SEPARATOR);
+    const replacements = suggestion.replacement.replace(/^[\r\n]+|[\r\n]+$/gu, '').split(SELECTION_SPAN_SEPARATOR);
     if (replacements.length !== originals.length) {
       withheld.push({ ordinal: suggestion.ordinal, reason: '替换后的文字会合并或拆分段落' });
       continue;

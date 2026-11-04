@@ -17,10 +17,11 @@
  *   unfinished tail is discarded.
  * - `settled`: the answer completed; the tail, if any, is the last fragment.
  */
-export type FragmentReading = 'streaming' | 'cut' | 'settled';
+export type FragmentReading = 'streaming' | 'cut' | 'settled' | 'incomplete';
 
 export interface DialogueFragment {
   readonly text: string;
+  readonly incomplete?: boolean;
   /** A line break follows: the next fragment starts a new paragraph, list item or row. */
   readonly breakAfter: boolean;
 }
@@ -72,7 +73,8 @@ export function splitFragments(text: string, reading: FragmentReading): Dialogue
     index = end;
     start = index;
   }
-  if (reading === 'settled') push(start, characters.length, false);
+  if (reading === 'settled' || reading === 'incomplete') push(start, characters.length, false);
+  if (reading === 'incomplete') return fragments.map((fragment) => ({ ...fragment, incomplete: true }));
   return fragments;
 }
 

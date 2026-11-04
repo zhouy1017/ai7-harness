@@ -702,6 +702,31 @@ describe('就这段提问… on the live route (provider-free)', () => {
     }
   });
 
+  it('keeps an outcome-unknown tail, preserves its billing hold and continues with the received text (#1311)', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '保留未完回答');
+    const calls: StubCall[] = [];
+    const tail = '已到达但未完成的半句';
+    const complete = stubTransport(calls, () => CONTINUED);
+    const transport = (async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      if (calls.length > 0) return complete(url, init);
+      calls.push({ url, headers: init.headers, body: init.body });
+      return new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: tail } }] })}\n\n`, { headers: { 'content-type': 'text/event-stream' } });
+    }) as typeof fetch;
+    const dialogues = liveOwner(store, liveRoute(transport));
+    try {
+      const { dialogueId, projection } = await ask(store, dialogues, book.bookId, selectionOf(store, book));
+      expect(projection.attempts[0]).toMatchObject({ state: 'failed', causeCode: 'AI7_OUTCOME_UNKNOWN', fragments: [{ text: tail, incomplete: true }] });
+      expect(projection.actions.continue).toBe(true);
+      expect((await ledgerLines()).map((line) => line.classification)).toEqual(['outcome-unknown']);
+      const continued = await next(store, dialogues, book.bookId, dialogueId, 'continue');
+      expect(continued.attempts[1]!.state).toBe('completed');
+      expect(calls).toHaveLength(2);
+      expect(calls[1]!.body).toContain(tail);
+      expect((await ledgerLines()).map((line) => line.classification)).toEqual(['outcome-unknown', undefined]);
+    } finally { await dialogues.dispose(); }
+  });
+
   it.each(['stop', 'dispose'] as const)('%s during live setup never transmits and preserves the question for an explicit retry', async (action) => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '发送前停止');

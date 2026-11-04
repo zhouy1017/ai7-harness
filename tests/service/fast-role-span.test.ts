@@ -91,7 +91,7 @@ describe('润色这段 across paragraphs', () => {
     const across = `${tail(a.text, 2)}\n${head(b.text, 2)}`;
     const merging = `${tail(b.text, 2)}\n${head(blocks[2].text, 2)}`;
     const requests = polishOn([
-      { original: across, replacement: '〔甲〕\n〔乙〕', reason: '跨段的连贯' },
+      { original: across, replacement: '\n〔甲〕\n〔乙〕\n', reason: '跨段的连贯' },
       { original: inside, replacement: '〔丙〕', reason: '段内' },
       { original: merging, replacement: '〔合〕', reason: '合并' },
     ], spanRequestDigest(blocks, selection));
