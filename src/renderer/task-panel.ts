@@ -273,7 +273,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       heading.append(' ', count);
       section.append(heading);
       if (group.items.length === 0) {
-        section.append(el('p', 'field-note task-panel-empty', TASK_PANEL_EMPTY_LINES[group.key]));
+        heading.append(' · ', el('span', 'task-panel-empty', TASK_PANEL_EMPTY_LINES[group.key]));
       } else {
         const list = el('ul', 'task-panel-list');
         for (const entry of group.items) list.append(card(entry));
@@ -429,7 +429,8 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     opener.append(open);
     const choices = analysis === null ? [] : composeOptions(analysis);
     if (choices.length === 0) {
-      compose.replaceChildren(heading, opener, el('p', 'field-note task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
+      heading.append(' · ', el('span', 'task-panel-compose-none', TASK_PANEL_COMPOSE_NONE));
+      compose.replaceChildren(heading, opener);
       return;
     }
     if (selected === null || !choices.some((choice) => choice.mode === selected && choice.available)) {

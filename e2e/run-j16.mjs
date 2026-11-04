@@ -395,7 +395,7 @@ const READ_PANEL = `(() => {
     scope: text(panel.querySelector('.task-panel-scope')),
     note: text(panel.querySelector('.task-panel-note')),
     compose: {
-      heading: text(panel.querySelector('.task-panel-compose h3')),
+      heading: panel.querySelector('.task-panel-compose h3')?.firstChild?.textContent ?? null,
       modes: Array.from(panel.querySelectorAll('.task-panel-compose input[name="task-panel-mode"]')).map((input) => [input.value, input.checked, input.disabled]),
       none: text(panel.querySelector('.task-panel-compose-none')),
       quick: state('[data-task-compose-action="quick"]'),
