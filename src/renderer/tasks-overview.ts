@@ -36,7 +36,7 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   else if (item.state !== 'paused') { add('查看结果', 'result'); add('再做一次', 'again'); }
   if (item.selection) add('跳到所选文字', 'jump');
   const more = el('details', 'task-overview-more'); more.append(el('summary', undefined, '更多'));
-  for (const [label, action] of [['查看计划', 'plan'], ['查看运行', 'run'], ['打开所在图书', 'book']] as const) { const button = el('button', 'quiet', label); button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); more.open = false; }); more.append(button); }
+  for (const [label, action] of [['查看计划', 'plan'], ['查看运行', 'run'], ['打开所在图书', 'book']] as const) { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); more.open = false; }); more.append(button); }
   more.addEventListener('click', (event) => event.stopPropagation()); actions.append(more); node.append(body, actions);
   node.addEventListener('click', () => act(item, 'open')); return node;
 }

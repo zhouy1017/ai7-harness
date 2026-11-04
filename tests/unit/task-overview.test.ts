@@ -48,6 +48,8 @@ describe('task overview', () => {
         expectNoTechnicalText(card);
         card.querySelector<HTMLButtonElement>(`[data-task-action="${actions[0]}"]`)!.click();
         expect(act).toHaveBeenCalledWith(projected, actions[0]);
+        card.querySelector<HTMLButtonElement>('[data-task-action="run"]')!.click();
+        expect(act).toHaveBeenCalledWith(projected, 'run');
       }
     } finally { uninstall(); }
   });
