@@ -1914,10 +1914,10 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'version-two-versions');
     const enabledTwo = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'version-two-enabled');
     requireJourney(JSON.stringify(enabledTwo.procedures[0].versions.map((version) => [version.version, version.state, version.latestEligible, version.eligiblePill])) ===
-      JSON.stringify([['2', 'enabled', 'true', '最新可用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
-      // 最新可用's meaning is a visible field note, for sighted users as much as for a screen reader (Issue #684).
+      JSON.stringify([['2', 'enabled', 'true', '新建审阅默认使用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
+      // The visible status now states directly which version new reviews use (Issue #684).
       JSON.stringify(enabledTwo.procedures[0].versions.map((version) => version.eligibleNote)) ===
-        JSON.stringify([{ text: '新建审阅按这个工序运行时，默认用这一版。', visible: true }, null]) &&
+        JSON.stringify([null, null]) &&
       enabledTwo.procedures[0].versions[1].runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 1 次审阅 · 已完成 · `), 'version-two-latest-eligible', enabledTwo.procedures[0].versions);
 
     at('procedure-exact-version');
