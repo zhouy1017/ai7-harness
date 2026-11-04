@@ -2176,7 +2176,7 @@ function renderImportRecovery(
     const support = element('section', 'uncertain-support');
     support.append(
       element('h3', undefined, '安全清理状态'),
-      element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`),
+      ...(technicalLayerVisible ? [element('p', undefined, `状态代码：${recovery.supportCode ?? 'ABANDON_CLEANUP_PENDING'}`)] : []),
       element('p', 'field-note', technicalWords('此状态不包含暂存正文或原始文件路径，请保留 Agent Data Root；重试会继续同一个持久清理意图，不会创建第二次放弃或导入。', '清理尚未完成，请保留 AI7 数据并重试；重试会继续原操作，不会重复导入或放弃。')),
     );
     const actions = element('div', 'button-row recovery-actions');
@@ -2204,9 +2204,11 @@ function renderImportRecovery(
     const support = element('section', 'uncertain-support');
     support.append(
       element('h3', undefined, '本地恢复与支持信息'),
-      element('p', undefined, `草稿标识：${recovery.draftId}`),
-      element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
-      element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
+      ...(technicalLayerVisible ? [
+        element('p', undefined, `草稿标识：${recovery.draftId}`),
+        element('p', undefined, `提交尝试：${recovery.commitAttemptId ?? '未读取'}`),
+        element('p', undefined, `状态代码：${recovery.supportCode ?? 'COMMIT_PROOF_INCONCLUSIVE'}`),
+      ] : []),
       element('p', 'field-note', technicalWords('这些信息不包含暂存正文、数据库内容、截图、跟踪或网络请求，请保留 Agent Data Root 等待本地核对；不要重复导入或手动删除暂存文件。', '无法确认清理状态，请保留 AI7 数据等待核对，不要重复导入或删除暂存文件。')),
     );
     content.append(support);
@@ -2433,9 +2435,10 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       row.dataset['reimportGroupVerb'] = group.verb;
       rows.append(row);
     }
-    detail.append(element('h4', undefined, `章节对应 · ${record.groups.count} 处`), rows);
     const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;
-    detail.append(element('p', 'field-note', `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
+    const groupsHeading = element('h4', undefined, `章节对应 · ${record.groups.count} 处`);
+    groupsHeading.append(' · ', element('span', undefined, `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
+    detail.append(groupsHeading, rows);
     // Each mark that could not follow, as the landing notice listed it: set aside for good, so the record is where it is read later.
     if (record.markOutcomes.items.length > 0) {
       const unfollowed = element('ul', 'degradation-list reimport-record-unfollowed');
