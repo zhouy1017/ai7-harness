@@ -1711,7 +1711,8 @@ async function main() {
         })(),
       };
     })()`);
-    requireJourney(surface !== null && typeof surface === 'object' && Object.values(surface).every((value) => value === true), 'document-surface-is-the-documents', surface);
+    requireJourney(surface !== null && typeof surface === 'object', 'document-surface-exists');
+    for (const [name, value] of Object.entries(surface)) requireJourney(value === true, `document-surface-${name}`);
     // #1287: opening navigation gives the document text its own readable cell and reflows the workflow below it.
     await clickSelector(renderer, '[data-edge-entry="navigation"]', 'document-navigation-layout-open');
     await waitFor(renderer, `(() => { const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const panel=document.querySelector('#manuscript-navigation-panel').getBoundingClientRect(); const lens=document.querySelector('.document-lens').getBoundingClientRect(); const workspace=document.querySelector('.editor-workspace'); const status=document.querySelector('#persistence-status').getBoundingClientRect(); const actions=document.querySelector('.window-actions').getBoundingClientRect(); return panel.width>0 && panel.height>0 && (panel.left>=text.right-1 || panel.top>=text.bottom-1) && lens.top>=text.bottom-1 && (workspace.clientWidth<864 || text.width>=480) && actions.bottom<=status.top+1 && document.documentElement.scrollHeight<=innerHeight+2; })()`, 'document-navigation-no-overlap');
