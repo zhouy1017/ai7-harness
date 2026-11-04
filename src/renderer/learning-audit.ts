@@ -407,7 +407,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
   const bookNode = (book: LearningAuditBookProjection): HTMLElement => {
     const section = el('section', 'learning-book learning-audit-book');
     section.dataset['bookId'] = book.bookId;
-    section.append(el('h3', undefined, learningAuditBookHeading(book)), el('p', 'field-note learning-people', learningPeopleLine(book)));
+    const heading = el('h3', undefined, learningAuditBookHeading(book));
+    heading.append(' · ', el('span', 'learning-people', learningPeopleLine(book)));
+    section.append(heading);
     const list = el('ul', 'learning-material-list');
     for (const material of book.materials) list.append(materialNode(book, material));
     section.append(list);
@@ -438,10 +440,10 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
       el('span', `status-pill learning-state learning-audit-standing learning-audit-standing-${material.standing}`, LEARNING_AUDIT_STANDING_LABELS[material.standing]),
     );
     item.append(head);
-    if (material.wordCurrentEligibility !== undefined) item.append(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.standing !== 'pending')));
     const reason = material.excerpt.at(-1);
     if (reason !== undefined) item.append(el('p', 'learning-audit-excerpt', reason));
-    const use = el('p', 'field-note learning-audit-use', learningAuditUse(material.downstreamTasks));
+    const standing = material.wordCurrentEligibility === undefined ? '' : `${wordLearningStandingLine(material.wordCurrentEligibility, material.standing !== 'pending').replace(/。$/u, '')}；`;
+    const use = el('p', 'field-note learning-audit-use', `${standing}${learningAuditUse(material.downstreamTasks)}`);
     use.dataset['downstreamTasks'] = String(material.downstreamTasks);
     item.append(use);
     const open = action(LEARNING_AUDIT_OPEN, 'quiet', 'open', () => void openLineage(book.bookId, material.materialKey));
@@ -739,8 +741,9 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     section.setAttribute('aria-label', learningLineageHeading(material.originLabel));
     const heading = el('h4', undefined, learningLineageHeading(material.originLabel));
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note learning-lineage-book', `《${read.bookTitle}》 · ${LEARNING_AUDIT_STANDING_LABELS[read.standing]}`));
-    if (read.automaticAdmission !== undefined && read.automaticAdmission !== null) section.append(el('p', 'field-note', '默认纳入本机学习；没有人工纳入决定。'));
+    heading.append(' · ', el('span', 'learning-lineage-book', `《${read.bookTitle}》 · ${LEARNING_AUDIT_STANDING_LABELS[read.standing]}`));
+    if (read.automaticAdmission !== undefined && read.automaticAdmission !== null) heading.append(' · 默认纳入本机学习，没有人工纳入决定');
+    section.append(heading);
 
     const step = (index: number, body: ReadonlyArray<HTMLElement>, count: number | null): HTMLLIElement => {
       const { step: key, label } = LEARNING_LINEAGE_STEPS[index]!;
@@ -753,18 +756,21 @@ export function mountLearningAudit(options: MountLearningAuditOptions): { load()
     const backward = el('ol', 'learning-lineage-steps');
     const excerpt = el('ul', 'learning-excerpt');
     for (const line of material.excerpt) excerpt.append(el('li', undefined, line));
-    const materialBody: HTMLElement[] = [excerpt, el('p', 'field-note', learningOriginLine(material, localInstantLabel))];
+    const originParts = [learningOriginLine(material, localInstantLabel).replace(/。$/u, '')];
+    if (material.sourceTask !== null) originParts.push(`来源任务：${material.sourceTask.label}`);
+    if (material.target.kind === 'word-tracked-edit') {
+      if (material.wordCurrentEligibility !== undefined) originParts.push(wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null).replace(/。$/u, ''));
+      originParts.push('Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务');
+    }
+    const materialBody: HTMLElement[] = [excerpt, el('p', 'field-note', `${originParts.join('；')}。`)];
     if (material.target.kind === 'word-tracked-edit') {
       const target = material.target;
       const detail = el('div');
-      if (material.wordCurrentEligibility !== undefined) materialBody.push(el('p', 'field-note', wordLearningStandingLine(material.wordCurrentEligibility, material.decision !== null)));
-      materialBody.push(el('p', 'field-note', 'Word 原始修改对尚未用于编辑记忆、审阅偏好或模型任务。'),
-        action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
-          detail.replaceChildren();
-          void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
-        }), detail);
+      materialBody.push(action('查看完整 Word 修改对', 'secondary', 'word-detail', () => {
+        detail.replaceChildren();
+        void mountWordTrackedEditDetail({ root: detail, api, ...target, openSourceVersion: options.openSourceVersion }).load();
+      }), detail);
     }
-    if (material.sourceTask !== null) materialBody.push(el('p', 'field-note', `来源任务：${material.sourceTask.label}`));
     backward.append(step(0, materialBody, null));
     const decisions = el('ol', 'learning-lineage-decisions');
     for (const entry of [...read.decisions].reverse()) {
