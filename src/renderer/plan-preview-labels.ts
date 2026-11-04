@@ -40,7 +40,12 @@ export const ANALYSIS_EDITORIAL_NOT_DO = ['不会直接修改稿件', '不读这
  * a dispatch decision no plan has frozen.
  */
 export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null): string {
-  if (!technicalLayerVisible) return '开始后按本次选择执行。';
+  if (!technicalLayerVisible) {
+    if (pin === null) return '这里只记录本次授权，计划尚未确定发送方式。';
+    return pin.decision === 'deny'
+      ? '这里只记录本次授权；当前设置不允许向模型服务发送内容。'
+      : '这里只记录本次授权；模型服务只能接收本次计划范围内的内容。';
+  }
   const flow = '本流程只冻结并记录本次标准直接授权';
   if (pin === null) return `${flow}。`;
   return pin.decision === 'deny'
