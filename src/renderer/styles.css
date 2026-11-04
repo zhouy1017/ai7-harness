@@ -2578,3 +2578,8 @@ body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:ca
 .task-overview-card-title { flex-wrap:nowrap; }
 .task-overview-count { display:inline-block; border:1px solid var(--boundary); border-radius:12px; padding:0 6px; color:var(--text-subdued); }
 @media (forced-colors:active) { .task-overview-card { border-left:3px solid CanvasText; } .task-overview-count { border:1px solid CanvasText; } }
+.task-overview-card-actions { flex-wrap:wrap; max-width:100%; }
+.task-overview-group, .task-overview-card-body { min-width:0; }
+.task-overview-card-title > * { min-width:0; }
+.task-overview-book { max-width:38%; overflow:hidden; text-overflow:ellipsis; }
+.task-overview-card-title .state-term { flex-shrink:0; }
