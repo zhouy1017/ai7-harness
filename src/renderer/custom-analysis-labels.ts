@@ -7,7 +7,7 @@ import type { CustomAnalysisRowProjection } from '../shared/protocol.js';
  * the quotation it rests on as a link back to the manuscript. 分析反馈 is not offered on these rows in this version.
  */
 export const CUSTOM_TAB_LABEL = '自定义';
-export const CUSTOM_TAB_EMPTY = '尚无自定义分析维度';
+export const CUSTOM_TAB_EMPTY = '尚无自定义分析维度，可在知识库中添加。';
 export const CUSTOM_TAB_EMPTY_NOTE = '在「知识库 › 工序与规则 › 自定义分析维度」中新建并启用一个维度后，它会出现在这里。';
 export const CUSTOM_TAB_NOT_RUN = '尚未运行';
 export const CUSTOM_TAB_RUN = '运行';

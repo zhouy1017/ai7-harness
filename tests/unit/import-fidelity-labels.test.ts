@@ -138,8 +138,8 @@ describe('the import fidelity review words', () => {
   });
 
   it('states true consequences around the review, and nothing about a round trip it does not make', () => {
-    expect(commitNote(false)).toBe('本次导入不创建导入降级决定；原文件随来源版本完整保留，导入不修改它。');
-    expect(commitNote(true)).toBe('已接受的完整降级集合、保真审阅、降级决定和稿件导入记录会原子关联；原文件随来源版本完整保留，导入不修改它。');
+    expect(commitNote(false)).toBe('原文件保持不变。');
+    expect(commitNote(true)).toBe('按已接受的格式处理导入，原文件保持不变。');
     expect(fidelityOutcomeLabel('clean-import-no-round-trip')).toBe('完整保留 · 原文件随来源版本保留');
     expect(fidelityOutcomeLabel('degraded-import-no-round-trip')).toBe('含已接受的降级 · 原文件随来源版本保留');
     expect(conversionNoteText({ converterIdentity: 'ai7-text-to-docx/1', sourceFormat: 'MD' }))

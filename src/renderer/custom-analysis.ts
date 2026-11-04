@@ -8,7 +8,6 @@ import type {
 } from '../shared/protocol.js';
 import {
   CUSTOM_TAB_EMPTY,
-  CUSTOM_TAB_EMPTY_NOTE,
   CUSTOM_TAB_FEEDBACK_NOTE,
   CUSTOM_TAB_NOT_RUN,
   CUSTOM_TAB_PREPARED,
@@ -177,7 +176,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     if (projection.dimensions.length === 0) {
       const empty = el('section', 'custom-empty');
       empty.dataset['customEmpty'] = 'no-dimension';
-      empty.append(el('p', undefined, CUSTOM_TAB_EMPTY), el('p', 'field-note', CUSTOM_TAB_EMPTY_NOTE));
+      empty.append(el('p', undefined, CUSTOM_TAB_EMPTY));
       panel.replaceChildren(empty);
       return;
     }

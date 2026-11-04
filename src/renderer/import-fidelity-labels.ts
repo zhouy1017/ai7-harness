@@ -178,8 +178,8 @@ export function offersTextBoxChoice(
 /** The commit bar's note: what the one commit links, and — true of every import — that the original stays. */
 export function commitNote(acceptedDegradation: boolean): string {
   return acceptedDegradation
-    ? '已接受的完整降级集合、保真审阅、降级决定和稿件导入记录会原子关联；原文件随来源版本完整保留，导入不修改它。'
-    : '本次导入不创建导入降级决定；原文件随来源版本完整保留，导入不修改它。';
+    ? '按已接受的格式处理导入，原文件保持不变。'
+    : '原文件保持不变。';
 }
 
 /** How a committed import's fidelity outcome reads on its record. */

@@ -1046,7 +1046,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SCOPE_TERMS[0], next.scope.process],
         [TASK_PLAN_SCOPE_TERMS[1], next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference, 'task-plan-list')],
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
-        [TASK_PLAN_SCOPE_TERMS[3], next.scope.notRead],
+        [TASK_PLAN_SCOPE_TERMS[3], technicalWords(next.scope.notRead, next.scope.notRead.replace('来源材料（来源版本仅作血缘证据，不属于可读范围）', '来源材料'))],
       ])),
       planSection(2, steps, ...stepsNote, ...assuranceBlock(next)),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
