@@ -731,12 +731,13 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('widens a v1 revision-84 store without changing its recorded bytes (#1084)', async () => {
     const legacy = await open('review-overlap-authored');
     const book = await importBook(legacy);
-    try { await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE)); }
+    // This retained v1 fixture closes no units under the current outcome rule (#1307).
+    try { expect((await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE))).state).toBe('failed'); }
     finally { await close(legacy); }
     const before = revision84ReviewStore();
     const session = await open('review-overlap-authored');
     try {
-      expect(workspace(session, book).runs[0]!.state).toBe('settled');
+      expect(workspace(session, book).runs[0]!.state).toBe('failed');
       withDatabase((after) => {
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -1464,7 +1465,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('counts no read made under another category contract: a 选章 after a new 规范文件 version leaves the rest unread, not changed (#711 review P2-1)', async () => {
+  it('keeps completed coverage when a 选章 under a new 规范文件 contract closes no units (#711 review P2-1, #1307)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
@@ -1472,12 +1473,12 @@ describe('a Review Run over the real store on exact sample1', () => {
       await writeFile(path, ['本社文字规范', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。'].join('\n'));
       const preview = await session.store.previewReviewGuidelineVersion('ai7-builtin/typos-and-usage', path);
       session.store.importReviewGuidelineVersion(preview.previewId);
-      // The 选章 runs under the new contract: nothing the 全书 read under the old one is reused, so every other chapter is left
-      // unread — and none of them changed. The matrix reads 当前, and 只审改动过的章 is not offered.
+      // The new contract reuses none of the old reading. This fixture cannot answer it, so the failed Run must not
+      // replace completed coverage or count its unreviewed chapters as manuscript changes (#1307).
       const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, 44));
       expect(chosen.categories[0]!.plan).toMatchObject({ reused: 0, unreviewed: 6 });
-      await authorizeAndDrive(session, book, chosen);
-      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
+      expect((await authorizeAndDrive(session, book, chosen)).state).toBe('failed');
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
       expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
     });
   }, 300_000);
