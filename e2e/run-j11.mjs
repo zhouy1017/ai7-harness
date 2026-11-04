@@ -1938,7 +1938,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-calibration .calibration-progress')?.textContent === '调分记录 1 / 2 本 · 满 2 本后生效'`, 'initial-evaluation-calibration-count');
     await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-waiting') === null`, 'initial-evaluation-calibration-connected');
     // The offset's waiting line names the same gate as the progress line above it (#741 review P1).
-    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。'`, 'initial-evaluation-calibration-waiting-gate');
+    await assertRenderer(renderer, `document.querySelector('[data-screen="evaluation-calibration"] .calibration-offset-waiting')?.textContent === '校准偏移尚未计算：满 2 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。'`, 'initial-evaluation-calibration-waiting-gate');
     const calibrationService = await renderer.evaluate(`window.ai7.inspectEvaluationCalibration({ after: null, focusBookId: null }).then((answer) => JSON.stringify([answer.calibration.adjustments, answer.calibration.initialScoresConnected, answer.calibration.active]))`);
     requireJourney(calibrationService === JSON.stringify([1, true, false]), 'initial-evaluation-calibration-service', calibrationService);
     // Back to 评估 by the manuscript's 工作 group, where the Journey goes on.

@@ -24,7 +24,7 @@ export const CALIBRATION_METHOD = '校准偏移 = 各本书最新一次从 AI7 �
  * product, lower only under J-11's Journey-only control — so it never disagrees with the progress line above it.
  */
 export function calibrationOffsetWaiting(threshold: number): string {
-  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
+  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
 }
 /** With the switch off: what a new version does instead, and that the switch can be turned on again. */
 export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';

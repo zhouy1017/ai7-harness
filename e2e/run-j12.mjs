@@ -1954,7 +1954,7 @@ async function main() {
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
       calibrationPage.waiting === null &&
       // The house offset (Issue #429, EVAL-011a): its method stated, waiting below ten 调分记录, nothing said of 停用 while on.
-      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
+      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
       calibrationPage.method === '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。' &&
       calibrationPage.offEffect === null &&
       calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
