@@ -772,7 +772,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(next.unconfirmed === null ? [] : [unconfirmedRecord(next.unconfirmed)]),
       ...(next.defaultRule.startedBy === null ? [] : [quickStartedBlock(next.defaultRule.startedBy)]),
       ...(next.drift === null ? [] : [driftBlock(next.drift)]),
-      ...(next.edit.lastEdit === null ? [] : [el('p', 'field-note task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit))]),
       mode === 'compact' ? compactBlock(next) : fullBlock(next),
       ...Object.keys(next.listPages ?? {}).filter((path) => !path.startsWith('technical.') && path !== 'runControl.cancel.impact').flatMap((path) => {
         const button = pageControl(next, path, TASK_PAGE_NAMES[path] ?? path);
@@ -914,7 +913,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       sentence.append(el('p', 'task-plan-sentence-text', next.goal.sentence), unavailable(TASK_PLAN_EDIT, 'edit', TASK_PLAN_EDIT_REASON));
     } else {
       // A Task prepared from a Task Intent Draft (Issue #423, slice 7a): the editor's own sentence, and 修改 back to the composer.
-      const asked = el('p', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
+      const asked = el('span', 'task-plan-sentence-text task-plan-draft-sentence', taskPlanDraftSentence(draft.sentence));
       asked.dataset['taskPlanDraft'] = draft.draftId;
       const edit = control(TASK_PLAN_EDIT, 'quiet', 'edit');
       edit.addEventListener('click', () => {
@@ -922,7 +921,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         surface.openDraft(next.bookId, draft.draftId, returnFocus);
         composerReturn = back === null ? null : () => surface.open(back, returnFocus);
       });
-      sentence.append(asked, edit, el('p', 'field-note task-plan-sentence-procedure', next.goal.sentence));
+      const context = el('p', 'task-plan-sentence-combined');
+      context.append(asked, ' · ', el('span', 'task-plan-sentence-procedure', next.goal.sentence));
+      sentence.append(context, edit);
     }
     const chips = el('ul', 'task-plan-chips');
     for (const chip of taskPlanChips(next.goal.chips)) {
@@ -930,10 +931,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       item.dataset['taskPlanChip'] = chip.key;
       chips.append(item);
     }
+    if (next.goal.savedForEdits) chips.append(el('li', 'task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
+    if (next.edit.lastEdit !== null) chips.append(el('li', 'task-plan-edit-record', taskPlanLastEdit(next.edit.lastEdit)));
     section.append(sentence, chips);
-    if (next.goal.savedForEdits) {
-      section.append(el('p', 'field-note task-plan-saved', taskPlanSavedLine(next.goal.chips.taskInputRevision)));
-    }
     return section;
   }
 
@@ -1109,11 +1109,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   /** 快速开始后 (S75 D5): which rule version started this Task, quietly, with the way to the rule. */
   function quickStartedBlock(startedBy: NonNullable<TaskPlanProjection['defaultRule']['startedBy']>): HTMLElement {
-    const notice = el('p', 'field-note task-plan-quick-started');
+    const notice = el('div', 'task-plan-quick-started');
     notice.dataset['taskPlanQuickStarted'] = startedBy.ruleVersionId;
-    const view = control(TASK_PLAN_VIEW_RULES, 'quiet', 'view-rules');
+    const view = control(`${taskPlanQuickStarted(startedBy.name)} · ${TASK_PLAN_VIEW_RULES}`, 'quiet', 'view-rules');
     view.addEventListener('click', () => options.openRules());
-    notice.append(taskPlanQuickStarted(startedBy.name), ' · ', view);
+    notice.append(view);
     return notice;
   }
 

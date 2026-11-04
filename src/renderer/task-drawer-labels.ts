@@ -130,7 +130,7 @@ export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): Reado
 
 /** TASK-039/040's one line: preparing the Task saved a revision, so later editing leaves the Task as it is. */
 export function taskPlanSavedLine(revisionLabel: string): string {
-  return `已为任务保存修订版${technicalWords(` ${revisionLabel}`)}，之后的编辑不影响这项任务。`;
+  return technicalWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`, '已为任务保存当前稿件，之后的编辑不影响这项任务。');
 }
 
 /** A count with its thousands grouped, the same text on every host. */
@@ -306,7 +306,7 @@ export function taskPlanEditCountAfterDrift(count: number): string {
 /** The edit that made the version shown, with its time (PLAN-011: recorded with actor and time). */
 export function taskPlanLastEdit(edit: NonNullable<TaskPlanProjection['edit']['lastEdit']>): string {
   const changes = edit.entries.map((entry) => `${entry.label}：${entry.prior} → ${entry.proposed}`).join('；');
-  return `${technicalWords(`第 ${edit.ordinal} 版`, '版本')}由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`;
+  return technicalWords(`第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`, `你修改了计划 · ${localInstantLabel(edit.recordedAt)}：${changes}`);
 }
 
 // ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------
