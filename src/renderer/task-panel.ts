@@ -783,7 +783,6 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     }
     context.append(target);
     const ranges = el('ul', 'task-composer-ranges');
-    if (current.ranges.length === 0) ranges.append(el('li', 'field-note task-composer-no-ranges', TASK_COMPOSER_NO_RANGES));
     for (const range of current.ranges) {
       const item = el('li', 'task-composer-range');
       item.dataset['taskComposerRange'] = range.key;
@@ -812,15 +811,18 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       }
       ranges.append(item);
     }
-    context.append(ranges);
+    if (current.ranges.length > 0) context.append(ranges);
+    const rangeActions = el('div', 'button-row');
+    if (current.ranges.length === 0) rangeActions.append(el('span', 'task-composer-no-ranges', TASK_COMPOSER_NO_RANGES));
     if (editable) {
       const add = el('button', 'quiet task-composer-add-range', TASK_COMPOSER_ADD_RANGE);
       add.type = 'button';
       add.dataset['taskComposerAction'] = 'add-range';
       add.disabled = working;
       add.addEventListener('click', () => void addRange());
-      context.append(add);
+      rangeActions.append(add);
     }
+    if (current.ranges.length === 0 || editable) context.append(rangeActions);
     if (current.note !== null) context.append(el('p', 'field-note task-composer-seed-note', current.note));
     parts.push(context);
 
