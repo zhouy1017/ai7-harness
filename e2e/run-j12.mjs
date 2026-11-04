@@ -747,16 +747,18 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');
     await click(primary, '帮助', 'technical-mode-help');
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
+    await primary.evaluate(`window.__j12TechnicalReloadMarker=true`);
     await clickSelector(primary, '.help-developer-mode input', 'technical-mode-off');
-    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-off-reloaded');
+    await waitFor(primary, `window.__j12TechnicalReloadMarker!==true && document.documentElement.dataset.technicalLayerVisible==='false' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-off-reloaded');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-restore-settings-ready');
     await click(primary, '帮助', 'technical-mode-restore-help');
+    await primary.evaluate(`window.__j12TechnicalReloadMarker=true`);
     await clickSelector(primary, '.help-developer-mode input', 'technical-mode-on');
-    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-on-reloaded');
+    await waitFor(primary, `window.__j12TechnicalReloadMarker!==true && document.documentElement.dataset.technicalLayerVisible==='true' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-on-reloaded');
 
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
