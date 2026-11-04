@@ -32,6 +32,23 @@ function requireJourney(condition, name, detail) {
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
+// A5 checks painted container depth rather than semantic/list/grid ancestors.
+async function assertShellFrame(renderer, name) {
+  await assertRenderer(renderer, `(() => {
+    const header=document.querySelector('#context-header'), content=document.querySelector('.content');
+    if(!header || !content || header.getBoundingClientRect().height>48 || getComputedStyle(header).flexWrap!=='nowrap' || content.querySelector('.panel') || document.querySelector('[data-shell-book-switcher]')) return false;
+    const framed=(node)=>{const s=getComputedStyle(node); return s.display!=='none' && ((parseFloat(s.borderTopWidth)>0 && parseFloat(s.borderRightWidth)>0 && parseFloat(s.borderBottomWidth)>0 && parseFloat(s.borderLeftWidth)>0 && parseFloat(s.borderTopLeftRadius)>0) || s.boxShadow!=='none');};
+    for(const card of content.querySelectorAll('section,article,fieldset,div,li')) {
+      if(!card.getClientRects().length || !framed(card) || !card.querySelector('button,input,select,textarea,a,summary,[contenteditable]')) continue;
+      let depth=0;
+      for(let node=card;node && node!==content;node=node.parentElement) if(framed(node)) depth++;
+      if(depth>2) return false;
+    }
+    const line=[...header.children].filter(n=>n.getClientRects().length && getComputedStyle(n).position!=='absolute');
+    return line.every(n=>{const r=n.getBoundingClientRect(),h=header.getBoundingClientRect();return r.top>=h.top-1 && r.bottom<=h.bottom+1;});
+  })()`, name);
+}
+
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -419,6 +436,7 @@ async function importSample1(renderer, cancellation) {
   await click(renderer, '确认书名并复核', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
+  await assertShellFrame(renderer, 'shell-frame-import');
   cancellation.throwIfRequested();
   // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are
   // retained with the file, so its review asks for no Import Degradation Decision.
@@ -793,37 +811,32 @@ async function main() {
     await runSettingsPages(renderer, cancellation);
     const crossBookId = await createEmptyBook(renderer, cancellation);
     at('editorial-book-switcher');
-    // The catalog was empty at startup; opening now must re-read both newly created Books.
-    await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-switcher-pin');
-    await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-switcher-pinned');
-    await assertRenderer(renderer, `(() => { const trigger=document.querySelector('[data-shell-book-switcher]'); trigger.focus(); return document.activeElement===trigger; })()`, 'book-switcher-trigger-focus');
-    await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-current-catalog');
-    await assertRenderer(renderer, `(() => { const ids=Array.from(document.querySelectorAll('[data-shell-picker-book]')).map((n)=>n.dataset.shellPickerBook); return document.querySelector('[data-shell-picker-group="pinned"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(imported.bookId)} && document.querySelector('[data-shell-picker-group="recent"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)} && new Set(ids).size===2 && ids.includes(${JSON.stringify(imported.bookId)}) && ids.includes(${JSON.stringify(crossBookId)}); })()`, 'book-switcher-unique-books');
-    await pressKey(renderer, { ...TAB_KEY, modifiers: 8 }); // CDP Shift
-    await assertRenderer(renderer, `document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-shift-tab-trigger');
-    await pressKey(renderer, ESCAPE_KEY);
-    await assertRenderer(renderer, `document.querySelector('[data-shell-book-picker="panel"]').hidden && document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-trigger-escape');
-    await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-trigger-reopen');
-    await fill(renderer, '[data-shell-book-search]', 'J-03 路由边界图书', 'book-switcher-filter');
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===1 && document.querySelector('[data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-filtered');
-    await pressKey(renderer, ESCAPE_KEY);
-    await assertRenderer(renderer, `document.querySelector('[data-shell-book-picker="panel"]').hidden && document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-escape-focus');
-    await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-reopen-refresh');
-    await clickSelector(renderer, `[data-shell-picker-book="${crossBookId}"]`, 'book-switcher-open-book');
-    await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-switcher-book-route');
-    await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-current-open');
-    await waitFor(renderer, `document.querySelector('[data-shell-picker-book][aria-current="true"]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-current-book');
-    await clickSelector(renderer, '[data-shell-book-library]', 'book-switcher-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-switcher-library-route');
+    await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-row-pin');
+    await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-row-pinned');
+    await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
+    await clickSelector(renderer, `[data-nav-book="${crossBookId}"]`, 'book-row-open');
+    await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-row-route');
+    await assertRenderer(renderer, `document.querySelector('[data-nav-book][aria-current="true"]')?.dataset.navBook===${JSON.stringify(crossBookId)}`, 'book-row-current');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'book-row-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-row-library-route');
 
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
+    await assertShellFrame(renderer, 'shell-frame-manuscript');
+    for (const section of ['overview', 'analysis', 'review', 'evaluation', 'deliverables']) {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section(section)), `shell-frame-open-${section}`);
+      await waitFor(renderer, `document.querySelector('[data-screen="book-${section}"]')`, `shell-frame-ready-${section}`);
+      await assertShellFrame(renderer, `shell-frame-${section}`);
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'shell-frame-open-knowledge');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, 'shell-frame-ready-knowledge');
+    await assertShellFrame(renderer, 'shell-frame-knowledge');
+    await assertRenderer(renderer, `document.querySelector('#context-title').dataset.contextBook==='false'`, 'shell-global-header-no-book');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'shell-frame-back-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-window')`, 'shell-frame-back-ready');
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
     const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
@@ -840,10 +853,7 @@ async function main() {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }, { name: 'prefers-reduced-motion', value: 'reduce' }] });
-    await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-narrow-open');
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-narrow-ready');
-    await assertRenderer(renderer, `(() => { const panel=document.querySelector('[data-shell-book-picker="panel"]'), trigger=document.querySelector('[data-shell-book-switcher]'), editor=document.querySelector('.editor-window'); const box=panel.getBoundingClientRect(); const style=getComputedStyle(panel); return Array.from(panel.querySelectorAll('.shell-book-picker-heading')).every((heading)=>getComputedStyle(heading).position==='static' && heading.getBoundingClientRect().height>5) && trigger.getClientRects().length>0 && box.left>=0 && box.right<=innerWidth+2 && panel.scrollWidth<=panel.clientWidth+2 && document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2 && style.borderStyle!=='none' && style.color!==style.backgroundColor; })()`, 'book-switcher-zoom-forced-colors');
-    await pressKey(renderer, ESCAPE_KEY);
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-nav-book]'), editor=document.querySelector('.editor-window'); return row?.getClientRects().length>0 && document.documentElement.dataset.sidebar==='icons' && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2; })()`, 'book-row-zoom-forced-colors');
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await renderer.send('Emulation.setEmulatedMedia', { features: [] });
@@ -915,6 +925,7 @@ async function main() {
     at('drawer-plan-compact');
     // Preparing opened the plan it froze beside the card, in 精简, with focus on the drawer's title.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.activeElement?.id==='task-drawer-title'`, 'drawer-opened-on-prepare');
+    await assertShellFrame(renderer, 'shell-frame-task-plan');
     const compact = await readDrawer(renderer);
     const selectedCount = /^已选 ([\d,]+) 字$/u.exec(compact?.chips?.selected ?? '')?.[1];
     requireJourney(compact?.hidden === false && compact.open === 'open' && compact.shell === 'open' && compact.kind === 'fixed-task' &&

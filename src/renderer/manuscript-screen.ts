@@ -178,7 +178,7 @@ async function copyPlainText(api: RendererApi, text: string): Promise<void> {
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
 const ENTRY_NOTICE_MS = 6_000;
 
-function panel(): HTMLElement { return element('section', 'panel'); }
+function panel(): HTMLElement { return element('section', 'page-content'); }
 
 /** The Manuscript and Production Document screen owns all mutable editor coordination until destruction. */
 export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {

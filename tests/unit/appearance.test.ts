@@ -79,7 +79,7 @@ describe('application appearance', () => {
       runJ14DarkPass(options: object): Promise<void>;
       journeyCheckLabel(error: unknown): string | null;
     };
-    const representative = '#screen[data-screen="landing"] > .panel';
+    const representative = '#screen[data-screen="landing"] > .page-content';
     const painted = `Promise.resolve(document.querySelector(${JSON.stringify(representative)})).then(Boolean)`;
     const labelOf = async (evaluate: (expression: string) => Promise<unknown>) => {
       const outcome = controller.runJ14DarkPass({ renderer: { evaluate, send: async () => undefined }, journey: 'J-08', at: () => undefined, representative })

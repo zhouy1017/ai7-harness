@@ -485,8 +485,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   sheet.setAttribute('aria-labelledby', sheetTitleId);
   host.append(live, sheet);
   options.root.append(
-    el('p', 'section-label', REVIEW_SECTION_LABEL),
-    el('h2', undefined, options.bookTitle),
+    el('h2', undefined, REVIEW_SECTION_LABEL),
     el('p', 'lede', REVIEW_LEDE),
     host,
   );

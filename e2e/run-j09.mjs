@@ -1031,7 +1031,7 @@ async function main() {
     at('attention-groups');
     await openAttention(renderer, 'attention');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-09', at, representative: '#screen[data-screen="global-attention"] > .panel', returnTo: SIDEBAR.destination('attention') });
+    await runJ14DarkPass({ renderer, journey: 'J-09', at, representative: '#screen[data-screen="global-attention"] > .page-content', returnTo: SIDEBAR.destination('attention') });
     await waitAttentionPainted(renderer, 'attention-after-dark-pass');
     // The service's answer once nothing is in flight, and the page come to say exactly it: the screen paints
     // the reader's last answer at once and the fresh one as soon as it arrives.
