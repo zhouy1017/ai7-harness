@@ -15,7 +15,6 @@ import { estimateUsageCost } from '../shared/usage.js';
 import {
   USAGE_EMPTY,
   USAGE_EXPORT,
-  USAGE_EXPORT_NOTE,
   USAGE_GROUPING_HEADING,
   USAGE_LEDE,
   USAGE_PRICES_HEADING,
@@ -154,14 +153,14 @@ export function mountUsage(options: MountUsageOptions): void {
         const appendRuns = (links: readonly UsageRunLinkProjection[]): void => {
           for (const run of links) {
             const item = el('li');
-            const open = el('button', 'quiet', usageRunLinkLabel(run, instant));
+            const open = el('button', 'quiet', `${usageRunLinkLabel(run, instant)} · ${usageRouteLabel(run.route)}`);
             open.type = 'button';
             open.dataset['usageRunRecord'] = run.runRecordId;
             open.addEventListener('click', () => {
               setStatus(USAGE_STATUS_LINES.opening, 'busy');
               openRun(run);
             });
-            item.append(open, el('span', 'field-note', ` · ${usageRouteLabel(run.route)}`));
+            item.append(open);
             list.append(item);
           }
         };
@@ -303,7 +302,7 @@ export function mountUsage(options: MountUsageOptions): void {
     }
   };
 
-  const exportButton = el('button', 'secondary', USAGE_EXPORT);
+  const exportButton = el('button', 'secondary', `${USAGE_EXPORT} · 仅数字和标识，无书名或文字`);
   exportButton.type = 'button';
   exportButton.dataset['usageExport'] = 'csv';
   exportButton.addEventListener('click', () => {
@@ -314,7 +313,7 @@ export function mountUsage(options: MountUsageOptions): void {
       .catch((error: unknown) => setStatus(errorMessage(error, USAGE_STATUS_LINES.exportFailed), 'error'))
       .finally(() => { exportButton.disabled = false; });
   });
-  exportRow.append(exportButton, el('span', 'field-note', USAGE_EXPORT_NOTE));
+  exportRow.append(exportButton);
 
   paintControls();
   root.append(el('p', 'field-note', USAGE_LEDE), controls, table, exportRow, pricesHost);

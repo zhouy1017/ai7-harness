@@ -5,7 +5,7 @@ import licensesDocument from './third-party-licenses.generated.json' with { type
 import {
   HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_BACK, HELP_BREADCRUMB, HELP_LICENSE_EMPTY,
   HELP_LICENSE_FIELD_LICENSE, HELP_LICENSE_FIELD_SOURCE, HELP_LICENSE_FILTER_LABEL, HELP_LICENSE_FILTER_PLACEHOLDER,
-  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LICENSE_TEXT_SUMMARY, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
+  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
   helpLicenseCount, type HelpTab,
 } from './help-labels.js';
 import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS, type HelpSection } from './help-text.js';
@@ -146,7 +146,6 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       el('span', 'help-license-name', license.name),
       el('span', 'help-license-version', technicalLayerVisible ? license.version : ''),
       el('span', 'help-license-id', `${HELP_LICENSE_FIELD_LICENSE} ${license.license}`),
-      el('span', 'field-note help-license-hint', HELP_LICENSE_TEXT_SUMMARY),
     );
     const source = [license.repository, license.homepage].filter((value): value is string => value !== null).join(' · ');
     details.append(
