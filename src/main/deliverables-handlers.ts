@@ -1,4 +1,5 @@
 import type { NativeFilePickers } from './file-pickers.js';
+import { enqueueQuickTasks } from './task-overview-quick-start.js';
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import {
   IPC_CHANNELS,
@@ -203,6 +204,7 @@ export function registerProductionAndPackageHandlers(context: {
     }),
   );
 
+  const overviewBooks = new WeakMap<OwnedRendererWindow, Set<string>>();
   // 图书交付包 (Issue #416, S67a): a read bound to the route's Book and its read epoch, and 准备图书交付包 serialized
   // like every other command. The service decides whether the content is still what the editor saw; nothing here
   // chooses a destination or writes a file.
@@ -514,13 +516,16 @@ export function registerProductionAndPackageHandlers(context: {
 
   // Cross-Book task control preserves this window's manuscript and Book route.
   ipcMain.handle(IPC_CHANNELS.taskOverviewCall, (event, request: TaskOverviewCall) => envelope(async () => {
-    requireSender(event);
+    const owned = requireSender(event);
     requireAuthority();
-    if (!request || !TASK_OVERVIEW_OPERATIONS.includes(request.operation) || !UUID_PATTERN.test(request.bookId)) {
+    if (!request || !TASK_OVERVIEW_OPERATIONS.includes(request.operation) || !UUID_PATTERN.test(request.bookId) || !overviewBooks.get(owned)?.has(request.bookId)) {
       throw new ServiceCallError('TASK_OVERVIEW_INVALID', '无法打开这项任务。');
     }
     return serializeEffect(async () => {
+      const generation = owned.routeGeneration;
       const result = await service.call(request.operation, { ...request.input, bookId: request.bookId });
+      requireCurrentRouteGeneration(owned, generation);
+      if (result && typeof result === 'object' && 'bookId' in result && result.bookId !== request.bookId) throw new ServiceCallError('TASK_OVERVIEW_INVALID', '任务结果不属于所选图书。');
       // Preparation jobs stay owned here until terminal; the overview never borrows a Book-route job capability.
       if (!['redoTaskPlan', 'prepareBaselineAnalysis', 'prepareCustomAnalysis', 'promoteTaskIntentDraft'].includes(request.operation)) return result;
       let job = result as ServiceJobProjection;
@@ -539,9 +544,13 @@ export function registerProductionAndPackageHandlers(context: {
 
   ipcMain.handle(IPC_CHANNELS.inspectTaskOverview, (event) =>
     envelope(async () => {
-      requireSender(event);
+      const owned = requireSender(event);
       requireAuthority();
-      return service.call('inspectTaskOverview', {});
+      const generation = owned.routeGeneration;
+      const result = await service.call('inspectTaskOverview', {});
+      requireCurrentRouteGeneration(owned, generation);
+      overviewBooks.set(owned, new Set(result.books.map((book) => book.bookId)));
+      return result;
     }),
   );
 
@@ -557,7 +566,7 @@ export function registerProductionAndPackageHandlers(context: {
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return serializeEffect(() => service.call('startQuickTasks', input));
+      return enqueueQuickTasks(service, input, serializeEffect);
     }),
   );
 

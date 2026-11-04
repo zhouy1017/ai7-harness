@@ -466,7 +466,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       const input = requireInput(value.input, ['tasks'], tentativeId);
       if (!Array.isArray(input.tasks) || input.tasks.length > 64) throw new ProtocolError(tentativeId);
       for (const task of input.tasks) {
-        if (!isRecord(task) || !hasExactKeys(task, ['bookId', 'procedureId']) || !validUuid(task.bookId) || !isBoundedString(task.procedureId, 160)) throw new ProtocolError(tentativeId);
+        if (!isRecord(task) || !hasExactKeys(task, ['bookId', 'procedureId', ...(task.repeat === undefined ? [] : ['repeat'])]) || !validUuid(task.bookId) || !isBoundedString(task.procedureId, 160)) throw new ProtocolError(tentativeId);
+        if (task.repeat !== undefined && (!isRecord(task.repeat) || !hasExactKeys(task.repeat, ['kind', 'ref']) ||
+          !['baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].includes(String(task.repeat.kind)) || !validUuid(task.repeat.ref))) throw new ProtocolError(tentativeId);
       }
       break;
     }
@@ -2759,9 +2761,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopDialogueAnswer':
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : [], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : value.op === 'stopDialogueAnswer' ? ['cancel'] : [], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
       if (input.question !== undefined && !isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS)) throw new ProtocolError(tentativeId);
+      if (input.cancel !== undefined && typeof input.cancel !== 'boolean') throw new ProtocolError(tentativeId);
       break;
     }
     case 'convertDialogueToChangeSuggestion': {

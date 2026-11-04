@@ -1,6 +1,8 @@
 import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
@@ -228,6 +230,25 @@ function contractInput(version: number): ReadersReportContractInput {
 }
 
 describe('审稿意见 over the real store on exact sample1', () => {
+  it('repeats an earlier report as that report template and includes evaluation completions in notifications (#1328)', async () => {
+    await withBook(async (book) => {
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      expect(book.store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'recent')!.items)
+        .toContainEqual(expect.objectContaining({ object: { kind: 'task', taskKind: 'initial-evaluation' } }));
+      finalizeAsJ11(book.store, book.bookId);
+      const original = await draftReport(book, 'author');
+      await draftReport(book, 'editorial');
+      await startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId: 'repeat', repeat: { kind: 'readers-report', ref: original } }] }, {
+        store: book.store, jobs: new CooperativeJobOwner(book.store), policy: launchPolicy, execution: book.owner, driveReview: () => {},
+        credentialReadiness: async () => null, connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => book.owner.busy },
+      });
+      await book.owner.whenIdle();
+      const tasks = book.store.inspectTaskOverview(() => null, 2, () => null, false).groups.flatMap((group) => group.items);
+      const latest = tasks.filter((item) => item.plan?.kind === 'readers-report').sort((a, b) => b.at.localeCompare(a.at))[0]!;
+      expect(latest.plan!.ref).not.toBe(original);
+      expect(book.store.repeatTaskRequest(book.bookId, { kind: 'readers-report', ref: latest.plan!.ref! })).toMatchObject({ kind: 'readers-report', template: 'author' });
+    });
+  });
   it('drafts from a 定稿 version under a template, says it has no exemplar, and opens the draft as a document that exports as DOCX', async () => {
     await withBook(async (book) => {
       // Nothing to draft from before a version is 定稿.

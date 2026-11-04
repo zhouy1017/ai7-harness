@@ -1,4 +1,4 @@
-import { startQuickTasks } from '../../src/service/quick-tasks.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
 import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
@@ -170,6 +170,25 @@ function active(projection: GlobalAttentionProjection): Array<[string | null, st
 }
 
 describe('the execution owner\'s concurrency governor over the real store on exact sample1', () => {
+  it('records a queued continuation refusal when the execution route changes before dispatch (#1328)', async () => {
+    const store = await openWithRoute(); const gate = sharedHold(); const original = ownerOf(store, gate.hold);
+    let changed: BaselineAnalysisExecutionOwner | null = null;
+    try {
+      const book = await preparedBook(store, '续行路线变化', true);
+      const { runRecordId } = start(store, original, book);
+      await until(() => original.progressFor(runRecordId) !== null, 'first run active');
+      store.requestBaselineAnalysisPause(book.bookId, book.taskIntentId); original.pauseRun(runRecordId); gate.allow(1);
+      await until(() => store.inspectBaselineAnalysis(book.bookId).state === 'paused', 'run paused');
+      await original.dispose(); changed = ownerOf(store, null, { fixture: otherFixture });
+      changed.freezeQueue(true); changed.resumeOrQueue(runRecordId, store.baselineAnalysisLedger);
+      expect(changed.queuePosition(runRecordId)).toBe(1);
+      changed.freezeQueue(false);
+      expect(changed.queuePosition(runRecordId)).toBeNull();
+      const paused = store.inspectTaskOverview(() => null, 2, () => null, false).groups.find((group) => group.key === 'paused')!.items[0]!;
+      expect(paused.attention.facts.resumeFailure).toBeTruthy();
+      expect(paused.detail).toBe(paused.attention.facts.resumeFailure);
+    } finally { gate.allow(SAMPLE1_UNITS); await original.dispose(); await changed?.dispose(); store.close(); }
+  });
   it('keeps the admitted v1 fixture serial when an unrelated top-level execution declaration says three (#1131)', async () => {
     const selectedProduction = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production');
     launchPolicy = { ...launchPolicy, providerProcessing: { ...launchPolicy.providerProcessing,
@@ -236,7 +255,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       const books: Book[] = [];
       for (const [index, name] of ['甲', '乙', '丙', '丁'].entries()) books.push(await preparedBook(store, `L2 任务总览 ${name}`, index === 0));
       gate.allow(1);
-      const result = await startQuickTasks({ tasks: books.map((book) => ({ bookId: book.bookId, procedureId: 'ai7-procedure/baseline-analysis' })) }, {
+      const result = await startQuickTasks({ tasks: books.map((book) => ({ bookId: book.bookId, procedureId: 'baseline-analysis' })) }, {
         store, jobs: new CooperativeJobOwner(store), policy: launchPolicy, execution: owner, driveReview: () => {},
         credentialReadiness: async () => null, connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => owner.busy },
       });

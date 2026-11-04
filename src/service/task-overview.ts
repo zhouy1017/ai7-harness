@@ -1,6 +1,21 @@
 import type { BookTaskItemProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewGroupKey, TaskOverviewItemProjection, TaskOverviewProjection, TaskPlanKind } from '../shared/protocol.js';
 
 const GROUPS: readonly TaskOverviewGroupKey[] = ['running', 'queued', 'waiting', 'paused', 'recent'];
+/** Bulk controls isolate stale individual tasks; resuming always restores dispatch. */
+export async function controlOverviewTasks(action: 'pause' | 'resume', owner: {
+  freeze(value: boolean): void; items(): ReadonlyArray<TaskOverviewItemProjection>;
+  control(item: TaskOverviewItemProjection): Promise<void>;
+}): Promise<void> {
+  owner.freeze(true);
+  const failures: string[] = [];
+  try {
+    for (const item of owner.items()) {
+      try { await owner.control(item); }
+      catch (error) { failures.push(error instanceof Error ? error.message : '任务未能处理。'); }
+    }
+  } finally { if (action === 'resume') owner.freeze(false); }
+  if (failures.length) throw new Error(failures.join('；'));
+}
 export function taskPlanTarget(item: GlobalAttentionItemProjection): { kind: TaskPlanKind; ref: string | null } | null {
   const target = item.target;
   if (target.kind === 'analysis' || target.kind === 'analysis-plan') return { kind: 'baseline-analysis', ref: target.taskIntentId };
@@ -13,8 +28,9 @@ export function taskOverviewItem(item: GlobalAttentionItemProjection, queuePosit
   const runRecordId = item.technical.find((row) => row.key === 'run-record' || row.key === 'run-records')?.value.split(' · ')[0] ?? null;
   const position = runRecordId === null ? null : queuePosition(runRecordId);
   let group: TaskOverviewGroupKey = item.group === 'recent' ? 'recent' : item.group === 'exceptions' || item.group === 'decisions' ? 'waiting'
-    : position !== null || ['analysis-waiting-capacity', 'analysis-waiting-idle', 'review-waiting'].includes(item.state) ? 'queued'
-    : ['analysis-paused', 'analysis-pausing', 'analysis-resumable', 'analysis-yielded'].includes(item.state) ? 'paused' : 'running';
+    : position !== null || item.state === 'analysis-queued' && item.facts.progress === null || ['analysis-waiting-capacity', 'analysis-waiting-idle', 'analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission', 'analysis-waiting-slot', 'review-waiting'].includes(item.state) ? 'queued'
+    : ['analysis-paused', 'analysis-pausing', 'analysis-resumable', 'analysis-yielded', 'dialogue-stopped'].includes(item.state) ? 'paused' : 'running';
+  if (item.state === 'dialogue-stopped' && !item.facts.dialogueCancelled) group = 'paused';
   const plan = taskPlanTarget(item);
   const taskKind = item.object.kind === 'dialogue' ? '对话' : KIND_LABELS[plan?.kind ?? ''] ?? '工序';
   const modes: Record<string, string> = { 'first-baseline': '全书', 'reanalyze-book': '重新分析全书', 'reanalyze-range': '重新分析所选范围', 'sync-current': '同步到当前稿件' };
@@ -23,8 +39,8 @@ export function taskOverviewItem(item: GlobalAttentionItemProjection, queuePosit
     : item.object.kind === 'review' ? `审阅 · 第 ${item.object.ordinal} 次`
     : item.object.kind === 'draft' ? `任务草稿 · 「${item.object.goal}」` : taskKind;
   return { itemId: item.itemId, bookId: item.book.bookId, bookTitle: item.book.title, taskKind, label, at: item.at,
-    selection: null, attention: item, detail: item.object.kind === 'dialogue' ? item.object.question : null, plan, result,
-    state: group === 'recent' ? item.state === 'analysis-cancelled' ? 'cancelled' : ['analysis-interrupted', 'analysis-failed', 'review-stopped', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'].includes(item.state) ? 'stopped' : 'completed' : group,
+    selection: null, attention: item, detail: item.facts.resumeFailure ?? (item.object.kind === 'dialogue' ? item.object.question : null), plan, result,
+    state: group === 'recent' ? item.state === 'analysis-cancelled' || item.facts.dialogueCancelled ? 'cancelled' : ['analysis-interrupted', 'analysis-failed', 'review-stopped', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'].includes(item.state) ? 'stopped' : 'completed' : group,
     progress: item.facts.progress === null ? null : { done: item.facts.progress.unitsSettled, total: item.facts.progress.unitsTotal, currentUnitLabel: null, elapsedMs: null, modelWaiting: item.state === 'analysis-running' && item.facts.progress.stage !== 'units' },
     queuePosition: position, eta: null, usage: null, nextAction: item.nextStep, runRecordId, target: item.target };
 }

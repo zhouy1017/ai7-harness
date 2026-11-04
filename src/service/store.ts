@@ -1,4 +1,5 @@
 import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
+import { customAnalysisModeGoal } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -4527,6 +4528,55 @@ export class EditorialStore {
   }
 
   /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */
+  repeatTaskRequest(bookId: string, source: NonNullable<import('../shared/protocol.js').StartQuickTasksInput['tasks'][number]['repeat']>) {
+    if (source.kind === 'review-run') return { kind: source.kind, ...this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, source.ref)) };
+    const row = this.#authority.prepare(`SELECT r.run_record_id, t.kind FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      WHERE t.book_id = ? AND t.task_intent_id = ? ORDER BY r.rowid DESC LIMIT 1`).get(bookId, source.ref) as SqlRow | undefined;
+    requireStore(row !== undefined, 'TASK_REPEAT_UNAVAILABLE', '原任务的运行记录不存在。');
+    const expected = source.kind === 'baseline-analysis' ? BASELINE_ANALYSIS_KIND : source.kind === 'writing' ? WRITING_KIND
+      : source.kind === 'initial-evaluation' ? INITIAL_EVALUATION_KIND : source.kind === 'readers-report' ? READERS_REPORT_KIND : EVALUATION_REWRITE_KIND;
+    requireStore(asString(row.kind) === expected || source.kind === 'baseline-analysis' && isCustomAnalysisKindId(row.kind), 'TASK_REPEAT_UNAVAILABLE', '原任务类型不一致。');
+    if (source.kind === 'baseline-analysis') {
+      const ledger = this.#analysisLedgerOfTask(bookId, source.ref);
+      const facts = ledger.loadExecutionPlan(asString(row.run_record_id));
+      const mode = facts.update?.mode;
+      const update = mode === 'sync-current' || mode === 'reanalyze-range' || mode === 'reanalyze-book' ? { mode, selectedRange: facts.update!.selectedRange }
+        : ledger.inspect(bookId).resultSetRevision === null ? null : { mode: 'reanalyze-book' as const, selectedRange: null };
+      return { kind: source.kind, update, customRef: isCustomAnalysisKindId(row.kind) ? source.ref : null };
+    }
+    const materialIds = this.#evaluationMaterialPlan(source.ref)?.boundary.references.map((entry) => entry.materialId) ?? [];
+    if (source.kind === 'initial-evaluation') return { kind: source.kind, materialIds };
+    if (source.kind === 'readers-report') {
+      const task = this.#readersReportCall(() => this.#readersReports.task(source.ref));
+      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原审稿意见任务不存在。');
+      return { kind: source.kind, template: task.template, materialIds };
+    }
+    if (source.kind === 'evaluation-rewrite') {
+      const task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(source.ref));
+      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原评估重写任务不存在。');
+      return { kind: source.kind, recordId: task.recordId };
+    }
+    const task = this.#writingCall(() => this.#writingTasks.task(source.ref));
+    requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原写作任务不存在。');
+    return { kind: source.kind, request: { typeId: task.typeId, audience: task.input.audience, channel: task.input.channel,
+      requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
+  }
+
+  quickTaskRule(bookId: string, ruleId: string) {
+    const rule = this.#ruleCall(() => this.#rules.list().find((rule) => (rule.ruleId === ruleId || rule.pattern === ruleId) && rule.bookId === bookId && rule.state === 'active'));
+    requireStore(rule !== undefined, 'QUICK_TASK_RULE_UNAVAILABLE', '这条快速开始规则已停用或不属于本书。');
+    return rule;
+  }
+
+  prepareRepeatedCustomAnalysis(bookId: string, ref: string, update: BaselineAnalysisUpdateRequest | null, policy: LaunchPolicyProjection): BaselineAnalysisProjection {
+    const ledger = this.#analysisLedgerOfTask(bookId, ref);
+    this.#requireCustomAnalysisStartable(ledger, ref);
+    let work = this.#analysisCall(() => ledger.prepare({ phase: 'start', bookId, goal: customAnalysisModeGoal(update?.mode ?? 'first-baseline'), update, reconfirm: false, launchPolicy: policy }));
+    while (!work.done) work = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId: work.workId! }));
+    return work.projection as BaselineAnalysisProjection;
+  }
+
   redoTaskRequest(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>) {
     if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
     const ledger = this.taskRunLedger(input);
@@ -14924,6 +14974,9 @@ export class EditorialStore {
         const baseline = this.#baselineAnalysis.attentionReadings(progress, since, limit);
         const review = this.#reviewRuns.attentionReadings(progress, since, limit);
         return composeGlobalAttention({
+          bookTasks: (this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]).flatMap((book) =>
+            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit).groups.flatMap((group) => group.items)
+              .map((entry) => entry.item).filter((item) => item.target.kind === 'dialogue' || item.group === 'recent' && item.target.kind === 'task-plan')),
           globalDialogues: this.#globalAgentHistory(() => null),
           applyOutcomes: readApplyOutcomeAttention(this.#authority, limit),
           imports: readImportAttention(this.#authority, limit),
@@ -14956,10 +15009,10 @@ export class EditorialStore {
   }
 
   inspectTaskOverview(progress: ProgressReader, capacity: number, queuePosition: (id: string) => number | null, queueFrozen: boolean,
-    dialogueLive: (id: string) => LiveAnswer | null = () => null): import('../shared/protocol.js').TaskOverviewProjection {
+    dialogueLive: (id: string) => LiveAnswer | null = () => null, waitingFor: WaitingFor = 'slot'): import('../shared/protocol.js').TaskOverviewProjection {
     const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title').all() as SqlRow[])
       .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
-    const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, 'slot', dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
+    const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, waitingFor, dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
     const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
     const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
       if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
@@ -14973,7 +15026,8 @@ export class EditorialStore {
       }
       return null;
     });
-    return estimateTaskStarts({ ...overview, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
+    const quickStarts = this.inspectDefaultExecutionRules().rules.filter((rule) => rule.state === 'active').map((rule) => ({ bookId: rule.bookId, procedureId: `rule:${rule.pattern}`, label: rule.name }));
+    return estimateTaskStarts({ ...overview, quickStarts, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
       if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
       const facts = this.executionLedgerForRun(item.runRecordId).loadExecutionPlan(item.runRecordId);
       const current = progress(item.runRecordId);
@@ -15621,6 +15675,7 @@ export class EditorialStore {
         dialogueId: task.dialogueId,
         question: resolved.first?.question ?? null,
         state: latest.state,
+        cancelled: latest.attempt.outcome?.causeCode === 'TASK_CANCELLED',
         answered: latest.fragments.length > 0,
         attempts: resolved.attempts.length,
         at: latest.attempt.outcome?.settledAt ?? latest.attempt.createdAt,

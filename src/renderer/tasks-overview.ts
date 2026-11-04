@@ -2,16 +2,16 @@ import type { RendererApi, TaskOverviewGroupProjection, TaskOverviewItemProjecti
 import { createSheet, sheetContent } from './components/sheet.js';
 const GROUP_LABELS: Record<TaskOverviewGroupProjection['key'], string> = { running: '正在运行', queued: '排队等待', waiting: '等你处理', paused: '已暂停', recent: '最近完成' };
 const STATE_LABELS: Record<TaskOverviewItemProjection['state'], string> = { running: '运行中', queued: '排队中', waiting: '等你处理', paused: '已暂停', completed: '已完成', cancelled: '已取消', stopped: '已停止' };
-const PROCEDURES = [['ai7-procedure/baseline-analysis', '基线分析'], ['ai7-procedure/review-common', '审阅 · 常用组合'], ['ai7-procedure/initial-evaluation', '评估'], ['ai7-procedure/writing/news-release', '写作 · 新闻稿']] as const;
+const PROCEDURES = [['baseline-analysis', '基线分析'], ['initial-evaluation', '评估']] as const;
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text;
   if (tag === 'button') { node.classList.add('btn'); (node as HTMLButtonElement).type = 'button'; } return node;
 }
 function progressLine(item: TaskOverviewItemProjection): string {
   const usage = item.usage === null ? '' : ` · 用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`;
-  if (item.state === 'queued') return item.queuePosition === null ? '等待运行名额' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
+  if (item.state === 'queued') return item.attention.state === 'analysis-waiting-network' ? '等待联网' : item.attention.state === 'analysis-waiting-connection' ? '等待模型连接' : item.attention.state === 'analysis-waiting-admission' ? '等待开始前检查' : item.queuePosition === null ? '等待运行名额' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
   if (item.state === 'waiting') return item.detail ?? (item.nextAction === 'answer-clarification' ? 'AI7 有问题等你回答' : '有一项处理需要你的决定');
-  if (item.state === 'paused') return `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? ` · 已完成 ${item.progress.done} / ${item.progress.total}` : ''} · 可续行`;
+  if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? ` · 已完成 ${item.progress.done} / ${item.progress.total}` : ''} · 可续行`;
   if (item.state === 'completed') return `已有结果${usage}`;
   if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}${usage}`;
   if (item.state === 'stopped') return `已停止 · 可查看运行${usage}`;
@@ -29,10 +29,10 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   const actions = el('div', 'task-overview-card-actions');
   const add = (label: string, action: TaskCardAction): void => { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); }); actions.append(button); };
   if (item.state === 'running') { add('暂停', 'pause'); add('取消', 'cancel'); }
-  else if (item.state === 'queued') { if (item.runRecordId) { add('上移', 'up'); add('置顶', 'top'); } add('取消等待', 'cancel'); }
+  else if (item.state === 'queued') { if (item.queuePosition !== null) { add('上移', 'up'); add('置顶', 'top'); } add('取消等待', 'cancel'); }
   else if (item.attention.state === 'draft-unfinished') add('继续编辑草稿', 'answer');
   else if (item.state === 'waiting') add(item.nextAction === 'answer-clarification' || item.taskKind === '对话' ? '回答' : '处理', 'answer');
-  else if (item.state === 'paused' && item.attention.state !== 'analysis-pausing') { add('续行', 'resume'); add('改计划重做', 'redo'); }
+  else if (item.state === 'paused' && item.attention.state !== 'analysis-pausing') { add('续行', 'resume'); if (item.target.kind !== 'dialogue') add('改计划重做', 'redo'); }
   else if (item.state !== 'paused') { add('查看结果', 'result'); add('再做一次', 'again'); }
   if (item.selection) add('跳到所选文字', 'jump');
   const more = el('details', 'task-overview-more'); more.append(el('summary', undefined, '更多'));
@@ -59,16 +59,20 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   const headingRow = el('div', 'task-overview-heading-row'); const heading = el(options.bookId ? 'h3' : 'h1', 'task-overview-title', '任务');
   const start = el('button', 'primary', '发起任务 ▾'); start.dataset['taskOverviewStart'] = ''; start.disabled = true;
   const all = el('button', 'quiet'); all.addEventListener('click', () => void perform(async () => { await options.api.controlAllTasks({ action: projection?.queueFrozen ? 'resume' : 'pause' }); }));
-  headingRow.append(heading, start); if (!options.bookId) headingRow.append(all);
-  const context = el('p', 'task-overview-context'); const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups'); const confirm = el('div', 'task-overview-confirm'); confirm.hidden = true; confirm.setAttribute('role', 'alert');
+  const context = el('span', 'task-overview-context'); headingRow.append(heading, context, start); if (!options.bookId) headingRow.append(all);
+  const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups'); const confirm = el('div', 'task-overview-confirm'); confirm.hidden = true; confirm.setAttribute('role', 'alert');
   const note = el('p', 'field-note', '队列顺序保存在本次使用中；重新启动后按发起顺序排列。');
   if (options.bookId) { heading.hidden = true; context.hidden = true; note.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
-  const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, context, filters, host, confirm, note, sheet);
+  const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, confirm, note, sheet);
   start.addEventListener('click', () => { if (sheet.open) sheet.close(); else { paintSheet(); sheet.show(); } });
   function paintSheet(): void {
     const books = projection?.books ?? []; const list = el('div', 'task-overview-sheet-books');
     for (const book of books.filter((book) => !options.bookId || options.bookId === book.bookId)) { const label = el('label', 'task-overview-sheet-book'); const input = el('input'); input.type = 'checkbox'; input.value = book.bookId; input.checked = options.bookId === book.bookId || selectedBook === book.bookId; label.append(input, document.createTextNode(book.title)); list.append(label); }
-    const type = el('select'); type.setAttribute('aria-label', '工序'); for (const [id, label] of PROCEDURES) type.add(new Option(label, id)); type.value = localStorage.getItem('ai7.task-overview.procedure') ?? PROCEDURES[0][0];
+    const type = el('select'); type.setAttribute('aria-label', '工序');
+    const procedures = new Map<string, string>(PROCEDURES);
+    for (const rule of projection?.quickStarts ?? []) if (!options.bookId || rule.bookId === options.bookId) procedures.set(rule.procedureId, rule.label);
+    for (const [id, label] of procedures) type.add(new Option(label, id));
+    const savedProcedure = localStorage.getItem('ai7.task-overview.procedure'); type.value = savedProcedure && procedures.has(savedProcedure) ? savedProcedure : PROCEDURES[0][0];
     type.addEventListener('change', () => localStorage.setItem('ai7.task-overview.procedure', type.value));
     const added = el('span'); added.dataset['taskOverviewAdded'] = ''; let count = 0;
     const add = el('button', 'primary', '加入队列'); add.dataset['taskOverviewEnqueue'] = '';
@@ -104,22 +108,22 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     void perform(async () => {
       if ((action === 'up' || action === 'top') && item.runRecordId) await options.api.reorderQueuedRun({ runRecordId: item.runRecordId, position: action === 'top' ? 1 : Math.max(1, (item.queuePosition ?? 1) - 1) });
       else if (action === 'again' && item.target.kind === 'dialogue') await dialogueAction(item, 'regenerateDialogueAnswer');
-      else if (action === 'again' && item.bookId) { const procedureId = item.taskKind === '分析' ? PROCEDURES[0][0] : item.taskKind === '审阅' ? PROCEDURES[1][0] : item.taskKind === '评估' ? PROCEDURES[2][0] : PROCEDURES[3][0]; await options.api.startQuickTasks({ tasks: [{ bookId: item.bookId, procedureId }] }); }
+      else if (action === 'again' && item.bookId && item.plan?.ref && item.plan.kind !== 'fixed-task') await options.api.startQuickTasks({ tasks: [{ bookId: item.bookId, procedureId: 'repeat', repeat: { kind: item.plan.kind, ref: item.plan.ref } }] });
       else if (action === 'redo') options.openTarget(item, 'redo');
       else if (item.target.kind === 'dialogue') { await dialogueAction(item, action === 'pause' ? 'stopDialogueAnswer' : 'continueDialogueAnswer'); }
       else if (item.plan?.ref) await call(item, item.plan.kind === 'baseline-analysis' ? action === 'pause' ? 'pauseBaselineAnalysisRun' : 'resumeBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action });
     });
   }
-  async function dialogueAction(item: TaskOverviewItemProjection, operation: 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer'): Promise<void> {
+  async function dialogueAction(item: TaskOverviewItemProjection, operation: 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer', cancel = false): Promise<void> {
     if (item.target.kind !== 'dialogue') return;
     const dialogue = await call(item, 'inspectDialogue', { dialogueId: item.target.dialogueId, afterFragment: 0 }) as Awaited<ReturnType<RendererApi['inspectDialogue']>>;
     const latest = dialogue.attempts.at(-1);
-    if (latest) await call(item, operation, { dialogueId: item.target.dialogueId, attemptId: latest.attemptId });
+    if (latest) await call(item, operation, { dialogueId: item.target.dialogueId, attemptId: latest.attemptId, ...(cancel ? { cancel: true } : {}) });
   }
   async function cancel(item: TaskOverviewItemProjection): Promise<void> {
-    if (item.target.kind === 'dialogue') { await dialogueAction(item, 'stopDialogueAnswer'); return; }
+    if (item.target.kind === 'dialogue') { await dialogueAction(item, 'stopDialogueAnswer', true); return; }
     if (!item.plan?.ref) return;
-    if (item.state === 'queued' && !['analysis-paused', 'analysis-resumable', 'analysis-yielded'].includes(item.attention.state)) await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : item.plan);
+    if (item.state === 'queued' && !['analysis-paused', 'analysis-resumable', 'analysis-yielded', 'analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission'].includes(item.attention.state)) await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelWaitingBaselineAnalysis' : 'cancelWaitingTask', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : item.plan);
     else await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action: 'cancel' });
   }
   function paint(): void {
@@ -146,6 +150,6 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const item = projection?.groups.flatMap((group) => group.items).find((row) => row.itemId === (cards[index]?.dataset['taskItem'] ?? selectedId)); if (!item) return;
     if (event.key === 'Enter' || event.key === ' ' || event.key === 'Delete') { event.preventDefault(); if (event.key === 'Enter') act(item, 'open'); else if (event.key === 'Delete' && ['running', 'queued', 'paused'].includes(item.state)) act(item, 'cancel'); else if (event.key === ' ' && ['running', 'paused'].includes(item.state)) act(item, item.state === 'running' ? 'pause' : 'resume'); }
   }
-  options.root.addEventListener('keydown', keydown); const timer = window.setInterval(refresh, 1000); refresh();
+  options.root.addEventListener('keydown', keydown); const timer = window.setInterval(refresh, 5000); refresh();
   return { refresh, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
 }

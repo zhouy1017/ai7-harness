@@ -16,7 +16,7 @@ import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-poli
 import { loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { CLARIFICATION_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, ANALYSIS_LEDGER_REVISION_58_SQL } from '../../src/service/task-authorization.js';
-import { RESUME_BLOCKED_OFFLINE, RESUME_BLOCKED_SLOT, RUN_CONTROL_CANCELLING_REASON } from '../../src/service/task-plan.js';
+import { RESUME_BLOCKED_OFFLINE, RUN_CONTROL_CANCELLING_REASON } from '../../src/service/task-plan.js';
 import { controlledUnitHold } from '../../src/service/unit-hold.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { CLARIFICATION_RELATIONS_DROP_ORDER } from '../support/clarifications.js';

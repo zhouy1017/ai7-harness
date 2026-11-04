@@ -767,7 +767,7 @@ const observeNotifications = createNotificationObserver({
     showQuietNotice(item);
     const currentBookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
     if (currentBookId === item.book.bookId && localStorage.getItem('ai7.task-overview.auto-result') !== 'off') {
-      void window.ai7.inspectBookTasks().then((tasks) => { const entry = tasks.groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === item.itemId); if (entry?.result) openTaskResult(entry, () => {}); });
+      void window.ai7.inspectTaskOverview().then((tasks) => { const entry = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId); if (entry) void openOverviewResult(entry); });
     }
   },
 });

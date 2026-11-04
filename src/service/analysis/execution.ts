@@ -1412,8 +1412,15 @@ export class BaselineAnalysisExecutionOwner {
         this.#queued.splice(index, 1);
         if (next.resume) this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true });
         else this.#admitInTurn(next.runRecordId, next.ledger);
-      } catch {
+      } catch (error) {
         if (this.#queued[index] === next) this.#queued.splice(index, 1);
+        if (next.resume) {
+          const state = next.ledger.currentRunState(next.runRecordId);
+          if (state === 'paused' || state === 'resumable' || state === 'awaiting-clarification') {
+            const reason = error instanceof Error ? error.message : '这项任务未能续行，请查看计划。';
+            next.ledger.recordRunState(next.runRecordId, state, { detail: reason, resumeFailure: reason });
+          }
+        }
         // Blocked before dispatch with its reason; the next start in the queue takes the place.
       }
     }

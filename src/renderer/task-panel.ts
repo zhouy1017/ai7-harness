@@ -24,7 +24,6 @@ import {
   type RendererApi,
   type TaskPlanKind,
 } from '../shared/protocol.js';
-import { TASK_BAR_PAUSE_FAILED, TASK_BAR_PAUSING_NOTE, TASK_BAR_RESUME_FAILED } from './task-drawer-labels.js';
 import {
   TASK_COMPOSER_ACTIONS,
   TASK_COMPOSER_ADD_RANGE,
@@ -76,14 +75,9 @@ import {
   TASK_PANEL_COMPOSE_HEADING,
   TASK_PANEL_COMPOSE_LEDE,
   TASK_PANEL_COMPOSE_NONE,
-  TASK_PANEL_EMPTY_LINES,
-  TASK_PANEL_GROUP_LABELS,
   TASK_PANEL_NOTE,
   TASK_PANEL_STATUS_LINES,
-  taskPanelCardView,
-  taskPanelMoreLine,
   taskPanelScopeLine,
-  type TaskPanelAction,
 } from './task-panel-labels.js';
 
 /**
@@ -285,81 +279,6 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     if (working) for (const control of element.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
   }
 
-  /** The Task Intent a baseline card names; `null` for any other Task. */
-  function taskIntentOf(target: GlobalAttentionTarget): string | null {
-    return target.kind === 'analysis' || target.kind === 'analysis-plan' ? target.taskIntentId : null;
-  }
-
-  function planOf(target: GlobalAttentionTarget): { kind: TaskPlanKind; ref: string } | null {
-    if (target.kind === 'analysis' || target.kind === 'analysis-plan') return { kind: 'baseline-analysis', ref: target.taskIntentId };
-    if (target.kind === 'review' || target.kind === 'review-plan') return { kind: 'review-run', ref: target.reviewRunId };
-    // A ledger Task of another kind (Issue #760, S74c): its own plan.
-    if (target.kind === 'task-plan' && target.ref !== null) return { kind: target.taskKind, ref: target.ref };
-    return null;
-  }
-
-  async function act(entry: BookTaskItemProjection, entryAction: TaskPanelAction): Promise<void> {
-    if (working || bookId === null) return;
-    const target = entry.item.target;
-    switch (entryAction.key) {
-      case 'pause':
-      case 'resume': {
-        const taskIntentId = taskIntentOf(target);
-        const planned = planOf(target);
-        if (taskIntentId === null && (planned === null || planned.kind === 'fixed-task' || planned.kind === 'baseline-analysis')) return;
-        const book = bookId;
-        working = true;
-        painted = '';
-        paint();
-        const pausing = entryAction.key === 'pause';
-        options.setStatus(pausing ? '正在暂停任务…' : '正在续行…', 'busy');
-        try {
-          if (taskIntentId !== null) {
-            if (pausing) await api.pauseBaselineAnalysisRun({ taskIntentId });
-            else await api.resumeBaselineAnalysisRun({ taskIntentId });
-          } else if (planned !== null && planned.kind !== 'fixed-task' && planned.kind !== 'baseline-analysis') {
-            await api.controlTaskRun({ kind: planned.kind, ref: planned.ref, action: pausing ? 'pause' : 'resume' });
-          }
-          options.setStatus(pausing ? TASK_BAR_PAUSING_NOTE : '已续行，从已保存的进度接着读。', 'success');
-          options.onRecorded(book);
-        } catch (error) {
-          options.setStatus(options.errorMessage(error, pausing ? TASK_BAR_PAUSE_FAILED : TASK_BAR_RESUME_FAILED), 'error');
-        } finally {
-          working = false;
-          painted = '';
-          if (bookId === book) read(false);
-        }
-        return;
-      }
-      case 'cancel':
-      case 'plan': {
-        const plan = planOf(target);
-        if (plan !== null) options.openPlan(plan.kind, plan.ref, entryAction.key === 'cancel');
-        return;
-      }
-      case 'result':
-      case 'answer':
-        options.openResult(entry);
-        return;
-      case 'jump':
-        if (entry.selection !== undefined) options.jumpToSelection({ ...entry, selection: entry.selection });
-        return;
-      case 'next':
-        // A draft's 继续编辑草稿 (Issue #423, slice 7a): the draft in the composer, beside its Book's manuscript.
-        if (target.kind === 'task-intent-draft') {
-          options.openDraft(target.draftId);
-          return;
-        }
-        if (target.kind === 'analysis-plan' || target.kind === 'review-plan' || target.kind === 'task-plan') {
-          const plan = planOf(target)!;
-          options.openPlan(plan.kind, plan.ref, false);
-          return;
-        }
-        options.openTarget(target);
-        return;
-    }
-  }
-
   // ---- 发起全书任务 ---------------------------------------------------------------------------------------
 
   function paintParked(): void {
@@ -483,7 +402,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
         onChanged: () => { options.onRecorded(next); read(true); },
         openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, false, view === 'redo'); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
         jumpToSelection: (item) => { if (item.selection) options.jumpToSelection({ item: item.attention, result: item.result, selection: item.selection }); },
-        openBook: () => {}, openResult: (item) => { const entry = tasks?.groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === item.itemId); if (entry) options.openResult(entry); },
+        openBook: () => {}, openResult: (item) => options.openResult({ item: item.attention, result: item.result, ...(item.selection == null ? {} : { selection: item.selection }) }),
       });
       read(true);
     },

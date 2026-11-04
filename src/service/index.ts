@@ -1,4 +1,5 @@
-import { startQuickTasks } from './quick-tasks.js';
+import { prepareQuickTask } from './quick-tasks.js';
+import { controlOverviewTasks } from './task-overview.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { refreshModelServiceModels } from './provider/model-discovery.js';
 import { PROVIDER_ROUTE_PROFILES, providerModelsEndpoint } from './provider/deepseek-adapter.js';
@@ -1581,32 +1582,39 @@ async function dispatch(
       };
     case 'inspectTaskOverview':
       return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity,
-        (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen, (id) => dialogues.liveText(id)) };
+        (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen, (id) => dialogues.liveText(id), await connectivity.waitingFor()) };
     case 'reorderQueuedRun':
       analysisExecution.reorderQueuedRun(request.input.runRecordId, request.input.position);
       return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity,
         (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen) };
     case 'controlAllTasks': {
-      // Freeze first: pausing a Run must not admit another between two controls.
-      analysisExecution.freezeQueue(true);
-      const overview = store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), true);
-      const items = overview.groups.find((group) => group.key === (request.input.action === 'pause' ? 'running' : 'paused'))!.items;
-      for (const item of items) {
-        if (item.plan === null || item.plan.kind === 'fixed-task' || item.plan.ref === null || item.bookId === null) continue;
-        const input = item.plan.kind === 'baseline-analysis'
-          ? { id: request.id, op: request.input.action === 'pause' ? 'pauseBaselineAnalysisRun' as const : 'resumeBaselineAnalysisRun' as const,
-            input: { bookId: item.bookId, taskIntentId: item.plan.ref } }
-          : { id: request.id, op: 'controlTaskRun' as const, input: { bookId: item.bookId, kind: item.plan.kind, ref: item.plan.ref, action: request.input.action } };
-        await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace,
-          input, importControl, launchPolicy, connectivity, background);
-      }
-      if (request.input.action === 'resume') analysisExecution.freezeQueue(false);
+      await controlOverviewTasks(request.input.action, {
+        freeze: (value) => analysisExecution.freezeQueue(value),
+        items: () => store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), true)
+          .groups.find((group) => group.key === (request.input.action === 'pause' ? 'running' : 'paused'))!.items,
+        control: async (item) => {
+          if (item.target.kind === 'dialogue') {
+            const dialogue = store.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, (id) => dialogues.liveText(id));
+            const latest = dialogue.attempts.at(-1);
+            if (latest) await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace,
+              { id: request.id, op: request.input.action === 'pause' ? 'stopDialogueAnswer' : 'continueDialogueAnswer',
+                input: { bookId: item.target.bookId, dialogueId: item.target.dialogueId, attemptId: latest.attemptId } }, importControl, launchPolicy, connectivity, background);
+            return;
+          }
+          if (item.plan === null || item.plan.kind === 'fixed-task' || item.plan.ref === null || item.bookId === null) return;
+          const input = item.plan.kind === 'baseline-analysis'
+            ? { id: request.id, op: request.input.action === 'pause' ? 'pauseBaselineAnalysisRun' as const : 'resumeBaselineAnalysisRun' as const,
+              input: { bookId: item.bookId, taskIntentId: item.plan.ref } }
+            : { id: request.id, op: 'controlTaskRun' as const, input: { bookId: item.bookId, kind: item.plan.kind, ref: item.plan.ref, action: request.input.action } };
+          await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace,
+            input, importControl, launchPolicy, connectivity, background);
+        },
+      }).catch((error: unknown) => { throw new StoreErrorClass('TASK_BULK_CONTROL_PARTIAL', error instanceof Error ? error.message : '部分任务未能处理，请查看任务列表。'); });
       return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen) };
     }
     case 'startQuickTasks': {
-      const result = await startQuickTasks(request.input, { store, jobs, policy: launchPolicy, execution: analysisExecution,
-        connectivity: connectivity.planConnectivity, credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding),
-        driveReview: (id) => driveReviewRun(reviewRuns, id) });
+      if (request.input.tasks.length !== 1) throw new StoreErrorClass('QUICK_TASK_INVALID', '每次准备一项任务。');
+      const result = prepareQuickTask(request.input.tasks[0]!, { store, jobs, policy: launchPolicy });
       return { id: request.id, ok: true, op: request.op, result };
     }
     // 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014): no plan and no 开始任务 (the Owner, 2026-10-07) — asking records the
@@ -1625,7 +1633,7 @@ async function dispatch(
       };
     case 'stopDialogueAnswer': {
       const attemptId = store.answeringDialogueAttempt(request.input.bookId, request.input);
-      await dialogues.stop(attemptId);
+      await dialogues.stop(attemptId, request.input.cancel === true);
       return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, 0, (id) => dialogues.liveText(id)) };
     }
     case 'continueDialogueAnswer':

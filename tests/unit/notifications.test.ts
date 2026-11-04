@@ -105,14 +105,14 @@ describe('privacy-safe main notifications', () => {
     for (const [key, value] of Object.entries(preferenceDefaults())) if (key.startsWith('notifications.')) expect(value).toBe(false);
     expect(new Set(Object.values(NOTIFICATION_LABELS)).size).toBe(Object.values(NOTIFICATION_LABELS).length);
     for (const label of Object.values(NOTIFICATION_LABELS)) expect(label).not.toMatch(/Synthetic|\$\{|\{.*\}|书稿|任务已完成/u);
-    expect(completionLabel(item({ group: 'recent', state: 'review-completed' }))).toBe('《Synthetic private title》分析完成 · 审阅结果已可查看');
+    expect(completionLabel(item({ group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } }))).toBe('《Synthetic private title》审阅完成');
   });
   it('tells 结果待确认 from a failure and a pending decision, and a coalesced notice names the most pressing class', () => {
     const classes = [
       notificationClass(item()),
       notificationClass(item({ group: 'exceptions', state: 'analysis-failed' })),
       notificationClass(item({ group: 'exceptions', state: 'apply-outcome-unresolved' })),
-      notificationClass(item({ group: 'recent', state: 'review-completed' })),
+      notificationClass(item({ group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } })),
       notificationClass(item({ group: 'recent', state: 'analysis-completed' })),
     ];
     expect(classes).toEqual(['pending', 'failure', 'ambiguous', 'candidate', 'outcome']);
@@ -239,12 +239,12 @@ describe('quiet notice lifetime', () => {
       vi.advanceTimersByTime(1);
       expect(host.hidden).toBe(true);
 
-      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
+      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } });
       const original = structuredClone(latest);
       show(item({ group: 'recent', state: 'analysis-completed' }));
       show(latest);
       expect(miniDocument.body.children).toHaveLength(1);
-      expect(host.children[0]?.textContent).toBe('《Synthetic private title》分析完成 · 审阅结果已可查看');
+      expect(host.children[0]?.textContent).toBe('《Synthetic private title》审阅完成');
       const view = host.children[1]!;
       view.focus();
       host.dispatchEvent({ type: 'focusin' });

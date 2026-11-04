@@ -4528,6 +4528,8 @@ export type GlobalAttentionObjectProjection =
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
+  dialogueCancelled?: boolean;
+  resumeFailure?: string;
   clarificationOrigin?: 'model';
   stopReason?: ResumableStopReason;
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
@@ -4665,6 +4667,7 @@ export interface TaskOverviewGroupProjection {
 }
 
 export interface TaskOverviewProjection {
+  readonly quickStarts?: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string; readonly label: string }>;
   readonly groups: ReadonlyArray<TaskOverviewGroupProjection>;
   readonly capacity: number;
   readonly queueFrozen: boolean;
@@ -4690,7 +4693,8 @@ export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; b
 export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
 
 export interface StartQuickTasksInput {
-  readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string }>;
+  readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
+    readonly repeat?: { readonly kind: Exclude<TaskPlanKind, 'fixed-task'>; readonly ref: string } }>;
 }
 
 export interface StartQuickTasksResult {
@@ -6635,7 +6639,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   controlAllTasks: { input: { action: 'pause' | 'resume' }; output: TaskOverviewProjection };
   inspectTaskOverview: { input: Record<string, never>; output: TaskOverviewProjection };
   reorderQueuedRun: { input: { runRecordId: string; position: number }; output: TaskOverviewProjection };
-  startQuickTasks: { input: StartQuickTasksInput; output: StartQuickTasksResult };
+  startQuickTasks: { input: StartQuickTasksInput; output: { kind: TaskPlanKind; job: ServiceJobProjection; ruleVersionId: string | null } };
   /** The Book's 任务 panel (Issue #423, plan slice S77a): a read of that Book's Tasks in the three groups. */
   inspectBookTasks: { input: { bookId: string }; output: BookTasksProjection };
   /**
@@ -6646,7 +6650,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   /** The dialogue as it stands: a read, the latest answer's fragments from `afterFragment` on. */
   inspectDialogue: { input: InspectDialogueInput & { bookId: string }; output: DialogueProjection };
   /** 停止回答: the answer in flight keeps only its complete fragments, labelled incomplete. */
-  stopDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  stopDialogueAnswer: { input: DialogueAttemptInput & { bookId: string; cancel?: boolean }; output: DialogueProjection };
   /** 继续回答: a new attempt going on from what a stopped or interrupted answer kept. */
   continueDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
   /** 重新回答: a new attempt asking the same question about the same words again. */

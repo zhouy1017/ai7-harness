@@ -544,7 +544,6 @@ export const QUICK_START_NEEDS_CONNECTION = '模型未连接：这份计划要�
  * (S74c), the writing Task's too: a rule starts only a Run that can begin now (TASK-024).
  */
 export const QUICK_START_OFFLINE = '离线：这份计划要连到模型服务，而这台设备现在没有网络；可以在计划里选择联网后开始任务。';
-export const QUICK_START_SLOT_BUSY = '运行名额已满：正在运行的任务结束后再开始。';
 /**
  * 结果待确认 (Issue #51, S16c; CONT-011): the Task would send again a range whose earlier request may already have been processed
  * and billed, so 快速开始 leaves it at its plan, which says so, for the editor to start there.

@@ -145,6 +145,7 @@ export interface AnalysisTaskAttentionReading {
     /** A resumable Run stopped on sent requests whose results cannot be known (Issue #51, S16c): 结果待确认. */
     readonly outcomeUnknown?: boolean;
     readonly stopReason?: ResumableStopReason;
+    readonly resumeFailure?: string;
     /** A waiting Run blocked because its plan moved before it could start (Issue #536): 需要重新确认计划. */
     readonly planMoved?: boolean;
   };
@@ -300,7 +301,6 @@ export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
   readonly conflicts: ReadonlyArray<ConflictAttentionReading>;
-  readonly recentLimit?: number;
   readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
   readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
   /** Every other ledger kind's Runs waiting to start once online, or blocked because their plan moved (Issue #760). */
@@ -323,6 +323,8 @@ export interface GlobalAttentionReadings {
   readonly drafts?: ReadonlyArray<TaskIntentDraftAttentionReading>;
   /** Whether Runs hold every place of the execution owner's governor now (Issue #49, S14). */
   readonly busy: boolean;
+  /** Book-owned writing/evaluation outcomes and dialogues share the notification reading. */
+  readonly bookTasks?: ReadonlyArray<GlobalAttentionItemProjection>;
   /**
    * What a Run in Connectivity Wait waits for now, as the drawer reads it (Issue #502): the device's reading, the
    * live credential and the slot are the service's, the same for every waiting Run.
@@ -422,6 +424,8 @@ function item(
     facts: {
       ...(fields.facts?.clarificationOrigin === undefined ? {} : { clarificationOrigin: fields.facts.clarificationOrigin }),
       ...(fields.facts?.stopReason === undefined ? {} : { stopReason: fields.facts.stopReason }),
+      ...(fields.facts?.resumeFailure === undefined ? {} : { resumeFailure: fields.facts.resumeFailure }),
+      ...(fields.facts?.dialogueCancelled === undefined ? {} : { dialogueCancelled: fields.facts.dialogueCancelled }),
       progress: fields.facts?.progress ?? null,
       categories: fields.facts?.categories ?? [],
       revisionOrdinal: fields.facts?.revisionOrdinal ?? null,
@@ -619,7 +623,7 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       // answered waits its turn in the slot to go on (S76d).
       const state = run.idleYield === true ? 'analysis-yielded' : run.state === 'paused' ? 'analysis-paused' : run.state === 'resumable' ? 'analysis-resumable' : 'analysis-queued';
       return item('active', state, { itemId, blocked: false, at: run.stateAt, book, object,
-        ...(run.stopReason === undefined ? {} : { facts: { stopReason: run.stopReason } }),
+        facts: { ...(run.stopReason === undefined ? {} : { stopReason: run.stopReason }), ...(run.resumeFailure === undefined ? {} : { resumeFailure: run.resumeFailure }) },
         nextStep: run.stopReason === 'proxy-unreachable' || run.stopReason === 'model-service-unreachable' ? 'open-network-proxy' : 'view-run',
         target, technical });
     }
@@ -956,6 +960,7 @@ export function readApplyOutcomeAttention(db: DatabaseSync, limit: number): Read
 export function composeGlobalAttention(readings: GlobalAttentionReadings, now: Date): GlobalAttentionProjection {
   const since = recentWindowStart(now);
   const all: GlobalAttentionItemProjection[] = [
+    ...(readings.bookTasks ?? []).filter((item) => item.group !== 'recent' || item.at >= since),
     ...(readings.applyOutcomes ?? []),
     ...(readings.globalDialogues ?? []).flatMap((dialogue) => {
       const latest = dialogue.attempts.at(-1);
@@ -995,7 +1000,7 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
     actionableCount: groups.filter((group) => GLOBAL_ATTENTION_COUNTED_GROUPS.includes(group.key)).reduce((sum, group) => sum + group.total, 0),
     // A Run holds a place of the governor's, or waits for one (Issue #49, S14), or a Review Run is being driven — between
     // two categories it holds none — or a Run waits to start once online, which a reader follows until it starts (Issue #502).
-    running: readings.busy || (readings.globalDialogues ?? []).some((dialogue) => dialogue.attempts.at(-1)?.state === 'answering') || readings.reviewRuns.some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
+    running: readings.busy || (readings.bookTasks ?? []).some((item) => item.state === 'dialogue-answering') || (readings.globalDialogues ?? []).some((dialogue) => dialogue.attempts.at(-1)?.state === 'answering') || readings.reviewRuns.some((reading) => reading.state === 'running' || reading.state === 'waiting') ||
       readings.analysisTasks.some((reading) => reading.run !== null && followedRun(reading.run)) ||
       (readings.waitingTasks ?? []).some((reading) => reading.state === 'awaiting-connectivity'),
     processing: processingOf(readings.globalDialogues ?? [], unique),
@@ -1064,6 +1069,7 @@ function draftItem(reading: TaskIntentDraftAttentionReading): GlobalAttentionIte
  * and its latest answer's state — answering, completed, or an Incomplete Dialogue Answer — and since when.
  */
 export interface DialogueTaskReading {
+  readonly cancelled?: boolean;
   readonly bookId: string;
   readonly bookTitle: string;
   readonly dialogueId: string;
@@ -1085,7 +1091,8 @@ const DIALOGUE_STATES: Readonly<Record<DialogueTaskReading['state'], GlobalAtten
 
 /** A dialogue Task's card (TASK-044): in 进行中 while it answers, in 最近完成 once settled; it stops no other work. */
 function dialogueTaskItem(reading: DialogueTaskReading): GlobalAttentionItemProjection {
-  return item(reading.state === 'answering' ? 'active' : 'recent', DIALOGUE_STATES[reading.state], {
+  return item(reading.state === 'answering' || reading.state === 'stopped' && !reading.cancelled ? 'active' : 'recent', DIALOGUE_STATES[reading.state], {
+    facts: reading.cancelled ? { dialogueCancelled: true } : {},
     itemId: `dialogue:${reading.dialogueId}`,
     blocked: false,
     at: reading.at,
