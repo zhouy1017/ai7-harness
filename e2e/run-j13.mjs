@@ -1968,7 +1968,7 @@ async function main() {
     requireJourney(stopPreview.procedures[0].versions[1].state === 'enabled' && previewRead.heading === `停用《${PROCEDURE_TITLE}》第 1 版` && previewRead.after === '2' &&
       JSON.stringify(previewRead.versions) === JSON.stringify([['1', '1', '0']]) &&
       JSON.stringify(previewRead.prepared) === JSON.stringify([`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · 计划已冻结 · 待授权`]) &&
-      previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版。' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
+      previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
     await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-stop h5')`, 'stop-preview-focused', 10_000);
     await clickSelector(renderer, '.captured-procedure-stop [data-procedure-action="confirm-stop"]', 'stop-confirm');
     const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.state === 'stopped', 'stop-stopped');
