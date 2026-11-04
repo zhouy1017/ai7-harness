@@ -1,4 +1,4 @@
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, boundedText, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { RunReportAccounting, RunReportSuggestion } from './run-report.js';
 
 /**
@@ -28,16 +28,8 @@ export const RUN_REPORT_REFLECTION_CONTRACT_VERSION = 'ai7.analysis.run-report-r
 /** ADR 0066's bound: at most ten items, so the list stays a list an Owner reads rather than a log. */
 export const MAX_RUN_REPORT_REFLECTION_ITEMS = 10;
 const MAX_TEXT_GRAPHEMES = 200;
-/** Graphemes, the unit every bound in the three existing contracts is already measured in. */
-const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
 
-function graphemeCount(text: string): number {
-  let count = 0;
-  for (const _segment of GRAPHEMES.segment(text)) count += 1;
-  return count;
-}
-
-export interface RunReportReflectionResult {
+export interface RunReportReflectionResult extends SalvagedModelResult {
   readonly schema: typeof RUN_REPORT_REFLECTION_RESULT_SCHEMA;
   readonly items: ReadonlyArray<RunReportSuggestion>;
 }
@@ -45,7 +37,7 @@ export interface RunReportReflectionResult {
 export type RunReportReflectionParseFailureCode = 'not-json' | 'schema-invalid';
 
 export type RunReportReflectionResultParse =
-  | { ok: true; result: RunReportReflectionResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: RunReportReflectionResult; canonicalJson: string; digest: string }
   | { ok: false; code: RunReportReflectionParseFailureCode; detail: string };
 
 /** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
@@ -128,10 +120,6 @@ export function runReportReflectionRequestDigest(promptContractDigest: string, a
   return sha256Hex(canonicalJson({ promptContractDigest, accountingDigest }));
 }
 
-function boundedText(value: unknown): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= MAX_TEXT_GRAPHEMES;
-}
-
 /**
  * Validate a model response against the reflection contract. Every refusal is one of two codes, and
  * the caller records it as the report's own `ifRedone` gap; nothing here throws, because an invalid
@@ -139,8 +127,7 @@ function boundedText(value: unknown): value is string {
  * disclosed absence in the report rather than a failed Run.
  */
 export function parseRunReportReflectionResult(text: string): RunReportReflectionResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;
@@ -157,8 +144,8 @@ export function parseRunReportReflectionResult(text: string): RunReportReflectio
   for (const [index, candidate] of (parsed.items as unknown[]).entries()) {
     const label = `第 ${index + 1} 条建议`;
     if (!isRecord(candidate) || !hasExactKeys(candidate, ['suggestion', 'basis'])) return invalid(`${label}的键集合不符合契约 v1。`);
-    if (!boundedText(candidate.suggestion)) return invalid(`${label}的做法缺失或超出边界。`);
-    if (!boundedText(candidate.basis)) return invalid(`${label}的依据缺失或超出边界。`);
+    if (!boundedText(candidate.suggestion, MAX_TEXT_GRAPHEMES)) return invalid(`${label}的做法缺失或超出边界。`);
+    if (!boundedText(candidate.basis, MAX_TEXT_GRAPHEMES)) return invalid(`${label}的依据缺失或超出边界。`);
     items.push({ suggestion: candidate.suggestion, basis: candidate.basis });
   }
   const result: RunReportReflectionResult = { schema: RUN_REPORT_REFLECTION_RESULT_SCHEMA, items };

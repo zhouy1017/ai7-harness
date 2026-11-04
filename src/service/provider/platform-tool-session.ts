@@ -532,7 +532,7 @@ export class PlatformToolSession implements PlatformToolOwner {
       };
       try {
         const settled = await this.#settle({ kind: 'search-call', purpose: this.#purpose, argumentsDigest: sent.argumentsDigest, host: sent.host, origin: target.origin },
-          { authorize: () => authorizeSearchCall({ ticket: sent, book: target.book, arguments: args }), send: (authorized) => sendSearchCall(authorized, fetch, call.signal, credentialed) }, target.backend);
+          { authorize: () => authorizeSearchCall({ ticket: sent, book: target.book, arguments: args }), send: (authorized) => sendSearchCall(authorized, fetch, call.signal, credentialed === undefined ? undefined : { ...credentialed, model: target.binding.model }) }, target.backend);
         if (settled.replayed) target.book.revoke(sent);
         last = { settled };
         if (settled.snapshot !== null) {
@@ -622,7 +622,7 @@ export class PlatformToolSession implements PlatformToolOwner {
           { kind: 'search-call', purpose: this.#purpose, argumentsDigest: decision.ticket.argumentsDigest, host: decision.ticket.host, origin: this.#searchOrigin },
           {
             authorize: () => authorizeSearchCall({ ticket: decision.ticket, book: this.#book!, arguments: args }),
-            send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal, this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' }),
+            send: (authorized) => sendSearchCall(authorized, this.#fetch, call.signal, this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role', model: this.#binding.model }),
           });
         if (settled.replayed && this.#fallback === null) this.#book.revoke(decision.ticket);
         if (settled.snapshot === null) {

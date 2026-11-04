@@ -338,6 +338,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       technicalDetails(
         'analysis-facts',
         element('dt', undefined, '运行报告'), element('dd', 'technical-identity', `${report.schema} · 摘要 ${report.reportDigest} · 账目摘要 ${report.accountingDigest}`),
+        ...(report.ifRedone.state === 'closed' || report.ifRedone.parseFailure === undefined ? [] : [
+          element('dt', undefined, '反思解析诊断'), element('dd', 'technical-identity', `${report.ifRedone.parseFailure.code} · ${report.ifRedone.parseFailure.detail}`),
+        ]),
         element('dt', undefined, '绑定'), element('dd', 'technical-identity', `Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`),
         element('dt', undefined, '记录时刻'), element('dd', 'technical-identity', report.recordedAt),
         element('dt', undefined, '阶段时刻'), element('dd', 'technical-identity', report.stages.map((stage) => `${stage.stage} ${stage.startedAt ?? '—'} → ${stage.settledAt ?? '—'} · ${stage.wallMs ?? '—'} ms`).join('；')),
@@ -530,6 +533,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
             : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
           ...(unit.state === 'gap' && unit.originalTextChanged ? [element('dt', undefined, '原请求'), element('dd', undefined, '原文已修改，原请求无法再核对')] : []),
+          ...(unit.state !== 'gap' || unit.gap.parseFailure === undefined ? [] : [
+            element('dt', undefined, '解析诊断'), element('dd', 'technical-identity', `${unit.gap.parseFailure.code} · ${unit.gap.parseFailure.detail}`),
+          ]),
           element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
           ...(unit.state !== 'closed' ? [] : [
             element('dt', undefined, '单元内计数'),
@@ -604,6 +610,12 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const technical = technicalDetails(
       'analysis-facts',
       element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
+      ...(revision.crossUnitReduction.parseFailure === undefined ? [] : [
+        element('dt', undefined, '归纳解析诊断'), element('dd', 'technical-identity', `${revision.crossUnitReduction.parseFailure.code} · ${revision.crossUnitReduction.parseFailure.detail}`),
+      ]),
+      ...(revision.assuranceSample.parseFailures ?? []).flatMap((failure) => [
+        element('dt', undefined, `抽检单元 ${failure.unitOrdinal} 解析诊断`), element('dd', 'technical-identity', `${failure.code} · ${failure.detail}`),
+      ]),
       element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
       element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
       element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', revision.digest),

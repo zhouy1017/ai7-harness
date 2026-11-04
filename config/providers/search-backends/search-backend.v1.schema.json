@@ -110,7 +110,7 @@
         "method": { "enum": ["GET", "POST", null] },
         "protocol": {
           "description": "The request and response shape, one per vendor interface AI7 implements an adapter for (slice 6b).",
-          "enum": ["bocha-web-search", "brave-web-search", "tinyfish-search", "parallel-search", "anthropic-messages-web-search", null]
+          "enum": ["bocha-web-search", "brave-web-search", "tinyfish-search", "parallel-search", "anthropic-messages-web-search", "openai-responses-web-search", null]
         },
         "evidence": { "$ref": "#/definitions/evidenceKey" }
       }

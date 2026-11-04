@@ -1,3 +1,20 @@
+export interface ModelResultSalvage {
+  readonly section: string;
+  /** Zero-based position in the model's section. */
+  readonly index: number;
+  readonly reason: string;
+}
+
+export interface SalvagedModelResult {
+  readonly salvaged?: ReadonlyArray<ModelResultSalvage>;
+}
+
+/** Parser diagnostics for technical details, separate from editor-facing gap wording. */
+export interface ModelResultParseFailure {
+  readonly code: string;
+  readonly detail: string;
+}
+
 import type { QuickStartBaselineAnalysisResult } from './series.js';
 import type {
   AnalysisReusePlanProjection,
@@ -191,7 +208,8 @@ export interface AnalysisCrossUnitFindingProjection {
  * run. The reduction forms no execution-span row of its own — the span table is unit-only — so this
  * is where its one attempt is recorded, transport facts included.
  */
-export interface AnalysisCrossUnitReductionProjection {
+export interface AnalysisCrossUnitReductionProjection extends SalvagedModelResult {
+  readonly parseFailure?: ModelResultParseFailure;
   state: 'closed' | 'gap' | 'not-run';
   /** The exact reason for a gap or for not running; `null` when the reduction closed. */
   reason: string | null;
@@ -241,6 +259,7 @@ export interface AnalysisAssuranceSamplePrecisionProjection {
  * and the revision's own findings and checked.
  */
 export interface AnalysisAssuranceSampleProjection {
+  readonly parseFailures?: ReadonlyArray<ModelResultParseFailure & { readonly unitOrdinal: number }>;
   state: 'closed' | 'closed-with-gaps' | 'gap' | 'not-run';
   /** The recorded seed the draw is reproducible from; `null` when no sample was drawn. */
   seed: string | null;
@@ -376,7 +395,7 @@ export interface RunReportSuggestionProjection {
  */
 export type RunReportIfRedoneProjection =
   | { state: 'closed'; items: ReadonlyArray<RunReportSuggestionProjection>; reason: null }
-  | { state: 'not-run' | 'policy-bounded' | 'gap'; items: readonly []; reason: string };
+  | { state: 'not-run' | 'policy-bounded' | 'gap'; items: readonly []; reason: string; parseFailure?: ModelResultParseFailure };
 
 /** The Run Report as it is recorded inside the Task Outcome, before its own digest is taken. */
 export interface RunReportRecordProjection {
@@ -429,6 +448,7 @@ export interface AnalysisUnresolvedProjection {
 }
 
 export interface AnalysisGapProjection {
+  readonly parseFailure?: ModelResultParseFailure;
   unitOrdinal: number;
   /**
    * Why the unit carries no result. The first five are things that went wrong or never happened in a

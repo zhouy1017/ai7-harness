@@ -235,7 +235,8 @@ async function main(args) {
       const executable = resolve(portable, 'app', 'AI7.exe');
       const report = run(executable, ['--self-check'], { env: selfCheckEnvironment(executable) });
       const check = JSON.parse(report.trim());
-      requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded');
+      requirePackage(check.channel === 'windows-portable' && check.writable === true && check.store_versions === 'readable' && check.keyringCarrier === 'loaded' &&
+        check.typography?.fontsCheck === true && check.typography?.bundledFacesLoaded === true);
       requirePackage(JSON.stringify(parseBuildIdentity(check.buildIdentity)) === JSON.stringify(identity));
       await writeFile(resolve(RELEASE, 'self-check.txt'), report);
       console.log('Packaged portable self-check: pass');

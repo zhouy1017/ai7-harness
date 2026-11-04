@@ -224,7 +224,7 @@ describe('更新计划 over the real store', () => {
       expect(edited.planRevision).toBeNull();
       expect(edited.actions).toEqual({ canPrepare: false, canAuthorize: true, canReconfirmPlan: false });
       expect(edited.executionPlan?.editorEdits).toEqual(BOTH);
-      expect(edited.planEnvelope?.boundary?.adaptable).toEqual([]);
+      expect(edited.planEnvelope?.boundary?.adaptable).toEqual([expect.objectContaining({ adaptationClass: 'contract-retry' })]);
       // The editor is the actor, recorded with the time (PLAN-011).
       const stored = withDatabase(true, (database) => database.prepare("SELECT trigger_kind, detected_at, canonical_json FROM analysis_plan_revisions WHERE task_intent_id = ?").get(taskIntentId) as Row);
       expect(stored.trigger_kind).toBe('plan-edit');
@@ -326,7 +326,7 @@ describe('更新计划 over the real store', () => {
       expect(reconfirmed.planVersion).toMatchObject({ ordinal: 3, edits: { removedSteps: ['assurance-sampling'], disallowedAdaptations: [] } });
       expect(reconfirmed.planVersion!.materialInputs.selectedRange).toEqual(rangeB);
       expect(reconfirmed.executionPlan?.editorEdits).toEqual({ removedSteps: ['assurance-sampling'], disallowedAdaptations: [] });
-      expect(reconfirmed.planEnvelope?.boundary?.adaptable.map((entry) => entry.adaptationClass)).toEqual(['safe-retry']);
+      expect(reconfirmed.planEnvelope?.boundary?.adaptable.map((entry) => entry.adaptationClass)).toEqual(['safe-retry', 'contract-retry']);
       // Version 3 was made by the reconfirmation, so it names no edit of its own; its items still read as left out.
       const shown = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: taskIntentId });
       expect(shown.edit).toEqual({ editable: true, reason: null, lastEdit: null, planEnvelopeDigest: reconfirmed.planEnvelope!.digest, budget: { ceiling: 'unset', settable: true, reason: null } });

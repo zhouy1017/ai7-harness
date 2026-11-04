@@ -1,4 +1,5 @@
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import * as liveAdmission from '../../src/service/analysis/live-kind-admission.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { Socket } from 'node:net';
 import { join } from 'node:path';
@@ -66,6 +67,7 @@ const PAGES: Record<string, { status: number; body: string }> = {
 type Relation = { sourceRef: string; relation: string; excerptRef: string | null; lineage: string | null };
 interface Scenario {
   claimStages?: boolean;
+  extractionAnswer?: 'recover' | 'invalid' | 'unknown';
   missingCredential?: 'model' | 'search';
   claimSearches?: number;
   pendingRound?: boolean;
@@ -135,6 +137,7 @@ async function setup(initial: Scenario): Promise<void> {
   store.factualReviewLedger.bindLaunch(launch);
   sends = { model: 0, search: 0, pages: [], toolSchemas: 0, runs: 0 };
   const usage = { prompt_tokens: 40, completion_tokens: 20 };
+  let firstExtraction = true;
   const answer = (message: Record<string, unknown>): Response => new Response(JSON.stringify({ model: DEVELOPER_LIVE_POLICY_BINDING.model,
     choices: [{ message: { reasoning_content: '合成推理通道。', ...message }, finish_reason: 'tool_calls' in message ? 'tool_calls' : 'stop' }], usage }), { status: 200 });
   const nativeFetch: typeof fetch = async (input, init) => {
@@ -156,6 +159,13 @@ async function setup(initial: Scenario): Promise<void> {
     const tools = body.messages.filter((message) => message.role === 'tool').length;
     const declared = (body.tools?.length ?? 0) > 0;
     if (header !== null) {
+      if (header.ordinal === 1 && initial.extractionAnswer !== undefined) {
+        if (initial.extractionAnswer === 'unknown') return new Response('data: {"choices":[{"index":0,"delta":{"content":"synthetic"}}]}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+        if (firstExtraction || initial.extractionAnswer === 'invalid') {
+          firstExtraction = false;
+          return answer({ content: 'plain text answer' });
+        }
+      }
       if (header.ordinal === 2) {
         scenario.atSecondUnit?.();
         if (scenario.secondUnit === 'clarification') return answer({ content: JSON.stringify({ question: '本范围按哪个重点处理？', options: ['人物', '事件'], freeTextAllowed: true }) });
@@ -514,7 +524,7 @@ describe('factual claim occurrence ledger', () => {
         let migrated: EditorialStore | undefined;
         try {
           migrated = await EditorialStore.open(migration.dataRoot, roots.codeRoot);
-          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 107, dataVersion: 1 });
+          expect(migrated.inspectDataVersion()).toMatchObject({ schemaRevision: 108, dataVersion: 1 });
           expect(migrated.inspectResearchEvidence({ bookId: book.bookId, after: null, staleAfterDays: null }).records.map((r) => r.evidenceId)).toEqual(rows().map((r) => r.evidence_id).reverse());
         } finally { migrated?.close(); await migration.dispose(); }
       }
@@ -752,6 +762,42 @@ describe('factual claim occurrence ledger', () => {
     const session = ledger.claimSession(results[0]!.runRecordId, 'web-verification', claims.claims[0]!.claimId)!;
     expect(ledger.claimAllowance(session.sessionId).search).toBe(0);
     expect(ledger.claimRounds(session.sessionId)).toMatchObject([{ state: 'closed' }]);
+  });
+
+  it.each(['recover', 'invalid', 'unknown'] as const)('retains claim extraction sends and retries only a completed not-json answer: %s', async (extractionAnswer) => {
+    await setup({ claimStages: true, extractionAnswer, relations: [] });
+    // Exercise the declared-retry execution seam; the current live policy remains review-category-only.
+    const original = liveAdmission.liveKindRule;
+    vi.spyOn(liveAdmission, 'liveKindRule').mockImplementation((...args) => {
+      const rule = original(...args);
+      return rule === null ? null : { ...rule, plusDeclaredContractRetryAdaptations: true };
+    });
+    const book = await newBook('断言抽取重试');
+    await review(book);
+    const projection = store.factualReviewLedger.inspect(book.bookId);
+    const runRecordId = projection.run!.runRecordId;
+    const ledger = store.factualReviewLedger.factualVerification;
+    const session = ledger.claimSession(runRecordId, 'claim-extraction', '1')!;
+    expect(ledger.claimAllowance(session.sessionId).model).toBe(0);
+    const retry = ledger.claimSession(runRecordId, 'claim-extraction', '1:contract-retry');
+    if (extractionAnswer === 'unknown') expect(retry).toBeNull();
+    else {
+      expect(retry!.sessionId).not.toBe(session.sessionId);
+      expect(retry!.sourceMessageDigest).toBe(session.sourceMessageDigest);
+      expect(ledger.claimAllowance(retry!.sessionId).model).toBe(0);
+    }
+    expect(projection.run!.adaptations!.filter((entry) => entry.unitOrdinal === 1).map((entry) => entry.adaptationClass))
+      .toEqual(extractionAnswer === 'unknown' ? [] : ['contract-retry']);
+    if (extractionAnswer !== 'unknown') {
+      expect(projection.run!.adaptations!.find((entry) => entry.unitOrdinal === 1)?.repetition).toBe('byte-identical');
+      expect(projection.taskOutcome!.report!.unitRows.find((row) => row.unitOrdinal === 1))
+        .toMatchObject({ attempts: 2, usage: { inputTokens: 80, outputTokens: 40 } });
+    }
+    expect(projection.resultSetRevision!.gaps.filter((gap) => gap.unitOrdinal === 1).map((gap) => gap.code))
+      .toEqual(extractionAnswer === 'recover' ? [] : [extractionAnswer === 'unknown' ? 'outcome-unknown' : 'contract-invalid']);
+    await reopen();
+    expect(store.factualReviewLedger.factualVerification.claimAllowance(session.sessionId).model).toBe(0);
+    if (retry !== null) expect(store.factualReviewLedger.factualVerification.claimAllowance(retry.sessionId).model).toBe(0);
   });
 
   it('keeps a pending first round and spends only the remaining claim allowance in the second', async () => {

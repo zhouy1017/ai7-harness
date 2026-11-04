@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-openai",
+  "service": "openai",
+  "displayName": "OpenAI 官方搜索",
+  "support": "supported",
+  "supportEvidence": "openai-web-search",
+  "request": {
+    "endpoint": "https://api.openai.com/v1/responses",
+    "method": "POST",
+    "protocol": "openai-responses-web-search",
+    "evidence": "openai-web-search"
+  },
+  "credential": {
+    "slot": "search-openai",
+    "developmentCredentialReference": "44d0a420-ddb3-4e65-9a2f-a2c00698c150",
+    "headerForm": "authorization-bearer",
+    "anthropicVersion": null,
+    "keyRequired": true,
+    "evidence": "openai-web-search"
+  },
+  "price": {
+    "amount": 10,
+    "currency": "USD",
+    "per": 1000,
+    "basis": "USD 10 per 1,000 web searches plus content tokens.",
+    "evidence": "openai-web-search"
+  },
+  "reachability": {
+    "note": "Official OpenAI API endpoint; account reachability has not been measured.",
+    "evidence": "openai-web-search"
+  },
+  "evidence": {
+    "openai-web-search": {
+      "kind": "vendor-documentation",
+      "source": "OpenAI Responses API web search documentation and pricing (Issue #1312).",
+      "readOn": "2026-11-04",
+      "note": "Responses API tools include web_search; results expose url_citation annotations and sources. Price is USD 10 / 1,000 searches plus content tokens. This backend is not live measured."
+    }
+  },
+  "openQuestions": [
+    "Candidate interface only: live latency and Chinese/international hit rate have not been measured."
+  ],
+  "notes": ["候选接口 · 未实测。"]
+}

@@ -1,9 +1,9 @@
+import { type SalvagedModelResult, graphemeCount, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from './canonical.js';
 import type {
   AnalysisAssuranceSampleStratumProjection,
   CoverageManifestProjection,
   CoverageManifestUnitProjection,
 } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 
 /**
@@ -43,14 +43,6 @@ const MAX_REASON_GRAPHEMES = 200;
 const MAX_DISPOSITIONS = 512;
 /** A decimal index for the baseline kind, a `fnd_…` identity for the factual kind; both fit this shape. */
 const REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/u;
-/** Graphemes, the unit every bound in the two existing contracts is already measured in. */
-const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
-
-function graphemeCount(text: string): number {
-  let count = 0;
-  for (const _segment of GRAPHEMES.segment(text)) count += 1;
-  return count;
-}
 
 /**
  * One sampleable finding, as the kind that owns it declares it. `unitOrdinal` is the unit the finding
@@ -70,7 +62,7 @@ export interface AssuranceSamplingDisposition {
   readonly reason: string;
 }
 
-export interface AssuranceSamplingResult {
+export interface AssuranceSamplingResult extends SalvagedModelResult {
   readonly schema: typeof ASSURANCE_SAMPLING_RESULT_SCHEMA;
   readonly dispositions: ReadonlyArray<AssuranceSamplingDisposition>;
 }
@@ -78,7 +70,7 @@ export interface AssuranceSamplingResult {
 export type AssuranceSamplingParseFailureCode = 'not-json' | 'schema-invalid' | 'ref-out-of-sample' | 'disposition-missing';
 
 export type AssuranceSamplingResultParse =
-  | { ok: true; result: AssuranceSamplingResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: AssuranceSamplingResult; canonicalJson: string; digest: string }
   | { ok: false; code: AssuranceSamplingParseFailureCode; detail: string };
 
 /**
@@ -292,8 +284,7 @@ export function parseAssuranceSamplingResult(
   text: string,
   expected: { readonly refs: ReadonlyArray<string> },
 ): AssuranceSamplingResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;

@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import type { FrozenWebToolsFallback } from './search-backends.js';
 import type { ProcedureDefinitionPin } from './procedures.js';
 import {
@@ -163,6 +164,7 @@ export type BaselineAnalysisRunState =
 
 export type BaselineAnalysisUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       /** The request digest of the model request that produced this result (the predecessor's for a reused unit). */

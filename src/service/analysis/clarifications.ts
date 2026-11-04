@@ -1,3 +1,4 @@
+import { stripModelJsonFence } from './canonical.js';
 import type { DatabaseSync } from 'node:sqlite';
 
 /**
@@ -175,7 +176,7 @@ export function clarificationGraphemes(text: string): number {
 /** Questions are a closed alternative to a unit result, never an extra field on one. */
 export function parseModelClarification(text: string): ModelClarificationQuestion | null {
   let value: unknown;
-  try { value = JSON.parse(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text) as unknown; } catch { return null; }
+  try { value = JSON.parse(stripModelJsonFence(text)) as unknown; } catch { return null; }
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);

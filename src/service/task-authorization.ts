@@ -457,13 +457,15 @@ export const DIALOGUE_LIVE_BINDING_SCHEMA_VERSION = 71;
  */
 export const MODEL_SERVICE_ROUTES_SCHEMA_VERSION = 72;
 export const MODEL_CLARIFICATION_SCHEMA_VERSION = 73;
-export const SEARCH_BACKEND_CONNECTIONS_SQL = `CREATE TABLE search_backend_connections (
+export const LEGACY_SEARCH_BACKEND_CONNECTIONS_SQL = `CREATE TABLE search_backend_connections (
   backend_id TEXT PRIMARY KEY CHECK(backend_id IN ('search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai')),
   credential_reference TEXT UNIQUE CHECK(credential_reference IS NULL OR length(credential_reference) = 36),
   credential_operation_state TEXT NOT NULL CHECK(credential_operation_state IN ('ready', 'missing', 'needs-attention')) CHECK(credential_reference IS NOT NULL OR credential_operation_state = 'missing'),
   selected INTEGER UNIQUE CHECK(selected IS NULL OR selected = 1),
   selected_at TEXT NOT NULL
 ) STRICT`;
+export const SEARCH_BACKEND_OVERRIDE_COLUMN = 'always_use_selected INTEGER NOT NULL DEFAULT 0 CHECK(always_use_selected IN (0, 1))';
+export const SEARCH_BACKEND_CONNECTIONS_SQL = LEGACY_SEARCH_BACKEND_CONNECTIONS_SQL.replace('\n) STRICT', `, ${SEARCH_BACKEND_OVERRIDE_COLUMN}\n) STRICT`);
 export const SEARCH_BACKEND_SCHEMA_VERSION = 74;
 /** Revision 75 (Issue #425, S70): the retained external evidence of research Runs — four append-only relations, nothing existing moved. */
 export const RESEARCH_EVIDENCE_SCHEMA_VERSION = 75;
@@ -543,7 +545,7 @@ export const SEARCH_BACKEND_FALLBACK_SQL = `CREATE TABLE search_backend_fallback
 ) STRICT`;
 /** Revision 105 (#1282): independent Fast model and cached account model metadata. */
 export const MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION = 105;
-export const LATEST_SCHEMA_VERSION = 107; // #1290: append-only resumed claim evidence summaries.
+export const LATEST_SCHEMA_VERSION = 108; // #1312: persist the editor's search source override.
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -3229,7 +3231,7 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
     db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
     return validateTaskAuthorizationSchema(db);
   }

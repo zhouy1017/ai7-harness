@@ -193,7 +193,7 @@ export const TYPOGRAPHY_BOUNDS = Object.freeze({
 
 /** The two presets' starting values (VIEW-005: a Chinese serif around 17 px, line height 1.9–2.0, 30–38 characters a line). */
 export const READING_PRESETS: Readonly<Record<ReadingPreset, Omit<ManuscriptTypography, 'preset'>>> = Object.freeze({
-  editing: Object.freeze({ fontFamily: 'serif', fontSize: 17, lineHeight: 1.9, columnWidth: 38, alignment: 'start' }),
+  editing: Object.freeze({ fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' }),
   reading: Object.freeze({ fontFamily: 'serif', fontSize: 18, lineHeight: 2, columnWidth: 32, alignment: 'justify' }),
 });
 

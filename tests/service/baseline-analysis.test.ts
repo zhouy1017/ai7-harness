@@ -730,7 +730,7 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
       // The Plan Boundary Split and the version ordinal are inside the canonical envelope.
       expect(prepared.planEnvelope?.planVersion).toBe(1);
       expect(prepared.planEnvelope?.boundary).toMatchObject({
-        adaptable: [{ adaptationClass: 'safe-retry', label: '安全重试' }],
+        adaptable: [{ adaptationClass: 'safe-retry', label: '安全重试' }, { adaptationClass: 'contract-retry' }],
         participation: { expected: false, statement: '预计无需中途参与' },
       });
       expect(prepared.planEnvelope?.boundary?.material.map((entry) => entry.field)).toEqual([
@@ -1708,3 +1708,38 @@ describe('baseline manuscript analysis over the real store on exact sample1', ()
     }
   }, 120_000);
 });
+
+
+it.each(['recovered', 'still-not-json', 'schema-invalid'] as const)('retries baseline not-json once, without retrying parsed invalid entries: %s (#1311 H1)', async (outcome) => {
+  const transient = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-transient-retry');
+  const entries = new Map(transient.entries);
+  const retried = [...entries.values()].find((entry) => entry.unitOrdinal === 5 && entry.attempt === null);
+  if (retried?.response.kind !== 'unit-result') throw new Error('Expected admitted baseline retry response');
+  entries.set(fixtureEntryKey(5, retried.requestDigest, 1), { ...retried, attempt: 1,
+    response: { ...retried.response, text: outcome === 'schema-invalid' ? '{}' : '{invalid' } });
+  if (outcome === 'still-not-json') entries.set(fixtureEntryKey(5, retried.requestDigest),
+    { ...retried, response: { ...retried.response, text: '{invalid' } });
+  const controlled = { ...transient, entries };
+  const store = await openWithRoute(roots.dataRoot, controlled);
+  const owner = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger,
+    launchPolicy, fixture: controlled, secretResolver: fakeSecretResolver() });
+  try {
+    const { bookId } = await importSample1Book(store, roots.codeRoot, 'L2 H1 契约重试');
+    recordMissingCredentialConnection(store, 'L2 主编辑连接');
+    const { settled } = await runToSettled(store, owner, bookId, null);
+    expect(settled.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.attemptIndex, entry.repetition]))
+      .toEqual(outcome === 'schema-invalid' ? [] : [['contract-retry', 2, 'byte-identical']]);
+    expect(settled.run!.attempt!.spans.filter((span) => span.unitOrdinal === 5).map((span) => span.attemptIndex))
+      .toEqual(outcome === 'schema-invalid' ? [1] : [1, 2]);
+    expect(settled.resultSetRevision!.gaps.filter((gap) => gap.unitOrdinal === 5)).toHaveLength(outcome === 'recovered' ? 0 : 1);
+    if (outcome !== 'recovered') {
+      const gap = settled.resultSetRevision!.gaps.find((gap) => gap.unitOrdinal === 5)!;
+      expect(gap.parseFailure).toMatchObject({ code: outcome === 'schema-invalid' ? 'schema-invalid' : 'not-json', detail: expect.any(String) });
+      expect(gap.parseFailure!.detail.length).toBeGreaterThan(0);
+      expect(gap.reason).not.toContain(gap.parseFailure!.detail);
+      const unit = settled.resultSetRevision!.units.find((unit) => unit.unitOrdinal === 5)!;
+      expect(unit.state === 'gap' && unit.gap.parseFailure).toEqual(gap.parseFailure);
+    }
+    store.markCleanShutdown();
+  } finally { await owner.dispose(); store.close(); }
+}, 300_000);

@@ -1,10 +1,10 @@
+import { type SalvagedModelResult, CONFIDENCE_LEVELS, stripModelJsonFence, boundedText, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type {
   AnalysisConflictProjection,
   AnalysisEntityKind,
   AnalysisSourceRangeProjection,
   CoverageManifestUnitProjection,
 } from '../../shared/protocol.js';
-import { BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 
@@ -23,7 +23,6 @@ export const BASELINE_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscript-analysis
 export const BASELINE_PROMPT_CONTRACT_V1_SCHEMA = 'ai7.baseline-manuscript-analysis.prompt-contract/1' as const;
 
 const ENTITY_KINDS: ReadonlyArray<AnalysisEntityKind> = ['person', 'place', 'organization', 'object', 'term', 'other'];
-const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;
 const MAX_ITEMS = 500;
 const MAX_SHORT_TEXT = 200;
 const MAX_LONG_TEXT = 4_000;
@@ -64,7 +63,7 @@ export interface UnitNote {
   readonly sourceRanges: ReadonlyArray<AnalysisSourceRangeProjection>;
 }
 
-export interface BaselineUnitResult {
+export interface BaselineUnitResult extends SalvagedModelResult {
   readonly schema: typeof BASELINE_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly synopsis: string;
@@ -80,11 +79,11 @@ export interface BaselineUnitResult {
 export type UnitResultParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'range-out-of-unit';
 
 export type UnitResultParse =
-  | { ok: true; result: BaselineUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: BaselineUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: UnitResultParseFailureCode; detail: string };
 
-function boundedText(value: unknown, maximum: number, allowEmpty = false): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.length <= maximum && (allowEmpty || value.trim().length > 0);
+function boundedStoredText(value: unknown, maximum: number, allowEmpty = false): value is string {
+  return typeof value === 'string' && value.length <= maximum && boundedText(value, maximum, allowEmpty);
 }
 
 function boundedList<T>(value: unknown, item: (candidate: unknown) => candidate is T): value is T[] {
@@ -101,15 +100,14 @@ function validSourceRange(value: unknown, blockIds: ReadonlySet<string>): value 
 }
 
 function validText(candidate: unknown): candidate is string {
-  return boundedText(candidate, MAX_SHORT_TEXT);
+  return boundedStoredText(candidate, MAX_SHORT_TEXT);
 }
 
 export function parseUnitResult(
   text: string,
   expected: { unitOrdinal: number; blockIds: ReadonlyArray<string> },
 ): UnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;
@@ -125,7 +123,7 @@ export function parseUnitResult(
   if (parsed.unitOrdinal !== expected.unitOrdinal) {
     return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(parsed.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
   }
-  if (!boundedText(parsed.synopsis, MAX_LONG_TEXT)) return invalid('结构概述缺失或超出边界。');
+  if (!boundedStoredText(parsed.synopsis, MAX_LONG_TEXT)) return invalid('结构概述缺失或超出边界。');
   if (!CONFIDENCE_LEVELS.includes(parsed.confidence as AnalysisConfidence)) return invalid('置信度不在闭合集合内。');
   const blockIds = new Set(expected.blockIds);
   let rangeOutOfUnit = false;
@@ -144,22 +142,22 @@ export function parseUnitResult(
   const validEntity = (candidate: unknown): candidate is UnitEntity =>
     isRecord(candidate) && hasExactKeys(candidate, ['name', 'kind', 'aliases', 'note', 'sourceRanges']) &&
     validText(candidate.name) && ENTITY_KINDS.includes(candidate.kind as AnalysisEntityKind) &&
-    boundedList(candidate.aliases, validText) && (candidate.note === null || boundedText(candidate.note, MAX_LONG_TEXT)) &&
+    boundedList(candidate.aliases, validText) && (candidate.note === null || boundedStoredText(candidate.note, MAX_LONG_TEXT)) &&
     ranges(candidate.sourceRanges);
   const validEvent = (candidate: unknown): candidate is UnitEvent =>
     isRecord(candidate) && hasExactKeys(candidate, ['ordinal', 'summary', 'chronology', 'participants', 'sourceRanges']) &&
-    Number.isSafeInteger(candidate.ordinal) && (candidate.ordinal as number) >= 1 && boundedText(candidate.summary, MAX_LONG_TEXT) &&
-    (candidate.chronology === null || boundedText(candidate.chronology, MAX_SHORT_TEXT)) &&
+    Number.isSafeInteger(candidate.ordinal) && (candidate.ordinal as number) >= 1 && boundedStoredText(candidate.summary, MAX_LONG_TEXT) &&
+    (candidate.chronology === null || boundedStoredText(candidate.chronology, MAX_SHORT_TEXT)) &&
     boundedList(candidate.participants, validText) && ranges(candidate.sourceRanges);
   const validRelationship = (candidate: unknown): candidate is UnitRelationship =>
     isRecord(candidate) && hasExactKeys(candidate, ['subject', 'object', 'relation', 'sourceRanges']) &&
     validText(candidate.subject) && validText(candidate.object) && validText(candidate.relation) && ranges(candidate.sourceRanges);
   const validClaim = (candidate: unknown): candidate is UnitSettingClaim =>
     isRecord(candidate) && hasExactKeys(candidate, ['subject', 'claim', 'sourceRanges']) &&
-    validText(candidate.subject) && boundedText(candidate.claim, MAX_LONG_TEXT) && ranges(candidate.sourceRanges);
+    validText(candidate.subject) && boundedStoredText(candidate.claim, MAX_LONG_TEXT) && ranges(candidate.sourceRanges);
   const validNote = (candidate: unknown): candidate is UnitNote =>
     isRecord(candidate) && hasExactKeys(candidate, ['description', 'sourceRanges']) &&
-    boundedText(candidate.description, MAX_LONG_TEXT) && ranges(candidate.sourceRanges);
+    boundedStoredText(candidate.description, MAX_LONG_TEXT) && ranges(candidate.sourceRanges);
   const sections: Array<[string, (candidate: unknown) => boolean, string]> = [
     ['entities', (value) => boundedList(value, validEntity), '实体/别名/术语'],
     ['events', (value) => boundedList(value, validEvent), '事件与时序'],

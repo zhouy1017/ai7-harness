@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import type { ProductionDocumentProjection } from './deliverables.js';
 import type {
   ReviewCategoryResultSetRevisionProjection,
@@ -62,6 +63,7 @@ export interface WritingRevisionUpdateProjection extends Omit<ReviewCategoryRevi
 
 export type WritingUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;
