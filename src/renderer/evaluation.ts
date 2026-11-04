@@ -250,8 +250,9 @@ export function evaluationMaterialsField(
       else selected.delete(item.materialId);
       repaint(item.materialId);
     });
-    label.append(input, el('span', undefined, `《${item.title}》 · ${taskMaterialSizeText(item)}`));
-    if (reason !== null) label.append(el('span', 'field-note', reason));
+    const name = el('span', undefined, `《${item.title}》 · ${taskMaterialSizeText(item)}`);
+    if (reason !== null) name.append(el('span', undefined, ' · '), el('span', undefined, reason));
+    label.append(input, name);
     fieldset.append(label);
   }
   if ((page.materials?.more ?? 0) > 0) fieldset.append(el('p', 'field-note', `另有 ${page.materials!.more} 份资料未列出。`));
@@ -358,13 +359,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     for (const entry of report.templates) {
       const item = el('li');
       item.dataset['template'] = entry.template;
-      item.append(el('span', 'readers-report-template', entry.label));
+      const template = el('span', 'readers-report-template', entry.label);
+      item.append(template);
       const row = el('div', 'button-row');
       const own = task !== null && task.template === entry.template;
       if (entry.draft !== null) {
         const draft = entry.draft;
         item.dataset['documentId'] = draft.document.documentId;
-        item.append(el('p', 'field-note readers-report-draft', readersReportDraftLine(draft)));
+        template.append(' · ', el('span', 'readers-report-draft', readersReportDraftLine(draft)));
         const open = action(READERS_REPORT_ACTIONS.openDraft, 'primary', 'open-draft', () => void openDraft(draft));
         open.dataset['readersReportAction'] = 'open-draft';
         open.disabled = busy;
@@ -382,7 +384,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         }
       } else if (entry.drafted !== null) {
         const drafted = entry.drafted;
-        item.append(el('p', 'field-note readers-report-drafted', readersReportDraftedLine(drafted)));
+        template.append(' · ', el('span', 'readers-report-drafted', readersReportDraftedLine(drafted)));
         const create = action(READERS_REPORT_ACTIONS.createDraft, 'primary', 'create-draft', () => void createDraft(drafted.revisionId));
         create.dataset['readersReportAction'] = 'create-draft';
         create.disabled = busy;
@@ -399,7 +401,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        item.append(el('p', 'field-note readers-report-reason', entry.prepare.reason));
+        template.append(' · ', el('span', 'readers-report-reason', entry.prepare.reason));
       }
       if (own && (task.state !== 'prepared' || reportBlocked)) {
         const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
@@ -580,7 +582,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const section = el('section', 'evaluation-market');
     const heading = el('h3', undefined, EVALUATION_MARKET_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', EVALUATION_MARKET_LEDE), el('p', 'field-note evaluation-market-basis', EVALUATION_MARKET_OFFLINE));
+    section.append(heading, el('p', 'field-note evaluation-market-basis', `${EVALUATION_MARKET_LEDE.replace(/。$/u, '')}；${EVALUATION_MARKET_OFFLINE.replace(/。$/u, '')}；${EVALUATION_COMPARABLES_NO_WEB}`));
     const market = record.initial?.market ?? null;
     section.dataset['marketAi7'] = String(market !== null);
     if (market === null) {
@@ -621,7 +623,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const more = evaluationComparablesMoreLine(page.market);
       if (more !== null) comparables.append(el('p', 'field-note', more));
     }
-    comparables.append(el('p', 'field-note evaluation-comparables-web', EVALUATION_COMPARABLES_NO_WEB));
     section.append(comparables);
     // 预测 · 低确定性 (EVAL-009, EVAL-010): a block of its own, never a promise.
     const prediction = el('div', 'evaluation-prediction');
@@ -662,11 +663,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const card = el('div', 'evaluation-rewrite-proposal');
       card.dataset['revisionId'] = proposal.revisionId;
       card.dataset['current'] = String(proposal.current);
-      card.append(el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal)));
-      const reading = el('p', 'field-note evaluation-rewrite-reading', evaluationRewriteReadingLine(proposal.reading));
+      const line = el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal));
+      const reading = el('span', 'evaluation-rewrite-reading', evaluationRewriteReadingLine(proposal.reading));
       reading.dataset['unitsRead'] = String(proposal.reading.unitsRead);
       reading.dataset['unitsTotal'] = String(proposal.reading.unitsTotal);
-      card.append(reading);
+      line.append(' · ', reading);
+      card.append(line);
       const list = el('dl', 'evaluation-rewrite-items');
       const pair = (label: string, before: string | null, after: string, itemId: string | null, evidence: NonNullable<typeof proposal>['items'][number]['evidence'], evidenceCount: number): void => {
         const value = el('dd');
@@ -1032,7 +1034,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.dataset['entries'] = String(record.entries);
     const heading = el('h3', undefined, evaluationHeading(record));
     heading.tabIndex = -1;
-    node.append(heading, el('p', 'field-note evaluation-revision', evaluationRevisionLine(record)));
+    heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
+    node.append(heading);
     // Which words are AI7's could not all be checked: they stay marked as AI7's, and the page says so (Issue #702 review).
     if (record.ai7WordsNotice !== null) node.append(el('p', 'field-note evaluation-ai7-words-notice', record.ai7WordsNotice));
     const finalized = evaluationFinalizedLine(record, localInstantLabel);
@@ -1074,8 +1077,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const content = record.content.items[index]!;
       const set = el('fieldset', 'evaluation-item');
       set.dataset['itemId'] = item.itemId;
-      set.append(el('legend', undefined, evaluationItemLegend(item)));
-      if (item.description) set.append(el('p', 'field-note evaluation-item-description', item.description));
+      const legend = el('legend', undefined, evaluationItemLegend(item));
+      if (item.description) legend.append(' · ', el('span', 'evaluation-item-description', item.description));
+      set.append(legend);
       const score = el('input');
       score.type = 'number';
       score.min = '0';
