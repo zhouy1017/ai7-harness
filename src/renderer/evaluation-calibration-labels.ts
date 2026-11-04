@@ -51,7 +51,7 @@ export function calibrationUnreadableLine(books: number): string | null {
 }
 export const PREDICTION_HEADING = '定价与首印预测';
 /** What turning it on would add (EVAL-014). */
-export const PREDICTION_ADDS = '打开后，评估的市场部分会给出定价与首印的预测区间，标注「预测 · 低确定性」；关闭时不预测。';
+export const PREDICTION_ADDS = '打开后在评估的市场部分显示预测区间并标注「预测 · 低确定性」；关闭时不预测。';
 export const PREDICTION_SWITCH = '启用定价与首印预测';
 export const ACTUALS_HEADING = '定价与首印实际数据';
 export const ACTUALS_EMPTY = '尚无已发稿图书，设为发稿版本后可在此录入定价和首印。';
