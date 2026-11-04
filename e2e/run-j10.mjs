@@ -524,6 +524,7 @@ async function waitForBar(renderer, expected, name, timeout = 60_000) {
     note: expected.notePrefix === undefined ? actual?.note === expected.note : typeof actual?.note === 'string' && actual.note.startsWith(expected.notePrefix),
     actions: JSON.stringify(actual?.actions) === JSON.stringify(expected.actions),
   };
+  if (!checks.status) requireJourney(false, `${name}-status-${actual?.status === null ? 'absent' : actual?.status === expected.pill ? 'same-as-pill' : 'other'}`);
   for (const [field, matches] of Object.entries(checks)) requireJourney(matches, `${name}-${field}`);
 }
 /**
