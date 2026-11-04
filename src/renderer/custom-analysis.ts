@@ -173,6 +173,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       panel.replaceChildren(empty);
       return;
     }
+    const firstAnswer = projection.dimensions.find((dimension) => dimension.book?.latest != null);
     const cards = projection.dimensions.map((dimension) => {
       const card = el('article', 'custom-dimension-card');
       card.dataset['dimensionId'] = dimension.dimensionId;
@@ -180,6 +181,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       const book = dimension.book;
       const heading = el('div', 'custom-dimension-heading');
       heading.append(el('h3', undefined, dimension.title));
+      if (dimension === firstAnswer) heading.append(el('span', 'custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE));
       if (book?.taskState != null) {
         const state = el('span', 'status-pill custom-task-state', book.taskState.stateLabel);
         state.dataset['taskState'] = book.taskState.state;
@@ -213,8 +215,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       }
       return card;
     });
-    const hasAnswers = projection.dimensions.some((dimension) => dimension.book?.latest != null);
-    panel.replaceChildren(...(hasAnswers ? [el('p', 'field-note custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE)] : []), ...cards);
+    panel.replaceChildren(...cards);
   };
 
   let refresh: ReturnType<typeof setTimeout> | null = null;
