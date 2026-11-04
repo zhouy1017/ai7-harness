@@ -151,7 +151,7 @@ function summaryOf(projection: MaintenanceCaseProjection): MaintenanceCaseSummar
 }
 
 function designationLabel(designation: PublicationVersionProjection): string {
-  return `第 ${designation.ordinal} 次 · 「${designation.milestoneLabel}」 · ${designation.revisionLabel} · ${designation.scope}`;
+  return `第 ${designation.ordinal} 次 · 「${designation.milestoneLabel}」${technicalWords(` · ${designation.revisionLabel}`)} · ${designation.scope}`;
 }
 
 export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceSurface {
