@@ -2327,16 +2327,11 @@ export class BaselineAnalysisStore {
    * written. `kind` reads another kind's revisions through this ledger, whose readings here are kind-generic.
    */
   unconfirmedOutcomesOf(bookId: string, kind: string = this.#definition.kind, includeEarlierText = false): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
-    // A kind none of whose revisions ever held such a gap has no range to walk for: the drawer reads this on every poll.
+    // Revision gaps and revisionless outcomes both contribute ranges to the same content-key walk.
     const held = this.#db.prepare(
       `SELECT 1 FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
        WHERE s.book_id = ? AND s.kind = ? AND instr(r.canonical_json, '"outcome-unknown"') > 0 LIMIT 1`,
     ).get(bookId, kind) !== undefined;
-    const rows = !held ? [] : this.#db.prepare(
-      `SELECT r.* FROM analysis_result_set_revisions r
-       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
-       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
-    ).all(bookId, kind) as SqlRow[];
     const outcomeOf = this.#db.prepare('SELECT classification, recorded_at FROM analysis_task_outcomes WHERE run_record_id = ?');
     const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
     const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
@@ -2368,6 +2363,11 @@ export class BaselineAnalysisStore {
         });
       }
     }
+    const rows = !held && outstanding.size === 0 ? [] : this.#db.prepare(
+      `SELECT r.* FROM analysis_result_set_revisions r
+       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
+    ).all(bookId, kind) as SqlRow[];
     for (const row of rows) {
       const record = parseCanonicalJson(asString(row.canonical_json));
       const unknown = isRecord(record) && Array.isArray(record.gaps)

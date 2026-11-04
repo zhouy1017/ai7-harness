@@ -736,7 +736,7 @@ describe('zero closed units (#1307)', () => {
     });
     launchPolicy = captured.policy;
     const run = await stoppedRun(store, captured.owner, 'L2 sample1 零闭合终态');
-    return { store, captured, ...run };
+    return { store, captured, ...run, setClosedUnits: (count: number) => { closedUnits = count; } };
   }
 
   it.each([0, 1])('classifies a run with %i closed units and retains unknown outcomes', async (closedUnits) => {
@@ -760,6 +760,33 @@ describe('zero closed units (#1307)', () => {
       const next = progress.projection!;
       expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: next.taskIntent!.taskIntentId }).resend?.units).toHaveLength(8 - closedUnits);
       expect(captured.requests.filter((request) => request.stage === 'units')).toHaveLength(8);
+      store.markCleanShutdown();
+    } finally { await captured.owner.dispose(); try { captured.assertMatched(); } finally { store.close(); } }
+  }, 300_000);
+
+  it.each([8, 3])('clears only the %i units successfully reread after a zero-closure failure', async (closedUnits) => {
+    const { store, captured, bookId, setClosedUnits } = await capturedRun(0);
+    try {
+      expect(store.inspectBaselineAnalysis(bookId, () => null).run?.state).toBe('failed');
+      expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toHaveLength(8);
+      setClosedUnits(closedUnits);
+      const prepared = prepare(store, bookId);
+      expect(store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: prepared.taskIntent!.taskIntentId }).resend?.units).toHaveLength(8);
+      captured.owner.admitAndDispatch(store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!);
+      await captured.owner.whenIdle();
+      const result = store.inspectBaselineAnalysis(bookId, () => null);
+      expect(result.run?.state).toBe(closedUnits === 8 ? 'completed' : 'completed-with-gaps');
+      expect(result.resultSetRevision?.coverage.unitsClosed).toBe(closedUnits);
+      const remaining = Array.from({ length: 8 - closedUnits }, (_, index) => closedUnits + index + 1);
+      expect(store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId).ranges.map((range) => range.unitOrdinal)).toEqual(remaining);
+      // This is the fact read by the background dispatcher's unconfirmedPending predicate.
+      expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId).length > 0).toBe(closedUnits < 8);
+      let next = store.createBaselineAnalysisPreparationWork(bookId, BASELINE_ANALYSIS_MODE_GOALS['reanalyze-book'],
+        { mode: 'reanalyze-book', selectedRange: null }, launchPolicy);
+      while (!next.done) next = store.advanceBaselineAnalysisPreparationWork(next.workId!);
+      const resend = store.inspectTaskPlan({ bookId, kind: 'baseline-analysis', ref: next.projection!.taskIntent!.taskIntentId }).resend;
+      if (closedUnits === 8) expect(resend).toBeNull();
+      else expect(resend?.units).toEqual(remaining);
       store.markCleanShutdown();
     } finally { await captured.owner.dispose(); try { captured.assertMatched(); } finally { store.close(); } }
   }, 300_000);
