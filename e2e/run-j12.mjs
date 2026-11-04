@@ -742,6 +742,22 @@ async function main() {
     // The live processing indicator (ADR 0096 §3, #1177) replaces the static 「本地处理 · 未联网」: this launch sends nothing.
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
+    // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');
+    await click(primary, '帮助', 'technical-mode-help');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
+    await clickSelector(primary, '.help-developer-mode input', 'technical-mode-off');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-off-reloaded');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
+    await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-restore-settings-ready');
+    await click(primary, '帮助', 'technical-mode-restore-help');
+    await clickSelector(primary, '.help-developer-mode input', 'technical-mode-on');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.documentElement.dataset.ai7ProductReady==='true'`, 'technical-mode-on-reloaded');
+
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');

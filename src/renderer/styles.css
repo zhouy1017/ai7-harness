@@ -2440,4 +2440,4 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 
 /* #1315: one development disclosure control; disabled technical content has no DOM payload. */
 [data-technical-layer][hidden], [data-technical-layer] > summary[hidden] { display: none !important; }
-.technical-layer-control { position: fixed; right: 1rem; bottom: 3rem; z-index: 90; padding: .6rem .8rem; background: var(--surface, #fbf9f4); border: 1px solid var(--border, #ddd4c8); border-radius: .4rem; }
+.technical-layer-control { position: fixed; right: 1rem; bottom: 3rem; z-index: 90; padding: .6rem .8rem; background: var(--surface); border: 1px solid var(--boundary); border-radius: .4rem; }
