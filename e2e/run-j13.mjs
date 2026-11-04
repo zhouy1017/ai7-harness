@@ -2028,7 +2028,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${seriesProcedureId}"] [data-procedure-action="versions"]`, 'series-procedure-versions');
     const seriesCard = (page) => page.procedures.find((card) => card.id === seriesProcedureId);
     const seriesPending = await readProcedures(renderer, (page) => seriesCard(page)?.versions.length === 1, 'series-procedure-listed');
-    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择。',
+    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择',
       'series-procedure-requirement', seriesCard(seriesPending).versions[0]);
     await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.state === 'enabled' && seriesCard(page)?.run === true, 'series-procedure-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'series-procedure-back');
