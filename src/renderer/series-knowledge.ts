@@ -589,7 +589,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (review.current !== null) identity.append(' · ', el('span', 'knowledge-review-superseded', knowledgeSupersededLine(review.current)));
       if (review.conflictLabel !== null) {
         const conflicts = el('div', 'knowledge-review-conflicts');
-        conflicts.append(el('p', 'attention-note knowledge-conflict-label', review.conflictLabel));
+        const conflictStatus = el('p', 'attention-note');
+        conflictStatus.append(el('span', 'knowledge-conflict-label', review.conflictLabel), ' · ', el('span', 'knowledge-conflicts-range',
+          `第 ${review.conflictsAfter + 1}–${review.conflictsAfter + review.conflicts.length} 处 / 共 ${review.conflictCount} 处冲突`));
+        conflicts.append(conflictStatus);
         const list = el('ul');
         for (const conflict of review.conflicts) {
           const line = el('li', undefined, conflict.line);
@@ -597,8 +600,6 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
           list.append(line);
         }
         conflicts.append(list);
-        conflicts.append(el('p', 'field-note knowledge-conflicts-range',
-          `第 ${review.conflictsAfter + 1}–${review.conflictsAfter + review.conflicts.length} 处 / 共 ${review.conflictCount} 处冲突`));
         const paging = el('div', 'button-row');
         if (review.conflictsNextAfter !== null) paging.append(action('更多冲突…', 'quiet', 'review-conflicts-next',
           () => void readReviewConflicts(review!.conflictsNextAfter!)));
@@ -617,16 +618,18 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
           paint('[data-knowledge-action="preserve"]');
         });
         keep.setAttribute('aria-pressed', String(preserved));
+        if (preserved) keep.append(' · ', el('span', 'knowledge-preserved-note', KNOWLEDGE_PRESERVED_NOTE));
         const close = action(KNOWLEDGE_CANCEL, 'secondary', 'review-cancel', () => closeReview());
         for (const button of [editButton, keep, close]) button.disabled = busy;
         choices.append(editButton, keep, close);
         conflicts.append(choices);
-        if (preserved) conflicts.append(el('p', 'field-note knowledge-preserved-note', KNOWLEDGE_PRESERVED_NOTE));
         box.append(conflicts);
       }
       if (edit !== null) box.append(draftForm(edit, 'edit'));
       const uses = el('fieldset', 'knowledge-reuse');
-      uses.append(el('legend', undefined, KNOWLEDGE_REUSE_LEGEND));
+      const reuseHeading = el('legend', undefined, KNOWLEDGE_REUSE_LEGEND);
+      reuseHeading.append(' · ', el('span', 'knowledge-promote-note', KNOWLEDGE_PROMOTE_NOTE));
+      uses.append(reuseHeading);
       for (const entry of review.reuseScopes) {
         const choice = el('label', 'knowledge-reuse-choice');
         const radio = el('input');
@@ -643,7 +646,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
         choice.append(radio, el('span', undefined, entry.label));
         uses.append(choice);
       }
-      box.append(uses, el('p', 'field-note knowledge-promote-note', KNOWLEDGE_PROMOTE_NOTE));
+      box.append(uses);
       const waits = knowledgePromoteWaits(review, reuse !== null, preserved);
       const buttons = el('div', 'button-row');
       const promote = action(review.actionLabel, 'primary', 'promote', () => void submitPromote());

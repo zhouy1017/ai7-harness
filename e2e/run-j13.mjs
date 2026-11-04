@@ -1154,7 +1154,7 @@ async function main() {
     requireJourney(stillWaits.review.promote[1] === true, 'knowledge-still-waits', stillWaits);
     await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-preserve');
     const kept = await readKnowledge(renderer, (read) => read.review?.preserved !== null && read.review?.preserved !== undefined, 'knowledge-preserved');
-    requireJourney(kept.review.preserved === '已选择保留已披露冲突：冲突会随这一版一起记录，不代表核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
+    requireJourney(kept.review.preserved === '冲突会一并记录，未经核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
       'knowledge-preserved-words', kept);
     await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-promote');
     await waitFor(renderer, `${status} === '书系知识已纳入'`, 'knowledge-promoted-status');
