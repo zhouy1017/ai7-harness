@@ -2313,7 +2313,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const procedureSelect = el('select');
     const versionSelect = el('select');
     procedureSelect.dataset['reviewField'] = 'procedure';
-    procedureSelect.append(new Option(SHEET_PROCEDURE_NONE, ''));
+    procedureSelect.append(new Option(state.procedures.length === 0 ? SHEET_PROCEDURE_NONE_ENABLED : SHEET_PROCEDURE_NONE, ''));
     // Each with the one version a new use takes and how much of it this Book can take (S31b; REUSE-053): said, never ruled out.
     for (const procedure of state.procedures) {
       const option = new Option(sheetProcedureOption(procedure), procedure.procedureId);
@@ -2327,7 +2327,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     procedureSelect.addEventListener('change', () => void chooseProcedure(state, procedureSelect.value));
     procedureLabel.append(el('span', undefined, SHEET_PROCEDURE_LABEL), procedureSelect);
     procedureField.append(procedureLabel);
-    if (state.procedures.length === 0) procedureField.append(el('p', 'field-note', SHEET_PROCEDURE_NONE_ENABLED));
     if (state.procedure !== null) {
       procedureField.dataset['procedureId'] = state.procedure.procedureId;
       if (state.procedure.resolved !== null) {

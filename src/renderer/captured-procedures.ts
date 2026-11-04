@@ -414,7 +414,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     select.dataset['procedureField'] = 'run-book';
     const reviewable = (books ?? []).filter((book) => book.manuscriptState === 'populated');
     for (const book of reviewable) select.append(new Option(`《${book.title}》`, book.bookId));
-    label.append(el('span', undefined, PROCEDURE_RUN_BOOK_LABEL), select);
+    const caption = el('span', undefined, PROCEDURE_RUN_BOOK_LABEL);
+    if (reviewable.length === 0) caption.append(' · 还没有导入了稿件的图书。');
+    label.append(caption, select);
     const go = button('打开新建审阅', 'primary', 'open-run', async () => {
       const book = reviewable.find((candidate) => candidate.bookId === select.value);
       if (book === undefined) return;
@@ -423,7 +425,6 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     });
     go.disabled = reviewable.length === 0;
     panel.append(label);
-    if (reviewable.length === 0) panel.append(el('p', 'field-note', '还没有导入了稿件的图书。'));
     panel.append(go);
     return panel;
   }

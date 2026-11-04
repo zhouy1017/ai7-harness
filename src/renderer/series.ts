@@ -494,7 +494,8 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
 
   const chooserNode = (): HTMLElement => {
     const box = el('fieldset', 'series-add-chooser');
-    box.append(el('legend', undefined, SERIES_ADD_LEGEND));
+    const heading = el('legend', undefined, SERIES_ADD_LEGEND);
+    box.append(heading);
     // 查找书名 first, so Tab from a chosen Book goes on to 查看影响.
     const searchRow = el('div', 'series-add-search');
     const searchLabel = el('label', 'series-field');
@@ -515,8 +516,8 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     searchRow.append(searchLabel, find);
     box.append(searchRow);
     const candidates = chooser?.candidates ?? null;
-    if (candidates === null) box.append(el('p', 'field-note', SERIES_STATUS.loading));
-    else if (candidates.length === 0) box.append(el('p', 'field-note series-add-no-match', (chooser?.text.trim() ?? '') === '' ? SERIES_ADD_NONE : SERIES_ADD_NO_MATCH));
+    if (candidates === null) heading.append(` · ${SERIES_STATUS.loading}`);
+    else if (candidates.length === 0) heading.append(' · ', el('span', 'series-add-no-match', (chooser?.text.trim() ?? '') === '' ? SERIES_ADD_NONE : SERIES_ADD_NO_MATCH));
     const visible = [...(candidates ?? [])];
     const selected = chooser?.selected;
     if (selected && !visible.some((entry) => entry.bookId === selected.bookId)) visible.push(selected);

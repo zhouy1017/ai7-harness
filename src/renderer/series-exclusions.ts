@@ -257,9 +257,10 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     box.append(kinds);
     if (open.kind !== null) {
       const targets = el('div', 'series-exclusion-targets');
-      targets.append(el('p', 'series-exclusion-targets-legend', EXCLUSIONS_TARGET_LEGEND));
-      if (open.targets === null) targets.append(el('p', 'field-note', EXCLUSIONS_STATUS.loading));
-      else if (open.targets.length === 0) targets.append(el('p', 'field-note series-exclusion-targets-none', EXCLUSIONS_TARGETS_NONE[open.kind]));
+      const heading = el('p', 'series-exclusion-targets-legend', EXCLUSIONS_TARGET_LEGEND);
+      if (open.targets === null) heading.append(` · ${EXCLUSIONS_STATUS.loading}`);
+      else if (open.targets.length === 0) heading.append(' · ', el('span', 'series-exclusion-targets-none', EXCLUSIONS_TARGETS_NONE[open.kind]));
+      targets.append(heading);
       const visible = [...(open.targets ?? [])];
       const selected = open.selected;
       if (selected !== null && !visible.some((entry) => entry.id === selected.id)) visible.push({ ...selected, excluded: false });
