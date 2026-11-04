@@ -1518,7 +1518,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
 .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { margin-top: 1.8em; line-height: 1.5; }
 .ProseMirror p { margin: 1em 0; text-indent: 2em; }
-.ProseMirror { text-justify: inter-ideograph; }
+.ProseMirror { text-justify: inter-character; text-justify: inter-ideograph; }
 .ProseMirror:focus, .ProseMirror:focus-visible { outline: none; }
 .ProseMirror h1, .ProseMirror h2, .ProseMirror h3, .ProseMirror h4, .ProseMirror h5, .ProseMirror h6 { font-family: "Noto Serif SC", serif; }
 /* A note block (Issue #1204): its label above, its words edited like a paragraph's. */
