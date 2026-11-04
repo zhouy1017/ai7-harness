@@ -726,7 +726,7 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:05.000Z'))).toBe(false);
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:11.000Z'))).toBe(true);
     expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
-    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
+    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('任务在上次关闭时未结束，目前没有运行；可以取消并重新准备。');
   });
 
   it('shows every governed unit and starts stale timing at that request admission (#1131)', () => {

@@ -1066,7 +1066,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
 
 export const TASK_PLAN_ACTIVITY_TITLE = '运行动态';
 /** A Run no execution of this service holds: AI7 closed while it ran, so nothing reports where it is. */
-export const TASK_PLAN_ACTIVITY_UNREPORTED = '这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。';
+export const TASK_PLAN_ACTIVITY_UNREPORTED = '任务在上次关闭时未结束，目前没有运行；可以取消并重新准备。';
 /** LIVE-003's words, kept as they are (ADR 0077): over this Run's own bar, the step says so and claims nothing more. */
 export const TASK_PLAN_ACTIVITY_STALE = '本步骤用时已超过通常水平';
 
