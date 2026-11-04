@@ -172,7 +172,11 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const proposalHeading = el('h3', undefined, `${PROPOSALS_SECTION_HEADING}${projection.proposalsTruncated ? ' · 仅列最近' : ''}`);
     proposals.append(proposalHeading);
     if (projection.proposals.length === 0) proposalHeading.append(' · ', el('span', 'developer-proposals-empty', PROPOSALS_EMPTY));
-    else proposals.append(el('p', 'field-note', PROPOSALS_SECTION_NOTE));
+    else {
+      const guidance = el('details');
+      guidance.append(el('summary', undefined, '开发建议如何使用'), el('p', undefined, PROPOSALS_SECTION_NOTE));
+      proposals.append(guidance);
+    }
     for (const proposal of projection.proposals) proposals.append(proposalCard(proposal, proposalVersions.get(proposal.proposalId) ?? null));
     host.replaceChildren(procedures, proposals);
   }

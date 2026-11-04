@@ -37,7 +37,9 @@ export function renderEvaluationProfiles(root: HTMLElement, projection: Evaluati
   root.replaceChildren();
   root.dataset['evaluationProfiles'] = String(projection.profiles.length);
   const active = projection.activeSha256 ?? projection.profiles[0]?.sha256;
-  root.append(el('p', 'field-note', PROFILE_PROSPECTIVE));
+  const versionHelp = el('details');
+  versionHelp.append(el('summary', undefined, '新版本如何生效'), el('p', undefined, PROFILE_PROSPECTIVE));
+  root.append(versionHelp);
   for (const profile of projection.profiles) {
     const card = el('article', 'evaluation-profile');
     card.dataset['profileId'] = profile.profileId;
@@ -109,7 +111,9 @@ function editForm(profile: EvaluationProfileProjection, save: (input: SaveEvalua
   const draft = initial.items.map((item) => ({ ...item }));
   const form = el('form', 'evaluation-profile-form');
   form.dataset['profileEdit'] = '';
-  form.append(el('h4', undefined, '新建评估方案版本'), el('p', 'field-note', PROFILE_CALIBRATION));
+  const calibrationHelp = el('details');
+  calibrationHelp.append(el('summary', undefined, '评分项修改如何影响校准'), el('p', undefined, PROFILE_CALIBRATION));
+  form.append(el('h4', undefined, '新建评估方案版本'), calibrationHelp);
   const fields = el('div', 'evaluation-profile-fields');
   const count = el('p', 'field-note');
   const refusal = el('p', 'attention-note');
