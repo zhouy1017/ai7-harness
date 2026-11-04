@@ -256,7 +256,7 @@ describe('Messages buffered client functions · synthetic profiles only', () => 
     const { adapter } = stubToolsAdapter([{ content: [{ type: 'text', text: 'partial' }], stop_reason: 'max_tokens' }]);
     const chunks = await collect(adapter.stream(toolPayload() as unknown as GenerateOptions));
     expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
-    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'max-tokens' } });
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
     expect(normalizeModelResponse(functionModel(), { content: [], stop_reason: 'end_turn' }, offered)).toMatchObject({ kind: 'empty-answer' });
     expect(normalizeModelResponse(functionModel(), { content: 'invalid' }, offered)).toMatchObject({ kind: 'malformed' });
   });

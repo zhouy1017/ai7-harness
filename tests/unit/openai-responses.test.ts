@@ -439,7 +439,8 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
     const chunks = await collect(instance.stream({ ...payload(), model: functionModel().model }));
     expect(chunks.some((chunk) => chunk.type === 'tool-call-delta')).toBe(false);
     expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: 'still an answer' });
-    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'max-tokens' } });
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    expect(instance.lastCanonicalResult).toMatchObject({ kind: 'answer', truncated: true });
   });
 
   it('refuses capability-none requests before ticket, credential or transport access', async () => {

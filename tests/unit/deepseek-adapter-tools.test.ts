@@ -116,7 +116,7 @@ describe('reading a request for tools', () => {
     const answer = await collect(productionAdapter(answered).stream(payload(DEEPSEEK_ROUTE, DEEPSEEK_MODEL) as unknown as GenerateOptions));
     expect(answer).toContainEqual({ type: 'text-delta', index: 0, text: 'retained' });
     expect(answer.some((chunk) => chunk.type === 'tool-call-delta')).toBe(false);
-    expect(answer.at(-1)).toEqual({ type: 'finish', reason: { kind: 'max-tokens' } });
+    expect(answer.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
   });
 });
 
