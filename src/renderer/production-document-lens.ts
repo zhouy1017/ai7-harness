@@ -86,8 +86,9 @@ export function renderDocumentLens(
   materials.append(el('h3', undefined, DOCUMENT_MATERIALS_HEADING));
   // How the material it was made from was read, for as long as the document exists (Issue #547).
   const notCarried = context.document.origin.marksNotCarried;
-  if (notCarried !== null && notCarried > 0) materials.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
-  materials.append(el('p', 'field-note document-materials-empty', DOCUMENT_MATERIALS_EMPTY));
+  const materialsState = el('p', 'field-note document-materials-empty', notCarried !== null && notCarried > 0 ? DOCUMENT_MATERIALS_EMPTY.replace(/。$/u, '') : DOCUMENT_MATERIALS_EMPTY);
+  if (notCarried !== null && notCarried > 0) materialsState.append('；', el('span', 'document-origin-marks', documentOriginMarksLine(notCarried)));
+  materials.append(materialsState);
   aside.append(el('p', 'section-label', DOCUMENT_LENS_LABEL), workflow.element, versions, materials);
   // The document as the service last answered, and the working digest the window holds now.
   let shown = context.document;
@@ -121,10 +122,9 @@ export function renderDocumentLens(
       for (const delivery of shown.deliveries) {
         const item = el('li');
         item.dataset['deliveryId'] = delivery.deliveryId;
-        item.append(
-          el('span', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt))),
-          el('span', 'field-note document-delivery-export', documentDeliveryExportLine(delivery)),
-        );
+        const record = el('span', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt)));
+        record.append(' · ', el('span', 'document-delivery-export', documentDeliveryExportLine(delivery)));
+        item.append(record);
         deliveries.append(item);
       }
       versions.append(deliveries);

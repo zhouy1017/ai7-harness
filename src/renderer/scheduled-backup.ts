@@ -69,6 +69,7 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     wrapper.append(input, el('span', undefined, SCHEDULED_BACKUP_SWITCH));
     const state = el('p', 'field-note scheduled-backup-state', scheduledBackupStateLine(projection));
     state.setAttribute('role', 'status');
+    if (projection.backingUp) state.append(' · ', el('span', 'scheduled-backup-running', SCHEDULED_BACKUP_RUNNING));
     const where = el('dl');
     where.append(el('dt', undefined, SCHEDULED_BACKUP_LOCATION), el('dd', 'scheduled-backup-location', projection.location));
     const list = el('ol');
@@ -80,7 +81,6 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     );
     const nodes: HTMLElement[] = [el('h3', undefined, SCHEDULED_BACKUP_HEADING), el('p', 'field-note', SCHEDULED_BACKUP_LEDE), wrapper, state];
     root.dataset['backingUp'] = String(projection.backingUp);
-    if (projection.backingUp) nodes.push(el('p', 'field-note scheduled-backup-running', SCHEDULED_BACKUP_RUNNING));
     if (projection.lastFailure !== null) {
       nodes.push(el('p', 'attention-note scheduled-backup-failure', scheduledBackupFailureLine(projection.lastFailure, instant)));
     }
