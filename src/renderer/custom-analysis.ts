@@ -328,16 +328,22 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
   const render = (): void => {
     section.replaceChildren(el('h3', undefined, CUSTOM_DIMENSIONS_HEADING), el('p', 'field-note', CUSTOM_DIMENSIONS_NOTE));
     const fixed = el('ul', 'custom-dimension-fixed');
-    for (const line of CUSTOM_DIMENSION_FIXED_LINES) fixed.append(el('li', 'field-note', line));
-    section.append(fixed);
+    for (const line of CUSTOM_DIMENSION_FIXED_LINES) fixed.append(el('li', undefined, line));
+    const fixedDetails = el('details');
+    fixedDetails.append(el('summary', undefined, '查看分析范围与输出'), fixed);
+    section.append(fixedDetails);
     if (projection === null) return;
     section.dataset['dimensionCount'] = String(projection.dimensions.length);
     if (editing === null) section.append(form(null));
-    else section.append(actionButton(CUSTOM_DIMENSION_NEW, 'secondary', 'new', () => {
-      editing = null;
-      render();
-    }));
-    if (projection.dimensions.length === 0) section.append(el('p', 'field-note custom-dimensions-empty', CUSTOM_DIMENSIONS_EMPTY));
+    else {
+      const actions = el('div', 'button-row');
+      if (projection.dimensions.length === 0) actions.append(el('span', 'custom-dimensions-empty', CUSTOM_DIMENSIONS_EMPTY));
+      actions.append(actionButton(CUSTOM_DIMENSION_NEW, 'secondary', 'new', () => {
+        editing = null;
+        render();
+      }));
+      section.append(actions);
+    }
     for (const dimension of projection.dimensions) {
       const card = el('article', 'custom-dimension-card');
       card.dataset['dimensionId'] = dimension.dimensionId;
