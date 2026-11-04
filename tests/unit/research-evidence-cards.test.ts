@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { findingEvidenceList } from '../../src/renderer/research-evidence.js';
-import { readFindingSources } from '../../src/renderer/research-evidence-labels.js';
+import { readFindingSources, SOURCE_TRANSLATION_MACHINE } from '../../src/renderer/research-evidence-labels.js';
 import { findingEvidenceSources } from '../../src/shared/report-wording.js';
+import { SOURCE_TRANSLATION_LABEL } from '../../src/shared/protocol.js';
 import type {
   EvidenceSourceCardProjection,
   EvidenceWorkspaceProjection,
@@ -60,7 +61,7 @@ describe('a factual finding’s sources on its card', () => {
     expect(items[0]!.querySelector('.finding-evidence-url')?.textContent).toBe('https://example.org/vessel');
     expect(items[0]!.querySelector('.finding-evidence-note')?.textContent).toBe('已精确取文 · 支持');
     expect(items[0]!.querySelector('.finding-evidence-snippet')?.textContent).toBe('现藏湖北省博物馆');
-    expect(items[0]!.querySelector('.finding-evidence-translation figcaption')?.textContent).toBe('来源译文');
+    expect(items[0]!.querySelector('.finding-evidence-translation figcaption')?.textContent).toBe(`${SOURCE_TRANSLATION_LABEL} · ${SOURCE_TRANSLATION_MACHINE}`);
     for (const absent of ['.finding-evidence-snippet', '.finding-evidence-translation', '[data-evidence-action]']) expect(items[1]!.querySelector(absent)).toBeNull();
     expect(items[0]!.querySelector('[data-evidence-action]')).not.toBeNull();
     (items[0]!.querySelector('[data-evidence-action="open-source"]') as HTMLButtonElement).click();

@@ -22,16 +22,13 @@ import {
   COLUMN_WIDTH_LABEL,
   DENSITY_CHOICES,
   DENSITY_LEGEND,
-  FONT_FALLBACK_NOTE,
   FONT_FAMILY_CHOICES,
   FONT_FAMILY_LABEL,
   FONT_SIZE_LABEL,
   LINE_HEIGHT_LABEL,
   PRESET_CHOICES,
   PRESET_LEGEND,
-  PRESET_NOTE,
   REGIONS_LEGEND,
-  REGIONS_NOTE,
   REGION_NAMES,
   RESTORED_DEFAULT_LAYOUT,
   RESTORE_DEFAULT_LAYOUT,
@@ -336,14 +333,13 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
       input.dataset[name === 'view-density' ? 'viewDensity' : name === 'view-preset' ? 'viewPreset' : 'viewAlignment'] = choice.value;
       input.addEventListener('change', () => { if (input.checked) choose(choice.value); });
       inputs.push(input);
-      label.append(input, el('strong', undefined, choice.label), ...(choice.description === undefined ? [] : [el('span', 'field-note', choice.description)]));
+      label.append(input, el('strong', undefined, choice.label));
       set.append(label);
     }
     return { set, inputs };
   };
   const density = radios(DENSITY_LEGEND, 'view-density', DENSITY_CHOICES, (value) => saved(view.setDensity(value)));
-  const preset = radios(PRESET_LEGEND, 'view-preset', PRESET_CHOICES, (value) => saved(view.choosePreset(value)));
-  preset.set.append(el('p', 'field-note', PRESET_NOTE));
+  const preset = radios(`${PRESET_LEGEND} · 选择会重置排版`, 'view-preset', PRESET_CHOICES, (value) => saved(view.choosePreset(value)));
 
   const typography = el('fieldset', 'appearance-choices view-typography');
   typography.append(el('legend', undefined, TYPOGRAPHY_LEGEND));
@@ -380,10 +376,10 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
   resetTypography.type = 'button';
   resetTypography.dataset['viewAction'] = 'reset-typography';
   resetTypography.addEventListener('click', () => saved(view.resetTypography(), TYPOGRAPHY_RESET_DONE));
-  typography.append(familyLabel, el('p', 'field-note', FONT_FALLBACK_NOTE), fontSize.label, lineHeight.label, columnWidth.label, alignment.set, resetTypography);
+  typography.append(familyLabel, fontSize.label, lineHeight.label, columnWidth.label, alignment.set, resetTypography);
 
   const regions = el('fieldset', 'appearance-choices view-regions');
-  regions.append(el('legend', undefined, REGIONS_LEGEND), el('p', 'field-note', REGIONS_NOTE));
+  regions.append(el('legend', undefined, `${REGIONS_LEGEND} · 在稿件旁拖动或用方向键调整，正文保留可用宽度`));
   const regionRows = (Object.keys(REGION_NAMES) as RegionKey[]).map((region) => {
     const row = el('p', 'view-region-row');
     row.dataset['viewRegion'] = region;

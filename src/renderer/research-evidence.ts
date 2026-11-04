@@ -70,7 +70,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
       const original = el('figure', 'research-evidence-original');
       original.append(el('figcaption', undefined, SOURCE_ORIGINAL_LABEL), el('blockquote', undefined, translation.original));
       const translated = el('figure', 'research-evidence-translated');
-      translated.append(el('figcaption', undefined, translation.label), el('blockquote', undefined, translation.text), el('p', 'field-note', translation.note));
+      translated.append(el('figcaption', undefined, `${translation.label} · ${translation.note}`), el('blockquote', undefined, translation.text));
       pair.append(original, translated);
       article.append(pair);
     } else if (record.passage !== null) {
@@ -186,7 +186,7 @@ export function findingEvidenceList(sources: ReadonlyArray<ReviewEvidenceSource>
     if (source.snippet !== null) item.append(el('blockquote', 'finding-evidence-snippet research-evidence-passage', source.snippet));
     if (source.translation !== null) {
       const translated = el('figure', 'finding-evidence-translation');
-      translated.append(el('figcaption', undefined, SOURCE_TRANSLATION_LABEL), el('blockquote', 'research-evidence-passage', source.translation), el('p', 'field-note', SOURCE_TRANSLATION_MACHINE));
+      translated.append(el('figcaption', undefined, `${SOURCE_TRANSLATION_LABEL} · ${SOURCE_TRANSLATION_MACHINE}`), el('blockquote', 'research-evidence-passage', source.translation));
       item.append(translated);
     }
     if (source.evidenceId !== null && openSource !== undefined) {
