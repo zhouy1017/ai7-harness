@@ -1165,6 +1165,7 @@ async function main() {
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-storage-failure');
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
     await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
+    await clickSelector(renderer, '#persistence-status .status-dismiss', 'mark-rail-storage-error-dismiss');
     await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
     // Hold the real committed storage completion, replace the editor, then release the old click.
     await renderer.evaluate(`(() => {
