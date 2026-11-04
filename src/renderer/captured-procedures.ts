@@ -161,17 +161,15 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   ): void {
     const procedures = el('section', 'knowledge-captured-procedures');
     procedures.dataset['procedureCount'] = String(projection.procedures.length);
-    if (!options.embeddedCatalog) procedures.append(el('h3', undefined, PROCEDURES_SECTION_HEADING));
-    else if (projection.procedures.length > 0) procedures.append(el('h4', undefined, '从运行保存的审阅工序'));
+    if (!options.embeddedCatalog) procedures.append(el('h3', undefined, `${PROCEDURES_SECTION_HEADING}${projection.proceduresTruncated ? ' · 仅列最近' : ''}`));
+    else if (projection.procedures.length > 0) procedures.append(el('h4', undefined, `从运行保存的审阅工序${projection.proceduresTruncated ? ' · 仅列最近' : ''}`));
     if (projection.procedures.length === 0 && !options.embeddedCatalog) procedures.append(el('p', 'field-note captured-procedures-empty', PROCEDURES_EMPTY));
     for (const procedure of projection.procedures) procedures.append(procedureCard(procedure, procedureVersions.get(procedure.procedureId) ?? null));
-    if (projection.proceduresTruncated) procedures.append(el('p', 'field-note', '只列出最近的可复用工序。'));
     const proposals = el('section', 'knowledge-developer-proposals');
     proposals.dataset['proposalCount'] = String(projection.proposals.length);
-    proposals.append(el('h3', undefined, PROPOSALS_SECTION_HEADING),
+    proposals.append(el('h3', undefined, `${PROPOSALS_SECTION_HEADING}${projection.proposalsTruncated ? ' · 仅列最近' : ''}`),
       el('p', `field-note${projection.proposals.length === 0 ? ' developer-proposals-empty' : ''}`, projection.proposals.length === 0 ? PROPOSALS_EMPTY : PROPOSALS_SECTION_NOTE));
     for (const proposal of projection.proposals) proposals.append(proposalCard(proposal, proposalVersions.get(proposal.proposalId) ?? null));
-    if (projection.proposalsTruncated) proposals.append(el('p', 'field-note', '只列出最近的开发建议。'));
     host.replaceChildren(procedures, proposals);
   }
 
@@ -343,20 +341,19 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const panel = el('section', 'captured-procedure-stop');
     panel.dataset['stopAfter'] = preview.afterVersion === null ? '' : String(preview.afterVersion);
     panel.dataset['stopVersionCount'] = String(preview.versionCount);
-    const heading = el('h5', undefined, procedureStopHeading(preview));
+    const heading = el('h5', undefined, `${procedureStopHeading(preview)}${preview.versionCount > preview.versions.length ? ` · ${procedureStopMoreVersionsLine(preview.versions.length, preview.versionCount)}` : ''}`);
     heading.tabIndex = -1;
     // The section is named by its heading (S31 review P3-6).
     heading.id = `procedure-stop-${preview.procedureId}-${preview.versionId ?? 'all'}`;
     panel.setAttribute('aria-labelledby', heading.id);
     panel.append(heading);
-    const runList = (runs: CapturedProcedureStopPreviewProjection['versions'][number]['prepared'], count: number, kind: string): HTMLElement => {
+    const runList = (runs: CapturedProcedureStopPreviewProjection['versions'][number]['prepared'], kind: string): HTMLElement => {
       const list = el('ul', `captured-procedure-stop-runs captured-procedure-stop-${kind}`);
       for (const run of runs) {
         const entry = el('li', undefined, procedureStopRunLine(run));
         entry.dataset['reviewRunId'] = run.reviewRunId;
         list.append(entry);
       }
-      if (count > runs.length) list.append(el('li', 'field-note', procedureStopMoreLine(runs.length, count)));
       return list;
     };
     const versions = el('ul', 'captured-procedure-stop-versions');
@@ -366,13 +363,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       entry.dataset['stopPrepared'] = String(version.preparedCount);
       entry.dataset['stopActive'] = String(version.activeCount);
       entry.append(el('p', undefined, procedureStopVersionLine(version)));
-      if (version.preparedCount > 0) entry.append(el('h6', undefined, PROCEDURE_STOP_PREPARED_HEADING), runList(version.prepared, version.preparedCount, 'prepared'));
-      if (version.activeCount > 0) entry.append(el('h6', undefined, PROCEDURE_STOP_ACTIVE_HEADING), runList(version.active, version.activeCount, 'active'));
+      if (version.preparedCount > 0) entry.append(el('h6', undefined, `${PROCEDURE_STOP_PREPARED_HEADING}${version.preparedCount > version.prepared.length ? ` · ${procedureStopMoreLine(version.prepared.length, version.preparedCount)}` : ''}`), runList(version.prepared, 'prepared'));
+      if (version.activeCount > 0) entry.append(el('h6', undefined, `${PROCEDURE_STOP_ACTIVE_HEADING}${version.activeCount > version.active.length ? ` · ${procedureStopMoreLine(version.active.length, version.activeCount)}` : ''}`), runList(version.active, 'active'));
       versions.append(entry);
-    }
-    // Versions beyond what one frame holds are stopped too, and counted (S31 review P2-2).
-    if (preview.versionCount > preview.versions.length) {
-      versions.append(el('li', 'field-note captured-procedure-stop-more', procedureStopMoreVersionsLine(preview.versions.length, preview.versionCount)));
     }
     const consequence = el('p', 'field-note');
     consequence.append(el('span', 'captured-procedure-stop-after', procedureStopAfterLine(preview.afterVersion).replace(/。$/u, '')), '；',
