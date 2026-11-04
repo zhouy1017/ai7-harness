@@ -1432,7 +1432,7 @@ async function main() {
       if(JSON.stringify(axes.map((axis)=>axis.querySelector('h5')?.textContent))!==${JSON.stringify(JSON.stringify(ANALYSIS_SENTENCE_HEADINGS))}) return false;
       const sentence=(axis)=>axes.find((item)=>item.dataset.analysisAxis===axis)?.querySelector('.analysis-axis-sentence')?.textContent??'';
       const technical=synopsis.querySelector('details.analysis-revision-technical');
-      if(!(technical instanceof HTMLDetailsElement) || technical.open) return false;
+      if(!(technical instanceof HTMLDetailsElement) || (technical.open && !technical.hidden)) return false;
       const decision=synopsis.cloneNode(true);
       for(const details of decision.querySelectorAll('details')) details.remove();
       return sentence('coverage')===${JSON.stringify(`全稿分成 ${revision.coverage.unitsTotal} 个阅读范围，已读完 ${revision.coverage.unitsClosed} 个；还有 ${revision.coverage.gapCount} 个没有读成，在「各章」里标为尚未分析。`)} &&
@@ -2316,7 +2316,7 @@ async function main() {
       const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
       const versions=card?.querySelector('details.analysis-plan-versions-technical');
       return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
-        !card.querySelector('.analysis-plan-boundary') && versions instanceof HTMLDetailsElement && !versions.open &&
+        !card.querySelector('.analysis-plan-boundary') && versions instanceof HTMLDetailsElement && (!versions.open || versions.hidden) &&
         versions.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
         !card.querySelector('.analysis-plan-drift-note') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"], [data-analysis-action="authorize"]') &&
         open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始';
