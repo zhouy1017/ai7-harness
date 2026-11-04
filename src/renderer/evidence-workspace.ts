@@ -308,10 +308,11 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderMatrix(): HTMLElement {
     const section = el('section', 'evidence-matrix');
     section.dataset['pinnedCount'] = String(pinned.length);
-    section.append(el('h6', undefined, EVIDENCE_MATRIX_HEADING));
+    const heading = el('h6', undefined, EVIDENCE_MATRIX_HEADING);
+    section.append(heading);
     const cards = pinned.map((id) => sources.find((card) => card.cardId === id)).filter((card): card is EvidenceSourceCardProjection => card !== undefined);
     if (cards.length < 2) {
-      section.append(el('p', 'field-note', EVIDENCE_MATRIX_HINT));
+      heading.append(` · ${EVIDENCE_MATRIX_HINT}`);
       return section;
     }
     const table = el('table', 'evidence-matrix-table');
@@ -390,9 +391,9 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderDecision(current: EvidenceWorkspaceProjection): HTMLElement {
     const section = el('section', 'evidence-decision');
     const titleId = uid('decision');
-    const title = el('h6', undefined, DECISION_HEADING);
+    const title = el('h6', undefined, `${DECISION_HEADING} · ${DECISION_NOTE}`);
     title.id = titleId;
-    section.append(title, el('p', 'field-note', DECISION_NOTE));
+    section.append(title);
     for (const recorded of current.decisions) {
       const line = el('p', 'evidence-decision-recorded', factDecisionLine(recorded));
       line.dataset['decisionId'] = recorded.decisionId;
@@ -553,7 +554,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     section.append(el('p', 'field-note', draft.scopeStatement));
     const group = el('fieldset', 'correction-variants');
     const name = uid('variant');
-    if (draft.variants.length === 0) group.append(el('p', 'field-note', CORRECTION_NO_VARIANTS));
+    group.append(el('legend', undefined, draft.variants.length === 0 ? `更正方案 · ${CORRECTION_NO_VARIANTS}` : '更正方案'));
     const choices: Array<{ id: string; label: string; text: string | null; rationale: string | null; lines: string[] }> = [
       ...draft.variants.map((variant, index) => ({ id: variant.variantId, label: `方案 ${index + 1}：${variant.text}`, text: variant.text, rationale: variant.rationale,
         lines: [variant.rationale, ...variant.unresolved.map((line) => `未解决：${line}`), ...variant.limitations.map((line) => `局限：${line}`)] })),
@@ -577,8 +578,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
         render();
       });
       const body = el('span', 'correction-variant-body');
-      body.append(el('span', undefined, choice.label));
-      if (choice.lines.length > 0) body.append(el('span', 'field-note', choice.lines.map((line) => line.replace(/。$/u, '')).join('；') + '。'));
+      const detail = choice.lines.length === 0 ? '' : ` · ${choice.lines.map((line) => line.replace(/。$/u, '')).join('；')}。`;
+      body.append(el('span', undefined, `${choice.label}${detail}`));
       label.append(input, body);
       group.append(label);
       const variant = draft.variants.find((entry) => entry.variantId === choice.id);
@@ -617,7 +618,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       section.append(field);
     }
     const ranges = el('fieldset', 'correction-ranges');
-    ranges.append(el('legend', undefined, CORRECTION_RANGES_HEADING), el('p', 'field-note', CORRECTION_RANGES_NOTE));
+    ranges.append(el('legend', undefined, `${CORRECTION_RANGES_HEADING} · ${CORRECTION_RANGES_NOTE}`));
     for (const range of draft.ranges) {
       const label = el('label', 'correction-range');
       const input = el('input');
