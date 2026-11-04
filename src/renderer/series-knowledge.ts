@@ -239,12 +239,12 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     node.dataset['itemId'] = item.itemId;
     const current = item.current;
     node.dataset['revision'] = String(current.ordinal);
-    const title = el('p', 'knowledge-item-title', knowledgeItemLine(item));
+    const title = el('span', 'knowledge-item-title', knowledgeItemLine(item));
     title.tabIndex = -1;
-    const context = el('p', 'field-note');
-    context.append(el('span', 'knowledge-item-provenance', knowledgeProvenanceLine(current.provenance).replace(/。$/u, '')), '；',
+    const context = el('p');
+    context.append(title, ' · ', el('span', 'knowledge-item-provenance', knowledgeProvenanceLine(current.provenance).replace(/。$/u, '')), '；',
       el('span', 'knowledge-item-reuse', knowledgeReuseLine(current)));
-    node.append(title, el('p', 'knowledge-item-content', current.content), context);
+    node.append(context, el('p', 'knowledge-item-content', current.content));
     const kept = knowledgeKeptConflictsLine(current.conflictCount);
     if (kept !== null) { context.append(' · ', el('span', 'knowledge-item-conflicts', kept)); node.append(conflictButton(item.itemId, current)); }
     const forItem = action(KNOWLEDGE_PROPOSE_FOR_ITEM, 'quiet', 'propose-item', () => {
