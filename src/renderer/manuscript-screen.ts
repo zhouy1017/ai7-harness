@@ -717,7 +717,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     });
   }
   if (saveMenu === undefined) options.setContextActions(chipHost);
-  if (entryNotice !== undefined) showTransientNotice(entryNotice);
 
   let currentWindow = initialWindow;
   if (!isDocument) {
@@ -2121,6 +2120,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // product never reaches an exit this surface can see, and the entry is what should answer then.
   void rememberEntryPosition();
   setStatus(`稿件窗口已打开；${initialWindow.position.label}。`);
+  if (entryNotice !== undefined) showTransientNotice(entryNotice);
   // 审阅's 回到原文 arrives at a finding's mark: its card opens as a click on it would.
   if (openMarkId !== undefined) void editorialMarks.openMark(openMarkId);
 
