@@ -2395,3 +2395,6 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 /* Keep one card surface. A grouping that contains cards is an unframed layout section. */
 .content :is([class*="-card"], .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset) { border-width: 1px; border-radius: 10px; box-shadow: none; }
 .content :is([class*="-card"], .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset):has(:is([class*="-card"], .review-section, .deliverables-publication, .global-attention-group, .appearance-choices, .choice, .model-service-flow fieldset)) { border: 0; border-radius: 0; box-shadow: none; background: transparent; padding: 0; }
+
+.context-actions .return-chip-host { margin: 0; min-width: 0; }
+.context-actions .return-chip { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

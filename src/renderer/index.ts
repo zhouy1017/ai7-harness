@@ -2642,8 +2642,7 @@ function showJudgedAnalysisItem(host: HTMLElement, itemKey: string): void {
 
 /**
  * ②B 审阅 as its own Book destination under 工作 (editor-surfaces §4, V2-UX-REV-001). The surface is
- * `review-workspace.ts`; this only routes to it and gives it the workbench's persistent way out, appended
- * last for the same reason ②A's is (LAYER-005). `focus` opens a named Review Run with one finding in
+ * `review-workspace.ts`; the sidebar provides the destination routes. `focus` opens a named Review Run with one finding in
  * view, which is how a Mark Card's 查看任务 arrives here.
  */
 function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus | null = null, procedureId: string | null = null): void {
@@ -2707,8 +2706,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
 
 /**
  * ⑥ 交付物 as its own Book destination under 工作, beside 审阅 (editor-surfaces §9, IA-006). The surface is
- * `deliverables.ts`; this only routes to it and gives it the workbench's persistent way out, appended last
- * so the sticky region stays on screen for the whole page (V2-UX-LAYER-005).
+ * `deliverables.ts`; destination navigation belongs to the sidebar.
  */
 /**
  * The dedicated Proposal review workspace (Issue #902, V2-UX-PROP-002): offered, never entered by itself. It takes the
@@ -2939,9 +2937,7 @@ function renderBookOverview(
   else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
   // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the
   // editor last was, and whether the edits are in the journal — above the Book's own identity and
-  // every record below. Its continuation action is `打开稿件`, the first action of the sticky
-  // `.workbench-actions` region, which V2-UX-LAYER-005 keeps on screen for the whole surface; the
-  // anchor therefore states the three readings and does not repeat the action's label beside them.
+  // every record below. Its continuation action sits with these manuscript readings.
   const anchor = overview.manuscriptAnchor;
   const guidance = element('section', 'onboarding-guidance');
   content.append(guidance);
@@ -3301,10 +3297,6 @@ function renderBookOverview(
     historyNavigation.append(next);
   }
   records.append(historyNavigation);
-  // The actions follow the record navigation so the sticky region stays pinned for the whole page: a
-  // sticky bar releases once its own flow position scrolls into view, so a mid-page one would be
-  // pushed off screen by the record list — exactly what V2-UX-LAYER-005 forbids. This is the slot
-  // `.commit-bar` occupies on the three review surfaces.
   content.append(records);
   (content.querySelector('.manuscript-anchor') ?? content).append(actions);
   appendRecoveryReturnAction(content, recoveryReturn);
@@ -4578,7 +4570,7 @@ function renderEditorWindow(
         await openEditorWindow(opened, bookTitle, recoveryAttentionId, undefined, openMarkId);
       });
     },
-    setContextActions: (content) => shell.setContextActions(content),
+    setContextActions: (...content) => shell.setContextActions(...content),
     setStatus, setCloseRisk, errorMessage: rendererErrorMessage, recentlyActivatedControl, awaitServiceJob,
     composerRangeOf, selectionTaskOffer, selectionProcedureOffer, prepareSelectionTask,
     renderEditorWindow, renderBookAnalysis, renderBookReview,

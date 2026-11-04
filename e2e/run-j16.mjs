@@ -454,7 +454,7 @@ async function cardAction(renderer, state, action, name) {
 }
 
 const blockInView = (blockId) => `document.querySelector('[data-screen="editor"] .ProseMirror [data-block-id=${JSON.stringify(blockId)}]') !== null`;
-const CHIP = `document.querySelector('[data-screen="editor"] .return-chip-host [data-return-chip]')`;
+const CHIP = `document.querySelector('#context-header .return-chip-host [data-return-chip]')`;
 /**
  * A window that presents no frames, as J-01 holds them: every animation frame asked for is kept, unrun, until RELEASE_FRAMES
  * restores the page's own and asks each kept one of it, in order; a kept frame cancelled meanwhile is dropped.
@@ -1135,7 +1135,7 @@ async function main() {
       rail.dispatchEvent(new Event('change'));
     })()`);
     // The real navigation sets its guard synchronously, before awaiting the window read.
-    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
+    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'chip-use');
     await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
     try {
       await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
@@ -1193,7 +1193,7 @@ async function main() {
     await waitForRailMarker(renderer, 'annotation', 'mark-rail-replacement-ready');
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-jump');
     await waitFor(renderer, `${blockInView(railTarget)} && ${CHIP}?.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'mark-rail-return-chip', 60_000);
-    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'mark-rail-return');
+    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'mark-rail-return');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-returned', 60_000);
     // A way out of 查看结果's window leaves the manuscript as its own ways out do (Issue #423 review): words typed a moment
     // before 在分析中打开 are written first, and the manuscript opened again from ②A holds them where they were typed.
@@ -1224,7 +1224,7 @@ async function main() {
     requireJourney(typeof rangeBlock === 'string' && rangeBlock.length > 0, 'analysis-range-block');
     await clickSelector(renderer, '[data-screen="book-analysis"] li.analysis-unit[data-analysis-unit="7"] [data-analysis-action="return-to-range"]', 'analysis-return-to-range');
     await waitFor(renderer, `${blockInView(rangeBlock)} && ${CHIP} !== null && ${CHIP}.dataset.returnChip === ${JSON.stringify(chip.blockId)}`, 'analysis-jumped', 60_000);
-    await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'analysis-chip-use');
+    await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'analysis-chip-use');
     await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'analysis-chip-used', 60_000);
 
     at('j14-panel-keyboard');
@@ -1757,7 +1757,7 @@ async function main() {
     // (a reimport re-identifies rewritten paragraphs), so the checks after the reimport tell a return place kept by the refused
     // jump from none (review P3-A).
     if (await renderer.evaluate(`${CHIP} !== null`)) {
-      await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
+      await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
       await waitFor(renderer, `${CHIP} === null && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
     }
     const composedInputs = resolve(runRoot, 'composed-inputs');
