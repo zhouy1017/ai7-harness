@@ -180,7 +180,6 @@ const DELIVERY_CUSTOM = '出版社发行部';
 const DELIVERY_EDIT = '〔交付后修订〕';
 const DOCUMENT_EXPORT_FILE = '新闻稿 · 版本 2.docx';
 const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
-const DELIVERY_UNSAVED = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
 const DELIVERY_CURRENT_TEXT = '现在的文字 · 交付时先保存为版本 3';
 // Issue #416 (S67a): 图书交付包 — prepared once with a purpose, again unchanged, and once more with a new purpose.
 const PACKAGE_PURPOSE = '交出版社存档';
@@ -1946,7 +1945,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const form = window.__j07.delivery('news-release');
       const versions = Array.from(form.querySelectorAll('input[name="delivery-version"]'));
-      return form.querySelector('.delivery-unsaved')?.textContent === ${JSON.stringify(DELIVERY_UNSAVED)} &&
+      return form.querySelector('.delivery-unsaved') === null &&
         JSON.stringify(versions.map((item) => item.value === 'current' ? item.closest('label')?.querySelector('span')?.textContent : (item.closest('label')?.querySelector('span')?.textContent ?? '').split(' · ')[0])) === ${JSON.stringify(JSON.stringify([DELIVERY_CURRENT_TEXT, '版本 2', '版本 1']))} &&
         Array.from(form.querySelectorAll('input[name="delivery-version"], input[name="delivery-recipient"]')).every((item) => !item.checked);
     })()`, 'redeliver-current-text-offered');
