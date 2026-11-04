@@ -311,7 +311,9 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     head.append(title, pill);
     const actions = el('div', 'button-row compact-actions task-card-actions');
     for (const entryAction of view.actions) actions.append(actionButton(entry, entryAction));
-    item.append(el('p', 'task-card-kind', view.kindLabel), head, el('p', 'task-card-reason', `${view.reason} · ${view.timeLine}`), actions);
+    const timing = el('p');
+    timing.append(el('span', 'task-card-reason', view.reason), ' · ', el('span', 'task-card-time', view.timeLine));
+    item.append(el('p', 'task-card-kind', view.kindLabel), head, timing, actions);
     return item;
   }
 
