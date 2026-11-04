@@ -1888,7 +1888,7 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
     return option('suggestions') === '转为 AI7 修订建议（推荐）' && option('accepted-baseline') === '直接并入正文（作为定稿基线）' &&
-      Array.from(controls.querySelectorAll('p')).some(line => line.textContent === ${JSON.stringify(previewLabel)}) &&
+      controls.querySelector('legend')?.textContent.includes(${JSON.stringify(previewLabel)}) &&
       controls.querySelector('[data-word-reading-availability]').textContent === ${JSON.stringify(readingReason)};
   })()`, 'word-preview-label-and-reading-reason');
   if (mode === 'accepted-baseline') {

@@ -100,7 +100,8 @@ export function createImportReview(options: ImportReviewOptions) {
     const projection = staged.wordTrackedChanges;
     if (projection === undefined) return { elements: [], choice: () => undefined, allowed: () => true, bind: () => undefined, setBusy: () => undefined };
     const group = element('fieldset'); group.dataset['wordImportControls'] = projection.compatibility;
-    group.append(element('legend', undefined, 'Word 修订导入方式'));
+    const groupHeading = element('legend', undefined, 'Word 修订导入方式');
+    group.append(groupHeading);
     if (projection.compatibility === 'unsupported') {
       group.append(element('p', undefined, `此文件含当前不支持的修订结构，不能作为首份稿件导入；定位到 ${projection.locationCount} 处，完整原始文件仍留在本机暂存中，来源材料继续按原有导入边界处理。`));
       const reasons = element('ul'); for (const code of projection.reasonCodes) reasons.append(element('li', undefined, wordIntakeRefusalLabel(code)));
@@ -113,7 +114,7 @@ export function createImportReview(options: ImportReviewOptions) {
       { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false };
     wordIntakeFormChoices.set(key, { ...selected });
     while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
-    group.append(element('p', 'field-note', `当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未选择稿件基线。`));
+    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未选择稿件基线。`);
     const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
@@ -126,10 +127,9 @@ export function createImportReview(options: ImportReviewOptions) {
     confirmation.dataset['wordAcceptedBaselineConfirmation'] = '';
     confirmationLabel.append(confirmation, element('span', undefined, '我确认以接受修订后的文字建立稿件基线，原始修订留在原文件中。'));
     const learningLabel = element('label', 'choice'); const learning = element('input'); learning.type = 'checkbox'; learning.dataset['wordLearnFromEdits'] = '';
-    learningLabel.append(learning, element('span', undefined, '允许按当前学习设置在本机保留原始修改对'));
+    learningLabel.append(learning, element('span', undefined, '允许按当前学习设置在本机保留原始修改对 · 关闭与排除优先，本次不创建编辑记忆、更新审阅偏好或调用模型。'));
     const notice = element('p', 'field-note'); notice.dataset['wordReadingAvailability'] = '';
-    group.append(confirmationLabel, learningLabel,
-      element('p', 'field-note', '全局关闭、本书排除和材料排除优先；本次导入不会创建编辑记忆、更新审阅偏好或调用模型。'), notice);
+    group.append(confirmationLabel, learningLabel, notice);
     let busy = false;
     const buttons: HTMLButtonElement[] = [];
     const allowed = (): boolean => projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'].usable &&
