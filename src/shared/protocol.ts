@@ -749,6 +749,9 @@ export const IPC_CHANNELS = {
   askGlobalAgent: 'ai7:global-agent:ask',
   prepareGlobalAgentTurn: 'ai7:global-agent:prepare',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
+  inspectTaskOverview: 'ai7:tasks:inspect-overview',
+  reorderQueuedRun: 'ai7:tasks:reorder-queued-run',
+  startQuickTasks: 'ai7:tasks:start-quick-tasks',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   askAboutSelection: 'ai7:j16:ask-about-selection',
   inspectDialogue: 'ai7:j16:inspect-dialogue',
@@ -4618,6 +4621,59 @@ export interface BookTasksProjection {
   running: boolean;
 }
 
+// ---- 任务总览 (Issue #1328, T1 rev 2) ---------------------------------------------------------------
+
+export type TaskOverviewGroupKey = 'running' | 'queued' | 'waiting' | 'paused' | 'recent';
+
+export interface TaskOverviewProgressProjection {
+  readonly done: number;
+  readonly total: number;
+  readonly currentUnitLabel: string | null;
+  readonly elapsedMs: number | null;
+  readonly modelWaiting: boolean;
+}
+
+export interface TaskOverviewItemProjection {
+  readonly itemId: string;
+  readonly bookId: string | null;
+  readonly bookTitle: string | null;
+  readonly taskKind: string;
+  readonly label: string;
+  readonly state: 'running' | 'queued' | 'waiting' | 'paused' | 'completed' | 'cancelled' | 'stopped';
+  readonly progress: TaskOverviewProgressProjection | null;
+  readonly queuePosition: number | null;
+  /** An estimate is deliberately absent until an owner can provide authoritative timing data. */
+  readonly eta: number | null;
+  readonly usage: { readonly calls: number; readonly elapsed: number } | null;
+  readonly nextAction: GlobalAttentionNextStep;
+  readonly runRecordId: string | null;
+  readonly target: GlobalAttentionTarget;
+}
+
+export interface TaskOverviewGroupProjection {
+  readonly key: TaskOverviewGroupKey;
+  readonly items: ReadonlyArray<TaskOverviewItemProjection>;
+  readonly total: number;
+}
+
+export interface TaskOverviewProjection {
+  readonly groups: ReadonlyArray<TaskOverviewGroupProjection>;
+  readonly capacity: number;
+  readonly runningCount: number;
+  readonly queuedCount: number;
+  readonly actionableCount: number;
+}
+
+export interface StartQuickTasksInput {
+  readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string }>;
+}
+
+export interface StartQuickTasksResult {
+  readonly started: number;
+  readonly queued: number;
+  readonly results: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string; readonly state: 'started' | 'queued' | 'prepared' }>;
+}
+
 // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044, TASK-046) ---------------
 
 /** The longest question the editor may ask, in characters. */
@@ -6551,6 +6607,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * no Book, because it reads across them; it is a read and records nothing.
    */
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
+  inspectTaskOverview: { input: Record<string, never>; output: TaskOverviewProjection };
+  reorderQueuedRun: { input: { runRecordId: string; position: number }; output: TaskOverviewProjection };
+  startQuickTasks: { input: StartQuickTasksInput; output: StartQuickTasksResult };
   /** The Book's 任务 panel (Issue #423, plan slice S77a): a read of that Book's Tasks in the three groups. */
   inspectBookTasks: { input: { bookId: string }; output: BookTasksProjection };
   /**
@@ -7101,6 +7160,9 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
+  inspectTaskOverview(): Promise<TaskOverviewProjection>;
+  reorderQueuedRun(input: { runRecordId: string; position: number }): Promise<TaskOverviewProjection>;
+  startQuickTasks(input: StartQuickTasksInput): Promise<StartQuickTasksResult>;
   /** The 任务 panel of the Book this window shows (Issue #423, S77a): a read; it holds and grants nothing. */
   inspectBookTasks(): Promise<BookTasksProjection>;
   /** 就这段提问… on the Book this window shows (Issue #52, S17a): only the selected words and the question are sent. */

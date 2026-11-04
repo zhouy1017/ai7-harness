@@ -66,6 +66,7 @@ import type { FastRoleRequests } from './fast-role/fast-role-suggestions.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from './harness/session-log.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
+import { composeTaskOverview } from './task-overview.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import { proxyAwareFetch, probeProxy } from './provider/proxy-setting.js';
@@ -1578,6 +1579,23 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes),
       };
+    case 'inspectTaskOverview': {
+      const attention = await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes);
+      return { id: request.id, ok: true, op: request.op,
+        result: composeTaskOverview(attention, analysisExecution.capacity, (runRecordId) => analysisExecution.queuePosition(runRecordId)) };
+    }
+    case 'reorderQueuedRun':
+      analysisExecution.reorderQueuedRun(request.input.runRecordId, request.input.position);
+      {
+        const attention = await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes);
+        return { id: request.id, ok: true, op: request.op,
+          result: composeTaskOverview(attention, analysisExecution.capacity, (runRecordId) => analysisExecution.queuePosition(runRecordId)) };
+      }
+    case 'startQuickTasks':
+      // Preparation remains owned by each Book's existing quick-start surface. This command intentionally
+      // reports the requested batch without inventing plan or authorization records (Issue #1328).
+      return { id: request.id, ok: true, op: request.op,
+        result: { started: 0, queued: 0, results: request.input.tasks.map(({ bookId, procedureId }) => ({ bookId, procedureId, state: 'prepared' as const })) } };
     // 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014): no plan and no 开始任务 (the Owner, 2026-10-07) — asking records the
     // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or
     // not; a read joins the records to the Harness Session Ledger, and to what the answer in flight has streamed so far.

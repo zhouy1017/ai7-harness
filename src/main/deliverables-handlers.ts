@@ -510,6 +510,30 @@ export function registerProductionAndPackageHandlers(context: {
     }),
   );
 
+  ipcMain.handle(IPC_CHANNELS.inspectTaskOverview, (event) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('inspectTaskOverview', {});
+    }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.reorderQueuedRun, (event, input: ServiceOperationMap['reorderQueuedRun']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('reorderQueuedRun', input);
+    }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.startQuickTasks, (event, input: ServiceOperationMap['startQuickTasks']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('startQuickTasks', input);
+    }),
+  );
+
 }
 
 const requireProductionDocumentResultOfRoute = (

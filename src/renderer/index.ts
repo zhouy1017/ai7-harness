@@ -204,6 +204,7 @@ import { FIRST_RUN_CARD_LABELS, SAMPLE_GUIDANCE_LABELS } from './onboarding-labe
 import { SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRoute } from './shell-labels.js';
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
+import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -632,6 +633,7 @@ const agentWorkspaceReturns = new WeakMap<HTMLElement, () => void | Promise<void
 let proposalConflictSurface: ProposalConflictSurface | undefined;
 /** 待我处理 while it is on screen: it stops painting once the screen is replaced. */
 let globalAttentionSurface: GlobalAttentionSurface | undefined;
+let taskOverviewSurface: TaskOverviewSurface | undefined;
 /**
  * What leaving the surface on screen asks first when the shell's header leads away from it (Issue #424): the
  * manuscript settles its local edits and takes its position, and 稿件冲突 saves its draft, exactly as their own
@@ -694,7 +696,7 @@ function clickCommandEntry(selector: string): void {
 }
 
 commandDispatcher.register({
-  ...Object.fromEntries(['attention', 'library', 'series', 'knowledge', 'quality'].map((destination) =>
+  ...Object.fromEntries(['attention', 'tasks', 'library', 'series', 'knowledge', 'quality'].map((destination) =>
     [`nav.${destination}`, () => clickCommandEntry(`[data-nav-destination="${destination}"]`)])),
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
     [id, () => clickCommandEntry(`[data-nav-book-section="${section}"]`)])),
@@ -817,6 +819,7 @@ const shell = mountShell({
   openDestination: (destination) => {
     if (authorityInterrupted) return;
     if (destination === 'library') void leaveThen(() => returnToLibrary());
+    else if (destination === 'tasks') void leaveThen(async () => { renderTaskOverview(); });
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
     else if (destination === 'global-agent') void leaveThen(() => renderGlobalAgent());
     else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
@@ -848,6 +851,23 @@ const shell = mountShell({
     void leaveThen(async () => renderSettingsHub());
   },
 });
+
+// 任务's sidebar badge follows the same read-only projection as the page (Issue #1328).
+const taskNavigationBadge = element('span', 'task-navigation-badge');
+taskNavigationBadge.setAttribute('aria-hidden', 'true');
+const taskNavigationLink = document.querySelector<HTMLElement>('[data-nav-destination="tasks"]');
+if (taskNavigationLink !== null) {
+  taskNavigationLink.append(taskNavigationBadge);
+  const refreshTaskBadge = (): void => {
+    void window.ai7.inspectTaskOverview().then((projection) => {
+      const count = projection.runningCount + projection.queuedCount + projection.actionableCount;
+      taskNavigationBadge.textContent = count > 0 ? String(count) : '';
+      taskNavigationBadge.hidden = count === 0;
+    }, () => undefined);
+  };
+  taskNavigationBadge.hidden = true;
+  globalAttentionReader.subscribe((reading) => { if (reading.kind === 'projection') refreshTaskBadge(); });
+}
 
 /**
  * 帮助's sidebar entry (Issue #939, wave 11 slice 11f; Owner decision 27): slice 11a left the bottom slot beside 设置, and
@@ -1043,6 +1063,8 @@ function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | 
   proposalConflictSurface = undefined;
   globalAttentionSurface?.destroy();
   globalAttentionSurface = undefined;
+  taskOverviewSurface?.destroy();
+  taskOverviewSurface = undefined;
   keyboardSettingsOff?.();
   keyboardSettingsOff = undefined;
   leaveGuard = null;
@@ -1125,6 +1147,20 @@ function renderGlobalAttention(bookId?: string | null): void {
   globalAttentionSurface = surface;
   surface.start();
   setStatus(bookId === undefined ? GLOBAL_ATTENTION_STATUS_LINES.opened : NOTIFICATION_BOOK_LIST_LINE);
+}
+
+/** Global cross-Book task queue (Issue #1328): the page is a projection; records remain Book-owned. */
+function renderTaskOverview(): void {
+  const content = panel();
+  content.classList.add('task-overview');
+  const surface = mountTaskOverview({
+    root: content,
+    api: window.ai7,
+    setStatus,
+    openTarget: (item) => void openGlobalAttentionTarget(item.target),
+  });
+  replaceScreen('task-overview', content);
+  taskOverviewSurface = surface;
 }
 
 /**

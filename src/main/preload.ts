@@ -765,6 +765,12 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
+  inspectTaskOverview: () =>
+    invoke<ServiceOperationMap['inspectTaskOverview']['output']>(IPC_CHANNELS.inspectTaskOverview, {}),
+  reorderQueuedRun: (input: ServiceOperationMap['reorderQueuedRun']['input']) =>
+    invoke<ServiceOperationMap['reorderQueuedRun']['output']>(IPC_CHANNELS.reorderQueuedRun, input),
+  startQuickTasks: (input: ServiceOperationMap['startQuickTasks']['input']) =>
+    invoke<ServiceOperationMap['startQuickTasks']['output']>(IPC_CHANNELS.startQuickTasks, input),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['reviewManuscriptExport']>>>(IPC_CHANNELS.reviewManuscriptExport, input),
   chooseManuscriptExportDestination: (input: Parameters<RendererApi['chooseManuscriptExportDestination']>[0]) =>

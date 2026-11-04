@@ -126,6 +126,8 @@ button:focus-visible, input:focus-visible {
 /* The number is a word inside its own outline, never a coloured dot alone. */
 .global-attention-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7em; height: 1.7em; padding: 0 .45em; border: 2px solid currentColor; border-radius: 999px; background: var(--status-attention-surface); color: var(--status-attention); font-size: .85rem; font-weight: 800; }
 .global-attention-badge[hidden] { display: none; }
+.task-navigation-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 1.45em; height: 1.45em; margin-left: auto; padding: 0 .35em; border: 1px solid currentColor; border-radius: 999px; background: var(--status-attention-surface); color: var(--status-attention); font-size: .76rem; font-weight: 800; }
+.task-navigation-badge[hidden] { display: none; }
 
 /* The shell (Issue #934, wave 11 slice 11a; editor-surfaces §0.3): a two-level sidebar fixed on the left, the context
    header above the screen. The page makes room for the sidebar as it does for the Task Drawer on the right; below 760 px,
@@ -486,6 +488,32 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .global-attention-time { color: var(--text-subdued); font-size: .86rem; }
 .global-attention-reason, .global-attention-next { margin: 0; line-height: 1.6; }
 .global-attention-next { font-weight: 700; }
+.task-overview { display: grid; gap: 1rem; }
+.task-overview-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.task-overview-title { margin: 0; font-size: 1.55rem; }
+.task-overview-context { margin: -.5rem 0 0; color: var(--text-subdued); }
+.task-overview-filters { display: grid; gap: .55rem; }
+.task-overview-filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.task-overview-filter-label { min-width: 3rem; color: var(--text-subdued); font-weight: 700; }
+.task-overview-filter[aria-pressed="true"] { border-color: var(--action-text); background: var(--status-progress-surface); }
+.task-overview-groups { display: grid; gap: 1rem; }
+.task-overview-group { padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
+.task-overview-group-heading { margin: 0; font-size: 1.08rem; }
+.task-overview-empty { margin: .6rem 0 0; color: var(--text-subdued); }
+.task-overview-items { display: grid; gap: .6rem; margin-top: .7rem; }
+.task-overview-card { display: grid; gap: .3rem; padding: .7rem .85rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); cursor: pointer; }
+.task-overview-card:hover { border-color: var(--action-text); }
+.task-overview-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+.task-overview-book { font-family: var(--font-serif); }
+.task-overview-separator { color: var(--text-subdued); }
+.task-overview-state { margin-left: auto; }
+.task-overview-card-line { color: var(--text-subdued); font-size: .92rem; }
+.task-overview-progress { width: 100%; height: 6px; accent-color: var(--action-text); }
+.task-overview-card-actions { display: flex; gap: .35rem; justify-content: flex-end; }
+.task-overview-action-hint { color: var(--action-text); font-size: .86rem; }
+.task-overview-sheet-note { padding: 0 1.2rem; color: var(--text-subdued); }
+.task-overview-sheet-books { display: grid; gap: .5rem; padding: 0 1.2rem 1rem; }
+.task-overview-sheet-book { display: flex; gap: .5rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--boundary); border-radius: 8px; }
 .global-attention-title:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 /* ⑥ 交付物 (editor-surfaces §9): the 发稿 · 稿件 block in the analysis family's card. Its lists and its form
    wrap rather than scroll sideways, and the 发稿版本 mark, the current item and the change notice each speak

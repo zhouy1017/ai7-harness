@@ -987,6 +987,22 @@ export class BaselineAnalysisExecutionOwner {
     return index < 0 ? null : index + 1;
   }
 
+  /** Move one admitted-but-not-started Run inside the in-memory FIFO (Issue #1328). */
+  reorderQueuedRun(runRecordId: string, position: number): number {
+    if (!Number.isSafeInteger(position) || position < 1) {
+      throw new ExecutionAdmissionError('EXECUTION_QUEUE_POSITION_INVALID', '队列位置无效。');
+    }
+    const index = this.#queued.findIndex((entry) => entry.runRecordId === runRecordId);
+    if (index < 0) throw new ExecutionAdmissionError('EXECUTION_RUN_NOT_QUEUED', '这项任务已经开始或不在等待队列中。');
+    const target = Math.min(position, this.#queued.length) - 1;
+    if (target !== index) {
+      const [entry] = this.#queued.splice(index, 1);
+      this.#queued.splice(target, 0, entry!);
+      this.#changed();
+    }
+    return target + 1;
+  }
+
   /**
    * A start the editor just authorized (Issue #49, S14; CONC-007): admitted at once while the governor has a place and
    * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
