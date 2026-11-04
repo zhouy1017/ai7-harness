@@ -1129,12 +1129,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The Historically Affected Result Marker (SER-026): beside the Run, its report and its findings, never in place of them. */
   function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>, run: ReviewRunProjection): HTMLElement {
     const box = el('div', 'review-historical-marker');
-    box.append(el('p', 'review-historical-marker-label', `${marker.label} · ${marker.detail}`));
+    const markerLine = el('p');
+    markerLine.append(el('span', 'review-historical-marker-label', `${marker.label} · ${marker.detail}`));
+    box.append(markerLine);
     // The marker links to the later remediation (Issue #912; LAUD-008): when, the material in 学习回溯, and the way on without it.
     const remediation = marker.remediation;
     if (remediation !== undefined) {
       box.dataset['remediationMaterial'] = remediation.materialKey;
-      box.append(el('p', 'field-note review-marker-remediation', reviewMarkerRemediationLine(remediation.recordedAt, localInstantLabel)));
+      markerLine.append(' · ', el('span', 'review-marker-remediation', reviewMarkerRemediationLine(remediation.recordedAt, localInstantLabel)));
       const actions = el('div', 'button-row');
       if (options.openLearningLineage !== undefined) {
         actions.append(actionButton('influence-lineage', 'quiet', () => options.openLearningLineage!(remediation.bookId, remediation.materialKey, run.reviewRunId)));
@@ -2448,14 +2450,14 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const termsLabel = el('label', 'review-field'); const terms = el('textarea'); terms.dataset['localBookTerms'] = '';
     terms.value = tables.bookTerms.map((entry) => `${entry.kind}\t${entry.preferred}\t${entry.variants.join('|')}`).join('\n');
-    const termProblem = el('p', 'field-note'); let invalidTerms = false;
+    const termProblem = el('span'); termProblem.setAttribute('role', 'alert'); let invalidTerms = false;
     terms.addEventListener('input', () => {
       try { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, bookTerms: parseBookTerms(terms.value) } }; invalidTerms = false; termProblem.textContent = ''; }
       catch (error) { invalidTerms = true; termProblem.textContent = error instanceof Error ? error.message : '请核对本书词表。'; }
       updateSheet();
     });
-    termsLabel.append(el('span', undefined, '本书术语、人名与地名表：每行用制表符分隔类型、采用写法和异写，多种异写用 | 分隔；类型为 term/person/place，明确列出的异写可机械替换并随本次审阅保存。'), terms);
-    localOptions.append(termsLabel, termProblem);
+    termsLabel.append(el('span', undefined, '本书术语、人名与地名表：每行用制表符分隔类型、采用写法和异写，多种异写用 | 分隔；类型为 term/person/place，明确列出的异写可机械替换并随本次审阅保存。'), terms, termProblem);
+    localOptions.append(termsLabel);
     if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
       const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';
       const houseStatus = el('span', undefined, '本社自用词表：正在读取');
