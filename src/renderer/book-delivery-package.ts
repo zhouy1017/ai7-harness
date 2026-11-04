@@ -46,7 +46,6 @@ import {
   PACKAGE_LIMITATIONS_TRUNCATED,
   PACKAGE_PREPARE,
   PACKAGE_PREVIEW_HEADING,
-  PACKAGE_PURPOSE_HINT,
   PACKAGE_PURPOSE_LABEL,
   PACKAGE_PURPOSE_NEEDED,
   PACKAGE_STATUS_LINES,
@@ -349,10 +348,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     input.dataset['packageField'] = 'purpose';
     input.value = purpose;
     input.disabled = busy();
-    const hint = el('small', 'field-note', PACKAGE_PURPOSE_HINT);
-    hint.id = uid('purpose-hint');
-    input.setAttribute('aria-describedby', hint.id);
-    label.append(el('span', undefined, PACKAGE_PURPOSE_LABEL), input, hint);
+    input.placeholder = '例如：交出版社存档';
+    label.append(el('span', undefined, PACKAGE_PURPOSE_LABEL), input);
     form.append(label);
     const prepare = el('button', 'primary', PACKAGE_PREPARE);
     prepare.type = 'button';

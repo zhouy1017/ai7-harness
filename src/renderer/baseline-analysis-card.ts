@@ -1182,7 +1182,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     }
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
-      element('h3', undefined, '基线稿件分析'),
+      element('h3', undefined, '基线稿件分析 · 不修改稿件'),
       element('span', `status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the

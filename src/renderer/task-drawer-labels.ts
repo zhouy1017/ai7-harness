@@ -269,7 +269,7 @@ export function taskPlanEditAskFirst(label: string): string {
 
 /** The selector's words: what a level is and is not, said beside the three options of a 事实核查 Task's plan. */
 export const TASK_PLAN_ASSURANCE_HEADING = '证据保证级别';
-export const TASK_PLAN_ASSURANCE_NOTE = '级别决定这次核查做多少证据工作、能记录什么结论；它不是模型、服务或权限的选择。开始任务时如果本机未联网，会自动降为快速整理并在结果里说明。';
+export const TASK_PLAN_ASSURANCE_NOTE = '级别决定核查深度，开始时未联网会自动改为快速整理并在结果中说明。';
 export function taskPlanAssuranceEdited(label: string): string {
   return `改成${label}`;
 }
