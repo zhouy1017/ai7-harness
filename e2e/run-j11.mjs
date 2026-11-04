@@ -503,7 +503,7 @@ const READ_EVALUATION = `(() => {
         actions: Array.from(section.querySelectorAll('.evaluation-rewrite-start button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
         proposal: card === null ? null : {
           current: card.dataset.current ?? null,
-          line: card.querySelector('.evaluation-rewrite-proposal-line')?.textContent ?? null,
+          line: card.querySelector('.evaluation-rewrite-proposal-line')?.firstChild?.textContent ?? null,
           reading: card.querySelector('.evaluation-rewrite-reading')?.textContent ?? null,
           withheld: Array.from(card.querySelectorAll('.evaluation-rewrite-withheld'), (line) => line.textContent),
           evidence: Array.from(card.querySelectorAll('.evaluation-rewrite-items dd'), (value) => value.querySelectorAll('.evaluation-rewrite-evidence li').length),

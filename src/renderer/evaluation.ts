@@ -31,7 +31,6 @@ import {
   EVALUATION_ADJUSTMENT_NOTE,
   EVALUATION_ADJUSTMENT_REASON_LABELS,
   EVALUATION_AI7_HEADING,
-  EVALUATION_AI7_LEDE,
   EVALUATION_AI7_NONE,
   EVALUATION_AI7_OPEN_PLAN,
   EVALUATION_AI7_OPEN_TASK,
@@ -104,7 +103,6 @@ import {
   EVALUATION_REWRITE_BEFORE,
   EVALUATION_REWRITE_EMPTY,
   EVALUATION_REWRITE_HEADING,
-  EVALUATION_REWRITE_LEDE,
   EVALUATION_REWRITE_STALE,
   EVALUATION_REWRITE_STATUS,
   EVALUATION_REWRITE_VERDICT,
@@ -340,10 +338,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.dataset['readersReportState'] = report.task?.state ?? 'none';
     const heading = el('h3', undefined, READERS_REPORT_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', READERS_REPORT_LEDE));
+    const context = el('p', 'field-note', `${READERS_REPORT_LEDE.replace(/。$/u, '')}；`);
+    context.append(el('span', 'readers-report-exemplars', `${report.exemplars.statement.replace(/。$/u, '')}。`));
+    section.append(heading, context);
     const basis = readersReportBasisLine(report.basis);
     if (basis !== null) section.append(el('p', 'readers-report-basis', basis));
-    section.append(el('p', 'field-note readers-report-exemplars', `${report.exemplars.statement}。`));
     const task = report.task;
     if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
@@ -359,7 +358,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     for (const entry of report.templates) {
       const item = el('li');
       item.dataset['template'] = entry.template;
-      const template = el('span', 'readers-report-template', entry.label);
+      const template = el('p');
+      template.append(el('span', 'readers-report-template', entry.label));
       item.append(template);
       const row = el('div', 'button-row');
       const own = task !== null && task.template === entry.template;
@@ -498,7 +498,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
     const latest = initial.latest;
-    section.append(heading, el('p', latest === null ? 'field-note evaluation-initial-none' : 'field-note', latest === null ? EVALUATION_AI7_NONE : EVALUATION_AI7_LEDE));
+    section.append(heading);
+    if (latest === null) section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
     const initialBlocked = page.materialReferences?.blocked.initial === true;
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
     if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'field-note', initial.task.historicalMarker));
@@ -655,7 +656,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.dataset['rewriteState'] = rewrite.task?.state ?? 'none';
     const heading = el('h3', undefined, EVALUATION_REWRITE_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', EVALUATION_REWRITE_LEDE));
+    section.append(heading);
     const task = rewrite.task !== null && rewrite.task.recordId === record.recordId ? rewrite.task : null;
     if (task !== null) section.append(el('p', 'evaluation-rewrite-task', evaluationRewriteTaskLine(task)));
     const proposal = rewrite.proposal;
@@ -699,8 +700,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, [], 0);
       card.append(list);
       // What AI7 wrote but does not offer, and why: a 评语 or the 总评 that stated a score or a conclusion.
-      for (const reason of proposal.withheld) card.append(el('p', 'field-note evaluation-rewrite-withheld', reason));
-      if (!proposal.current) card.append(el('p', 'field-note evaluation-rewrite-stale', EVALUATION_REWRITE_STALE));
+      if (proposal.withheld.length > 0 || !proposal.current) {
+        const warnings = el('ul', 'evaluation-rewrite-warnings');
+        for (const reason of proposal.withheld) warnings.append(el('li', 'evaluation-rewrite-withheld', reason));
+        if (!proposal.current) warnings.append(el('li', 'evaluation-rewrite-stale', EVALUATION_REWRITE_STALE));
+        card.append(warnings);
+      }
       const actions = el('div', 'button-row evaluation-rewrite-actions');
       const accept = action(EVALUATION_REWRITE_ACTIONS.accept, 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
       accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null);
@@ -1036,13 +1041,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     heading.tabIndex = -1;
     heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
     node.append(heading);
-    // Which words are AI7's could not all be checked: they stay marked as AI7's, and the page says so (Issue #702 review).
-    if (record.ai7WordsNotice !== null) node.append(el('p', 'field-note evaluation-ai7-words-notice', record.ai7WordsNotice));
+    // Preserve the notices about attribution and damaged versions with the record they qualify.
+    const skipped = evaluationSkippedRecordsLine(record);
+    if (record.ai7WordsNotice !== null || skipped !== null) {
+      const notices = el('p', 'field-note');
+      if (record.ai7WordsNotice !== null) notices.append(el('span', 'evaluation-ai7-words-notice', skipped === null ? record.ai7WordsNotice : record.ai7WordsNotice.replace(/。$/u, '')));
+      if (skipped !== null) {
+        if (record.ai7WordsNotice !== null) notices.append('；');
+        notices.append(el('span', 'evaluation-skipped', skipped));
+      }
+      node.append(notices);
+    }
     const finalized = evaluationFinalizedLine(record, localInstantLabel);
     if (finalized !== null) node.append(el('p', 'evaluation-finalized', finalized));
-    // A version that skipped damaged versions when it began says so, in its own words (Issue #726).
-    const skipped = evaluationSkippedRecordsLine(record);
-    if (skipped !== null) node.append(el('p', 'field-note evaluation-skipped', skipped));
     const initial = record.initial;
     node.dataset['initial'] = String(initial !== null);
     node.dataset['calibrated'] = String(record.calibration !== null);
