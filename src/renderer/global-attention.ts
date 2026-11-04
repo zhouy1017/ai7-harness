@@ -123,6 +123,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
 }
 
 let identities = 0;
+// Reading is window-local view state; navigating away does not undo it or decide an item.
+const readAttentionItems = new Set<string>();
 function uid(prefix: string): string {
   identities += 1;
   return `global-attention-${prefix}-${identities}`;
@@ -188,7 +190,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   let unsubscribe: (() => void) | null = null;
   let focusHeading = true;
   const byItem = new Map<string, GlobalAttentionItemProjection>();
-  const readItems = new Set<string>();
+  const readItems = readAttentionItems;
 
   const heading = el('h2', 'global-attention-title', GLOBAL_ATTENTION_HEADING);
   heading.tabIndex = -1;
