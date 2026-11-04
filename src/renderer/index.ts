@@ -3799,7 +3799,8 @@ async function renderSeries(seriesId: string): Promise<void> {
   content.classList.add('series-screen');
   content.dataset['seriesId'] = seriesId;
   const heading = element('h2', undefined, SERIES_TITLE);
-  const note = element('p', 'field-note series-note');
+  const note = element('blockquote', 'series-note');
+  note.setAttribute('aria-label', '书系说明');
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button(SERIES_BACK_TO_LIST, 'quiet', () => void renderSeriesList(seriesId)));
@@ -4462,14 +4463,12 @@ function renderLanding(
   }
   if (priorWork.length > 0) {
     const recent = element('section', 'recent-work');
-    recent.append(element('p', 'section-label', '继续已有工作'), element('h3', undefined, '最近稿件'));
+    recent.append(element('h3', undefined, '最近稿件'));
     const list = element('div', 'recent-work-list');
     for (const item of priorWork) {
-      const open = button(
-        item.recoveryAttention
-          ? `${item.bookTitle} · 恢复待确认状态`
-          : `${item.bookTitle} · 当前稿件 ${item.revisionLabel}`,
-        'secondary', async () => {
+      const title = item.recoveryAttention ? `${item.bookTitle} · 恢复待确认状态` : `${item.bookTitle} · 当前稿件 ${item.revisionLabel}`;
+      const context = `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''}`;
+      const open = button(`${title} · ${context}`, 'secondary', async () => {
         open.disabled = true;
         setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
         try {
@@ -4491,13 +4490,6 @@ function renderLanding(
       row.append(
         open,
         ...(item.recoveryAttention ? [element('p', 'attention-note', '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。')] : []),
-        element(
-          'p',
-          'field-note',
-          `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${
-            item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''
-          }`,
-        ),
       );
       list.append(row);
     }
