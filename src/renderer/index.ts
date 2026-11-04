@@ -3767,6 +3767,11 @@ function renderBookCreationForm(): void {
 }
 
 function renderDiagnostics(): void {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const content = panel();
   mountDiagnostics(content, window.ai7, () => void returnToLibrary());
   replaceScreen('diagnostics', content);
@@ -3832,6 +3837,11 @@ async function renderSeries(seriesId: string): Promise<void> {
 }
 
 async function renderEvaluationCalibration(focusBookId: string | null): Promise<void> {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const content = panel();
   content.classList.add('evaluation-calibration-page');
   const host = element('div');
@@ -3908,6 +3918,11 @@ async function renderNotificationSettings(): Promise<void> {
  * No current-plan lookup can redirect this link to another Run or make an old Run inaccessible.
  */
 async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkProjection): Promise<void> {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const origin = screen.firstElementChild;
   try {
     const usage = await window.ai7.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: run.runRecordId });
@@ -3934,6 +3949,11 @@ async function openUsageRun(run: import('../shared/protocol.js').UsageRunLinkPro
 
 /** 设置 › 服务 › 用量 (Issue #936, plan slice 11c; V2-UX-MSET-010). */
 function renderUsage(): void {
+  if (!technicalLayerVisible) {
+    renderSettingsHub();
+    setStatus('该页在开发者模式下显示');
+    return;
+  }
   const content = panel();
   content.classList.add('usage-screen');
   content.append(element('p', 'section-label', USAGE_SECTION_LABEL), element('h2', undefined, USAGE_TITLE));
@@ -3990,19 +4010,24 @@ function renderSettingsHub(): void {
     keyboard: renderKeyboardSettings,
     notifications: () => void renderNotificationSettings(),
   };
+  let visibleRowCount = 0;
   for (const group of SETTINGS_HUB_GROUPS) {
+    const rows = group.rows.filter((row) => technicalLayerVisible || row.developerOnly !== true);
+    if (rows.length === 0) continue;
     const section = element('section', 'settings-group');
     section.dataset['settingsGroup'] = group.key;
     const heading = element('h3', undefined, group.label);
     heading.id = `settings-group-${group.key}`;
     section.setAttribute('aria-labelledby', heading.id);
     const list = element('ul', 'settings-rows');
-    for (const row of group.rows) {
+    for (const row of rows) {
+      visibleRowCount += 1;
       const item = element('li', 'settings-row');
       item.dataset['settingsEntry'] = row.route;
       const open = pages[row.route];
       const entry = button(row.label, 'secondary', () => open?.());
       entry.dataset['settingsRoute'] = row.route;
+      if (technicalLayerVisible && row.developerOnly === true) entry.dataset['developerOnly'] = 'true';
       const note = element('p', 'field-note', row.note);
       note.id = `settings-note-${row.route}`;
       entry.setAttribute('aria-describedby', note.id);
@@ -4020,7 +4045,8 @@ function renderSettingsHub(): void {
     section.append(heading, list);
     content.append(section);
   }
-  mountLearningAskFrequency(content, window.ai7);
+  content.dataset['settingsRowCount'] = String(visibleRowCount);
+  if (technicalLayerVisible) mountLearningAskFrequency(content, window.ai7);
   replaceScreen('settings', content);
   setStatus(SETTINGS_HUB_WORDS.opened);
 }

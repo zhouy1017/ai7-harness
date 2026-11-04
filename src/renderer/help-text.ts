@@ -6,7 +6,8 @@
 import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTINGS } from './shell-labels.js';
 import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import { TASK_BAR_START } from './task-drawer-labels.js';
-import { KNOWLEDGE_BASE_TAB_VIEWS } from './knowledge-base-labels.js';
+import { visibleKnowledgeBaseTabs } from './knowledge-base-labels.js';
+import { QUALITY_LEARNING_TABS } from './quality-learning-labels.js';
 import { MILESTONE_FORM_WORDS, PUBLICATION_ACTION_LABELS } from './deliverables-labels.js';
 
 export interface HelpSection {
@@ -23,7 +24,10 @@ function sectionLabel(key: string): string {
 }
 
 /** 使用帮助: seven short sections mirroring the destinations a reader works in. */
-export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
+export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSection> {
+  const knowledgeTabs = visibleKnowledgeBaseTabs(developerMode);
+  const settingsRows = SETTINGS_HUB_GROUPS.flatMap((group) => group.rows.filter((row) => developerMode || row.developerOnly !== true));
+  return Object.freeze([
   { heading: '书库与稿件导入', paragraphs: [
     `${destinationLabel('library')}是全部图书；点「新建图书」建空图书，点「导入稿件」导入文件。打开一本书会回到它上次的「${sectionLabel('manuscript')}」位置。`,
   ] },
@@ -37,15 +41,18 @@ export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([
     `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。`,
   ] },
   { heading: '知识库与工序', paragraphs: [
-    `${destinationLabel('knowledge')}七类：${KNOWLEDGE_BASE_TAB_VIEWS.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
+    `${destinationLabel('knowledge')}${developerMode ? '七类' : '分为三类'}：${knowledgeTabs.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
   ] },
   { heading: '书系', paragraphs: [
-    `${destinationLabel('series')}管理成员与共享范围、书系知识与检索排除；书系一致性审阅在成员图书的「${sectionLabel('review')}」里。`,
+    `${destinationLabel('series')}管理成员与共享范围、书系知识${developerMode ? '与检索排除' : ''}；书系一致性审阅在成员图书的「${sectionLabel('review')}」里。`,
   ] },
   { heading: '设置', paragraphs: [
-    `${SHELL_SETTINGS.label}分服务、编辑工作、本机三组：${SETTINGS_HUB_GROUPS.flatMap((group) => group.rows.map((row) => row.label)).join('、')}。`,
+    `${SHELL_SETTINGS.label}：${settingsRows.map((row) => row.label).join('、')}。质量与学习${developerMode ? `还包括「${QUALITY_LEARNING_TABS.slice(1).map((entry) => entry.label).join('、')}」` : `只显示「${QUALITY_LEARNING_TABS[0]!.label}」`}。`,
   ] },
-]);
+  ]);
+}
+
+export const HELP_USAGE_SECTIONS: ReadonlyArray<HelpSection> = helpUsageSections(true);
 
 /** 隐私说明: local-first by default, what may leave the machine and under which policy, and what never does. */
 export const HELP_PRIVACY_SECTIONS: ReadonlyArray<HelpSection> = Object.freeze([

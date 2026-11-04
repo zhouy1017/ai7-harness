@@ -749,6 +749,12 @@ async function main() {
     await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
     await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-off');
     await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && !document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'technical-mode-off-applied');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')?.dataset.settingsRowCount==='6' && document.querySelectorAll('[data-screen="settings"] [data-settings-entry]').length===6 && !document.querySelector('[data-settings-entry="usage"]') && !document.querySelector('[data-settings-entry="evaluation-calibration"]') && !document.querySelector('[data-settings-entry="diagnostics"]')`, 'ordinary-settings-six-rows');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]'), node=>node.textContent).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-tabs');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]').length===1 && document.querySelector('[data-screen="quality-learning"] [role="tab"]')?.textContent==='反馈历史'`, 'ordinary-quality-feedback-only');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
     await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');

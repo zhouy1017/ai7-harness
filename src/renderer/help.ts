@@ -8,7 +8,7 @@ import {
   HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LICENSE_TEXT_SUMMARY, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
   helpLicenseCount, type HelpTab,
 } from './help-labels.js';
-import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS, type HelpSection } from './help-text.js';
+import { HELP_PRIVACY_SECTIONS, helpUsageSections, type HelpSection } from './help-text.js';
 import { dataVersionStateLine } from './data-version-labels.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 
@@ -110,7 +110,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   usagePanel.tabIndex = 0;
   usagePanel.setAttribute('aria-labelledby', 'help-tab-usage');
   usagePanel.append(el('h3', undefined, HELP_TABS[0]!.label));
-  for (const section of HELP_USAGE_SECTIONS) usagePanel.append(helpSection(section));
+  for (const section of helpUsageSections(technicalLayerVisible)) usagePanel.append(helpSection(section));
 
   const privacyPanel = el('section', 'help-panel');
   privacyPanel.id = 'help-panel-privacy';
