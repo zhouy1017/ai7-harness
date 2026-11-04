@@ -2490,4 +2490,15 @@ button.btn.small, button.btn.sidebar-pin { min-height: 26px; }
 .state-term.export-status-unavailable::before, .state-term.status-unsupported::before { border-radius: 1px; background: currentColor; }
 
 .similar-materials textarea { box-sizing: border-box; width: 100%; padding: .4rem .6rem; border: 1px solid var(--boundary-strong); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; }
+/* Rail buttons keep the shared hit height while their dots retain the narrow lane geometry. */
+button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padding: 0; border: 0; background: transparent; transform: none; }
+.rail-marker::before { content: ''; position: absolute; top: 50%; left: 0; width: 100%; aspect-ratio: 1; border-radius: 50%; background: currentColor; transform: translateY(-50%); pointer-events: none; }
+.rail-marker[data-rail-lane="1"] { color: var(--mark-suggestion); }
+.rail-marker[data-rail-lane="2"] { color: var(--mark-annotation); }
+.rail-marker[data-rail-lane="3"] { color: var(--mark-note); }
+@media (forced-colors: active) {
+  .rail-marker::before { background: CanvasText; forced-color-adjust: none; }
+  .rail-marker[data-rail-lane="2"]::before { border-radius: 0; }
+  .rail-marker[data-rail-lane="3"]::before { border-radius: 0; transform: translateY(-50%) rotate(45deg); }
+}
 /* End A4 shared controls. */
