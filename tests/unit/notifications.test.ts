@@ -263,7 +263,7 @@ describe('quiet notice lifetime', () => {
 });
 
 describe('a Run started from the Task Drawer reaches the observer', () => {
-  it('a read at the start follows the Run in flight to its outcome; without it the outcome is never heard', async () => {
+  it('automatically follows new Runs and reports their completion only once', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('window', { setTimeout, clearTimeout });
     try {
@@ -276,12 +276,12 @@ describe('a Run started from the Task Drawer reaches the observer', () => {
       reader.subscribe((reading) => { if (reading.kind === 'projection') observe(reading.projection); });
       reader.refresh();
       await vi.advanceTimersByTimeAsync(0);
-      // Started on the same screen: nothing reads again, so the outcome stays unheard however long the Run takes.
+      // A new task is followed even when the previous reading had no running work.
       current = running;
       current = settled;
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(completed).not.toHaveBeenCalled();
-      // The drawer's record of the start reads at once; the slow poll then follows the Run to its outcome.
+      expect(completed).toHaveBeenCalledOnce();
+      // Reading the same completion again does not open a second result.
       current = running;
       reader.refresh();
       await vi.advanceTimersByTimeAsync(0);

@@ -643,6 +643,7 @@ async function clickSelector(renderer, selector, name) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
     `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`,
@@ -670,18 +671,18 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
 
 async function importSample1(renderer, cancellation, distinct = false) {
   await click(renderer, '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'import-relationship-screen');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'import-title-screen');
   at('sample1-import-title');
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, 'import-exact-source');
   await fill(renderer, '#book-title', J04_BOOK_TITLE, 'import-title');
   cancellation.throwIfRequested();
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
   cancellation.throwIfRequested();
@@ -709,9 +710,9 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
-  await click(renderer, '保存当前编辑', 'edit-save');
+  await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
@@ -2291,7 +2292,7 @@ async function main() {
     requireJourney(retryOption?.unitOrdinal === 5 && retryOption.startPosition === SAMPLE1_UNIT_RANGES[4][0] && retryOption.endPosition === SAMPLE1_UNIT_RANGES[4][1] &&
       sameRecord(retryOption.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }), 'safe-retry-option', settledBook.updateControls);
     const retryRange = { startPosition: retryOption.startPosition, endPosition: retryOption.endPosition };
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'safe-retry-range-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'safe-retry-prepared', 120_000);
     const preparedRetry = await readBaseline(renderer);
@@ -2396,7 +2397,7 @@ async function main() {
       driftOptionB?.unitOrdinal === 8 && sameRecord(driftOptionB.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'plan-revision-options', settledRetry.updateControls);
     const rangeA = { startPosition: driftOptionA.startPosition, endPosition: driftOptionA.endPosition };
     const rangeB = { startPosition: driftOptionB.startPosition, endPosition: driftOptionB.endPosition };
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-prepare-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId!==${JSON.stringify(preparedRetry.taskIntent.taskIntentId)}`, 'plan-revision-prepared', 120_000);
     const preparedDrift = await readBaseline(renderer);
@@ -2411,7 +2412,7 @@ async function main() {
     at('plan-revision-drift');
     cancellation.throwIfRequested();
     // The material change before authorization: the selected range moves to unit 8 and the same prepared Task is prepared again.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-drift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-pending', 120_000);
     const drifted = await readBaseline(renderer);
@@ -2491,7 +2492,7 @@ async function main() {
     // (iv) The way back (Issue #281). Preparing again at the range version 1 froze records the revert
     // as its own append-only revision, settles the pending one, and returns 开始任务 to the version that was
     // never replaced: the same envelope digest, still one plan version, nothing rewritten.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-revert-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
     const reverted = await readBaseline(renderer);
@@ -2536,7 +2537,7 @@ async function main() {
       revertedDrawer.bar?.state === 'ready' && barActions(revertedDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'plan-revision-revert-drawer-plan', revertedDrawer);
     // Back to the change this Task means to confirm: the same range drift, pending on its own again.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-redrift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-redrift-pending', 120_000);
     const redrifted = await readBaseline(renderer);
@@ -2938,7 +2939,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
     // Nine categories and none preselected, the unavailable two saying why; four scopes and none
     // preselected; the four consequence lines; the quick start waits for a Default Execution Rule.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.every(box=>!box.checked) && boxes.some(box=>box.value==='local-text-check'&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences').length===0 && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='查看计划'; })()`, 'review-sheet-contract');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && boxes.some(box=>box.value==='local-text-check'&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences').length===0 && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='查看计划'; })()`, 'review-sheet-contract');
 
     at('review-prepare');
     // F-05 part 2a (Issue #1109 revisions 6-7): a real governed house rule for this category exists before the review, made through
@@ -2949,7 +2950,7 @@ async function main() {
     requireJourney(governedPreference?.current?.lines?.some((line) => line.categoryId === 'typos-and-usage' && line.bookId === null && line.text === '统一编辑用语，保留有意的节奏。') === true,
       'review-governed-preference-exists', governedPreference?.current?.lines);
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
     // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
     // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
     // drawer's bar, so ②B offers 查看计划并开始 beside 返回修改 and no authorization button.
@@ -3252,7 +3253,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'overlap-sheet');
     // 开始审阅 (ADR 0096 §3, #1177): one action prepares the plan and, while it is ready, records its Run Authorization; the drawer
     // stays optional while the visible Run settles; nothing waits on the drawer's 开始任务.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const start=sheet.querySelector('[data-review-action="start"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='开始审阅'||!start.classList.contains('primary'))return false; start.click(); return true; })()`, 'overlap-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const previous of sheet.querySelectorAll('input[name="review-category"]:checked'))previous.click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const start=sheet.querySelector('[data-review-action="start"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='开始审阅'||!start.classList.contains('primary'))return false; start.click(); return true; })()`, 'overlap-prepare');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true && ['running','settled'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'overlap-prepared', 120_000);
     const overlapPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(overlapPrepared.authorization !== null, 'overlap-one-action-authorized', overlapPrepared.authorization);
@@ -3305,7 +3306,7 @@ async function main() {
     await openReviewDestination(renderer, 'factual-review-destination');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'factual-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-sheet-open');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const previous of sheet.querySelectorAll('input[name="review-category"]:checked'))previous.click(); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='factual-review'`, 'factual-prepared', 120_000);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(factualPrepared?.state === 'prepared' && UUID_PATTERN.test(factualPrepared.reviewRunId), 'factual-prepared-run');
@@ -3792,7 +3793,7 @@ async function main() {
     await openReviewDestination(renderer, 'stock-leaf-review-destination');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'stock-leaf-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'stock-leaf-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const previous of sheet.querySelectorAll('input[name="review-category"]:checked'))previous.click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'stock-leaf-prepared', 120_000);
     const leafPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(leafPrepared.categories.length === 1 && leafPrepared.categories[0].plan.units === SAMPLE1_UNITS &&

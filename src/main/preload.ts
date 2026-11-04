@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { DiagnosticsApi } from './diagnostics.js';
 import {
   IPC_CHANNELS,
@@ -215,6 +215,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   getImportStartup: () =>
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageManuscript: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript),
+  stageDroppedManuscript: (file: File) => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript, { droppedPath: webUtils.getPathForFile(file) }),
   continueImportDraft: (input: ServiceOperationMap['continueImportDraft']['input']) =>
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>

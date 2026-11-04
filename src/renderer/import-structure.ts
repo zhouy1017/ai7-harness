@@ -79,7 +79,7 @@ export function renderStructureReview(structure: ImportStructureProjection | und
     splits.append(el('p', 'field-note', SOFT_BREAK_NOTE), ...structure.softBreakSplits.map((paragraph) => el('p', 'structure-lineage', lineageLine(paragraph))));
     section.append(splits);
   }
-  let method: LongParagraphMethod | null = stated?.longParagraphs ?? null;
+  let method: LongParagraphMethod | null = stated?.longParagraphs ?? (structure.longParagraphs.length > 0 ? 'sentences' : null);
   if (structure.longParagraphs.length > 0) {
     const fieldset = el('fieldset', 'long-paragraph-choice');
     fieldset.setAttribute('role', 'radiogroup');

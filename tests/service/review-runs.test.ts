@@ -1088,6 +1088,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
       const aggregateBefore = session.store.inspectBookFindings(book.bookId);
+      const direct = aggregateBefore.items.find((item) => item.suggestion !== undefined);
+      expect(direct?.suggestion).toMatchObject({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, batchAllowed: true });
+      expect(direct?.suggestion?.markId).toBeTruthy();
       expect(aggregateBefore.items.filter((item) => item.target.kind === 'review').length).toBe(run.findingCounts.pending);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);

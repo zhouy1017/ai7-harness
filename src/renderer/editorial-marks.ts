@@ -1,4 +1,5 @@
 import { windowStep } from './components/controls.js';
+import { showToast } from './components/toast.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
@@ -1496,6 +1497,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         recoveryCards.delete(markId);
         if (decidedBefore !== undefined) notePrompt(decidedBefore, applied.result.card);
         if (applied.result.card !== null) showCard(applied.result.card);
+        if (decidedBefore !== undefined) showToast(done, { action: { label: '撤销', run: () => void writeManuscript(markId,
+          (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId, clientEffectId }), '已撤销本次应用。') } });
         return;
       }
       if (applied.outcome === null) throw applied.outcomeFailure;
@@ -1928,6 +1931,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     await load(null);
   };
 
+  let contextParagraph: string | null = null;
   const showSelectionMenu = (at: { x: number; y: number }, reread = true): void => {
     const range = editor.selectedRange();
     const markable = range.kind === 'range' || range.kind === 'unsettled';
@@ -1937,6 +1941,15 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
     const shown = inSeries?.current() ?? null;
     const shownProcedures = houseProcedures?.current() ?? null;
+    const paragraph = range.kind === 'none' && contextParagraph ? editor.currentWindow().blocks.find((block) => block.blockId === contextParagraph) : undefined;
+    const taskGroup = aiTaskGroup(paragraph ? undefined : range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span');
+    if (paragraph) for (const item of taskGroup.items) {
+      if (!item.run) continue;
+      const run = item.run;
+      item.run = () => { if (editor.selectRange(paragraph.blockId, 0, [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(paragraph.text)].length)) run(); };
+      if (item.action === 'task-on-selection') item.label = '就本段发起任务…';
+      if (item.action === 'ask-on-selection') item.label = '就本段提问…';
+    }
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
     showMenu('selection', '稿件右键菜单', [
@@ -1973,7 +1986,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         ],
       },
       // Across paragraphs (Issue #1176) the AI7 actions take the exact span; marks and 书系 knowledge stay in one paragraph.
-      aiTaskGroup(range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span'),
+      taskGroup,
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
     if (!reread || (inSeries === null && houseProcedures === null && polishRoute === null)) return;
@@ -2124,6 +2137,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   const onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
+    contextParagraph = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]')?.dataset['blockId'] ?? null : null;
     const mark = collapsedBeforeContextClick ? markAt(event.target, true) : undefined;
     collapsedBeforeContextClick = true;
     if (mark) showMarkMenu(mark, { x: event.clientX, y: event.clientY });
@@ -2133,6 +2147,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
     event.preventDefault();
     const selection = window.getSelection();
+    contextParagraph = selection?.anchorNode?.parentElement?.closest<HTMLElement>('[data-block-id]')?.dataset['blockId'] ?? null;
     const rects = selection !== null && selection.rangeCount > 0 ? selection.getRangeAt(0).getClientRects() : undefined;
     const rect = rects && rects.length > 0 ? rects[rects.length - 1]! : options.host.getBoundingClientRect();
     const at = { x: rect.right, y: rect.bottom };

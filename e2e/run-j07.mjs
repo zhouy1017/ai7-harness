@@ -348,6 +348,7 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
@@ -606,11 +607,11 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
     await click(renderer, '导入稿件', 'import-start');
   }
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
@@ -634,7 +635,7 @@ async function reviewHistoricalPublication(renderer, sourceDigest, sourceBytes) 
   await clickImportControl(renderer, '[data-import-relationship="source-only"]', true, 'historical-publication-source-only');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'historical-publication-title');
   await fill(renderer, '#book-title', EXCERPT.title, 'historical-publication-title-filled');
-  await click(renderer, '确认书名并复核', 'historical-publication-review');
+  await click(renderer, '查看导入详情', 'historical-publication-review');
   await waitFor(renderer, `document.querySelector('[data-import-review-kind="source-only"]')`, 'historical-publication-reviewed');
   await assertRenderer(renderer, `(() => { const review=document.querySelector('[data-import-review-kind="source-only"]');return review.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(sourceDigest)} && review.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(sourceBytes))};})()`, 'historical-publication-original-pin');
 }
@@ -719,12 +720,12 @@ async function importDraftAsSource(renderer, bookId) {
   await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen="landing"]')`, 'draft-landing');
   await assertRenderer(renderer, PAGE_HELPERS, 'draft-page-helpers');
   await click(renderer, '导入稿件', 'draft-import');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'draft-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'draft-target');
   await assertRenderer(renderer, `(() => { const target = document.querySelector('[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookId)}]'); if (!(target instanceof HTMLInputElement)) return false; target.click(); return target.checked; })()`, 'draft-target-book');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"] [data-import-relationship="source-only"]')`, 'draft-relationship');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices] [data-import-relationship="source-only"]')`, 'draft-relationship');
   await assertRenderer(renderer, `(() => { const source = document.querySelector('[data-import-relationship="source-only"]'); if (!(source instanceof HTMLInputElement) || source.checked) return false; source.click(); return source.checked; })()`, 'draft-source-only');
   await waitFor(renderer, `document.querySelector('[data-prepare-source-import-review=${JSON.stringify(bookId)}]')`, 'draft-review-action');
-  await click(renderer, '复核来源材料导入', 'draft-review');
+  await click(renderer, '查看导入详情', 'draft-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"] [data-commit-source-import]')`, 'draft-reviewed', 120_000);
   await clickSelector(renderer, '[data-commit-source-import]', 'draft-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'draft-committed', 120_000);
@@ -756,7 +757,7 @@ async function choosePurpose(renderer, kind, name) {
 }
 /** 保存里程碑版本 once the form is filled, answered with `已保存里程碑版本「标签」 · rN`. */
 async function saveMilestone(renderer, milestone, revisionLabel, name) {
-  await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); if (!(save instanceof HTMLButtonElement) || save.disabled) return false; save.click(); return true; })()`, `${name}-save`);
+  await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); if (!(save instanceof HTMLElement) || (save.dataset.editorPersistence === 'confirmed')) return false; document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`, `${name}-save`);
   const completion = `已保存里程碑版本「${milestone.label}」 · ${revisionLabel}`;
   await waitFor(renderer, `window.__j07.status().includes(${JSON.stringify(completion)}) && window.__j07.tone() === 'success'`, `${name}-completion`, 120_000);
 }
@@ -784,9 +785,9 @@ async function acknowledgedEdit(renderer, text, name) {
     return document.execCommand('insertText', false, ${JSON.stringify(text)}) && (block.textContent ?? '') === original + ${JSON.stringify(text)};
   })()`);
   requireJourney(typed === true, `${name}-typed`);
-  await waitFor(renderer, `(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return (save instanceof HTMLButtonElement && !save.disabled) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
-  await renderer.evaluate(`(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); if (save instanceof HTMLButtonElement && !save.disabled) save.click(); return true; })()`);
-  await waitFor(renderer, `(() => { const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return window.__j07.journal() > ${before} && save instanceof HTMLButtonElement && save.disabled && document.documentElement.dataset.ai7CloseRisk !== 'true' && window.__j07.tone() === 'success'; })()`, `${name}-acknowledged`, 120_000);
+  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) || window.__j07.journal() > ${before}; })()`, `${name}-dirty`, 30_000);
+  await renderer.evaluate(`(() => { const save = document.querySelector('[data-editor-persistence]'); if (save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed')) document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true })); return true; })()`);
+  await waitFor(renderer, `(() => { const save = document.querySelector('[data-editor-persistence]'); return window.__j07.journal() > ${before} && save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed') && document.documentElement.dataset.ai7CloseRisk !== 'true' && window.__j07.tone() === 'success'; })()`, `${name}-acknowledged`, 120_000);
   // Real editor reconciliation must retain the loaded preview while paragraph edits still reach the journal.
   await waitFor(renderer, `(async()=>{const image=document.querySelector('.manuscript-source-image img');
     if(!image||image.naturalWidth===0)return false;const source=image.src;
@@ -1028,13 +1029,13 @@ async function main() {
       await assertRenderer(native, `document.querySelector('[data-word-import-mode="suggestions"]')?.checked===true && document.querySelector('[data-word-import-mode="accepted-baseline"]')?.checked===false && document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && document.querySelector('[data-word-learn-from-edits]')?.checked===true`, `${name}-honest-default`);
       if (mode === 'accepted-baseline') {
         await clickImportControl(native, '[data-word-import-mode="accepted-baseline"]', true, `${name}-accepted-mode`);
-        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='确认书名并复核')?.disabled===true`, `${name}-separate-confirmation-required`);
+        await assertRenderer(native, `document.querySelector('[data-word-accepted-baseline-confirmation]')?.checked===false && Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='查看导入详情')?.disabled===true`, `${name}-separate-confirmation-required`);
         await clickImportControl(native, '[data-word-accepted-baseline-confirmation]', true, `${name}-confirm-accepted`);
       }
       await clickImportControl(native, '[data-word-learn-from-edits]', false, `${name}-learning-opt-out`);
       await assertRenderer(native, `document.querySelector('[data-word-learn-from-edits]')?.checked===false`, `${name}-learning-choice-visible`);
       await fill(native, '#book-title', EXCERPT.title, `${name}-title`);
-      await click(native, '确认书名并复核', `${name}-prepare-import`);
+      await click(native, '查看导入详情', `${name}-prepare-import`);
       await waitFor(native, `document.querySelector('[data-screen="review"] [data-word-reviewed-mode="${mode}"][data-word-reviewed-learning="false"]')`, `${name}-reviewed-choice`);
       await click(native, '新建图书并导入稿件', `${name}-commit-import`);
       await waitFor(native, `document.querySelector('[data-screen="imported"]') && document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, `${name}-import-acknowledged`, 180_000);
@@ -1154,7 +1155,7 @@ async function main() {
     renderer = await launch({ save: exportPath });
     await waitFor(renderer, `document.querySelector('[data-screen="import-recovery"]')`, 'historical-publication-recovery');
     await click(renderer, '继续导入', 'historical-publication-continue');
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'historical-publication-recovered-target');
+    await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'historical-publication-recovered-target');
     await importAndOpen(renderer, EXCERPT.title, false, 'target');
     const historicalBookId = await renderer.evaluate(`document.querySelector('.editor-shell')?.dataset.bookId`);
     requireJourney(UUID_PATTERN.test(historicalBookId ?? ''), 'historical-publication-committed-book');
@@ -1226,7 +1227,7 @@ async function main() {
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
         radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
-        save instanceof HTMLButtonElement && save.disabled;
+        save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed');
     })()`, 'milestone-form-starts-unselected');
     await fill(renderer, '#milestone-label', FIRST.label, 'first-label');
     await assertRenderer(renderer, `(() => { const save = window.__j07.milestoneSave(); const reason = document.getElementById(save?.getAttribute('aria-describedby') ?? ''); return save?.disabled === true && (reason?.textContent ?? '').includes('选择用途'); })()`, 'milestone-save-waits-for-a-purpose');
@@ -1722,8 +1723,8 @@ async function main() {
     at('document-edit-and-version');
     // An edit is written to the document's own journal; 保存为版本 makes it 版本 2, and the column lists both.
     await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DOCUMENT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DOCUMENT_EDIT)}); })()`, 'document-edit');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'document-edit-save-ready');
-    await click(renderer, '保存当前编辑', 'document-edit-save');
+    await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'document-edit-save-ready');
+    await click(renderer, '保存', 'document-edit-save');
     await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'document-edit-durable');
     // Hold the new version's first animation frame until the next explicit command has taken focus. This reproduces
     // a slow frame on macOS: an arrival's pending editor restore must not steal focus back from the workflow row.
@@ -1905,8 +1906,8 @@ async function main() {
     await clickSelector(renderer, 'aside.document-lens li.document-phase[data-phase-id="delivery"] [data-phase-action="start"]', 'changed-delivery-start');
     await waitFor(renderer, `(() => { const row = document.querySelector('aside.document-lens li.document-phase[data-phase-id="delivery"]'); return row?.dataset.phaseState === 'in-progress' && row.dataset.phaseWaiting === 'false' && row.querySelector('.phase-pill')?.textContent === '进行中' && window.__j07.status() === '「交付」已开始'; })()`, 'changed-delivery-started');
     await assertRenderer(renderer, `(() => { const block = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]'); if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DELIVERY_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(`${DOCUMENT_EDIT}${DELIVERY_EDIT}`)}); })()`, 'changed-edit');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'changed-edit-save-ready');
-    await click(renderer, '保存当前编辑', 'changed-edit-save');
+    await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'changed-edit-save-ready');
+    await click(renderer, '保存', 'changed-edit-save');
     await waitFor(renderer, `window.__j07.status().includes('已写入修订日志')`, 'changed-edit-durable');
     // The document window follows the edit it wrote (Issue #543): the lens drops 当前 from 版本 2 and says both moves.
     await waitFor(renderer, `(() => {

@@ -1,3 +1,4 @@
+import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { technicalDisclosure } from '../../src/renderer/technical-layer.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
@@ -287,3 +288,5 @@ it('scans the review results and evidence in ordinary mode (#1315)', async () =>
   try { const view = mount('settled'); await flush(); expectNoTechnicalText(view.root); }
   finally { setTechnicalLayerVisible(true); }
 });
+
+vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));

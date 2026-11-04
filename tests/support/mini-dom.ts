@@ -262,6 +262,9 @@ function compound(element: MiniElement, part: string): boolean {
 }
 
 export const miniDocument = {
+  visibilityState: 'visible',
+  addEventListener(type: string, listener: Listener): void { miniDocument.body.addEventListener(type, listener); },
+  removeEventListener(type: string, listener: Listener): void { miniDocument.body.removeEventListener(type, listener); },
   body: new MiniElement('body'),
   activeElement: null as MiniElement | null,
   querySelector(selector: string): MiniElement | null { return miniDocument.body.querySelector(selector); },

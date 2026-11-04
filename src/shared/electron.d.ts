@@ -64,6 +64,7 @@ declare module 'electron' {
     quit(): void;
   };
   export const contextBridge: { exposeInMainWorld(name: string, api: unknown): void };
+  export const webUtils: { getPathForFile(file: File): string };
   export const dialog: {
     showMessageBox(options: Record<string, unknown>): Promise<{ response: number }>;
     showOpenDialog(options: Record<string, unknown>): Promise<{ canceled: boolean; filePaths: string[] }>;

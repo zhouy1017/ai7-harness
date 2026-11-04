@@ -2,7 +2,7 @@
 export const FINDINGS_CENTER_WORDS = {
   section: (bookTitle: string) => `处理 · 《${bookTitle}》`,
   heading: '发现',
-  lede: '这里汇集尚未处理的分析未覆盖处、审阅发现与评估风险。查看原记录并在那里处理，刷新后同步显示。',
+  lede: '尚未处理的分析未覆盖处、审阅发现与评估风险会自动跟随。',
   empty: '暂无发现',
   summary: (total: number, pageSize: number) => `共 ${total} 项待处理发现 · 每页最多 ${pageSize} 项`,
   filter: '发现类别',

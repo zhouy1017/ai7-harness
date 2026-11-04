@@ -5,6 +5,7 @@ import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.j
 
 it('renders each finding status with its actual tone, defaulting unknown statuses to neutral', async () => {
   const restore = installMiniDom();
+  vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => undefined });
   vi.stubGlobal('document', {
     ...miniDocument,
     createElement: (tag: string) => {

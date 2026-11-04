@@ -3465,6 +3465,10 @@ export class EditorialStore {
             { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
           for (const finding of run.findings) if (finding.status === 'pending') {
             yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
+              ...(finding.output === 'change-suggestion' && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null ? {
+                suggestion: { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, markId: finding.markId, blockId: finding.blockId,
+                  batchAllowed: run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
+              } : {}),
               target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
           }
           if (!run.findingsTruncated || run.findings.length === 0) break;

@@ -1303,18 +1303,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   // ---- 导出 (Issue #413) ----------------------------------------------------------------------------------
 
   /** 导出… for one version: the card opens beside the block, and focus comes back here when it closes. */
-  function exportOpenButton(target: { kind: 'current' } | { kind: 'milestone'; milestoneId: string }, label: string | null): HTMLButtonElement {
-    const button = el('button', 'secondary', EXPORT_ACTION_LABELS.open);
-    button.type = 'button';
-    button.dataset['exportAction'] = 'open';
-    button.dataset['exportTarget'] = target.kind;
-    button.setAttribute('aria-label', exportOpenAccessibleName(target.kind === 'current' ? { kind: 'current' } : { kind: 'milestone', label: label ?? '' }));
-    button.disabled = working || exporter.busy();
-    button.addEventListener('click', () => {
-      if (working || exporter.busy()) return;
-      exporter.open(target, label, button);
-    });
-    return button;
+  function exportOpenButton(target: { kind: 'current' } | { kind: 'milestone'; milestoneId: string }, label: string | null): HTMLElement {
+    return exporter.menu(target, label);
   }
 
   /** Every approved export newest first, with what it came to (EXP-017, EXP-021); none of them is sending. */

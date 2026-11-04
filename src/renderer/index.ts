@@ -10,6 +10,9 @@ import { mountManuscriptScreen, documentContextOf, type ManuscriptScreen } from 
 import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
+import { createCommandPalette } from './command-palette.js';
+import { applyOnce } from './manuscript-apply.js';
+import { showToast } from './components/toast.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
@@ -703,6 +706,16 @@ function clickCommandEntry(selector: string): void {
 }
 
 commandDispatcher.register({
+  'command.palette': () => commandPalette.open(),
+  'book.switch': () => commandPalette.open(true),
+  'review.new': () => {
+    const book = shell.currentBook(); if (!book) return;
+    void leaveThen(async () => { renderBookReview(book.bookId, book.title); reviewWorkspace?.openNew(); });
+  },
+  'evaluation.start': () => {
+    const place = shell.currentBook(); if (!place) return;
+    void leaveThen(async () => renderBookEvaluation(place.bookId, place.title, undefined, true));
+  },
   ...Object.fromEntries(['attention', 'tasks', 'library', 'series', 'knowledge', 'quality'].map((destination) =>
     [`nav.${destination}`, () => clickCommandEntry(`[data-nav-destination="${destination}"]`)])),
   ...Object.fromEntries(BOOK_SECTION_COMMANDS.map(([id, , section]) =>
@@ -718,6 +731,14 @@ commandDispatcher.register({
     const bookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
     if (bookId !== undefined && !authorityInterrupted) taskDrawer.openPanel(bookId, () => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
   },
+});
+
+const commandPalette = createCommandPalette({
+  api: window.ai7, execute: (id) => commandDispatcher.execute(id),
+  openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
+  openResult: (item) => void openOverviewResult(item),
+  openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
+  status: setStatus,
 });
 
 /**
@@ -787,6 +808,7 @@ window.ai7.onNotificationNavigate((target) => {
   });
 });
 window.addEventListener('focus', () => globalAttentionReader.refresh());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') globalAttentionReader.refresh(); });
 
 /**
  * The shell (Issue #934, wave 11 slice 11a; editor-surfaces §0.3): the two-level sidebar and the context header around
@@ -1216,6 +1238,11 @@ async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Pro
   if (item.nextStep === 'open-network-proxy') {
     await renderModelServiceSettings();
     return;
+  }
+  if (['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(item.target.kind)) {
+    const tasks = await window.ai7.inspectTaskOverview();
+    const task = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
+    if (task) { if (task.state === 'completed') await openOverviewResult(task); else openOverviewTask(task); return; }
   }
   await openGlobalAttentionTarget(item.target);
 }
@@ -2653,6 +2680,24 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     if (target.kind === 'review') renderBookReview(bookId, bookTitle, { reviewRunId: target.reviewRunId, findingId: target.findingId });
     else if (target.kind === 'risk') renderBookEvaluation(bookId, bookTitle, target);
     else renderBookAnalysis(bookId, bookTitle, target.revisionId, { tab: 'chapters', gap: target.unitOrdinal });
+  }, async (items) => {
+    const suggestions = items.flatMap((item) => item.suggestion ? [item.suggestion] : []);
+    const first = suggestions[0]; if (!first) return;
+    try {
+      if (suggestions.some((item) => item.manuscriptId !== first.manuscriptId || item.branchId !== first.branchId)) throw new Error('请选择同一稿件版本的修改建议。');
+      const binding = { manuscriptId: first.manuscriptId, branchId: first.branchId, windowStartBlockId: first.blockId };
+      const applied = await applyOnce(binding, (clientEffectId) => suggestions.length === 1
+        ? window.ai7.applyChangeSuggestion({ ...binding, markId: first.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null })
+        : window.ai7.applyChangeSuggestionBatch({ ...binding, markIds: suggestions.map((item) => item.markId), clientEffectId }), (input) => window.ai7.getManuscriptApplyOutcome(input));
+      if (!applied.acknowledged && applied.outcome?.state !== 'committed') throw applied.failure ?? new Error('应用结果待确认，请查看历史记录。');
+      showToast(`已接受并应用 ${suggestions.length} 条。`, { action: { label: '撤销', run: () => {
+        void applyOnce(binding, (clientEffectId) => window.ai7.reverseAppliedChangeSuggestion({ ...binding, markId: first.markId, clientEffectId }),
+          (input) => window.ai7.getManuscriptApplyOutcome(input)).then((result) => {
+          if (!result.acknowledged && result.outcome?.state !== 'committed') throw result.failure ?? new Error('撤销结果待确认。');
+          setStatus('已撤销本次应用。', 'success'); renderBookFindings(bookId, bookTitle);
+        }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '未能撤销应用。'), 'error'));
+      } } });
+    } catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
   });
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }
@@ -2880,7 +2925,7 @@ function renderProposalConflict(target: { bookId: string; manuscriptId: string; 
  * ②C 评估 (Issue #429, plan slice S81a; editor-surfaces §5): the Book's Evaluation Records under the house profile — the surface
  * is `evaluation.ts` — with the way back to the manuscript and to 工作概览.
  */
-function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recordId: string; riskId: string }): void {
+function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recordId: string; riskId: string }, start = false): void {
   const content = panel();
   content.classList.add('book-evaluation');
   content.dataset['bookId'] = bookId;
@@ -2921,6 +2966,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
     () => {
       if (content.isConnected) {
         setStatus(EVALUATION_STATUS.opened);
+        if (start) host.querySelector<HTMLButtonElement>('[data-evaluation-action="new-evaluation"]')?.click();
         if (focus !== undefined) {
           const risk = host.querySelector<HTMLElement>(`[data-risk-id="${CSS.escape(focus.riskId)}"]`);
           if (risk !== null) { risk.tabIndex = -1; risk.scrollIntoView({ block: 'center' }); risk.focus({ preventScroll: true }); }
@@ -4485,6 +4531,23 @@ function renderLanding(
 const { listSection, reimportRangeLine, renderManuscriptReimportReview, renderReview, renderSourceImportReview, renderTargetChoice } = createImportReview({
   abandonAndContinue, appendRecoveryReturnAction, awaitServiceJob, hasErrorCode, identityFindingDisclosure, initializeStartup,
   instantValue, rendererErrorMessage, renderError, renderImported, replaceScreen, setStatus, sourceCard, technicalDetails,
+});
+
+let dropImportBusy = false;
+screen.addEventListener('dragover', (event) => {
+  if (['landing', 'editor'].includes(screen.dataset['screen'] ?? '') && event.dataTransfer?.types.includes('Files')) event.preventDefault();
+});
+screen.addEventListener('drop', (event) => {
+  const file = event.dataTransfer?.files[0];
+  if (!file || !['landing', 'editor'].includes(screen.dataset['screen'] ?? '')) return;
+  event.preventDefault();
+  if (dropImportBusy || !/\.docx$/iu.test(file.name)) return;
+  dropImportBusy = true;
+  void (async () => {
+    if (!await settleScreen()) return;
+    const result = await window.ai7.stageDroppedManuscript(file);
+    if (result.status === 'staged') renderTargetChoice(result.staged, null);
+  })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法导入拖入的 DOCX。'), 'error')).finally(() => { dropImportBusy = false; });
 });
 
 function renderImported(result: ImportCommitProjection, recoveryReturn?: RecoveryReturnContext): void {

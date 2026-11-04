@@ -175,6 +175,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
@@ -1187,7 +1188,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const input=document.querySelector('[data-import-relationship="first-manuscript"]');if(!(input instanceof HTMLInputElement)||input.checked)return false;input.click();return true;})()`, 'word-lineage-first-manuscript');
     await waitFor(renderer, `document.querySelector('[data-word-import-controls="ready"]')`, 'word-lineage-controls');
     await assertRenderer(renderer, `(() => {const mode=document.querySelector('[data-word-import-mode="accepted-baseline"]');if(!(mode instanceof HTMLInputElement)||mode.disabled)return false;mode.click();const confirm=document.querySelector('[data-word-accepted-baseline-confirmation]');if(!(confirm instanceof HTMLInputElement)||confirm.checked)return false;confirm.click();return document.querySelector('[data-word-learn-from-edits]')?.checked===true;})()`, 'word-lineage-explicit-accepted-choice');
-    await click(renderer, '确认书名并复核', 'word-lineage-prepare');
+    await click(renderer, '查看导入详情', 'word-lineage-prepare');
     await waitFor(renderer, `document.querySelector('[data-word-reviewed-mode="accepted-baseline"][data-word-reviewed-learning="true"]')`, 'word-lineage-reviewed');
     await click(renderer, '新建图书并导入稿件', 'word-lineage-commit');
     await waitFor(renderer, `document.querySelector('[data-screen="imported"]')&&document.documentElement.dataset.ai7ImportCompletionAcknowledged==='true'`, 'word-lineage-committed');

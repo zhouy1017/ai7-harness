@@ -103,8 +103,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
+  let stopFollow: (() => void) | undefined;
 
   function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
+    stopFollow?.();
     const content = panel();
     content.classList.add('model-service-settings');
     content.dataset['policyIntegrity'] = projection.launchPolicy.integrityState;
@@ -189,6 +191,26 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     }
     content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
+    let reading = false;
+    const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
+    const signature = catalogueKey(projection);
+    const follow = async (discover = false): Promise<void> => {
+      if (!content.isConnected) { stopFollow?.(); return; }
+      if (reading || document.visibilityState !== 'visible') return;
+      reading = true;
+      try {
+        const next = await window.ai7.getModelServiceSettings();
+        const channel = next.channels.find((item) => item.channelId === modelServiceChannel) ?? next.channels.find((item) => item.route !== null && next.routeChoice.routes.some((route) => route.route === item.route && route.connection?.credentialOperationState === 'ready'));
+        const result = discover && channel?.route ? await window.ai7.refreshModelServiceModels({ route: channel.route }) : next;
+        if (content.isConnected && catalogueKey(result) !== signature && !(document.activeElement instanceof HTMLInputElement && content.contains(document.activeElement))) renderModelServiceSettingsProjection(result);
+      } catch { /* Keep the visible fields; a failed discovery offers its own retry. */ }
+      finally { reading = false; }
+    };
+    const visible = (): void => { void follow(true); };
+    const timer = window.setInterval(() => void follow(), 2000);
+    document.addEventListener('visibilitychange', visible);
+    stopFollow = () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); };
+    if (projection.channels.some((channel) => channel.models.length === 0 && channel.route !== null && projection.routeChoice.routes.some((route) => route.route === channel.route && route.connection?.credentialOperationState === 'ready')) && projection.modelDiscovery?.status !== 'failure') void follow(true);
   }
 
   async function renderModelServiceSettings(): Promise<void> {
