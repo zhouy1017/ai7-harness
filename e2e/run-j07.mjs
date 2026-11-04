@@ -1846,7 +1846,7 @@ async function main() {
         JSON.stringify(recipients.map((item) => item.value + ':' + item.checked + ':' + item.closest('label')?.querySelector('span')?.textContent)) === ${JSON.stringify(DELIVERY_RECIPIENTS)} &&
         form.querySelector('[data-delivery-field="custom"]')?.disabled === true && form.querySelector('.delivery-unsaved') === null &&
         form.querySelector('.delivery-statement')?.textContent === ${JSON.stringify(DELIVERY_STATEMENT)} &&
-        confirm?.textContent === '交付' && confirm.disabled === true && window.__j07.deliveryReason('news-release') === '先选择要交付的版本';
+        confirm?.getAttribute('aria-label') === '交付' && confirm.disabled === true && window.__j07.deliveryReason('news-release') === '先选择要交付的版本';
     })()`, 'deliver-nothing-preselected');
     await assertRenderer(renderer, `(() => { const version = window.__j07.delivery('news-release').querySelector('input[name="delivery-version"]'); version.click(); return version.checked && window.__j07.cardAction('news-release', 'confirmDeliver').disabled === true && window.__j07.deliveryReason('news-release') === '先选择交给谁'; })()`, 'deliver-choose-version');
     await assertRenderer(renderer, `(() => {
