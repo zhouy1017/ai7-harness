@@ -1987,7 +1987,7 @@ async function main() {
       calibrationPage.offEffect === null &&
       calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
       JSON.stringify(calibrationPage.switches) === JSON.stringify({ calibration: [true, false], prediction: [false, true] }) &&
-      calibrationPage.empty === '尚无已发稿图书，发稿后可在此录入定价和首印。' && calibrationPage.books.length === 0,
+      calibrationPage.empty === '尚无已发稿图书，设为发稿版本后可在此录入定价和首印。' && calibrationPage.books.length === 0,
     'calibration-page-words', calibrationPage);
     const toggle = (name) => primary.evaluate(`(() => { const input = document.querySelector('[data-calibration-switch="${name}"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`);
     requireJourney(await toggle('calibration'), 'calibration-off-click');
