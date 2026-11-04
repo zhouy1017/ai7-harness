@@ -1,8 +1,9 @@
 import { recoveryIdentityRows } from '../../src/renderer/technical-layer-labels.js';
 import { globalAttentionObjectLabel } from '../../src/renderer/global-attention-labels.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { collectTechnicalDisclosures, initializeTechnicalLayer, metadataWords, modelLabelWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { collectTechnicalDisclosures, initializeTechnicalLayer, technicalWords, modelLabelWords, saveTechnicalLayerVisible, setTechnicalLayerVisible, technicalDisclosure, technicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { reviewBasisWords } from '../../src/renderer/review-basis.js';
+import { modelConnectionTestDisclosure } from '../../src/renderer/model-service-roles.js';
 import { installMiniDom } from '../support/mini-dom.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
@@ -45,7 +46,7 @@ describe('technical layer presentation (#1315)', () => {
     disclosure.textContent = '查看技术详情 · ordinary-production v33 · abcdef0123456789';
     root.append(technicalDisclosure(disclosure));
     const metadata = document.createElement('p');
-    metadata.textContent = metadataWords('主分支 · Revision 18 · 版本8 · 全稿 0.121%');
+    metadata.textContent = `稿件${technicalWords(' · 主分支 · Revision 18 · 版本8')} · 全稿 0%`;
     root.append(metadata);
     expectNoTechnicalText(root);
     expect(disclosure.textContent).toBe('');
@@ -71,6 +72,8 @@ describe('technical layer presentation (#1315)', () => {
     const add = () => { const details = document.createElement('details'); const summary = document.createElement('summary');
       summary.textContent = '查看技术详情'; details.append(summary); page.append(technicalDisclosure(details)); };
     add(); add(); collectTechnicalDisclosures(root);
+    page.append(...modelConnectionTestDisclosure({ modelId: 'synthetic-model', outcome: 'passed', code: null,
+      testedAt: '2026-11-04T12:00:00.000Z', credentialUpdatedAt: '2026-11-04T11:00:00.000Z', verified: 'buffered-text-only' }));
     add(); collectTechnicalDisclosures(root);
     expect(root.textContent?.match(/查看技术详情/gu)).toHaveLength(1);
     page.remove(); collectTechnicalDisclosures(root);

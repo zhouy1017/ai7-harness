@@ -1,5 +1,4 @@
-import { technicalLayerVisible } from './technical-layer.js';
-import { metadataWords, modelLabelWords } from './technical-layer.js';
+import { technicalLayerVisible, modelLabelWords } from './technical-layer.js';
 import {
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
   type ModelServiceChannelId,
@@ -228,7 +227,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
     if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; }
     radio.addEventListener('change', () => { checked = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
-    label.append(radio, metadataWords(` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`));
+    label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
     group.append(label);
   }
   if (offered.length === 0) group.append(el('p', 'field-note', technicalLayerVisible ? '尚未获取模型列表；保存凭据后刷新，或手动输入模型 ID。' : '保存凭据后获取可用模型。'));
@@ -265,7 +264,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     try {
       const next = await options.api.testModelServiceConnection({ route: channel.route, modelId: model.modelId });
       const result = next.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest;
-      const status = modelConnectionTestFeedback(result?.modelId === model.modelId ? result : null, channel.channelLabel, model.modelLabel);
+      const status = modelConnectionTestFeedback(result?.modelId === model.modelId ? result : null, channel.channelLabel, modelLabelWords(model));
       options.render(next);
       options.setStatus(status.message, status.tone);
     } catch (error) { options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
@@ -277,7 +276,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     options.setStatus('正在保存主编辑与快速交互的模型…', 'busy');
     try {
       options.render(await useForBothRoles(options.api, { route: channel.route, modelId: checked.modelId }));
-      options.setStatus(metadataWords(`之后开始的任务使用 ${channel.channelLabel} / ${checked.modelLabel}；已在进行的任务不受影响`), 'success');
+      options.setStatus(`之后开始的任务使用 ${channel.channelLabel} / ${modelLabelWords(checked)}；已在进行的任务不受影响`, 'success');
     } catch (error) { use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   paint();
@@ -290,7 +289,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     details.append(el('summary', undefined, `不可在此选择的模型（${others.length}）`));
     const list = el('ul');
     for (const model of others) {
-      const item = el('li', undefined, metadataWords(`${modelLabelWords(model)} · ${modelRolesLabel(model)}`));
+      const item = el('li', undefined, `${modelLabelWords(model)} · ${modelRolesLabel(model)}`);
       item.dataset['modelDisposition'] = model.main;
       list.append(item);
     }

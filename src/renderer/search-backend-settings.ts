@@ -1,5 +1,5 @@
 import type { ModelServiceSettingsProjection, RendererApi, SearchBackendCandidateProjection, SearchBackendProbeProjection, SearchCandidateProbeOutcome } from '../shared/protocol.js';
-import { metadataWords, technicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible } from './technical-layer.js';
 
 /**
  * 设置 › 模型服务 › 联网检索 (Issue #883): the shipped backends in rank order with 选择后端 and 测试检索, and (Issue #1055) the
@@ -43,7 +43,7 @@ export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjec
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = metadataWords(text);
+  if (text !== undefined) node.textContent = text;
   return node;
 }
 

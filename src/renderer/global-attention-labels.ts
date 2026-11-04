@@ -1,6 +1,5 @@
 import { completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
 import {
   BASELINE_ANALYSIS_MODE_LABELS,
   GLOBAL_ATTENTION_COUNTED_GROUPS,
@@ -369,7 +368,7 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
         ? `导入 · ${object.sourceDisplayName}`
         : `导入 · ${object.sourceDisplayName} · ${IMPORT_RELATIONSHIP_LABELS[object.relationship]}`;
     case 'recovery':
-      return technicalLayerVisible ? metadataWords(`稿件 · ${object.branchName}`) : '稿件';
+      return technicalLayerVisible ? `稿件 · ${object.branchName}` : '稿件';
     case 'manuscript-conflict':
       return object.conflictKind === 'reversal' ? '已应用的修改建议 · 稿件冲突' : '修改建议 · 稿件冲突';
     case 'analysis':
@@ -381,7 +380,7 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
       // A 审阅 on the selection 就这段发起任务… handed over says so (Issue #423, S77b).
       return object.onSelection === true ? `审阅 · 第 ${object.ordinal} 次 · ${REVIEW_ON_SELECTION}` : `审阅 · 第 ${object.ordinal} 次`;
     case 'maintenance':
-      return metadataWords(`维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`);
+      return `维护事项 · 第 ${object.ordinal} 项 · ${MAINTENANCE_CLASSIFICATION_LABELS[object.classification]} · 第 ${object.publicationOrdinal} 次发稿版本`;
     case 'library-material':
       return `资料库 · ${LIBRARY_KIND_LABELS[object.materialKind]}「${object.title}」`;
     case 'library-index':
@@ -503,10 +502,10 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return next === undefined ? '继续审阅时从没有完成的类别接着审。' : `「${next.label}」${next.detail ?? next.stateLabel}`;
     }
     case 'analysis-completed':
-      return facts.revisionOrdinal === null ? '已形成结果集修订版。' : metadataWords(`已形成第 ${facts.revisionOrdinal} 份基线分析。`);
+      return facts.revisionOrdinal === null ? '已形成结果集修订版。' : `已形成第 ${facts.revisionOrdinal} 份基线分析。`;
     case 'analysis-completed-with-gaps':
       if (facts.completion?.reason) return facts.completion.reason;
-      return facts.revisionOrdinal === null ? '已形成结果集修订版 · 有缺口单元。' : metadataWords(`已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`);
+      return facts.revisionOrdinal === null ? '已形成结果集修订版 · 有缺口单元。' : `已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`;
     case 'review-completed':
       return facts.categories.length === 0 ? '审阅发现已标到稿件上。' : `已审：${quoted(facts.categories.map((category) => category.label))}；发现已标到稿件上。`;
     // The 任务 panel's own three (Issue #423, S77a): nothing starts by itself, and a cancellation keeps what was read.
@@ -519,7 +518,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-cancelled':
       return facts.revisionOrdinal === null
         ? '你取消了这项任务；它还没有读完任何阅读范围，没有形成结果。'
-        : metadataWords(`你取消了这项任务；读完的阅读范围已形成第 ${facts.revisionOrdinal} 份基线分析。`);
+        : `你取消了这项任务；读完的阅读范围已形成第 ${facts.revisionOrdinal} 份基线分析。`;
     // 维护事项待处理 (Issue #426, S68b): what the case waits on, in its own terms; nothing outside AI7 is claimed.
     case 'maintenance-waiting':
       return maintenanceWaitingReason(item.object.kind === 'maintenance' ? item.object.classification : 'supersession');

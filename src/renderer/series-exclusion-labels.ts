@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import {
   SERIES_EXCLUSION_TARGET_KIND_LABELS,
   type SeriesExclusionProjection,
@@ -72,7 +72,7 @@ export function exclusionRevisionLine(revision: Pick<SeriesExclusionRevisionProj
 /** Who recorded a revision and when, its revision number, and its reason. */
 export function exclusionRevisionByline(revision: Pick<SeriesExclusionRevisionProjection, 'actor' | 'recordedAt' | 'revision' | 'reason'>,
   instant: (iso: string) => string): string {
-  return metadataWords(`${revision.actor} · ${instant(revision.recordedAt)} · 第 ${revision.revision} 版 · ${exclusionReasonLine(revision.reason)}`);
+  return `${revision.actor} · ${instant(revision.recordedAt)} · ${technicalWords(`第 ${revision.revision} 版`, '版本')} · ${exclusionReasonLine(revision.reason)}`;
 }
 
 /** The preview's identity rows (SER-021): exact target, scope, effective time, how far it reaches, reason and actor. */

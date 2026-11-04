@@ -1,4 +1,3 @@
-import { metadataWords } from './technical-layer.js';
 import {
   BOOK_PEOPLE_NAME_SEPARATOR,
   MAX_BOOK_PERSON_NAME_CHARACTERS,
@@ -58,7 +57,7 @@ export function bookPeopleRelatedLine(related: ReadonlyArray<{ roleLabel: string
 
 /** When they were last saved, or that they were never. */
 export function bookPeopleRecordedLine(people: Pick<BookPeopleProjection, 'version' | 'recordedAt'>, recordedAt: string | null): string {
-  return people.version === 0 || recordedAt === null ? '尚未填写作者、责编和相关人。' : metadataWords(`第 ${people.version} 次保存 · ${recordedAt}`);
+  return people.version === 0 || recordedAt === null ? '尚未填写作者、责编和相关人。' : `第 ${people.version} 次保存 · ${recordedAt}`;
 }
 
 // ---- 书库 --------------------------------------------------------------------------------------------------------

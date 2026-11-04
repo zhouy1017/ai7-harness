@@ -1,4 +1,3 @@
-import { metadataWords } from './technical-layer.js';
 // 帮助's words (Issue #939, wave 11 slice 11f; Owner decision 27; editor-surfaces §0.3): the sidebar entry beside 设置, the
 // three tabs, the 关于 line and the 第三方许可 list's chrome. The tab content itself lives in help-text.ts; both name the
 // exact labels the rest of the UI uses, so a reader can follow a sentence straight to where it points.
@@ -28,7 +27,7 @@ export const HELP_ABOUT_FAILED = '无法读取版本信息，请稍后重试。'
 
 /** 关于: the software version, the Data Version and the service protocol, as 设置 › 数据与存储 states them. */
 export function helpAboutLine(softwareVersion: string, dataVersion: number, protocolVersion: number): string {
-  return metadataWords(`软件版本 ${softwareVersion} · 数据版本 ${dataVersion} · 服务协议 ${protocolVersion}`);
+  return `软件版本 ${softwareVersion} · 数据版本 ${dataVersion} · 服务协议 ${protocolVersion}`;
 }
 
 export const HELP_LICENSE_FILTER_LABEL = '筛选第三方组件';

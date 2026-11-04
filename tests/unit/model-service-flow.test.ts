@@ -1,4 +1,4 @@
-import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
@@ -295,4 +295,47 @@ it('scans every channel model catalogue in ordinary mode (#1315)', () => {
   setTechnicalLayerVisible(false);
   try { for (const channel of MODEL_SERVICE_ROUTES) expectNoTechnicalText(flow(settings([channel])).node); }
   finally { setTechnicalLayerVisible(true); }
+});
+
+it('scans connection-test feedback and the repainted model page when discovery uses the raw ID as its label', async () => {
+  setTechnicalLayerVisible(false);
+  try {
+    const answer = settings(['deepseek-open-platform']);
+    const model = answer.channels.find((channel) => channel.channelId === 'deepseek-open-platform')!.models[0]!;
+    Object.assign(model, { modelLabel: model.modelId });
+    const before = structuredClone(answer);
+    Object.assign(answer.routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')!.connection!, { connectionTest: {
+      modelId: model.modelId, outcome: 'passed', code: null, testedAt: '2026-11-04T12:00:00.000Z',
+      credentialUpdatedAt: '2026-11-04T11:00:00.000Z', verified: 'buffered-text-only',
+    } });
+    const { node, render, setStatus } = flow(before, api(answer));
+    button(node, 'test-flow-connection').click();
+    await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
+    expectNoTechnicalText({ textContent: String(setStatus.mock.lastCall![0]) });
+    const painted = flow(answer).node;
+    expect(painted.querySelector('[data-connection-test-outcome="passed"]')!.textContent).toContain('文本连接测试通过');
+    expectNoTechnicalText(painted);
+    const projection = { ...answer, routeChoice: { ...answer.routeChoice, unsupportedProviders: [] },
+      proxy: { mode: 'direct', protocol: 'http', hostPort: '' }, lastProxyProbe: null,
+      searchBackends: { backends: [], candidates: [] }, protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
+      launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
+        externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
+    } as unknown as ModelServiceSettingsProjection;
+    vi.stubGlobal('window', { ai7: api(projection) });
+    try {
+      const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
+        const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
+      };
+      const root = element('main');
+      const page = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+        button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
+        rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
+      await page.renderModelServiceSettings();
+      expect(root.querySelector('.model-service-settings')).not.toBeNull();
+      expectNoTechnicalText(root);
+      setTechnicalLayerVisible(true);
+      await page.renderModelServiceSettings(); collectTechnicalDisclosures(root);
+      expect(root.textContent?.match(/查看技术详情/gu)).toHaveLength(1);
+    } finally { vi.unstubAllGlobals(); }
+  } finally { setTechnicalLayerVisible(true); }
 });

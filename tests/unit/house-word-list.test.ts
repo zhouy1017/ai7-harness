@@ -9,6 +9,8 @@ import { HouseWordLists, houseWordListPin, initializeHouseWordListSchema, valida
 import { canonicalJson, sha256Hex } from '../../src/service/analysis/canonical.js';
 import { mountHouseWordList } from '../../src/renderer/house-word-list.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
+import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
 const entry = (literal: string, note = ''): HouseWordListDraftEntry => ({ entryId: null, literal, note, enabled: true });
 const input = (entries: readonly HouseWordListDraftEntry[]) => ({ expectedCurrent: null, sourceKind: 'editor-entry' as const, entries });
@@ -62,6 +64,19 @@ describe('editor-authored House input bounds', () => {
 });
 
 describe('standalone House panel through its two-operation interface', () => {
+  it('keeps saved entries while omitting version technical details in ordinary mode', async () => {
+    const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
+    const owner = new HouseWordLists(db); owner.save(input([entry('合成词', '合成说明')]));
+    const root = document.createElement('div');
+    const panel = mountHouseWordList({ root, api: { inspectHouseWordList: async (value) => owner.inspect(value), saveHouseWordList: async (value) => owner.save(value) }, setStatus: vi.fn() });
+    setTechnicalLayerVisible(false);
+    try {
+      await panel.load(); collectTechnicalDisclosures(root);
+      expect(root.textContent).toContain('合成词');
+      expect(root.textContent).not.toContain('版本技术详情');
+      expectNoTechnicalText(root);
+    } finally { panel.destroy(); db.close(); setTechnicalLayerVisible(true); restore(); }
+  });
   it('keeps a known committed save truthful after a failed read and retries only the read', async () => {
     const restore = installMiniDom(); const db = new DatabaseSync(':memory:'); initializeHouseWordListSchema(db);
     const owner = new HouseWordLists(db); const status = vi.fn(); let failRead = false;

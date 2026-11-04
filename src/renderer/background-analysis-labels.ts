@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.js';
 
 /**
@@ -110,7 +110,7 @@ export function backgroundHistoryLine(
   entry: BackgroundAnalysisEnrollmentProjection['history'][number],
   instant: (value: string) => string,
 ): string {
-  return metadataWords(`第 ${entry.ordinal} 版 · ${entry.stateLabel} · ${instant(entry.recordedAt)}`);
+  return `${technicalWords(`第 ${entry.ordinal} 版`, '版本')} · ${entry.stateLabel} · ${instant(entry.recordedAt)}`;
 }
 
 /** The dispatcher's latest look at the Book: `AI7 上次查看：… · <what it found>`. */

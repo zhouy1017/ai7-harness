@@ -1,6 +1,5 @@
-import { identityWords } from './technical-layer.js';
-import { technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
+import { taskPlanWording } from './task-drawer-labels.js';
 import type {
   EvidenceAssuranceLevel,
   BaselineAnalysisGoal,
@@ -711,6 +710,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   // ---- painting ---------------------------------------------------------------------------------------
 
   function paint(next: TaskPlanProjection, force: boolean): void {
+    next = taskPlanWording(next);
     const key = JSON.stringify(next);
     const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
@@ -992,13 +992,13 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const full = control(next.edit.editable ? TASK_PLAN_FULL_LINK_EDITABLE : TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
-    section.append(el('p', 'research-status', next.service.decision), rows, full);
+    section.append(...(technicalLayerVisible ? [el('p', 'research-status', next.service.decision)] : []), rows, full);
     return section;
   }
 
   function listOf(items: ReadonlyArray<string>, className: string): HTMLElement {
     const list = el('ul', className);
-    for (const item of items) list.append(el('li', undefined, metadataWords(item)));
+    for (const item of items) list.append(el('li', undefined, item));
     return list;
   }
 
@@ -1015,7 +1015,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const list = el('dl', 'task-plan-facts');
     for (const [term, value] of rows) {
       const dd = el('dd');
-      if (typeof value === 'string') dd.textContent = metadataWords(value);
+      if (typeof value === 'string') dd.textContent = value;
       else dd.append(value);
       dd.dataset['taskPlanTerm'] = term;
       list.append(el('dt', undefined, term), dd);
@@ -1044,7 +1044,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       planSection(0, facts([[TASK_PLAN_GOAL_TERMS[0], next.goal.sentence], [TASK_PLAN_GOAL_TERMS[1], listOf(next.outcomes, 'task-plan-list')]])),
       planSection(1, facts([
         [TASK_PLAN_SCOPE_TERMS[0], next.scope.process],
-        [TASK_PLAN_SCOPE_TERMS[1], next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference.map(metadataWords), 'task-plan-list')],
+        [TASK_PLAN_SCOPE_TERMS[1], next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference, 'task-plan-list')],
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
         [TASK_PLAN_SCOPE_TERMS[3], next.scope.notRead],
       ])),
@@ -1819,7 +1819,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       assuranceBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
-      options.setStatus(metadataWords(`计划已更新为第 ${ordinal ?? '?'} 版。`), 'success');
+      options.setStatus(`计划已更新为${technicalWords(`第 ${ordinal ?? '?'} 版`, '版本')}。`, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -2368,7 +2368,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
           throw new Error('重新确认计划未返回计划。');
         }
-        options.setStatus(metadataWords(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}。`), 'success');
+        options.setStatus(`计划已重新确认${technicalWords(`为版本 ${completed.result.planVersion?.ordinal ?? '?'}`)}。`, 'success');
       }
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);

@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
   type ReviewChapterOptionProjection,
@@ -125,7 +125,7 @@ export function reviewGenerateReportLabel(latestVersion: number | null): string 
 export function reviewManuscriptLine(manuscript: ReviewWorkspaceProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能审阅。'
-    : metadataWords(`当前稿件：修订版 ${manuscript.revisionLabel} · ${manuscript.totalBlocks} 个段落`);
+    : `当前稿件：修订版${technicalWords(` ${manuscript.revisionLabel}`)} · ${manuscript.totalBlocks} 个段落`;
 }
 
 // ---- state pills: text and shape, never colour alone (editor-surfaces §0.3) ----------------------------
@@ -189,7 +189,7 @@ export const REVIEW_STATUS_PILLS: Readonly<Record<ReviewFindingStatus, ReviewPil
 // ---- the coverage matrix and the 审阅记录 -----------------------------------------------------------
 
 export function reviewCoverageLastReview(row: Pick<ReviewCoverageRowProjection, 'lastRunOrdinal' | 'lastReviewedRevisionLabel'>): string {
-  return row.lastRunOrdinal === null ? '—' : metadataWords(`第 ${row.lastRunOrdinal} 次 · 读的是 ${row.lastReviewedRevisionLabel ?? '—'}`);
+  return row.lastRunOrdinal === null ? '—' : `第 ${row.lastRunOrdinal} 次 · 读的是 ${technicalWords(row.lastReviewedRevisionLabel ?? '—', "修订版")}`;
 }
 
 export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'changedBlocks'>): string {
@@ -217,7 +217,7 @@ export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' 
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
-  return reportVersion === null ? '尚未生成报告' : metadataWords(`报告第 ${reportVersion} 版`);
+  return reportVersion === null ? '尚未生成报告' : `报告${technicalWords(`第 ${reportVersion} 版`, '版本')}`;
 }
 
 export function reviewRunsTruncatedLine(listed: number): string {
@@ -259,7 +259,7 @@ export function reviewReadConsequence(
     case null:
       return '选好范围后显示';
     case 'whole':
-      return manuscript === null ? '这本书还没有稿件。' : metadataWords(`当前稿件（修订版 ${manuscript.revisionLabel}）的全部 ${manuscript.totalBlocks} 个段落`);
+      return manuscript === null ? '这本书还没有稿件。' : `当前稿件（修订版${technicalWords(` ${manuscript.revisionLabel}`)}）的全部 ${manuscript.totalBlocks} 个段落`;
     case 'chapters':
       return chapters.from === null || chapters.to === null
         ? '选好起止的章后显示'
@@ -480,7 +480,7 @@ export function reviewRunHeading(label: string): string {
 }
 
 export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): string {
-  return metadataWords(`${scopeLabel.replaceAll('内容块', '段落')} · 读的是修订版 ${revisionLabel}`);
+  return `${scopeLabel.replaceAll('内容块', '段落')} · 读的是修订版 ${technicalWords(revisionLabel)}`;
 }
 
 export function reviewCreatedLine(localInstant: string): string {
@@ -573,7 +573,7 @@ export function reviewBatchAppliedLine(count: number, recovered: boolean): strin
 }
 
 export function reviewReportGeneratedLine(version: number): string {
-  return metadataWords(`已生成审阅报告第 ${version} 版。`);
+  return `已生成审阅报告${technicalWords(`第 ${version} 版`, '版本')}。`;
 }
 
 // ---- entry points ----------------------------------------------------------------------------------

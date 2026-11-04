@@ -47,7 +47,7 @@ export function modelConnectionTestDisclosure(test: ModelConnectionTestStatus | 
     list.append(dt, dd);
   }
   details.append(summary, list);
-  return [details];
+  return [technicalDisclosure(details)];
 }
 
 export const MODEL_CONNECTION_TEST_NOTE = '测试只发送固定公开合成消息，不含图书文字；仅核验缓冲文本，不核验工具或流式。';

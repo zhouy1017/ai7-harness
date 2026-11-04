@@ -1,5 +1,4 @@
-import { identityWords } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, identityWords } from './technical-layer.js';
 import {
   CAPTURED_PROCEDURE_SCOPE_LABELS,
   type BookSummaryCursor,
@@ -213,7 +212,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     heading.tabIndex = -1;
     const latest = el('p', 'captured-procedure-latest');
     latest.append(el('span', `status-pill captured-procedure-state-${procedure.latestState}`, procedure.latestStateLabel),
-      el('span', undefined, metadataWords(` 最新为第 ${procedure.latestVersion} 版 · 共 ${procedure.versionCount} 版`)));
+      el('span', undefined, ` 最新为${technicalWords(`第 ${procedure.latestVersion} 版`, '版本')} · 共 ${procedure.versionCount} 版`));
     card.append(heading, latest);
     const actions = el('div', 'button-row captured-procedure-actions');
     if (procedure.runnable) {
@@ -253,12 +252,12 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     item.dataset['version'] = String(version.version);
     item.dataset['versionState'] = version.state;
     item.dataset['latestEligible'] = String(latestEligible);
-    const pill = el('span', metadataWords(`status-pill captured-procedure-state-${version.state}`), version.stateLabel);
+    const pill = el('span', `status-pill captured-procedure-state-${version.state}`, version.stateLabel);
     const line = el('p', 'captured-procedure-version-line');
     line.append(pill);
     // 最新可用 (Issue #66, S31; REUSE-043): the version a new use resolves to now.
     if (latestEligible) line.append(' ', el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE));
-    line.append(el('span', undefined, metadataWords(` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`)));
+    line.append(el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
     item.append(line);
     // Its meaning as a visible field note under the line, read in order by a screen reader and seen by everyone else
     // (S31 review P3-6, Issue #684): never only a tooltip, and never hidden from sighted users.
@@ -267,7 +266,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     for (const step of version.steps) steps.append(el('li', undefined, captureStepLine(step)));
     // What a Book must have for this version to run there (Issue #66, S31b; REUSE-048): the 新建审阅 sheet says how it fits each Book.
     const requirement = el('p', 'field-note captured-procedure-requirement', procedureRequirementLine(version.steps));
-    item.append(steps, requirement, el('p', 'field-note captured-procedure-source', metadataWords(`${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`)));
+    item.append(steps, requirement, el('p', 'field-note captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`));
     const runs = el('p', 'field-note captured-procedure-runs', procedureRunsLine(version));
     item.append(runs);
     // 关联工作 (Issue #66, S31; REUSE-031): each Run an exact link to that Run in its Book's 审阅, never a copy of what it found.
@@ -303,7 +302,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       item.append(list);
     }
     for (const problem of version.validationProblems) item.append(el('p', 'attention-note captured-procedure-problem', problem));
-    if (version.state === 'stopped') item.append(el('p', 'field-note', metadataWords(`已停用：编辑确认停用；${version.stateRecordedAt === null ? '' : `${options.localInstantLabel(version.stateRecordedAt)}；`}不会再被选用；按它运行过的审阅仍然记着它。`)));
+    if (version.state === 'stopped') item.append(el('p', 'field-note', `已停用：编辑确认停用；${version.stateRecordedAt === null ? '' : `${options.localInstantLabel(version.stateRecordedAt)}；`}不会再被选用；按它运行过的审阅仍然记着它。`));
     const actions = el('div', 'button-row captured-procedure-version-actions');
     if (version.state === 'pending-validation') {
       actions.append(button(PROCEDURE_ACTIONS.validate, 'primary', 'validate', () => act('正在验证…', '无法验证这一版。', async () => {
@@ -329,8 +328,8 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       el('dt', undefined, '版本'), el('dd', 'technical-identity', version.versionId),
       el('dt', undefined, '文档 SHA-256'), el('dd', 'technical-identity', version.technical.documentSha256),
       el('dt', undefined, '上一版 SHA-256'), el('dd', 'technical-identity', version.technical.previousDocumentSha256 ?? '无（第 1 版）'),
-      el('dt', undefined, '来源审阅'), el('dd', 'technical-identity', metadataWords(`${version.source.bookId} · ${version.source.reviewRunId}`)),
-      ...version.steps.flatMap((step) => [el('dt', undefined, step.label), el('dd', 'technical-identity', metadataWords(`${step.categoryId} · ${step.procedureTitle} · 第 ${step.procedureVersion} 版`))]),
+      el('dt', undefined, '来源审阅'), el('dd', 'technical-identity', `${version.source.bookId} · ${version.source.reviewRunId}`),
+      ...version.steps.flatMap((step) => [el('dt', undefined, step.label), el('dd', 'technical-identity', `${step.categoryId} · ${step.procedureTitle} · ${technicalWords(`第 ${step.procedureVersion} 版`, '版本')}`)]),
     ));
     return item;
   }
@@ -458,7 +457,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const heading = el('h4', undefined, `《${proposal.title}》`);
     heading.tabIndex = -1;
     card.append(heading, el('p', 'field-note developer-proposal-latest',
-      metadataWords(`最新为第 ${proposal.latestVersion} 版 · 记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`)));
+      `最新为${technicalWords(`第 ${proposal.latestVersion} 版`, '版本')} · 记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`));
     const actions = el('div', 'button-row developer-proposal-actions');
     const toggle = button(page === null ? `查看各版本（${proposal.versionCount}）` : '收起各版本', 'quiet', 'proposal-versions', async () => {
       if (proposalPages.has(proposal.proposalId)) proposalPages.delete(proposal.proposalId);
@@ -505,9 +504,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       const result = await api.saveDeveloperProposalFile({ proposalVersionId: version.proposalVersionId });
       options.setStatus(result.outcome === 'saved' ? proposalFileSavedLine(result.fileName) : '已取消导出；什么都没有写入。', result.outcome === 'saved' ? 'success' : undefined);
     }, `[data-proposal-version-id="${version.proposalVersionId}"] [data-procedure-action="proposal-file"]`));
-    save.setAttribute('aria-label', metadataWords(`${PROCEDURE_ACTIONS.proposalFile}（第 ${version.version} 版）`));
+    save.setAttribute('aria-label', `${PROCEDURE_ACTIONS.proposalFile}${technicalWords(`（第 ${version.version} 版）`)}`);
     item.append(save, options.technicalDetails('developer-proposal-facts',
-      el('dt', undefined, '开发建议'), el('dd', 'technical-identity', metadataWords(`${version.proposalId} · ${version.proposalVersionId}`)),
+      el('dt', undefined, '开发建议'), el('dd', 'technical-identity', `${version.proposalId} · ${version.proposalVersionId}`),
       el('dt', undefined, 'SHA-256'), el('dd', 'technical-identity', version.technical.sha256)));
     return item;
   }
@@ -535,7 +534,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     problem.setAttribute('role', 'alert');
     const actions = el('div', 'button-row');
     actions.append(
-      button(metadataWords(`保存为第 ${latest.version + 1} 版`), 'primary', 'save-proposal', async () => {
+      button(`保存为${technicalWords(`第 ${latest.version + 1} 版`, '版本')}`, 'primary', 'save-proposal', async () => {
         problem.textContent = title.value.trim().length === 0 ? PROPOSAL_PICK_TITLE : missing.value.trim().length === 0 ? PROPOSAL_PICK_CAPABILITY : '';
         if (problem.textContent !== '') return;
         await act('正在保存开发建议…', '无法保存开发建议。', async () => {

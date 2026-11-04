@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import type {
   ImportedSkillAcquisitionProjection, ImportedSkillCeiling, ImportedSkillHistoryEntry, ImportedSkillRevisionProjection, ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCandidateSummary,
   ImportedSkillUpdateCheckProjection, ImportedSkillUpdateDisposition, ImportedSkillUpdateFileChange,
@@ -8,7 +8,7 @@ export const IMPORTED_SKILLS_HEADING = '外部 Skill';
 export const IMPORTED_SKILLS_NO_EXECUTOR = '外部 Skill 在此版本没有执行器，不参与工序推荐。';
 export const IMPORTED_SKILL_NO_AUTHORITY = '安装或启用不会发起任务，也不授予稿件访问、模型调用、凭据、联网、外部操作、后台分析或应用修改的权限。';
 export function importedSkillIdentityLine(skill: Pick<ImportedSkillRevisionProjection, 'name' | 'sourceRevision' | 'ordinal' | 'stateLabel'>): string {
-  return metadataWords(`${skill.name} · DSH Skill · 来源 ${skill.sourceRevision} · 本地修订 ${skill.ordinal} · ${skill.stateLabel}`);
+  return `${skill.name} · DSH Skill${technicalWords(` · 来源 ${skill.sourceRevision} · 本地修订 ${skill.ordinal}`)} · ${skill.stateLabel}`;
 }
 export function importedSkillCeilingLines(ceiling: ImportedSkillCeiling): string[] {
   return [
@@ -44,7 +44,7 @@ export function importedSkillUpdateStatusLine(candidate: Pick<ImportedSkillUpdat
     : candidate.status === 'dismissed' ? '已忽略' : candidate.stale ? '待处理，但这个 Skill 已换了修订，需重新检查更新' : '待处理';
 }
 export function importedSkillUpdateCandidateLine(candidate: ImportedSkillUpdateCandidateSummary): string {
-  return metadataWords(`${candidate.incomingName} · 来源 ${candidate.incomingSourceRevision} · ${IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS[candidate.disposition]} · ${importedSkillUpdateStatusLine(candidate)}`);
+  return `${candidate.incomingName}${technicalWords(` · 来源 ${candidate.incomingSourceRevision}`)} · ${IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS[candidate.disposition]} · ${importedSkillUpdateStatusLine(candidate)}`;
 }
 export const IMPORTED_SKILL_UPDATE_ACCEPT_LABEL = '我已逐项查看并接受以上事项';
 export const IMPORTED_SKILL_UPDATE_UPSTREAM_LABEL = '以上游为准';
@@ -63,7 +63,7 @@ export const IMPORTED_SKILL_HISTORY_HEADING = '修订历史';
 export const IMPORTED_SKILL_HISTORY_NOT_RESTORED = '回到此版本只把它设为当前修订；不改写历史，也不恢复它之前的启用，需要时请重新启用。';
 export function importedSkillHistoryLine(entry: ImportedSkillHistoryEntry): string {
   const origin = entry.origin === 'rule' ? '由更新规则采纳' : entry.origin === 'adopt' ? '由你采纳' : '导入';
-  return metadataWords(`本地修订 ${entry.ordinal} · 来源 ${entry.sourceRevision} · ${entry.stateLabel} · ${origin}${entry.current ? ' · 当前' : ''}`);
+  return `${technicalWords(`本地修订 ${entry.ordinal} · 来源 ${entry.sourceRevision} · `)}${entry.stateLabel} · ${origin}${entry.current ? ' · 当前' : ''}`;
 }
 
 // The update card's own words: actions, headings, the status line each act answers, and the sentences built from a candidate.
@@ -98,19 +98,19 @@ export const IMPORTED_SKILL_UPDATE_STATUS = {
 export const IMPORTED_SKILL_NOT_CURRENT_NOTE = '这不是当前修订：先在修订历史里「回到此版本」，才能继续验证、安装或启用。';
 export const IMPORTED_SKILL_REPAIR_NOTE = '这一修订保持可查看。修复后请用「检查更新（从文件）…」；若原包未声明 Skill 名称，请在原目录修复后重新导入。旧记录不改写。';
 export function importedSkillUpdateSourceLines(read: ImportedSkillAcquisitionProjection): string[] {
-  return [`来源：${read.sourcePath}`, `许可：${read.license ?? '未提供'}`, metadataWords(`内容 SHA-256 ${read.contentSha256}`)];
+  return [`来源：${read.sourcePath}`, `许可：${read.license ?? '未提供'}`, technicalWords(`内容 SHA-256 ${read.contentSha256}`)];
 }
 export function importedSkillUpdateSourceFileLine(file: ImportedSkillAcquisitionProjection['files'][number]): string {
-  return metadataWords(`${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`);
+  return `${file.path}${technicalWords(` · ${file.bytes} 字节 · SHA-256 ${file.sha256}`)}`;
 }
 export function importedSkillUpdateCheckTitle(read: ImportedSkillUpdateCheckProjection): string {
-  return metadataWords(`${read.acquisition.name} · ${read.acquisition.kind} · 来源 ${read.acquisition.sourceRevision} · 尚未保留`);
+  return `${read.acquisition.name} · ${read.acquisition.kind}${technicalWords(` · 来源 ${read.acquisition.sourceRevision}`)} · 尚未保留`;
 }
 export function importedSkillThreeWayLines(read: ImportedSkillUpdateCandidateProjection): string[] {
   return [
-    metadataWords(`之前的来源快照：来源 ${read.prior.sourceRevision} · SHA-256 ${read.prior.sha256}`),
-    metadataWords(`当前工作修订：本地修订 ${read.working.ordinal} · SHA-256 ${read.working.sha256}`),
-    metadataWords(`新的来源快照：来源 ${read.incomingSourceRevision} · SHA-256 ${read.incoming.sha256}`),
+    `之前的来源快照${technicalWords(`：来源 ${read.prior.sourceRevision} · SHA-256 ${read.prior.sha256}`)}`,
+    `当前工作修订${technicalWords(`：本地修订 ${read.working.ordinal} · SHA-256 ${read.working.sha256}`)}`,
+    `新的来源快照${technicalWords(`：来源 ${read.incomingSourceRevision} · SHA-256 ${read.incoming.sha256}`)}`,
   ];
 }
 export function importedSkillUpdateFileLine(path: string, change: ImportedSkillUpdateFileChange): string {

@@ -1,5 +1,4 @@
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { metadataWords, modelLabelWords } from './technical-layer.js';
+import { technicalDisclosure, technicalLayerVisible, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { modelServiceFlow } from './model-service-flow.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
@@ -118,7 +117,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     const currentRoles = element('section', 'model-service-current-roles');
     currentRoles.setAttribute('aria-label', '当前角色模型');
     for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
-      const line = element('p', undefined, metadataWords(`${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`} · ${role.statusLabel}`));
+      const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`} · ${role.statusLabel}`);
       line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
       currentRoles.append(line);
     }

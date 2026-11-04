@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import {
   CAPTURED_PROCEDURE_SCOPE_LABELS,
   MAX_CAPTURED_PROCEDURE_PACKAGES_SHOWN,
@@ -92,7 +92,7 @@ export function captureOutputLabel(output: ReviewCategoryOutputKind): string {
 
 /** One step in words: what it runs, at which 工序 version, what it yields, and whether it calls a model or a search engine. */
 export function captureStepLine(step: Pick<CapturedProcedureStepProjection, 'label' | 'procedureTitle' | 'procedureVersion' | 'output' | 'model' | 'searchEngine'>): string {
-  return metadataWords(`${step.label} · ${step.procedureTitle}（第 ${step.procedureVersion} 版） · 输出${OUTPUT_LABELS[step.output]} · ${step.model ? '调用模型' : '不调用模型'} · ${step.searchEngine ? '使用搜索引擎' : '不使用搜索引擎'}`);
+  return `${step.label} · ${step.procedureTitle}${technicalWords(`（第 ${step.procedureVersion} 版）`)} · 输出${OUTPUT_LABELS[step.output]} · ${step.model ? '调用模型' : '不调用模型'} · ${step.searchEngine ? '使用搜索引擎' : '不使用搜索引擎'}`;
 }
 
 /** 将提取什么 (REUSE-013, REUSE-014): the purpose, the ordered steps, the one parameter slot, and the ceiling. */
@@ -117,15 +117,15 @@ export function captureSourceLine(runLabel: string, scopeLabel: string): string 
 }
 
 export function captureNextVersionOption(title: string, latestVersion: number): string {
-  return metadataWords(`《${title}》的第 ${latestVersion + 1} 版`);
+  return `《${title}》的${technicalWords(`第 ${latestVersion + 1} 版`, '版本')}`;
 }
 
 export function captureSavedLine(title: string, version: number): string {
-  return metadataWords(`已保存《${title}》第 ${version} 版 · 已启用，可直接运行。`);
+  return `已保存《${title}》${technicalWords(`第 ${version} 版`, '版本')} · 已启用，可直接运行。`;
 }
 
 export function proposalSavedLine(title: string, version: number): string {
-  return metadataWords(`已保存开发建议《${title}》第 ${version} 版；只记在本机，AI7 不会发送它。`);
+  return `已保存开发建议《${title}》${technicalWords(`第 ${version} 版`, '版本')}；只记在本机，AI7 不会发送它。`;
 }
 
 // ---- 知识库 › 工序与规则 --------------------------------------------------------------------------------------
@@ -153,11 +153,11 @@ export const PROCEDURE_RUN_NOTE = '会打开这本书的「新建审阅」，按
 export const PROCEDURE_STOP_NOTE = '停用后这一版不会再被选用，也不能再启用；按它运行过的审阅仍然记着它。要再用，请从一次新的审阅重新保存。' as const;
 
 export function procedureVersionLine(version: Pick<CapturedProcedureVersionProjection, 'version' | 'stateLabel' | 'steps' | 'scopeSlot'>): string {
-  return metadataWords(`第 ${version.version} 版 · ${version.stateLabel} · ${version.steps.length} 步 · 范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[version.scopeSlot]}」`);
+  return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.steps.length} 步 · 范围「${CAPTURED_PROCEDURE_SCOPE_LABELS[version.scopeSlot]}」`;
 }
 
 export function procedureSourceLine(version: Pick<CapturedProcedureVersionProjection, 'source'>): string {
-  return metadataWords(`来自《${version.source.bookTitle}》${version.source.runLabel}`);
+  return `来自《${version.source.bookTitle}》${version.source.runLabel}`;
 }
 
 /**
@@ -166,7 +166,7 @@ export function procedureSourceLine(version: Pick<CapturedProcedureVersionProjec
  */
 export function procedureRunsLine(version: Pick<CapturedProcedureVersionProjection, 'runCount' | 'preparedRunCount'>): string {
   const ran = version.runCount === 0 ? '还没有审阅按这一版运行过' : `按这一版运行过 ${version.runCount} 次`;
-  return version.preparedRunCount === 0 ? ran : metadataWords(`${ran}；另有 ${version.preparedRunCount} 次已准备、未开始`);
+  return version.preparedRunCount === 0 ? ran : `${ran}；另有 ${version.preparedRunCount} 次已准备、未开始`;
 }
 
 /** One Review Run a version ran (REUSE-031): an exact link, with where it stands now (Issue #66, S31). */
@@ -203,7 +203,7 @@ export function procedurePackagesLine(shown: number, count: number, limit: numbe
 
 /** One 图书交付包 version as an exact link (REUSE-031): it opens that Book's 交付物, where the version is listed. */
 export function procedurePackageLinkLine(link: Pick<CapturedProcedurePackageLinkProjection, 'bookTitle' | 'version'>, at: string): string {
-  return metadataWords(`《${link.bookTitle}》图书交付包 v${link.version} · 准备于 ${at}`);
+  return `《${link.bookTitle}》图书交付包 ${technicalWords(`v${link.version}`)} · 准备于 ${at}`;
 }
 
 /** The mark on the version a new use resolves to now (Issue #66, S31; REUSE-043; interaction-spec `最新可用`). */
@@ -220,7 +220,7 @@ export const PROCEDURE_STOP_KEPT = '不会删除任何东西：这一版的内�
 export function procedureStopHeading(preview: Pick<CapturedProcedureStopPreviewProjection, 'title' | 'versionId' | 'versions' | 'versionCount'>): string {
   return preview.versionId === null
     ? `停用《${preview.title}》尚未停用的 ${preview.versionCount} 个版本`
-    : metadataWords(`停用《${preview.title}》第 ${preview.versions[0]?.version ?? ''} 版`);
+    : `停用《${preview.title}》${technicalWords(`第 ${preview.versions[0]?.version ?? ''} 版`, '版本')}`;
 }
 
 /** Versions the preview takes but does not list, beyond what one frame holds (S31 review P2-2). */
@@ -230,7 +230,7 @@ export function procedureStopMoreVersionsLine(shown: number, count: number): str
 
 /** One version the 停用 takes: where it stands, and the history that keeps naming it. */
 export function procedureStopVersionLine(version: CapturedProcedureStopPreviewProjection['versions'][number]): string {
-  return metadataWords(`第 ${version.version} 版 · ${version.stateLabel} · ${version.runCount === 0 ? '还没有审阅按它运行过' : `按它运行过 ${version.runCount} 次，停用后仍然记着它`}`);
+  return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.runCount === 0 ? '还没有审阅按它运行过' : `按它运行过 ${version.runCount} 次，停用后仍然记着它`}`;
 }
 
 export function procedureStopRunLine(run: CapturedProcedureStopRunProjection): string {
@@ -246,14 +246,14 @@ export function procedureStopMoreLine(shown: number, count: number): string {
 export function procedureStopAfterLine(afterVersion: number | null): string {
   return afterVersion === null
     ? '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。'
-    : metadataWords(`停用后，新建审阅按这个工序运行时用第 ${afterVersion} 版。`);
+    : `停用后，新建审阅按这个工序运行时用${technicalWords(`第 ${afterVersion} 版`, '版本')}。`;
 }
 
 /** A guideline document a run would apply today, against the source Run's (ADR 0087 §3). */
 export function procedureGuidelineLine(guideline: CapturedProcedureGuidelineProjection): string {
   const today = `${guideline.title}（${guideline.issuer}）第 ${guideline.version} 版`;
   if (guideline.sourceVersion === null) return `${today} · 来源审阅没有用它`;
-  return guideline.sourceVersion === guideline.version ? `${today} · 与来源审阅相同` : metadataWords(`${today} · 来源审阅用的是第 ${guideline.sourceVersion} 版`);
+  return guideline.sourceVersion === guideline.version ? `${today} · 与来源审阅相同` : `${today} · 来源审阅用的是${technicalWords(`第 ${guideline.sourceVersion} 版`, '版本')}`;
 }
 
 /** The ceiling in words (ADR 0087 §4): what a Run prepared from the version may do, and no more. */
@@ -278,11 +278,11 @@ export function procedureValidationResult(passes: boolean): string {
 }
 
 export function procedureEnabledLine(title: string, version: number): string {
-  return metadataWords(`已启用《${title}》第 ${version} 版；在一本书的新建审阅里可以按它运行。`);
+  return `已启用《${title}》${technicalWords(`第 ${version} 版`, '版本')}；在一本书的新建审阅里可以按它运行。`;
 }
 
 export function procedureValidationFailedLine(title: string, version: number): string {
-  return metadataWords(`《${title}》第 ${version} 版没有通过验证，仍是「待验证」。`);
+  return `《${title}》${technicalWords(`第 ${version} 版`, '版本')}没有通过验证，仍是「待验证」。`;
 }
 
 export const PROCEDURE_STOP_STALE = '停用的影响在你查看之后有了变化，已重新列出；请再看一遍再停用。' as const;
@@ -292,7 +292,7 @@ export function procedureStoppedLine(title: string, versions: number): string {
 }
 
 export function proposalVersionLine(version: Pick<DeveloperProposalVersionProjection, 'version' | 'fileCount'>, at: string): string {
-  return metadataWords(`第 ${version.version} 版 · 记录于 ${at} · ${version.fileCount === 0 ? '还没有导出' : `导出过 ${version.fileCount} 次`}`);
+  return `${technicalWords(`第 ${version.version} 版`, '版本')} · 记录于 ${at} · ${version.fileCount === 0 ? '还没有导出' : `导出过 ${version.fileCount} 次`}`;
 }
 
 export function proposalFileSavedLine(fileName: string): string {
@@ -308,7 +308,7 @@ export const SHEET_PROCEDURE_NONE_ENABLED = '还没有启用的可复用工序�
 export const SHEET_PROCEDURE_VERSION_LABEL = '版本' as const;
 
 export function sheetProcedureVersionOption(version: number, latest: boolean): string {
-  return metadataWords(`第 ${version} 版${latest ? '（最新可用）' : ''}`);
+  return `${technicalWords(`第 ${version} 版`, '版本')}${latest ? '（最新可用）' : ''}`;
 }
 
 /**
@@ -349,7 +349,7 @@ function filledWords(steps: ReadonlyArray<Pick<CapturedProcedureRunStepProjectio
 /** The status once a choice filled the sheet (S31b review P3-5): what it ticked, in the same words as the sheet's own line. */
 export function sheetProcedureChosenStatus(run: CapturedProcedureRunProjection): string {
   if (run.resolved === null) return run.unavailableReason ?? '';
-  return metadataWords(`已读取《${run.title}》第 ${run.resolved.version} 版：${filledWords(run.resolved.steps)}。`);
+  return `已读取《${run.title}》${technicalWords(`第 ${run.resolved.version} 版`, '版本')}：${filledWords(run.resolved.steps)}。`;
 }
 
 /** What the sheet says once a Captured Procedure filled it (ADR 0087 §4; REUSE-054): the exact version, and what it leaves out. */
@@ -376,7 +376,7 @@ export function sheetProcedureLines(run: CapturedProcedureRunProjection): string
 /** The pin a Run shows (ADR 0087 §4): never moved by a later version or a 停用. */
 export function runProcedureLine(procedure: ReviewRunProcedureProjection): string {
   const note = procedure.missing ? '（本机没有这一版；这次审阅仍记着它）' : procedure.stopped ? '（这一版已停用；这次审阅仍记着它）' : '';
-  return metadataWords(`按可复用工序《${procedure.title}》第 ${procedure.version} 版${note}`);
+  return `按可复用工序《${procedure.title}》${technicalWords(`第 ${procedure.version} 版`, '版本')}${note}`;
 }
 
 /** A step the Run left out (ADR 0087 §4): one its Book could not take, or — by choice — a Series step the editor did not choose (S31b). */

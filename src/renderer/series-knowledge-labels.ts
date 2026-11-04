@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import type {
   SeriesKnowledgeCandidateProjection,
   SeriesKnowledgeProvenanceProjection,
@@ -79,7 +79,7 @@ export const KNOWLEDGE_MENU_NOTE = '候选项在书系里经过纳入审阅，�
 export function knowledgeTargetLine(candidate: Pick<SeriesKnowledgeCandidateProjection, 'target'>): string {
   const { target } = candidate;
   if (target.kind === 'new') return `新条目「${target.subject}」（${target.classLabel}）`;
-  return metadataWords(`更新「${target.subject}」（${target.classLabel}，基于第 ${target.baseRevisionOrdinal ?? '?'} 版）`);
+  return `更新「${target.subject}」（${target.classLabel}，基于${technicalWords(`第 ${target.baseRevisionOrdinal ?? '?'} 版`, '版本')}）`;
 }
 
 /**
@@ -90,19 +90,19 @@ export function knowledgeTargetLine(candidate: Pick<SeriesKnowledgeCandidateProj
 export function knowledgeProvenanceLine(provenance: SeriesKnowledgeProvenanceProjection | null): string {
   if (provenance === null) return '编辑撰写';
   if (provenance.uncheckpointed) {
-    return metadataWords(`来自《${provenance.bookTitle}》的稿件（${provenance.revisionLabel} 之后另有尚未保存为修订版的改动）：「${provenance.quote}」`);
+    return `来自《${provenance.bookTitle}》的稿件（${technicalWords(provenance.revisionLabel, '修订版')} 之后另有尚未保存为修订版的改动）：「${provenance.quote}」`;
   }
-  return metadataWords(`来自《${provenance.bookTitle}》${provenance.revisionLabel} 的原文：「${provenance.quote}」`);
+  return `来自《${provenance.bookTitle}》${technicalWords(provenance.revisionLabel, '修订版')} 的原文：「${provenance.quote}」`;
 }
 
 /** An item as the list heads it: its name, class and current version. */
 export function knowledgeItemLine(item: { readonly subject: string; readonly classLabel: string; readonly current: Pick<SeriesKnowledgeRevisionProjection, 'ordinal'> }): string {
-  return metadataWords(`「${item.subject}」 · ${item.classLabel} · 第 ${item.current.ordinal} 版`);
+  return `「${item.subject}」 · ${item.classLabel} · ${technicalWords(`第 ${item.current.ordinal} 版`, '版本')}`;
 }
 
 /** One revision in an item's history. */
 export function knowledgeRevisionLine(revision: Pick<SeriesKnowledgeRevisionProjection, 'ordinal' | 'outcome' | 'content'>): string {
-  return metadataWords(`第 ${revision.ordinal} 版 · ${revision.outcome === 'created' ? '纳入' : '更新'}：${revision.content}`);
+  return `${technicalWords(`第 ${revision.ordinal} 版`, '版本')} · ${revision.outcome === 'created' ? '纳入' : '更新'}：${revision.content}`;
 }
 
 /** The conflicts a revision keeps, never a verification (SER-016). */
@@ -125,7 +125,7 @@ export function knowledgeReviewIdentity(review: Pick<SeriesKnowledgeReviewProjec
 
 /** The current revision a promotion would supersede. */
 export function knowledgeSupersededLine(current: Pick<SeriesKnowledgeRevisionProjection, 'ordinal' | 'content'>): string {
-  return metadataWords(`将被取代的当前版本：第 ${current.ordinal} 版 · ${current.content}`);
+  return `将被取代的当前版本：${technicalWords(`第 ${current.ordinal} 版`, '版本')} · ${current.content}`;
 }
 
 /** Why `纳入书系知识` waits, or `null` when it may go (SER-015, SER-016). */

@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import type {
   RendererApi,
   RunBudgetCeilingState,
@@ -123,14 +123,14 @@ export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): Reado
     { key: 'book', text: chips.book },
     { key: 'position', text: chips.position },
     ...(chips.selectedGraphemes === null ? [] : [{ key: 'selected', text: `已选 ${groupedCount(chips.selectedGraphemes)} 字` }]),
-    { key: 'revision', text: metadataWords(`任务输入修订版 ${chips.taskInputRevision}`) },
+    { key: 'revision', text: `任务输入修订版${technicalWords(` ${chips.taskInputRevision}`)}` },
     { key: 'procedure', text: `工序「${chips.procedure}」` },
   ];
 }
 
 /** TASK-039/040's one line: preparing the Task saved a revision, so later editing leaves the Task as it is. */
 export function taskPlanSavedLine(revisionLabel: string): string {
-  return metadataWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`);
+  return `已为任务保存修订版${technicalWords(` ${revisionLabel}`)}，之后的编辑不影响这项任务。`;
 }
 
 /** A count with its thousands grouped, the same text on every host. */
@@ -149,6 +149,7 @@ export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
 /** The five rows of 精简, each one line built from the projection's own sentences. */
 export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<readonly [string, string]> {
+  plan = taskPlanWording(plan);
   const usage = `用量：${plan.service.usage}${plan.service.usageIsCeiling ? `（${TASK_PLAN_CEILING_NOTE}）` : ''}`;
   return [
     ['处理', plan.scope.reference.length === 0 ? plan.scope.process : `${plan.scope.process}；参考 ${plan.scope.reference.join('、')}`],
@@ -157,6 +158,19 @@ export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<rea
     ['不会', plan.notDo.editorial.join(' · ')],
     ['中途', plan.participation.after === null ? plan.participation.during : `${plan.participation.during}；结束后：${plan.participation.after}`],
   ];
+}
+
+/** Select composed metadata without interpreting any source sentence, title or quote. */
+export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
+  if (technicalLayerVisible) return plan;
+  const words = (parts: ReadonlyArray<string | { technical: string }> | undefined, fallback: string): string =>
+    parts === undefined ? fallback : parts.map((part) => typeof part === 'string' ? part : technicalWords(part.technical)).join('');
+  return { ...plan, goal: { ...plan.goal, sentence: words(plan.wording?.goal, plan.goal.sentence),
+    chips: { ...plan.goal.chips, procedure: words(plan.wording?.procedure, plan.goal.chips.procedure) } },
+    scope: { ...plan.scope, reference: plan.wording?.reference?.map((parts) => words(parts, '')) ?? plan.scope.reference,
+      send: words(plan.wording?.scopeSend, plan.scope.send) },
+    service: { ...plan.service, send: words(plan.wording?.serviceSend, plan.service.send) },
+    outcomes: plan.wording?.outcomes?.map((parts) => words(parts, '')) ?? plan.outcomes };
 }
 
 // ---- 完整 (PLAN-002): the six sections, the two columns, the technical layer ---------------------------------
@@ -292,7 +306,7 @@ export function taskPlanEditCountAfterDrift(count: number): string {
 /** The edit that made the version shown, with its time (PLAN-011: recorded with actor and time). */
 export function taskPlanLastEdit(edit: NonNullable<TaskPlanProjection['edit']['lastEdit']>): string {
   const changes = edit.entries.map((entry) => `${entry.label}：${entry.prior} → ${entry.proposed}`).join('；');
-  return metadataWords(`第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`);
+  return `${technicalWords(`第 ${edit.ordinal} 版`, '版本')}由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`;
 }
 
 // ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------

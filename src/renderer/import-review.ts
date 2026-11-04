@@ -1,6 +1,4 @@
-import { identityWords } from './technical-layer.js';
-import { technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   type WordTrackedChangesChoice,
   type StagedImportProjection,
@@ -572,7 +570,7 @@ export function createImportReview(options: ImportReviewOptions) {
         sourceRadio.value = exactSourceVersionId;
         sourceRadio.dataset['reuseSourceVersionId'] = exactSourceVersionId;
         sourceRadio.checked = reuseSourceVersionId === exactSourceVersionId;
-        sourceRadio.setAttribute('aria-label', metadataWords(`复用来源版本 ${exactSourceVersionId}`));
+        sourceRadio.setAttribute('aria-label', `复用来源版本${technicalWords(` ${exactSourceVersionId}`)}`);
       } else {
         sourceRadio.value = 'create-new';
         sourceRadio.dataset['createSourceVersion'] = 'true';
@@ -900,7 +898,7 @@ export function createImportReview(options: ImportReviewOptions) {
     values.append(
       element('dt', undefined, '目标图书'), element('dd', undefined, review.target.label),
       element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
-      element('dt', undefined, '已保存的修订版'), element('dd', undefined, metadataWords(`${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`)),
+      element('dt', undefined, '已保存的修订版'), element('dd', undefined, `${technicalWords(review.checkpoint.revisionLabel, '修订版')}${technicalWords(` · 修订日志 ${review.checkpoint.journalSequence}`)}`),
       element('dt', undefined, '保存状态'), element('dd', undefined,
         review.checkpoint.createdForDirtyJournal ? '已将当前编辑保存为修订版' : '当前稿件已保存'),
       element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),

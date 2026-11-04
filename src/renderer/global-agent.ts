@@ -1,5 +1,4 @@
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { GLOBAL_AGENT_TITLE, type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus } from './shell-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
@@ -293,7 +292,7 @@ export function mountGlobalAgent(options: {
       if (prepared.scope !== undefined) disclosure.append(
         el('p', `可用工具：${prepared.scope.tools.map((tool) => TOOL_LABELS[tool] ?? '本机工具').join('、')}`),
         el('p', `图书：${prepared.scope.books.map((entry) => entry.title).join('、') || '未选'}`),
-        el('p', metadataWords(`工序：${prepared.scope.procedures.map((entry) => `${entry.title} 第 ${entry.version} 版`).join('、') || '未选'}`)));
+        el('p', `工序：${prepared.scope.procedures.map((entry) => `${entry.title} ${technicalWords(`第 ${entry.version} 版`, '版本')}`).join('、') || '未选'}`));
       if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆。'));
       for (const entry of prepared.sources) {
         const row = el('article'); row.className = 'global-agent-source-card';
@@ -360,7 +359,7 @@ export function mountGlobalAgent(options: {
     // 工序与规则 inspected here; a version enters the turn only when explicitly checked.
     scopeProcedures.replaceChildren(...(projection.procedures ?? []).map((entry) => {
       const row = el('details'); row.className = 'global-agent-procedure'; row.dataset['globalAgentProcedure'] = entry.procedureId;
-      row.append(el('summary', metadataWords(`工序 · ${entry.title} · 第 ${entry.version} 版`)), el('p', entry.editorInstruction || '没有编辑说明。'),
+      row.append(el('summary', `工序 · ${entry.title} · ${technicalWords(`第 ${entry.version} 版`, '版本')}`), el('p', entry.editorInstruction || '没有编辑说明。'),
         el('p', `阶段：${entry.stages.map((stage) => stage.label).join(' → ')}`));
       if (projection.scopedDialogueState === 'available') {
         const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.dataset['globalAgentScopeProcedure'] = entry.procedureId;

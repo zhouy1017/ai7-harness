@@ -1,6 +1,5 @@
-import { identityWords } from './technical-layer.js';
+import { technicalWords, identityWords } from './technical-layer.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
-import { metadataWords } from './technical-layer.js';
 import { reviewExcludedHeading } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
 import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
@@ -973,7 +972,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     title.tabIndex = -1;
     heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     appendProposalOffer(heading, run);
-    const meta = el('p', 'field-note review-run-meta', metadataWords(`${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`));
+    const meta = el('p', 'field-note review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
       const authorized = el('span', 'review-run-authorized', reviewAuthorizedLine(localInstantLabel(run.authorization.authorizedAt)));
@@ -1029,7 +1028,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     section.append(options.technicalDetails(
       'review-facts',
       el('dt', undefined, '审阅记录'), el('dd', 'technical-identity', `${run.reviewRunId} · ${run.label}`),
-      el('dt', undefined, '稿件 pin'), el('dd', 'technical-identity', metadataWords(`${run.manuscript.revisionLabel} · ${run.manuscript.revisionId} · 修订日志序号 ${run.manuscript.journalSequence} · ${run.manuscript.workingDigest}`)),
+      el('dt', undefined, '稿件 pin'), el('dd', 'technical-identity', `${technicalWords(run.manuscript.revisionLabel, '修订版')} · ${run.manuscript.revisionId} · 修订日志序号 ${run.manuscript.journalSequence} · ${run.manuscript.workingDigest}`),
       el('dt', undefined, '审阅配置摘要'), el('dd', 'technical-identity', run.configurationDigest),
       ...(run.procedure === null ? [] : [
         el('dt', undefined, '可复用工序'), el('dd', 'technical-identity', `${run.procedure.procedureId} · ${run.procedure.versionId} · ${run.procedure.documentSha256}`),
@@ -1050,7 +1049,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     section.dataset['reviewCategories'] = run.categories.map((category) => category.categoryId).join(',');
     section.append(
       el('h5', undefined, REVIEW_PLAN_HEADING),
-      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, metadataWords(`任务输入修订版 ${run.manuscript.revisionLabel}`)])),
+      el('p', 'task-plan-summary-line', taskPlanSummaryLine([reviewPlanCategoriesLine(run.categories.length), run.scope.label, `任务输入修订版${technicalWords(` ${run.manuscript.revisionLabel}`)}`])),
     );
     // A category that cannot go ahead says so here too: it is what the one approval would be refused for.
     for (const category of run.categories) {
@@ -1885,9 +1884,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       part('category-summaries', record.categorySummaries.title, summaries),
       part('appendix', record.appendix.title, appendix, options.technicalDetails(
         'review-facts',
-        el('dt', undefined, '报告'), el('dd', 'technical-identity', metadataWords(`${report.reportId} · 第 ${report.version} 版 · ${report.digest}`)),
+        el('dt', undefined, '报告'), el('dd', 'technical-identity', `${report.reportId} · ${technicalWords(`第 ${report.version} 版`, '版本')} · ${report.digest}`),
         el('dt', undefined, '生成时刻'), el('dd', 'technical-identity', report.generatedAt),
-        el('dt', undefined, '审阅配置'), el('dd', 'technical-identity', metadataWords(`${record.appendix.configuration.schema} · ${record.appendix.configuration.version} · ${record.appendix.configuration.digest}`)),
+        el('dt', undefined, '审阅配置'), el('dd', 'technical-identity', `${record.appendix.configuration.schema} · ${record.appendix.configuration.version} · ${record.appendix.configuration.digest}`),
         ...record.appendix.categories.flatMap((category) => [
           el('dt', undefined, category.label),
           el('dd', 'technical-identity', [
@@ -2345,7 +2344,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const categories = el('fieldset', 'review-category-options');
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
-      const line = el('p', 'field-note review-sheet-definition', metadataWords(`按工序《${state.definition.title}》第 ${state.definition.pin.version} 版依次审阅：${labels.join(' → ')}；成员不能单独增减。`));
+      const line = el('p', 'field-note review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
       categories.append(line);
     }
@@ -2355,7 +2354,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const localCategory: ReviewWorkspaceCategoryProjection = {
       categoryId: 'local-text-check', label: '本地文字检查', description: '单独在本机检查标点、规范字形与异形词；数字检查可选。',
       output: 'change-suggestion', riskPointsOnly: false, batchApply: true, searchEngine: false, modelFree: true,
-      materialReferencesAllowed: false, basis: { categoryId: 'local-text-check', executor: 'local-text-check', searchEngine: false, guidelineDocuments: [], procedure: { title: '本地文字检查', version: '1' } }, guidelineDocuments: [],
+      materialReferencesAllowed: false, basis: { categoryId: 'local-text-check', executor: 'local-text-check', searchEngine: false, guidelineDocuments: [], procedure: { title: '确定性检查', version: '3' } }, guidelineDocuments: [],
       procedure: { title: '确定性检查', version: '3' }, available: workspace.manuscript !== null,
       unavailableReason: workspace.manuscript === null ? '导入稿件后即可检查。' : null,
       scopes: { whole: workspace.scopeOptions.whole, chapters: workspace.scopeOptions.chapters,
@@ -2449,7 +2448,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         try {
           const page = await api.inspectHouseWordList!({ versionId: null, entryOffset: 0, historyOffset: 0 });
           house.disabled = page.selected === null || page.selected.enabledCount === 0;
-          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : metadataWords(`本社自用词表 第${page.selected.ordinal}版（${page.selected.enabledCount}条启用）；选中后仅生成批注`);
+          houseStatus.textContent = page.selected === null ? '本社自用词表：尚无词条，可在下方编辑' : `本社自用词表 ${technicalWords(`第${page.selected.ordinal}版`, '版本')}（${page.selected.enabledCount}条启用）；选中后仅生成批注`;
           house.onchange = () => { state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: house.checked ? page.current : null } }; updateSheet(); };
         } catch { house.disabled = true; houseStatus.textContent = '本社词表读取失败，请重新打开检查选项。'; }
         updateSheet();

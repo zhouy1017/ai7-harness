@@ -1,5 +1,4 @@
-import { identityWords } from './technical-layer.js';
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
 import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
 import { localInstantLabel } from './plan-preview-labels.js';

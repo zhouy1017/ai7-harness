@@ -1,5 +1,4 @@
-import { metadataWords } from './technical-layer.js';
-import { technicalLayerVisible, saveTechnicalLayerVisible } from './technical-layer.js';
+import { technicalLayerVisible, technicalLayerReady, saveTechnicalLayerVisible } from './technical-layer.js';
 import type { DataVersionProjection } from '../shared/protocol.js';
 import { SERVICE_PROTOCOL_VERSION } from '../shared/protocol.js';
 import licensesDocument from './third-party-licenses.generated.json' with { type: 'json' };
@@ -79,6 +78,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const toggle = el('input');
   toggle.type = 'checkbox';
   toggle.checked = technicalLayerVisible;
+  toggle.disabled = !technicalLayerReady;
   toggle.setAttribute('aria-label', '开发者模式');
   toggle.addEventListener('change', () => {
     saveTechnicalLayerVisible(toggle.checked, window.localStorage);
@@ -140,18 +140,19 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const items = licenses.map((license) => {
     const item = el('li', 'help-license');
     item.dataset['licenseName'] = license.name;
-    const details = el(technicalLayerVisible ? 'details' : 'div', 'help-license-entry');
-    const summary = el(technicalLayerVisible ? 'summary' : 'p');
+    const details = el('details', 'help-license-entry');
+    const summary = el('summary');
     summary.append(
-      el('span', 'help-license-name', metadataWords(license.name)),
+      el('span', 'help-license-name', license.name),
       el('span', 'help-license-version', technicalLayerVisible ? license.version : ''),
-      el('span', 'help-license-id', metadataWords(`${HELP_LICENSE_FIELD_LICENSE} ${license.license}`)),
-      el('span', 'field-note help-license-hint', technicalLayerVisible ? HELP_LICENSE_TEXT_SUMMARY : ''),
+      el('span', 'help-license-id', `${HELP_LICENSE_FIELD_LICENSE} ${license.license}`),
+      el('span', 'field-note help-license-hint', HELP_LICENSE_TEXT_SUMMARY),
     );
     const source = [license.repository, license.homepage].filter((value): value is string => value !== null).join(' · ');
     details.append(
       summary,
-      ...(technicalLayerVisible ? [el('p', 'field-note help-license-source', `${HELP_LICENSE_FIELD_SOURCE}：${source.length > 0 ? source : HELP_LICENSE_NO_SOURCE}`), el('pre', 'help-license-text', license.licenseText)] : []),
+      el('p', 'field-note help-license-source', `${HELP_LICENSE_FIELD_SOURCE}：${source.length > 0 ? source : HELP_LICENSE_NO_SOURCE}`),
+      el('pre', 'help-license-text', license.licenseText),
     );
     item.append(details);
     list.append(item);

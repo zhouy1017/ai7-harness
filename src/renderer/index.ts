@@ -1,7 +1,4 @@
-import { identityWords } from './technical-layer.js';
-import { technicalLayerVisible } from './technical-layer.js';
-import { collectTechnicalDisclosures, initializeTechnicalLayer, technicalDisclosure } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
 import { createModelServiceSettings } from './model-service-settings.js';
@@ -1711,7 +1708,7 @@ function recoveryCandidateCard(
   revisionDigest.dataset['candidateRevisionDigest'] = candidate.revisionDigest;
   details.append(
     element('dt', undefined, '修订版'), element('dd', undefined, candidate.revisionLabel),
-    element('dt', undefined, '持久边界'), element('dd', undefined, metadataWords(`修订日志序号 ${candidate.journalSequence} · ${localInstantLabel(candidate.durableAt)}`)),
+    element('dt', undefined, '持久边界'), element('dd', undefined, `${technicalWords(`修订日志序号 ${candidate.journalSequence} · `)}${localInstantLabel(candidate.durableAt)}`),
     element('dt', undefined, '覆盖范围'), element('dd', undefined, candidate.coveredChangeExtent),
     element('dt', undefined, '校验'), element('dd', undefined, candidate.verification),
     element('dt', undefined, '限制'), element('dd', undefined, candidate.limitation),
@@ -1815,7 +1812,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     let unopened: unknown;
     try {
       await openEditorWindow(restored.window, recovery.bookTitle);
-      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : metadataWords(`已恢复为新版本 ${restored.descendantRevisionLabel}`), 'success');
+      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}`, 'success');
       return;
     } catch (error) {
       unopened = error;
@@ -1829,7 +1826,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         return;
       }
       await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
-      setStatus(metadataWords(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`), 'error');
+      setStatus(`已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`, 'error');
     };
     try {
       await openBook();
@@ -1851,14 +1848,14 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
           reopen.disabled = false;
           setStatus(onDocument
             ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, DELIVERABLES_STATUS_LINES.openFailed)}`
-            : metadataWords(`已恢复为新版本 ${restored.descendantRevisionLabel}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`), 'error');
+            : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
         }
       });
       actions.replaceChildren(reopen);
       reopen.focus();
       setStatus(onDocument
         ? DOCUMENT_STATUS_LINES.recoveredNothingOpened
-        : metadataWords(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`), 'error');
+        : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
     }
   });
   const selected = (
@@ -1867,7 +1864,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
       Extract<RecoveryComparisonProjection['snapshot'], { state: 'eligible' }>['candidate'],
   ): void => {
     selection = next;
-    consequence.textContent = metadataWords(`将以“${candidate.title}”形成当前分支的新后代修订版；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`);
+    consequence.textContent = `将以“${candidate.title}”形成当前分支的新后代修订版${technicalWords(`；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}`)}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`;
     consequence.dataset['selectedCandidate'] = candidate.kind;
     consequence.hidden = false;
     view.disabled = false;
@@ -1951,7 +1948,7 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   content.append(
     element('p', 'section-label', '仅查看 · 永久只读'),
     element('h2', undefined, projection.title),
-    element('p', 'lede', metadataWords(`${projection.revisionLabel} · 此窗口不装载编辑器，也不提供任何写入操作。`)),
+    element('p', 'lede', `${technicalWords(projection.revisionLabel, '修订版')} · 此窗口不装载编辑器，也不提供任何写入操作。`),
   );
   const blocks = element('article', 'recovery-readonly-blocks');
   blocks.setAttribute('aria-label', '恢复证据只读内容窗口');
@@ -1985,7 +1982,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   content.dataset['blockCount'] = String(projection.blocks.length);
   content.append(
     element('p', 'section-label', `${projection.bookTitle} · 历史修订版 · 永久只读`),
-    element('h2', undefined, metadataWords(`稿件修订版 ${projection.revisionLabel}`)),
+    element('h2', undefined, `稿件修订版${technicalWords(` ${projection.revisionLabel}`)}`),
     element('p', 'lede', `${projection.position.label}。此窗口不装载编辑器，也不提供写入、修订日志、替换、撤销/重做或里程碑操作。`),
   );
   const identity = element('section', 'source-card');
@@ -2059,7 +2056,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   replaceScreen('historical-revision', content, { bookId: projection.bookId, title: projection.bookTitle, section: 'history' });
   agentWorkspaceReturns.set(content, () => renderHistoricalRevision(projection));
   focusRecoveryHeading(content);
-  setStatus(metadataWords(`只读历史修订版已打开；${projection.position.label}。`));
+  setStatus(`只读历史修订版已打开；${projection.position.label}。`);
 }
 
 function renderContinuation(
@@ -3215,7 +3212,7 @@ function renderBookOverview(
           element('h3', undefined, '分析'),
           element('p', undefined, projection.resultSetRevision === null
             ? `基线分析 · ${projection.stateLabel}`
-            : metadataWords(`基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`)),
+            : `基线分析 · ${projection.stateLabel} · 读的是 ${technicalWords(projection.resultSetRevision.manuscriptPin.revisionLabel, '修订版')} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`),
           open,
         );
       },
@@ -3489,7 +3486,7 @@ function renderForegroundExecutionBoundary(
   lineage.append(
     element('dt', undefined, '任务运行权限'), element('dd', undefined, projection.runAuthority),
     element('dt', undefined, '当前可信策略'),
-    element('dd', undefined, metadataWords(`${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`)),
+    element('dd', undefined, technicalWords(`${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`)),
   );
   const reasons = element('ul', 'task-authorization-non-effects');
   for (const reason of projection.reasons) reasons.append(element('li', undefined, reason));
@@ -3600,7 +3597,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       projection.actions.canAuthorize);
     open.dataset['taskAuthorizationAction'] = 'view-plan';
     summary.append(
-      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', metadataWords(`任务输入修订版 ${checkpoint.revisionLabel}`), '不发送任何内容'])),
+      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', `任务输入修订版${technicalWords(` ${checkpoint.revisionLabel}`)}`, '不发送任何内容'])),
       open,
     );
     card.append(summary);
@@ -4506,9 +4503,9 @@ function renderLanding(
         element(
           'p',
           'field-note',
-          metadataWords(`${item.totalCharacters.toLocaleString('zh-CN')} 字符 · 修订日志 ${item.journalSequence}${
+          `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${
             item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''
-          }`),
+          }`,
         ),
       );
       list.append(row);
@@ -4571,7 +4568,7 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
   section.append(
     element('h3', undefined, result.completionLabel),
     element('p', undefined, result.resultKind === 'changed'
-      ? metadataWords(`已形成修订版 ${result.window.revisionLabel}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`)
+      ? `已形成修订版${technicalWords(` ${result.window.revisionLabel}`)}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
       : '新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。'),
   );
   if (record.markOutcomes.unfollowed > 0) {
@@ -4740,10 +4737,12 @@ const { renderModelServiceSettings } = createModelServiceSettings({
 });
 
 async function initializeRenderer(): Promise<void> {
+  resetTechnicalLayer();
   await appearance.ready;
   try {
-    const [location, settings] = await Promise.all([window.ai7.getProductDataLocation(), window.ai7.getModelServiceSettings()]);
-    initializeTechnicalLayer(location.channel, window.localStorage, settings.launchPolicy.operationalScope);
+    const location = await window.ai7.getProductDataLocation();
+    const scope = location.channel === 'source-checkout' ? (await window.ai7.getModelServiceSettings()).launchPolicy.operationalScope : null;
+    initializeTechnicalLayer(location.channel, window.localStorage, scope);
     const route = await window.ai7.getBookWorkbenchRoute();
     if (route) {
       await renderResolvedBookWorkbenchRoute(route);

@@ -1,5 +1,4 @@
 import { technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisCoverageAxis,
@@ -45,8 +44,8 @@ export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null)
   const flow = '本流程只冻结并记录本次标准直接授权';
   if (pin === null) return `${flow}。`;
   return pin.decision === 'deny'
-    ? metadataWords(`${flow}；Provider Processing ${pin.version} 固定拒绝派发。`)
-    : metadataWords(`${flow}；Provider Processing ${pin.version} 仅允许运行边界内的实时传输。`);
+    ? `${flow}；Provider Processing ${pin.version} 固定拒绝派发。`
+    : `${flow}；Provider Processing ${pin.version} 仅允许运行边界内的实时传输。`;
 }
 
 /**
@@ -64,8 +63,8 @@ export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPo
   const version = 'version' in policy ? policy.version : policy.providerProcessingVersion;
   const denied = 'decision' in policy ? policy.decision === 'deny' : policy.liveTransmissions === 0;
   return denied
-    ? metadataWords(`${kind}；远程绑定被 Provider Processing ${version} 拒绝，${revision}。`)
-    : metadataWords(`${kind}；远程绑定在 Provider Processing ${version} 下仅限资格，${revision}。`);
+    ? `${kind}；远程绑定被 Provider Processing ${version} 拒绝，${revision}。`
+    : `${kind}；远程绑定在 Provider Processing ${version} 下仅限资格，${revision}。`;
 }
 
 /**

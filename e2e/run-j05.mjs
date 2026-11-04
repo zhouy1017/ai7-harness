@@ -483,13 +483,13 @@ async function main() {
     await importAndOpen(renderer, EXCERPT.title);
     await assertRenderer(renderer, PAGE_HELPERS, 'page-helpers');
     at('selected-fast-text-scope-refusal');
-    // Refresh this same Book surface so its compact selector reads the persisted independent Fast choice.
+    // The selected Fast binding remains in Settings; the Book header keeps its title and processing indication.
     await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
       const role=settings.roles.find((item)=>item.roleId==='fast-interaction');
       window.__j05FastSelected=role.binding.providerId==='deepseek-open-platform' && role.connection.fastSelected===true;
     })`);
     requireJourney(await renderer.evaluate(`Boolean(window.__j05FastSelected)`), 'selected-fast-exact-recorded-choice');
-    await assertRenderer(renderer, `document.querySelector('#context-header .compact-model-selector')===null`, 'model-selector-settings-only');
+    await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent===${JSON.stringify(EXCERPT.title)} && document.querySelector('#processing-indicator')?.textContent==='本地处理' && Array.from(document.querySelectorAll('#context-header input,#context-header select')).length===0`, 'book-header-title-and-processing');
     requireJourney(await renderer.evaluate(`window.ai7.listPriorWork().then(async (work)=>{
       const book=work.find((item)=>item.bookTitle===${JSON.stringify(EXCERPT.title)});
       const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});

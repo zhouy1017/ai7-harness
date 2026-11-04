@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import { mountEditableProcedureLibrary } from './procedure-library.js';
 import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
@@ -516,7 +516,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       }
       view.append(summary, binds, technicalDetails('default-rule-facts',
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
-        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', metadataWords(`第 ${rule.ordinal} 版 · ${rule.ruleVersionId}`)),
+        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
       card.append(heading, element('p', undefined, rule.does), element('p', 'field-note', set), view);
       if (rule.state === 'active') {

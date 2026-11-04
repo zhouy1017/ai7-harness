@@ -1,7 +1,5 @@
+import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
-import { identityWords } from './technical-layer.js';
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import {
@@ -349,7 +347,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         ...(report.ifRedone.state === 'closed' || report.ifRedone.parseFailure === undefined ? [] : [
           element('dt', undefined, '反思解析诊断'), element('dd', 'technical-identity', `${report.ifRedone.parseFailure.code} · ${report.ifRedone.parseFailure.detail}`),
         ]),
-        element('dt', undefined, '绑定'), element('dd', 'technical-identity', metadataWords(`Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`)),
+        element('dt', undefined, '绑定'), element('dd', 'technical-identity', `Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`),
         element('dt', undefined, '记录时刻'), element('dd', 'technical-identity', report.recordedAt),
         element('dt', undefined, '阶段时刻'), element('dd', 'technical-identity', report.stages.map((stage) => `${stage.stage} ${stage.startedAt ?? '—'} → ${stage.settledAt ?? '—'} · ${stage.wallMs ?? '—'} ms`).join('；')),
         ...usageRows,
@@ -433,10 +431,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const synopsis = panels.synopsis;
     if (view.historical) {
       synopsis.append(
-        element('h4', undefined, metadataWords(`历史修订版 Revision ${revision.ordinal}（只读）`)),
+        element('h4', undefined, `历史修订版${technicalWords(` Revision ${revision.ordinal}`)}（只读）`),
         element('p', 'attention-note', view.current
-          ? metadataWords(`Revision ${revision.ordinal} 是当前最新的结果集修订版；此视图为只读。`)
-          : metadataWords(`Revision ${revision.ordinal} 已被后续修订版取代；它按其原始稿件 pin ${revision.manuscriptPin.revisionLabel} 呈现，不是当前事实，也未被删除。`)),
+          ? `${technicalWords(`Revision ${revision.ordinal}`, "此修订版")} 是当前最新的结果集修订版；此视图为只读。`
+          : `${technicalWords(`Revision ${revision.ordinal}`, "此修订版")} 已被后续修订版取代；它按其原始稿件 pin ${technicalWords(revision.manuscriptPin.revisionLabel, '修订版')} 呈现，不是当前事实，也未被删除。`),
       );
     }
 
@@ -624,8 +622,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       ...(revision.assuranceSample.parseFailures ?? []).flatMap((failure) => [
         element('dt', undefined, `抽检单元 ${failure.unitOrdinal} 解析诊断`), element('dd', 'technical-identity', `${failure.code} · ${failure.detail}`),
       ]),
-      element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', metadataWords(`${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`)),
-      element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', metadataWords(`Revision ${revision.ordinal} · ${revision.revisionId}`)),
+      element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${technicalWords(revision.manuscriptPin.revisionLabel, '修订版')} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
+      element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
       element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', revision.digest),
       element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', revision.coverageManifestDigest),
       element('dt', undefined, 'Schema / Reducer 摘要'), element('dd', 'technical-identity', `${revision.schemaDigest} · ${revision.reducerDigest}`),
@@ -633,18 +631,18 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '执行绑定 pin'), element('dd', 'technical-identity', `${revision.bindingPin.bindingDigest} · Session ${revision.bindingPin.harnessSessionId}`),
       element('dt', undefined, '更新方式'), element('dd', 'technical-identity', revision.update.predecessor === null
         ? `${revision.update.modeLabel} · 无前一修订版`
-        : metadataWords(`${revision.update.modeLabel} · 后继于 Revision ${revision.update.predecessor.ordinal} · ${rangeText(revision.update.selectedRange)}`)),
+        : `${revision.update.modeLabel} · 后继于 Revision ${revision.update.predecessor.ordinal} · ${rangeText(revision.update.selectedRange)}`),
       element('dt', undefined, '单元血缘'), element('dd', 'technical-identity', reuseCountsText(revision.update.counts)),
       element('dt', undefined, '覆盖'), element('dd', 'technical-identity', `${revision.coverage.unitsClosed}/${revision.coverage.unitsTotal} 个分析单元闭合 · ${revision.coverage.unitsReused} 个按血缘复用 · ${revision.coverage.gapCount} 处缺口 · ${revision.coverage.label}`),
       element('dt', undefined, '归约/综合闭合'), element('dd', 'technical-identity', `${revision.reducerClosure.label} · ${revision.reducerClosure.stages.map((stage) => `${stage.stage}：${stage.state}（${stage.inputCount} 项输入）`).join('；')}`),
-      element('dt', undefined, '精确修订版新鲜度'), element('dd', 'technical-identity', metadataWords(`${revision.freshness.label} · 绑定修订版 ${revision.freshness.boundRevisionId} · 当前修订版 ${revision.freshness.currentRevisionId} · 修订日志序号 ${revision.freshness.currentJournalSequence} · 仅通过本地确定性比较判定；不调用 Provider`)),
+      element('dt', undefined, '精确修订版新鲜度'), element('dd', 'technical-identity', `${revision.freshness.label} · 绑定修订版 ${revision.freshness.boundRevisionId} · 当前修订版 ${revision.freshness.currentRevisionId} · 修订日志序号 ${revision.freshness.currentJournalSequence} · 仅通过本地确定性比较判定；不调用 Provider`),
       element('dt', undefined, '语义/证据保证'), element('dd', 'technical-identity', `${revision.assurance.label} · ${revision.assurance.unresolvedConflictCount} 处未解决冲突 · ${revision.assurance.unresolvedItemCount} 项未解决事项 · ${revision.assurance.lowConfidenceUnitCount} 个低置信单元 · ${revision.assurance.crossUnitFindingCount} 条跨单元发现`),
-      element('dt', undefined, '策略 pin'), element('dd', 'technical-identity', metadataWords(`${revision.policyPin.operationalScope} · Provider Processing ${revision.policyPin.providerProcessingVersion} · ${revision.policyPin.liveTransmissions} 次实时传输`)),
+      element('dt', undefined, '策略 pin'), element('dd', 'technical-identity', `${revision.policyPin.operationalScope} · Provider Processing ${revision.policyPin.providerProcessingVersion} · ${revision.policyPin.liveTransmissions} 次实时传输`),
       element('dt', undefined, '用量'), element('dd', 'technical-identity', `${revision.usage.requests} 次模型请求（仅重算单元，含安全重试）· 输入 ${revision.usage.inputTokens} · 输出 ${revision.usage.outputTokens}`),
-      element('dt', undefined, '计划版本'), element('dd', 'technical-identity', revision.provenance.planVersion === undefined ? '未记录' : metadataWords(`版本 ${revision.provenance.planVersion}（运行授权所绑定）`)),
+      element('dt', undefined, '计划版本'), element('dd', 'technical-identity', revision.provenance.planVersion === undefined ? '未记录' : `版本 ${revision.provenance.planVersion}（运行授权所绑定）`),
       element('dt', undefined, '计划内调整'), element('dd', 'technical-identity', revision.provenance.adaptations === undefined ? '未记录' : `${revision.provenance.adaptations.count} 次${adaptedUnits.length === 0 ? '' : ` · 单元 ${adaptedUnits.join('、')}`}`),
       ...(revision.update.predecessor === null ? [] : [
-        element('dt', undefined, '前一修订版'), element('dd', 'technical-identity', metadataWords(`Revision ${revision.update.predecessor.ordinal} · ${revision.update.predecessor.revisionId} · ${revision.update.predecessor.digest}`)),
+        element('dt', undefined, '前一修订版'), element('dd', 'technical-identity', `Revision ${revision.update.predecessor.ordinal} · ${revision.update.predecessor.revisionId} · ${revision.update.predecessor.digest}`),
         element('dt', undefined, '复用计划摘要'), element('dd', 'technical-identity', revision.update.reusePlanDigest ?? '无'),
       ]),
     );
@@ -689,7 +687,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const versions = element('ol', 'analysis-list analysis-plan-version-list');
     for (const version of projection.planVersions) {
       const state = version.state === 'bound' ? '已被运行授权绑定' : version.state === 'current' ? '当前 · 尚未开始' : '已被取代';
-      const item = element('li', undefined, metadataWords(`版本 ${version.ordinal} · ${state} · 信封 ${version.planEnvelopeDigest}${version.planRevisionId === null ? '' : ` · 由计划修订 ${version.planRevisionId} 产生`}`));
+      const item = element('li', undefined, `${technicalWords(`版本 ${version.ordinal} · `)}${state}${technicalWords(` · 信封 ${version.planEnvelopeDigest}${version.planRevisionId === null ? '' : ` · 由计划修订 ${version.planRevisionId} 产生`}`)}`);
       item.dataset['planVersionOrdinal'] = String(version.ordinal);
       item.dataset['planVersionState'] = version.state;
       item.dataset['planVersionEnvelope'] = version.planEnvelopeDigest;
@@ -867,8 +865,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // Freshness and the work an update would cover are what the editor weighs before issuing a Task, so
     // both readings stay at full rank; the digests that identify them go one step away.
     facts.append(
-      element('dt', undefined, '目标修订版'), element('dd', undefined, metadataWords(`Revision ${controls.target.ordinal} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`)),
-      element('dt', undefined, '当前稿件'), element('dd', undefined, metadataWords(`${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`)),
+      element('dt', undefined, '目标修订版'), element('dd', undefined, `${technicalWords(`Revision ${controls.target.ordinal} · `)}绑定 ${technicalWords(controls.target.manuscriptPin.revisionLabel, '修订版')} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
+      element('dt', undefined, '当前稿件'), element('dd', undefined, `${technicalWords(controls.working.revisionLabel, '修订版')}${technicalWords(` + 修订日志序号 ${controls.working.journalSequence}`)} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
       element('dt', undefined, '模型服务与用量'), element('dd', undefined, '沿用本次分析的模型服务、发送范围与预算；复用已有结果不调用模型。'),
       element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
     );
@@ -1085,17 +1083,17 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         // the Run that produced it — travel together in the entry's one disclosure, in the order they read
         // in before (V2-UX-LAYER-001).
         item.append(
-          element('p', undefined, metadataWords(`第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`)),
+          element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${technicalWords(entry.manuscriptPin.revisionLabel, '修订版')} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
           element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
           technicalDetails('analysis-facts',
             element('dt', undefined, '修订版'),
-            element('dd', 'technical-identity', metadataWords(`Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`)),
+            element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
             element('dt', undefined, '单元血缘与计数'),
             element('dd', 'technical-identity', `${reuseCountsText(entry.counts)} · 缺口 ${entry.gapCount} · 冲突 ${entry.conflictCount} · 覆盖 ${entry.unitsClosed}/${entry.unitsTotal}`),
             element('dt', undefined, '修订版身份'),
             element('dd', 'technical-identity', `${entry.revisionId} · 摘要 ${entry.digest} · 稿件 pin ${entry.manuscriptPin.revisionId} · ${entry.manuscriptPin.revisionDigest}`),
             element('dt', undefined, '产出 Run 与用量'),
-            element('dd', 'technical-identity', metadataWords(`Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`)),
+            element('dd', 'technical-identity', `Run ${entry.producingRun.runRecordId} · ${entry.producingRun.classification ?? '无结果'} · ${entry.usage.requests} 次模型请求 · 输入 ${entry.usage.inputTokens} · 输出 ${entry.usage.outputTokens}`),
           ),
         );
         item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
@@ -1278,7 +1276,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         runReportOrReason(projection.taskOutcome.report, projection.taskOutcome.reportAbsentReason),
         technicalDetails('analysis-facts',
           element('dt', undefined, '任务结果'),
-          element('dd', 'technical-identity', metadataWords(`Task Outcome ${projection.taskOutcome.outcomeId} · 链接结果集修订版 ${projection.taskOutcome.resultSetRevisionId ?? '无'}`))),
+          element('dd', 'technical-identity', `Task Outcome ${projection.taskOutcome.outcomeId} · 链接结果集修订版 ${projection.taskOutcome.resultSetRevisionId ?? '无'}`)),
       );
       records.append(outcome);
     }
@@ -1388,8 +1386,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         projection.taskIntent!.modeLabel,
         range === null ? '全书' : `第 ${range.startPosition}–${range.endPosition} 段`,
         counts === null ? `${projection.listPages['coverageManifest.units']?.total ?? manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
-        metadataWords(`任务输入修订版 ${checkpoint.revisionLabel}`),
-        projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
+        `任务输入修订版${technicalWords(` ${checkpoint.revisionLabel}`)}`,
+        projection.planVersion === null ? '' : technicalWords(`计划版本 ${projection.planVersion.ordinal}`),
       ])),
     );
     // A plan the 后台分析登记 dispatcher prepared and did not start (Issue #95, S39; #713 review, P2-2) says whose it is.
@@ -1422,7 +1420,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Who authorized this Run, on whose authority and against which plan version, is the decision behind
       // it; only the identifiers and the envelope digest that name them go one step away.
       runFacts.append(
-        element('dt', undefined, '运行授权'), element('dd', undefined, metadataWords(`${projection.authorization!.origin} · ${projection.authorization!.authority} · 计划版本 ${projection.authorization!.planVersionOrdinal ?? '未记录'}`)),
+        element('dt', undefined, '运行授权'), element('dd', undefined, `${projection.authorization!.origin} · ${projection.authorization!.authority}${technicalWords(` · 计划版本 ${projection.authorization!.planVersionOrdinal ?? '未记录'}`)}`),
         element('dt', undefined, '状态转换'), element('dd', undefined, run.transitions.map((transition) => `${transition.sequence}. ${transition.state}`).join(' → ')),
         element('dt', undefined, '计划内调整'), element('dd', undefined, run.adaptations.length === 0
           ? '无'

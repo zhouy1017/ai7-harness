@@ -1,6 +1,4 @@
-import { identityWords } from './technical-layer.js';
-import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { MAX_BATCH_APPLY_SUGGESTIONS } from '../shared/protocol.js';
 import type { RendererApi, ProposalWorkspaceInput, ProposalWorkspaceProjection, ProposalNavigatorItem, ProposalReviewReturnPosition, ProposalDraftDisposition, ProposalDraftBatchProjection, EditorialMarkCardProjection, ManuscriptWindowProjection, ApplyReceiptProjection, BatchProposalDecisionDraftInput } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
@@ -218,7 +216,7 @@ export function mountProposalWorkspace(options: {
       technical(proposalIdentityRows({ 分支: workspace.branchId, 当前修订: workspace.revisionId, 提案决定: preparedDecision })));
     const rows = el('ul'); for (const markId of prepared) { const item = workspace.items.find((entry) => entry.markId === markId)!; const row = el('li', `${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme}`);
       row.append(button('从本次应用移除', 'remove', () => { const group = item.atomicGroupId; prepared = prepared!.filter((id) => group === null ? id !== markId : workspace!.items.find((entry) => entry.markId === id)?.atomicGroupId !== group); renderPreparation(); })); rows.append(row); }
-    const excluded = el('ul'); for (const item of workspace.items.filter((entry) => !prepared!.includes(entry.markId))) excluded.append(el('li', metadataWords(`排除：${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme} · ${item.appliedRevisionId !== null ? '已应用' : item.conflict ? '冲突待解决' : item.disposition === 'accepted' ? '本次移除或决定已更新（已采纳 · 尚未应用）' : '未被当前决定采纳'}`)));
+    const excluded = el('ul'); for (const item of workspace.items.filter((entry) => !prepared!.includes(entry.markId))) excluded.append(el('li', `排除：${item.chapter} · 第 ${item.position} 段 ${item.fromGrapheme}–${item.toGrapheme} · ${item.appliedRevisionId !== null ? '已应用' : item.conflict ? '冲突待解决' : item.disposition === 'accepted' ? '本次移除或决定已更新（已采纳 · 尚未应用）' : '未被当前决定采纳'}`));
     controls.append(rows, el('p', `排除 ${workspace.items.length - prepared.length} 项；移除项保持已采纳 · 尚未应用。`), excluded);
     // One Effect carries at most the existing batch bound; the strip says so instead of sending what would be refused.
     if (prepared.length > MAX_BATCH_APPLY_SUGGESTIONS) controls.append(el('p', `一次应用最多 ${MAX_BATCH_APPLY_SUGGESTIONS} 项；请移除部分修改后再确认应用。`));

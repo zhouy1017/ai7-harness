@@ -1,4 +1,4 @@
-import { metadataWords } from './technical-layer.js';
+import { technicalWords } from './technical-layer.js';
 import type {
   CapturedProcedureProjection,
   CapturedProcedureRunProjection,
@@ -83,7 +83,7 @@ export function mountProcedureRecommendation(options: ProcedureRecommendationSur
     label.setAttribute('role', 'status');
     root.replaceChildren(node('h4', '工序推荐'), label);
     if (state.selected !== null) {
-      root.append(node('p', metadataWords(`已选《${state.selected.purpose}》第 ${state.selected.version} 版；选择工序不授予任何权限。`)));
+      root.append(node('p', `已选《${state.selected.purpose}》${technicalWords(`第 ${state.selected.version} 版`, '版本')}；选择工序不授予任何权限。`));
       if (options.clear !== undefined) root.append(button('清除工序选择', 'clear', () => { state.clear(); options.clear!(); render(); }));
     }
     if (problem !== '') { const alert = node('p', problem); alert.setAttribute('role', 'alert'); root.append(alert); }
@@ -91,7 +91,7 @@ export function mountProcedureRecommendation(options: ProcedureRecommendationSur
     const list = node('ul');
     for (const candidate of state.projection?.candidates ?? []) {
       const item = node('li'); item.dataset['recommendationVersionId'] = candidate.versionId;
-      item.append(node('strong', metadataWords(`《${candidate.purpose}》 · ${candidate.kind} · 第 ${candidate.version} 版`)));
+      item.append(node('strong', `《${candidate.purpose}》 · ${candidate.kind} · ${technicalWords(`第 ${candidate.version} 版`, '版本')}`));
       for (const line of candidate.rationale) item.append(node('p', line));
       item.append(node('p', `需要：${candidate.requiredInputs.join('、')}`), node('p', `预期结果：${candidate.expectedOutcome}`),
         node('p', `建议类型：${candidate.proposalClasses.join('、') || '无'}；外部操作：${candidate.effectClasses.join('、') || '无'}`));

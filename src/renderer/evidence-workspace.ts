@@ -1,5 +1,4 @@
-import { identityWords } from './technical-layer.js';
-import { metadataWords } from './technical-layer.js';
+import { technicalWords, identityWords } from './technical-layer.js';
 import {
   EVIDENCE_MATRIX_MAX_PINNED,
   type CorrectionProposalDraftProjection,
@@ -382,7 +381,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     const list = el('ol');
     for (const entry of current.history) {
       list.append(el('li', entry.resultId === current.result.resultId ? 'evidence-history-current' : undefined,
-        metadataWords(`第 ${entry.version} 版 · ${entry.outcome} · ${options.instant(entry.recordedAt)}`)));
+        `${technicalWords(`第 ${entry.version} 版`, '版本')} · ${entry.outcome} · ${options.instant(entry.recordedAt)}`));
     }
     section.append(list);
     return section;
