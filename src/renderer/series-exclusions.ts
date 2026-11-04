@@ -149,11 +149,11 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
         item.dataset['exclusionId'] = exclusion.exclusionId;
         item.dataset['targetKind'] = exclusion.target.kind;
         item.dataset['targetId'] = exclusion.target.id;
-        const context = el('p', 'field-note');
-        context.append(el('span', 'series-exclusion-reason', exclusionReasonLine(exclusion.reason).replace(/。$/u, '')), '；',
+        const context = el('p', 'series-exclusion-line');
+        context.append(exclusionLine(exclusion, localInstantLabel).replace(/。$/u, ''), ' · ', el('span', 'series-exclusion-reason', exclusionReasonLine(exclusion.reason).replace(/。$/u, '')), '；',
           el('span', 'series-exclusion-continuing', exclusion.target.read ? exclusion.target.continuing : exclusion.target.continuing.replace(/。$/u, '')));
         if (!exclusion.target.read) context.append('；', el('span', 'series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
-        item.append(el('p', 'series-exclusion-line', exclusionLine(exclusion, localInstantLabel)), context);
+        item.append(context);
         const buttons = el('div', 'button-row');
         const edit = action(EXCLUSIONS_CHANGE_OPEN, 'quiet', 'change-open', () => {
           if (busy) return;
