@@ -180,7 +180,9 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   heading.id = uid('title');
   const host = el('div', 'global-attention-host');
   host.setAttribute('aria-busy', 'true');
-  host.append(el('p', 'field-note global-attention-loading', GLOBAL_ATTENTION_STATUS_LINES.loading));
+  const loading = el('span', 'global-attention-loading', ` · ${GLOBAL_ATTENTION_STATUS_LINES.loading}`);
+  loading.setAttribute('role', 'status');
+  heading.append(loading);
   options.root.setAttribute('aria-labelledby', heading.id);
   options.root.append(
     el('p', 'section-label', GLOBAL_ATTENTION_SECTION_LABEL),
@@ -270,6 +272,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     host.dataset['attentionCount'] = String(projection.actionableCount);
     host.dataset['attentionRunning'] = projection.running ? 'true' : 'false';
     host.removeAttribute('aria-busy');
+    loading.remove();
     host.replaceChildren(...globalAttentionView(projection).map((view) => groupNode(view, projection)));
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
     if (restore !== null) {
@@ -284,6 +287,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
       return;
     }
     host.removeAttribute('aria-busy');
+    loading.remove();
     host.replaceChildren(el('p', 'attention-note global-attention-unavailable', options.errorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.unavailable)));
   }
 
