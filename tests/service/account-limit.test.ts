@@ -215,10 +215,15 @@ describe('finite-ceiling serial backoff before the safe retry on the declared re
       execution.admitAndDispatch(runId);
       await execution.whenIdle();
       const result = store.inspectBaselineAnalysis(bookId, () => null);
-      const gaps = result.resultSetRevision!.gaps;
+      // #1307 retains failed unit checkpoints without creating a result revision.
+      expect(result.resultSetRevision).toBeNull();
+      expect(result.taskOutcome?.classification).toBe('failed');
+      const gaps = store.baselineAnalysisLedger.unitCheckpoints(runId)
+        .flatMap(({ unit }) => unit.closed.state === 'gap' ? [unit.closed.gap] : []);
       expect(gaps).toHaveLength(SAMPLE1_UNITS);
       expect(gaps.every((gap) => gap.code === 'adapter-failure' && gap.reason.includes('模型服务不可达'))).toBe(true);
-      expect(result.run?.state).not.toBe('completed');
+      expect(result.run?.state).toBe('failed');
+      expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toEqual([]);
       expect(JSON.stringify([result.taskOutcome, gaps])).not.toMatch(/outcome-unknown|可能已计费|可能.*计费|结果待确认/u);
       expect(store.baselineAnalysisLedger.adaptationsOf(runId).some((entry) => entry.failureCode === 'MODEL_SERVICE_UNREACHABLE')).toBe(true);
     } finally { await execution.dispose(); store.close(); }

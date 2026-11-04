@@ -397,9 +397,9 @@ describe('evaluation on the Go execution path (#429)', () => {
     const report = store.inspectReadersReport(bookId)!;
     expect(report.planEnvelope!.promptContractDigest).toBe('d3f82693cdae4751b30272640ef284c71fde6c57e8a485cb94b7d6a85fe7922b');
     const revision = report.resultSetRevision!;
-    // The live unit 1 answer did not meet the contract and stays a gap; the synthesis drafted from the other seven.
-    expect(revision.coverage).toMatchObject({ state: 'partial', unitsTotal: 8, unitsClosed: 7 });
-    expect(revision.gaps.map((gap) => [gap.unitOrdinal, gap.code])).toEqual([[1, 'contract-invalid']]);
+    // H3 salvages the recorded unit 1 answer instead of dropping its usable passages.
+    expect(revision.coverage).toMatchObject({ state: 'complete', unitsTotal: 8, unitsClosed: 8 });
+    expect(revision.gaps).toEqual([]);
     expect(revision.readersReport.synthesis.state).toBe('closed');
     expect(revision.readersReport.sections!.conclusion).toContain('修改后再议');
     expect(revision.usage).toEqual({ requests: 9, inputTokens: 78_768, outputTokens: 37_931 });
@@ -422,10 +422,11 @@ describe('evaluation on the Go execution path (#429)', () => {
     bindLive(policy);
     await runInitial(policy);
     const initial = store.inspectInitialEvaluation(bookId);
-    expect(initial.resultSetRevision!.evaluation.synthesis.state).toBe('gap');
-    expect(initial.resultSetRevision!.evaluation.items.every((item) => item.score === null)).toBe(true);
-    // Eight units and the reflection; no synthesis message ever formed.
-    expect(sent).toBe(9);
+    expect(initial.resultSetRevision).toBeNull();
+    expect(initial.taskOutcome?.classification).toBe('failed');
+    expect(initial.taskOutcome?.report?.failures).toContainEqual(expect.objectContaining({ code: 'SYNTHESIS_UNAVAILABLE' }));
+    // Eight units; no synthesis is admitted, and a failed Run skips reflection.
+    expect(sent).toBe(8);
     expect((await ledgerLines()).some((line) => line.validation?.step === 'evaluation-first/reduction')).toBe(false);
   }, 300_000);
 
@@ -445,15 +446,15 @@ describe('evaluation on the Go execution path (#429)', () => {
     expect(sent).toBe(0);
   });
 
-  it('keeps the conclusion-mismatch rule: a live report that does not state the editor\'s conclusion writes no draft', async () => {
+  it('prefixes the editor\'s conclusion when a live report supplies a different conclusion', async () => {
     const policy = selected;
     await runInitial(policy);
     finalizeAsJ11(store, bookId);
     mismatchConclusion = true;
     await draftReport(policy);
     const drafted = store.inspectReadersReport(bookId)!.resultSetRevision!.readersReport;
-    expect(drafted.sections).toBeNull();
-    expect(drafted.synthesis.state).toBe('gap');
+    expect(drafted.sections?.conclusion).toBe(`结论：修改后再议。${AUTHORED_SECTIONS.conclusion.replace('修改后再议', '同意出版')}`);
+    expect(drafted.synthesis.state).toBe('closed');
   }, 300_000);
 
   it.each((['initial', 'readers', 'rewrite'] as const).flatMap((kind) => (['unknown', 'quota'] as const).map((mode) => ({ kind, mode }))))('retains $kind $mode without retrying or resending the unit', async ({ kind, mode }) => {

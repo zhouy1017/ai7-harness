@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   ExportFidelityRowProjection,
   ExportFidelityStatus,
@@ -52,16 +53,16 @@ export function exportCardHeading(target: ManuscriptExportTargetProjection | nul
     if (pending.kind === 'report' || pending.kind === 'document') return `导出 · ${pending.label}`;
     return pending.kind === 'current' ? '导出 · 当前修订版' : `导出 · 里程碑版本「${pending.label}」`;
   }
-  if (target.report !== null) return `导出 · ${reportExportLabel(target.report.runLabel, target.report.version)}`;
-  if (target.document !== null) return `导出 · ${target.document.typeLabel} · ${target.document.versionLabel}`;
+  if (target.report !== null) return `导出 · ${technicalWords(reportExportLabel(target.report.runLabel, target.report.version), target.report.runLabel)}`;
+  if (target.document !== null) return `导出 · ${target.document.typeLabel}${technicalWords(` · ${target.document.versionLabel}`)}`;
   return target.kind === 'current'
-    ? `导出 · 当前修订版 ${target.revisionLabel}`
-    : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
+    ? `导出 · 当前修订版${technicalWords(` ${target.revisionLabel}`)}`
+    : `导出 · 里程碑版本「${target.milestoneLabel ?? ''}」 · ${technicalWords(target.revisionLabel, '修订版')}`;
 }
 
 /** V2-UX-TASK-040's low ceremony: unsaved edits became a revision for the export, and nothing more. */
 export function exportSavedRevisionLine(revisionLabel: string): string {
-  return `未保存的修改已为导出保存为修订版 ${revisionLabel}；这不是里程碑版本。`;
+  return `未保存的修改已为导出保存为修订版 ${technicalWords(revisionLabel)}；这不是里程碑版本。`;
 }
 
 /** V2-UX-EXP-015, EXP-017: the export ends at the chosen local file. */
@@ -175,8 +176,8 @@ export function exportReceiptMeta(receipt: Pick<ManuscriptExportReceiptProjectio
 export function exportVersionText(target: ManuscriptExportTargetProjection): string {
   if (target.report !== null) return reportExportLabel(target.report.runLabel, target.report.version);
   // A Production Document's version by its type and 版本 N (Issue #415, S66b), never by the revision behind it.
-  if (target.document !== null) return `${target.document.typeLabel} · ${target.document.versionLabel}`;
-  return target.kind === 'current' ? `修订版 ${target.revisionLabel}` : `里程碑版本「${target.milestoneLabel ?? ''}」 · ${target.revisionLabel}`;
+  if (target.document !== null) return `${target.document.typeLabel}${technicalWords(` · ${target.document.versionLabel}`)}`;
+  return target.kind === 'current' ? `修订版${technicalWords(` ${target.revisionLabel}`)}` : `里程碑版本「${target.milestoneLabel ?? ''}」 · ${technicalWords(target.revisionLabel, '修订版')}`;
 }
 
 // ---- the records on 交付物 ------------------------------------------------------------------------------

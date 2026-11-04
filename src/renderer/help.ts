@@ -1,3 +1,4 @@
+import { technicalLayerVisible, technicalLayerReady, saveTechnicalLayerVisible } from './technical-layer.js';
 import type { DataVersionProjection } from '../shared/protocol.js';
 import { SERVICE_PROTOCOL_VERSION } from '../shared/protocol.js';
 import licensesDocument from './third-party-licenses.generated.json' with { type: 'json' };
@@ -72,7 +73,21 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   const stateLine = el('p', 'field-note help-data-version-state');
   const buildLine = el('p', 'field-note help-build-identity');
   about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine, buildLine);
-  root.append(about);
+  if (technicalLayerVisible) root.append(about);
+  const developer = el('label', 'help-developer-mode');
+  const toggle = el('input');
+  toggle.type = 'checkbox';
+  toggle.checked = technicalLayerVisible;
+  toggle.disabled = !technicalLayerReady;
+  toggle.setAttribute('aria-label', '开发者模式');
+  toggle.addEventListener('change', () => {
+    saveTechnicalLayerVisible(toggle.checked, window.localStorage);
+    root.replaceChildren();
+    mountHelp(options);
+    root.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
+  });
+  developer.append(toggle, el('span', undefined, '开发者模式'));
+  root.append(developer);
   void options.loadVersions().then(
     (versions) => {
       const identity = currentBuildIdentity();
@@ -129,7 +144,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     const summary = el('summary');
     summary.append(
       el('span', 'help-license-name', license.name),
-      el('span', 'help-license-version', license.version),
+      el('span', 'help-license-version', technicalLayerVisible ? license.version : ''),
       el('span', 'help-license-id', `${HELP_LICENSE_FIELD_LICENSE} ${license.license}`),
       el('span', 'field-note help-license-hint', HELP_LICENSE_TEXT_SUMMARY),
     );

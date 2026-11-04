@@ -1,3 +1,4 @@
+import { identityWords } from './technical-layer.js';
 import type { AnalysisFeedbackItemProjection, AnalysisFeedbackProjection, RendererApi } from '../shared/protocol.js';
 import { ANALYSIS_FEEDBACK_JUDGMENTS, ANALYSIS_FEEDBACK_OTHER, type AnalysisFeedbackJudgment } from '../shared/analysis-feedback.js';
 import {
@@ -81,7 +82,7 @@ function keepCommitted(field: HTMLInputElement | HTMLTextAreaElement, keep: (val
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 

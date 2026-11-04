@@ -81,6 +81,24 @@ function ownerOf(store: EditorialStore, fixture: ResolvedModelFixture): Baseline
   return new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy, fixture, secretResolver: { resolve: async () => null } });
 }
 
+/** These history tests need a completed partial evaluation, including synthesis of its actual closed subset. */
+function answerPartialEvaluation(store: EditorialStore, prepared: Pick<BaselineAnalysisProjection, 'coverageManifest'>, fixture: ResolvedModelFixture): ResolvedModelFixture {
+  const definition = store.initialEvaluationLedger.definition;
+  const closed = prepared.coverageManifest!.units.flatMap((unit) => {
+    const answer = resolveFixtureEntry(fixture.entries, unit.ordinal, definition.requestDigest(unit.ordinal, unit.digest), 1)?.response;
+    if (answer?.kind !== 'unit-result') return [];
+    const parsed = definition.parseUnitResult(answer.text, unit);
+    return parsed.ok ? [{ unitOrdinal: unit.ordinal, state: 'closed' as const, result: parsed.result }] : [];
+  });
+  const synthesis = [...fixture.entries.values()].find((entry) => entry.unitOrdinal === 0 && entry.response.kind === 'unit-result' &&
+    JSON.parse(entry.response.text).schema === 'ai7.evaluation.synthesis-result/2')!;
+  expect(synthesis).toBeDefined();
+  const requestDigest = definition.crossUnit!.step!.requestDigest(closed);
+  const entries = new Map(fixture.entries);
+  entries.set(fixtureEntryKey(0, requestDigest), { ...synthesis, requestDigest });
+  return { ...fixture, entries };
+}
+
 /** The fixture with every entry `drop` names answering 结果待确认 instead; identity and digest stay, as the route bound them. */
 function dropping(fixture: ResolvedModelFixture, drop: (entry: ModelFixtureEntry) => boolean): ResolvedModelFixture {
   return { ...fixture, entries: new Map([...fixture.entries].map(([key, entry]) => [key, drop(entry) ? { ...entry, response: DROPPED } : entry])) };
@@ -148,12 +166,13 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
   it('lists unresolved pairs after more than 500 resolved pairs through the real walk, derives once per relevant write, and rebuilds on restart (#765, #773)', async () => {
     const fixture = dropping(await loadModelFixture(FIXTURES_ROOT, 'sample1-evaluation-authored'), (entry) => entry.unitOrdinal === 3);
     let store = await open(fixture);
-    const execution = ownerOf(store, fixture);
+    let execution: BaselineAnalysisExecutionOwner | undefined;
     try {
       const bookId = await book(store, 'L2 sample1 大量已确认结果');
       let work = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
       while (!work.done) work = store.advanceInitialEvaluationPreparationWork(work.workId!);
       const prepared = work.projection!;
+      execution = ownerOf(store, answerPartialEvaluation(store, prepared, fixture));
       execution.admitOrQueue(store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!, store.initialEvaluationLedger);
       await execution.whenIdle();
       const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
@@ -204,7 +223,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       expect(reads.mock.calls.length).toBeGreaterThan(500);
       reads.mockRestore();
       store.markCleanShutdown();
-    } finally { await execution.dispose(); store.close(); }
+    } finally { await execution?.dispose(); store.close(); }
   }, 300_000);
 
   it('reads the derivation only of its own relations: an edit and a progress row leave the reading, a resolution or a new gap moves it (#773)', async () => {
@@ -215,7 +234,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       let work = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
       while (!work.done) work = store.advanceInitialEvaluationPreparationWork(work.workId!);
       const prepared = work.projection!;
-      const execution = ownerOf(store, route);
+      const execution = ownerOf(store, answerPartialEvaluation(store, prepared, route));
       try {
         const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
         expect(execution.admitOrQueue(authorized.dispatchRunRecordId!, store.initialEvaluationLedger)).toBe('admitted');
@@ -279,6 +298,9 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       const prepared = work.projection!;
       execution.admitOrQueue(store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!, store.initialEvaluationLedger);
       await execution.whenIdle();
+      expect(store.inspectInitialEvaluation(bookId).taskOutcome?.classification).toBe('failed');
+      expect(store.inspectInitialEvaluation(bookId).resultSetRevision).toBeNull();
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toMatchObject({ object: { ranges: 1 } });
       const key = store.baselineAnalysisLedger.unconfirmedOutcomesOf(bookId, store.inspectInitialEvaluation(bookId).kind).ranges[0]!.key;
       const digest = store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null }).unconfirmed!.digest;
       // Another handle settles the range meanwhile, so the digest the editor read is stale and 保留为缺口 is refused.
@@ -470,7 +492,7 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       let progress = store.createInitialEvaluationPreparationWork(bookId, launchPolicy);
       while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
       const prepared = progress.projection!;
-      const execution = ownerOf(store, fixture);
+      const execution = ownerOf(store, answerPartialEvaluation(store, prepared, fixture));
       try {
         const authorized = store.authorizeInitialEvaluation(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest);
         expect(execution.admitOrQueue(authorized.dispatchRunRecordId!, store.initialEvaluationLedger)).toBe('admitted');

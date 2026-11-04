@@ -1,3 +1,5 @@
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
+import { taskPlanWording } from './task-drawer-labels.js';
 import type {
   EvidenceAssuranceLevel,
   BaselineAnalysisGoal,
@@ -330,7 +332,7 @@ const COPILOT_SCREENS: ReadonlyArray<string> = [
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 
@@ -708,6 +710,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   // ---- painting ---------------------------------------------------------------------------------------
 
   function paint(next: TaskPlanProjection, force: boolean): void {
+    next = taskPlanWording(next);
     const key = JSON.stringify(next);
     const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
@@ -989,7 +992,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const full = control(next.edit.editable ? TASK_PLAN_FULL_LINK_EDITABLE : TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
-    section.append(el('p', 'research-status', next.service.decision), rows, full);
+    section.append(...(technicalLayerVisible ? [el('p', 'research-status', next.service.decision)] : []), rows, full);
     return section;
   }
 
@@ -1049,8 +1052,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
-        [TASK_PLAN_SERVICE_TERMS[1], next.service.provider],
-        [TASK_PLAN_SERVICE_TERMS[2], next.service.decision],
+        ...(technicalLayerVisible ? [[TASK_PLAN_SERVICE_TERMS[1], next.service.provider] as const] : []),
+        ...(technicalLayerVisible ? [[TASK_PLAN_SERVICE_TERMS[2], next.service.decision] as const] : []),
         [TASK_PLAN_SERVICE_TERMS[3], next.service.send],
         [TASK_PLAN_SERVICE_TERMS[4], next.service.sendCategory],
         [TASK_PLAN_SERVICE_TERMS[5], usage],
@@ -1816,7 +1819,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       assuranceBuffers.delete(editKey(current));
       if (budgetForm?.key === editKey(current)) budgetForm = null;
       const ordinal = typeof updated.planVersion === 'number' ? updated.planVersion : updated.planVersion?.ordinal;
-      options.setStatus(`计划已更新为第 ${ordinal ?? '?'} 版。`, 'success');
+      options.setStatus(`计划已更新为${technicalWords(`第 ${ordinal ?? '?'} 版`, '版本')}。`, 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
@@ -2365,7 +2368,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (completed.kind !== 'baseline-analysis-preparation' || completed.result === null || !('coverageManifest' in completed.result)) {
           throw new Error('重新确认计划未返回计划。');
         }
-        options.setStatus(`计划已重新确认为版本 ${completed.result.planVersion?.ordinal ?? '?'}。`, 'success');
+        options.setStatus(`计划已重新确认${technicalWords(`为版本 ${completed.result.planVersion?.ordinal ?? '?'}`)}。`, 'success');
       }
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
@@ -2748,6 +2751,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       painted = '';
       refusal = null;
       pendingNote = null;
+      body.replaceChildren();
+      bar.replaceChildren();
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';

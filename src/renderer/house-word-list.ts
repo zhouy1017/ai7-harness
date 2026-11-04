@@ -1,3 +1,4 @@
+import { technicalWords, technicalDisclosure } from './technical-layer.js';
 import {
   HOUSE_DISCLOSURE, HOUSE_PAGE_SIZE, MAX_HOUSE_ENTRIES, HouseWordListError, previewHousePaste, validateSaveHouseWordListInput,
   type HousePastePreview, type HouseWordListApi, type HouseWordListDraftEntry, type HouseWordListPage,
@@ -31,7 +32,7 @@ export function mountHouseWordList(options: {
     try { await work(); }
     catch (error) {
       if (!destroyed) setStatus(committedRead !== null
-        ? `${committedRead.created ? '已保存本社敏感词表' : '词条未变，仍为'} 第${committedRead.ordinal}版；读取未完成，请重试读取。`
+        ? `${committedRead.created ? '已保存本社敏感词表' : '词条未变，仍为'} ${technicalWords(`第${committedRead.ordinal}版`, '版本')}；读取未完成，请重试读取。`
         : error instanceof HouseWordListError ? error.message : draft === null ? '词表读取未完成，请重试。' : '词表操作未完成；草稿已保留，请重试。', 'error');
     } finally { if (!destroyed) { busy = false; paint(); } }
   };
@@ -44,7 +45,7 @@ export function mountHouseWordList(options: {
     await inspect({ versionId: saved.pin.versionId, entryOffset: 0, historyOffset: 0 });
     if (!destroyed) {
       committedRead = null;
-      setStatus(saved.created ? `已保存本社敏感词表 第${saved.ordinal}版。` : `词条未变，仍为第${saved.ordinal}版。`, 'success');
+      setStatus(saved.created ? `已保存本社敏感词表 ${technicalWords(`第${saved.ordinal}版`, '版本')}。` : `词条未变，仍为${technicalWords(`第${saved.ordinal}版`, '版本')}。`, 'success');
     }
   };
   const beginDraft = (): Promise<void> => run(async () => {
@@ -79,7 +80,7 @@ export function mountHouseWordList(options: {
     const panel = el('section'); panel.className = 'guideline-card'; panel.dataset['houseWordList'] = 'panel';
     panel.append(el('h3', '本社敏感词表'), el('p', HOUSE_DISCLOSURE));
     if (committedRead !== null) {
-      panel.append(el('p', `第${committedRead.ordinal}版已保存；${busy ? '正在读取词条。' : '读取未完成，请重试读取。'}`),
+      panel.append(el('p', `${technicalWords(`第${committedRead.ordinal}版`, '版本')}已保存；${busy ? '正在读取词条。' : '读取未完成，请重试读取。'}`),
         button('重新读取已保存版本', 'retry-read', () => void run(readCommitted)));
       root.replaceChildren(panel); return;
     }
@@ -126,7 +127,7 @@ export function mountHouseWordList(options: {
       })));
     } else {
       const selected = page?.selected;
-      panel.append(el('p', selected === undefined || selected === null ? '尚未保存词表；AI7不提供预置词条。' : `第${selected.ordinal}版 · ${selected.entryCount}条 · 启用${selected.enabledCount}条`));
+      panel.append(el('p', selected === undefined || selected === null ? '尚未保存词表；AI7不提供预置词条。' : `${technicalWords(`第${selected.ordinal}版`, '版本')} · ${selected.entryCount}条 · 启用${selected.enabledCount}条`));
       if (selected !== undefined && selected !== null) {
         const entries = el('ol');
         for (let index = 0; index < (page?.entries.length ?? 0); index++) {
@@ -135,11 +136,11 @@ export function mountHouseWordList(options: {
         }
         panel.append(entries, button('上一页词条', 'entries-previous', () => void run(() => inspect({ ...request, entryOffset: Math.max(0, request.entryOffset - HOUSE_PAGE_SIZE) })), request.entryOffset === 0),
           button('下一页词条', 'entries-next', () => void run(() => inspect({ ...request, entryOffset: page!.nextEntryOffset! })), page?.nextEntryOffset === null));
-        const details = el('details'); details.append(el('summary', '版本技术详情'), el('p', `词表 ${selected.pin.listId} · 版本 ${selected.pin.versionId} · 摘要 ${selected.pin.digest}`)); panel.append(details);
+        const details = el('details'); details.append(el('summary', '查看技术详情'), el('p', `词表 ${selected.pin.listId} · 版本 ${selected.pin.versionId} · 摘要 ${selected.pin.digest}`)); panel.append(technicalDisclosure(details));
       }
       panel.append(button(page?.current === null ? '创建词表' : '编辑当前版本', 'edit', () => void beginDraft()));
       const history = el('details'); history.append(el('summary', '版本历史（只读）'));
-      for (const version of page?.history ?? []) history.append(button(`查看第${version.ordinal}版`, `history-${version.ordinal}`, () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 }))));
+      for (const version of page?.history ?? []) history.append(button(`查看${technicalWords(`第${version.ordinal}版`, '版本')}`, `history-${version.ordinal}`, () => void run(() => inspect({ ...request, versionId: version.pin.versionId, entryOffset: 0 }))));
       history.append(button('最新历史', 'history-first', () => void run(() => inspect({ ...request, historyOffset: 0 })), request.historyOffset === 0),
         button('更早历史', 'history-next', () => void run(() => inspect({ ...request, historyOffset: page!.nextHistoryOffset! })), page?.nextHistoryOffset === null || page === null)); panel.append(history);
       panel.append(button('查看当前版本', 'current', () => void run(() => inspect({ versionId: null, entryOffset: 0, historyOffset: 0 }))));

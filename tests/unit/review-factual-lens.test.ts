@@ -1,3 +1,6 @@
+import { technicalDisclosure } from '../../src/renderer/technical-layer.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountReviewWorkspace, type MountReviewWorkspaceOptions, type ReviewWorkspaceSurface } from '../../src/renderer/review-workspace.js';
@@ -49,7 +52,7 @@ function workspace(id = RUN, state: ReviewRunCategoryState = 'failed', findingsC
     run: { reviewRunId: id, ordinal: 1, label: '第 1 次', createdAt: AT, state: 'partial', stateLabel: '部分完成', canContinue: false,
       scope: { kind: 'whole', label: '全书', selectedRange: null, selection: null }, manuscript: MANUSCRIPT, configurationDigest: PIN.digest,
       authorization: { authorizedAt: AT }, categories: [{ categoryId: 'factual-review', label: '事实核查', position: 1, output: 'annotation', riskPointsOnly: false,
-        batchApply: false, basisStatement: '公开合成依据', state, stateLabel: state === 'failed' ? '运行失败' : '已中断', detail: '真实终态缺口说明',
+        batchApply: false, basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } }, state, stateLabel: state === 'failed' ? '运行失败' : '已中断', detail: '真实终态缺口说明',
         taskIntentId: null, planEnvelopeDigest: PIN.digest, modeLabel: null, plan: null, progress: null, findingsCount, excludedCount: 0 }],
       findings: findingsCount > 0 ? [finding()] : [], findingsTotal: findingsCount, findingsTruncated: false, findingCounts: COUNTS, report: null, reportVersions: [], historicalMarker: null,
       influence: [], scopeStop: null, procedure: null, capture: unavailable } };
@@ -105,7 +108,7 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
   const status = vi.fn();
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: null, api,
-    awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return node as unknown as HTMLElement; },
+    awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
     setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
     goToText: async () => undefined, openPlan: () => undefined, planChanged: () => undefined });
   surfaces.push(surface);
@@ -122,7 +125,8 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     const reason = '当前模型渠道的原生搜索为候选接口 · 未实测；请前往 设置 › 联网检索 的后端列表，保存一个可用后端的密钥。';
     next.categories = [{ categoryId: 'factual-review', label: '事实核查', description: '核对公开来源', output: 'annotation', riskPointsOnly: false,
       batchApply: false, searchEngine: true, modelFree: false, materialReferencesAllowed: false,
-      basisStatement: admitted ? '将使用 DeepSeek 开放平台（官方） 自带的联网搜索；是否完成以本次运行的核查状态为准' : '使用用户所选的联网检索后端',
+      basis: { categoryId: 'factual-review', executor: 'factual-review-kind', searchEngine: true, guidelineDocuments: [], procedure: { title: '事实核查', version: '1' },
+        ...(admitted ? { modelChannelSearchLabel: 'DeepSeek 开放平台（官方）' } : {}) },
       guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, available: admitted, unavailableReason: admitted ? null : reason,
       scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
     view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
@@ -276,4 +280,10 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     view.inspectFactualVerification.mockResolvedValue({ ...lens(), bookId: 'foreign-book' }); view.surface.refresh(); await flush();
     expect(view.root.querySelectorAll('[data-fact-result-id]')).toHaveLength(0);
   });
+});
+
+it('scans the review results and evidence in ordinary mode (#1315)', async () => {
+  setTechnicalLayerVisible(false);
+  try { const view = mount('settled'); await flush(); expectNoTechnicalText(view.root); }
+  finally { setTechnicalLayerVisible(true); }
 });

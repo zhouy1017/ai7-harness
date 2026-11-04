@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import {
   EVIDENCE_ASSURANCE_LEVEL_LABELS,
   FACTUAL_ACTION_NEED_LABELS,
@@ -117,7 +118,7 @@ export function factSourceCountsLine(result: Pick<FactualVerificationResultProje
 export function factDecisionLine(decision: FactualReviewDecisionProjection | null): string {
   if (decision === null) return '尚未作出核查审阅决定';
   const own = decision.ownWords === null ? '' : `：${decision.ownWords}`;
-  return `${decision.dispositionLabel}${own} · 针对第 ${decision.boundVersion} 版${decision.superseded ? ' · 已有新版本' : ''}`;
+  return `${decision.dispositionLabel}${own} · 针对${technicalWords(`第 ${decision.boundVersion} 版`, '版本')}${decision.superseded ? ' · 已有新版本' : ''}`;
 }
 
 export function factActionLine(result: Pick<FactualVerificationResultProjection, 'actionNeed'>): string {
