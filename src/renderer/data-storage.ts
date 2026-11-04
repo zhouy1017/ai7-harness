@@ -68,8 +68,7 @@ export function createDataStorage(options: DataStorageOptions) {
       const credentials = element('section', 'review-section');
       credentials.append(
         element('h3', undefined, '凭据与产品数据分开'),
-        element('p', undefined, projection.separationLabel),
-        element('p', 'field-note', `当前系统保护位置：${projection.protectedSecretStoreLabel}；复制产品数据不会复制模型服务凭据。`),
+        element('p', undefined, `${projection.separationLabel.replace(/。$/u, '')}；系统保护位置：${projection.protectedSecretStoreLabel}。`),
       );
       const reveal = button('查看数据位置', 'secondary', async () => {
         reveal.disabled = true;
@@ -125,10 +124,7 @@ export function createDataStorage(options: DataStorageOptions) {
         const upgraded = version.upgrades[0];
         if (upgraded !== undefined) {
           const lines = element('dd', 'data-version-upgrade');
-          lines.append(
-            element('p', undefined, dataVersionUpgradeLine(upgraded, localInstantLabel)),
-            element('p', 'field-note', dataVersionUpgradeBackupLine(upgraded)),
-          );
+          lines.append(element('p', undefined, `${dataVersionUpgradeLine(upgraded, localInstantLabel).replace(/。$/u, '')}；${dataVersionUpgradeBackupLine(upgraded)}`));
           // Going back uses the earlier complete backup when this upgrade began from an unfinished one's middle state, so the steps
           // stand while that backup does, whatever became of this upgrade's own (Issue #433 review).
           if (upgraded.rollback?.backupPresent ?? upgraded.backupPresent) {
