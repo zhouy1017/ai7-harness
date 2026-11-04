@@ -132,22 +132,14 @@ describe('the custom analysis kind family (custom-analysis/<dimension-id>)', () 
     expect(baselineAnalysisKindDefinition().promptContractDigest).toBe(BASELINE_PROMPT_CONTRACT_DIGEST);
   });
 
-  it('admits a unit result of exactly its shape and refuses any other', () => {
-    const row = { answer: '本单元从一封信写起。', blockOrdinal: 2, quote: '收到一封信', confidenceNote: '开篇直接写到，依据充分。' };
-    const result = (rows: unknown[], unitOrdinal = 3): string => JSON.stringify({ schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, unitOrdinal, rows });
-    const parsed = parseCustomAnalysisUnitResult(result([row]), { unitOrdinal: 3, blockCount: 4 });
-    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 3, rows: [row] } });
-    expect(parseCustomAnalysisUnitResult(`\`\`\`json\n${result([])}\n\`\`\``, { unitOrdinal: 3, blockCount: 4 }).ok).toBe(true);
-    expect(parseCustomAnalysisUnitResult('不是 JSON', { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'not-json' });
-    expect(parseCustomAnalysisUnitResult(result([{ ...row, score: 4 }]), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseCustomAnalysisUnitResult(JSON.stringify({ schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, unitOrdinal: 3, rows: [], summary: '跨单元总结' }), { unitOrdinal: 3, blockCount: 4 }))
-      .toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseCustomAnalysisUnitResult(result([row], 4), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'unit-mismatch' });
-    expect(parseCustomAnalysisUnitResult(result([{ ...row, blockOrdinal: 5 }]), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'quote-not-in-block' });
-    expect(parseCustomAnalysisUnitResult(result([{ ...row, answer: '答'.repeat(301) }]), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'schema-invalid' });
+  it('keeps valid rows and the first twelve positions, trimming prose but never quotations', () => {
+    const row = { answer: '答'.repeat(301), blockOrdinal: 2, quote: '合成引文', confidenceNote: '注'.repeat(121), extra: 1 };
+    const result = (rows: unknown[]) => JSON.stringify({ schema: 'other', unitOrdinal: 99, rows, summary: 'extra' });
+    const parsed = parseCustomAnalysisUnitResult(result([null, row, { ...row, blockOrdinal: 5 }, ...Array.from({ length: 10 }, () => row)]), { unitOrdinal: 3, blockCount: 4 });
+    expect(parsed.ok && parsed.result.rows).toHaveLength(10);
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 3, rows: expect.arrayContaining([{ answer: '答'.repeat(300), blockOrdinal: 2, quote: '合成引文', confidenceNote: '注'.repeat(120) }]) } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'quote-not-in-block' })]));
     expect(parseCustomAnalysisUnitResult(result([{ ...row, quote: '引'.repeat(81) }]), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseCustomAnalysisUnitResult(result([{ ...row, confidenceNote: '注'.repeat(121) }]), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseCustomAnalysisUnitResult(result(Array.from({ length: 13 }, () => row)), { unitOrdinal: 3, blockCount: 4 })).toMatchObject({ ok: false, code: 'schema-invalid' });
   });
 
   it('locates each quotation deterministically, keeps the rows it cannot locate, and counts without synthesizing across units', () => {

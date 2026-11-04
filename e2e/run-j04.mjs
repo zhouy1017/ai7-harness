@@ -18,7 +18,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
 // and is reconfirmed as version 2.
 // Issue #387 adds a separate fresh Book replaying the reviewed 2026-10-12 V4.1 capture, including its
-// truthful schema-invalid unit 1 gap, under the retained prompt contract /1 it was asked under. Issue #826 then
+// seven recovered string notes in unit 1 under the retained prompt contract /1 it was asked under. Issue #826 then
 // relaunches that Book under the current contracts and replays the reviewed 2026-10-13 range recomputation of units
 // 1 and 2: eight units closed, six of them reused from the /1 revision. Existing authored/synthetic retry and
 // incremental scenarios remain intact.
@@ -360,6 +360,22 @@ async function readBaseline(renderer, revisionId = null) {
     projection.coverageManifest = { ...projection.coverageManifest, units };
     const { digest, ...body } = projection.coverageManifest;
     requireJourney(sha256Hex(canonicalJson(body)) === digest, 'coverage-manifest-page-digest');
+  }
+  for (const key of ['resultSetRevision', 'inspectedRevision']) {
+    const revision = projection[key];
+    if (revision?.overviewPage === undefined || revision.synthesis !== undefined) continue;
+    const chunks = [];
+    let cursor = 0;
+    do {
+      const page = await renderer.evaluate(`window.ai7.getAnalysisRevisionOverview(${JSON.stringify({ revisionId: revision.revisionId, afterIndex: cursor })})`);
+      requireJourney(page.revisionId === revision.revisionId && (page.next === null || page.next > cursor), 'analysis-overview-page');
+      chunks.push(page.text);
+      cursor = page.next;
+    } while (cursor !== null && chunks.length < revision.overviewPage.chunkCount);
+    const text = chunks.join('');
+    requireJourney(cursor === null && chunks.length === revision.overviewPage.chunkCount && [...text].length === revision.overviewPage.totalLength &&
+      sha256Hex(text) === revision.overviewPage.sha256, 'analysis-overview-digest');
+    projection[key] = { ...revision, ...JSON.parse(text) };
   }
   return projection;
 }
@@ -3535,16 +3551,13 @@ async function main() {
     const recorded = await readBaseline(renderer);
     const realRevision = recorded?.resultSetRevision;
     const realReport = recorded?.taskOutcome?.report;
-    requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
-      realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
-      realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
-      realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
-      realRevision.gaps[0].parseFailure?.code === 'schema-invalid' &&
-      realRevision.gaps[0].reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && realRevision.coverage.state === 'partial' &&
-      realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
-    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
-      realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
-      realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
+    requireJourney(recorded?.run?.state === 'completed' && recorded.taskOutcome?.classification === 'completed' &&
+      realRevision?.ordinal === 1 && realRevision.units.every((unit) => unit.state === 'closed') && realRevision.gaps.length === 0 &&
+      realRevision.units[0].unresolved.length === 7 && realRevision.units[0].salvaged?.filter((entry) => entry.reason === 'string-note-wrapped').length === 7 &&
+      realRevision.coverage.state === 'complete' && realRevision.coverage.unitsClosed === 8 && realRevision.coverage.unitsTotal === 8, 'recorded-salvaged-unit-closure');
+    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 93 &&
+      realRevision.synthesis.events.length === 69 && realRevision.synthesis.relationships.length === 60 &&
+      realRevision.synthesis.settingClaims.length === 76 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
       realRevision.synthesis.relationships.some((relationship) => relationship.subject === '郑雄' && relationship.object === '曾本之') &&
       realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction?.state === 'closed' &&
       realRevision.assuranceSample?.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
@@ -3569,7 +3582,7 @@ async function main() {
       realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
       recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
     'recorded-zero-new-incurred-transmissions');
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed-with-gaps' && document.querySelector('[data-analysis-unit="1"][data-analysis-unit-state="gap"]') && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===7`, 'recorded-visible-gap');
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed' && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===8 && document.querySelector('[data-analysis-unit="1"]')?.textContent.includes('string-note-wrapped')`, 'recorded-visible-salvage');
     at('restart-immutable');
     await closeOwnedBrowser();
     await launchForCleanup();
@@ -3583,7 +3596,7 @@ async function main() {
       'recorded-restart-preserves-result-and-report');
 
     // #1161 rev6: a separate, unedited sample1 Book owns the genuine paused-/1 execution formerly simulated in L2.
-    // Keep the completed recorded Book above intact. This replay truthfully keeps unit1's schema gap and units2/3 closed.
+    // Keep the completed recorded Book above intact. This replay keeps all three units closed and unit 1's salvage metadata.
     at('recorded-retained-pause');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
@@ -3621,9 +3634,7 @@ async function main() {
         recordedPaused.run.attempt.executionBinding.fixtureSha256 === recordedFixtureDigest &&
         sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
         sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
-        kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
-        kept[0].closed.gap.parseFailure?.code === 'schema-invalid' &&
-        kept[0].closed.gap.reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        kept.every((unit) => unit.closed.state === 'closed') && kept[0].closed.result.salvaged?.length === 7 &&
         recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
       'recorded-paused-authentic-retained-checkpoints');
     } finally { await writeFile(unitHoldPath, 'release'); }
@@ -3631,7 +3642,7 @@ async function main() {
     // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
     // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
     // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
-    // repair, the three sampling /2 turns from the second — so unit 1, schema-invalid under /1, now closes. No recorded
+    // repair, the three sampling /2 turns from the second — so unit 1 closes under /2 with six typed notes. No recorded
     // reflection was ever asked with this replay's accounting (the real Run replayed its units from the development cache
     // and recorded no usage for them), so the reflection settles as the disclosed fixture mismatch it is.
     at('reanalyze-range-select');
@@ -3691,7 +3702,7 @@ async function main() {
     requireJourney(JSON.stringify(rangeBefore?.resultSetRevision) === JSON.stringify(realRevision) &&
       rangeBefore.updateControls?.target?.revisionId === realRevision.revisionId && recordedRangeOption?.unitOrdinal === 1 &&
       recordedRangeOption.startPosition === SAMPLE1_UNIT_RANGES[0][0] && recordedRangeOption.endPosition === SAMPLE1_UNIT_RANGES[0][1] &&
-      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'range-recorded-predecessor-readable');
+      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }), 'range-recorded-predecessor-readable');
     const recordedSelectedRange = { startPosition: recordedRangeOption.startPosition, endPosition: recordedRangeOption.endPosition };
     await assertRenderer(renderer, `(() => {
       const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
@@ -3715,7 +3726,7 @@ async function main() {
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
       rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
       JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
-      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }) &&
+      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }) &&
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
         JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&

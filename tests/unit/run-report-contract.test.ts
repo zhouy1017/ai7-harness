@@ -157,21 +157,14 @@ describe('Run Report reflection contract v1', () => {
     expect(parseRunReportReflectionResult(validResult([])).ok).toBe(true);
   });
 
-  it('refuses anything the contract does not describe', () => {
-    expect(parseRunReportReflectionResult('not json at all')).toMatchObject({ ok: false, code: 'not-json' });
-    expect(parseRunReportReflectionResult(JSON.stringify({ schema: RUN_REPORT_REFLECTION_RESULT_SCHEMA }))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseRunReportReflectionResult(JSON.stringify({ schema: RUN_REPORT_REFLECTION_RESULT_SCHEMA, items: [], extra: 1 }))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseRunReportReflectionResult(JSON.stringify({ schema: 'ai7.analysis.assurance-sampling-result/1', items: [] }))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    // More than ten items is past the bound ADR 0066 states.
-    const eleven = Array.from({ length: MAX_RUN_REPORT_REFLECTION_ITEMS + 1 }, () => ITEM);
-    expect(parseRunReportReflectionResult(validResult(eleven))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseRunReportReflectionResult(validResult(eleven.slice(1)))).toMatchObject({ ok: true });
-    // Each field is bounded in graphemes and must not be blank.
-    expect(parseRunReportReflectionResult(validResult([{ suggestion: '多'.repeat(201), basis: '依据。' }]))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseRunReportReflectionResult(validResult([{ suggestion: '做法。', basis: '据'.repeat(201) }]))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseRunReportReflectionResult(validResult([{ suggestion: '   ', basis: '依据。' }]))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseRunReportReflectionResult(validResult([{ suggestion: '做法。', basis: '' }]))).toMatchObject({ ok: false, code: 'schema-invalid' });
-    // 200 graphemes exactly is inside the bound.
-    expect(parseRunReportReflectionResult(validResult([{ suggestion: '多'.repeat(200), basis: '依据。' }]))).toMatchObject({ ok: true });
+  it('keeps the first ten valid items, trims prose and drops only bad entries', () => {
+    const body = JSON.stringify({ schema: 'other', extra: 1, items: [null, { suggestion: '多'.repeat(201), basis: '据'.repeat(201) }, ...Array.from({ length: 10 }, () => ITEM)] });
+    const parsed = parseRunReportReflectionResult(body);
+    expect(parsed.ok && parsed.result.items).toHaveLength(9);
+    expect(parsed.ok && parsed.result.items[0]).toEqual({ suggestion: '多'.repeat(200), basis: '据'.repeat(200) });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ section: 'items', index: 0, reason: 'entry-invalid' })]));
+    expect(parseRunReportReflectionResult('not json')).toMatchObject({ ok: false, code: 'not-json' });
+    expect(parseRunReportReflectionResult('{"items":[null]}')).toMatchObject({ ok: false, code: 'schema-invalid' });
   });
+
 });

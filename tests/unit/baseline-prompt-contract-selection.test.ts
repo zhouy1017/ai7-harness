@@ -116,7 +116,7 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     expect(retained.assurance?.resultSchema).toBe(current.assurance?.resultSchema);
   });
 
-  it('parses a unit result identically under either contract: the parser and result schema are unchanged', () => {
+  it('shares salvage behavior across frozen prompt versions without changing the result schema', () => {
     const unit = { ordinal: 1, blockIds: [`blk_${'a'.repeat(24)}`], overlapBlockIds: [] } as never;
     const bare = JSON.stringify({
       schema: 'ai7.baseline-manuscript-analysis.unit-result/1', unitOrdinal: 1, synopsis: '合成概述。', entities: [], events: [],
@@ -124,7 +124,7 @@ describe('baselineAnalysisKindDefinition (Issue #826)', () => {
     });
     for (const selection of ['current', 'retained-v1'] as const) {
       expect(baselineAnalysisKindDefinition(selection).parseUnitResult(bare, unit))
-        .toEqual({ ok: false, code: 'schema-invalid', detail: '未解决事项不符合契约 v1。' });
+        .toMatchObject({ ok: true, result: { unresolved: [{ description: '合成未确定事项。', sourceRanges: [] }] } });
     }
   });
 

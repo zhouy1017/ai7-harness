@@ -1,0 +1,23 @@
+{
+  "schema": "ai7.model-fixture-replay-compat/1",
+  "entries": [
+    {
+      "mode": "replay-compat",
+      "fixtureIdentity": "sample1-recorded-v41-baseline",
+      "fixtureSha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391",
+      "stage": "reduction",
+      "contentKey": "551d154466a74ba1fd28816d9381ff8fb2edc2eb1dde10e24dee3d2833489c20",
+      "requestDigest": "ee7b301c80e4013dff3f5f2811eb7e2658fd734f138612a571c9ef14819a0e19",
+      "reason": "#1311 H2: per-entry salvage closes unit 1; replay the same recorded downstream stage for the unchanged admitted sample1 and task prompt, ignoring the changed dependency result/accounting digest."
+    },
+    {
+      "mode": "replay-compat",
+      "fixtureIdentity": "sample1-recorded-v41-baseline",
+      "fixtureSha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391",
+      "stage": "reflection",
+      "contentKey": "ef52ceee2581baa45c986a21c645f0cfb818ac1dd7fb78fab93cf2863261b195",
+      "requestDigest": "9f4775637a2c3d370db83dd2180d7814ad9a7ad9a9a68bee3f642bf085a90044",
+      "reason": "#1311 H2: per-entry salvage closes unit 1; replay the same recorded downstream stage for the unchanged admitted sample1 and task prompt, ignoring the changed dependency result/accounting digest."
+    }
+  ]
+}

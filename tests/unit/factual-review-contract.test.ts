@@ -128,38 +128,19 @@ describe('the factual review unit result parser', () => {
     if (parsed.ok) expect(parsed.result.assertions).toEqual([]);
   });
 
-  it(`refuses with the unit parser's own codes`, () => {
+  it('normalizes request echoes and enums and trims prose without trimming quotations', () => {
+    const parsed = parseFactualReviewUnitResult(unitResult([assertion({ assertionClass: 'FACT', category: 'history', severity: 'high', question: '问'.repeat(121), basis: '据'.repeat(201) })], { schema: 'other', unitOrdinal: 99 }), expected);
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: expected.unitOrdinal, assertions: [{ assertionClass: 'real-world-fact', category: '史实', severity: 'A', question: '问'.repeat(120), basis: '据'.repeat(200) }] } });
     expect(parseFactualReviewUnitResult('not json', expected)).toMatchObject({ ok: false, code: 'not-json' });
-    expect(parseFactualReviewUnitResult(JSON.stringify({ schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal }), expected))
-      .toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion()], { schema: 'ai7.baseline-manuscript-analysis.unit-result/1' }), expected))
-      .toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(JSON.stringify({ schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: unit.ordinal + 7, assertions: [] }), expected))
-      .toMatchObject({ ok: false, code: 'unit-mismatch' });
   });
 
-  it('refuses a class, a category, or a tier outside its closed set', () => {
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ assertionClass: 'guess' })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ category: '天气' })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ severity: 'D' })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ mood: 'extra' })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
+  it('rejects only assertions with overlong quotes or ordinals outside the listed blocks', () => {
+    const parsed = parseFactualReviewUnitResult(unitResult([assertion(), assertion({ quote: '引'.repeat(81) }), assertion({ blockOrdinal: expected.blockCount + 1 })]), expected);
+    expect(parsed.ok && parsed.result.assertions).toHaveLength(1);
+    expect(parsed.ok && parsed.result.salvaged?.map((entry) => entry.reason)).toEqual(['quote-invalid', 'quote-not-in-block']);
+    expect(parseFactualReviewUnitResult(unitResult([assertion({ quote: '引'.repeat(81) })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
   });
 
-  it('refuses a quotation, question, or basis past its grapheme bound', () => {
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ quote: '甲'.repeat(81) })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ quote: '甲'.repeat(80) })]), expected).ok).toBe(true);
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ question: '问'.repeat(121) })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ basis: '据'.repeat(201) })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ quote: '   ' })]), expected)).toMatchObject({ ok: false, code: 'schema-invalid' });
-  });
-
-  it('refuses `quote-not-in-block` when the named block is not one the unit listed', () => {
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ blockOrdinal: expected.blockCount + 1 })]), expected))
-      .toMatchObject({ ok: false, code: 'quote-not-in-block' });
-    // A block the unit does list is a parse success even before Reference Integrity looks at it: a
-    // quotation that is not found there is excluded with its reason, never a refused unit result.
-    expect(parseFactualReviewUnitResult(unitResult([assertion({ quote: '不在任何内容块中的引文' })]), expected).ok).toBe(true);
-  });
 });
 
 describe('reference integrity: locating a quotation in the block it names', () => {
