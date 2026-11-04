@@ -172,7 +172,8 @@ export function readEditorialPolishAnswer(text: string, selection: string): Edit
     }
     if (typeof replacement === 'string') {
       const normalized = replacement.normalize('NFC');
-      replacement = selection.includes(normalized) ? normalized : normalized.replace(/^[\s\p{P}\x60]+|[\s\p{P}\x60]+$/gu, '');
+      const quoted = /^\s*["'“‘「『«\x60]|["'”’」』»\x60][\s\p{P}\x60]*$/u.test(normalized);
+      replacement = selection.includes(normalized) || !quoted ? normalized : normalized.replace(/^[\s\p{P}\x60]+|[\s\p{P}\x60]+$/gu, '');
     }
     if (typeof original !== 'string' || typeof replacement !== 'string' || typeof reason !== 'string' ||
         !original.isWellFormed() || !replacement.isWellFormed() || !reason.isWellFormed()) { refuse('建议不是约定的格式'); continue; }

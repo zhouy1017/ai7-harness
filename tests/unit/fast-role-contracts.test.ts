@@ -132,6 +132,8 @@ describe('Editorial Polish Contract v1', () => {
       .toMatchObject({ kind: 'read', suggestions: [{ original: '慢慢的', replacement: '慢慢地' }] });
     expect(readEditorialPolishAnswer(polish([{ original: '“慢慢的”', replacement: '“慢慢的”' }]), SELECTION))
       .toMatchObject({ kind: 'read', suggestions: [], withheld: [{ reason: '替换后的文字与原文相同' }] });
+    expect(readEditorialPolishAnswer(polish([{ original: '慢慢的', replacement: '〔改〕。' }]), SELECTION))
+      .toMatchObject({ kind: 'read', suggestions: [{ replacement: '〔改〕。' }] });
   });
 
   it('skips a leading bracketed note before the real object or array (#1311)', () => {
