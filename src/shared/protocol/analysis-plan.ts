@@ -184,6 +184,7 @@ export type BaselineAnalysisUnitProjection =
   | {
       unitOrdinal: number;
       state: 'gap';
+      originalTextChanged?: boolean;
       requestDigest: string;
       lineage: AnalysisUnitLineage;
       gap: AnalysisGapProjection;

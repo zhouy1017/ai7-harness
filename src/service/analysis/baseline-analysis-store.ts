@@ -2319,7 +2319,7 @@ export class BaselineAnalysisStore {
    * The steps are the latest completed Run's alone, since every later Run that completes makes its own. A read: nothing is
    * written. `kind` reads another kind's revisions through this ledger, whose readings here are kind-generic.
    */
-  unconfirmedOutcomesOf(bookId: string, kind: string = this.#definition.kind): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
+  unconfirmedOutcomesOf(bookId: string, kind: string = this.#definition.kind, includeEarlierText = false): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
     // A kind none of whose revisions ever held such a gap has no range to walk for: the drawer reads this on every poll.
     const held = this.#db.prepare(
       `SELECT 1 FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
@@ -2333,6 +2333,7 @@ export class BaselineAnalysisStore {
     const outcomeOf = this.#db.prepare('SELECT classification, recorded_at FROM analysis_task_outcomes WHERE run_record_id = ?');
     const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
     const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
+    let latestKeys: Set<string> | null = null;
     for (const row of rows) {
       const record = parseCanonicalJson(asString(row.canonical_json));
       const unknown = isRecord(record) && Array.isArray(record.gaps)
@@ -2347,10 +2348,17 @@ export class BaselineAnalysisStore {
         continue;
       }
       const keys = unitContentKeys(facts.manifest);
+      latestKeys = new Set(keys);
       const keyOf = new Map(facts.manifest.units.map((unit, index) => [unit.ordinal, keys[index]!] as const));
       for (const unit of facts.unitStates) {
-        const key = unit.state === 'closed' ? keyOf.get(unit.unitOrdinal) : undefined;
-        if (key !== undefined) outstanding.delete(key);
+        const key = keyOf.get(unit.unitOrdinal);
+        if (key === undefined) continue;
+        if (unit.state === 'closed') outstanding.delete(key);
+        else if (isRecord(record) && Array.isArray(record.gaps) && record.gaps.some((gap: unknown) =>
+          isRecord(gap) && gap.unitOrdinal === unit.unitOrdinal && gap.code === 'contract-invalid')) {
+          const earlier = outstanding.get(key);
+          if (earlier !== undefined) outstanding.set(key, { ...earlier, rereadFailed: true });
+        }
       }
       const runRecordId = asString(row.run_record_id);
       const outcome = outcomeOf.get(runRecordId) as SqlRow | undefined;
@@ -2413,7 +2421,7 @@ export class BaselineAnalysisStore {
         });
       }
     }
-    const ranges = [...outstanding.values()].sort((left, right) => (left.unitOrdinal ?? 0) - (right.unitOrdinal ?? 0));
+    const ranges = [...outstanding.values()].filter((range) => includeEarlierText || latestKeys === null || latestKeys.has(range.contentKey!)).sort((left, right) => (left.unitOrdinal ?? 0) - (right.unitOrdinal ?? 0));
     return { ranges, steps };
   }
 
@@ -2440,7 +2448,7 @@ export class BaselineAnalysisStore {
    * scope plan from the components it froze.
    */
   resendUnitsByContent(bookId: string, kind: string, manifest: CoverageManifestProjection, plan: ResendPlan | null): number[] {
-    const unconfirmed = new Set(this.unconfirmedOutcomesOf(bookId, kind).ranges.map((range) => range.contentKey));
+    const unconfirmed = new Set(this.unconfirmedOutcomesOf(bookId, kind, true).ranges.map((range) => range.contentKey));
     if (unconfirmed.size === 0) return [];
     const keys = unitContentKeys(manifest);
     const sent = plan !== null
@@ -2486,6 +2494,23 @@ export class BaselineAnalysisStore {
         const record = parseCanonicalJson(asString(unit.canonical_json)) as Record<string, unknown>;
         return { ...record, lineage: this.#unitLineage(record) } as BaselineAnalysisUnitProjection;
       });
+    if (ordinal < latestOrdinal && units.some((unit) => unit.state === 'gap' && unit.gap.code === 'outcome-unknown')) {
+      const set = this.#db.prepare('SELECT book_id FROM analysis_result_sets WHERE result_set_id = ?').get(asString(row.result_set_id)) as SqlRow;
+      const bookId = asString(set.book_id);
+      const all = this.unconfirmedOutcomesOf(bookId, this.#definition.kind, true).ranges;
+      const current = new Set(this.unconfirmedOutcomesOf(bookId, this.#definition.kind).ranges.map((range) => range.contentKey));
+      const earlier = new Set(all.filter((range) => !current.has(range.contentKey)).map((range) => range.contentKey));
+      try {
+        const manifest = this.#predecessorFacts(row).manifest;
+        const keys = unitContentKeys(manifest);
+        const keyOf = new Map(manifest.units.map((unit, index) => [unit.ordinal, keys[index]!] as const));
+        for (const unit of units) {
+          if (unit.state === 'gap' && unit.gap.code === 'outcome-unknown' && earlier.has(keyOf.get(unit.unitOrdinal)!)) unit.originalTextChanged = true;
+        }
+      } catch {
+        // An unreadable historical manifest cannot identify a range by content.
+      }
+    }
     const manuscriptPin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
     const coverage = body.coverage as BaselineAnalysisResultSetRevisionProjection['coverage'];
     // The shared components are read the same way for every kind; the kind's own components — the

@@ -528,6 +528,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
             ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
             : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
+          ...(unit.state === 'gap' && unit.originalTextChanged ? [element('dt', undefined, '原请求'), element('dd', undefined, '原文已修改，原请求无法再核对')] : []),
           element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
           ...(unit.state !== 'closed' ? [] : [
             element('dt', undefined, '单元内计数'),

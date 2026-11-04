@@ -427,7 +427,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-outcome-unknown':
       return '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。';
     case 'analysis-outcome-unconfirmed':
-      return `运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为${item.object.kind === 'unconfirmed' && item.object.ranges > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。`;
+      return `运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为${item.object.kind === 'unconfirmed' && item.object.ranges > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。${item.object.kind === 'unconfirmed' && item.object.ranges > 0 ? '后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。' : ''}`;
     case 'analysis-blocked':
       return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
     case 'analysis-orphaned':
