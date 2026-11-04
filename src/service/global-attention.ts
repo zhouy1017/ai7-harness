@@ -616,7 +616,9 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       // answered waits its turn in the slot to go on (S76d).
       const state = run.idleYield === true ? 'analysis-yielded' : run.state === 'paused' ? 'analysis-paused' : run.state === 'resumable' ? 'analysis-resumable' : 'analysis-queued';
       return item('active', state, { itemId, blocked: false, at: run.stateAt, book, object,
-        ...(run.stopReason === undefined ? {} : { facts: { stopReason: run.stopReason } }), nextStep: 'view-run', target, technical });
+        ...(run.stopReason === undefined ? {} : { facts: { stopReason: run.stopReason } }),
+        nextStep: run.stopReason === 'proxy-unreachable' || run.stopReason === 'model-service-unreachable' ? 'open-network-proxy' : 'view-run',
+        target, technical });
     }
     default:
       return null;

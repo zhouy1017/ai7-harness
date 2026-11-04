@@ -4428,6 +4428,7 @@ export type GlobalAttentionNextStep =
   | 'answer-clarification'
   | 'adjust-budget-redo'
   | 'resolve-model-service'
+  | 'open-network-proxy'
   // 结果待确认's 查看未确认的部分 (Issue #51, S16c): which reading ranges are unconfirmed, in the drawer.
   | 'view-unconfirmed'
   | 'reprepare'
@@ -4454,7 +4455,7 @@ export type GlobalAttentionNextStep =
 
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'open-network-proxy', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
   'view-unconfirmed', 'view-apply-receipt', 'continue-draft',

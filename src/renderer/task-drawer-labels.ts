@@ -328,6 +328,20 @@ export const RESUMABLE_STOP_REASON_LABELS: Readonly<Record<ResumableStopReason, 
 export function resumableStopReasonLabel(reason: ResumableStopReason): string {
   return RESUMABLE_STOP_REASON_LABELS[reason];
 }
+export function taskBarResumableStatement(reason: ResumableStopReason): string {
+  if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后续行。';
+  if (reason === 'model-service-unreachable') return '模型服务不可达：去 设置 › 模型服务 › 网络代理 检查网络或代理后续行。';
+  if (reason === 'outcome-unknown') return '结果待确认：这次运行不能续行，请先查看未确认的部分。';
+  return 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+}
+export function taskBarResumableStatus(reason: ResumableStopReason): string {
+  return `任务已中断 · ${resumableStopReasonLabel(reason)}`;
+}
+export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: boolean): { message: string; tone: 'success' | 'error' } {
+  return repeated
+    ? { message: `续行后仍然 ${resumableStopReasonLabel(reason)}；没有发送任何书稿内容`, tone: 'error' }
+    : { message: '已续行，从已保存的进度接着读。', tone: 'success' };
+}
 /** AUTH-006: a plan whose key content changed offers these two, and no start. */
 export const TASK_BAR_RECONFIRM = '重新确认计划';
 /**
@@ -861,9 +875,9 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
         return {
           readiness,
           summary,
-          statement: null,
+          statement: control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason),
           note: [continuationNote, stopNote].filter((entry): entry is string => entry !== null).join('；') || null,
-          status: plan.state.label,
+          status: control.stopReason === undefined ? plan.state.label : taskBarResumableStatus(control.stopReason),
           actions: [
             ...(control.stopReason === 'proxy-unreachable' || control.stopReason === 'model-service-unreachable'
               ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),

@@ -159,6 +159,9 @@ describe('待我处理 over the real store on exact sample1', () => {
       const projected = projection.groups.flatMap((group) => group.items)
         .filter((item) => item.object.kind === 'analysis' && item.book.title?.startsWith('L2 停因'));
       expect(projected.map((item) => item.facts.stopReason).sort()).toEqual([...reasons].sort());
+      expect(projected.find((item) => item.facts.stopReason === 'proxy-unreachable')?.nextStep).toBe('open-network-proxy');
+      expect(projected.find((item) => item.facts.stopReason === 'model-service-unreachable')?.nextStep).toBe('open-network-proxy');
+      expect(projected.find((item) => item.facts.stopReason === 'shutdown')?.nextStep).toBe('view-run');
     } finally {
       store.markCleanShutdown();
       store.close();

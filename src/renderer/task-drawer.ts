@@ -57,11 +57,11 @@ import {
   TASK_BAR_PAUSE_FAILED,
   TASK_BAR_PAUSING_NOTE,
   TASK_BAR_RESUME_FAILED,
+  taskBarResumeOutcome,
   TASK_PLAN_ACTIVITY_STALE,
   TASK_PLAN_ACTIVITY_TITLE,
   TASK_PLAN_ACTIVITY_UNREPORTED,
   taskBarContinuationNote,
-  resumableStopReasonLabel,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
   TASK_BAR_QUEUED_STATUS,
@@ -2225,6 +2225,27 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       ...(result.runControl?.stopReason === undefined ? {} : { stopReason: result.runControl.stopReason }) };
   }
 
+  /**
+   * A resume response normally returns while the Run is admitted. Observe the next plan projection briefly so a
+   * transport failure that settles the same Run back to resumable is reported as a repeated stop, rather than the
+   * optimistic success that the first IPC projection necessarily carried.
+   */
+  async function observeImmediateResumeStop(current: TaskPlanProjection, reason: ResumableStopReason): Promise<boolean> {
+    if (current.kind !== 'baseline-analysis' || current.runControl === null) return false;
+    const runRecordId = current.runControl.runRecordId;
+    const initialSpanCount = current.runControl.executionSpanCount ?? 0;
+    const deadline = Date.now() + 1_000;
+    while (Date.now() < deadline) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 25));
+      const next = await api.inspectTaskPlan({ kind: current.kind, ref: current.ref });
+      const control = next.runControl;
+      if (control?.runRecordId !== runRecordId) return false;
+      if (next.state.key === 'resumable' && control.stopReason === reason && (control.executionSpanCount ?? 0) > initialSpanCount) return true;
+      if (next.state.key !== 'running' && next.state.key !== 'resumable' && next.state.key !== 'cancelling' && next.state.key !== 'pausing') return false;
+    }
+    return false;
+  }
+
   async function cancelRun(): Promise<void> {
     const current = plan;
     const asked = request;
@@ -2275,10 +2296,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const stopReason = current.runControl.stopReason;
       const repeated = stopReason !== undefined
         && result.runRecordId === current.runControl.runRecordId
-        && result.stopReason === stopReason;
-      options.setStatus(repeated
-        ? `续行后仍然 ${resumableStopReasonLabel(stopReason!)}；没有发送任何书稿内容`
-        : '已续行，从已保存的进度接着读。', repeated ? 'error' : 'success');
+        && (result.stopReason === stopReason || await observeImmediateResumeStop(current, stopReason));
+      const status = stopReason === undefined ? { message: '已续行，从已保存的进度接着读。', tone: 'success' as const }
+        : taskBarResumeOutcome(stopReason, repeated);
+      options.setStatus(status.message, status.tone);
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {

@@ -2177,6 +2177,12 @@ export class BaselineAnalysisStore {
       };
     });
     const current = transitions[transitions.length - 1]!;
+    const resumedAt = current.state === 'resumable'
+      ? states.reduce<string | undefined>((latest, row) => {
+        const record = parseCanonicalJson(asString(row.canonical_json)) as Record<string, unknown>;
+        return record.resumed === true ? asString(row.recorded_at) : latest;
+      }, undefined)
+      : undefined;
     // A blocked Run states the reasons its own state transition recorded, not the reasons the launch
     // running right now would state: a Run blocked under development-ci keeps that reading forever,
     // exactly as a Result Set Revision keeps its own policy pin. Only a record written before those
@@ -2232,6 +2238,7 @@ export class BaselineAnalysisStore {
       procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
       ...(stopReason === undefined ? {} : { stopReason }),
+      ...(resumedAt === undefined ? {} : { resumedAt }),
       stateLabel: currentRecord.idleYield === true ? RUN_IDLE_YIELD_LABEL : current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL

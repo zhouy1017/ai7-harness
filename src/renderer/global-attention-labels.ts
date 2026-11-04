@@ -284,6 +284,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
   'adjust-budget-redo': '调整预算并重做',
   // The remediation route of a Provider Account Limit (Issue #51, S16b; interaction-spec §1566).
   'resolve-model-service': '处理模型服务',
+  'open-network-proxy': '去设置 › 模型服务 › 网络代理',
   // 结果待确认's first step (Issue #51, S16c): which reading ranges are unconfirmed — never a repeat-shaped action.
   'view-unconfirmed': '查看未确认的部分',
   // The drawer's own action for a waiting Run whose plan moved (Issue #536; OFF-008).

@@ -2195,6 +2195,7 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
     runRecordId: run.runRecordId,
+    executionSpanCount: run.attempt?.spans.length ?? 0,
     ...(stopped?.stopReason === undefined ? {} : { stopReason: stopped.stopReason, stopAt: stopped.stopAt }),
     cancelling,
     pausing,

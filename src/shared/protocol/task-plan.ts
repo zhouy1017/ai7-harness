@@ -140,6 +140,8 @@ export type TaskPlanStateKey =
 export interface TaskPlanRunControlProjection {
   /** The one Run every control names (CTRL-009). */
   runRecordId: string;
+  /** Number of durable Harness Execution Spans currently recorded for this Run. */
+  executionSpanCount?: number;
   /** The editor-facing reason this Run stopped and may be resumed. */
   stopReason?: import('../protocol.js').ResumableStopReason;
   /** When that stop was recorded, used by the continuation note. */

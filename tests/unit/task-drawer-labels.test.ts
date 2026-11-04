@@ -109,6 +109,9 @@ import {
   groupedCount,
   taskBarSummary,
   taskBarContinuationNote,
+  taskBarResumeOutcome,
+  taskBarResumableStatement,
+  taskBarResumableStatus,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
   taskBarView,
@@ -639,11 +642,20 @@ describe('the authorization bar (S74a)', () => {
       activity: null, executingSince: null, continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
       accountLimit: null, outcomeUnknown: null,
     };
-    const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'resumable', label: '任务已中断 · 代理不可达' }, runControl: stopped }));
+    const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'resumable', label: '任务已中断 · 可续行' }, runControl: stopped }));
     expect(view.note).toContain('上次续行于');
     expect(view.note).toContain('因 代理不可达 停下');
+    expect(view.statement).toBe(taskBarResumableStatement('proxy-unreachable'));
+    expect(view.status).toBe(taskBarResumableStatus('proxy-unreachable'));
     expect(view.actions[0]).toMatchObject({ name: 'connect', label: '去设置 › 模型服务 › 网络代理' });
     expect(view.actions[1]).toMatchObject({ name: 'resume', label: '续行' });
+    const { stopAt: _stopAt, ...firstStopControl } = stopped;
+    const firstStop = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'resumable', label: '任务已中断 · 可续行' }, runControl: firstStopControl,
+    }));
+    expect(firstStop.note).not.toContain('上次续行于');
+    expect(taskBarResumeOutcome('proxy-unreachable', true)).toEqual({ message: '续行后仍然 代理不可达；没有发送任何书稿内容', tone: 'error' });
+    expect(taskBarResumeOutcome('proxy-unreachable', false)).toEqual({ message: '已续行，从已保存的进度接着读。', tone: 'success' });
   });
 
   it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {
