@@ -8,5 +8,5 @@ export const TECHNICAL_TEXT_PATTERNS = [
 ] as const;
 
 export function expectNoTechnicalText(root: { readonly textContent: string | null }): void {
-  for (const pattern of TECHNICAL_TEXT_PATTERNS) expect(root.textContent ?? '').not.toMatch(pattern);
+  for (const pattern of TECHNICAL_TEXT_PATTERNS) expect(pattern.test(root.textContent ?? ''), `technical text pattern: ${pattern.source}`).toBe(false);
 }

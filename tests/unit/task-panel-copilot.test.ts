@@ -26,21 +26,23 @@ afterEach(() => {
 
 function harness() {
   const reads = { tasks: 0, plans: 0 };
+  let selectedBook = BOOK;
   const root = miniDocument.createElement('aside');
   miniDocument.body.append(root);
   const api = {
-    inspectBookTasks: async () => { reads.tasks += 1; return TASKS; },
+    inspectBookTasks: async () => { reads.tasks += 1; return { ...TASKS, bookId: selectedBook }; },
     inspectBaselineAnalysis: async () => { throw new Error('none'); },
     inspectTaskPlan: async () => { reads.plans += 1; throw new Error('none'); },
-    inspectTaskIntentDrafts: async () => ({ bookId: BOOK, bookTitle: '春江', manuscript: null, drafts: [] }),
+    inspectTaskIntentDrafts: async () => ({ bookId: selectedBook, bookTitle: '春江', manuscript: null, drafts: [] }),
   };
   const drawer: TaskDrawerSurface = mountTaskDrawer({
+    resumeDraft: (bookId: string, resume: () => void) => { selectedBook = bookId; resume(); },
     root, shell: miniDocument.body, api, technicalDetails: () => miniDocument.createElement('div'),
     errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(),
   } as unknown as MountTaskDrawerOptions);
   const find = (selector: string): MiniElement | null => root.querySelector(selector);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-  return { root, drawer, reads, find, settle };
+  return { root, drawer, reads, find, settle, selectBook: (bookId: string) => { selectedBook = bookId; } };
 }
 
 describe('the 任务 panel as the right co-pilot', () => {
@@ -94,15 +96,19 @@ describe('the 任务 panel as the right co-pilot', () => {
   });
 
   it('parks unsaved composer words when the global destination closes it', async () => {
-    const { root, drawer, find, settle } = harness();
+    const { root, drawer, find, settle, selectBook } = harness();
     drawer.openComposer({ bookId: BOOK, bookTitle: '春江', origin: 'composer-book', manuscript: null, ranges: [] }, () => null);
     await settle();
     find('[data-task-composer-field="goal"]')!.value = '核对人物称谓';
+    find('[data-task-composer-field="goal"]')!.dispatchEvent({ type: 'input' });
     drawer.followScreen('global-agent', null);
     expect(root.hidden).toBe(true);
     expect(drawer.view()).toBeNull();
     drawer.followScreen('editor', BOOK);
     expect(root.hidden).toBe(true);
+    expect(find('[data-task-composer-field="goal"]')).toBeNull();
+    selectBook(OTHER); drawer.openPanel(OTHER, () => null); await settle();
+    find('[data-task-composer-action="resume"]')!.click();
     expect(find('[data-task-composer-field="goal"]')?.value).toBe('核对人物称谓');
   });
 });

@@ -114,3 +114,25 @@ it('scans Help in ordinary mode (#1315)', async () => {
   try { const view = mounted(); await Promise.resolve(); expectNoTechnicalText(view.root); }
   finally { setTechnicalLayerVisible(true); }
 });
+
+it('applies developer mode immediately and persists the choice (#1315)', () => {
+  const storage = { setItem: vi.fn() };
+  vi.stubGlobal('window', { localStorage: storage, location: { reload: vi.fn() } });
+  const view = mounted();
+  const toggle = view.find('.help-developer-mode input');
+  toggle.checked = false; toggle.dispatchEvent({ type: 'change' });
+  try {
+    expect(storage.setItem).toHaveBeenCalledWith('ai7.technicalLayerVisible', 'false');
+    expect(view.root.querySelector('.help-about') === null).toBe(true);
+    expect(view.root.querySelector('.help-developer-mode input')?.checked).toBe(false);
+  } finally { setTechnicalLayerVisible(true); }
+});
+
+it('scans the shipped Help and licence catalogue in ordinary mode (#1315)', () => {
+  setTechnicalLayerVisible(false);
+  try {
+    const root = document.createElement('section');
+    mountHelp({ root, loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }), back: vi.fn() });
+    expectNoTechnicalText(root);
+  } finally { setTechnicalLayerVisible(true); }
+});

@@ -2719,6 +2719,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       painted = '';
       refusal = null;
       pendingNote = null;
+      body.replaceChildren();
+      bar.replaceChildren();
       root.hidden = true;
       root.dataset['taskDrawer'] = 'closed';
       shell.dataset['taskDrawer'] = 'closed';
