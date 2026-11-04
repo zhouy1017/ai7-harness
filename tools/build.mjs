@@ -168,6 +168,14 @@ async function ensureClosedOutputs() {
     'renderer/styles.css',
     'renderer/global-agent.css',
     'renderer/manuscript-source.css',
+    'renderer/fonts.css',
+    'renderer/fonts/NotoSansSC-Regular.woff2',
+    'renderer/fonts/NotoSansSC-Bold.woff2',
+    'renderer/fonts/NotoSerifSC-Regular.woff2',
+    'renderer/fonts/NotoSerifSC-Bold.woff2',
+    'notices/fonts/manifest.json',
+    'notices/fonts/OFL-Sans.txt',
+    'notices/fonts/OFL-Serif.txt',
     'service/index.mjs',
     'shared/data-root.mjs',
     'shared/network-denial.mjs',
@@ -464,6 +472,15 @@ async function main() {
   await copyFile(resolve(ROOT, 'src', 'renderer', 'styles.css'), outputPath('renderer', 'styles.css'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'global-agent.css'), outputPath('renderer', 'global-agent.css'));
   await copyFile(resolve(ROOT, 'src', 'renderer', 'manuscript-source.css'), outputPath('renderer', 'manuscript-source.css'));
+  await copyFile(resolve(ROOT, 'src/renderer/fonts.css'), outputPath('renderer', 'fonts.css'));
+  await mkdir(outputPath('renderer', 'fonts'), { recursive: true });
+  await mkdir(outputPath('notices', 'fonts'), { recursive: true });
+  for (const name of ['NotoSansSC-Regular.woff2', 'NotoSansSC-Bold.woff2', 'NotoSerifSC-Regular.woff2', 'NotoSerifSC-Bold.woff2']) {
+    await copyFile(resolve(ROOT, 'assets/fonts', name), outputPath('renderer', 'fonts', name));
+  }
+  for (const name of ['manifest.json', 'OFL-Sans.txt', 'OFL-Serif.txt']) {
+    await copyFile(resolve(ROOT, 'assets/fonts', name), outputPath('notices', 'fonts', name));
+  }
   // Main checks this exact service/renderer closure before choosing or opening a data root.
   const outputDigests = Object.fromEntries(await Promise.all(IDENTITY_BOUND_OUTPUTS.map(async (path) =>
     [path, createHash('sha256').update(await readFile(outputPath(...path.split('/')))).digest('hex')])));

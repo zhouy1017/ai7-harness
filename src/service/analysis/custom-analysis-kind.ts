@@ -256,8 +256,9 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ rows: (result as CustomAnalysisUnitResult).rows }),
+    unitRecord: (result) => ({ rows: (result as CustomAnalysisUnitResult).rows, ...((result as CustomAnalysisUnitResult).salvaged === undefined ? {} : { salvaged: (result as CustomAnalysisUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): CustomAnalysisUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<CustomAnalysisUnitResult['salvaged']> }),
       schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       rows: record.rows as CustomAnalysisUnitResult['rows'],

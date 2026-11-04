@@ -162,8 +162,9 @@ export function evaluationRewriteKindDefinition(input: EvaluationRewriteContract
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ observations: (result as EvaluationRewriteUnitResult).observations }),
+    unitRecord: (result) => ({ observations: (result as EvaluationRewriteUnitResult).observations, ...((result as EvaluationRewriteUnitResult).salvaged === undefined ? {} : { salvaged: (result as EvaluationRewriteUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): EvaluationRewriteUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<EvaluationRewriteUnitResult['salvaged']> }),
       schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       observations: record.observations as EvaluationRewriteUnitResult['observations'],

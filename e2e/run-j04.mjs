@@ -2291,13 +2291,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'safe-retry-prepared', 120_000);
     const preparedRetry = await readBaseline(renderer);
     const retryBoundary = preparedRetry?.planEnvelope?.boundary;
+    // #1311 H1 synchronized delta: every kind declares a separate completed-not-json retry.
     requireJourney(preparedRetry?.state === 'prepared' && preparedRetry.taskIntent?.mode === 'reanalyze-range' && sameRecord(preparedRetry.update?.selectedRange, retryRange) &&
       preparedRetry.update?.predecessor?.revisionId === revision4.revisionId && sameRecord(preparedRetry.update?.reusePlan?.counts, retryOption.expected) &&
       preparedRetry.providerResolutionPlan?.executionRoute?.fixtureIdentity === RETRY_FIXTURE_IDENTITY && preparedRetry.providerResolutionPlan?.executionRoute?.fixtureSha256 === retryFixtureDigest &&
       JSON.stringify(preparedRetry.providerResolutionPlan?.executionRoute?.fixtureLineage?.map((link) => link.identity)) === JSON.stringify([RETRY_FIXTURE_IDENTITY, FIXTURE_IDENTITY, FIXTURE_BASE_IDENTITY]) &&
       preparedRetry.planEnvelope?.planVersion === 1 && preparedRetry.planVersion?.ordinal === 1 && preparedRetry.planVersion?.state === 'current' && preparedRetry.planVersion?.planRevisionId === null &&
       preparedRetry.planVersion?.planEnvelopeDigest === preparedRetry.planEnvelope.digest && preparedRetry.planVersions?.length === 1 && preparedRetry.planRevisions?.length === 0 && preparedRetry.planRevision === null &&
-      JSON.stringify(retryBoundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry']) &&
+      JSON.stringify(retryBoundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry', 'contract-retry']) &&
       JSON.stringify(retryBoundary?.material?.map((entry) => entry.field)) === JSON.stringify(PLAN_MATERIAL_FIELDS) &&
       retryBoundary?.participation?.expected === false && retryBoundary.participation.statement === '预计无需中途参与' &&
       sameRecord(preparedRetry.planVersion?.materialInputs?.selectedRange, retryRange) && preparedRetry.planVersion?.materialInputs?.predecessorRevision?.revisionId === revision4.revisionId &&
@@ -2652,11 +2653,12 @@ async function main() {
     const v3Digest = edited?.planEnvelope?.digest;
     const editRevision = edited?.planRevisions?.at(-1);
     const PLAN_EDITS = { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'] };
+    // Withdrawing the transient-failure retry leaves the distinct contract retry declared.
     requireJourney(edited?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && edited.state === 'prepared' && DIGEST_PATTERN.test(v3Digest) && v3Digest !== v2Digest &&
       edited.planVersion?.ordinal === 3 && edited.planVersion.state === 'current' && sameValue(edited.planVersion.edits, PLAN_EDITS) &&
       JSON.stringify(edited.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'current']]) &&
       sameValue(edited.planVersion.materialInputs, reconfirmed.planVersion.materialInputs) && sameValue(edited.executionPlan?.editorEdits, PLAN_EDITS) &&
-      JSON.stringify(edited.planEnvelope?.boundary?.adaptable) === '[]' && edited.planRevisions?.length === 4 && edited.planRevision === null &&
+      JSON.stringify(edited.planEnvelope?.boundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['contract-retry']) && edited.planRevisions?.length === 4 && edited.planRevision === null &&
       editRevision?.trigger === 'plan-edit' && editRevision.state === 'resolved' && editRevision.priorOrdinal === 2 && editRevision.nextOrdinal === 3 &&
       // The stored diff reads back in its canonical key order, so it is compared entry by entry, not as one string.
       JSON.stringify(editRevision.diff?.map((entry) => [entry.field, entry.label, entry.prior, entry.proposed, entry.materiality])) === JSON.stringify([
@@ -3537,7 +3539,8 @@ async function main() {
       realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
       realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
       realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
-      realRevision.gaps[0].reason.includes('schema-invalid') && realRevision.coverage.state === 'partial' &&
+      realRevision.gaps[0].parseFailure?.code === 'schema-invalid' &&
+      realRevision.gaps[0].reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && realRevision.coverage.state === 'partial' &&
       realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
     requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
       realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
@@ -3619,7 +3622,8 @@ async function main() {
         sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
         sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
         kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
-        kept[0].closed.gap.reason.includes('schema-invalid') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        kept[0].closed.gap.parseFailure?.code === 'schema-invalid' &&
+        kept[0].closed.gap.reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
         recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
       'recorded-paused-authentic-retained-checkpoints');
     } finally { await writeFile(unitHoldPath, 'release'); }

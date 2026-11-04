@@ -269,7 +269,8 @@ describe('live material references (#809)', () => {
     if (kind === 'readers-report') {
       const revision = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions ORDER BY rowid DESC LIMIT 1').get()!.canonical_json)));
       expect(revision.readersReport.sections).toBeNull();
-      expect(revision.readersReport.synthesis.reason.includes('schema-invalid')).toBe(true);
+      expect(revision.readersReport.synthesis.reason).toContain('条目缺少必要内容或格式无法识别');
+      expect(revision.readersReport.synthesis.reason).not.toContain('schema-invalid');
     }
   });
 

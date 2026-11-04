@@ -3799,8 +3799,41 @@ export async function runApplication(): Promise<void> {
       await openProtectedSecretStore(); // Loads the carrier; never reads or writes a credential.
       const versions = await service.call('inspectDataVersion', {});
       requireDesktop(typeof versions.dataVersion === 'number' && versions.history.length > 0);
+      // Keep Electron alive after the probe window closes, until the report is flushed.
+      app.once('window-all-closed', () => undefined);
+      // Exercise the packaged stylesheet and font bytes in Chromium, not installed system faces.
+      const fontWindow = new BrowserWindow({ show: false, webPreferences: {
+        sandbox: true, contextIsolation: true, nodeIntegration: false, devTools: false, session: productSession,
+      } });
+      let typography;
+      try {
+        await fontWindow.loadFile(resolve(__dirname, '..', 'renderer', 'index.html'));
+        typography = await fontWindow.webContents.executeJavaScript<{
+          fontsCheck: boolean; bundledFacesLoaded: boolean; fontSize: string; lineHeight: string;
+          textIndent: string; textAlign: string; textJustify: string; outlineStyle: string; columnWidth: string; uiFontSize: string; rootFontSize: string;
+        }>(`(async () => {
+          const faces = ['17px "Noto Serif SC"', '700 17px "Noto Serif SC"', '14px "Noto Sans SC"', '700 14px "Noto Sans SC"'];
+          const loaded = await Promise.all(faces.map(face => document.fonts.load(face, '中文编辑')));
+          await document.fonts.ready;
+          const editor = document.createElement('div');
+          editor.className = 'ProseMirror'; editor.contentEditable = 'true';
+          const paragraph = document.createElement('p'); paragraph.textContent = '中文编辑';
+          editor.append(paragraph); document.body.append(editor); editor.focus();
+          const style = getComputedStyle(paragraph), frame = getComputedStyle(editor);
+          return { fontsCheck: document.fonts.check('17px "Noto Serif SC"'),
+            bundledFacesLoaded: loaded.every(entries => entries.length > 0 && entries.every(face => face.status === 'loaded')),
+            fontSize: style.fontSize, lineHeight: style.lineHeight, textIndent: style.textIndent,
+            textAlign: style.textAlign, textJustify: style.textJustify, outlineStyle: frame.outlineStyle,
+            columnWidth: frame.maxWidth, uiFontSize: getComputedStyle(document.body).fontSize,
+            rootFontSize: getComputedStyle(document.documentElement).fontSize };
+        })()`);
+        requireDesktop(typography.fontsCheck && typography.bundledFacesLoaded && typography.fontSize === '17px' &&
+          parseFloat(typography.lineHeight) / 17 >= 1.9 && typography.textIndent === '34px' &&
+          typography.textAlign === 'justify' && typography.outlineStyle === 'none' &&
+          typography.uiFontSize === '14px' && typography.rootFontSize === '16px');
+      } finally { fontWindow.destroy(); }
       const report = { softwareVersion, buildIdentity, channel, electron: process.versions.electron, node: process.versions.node,
-        modules: process.versions.modules, keyringCarrier: 'loaded', dataRoot, writable: true, store_versions: 'readable' };
+        modules: process.versions.modules, keyringCarrier: 'loaded', dataRoot, writable: true, store_versions: 'readable', typography };
       await stop();
       process.stdout.write(`${JSON.stringify(report)}\n`, () => app.exit(0));
       return;
