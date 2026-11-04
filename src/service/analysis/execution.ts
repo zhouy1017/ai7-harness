@@ -3557,7 +3557,7 @@ export class BaselineAnalysisExecutionOwner {
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
       const synthesisUnavailable = ['evaluation', 'evaluation-rewrite', 'readers-report'].includes(definition.kind) &&
         definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed'
-        ? `未完成：没有形成可用的综合结果 · ${crossUnit.reason}` : null;
+        ? `未完成：没有形成可用的综合结果 · ${majorityGapReason([{ code: 'synthesis-unavailable', reason: crossUnit.reason }]) ?? '没有收到可用的模型回答。'}` : null;
 
       // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
       // range review that closed everything it was asked to read completed, without qualification.
