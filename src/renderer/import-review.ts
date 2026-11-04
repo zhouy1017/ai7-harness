@@ -117,7 +117,7 @@ export function createImportReview(options: ImportReviewOptions) {
       { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false };
     wordIntakeFormChoices.set(key, { ...selected });
     while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
-    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未选择稿件基线。`);
+    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未建立稿件基线。`);
     const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
@@ -147,7 +147,7 @@ export function createImportReview(options: ImportReviewOptions) {
           : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
         : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
         : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'
-          : '最终保真、导入方式及本机保留范围会在下一步复核。';
+          : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
       for (const control of buttons) control.disabled = busy || !allowed();
     };
     const changed = (): void => { wordIntakeFormChoices.set(key, { ...selected }); paint(); };

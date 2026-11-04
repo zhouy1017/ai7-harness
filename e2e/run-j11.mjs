@@ -1968,7 +1968,7 @@ async function main() {
         templates: Array.from(section.querySelectorAll('ul.readers-report-templates > li'), (entry) => [
           entry.dataset.template, entry.querySelector('.readers-report-template')?.textContent ?? null,
           entry.querySelector('.readers-report-draft, .readers-report-drafted, .readers-report-reason')?.textContent ?? null,
-          Array.from(entry.querySelectorAll('button'), (button) => [button.dataset.readersReportAction, button.textContent, button.disabled]),
+          Array.from(entry.querySelectorAll('button[data-readers-report-action]'), (button) => [button.dataset.readersReportAction, button.textContent, button.disabled]),
         ]),
       };
     })()`;
@@ -2052,10 +2052,11 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'readers-report-evaluation');
     const versioned = await readReport((page) => (page.templates[0]?.[2] ?? '').startsWith('草稿 · 版本 2'), 'readers-report-versioned');
     requireJourney(JSON.stringify(versioned.templates[0]) === JSON.stringify(['author', '给作者的修改意见', '草稿 · 版本 2 · 依据第 14 版定稿',
-      [['open-draft', '打开草稿', false], ['export', '导出…', false], ['open-task', '查看任务', false]]]) &&
+      [['open-draft', '打开草稿', false], ['open-task', '查看任务', false]]]) &&
       JSON.stringify(versioned.templates[1][3]) === JSON.stringify([['prepare', '起草', false]]), 'readers-report-versioned-words', versioned);
     await mkdir(draftExportsRoot, { recursive: true });
-    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-readers-report-action="export"]', 'readers-report-export-open');
+    await assertRenderer(renderer, `(() => { const menu=document.querySelector('.evaluation-readers-report li[data-template="author"] [data-export-menu]'); menu.querySelector('summary').click(); return menu.open && Array.from(menu.querySelectorAll('[data-export-format-action]'), button=>button.dataset.exportFormatAction).join(',')==='docx,pdf,markdown'; })()`, 'readers-report-export-menu');
+    await clickSelector(renderer, '[data-screen="book-evaluation"] .evaluation-readers-report li[data-template="author"] [data-export-format-action="docx"]', 'readers-report-export-open');
     const draftCard = `document.querySelector('[data-screen="book-evaluation"] .readers-report-export-slot > section.manuscript-export')`;
     await waitFor(renderer, `${draftCard}?.dataset.exportPhase === 'done' && ${draftCard}.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'readers-report-export-written', 120_000);
     const writtenDraft = await readFile(draftExportPath);

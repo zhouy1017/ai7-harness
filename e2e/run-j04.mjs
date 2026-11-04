@@ -3146,8 +3146,8 @@ async function main() {
     requireJourney(/^第 \d+ 次审阅$/u.test(runHeading ?? ''), 'report-export-run-heading', runHeading);
     const reportLabel = `审阅报告 · ${runHeading} · 第 1 版`;
     await assertRenderer(renderer, `document.querySelector('section.review-report [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('section.review-report .review-report-export-slot input[value="markdown"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'report-inline-markdown');
-    await reviewAction(renderer, 'section.review-report [data-review-action="export"]', 'report-export-open');
+    await assertRenderer(renderer, `(() => { const menu=document.querySelector('section.review-report [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'report-format-menu');
+    await reviewAction(renderer, 'section.review-report [data-export-format-action="markdown"]', 'report-export-open');
     await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, 'report-export-written', 60_000);
     const reportMarkdown = await readFile(reportExportPath, 'utf8');
     const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');

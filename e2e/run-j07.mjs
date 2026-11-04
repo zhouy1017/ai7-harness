@@ -1874,7 +1874,8 @@ async function main() {
     at('document-delivery-export');
     // The export card is the delivered version's — 新闻稿 · 版本 2, DOCX chosen — and exports it under this launch's
     // Save-dialog answer; the Delivery Record then names the file, and the file reads as that version of the 新闻稿.
-    await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-action="open"]', 'delivery-export-start');
+    await assertRenderer(renderer, `(() => { const menu=document.querySelector('ol.production-document-deliveries > li [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'delivery-export-menu');
+    await clickSelector(renderer, 'ol.production-document-deliveries > li [data-export-format-action="docx"]', 'delivery-export-start');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.status() === ${JSON.stringify(EXPORTED_LABEL)}`, 'delivery-export-written', 120_000);
     await waitFor(renderer, `window.__j07.deliveries('news-release')[0]?.dataset.deliveryExport === 'created'`, 'delivery-export-on-the-record', 30_000);
     await assertRenderer(renderer, `window.__j07.deliveries('news-release')[0].querySelector('.document-delivery-export')?.textContent === ${JSON.stringify(`${EXPORTED_LABEL} · ${DOCUMENT_EXPORT_FILE}`)}`, 'delivery-export-line');
@@ -1886,7 +1887,7 @@ async function main() {
       { paragraphs: documentFile.paragraphs.length, differing: documentFile.paragraphs.map((paragraph, index) => paragraph.digest === deliveredParagraphs[index] ? 0 : index + 1).filter(Boolean) });
     // 完成 closes the card, and focus finds the Delivery Record's own 导出….
     await exportAct(renderer, 'close', 'delivery-export-close');
-    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-action="open"]')`, 'delivery-export-closed-focus-returns', 10_000);
+    await waitFor(renderer, `window.__j07.exportCard() === null && document.activeElement === window.__j07.deliveries('news-release')[0]?.querySelector('[data-export-menu] > summary')`, 'delivery-export-closed-focus-returns', 10_000);
 
     at('document-changed-since-delivery');
     // The document's 工作流程 column lists the delivery beside its versions. An edit after it: the card reads

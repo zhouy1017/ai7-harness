@@ -22,8 +22,8 @@ import {
  * `global-attention-labels.ts`.
  *
  * One reader serves both: the entry and the screen paint the same answer. It reads on each screen change and
- * each time the window gains focus, and slowly on its own only while a Run is in flight (the projection's
- * `running`), with a two-second follow even while idle. Reading grants and changes nothing (V2-UX-ATTN-008): opening
+ * each time the window gains focus, and every two seconds even while idle. Reading grants and changes nothing
+ * (V2-UX-ATTN-008): opening
  * an item is only navigation, and every decision is still the record's.
  */
 

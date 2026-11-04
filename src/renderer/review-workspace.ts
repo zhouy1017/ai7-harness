@@ -1797,17 +1797,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   }
 
   /** 导出… of the report version on show, named for a screen reader by that version. */
-  function exportReportAction(run: ReviewRunProjection, report: ReviewReportProjection): HTMLButtonElement {
+  function exportReportAction(run: ReviewRunProjection, report: ReviewReportProjection): HTMLElement {
     const reportLabel = reportExportLabel(run.label, report.version);
-    const control = actionButton('export', 'secondary', () => {
-      if (destroyed || working || exporter.busy()) return;
-      exportRunId = run.reviewRunId;
-      control.closest('.review-report-actions')?.after(exportSlot);
-      exporter.open({ kind: 'report', reportId: report.reportId }, reportLabel, control);
-    }, EXPORT_ACTION_LABELS.open);
+    const menu = exporter.menu({ kind: 'report', reportId: report.reportId }, reportLabel);
+    const control = menu.querySelector<HTMLElement>('summary')!;
+    control.dataset['reviewAction'] = 'export';
+    menu.addEventListener('click', () => { exportRunId = run.reviewRunId; });
     control.dataset['reportVersion'] = String(report.version);
     control.setAttribute('aria-label', exportOpenAccessibleName({ kind: 'report', label: reportLabel }));
-    return control;
+    return menu;
   }
 
   function renderReportRecord(report: ReviewReportProjection, categories: ReviewRunProjection['categories']): HTMLElement {

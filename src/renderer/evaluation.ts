@@ -324,7 +324,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     errorMessage,
     onChanged: () => undefined,
     openerOf: (target) => target.kind === 'document'
-      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-readers-report-action="export"]`)
+      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-export-menu] > summary`)
       : null,
   });
 
@@ -382,14 +382,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         row.append(open);
         const latest = draft.document.versions[0];
         if (latest !== undefined) {
-          const exportButton = action(READERS_REPORT_ACTIONS.exportDraft, 'secondary', 'export-draft', () => {
-            if (busy || exporter.busy()) return;
-            exporter.open({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
-              documentExportLabel(draft.typeLabel, latest.label), exportButton);
-          });
-          exportButton.dataset['readersReportAction'] = 'export';
-          exportButton.disabled = busy || exporter.busy();
-          row.append(exportButton);
+          const menu = exporter.menu({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
+            documentExportLabel(draft.typeLabel, latest.label));
+          menu.dataset['readersReportExport'] = '';
+          for (const button of menu.querySelectorAll('button')) button.disabled = busy || exporter.busy();
+          row.append(menu);
         }
       } else if (entry.drafted !== null) {
         const drafted = entry.drafted;
