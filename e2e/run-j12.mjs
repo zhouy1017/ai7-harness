@@ -819,13 +819,14 @@ async function main() {
     // its start instead of claiming a return. It floats rather than taking a row from the manuscript,
     // and both readings are taken in one pass because the notice is on its way out while they are read.
     await assertRenderer(primary, `(() => {
-      const notice=document.querySelector('[data-entry-notice]');
-      return notice instanceof HTMLElement &&
+      const toast=document.querySelector('[data-toast]');
+      const notice=toast?.querySelector('span');
+      return toast instanceof HTMLElement && !toast.hidden && notice instanceof HTMLElement &&
         notice.textContent==='从稿件开头打开；这本图书还没有记录上次位置。' &&
-        getComputedStyle(notice.closest('.quiet-completion-notice')).position==='fixed';
+        getComputedStyle(toast).position==='fixed';
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
-    await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
+    await waitFor(primary, `document.querySelector('[data-toast]')?.hidden === true`, 'entry-notice-self-dismissed');
     // Wave 23 #1286: entering the global destination closes the book-only drawer and releases its column.
     await assertRenderer(primary, `(() => { const entry=document.querySelector('[data-edge-entry="tasks"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return true; })()`, 'global-agent-book-drawer-open');
     await waitFor(primary, `document.querySelector('#task-drawer')?.hidden===false`, 'global-agent-book-drawer-ready');
@@ -1295,7 +1296,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'restart-a-manuscript');
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(editSuffix)})`, 'restart-persisted-edit');
     await assertRenderer(primary, `(() => {
-      const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
+      const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
       return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('overview')), 'restart-back-overview');
