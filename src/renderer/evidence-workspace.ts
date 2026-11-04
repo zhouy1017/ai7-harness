@@ -412,7 +412,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     }
     if (card.recommendation !== null) {
       section.append(el('p', 'evidence-decision-recommendation',
-        `AI7 建议「${current.decisionCard.choices.find((choice) => choice.disposition === card.recommendation!.disposition)?.label ?? ''}」：${card.recommendation.rationale}（未预选）`));
+        `AI7 建议「${current.decisionCard.choices.find((choice) => choice.disposition === card.recommendation!.disposition)?.label ?? ''}」：${card.recommendation.rationale}`));
     }
     if (card.drift !== null) {
       const drift = el('p', 'evidence-decision-drift', card.drift);
