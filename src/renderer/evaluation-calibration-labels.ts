@@ -27,7 +27,7 @@ export function calibrationOffsetWaiting(threshold: number): string {
   return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
 }
 /** With the switch off: what a new version does instead, and that the switch can be turned on again. */
-export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';
+export const CALIBRATION_OFF_EFFECT = '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。';
 /** The heading of the per-item offsets, with the Books they rest on. */
 export function calibrationBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'basisBooks'>): string {
   return `校准依据：${offset.basisBooks} 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。`;

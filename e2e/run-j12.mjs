@@ -1966,7 +1966,7 @@ async function main() {
     const calibrationOff = await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 已关闭', 'calibration-off');
     requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration' &&
       // Off says what a new version does instead, and that the switch stays reversible (EVAL-011; EVAL-011a).
-      calibrationOff.offEffect === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && calibrationOff.offset === 'waiting',
+      calibrationOff.offEffect === '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。' && calibrationOff.offset === 'waiting',
     'calibration-off-words', calibrationOff);
     const offService = await primary.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => [answer.calibration.enabled, answer.calibration.active, answer.preferenceEntries, answer.prediction.enabled])`);
     requireJourney(JSON.stringify(offService) === JSON.stringify([false, false, 1, false]), 'calibration-off-service', offService);

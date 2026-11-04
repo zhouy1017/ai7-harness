@@ -184,7 +184,7 @@ describe('评估校准与预测 words', () => {
     // J-11's Journey-only control (#741 review P1).
     expect(calibrationOffsetWaiting(10)).toBe('校准偏移尚未计算：满 10 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
     expect(calibrationOffsetWaiting(2)).toBe('校准偏移尚未计算：满 2 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。');
-    expect(CALIBRATION_OFF_EFFECT).toBe('校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。');
+    expect(CALIBRATION_OFF_EFFECT).toBe('新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。');
     expect(calibrationBasisLine({ basisBooks: 10 })).toBe('校准依据：10 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。');
     // Why the basis can be fewer Books than 调分记录 counts (P3-1): said only when it is.
     expect(calibrationWithoutBasisLine({ booksWithoutBasis: 0 })).toBeNull();

@@ -114,6 +114,11 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
       void savePreferences({ predictionEnabled: prediction.enabled, calibrationEnabled: on }, 'calibration'));
     const method = el('p', 'field-note');
     method.append(CALIBRATION_SCOPE.replace(/。$/u, ''), '；', el('span', 'calibration-method', CALIBRATION_METHOD));
+    const progress = el('p', 'calibration-status');
+    progress.append(el('span', 'calibration-progress', calibrationProgressLine(calibration)));
+    const unreadable = calibrationUnreadableLine(calibration.unreadableBooks);
+    if (unreadable !== null) progress.append(' · ', el('span', 'calibration-unreadable', unreadable));
+    if (!calibration.enabled) progress.append(' · ', el('span', 'calibration-off-effect', CALIBRATION_OFF_EFFECT));
     // The house offset as computed now (EVAL-011a): its basis and each item's offset past the gate, or what it waits for.
     const offsetNode = el('div', 'calibration-offset');
     offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
@@ -139,15 +144,12 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     }
     calibrationSection.append(
       el('h3', undefined, CALIBRATION_HEADING),
-      el('p', 'calibration-progress', calibrationProgressLine(calibration)),
-      ...(calibrationUnreadableLine(calibration.unreadableBooks) === null ? []
-        : [el('p', 'field-note calibration-unreadable', calibrationUnreadableLine(calibration.unreadableBooks)!)]),
+      progress,
       method,
       // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
       ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
       offsetNode,
       // Off: new versions start from the raw 初评, and the switch stays reversible (EVAL-011).
-      ...(calibration.enabled ? [] : [el('p', 'field-note calibration-off-effect', CALIBRATION_OFF_EFFECT)]),
       calibrationSwitch,
     );
     refusalFor('calibration', calibrationSection);
