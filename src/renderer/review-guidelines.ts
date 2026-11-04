@@ -88,7 +88,8 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     const title = el('h3', undefined, document.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill guideline-version-pill', guidelineVersionPill(document)));
-    node.append(heading, el('p', 'field-note guideline-applied', guidelineAppliedBy(document)));
+    heading.append(el('span', 'guideline-applied', guidelineAppliedBy(document)));
+    node.append(heading);
     const older = guidelineOlderBooks(document);
     if (older !== null) {
       const note = el('p', 'attention-note guideline-older', older);
@@ -154,10 +155,9 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         row.append(mergedClauses);
         if (version.clausePages > 1) {
           const controls = el('div', 'button-row');
-          controls.append(el('span', 'field-note', `条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`));
           for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
             const name = `merged-clause-${version.digest}-${step}`;
-            const button = action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
+            const button = action(step === 1 ? `${label} · ${version.clausePage + 1} / ${version.clausePages}` : label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
               { digest: version.digest, page: version.clausePage + step }, name));
             button.disabled = busy || preview !== null || version.clausePage + step < 0 || version.clausePage + step >= version.clausePages;
             controls.append(button);
@@ -227,9 +227,8 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
 
   const clauseControls = (shown: ReviewGuidelineDocumentProjection | ReviewGuidelinePreviewProjection, isPreview: boolean): HTMLElement => {
     const row = el('div', 'button-row');
-    row.append(el('span', 'field-note', `第 ${shown.clausePage + 1} / ${shown.clausePages} 页；较长条款分段显示。`));
     for (const [step, label, name] of [[-1, '上一页', 'clauses-previous'], [1, '下一页', 'clauses-next']] as const) {
-      const button = action(label, 'secondary', name, () => {
+      const button = action(step === 1 ? `${label} · ${shown.clausePage + 1} / ${shown.clausePages}` : label, 'secondary', name, () => {
         if (isPreview && 'previewId' in shown) void turnPreview(shown, shown.clausePage + step, name);
         else if ('versionsBefore' in shown) void turn(shown, shown.versionsBefore, shown.clausePage + step, name);
       });
