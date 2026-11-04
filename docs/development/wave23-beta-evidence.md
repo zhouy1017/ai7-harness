@@ -1,6 +1,6 @@
 # Wave 23 Windows Beta candidate evidence
 
-This records [#1290](https://github.com/zhouy1017/ai7-harness/issues/1290) under [Owner intent #1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [PR #1301](https://github.com/zhouy1017/ai7-harness/pull/1301). Software **0.5.0 Beta**, Data Version **1**, additive schema **107**, protocol **196** remain a candidate. Human Beta acceptance and the independent editor study are pending. [Wave integration PR #1302](https://github.com/zhouy1017/ai7-harness/pull/1302) targets dev and remains a separate Commander-owned draft; dev integration and its final exact-head Gate are pending. No release, tag, main promotion or `1.0.0` is authorized.
+This records [#1290](https://github.com/zhouy1017/ai7-harness/issues/1290) under [Owner intent #1279](https://github.com/zhouy1017/ai7-harness/issues/1279) and [PR #1301](https://github.com/zhouy1017/ai7-harness/pull/1301). Software **0.5.0 Beta**, Data Version **1**, additive schema **107**, protocol **196** remain a candidate. Human Beta acceptance and the independent editor study are pending. [Wave integration PR #1302](https://github.com/zhouy1017/ai7-harness/pull/1302) targets dev and records the final wave head/base, exact-head Gate and dev squash commit. S10 merged into the wave at `b32e2c842557ec3d32b1bbbc3fee861cd3fa61f6`. No release, tag, main promotion or `1.0.0` is authorized.
 
 ## Source and verification
 
@@ -16,6 +16,8 @@ Launch worktree `codex-1290-beta-validation`, branch `codex/1290-beta-validation
 | Installed/Portable provider-free smoke | build28s/smoke41s, six exact search returns; analysis7/dialogue6/translation0 attempts unchanged; cleanup completed |
 
 The initial unbounded unit run at predecessor7303eeba retained four subprocess/test timeouts (4,136 pass / 6 skip). The four affected files pass118 tests with two workers, followed by the passing bounded full suite. No timeout threshold was weakened. Verification manifest: `assessments/verification-432267ce.json` (SHA-256 `a6dc2458e821b13018b597833a0775d290c8be1767251bcdba42d8f73c98936b`). The portable smoke retains a readiness-expression TypeError (code null) whose exact expression is unavailable; final UI/action assertions pass. This is not an exception-free-run or app-crash claim.
+
+Final S10 [Full Gate41756357076](https://github.com/zhouy1017/ai7-harness/actions/runs/41756357076) passed all15 Journeys and the same-run publisher at exact head `4eda36c725c175dd34ee4c36da46fa39fbe5853e`, base `09e57718c5ca29b24906eada1eca7c3a3c2aadf8`. J-01 disclosed the local-DOC-absent skip. The final Wave Gate is separately recorded in PR #1302; the local evidence README and archived S10 handoff retain their original identities.
 
 Historical Full Gate [41614056628](https://github.com/zhouy1017/ai7-harness/actions/runs/41614056628) passed all15 Journeys and its same-run publisher at exact `5a00ef0af53bfc467a81cc41a470f4727246bb58`, with its J-01 local-DOC-absent skip. It is not the Gate for a later head. Root owns final Ready, exact-head Full Gate, serial integration and #1279 progress.
 
