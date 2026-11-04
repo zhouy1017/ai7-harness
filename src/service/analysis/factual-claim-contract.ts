@@ -44,7 +44,8 @@ export function parseFactualClaimExtraction(text: string, expected: { unitOrdina
   const parsed = parseFactualReviewUnitResult(JSON.stringify({ ...reader.value, schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA }), expected);
   if (!parsed.ok) return parsed;
   reader.salvaged.push(...parsed.result.salvaged ?? []);
-  return reader.finish({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal: expected.unitOrdinal, assertions: parsed.result.assertions });
+  return reader.finish({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal: expected.unitOrdinal, assertions: parsed.result.assertions,
+    ...(parsed.result.acceptedIndexes === undefined ? {} : { acceptedIndexes: parsed.result.acceptedIndexes }) });
 }
 
 export interface FactualClaimVerificationResult extends SalvagedModelResult {

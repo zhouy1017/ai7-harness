@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, CONFIDENCE_LEVELS, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, CONFIDENCE_LEVELS, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
 import type { AnalysisSourceRangeProjection } from '../../shared/protocol.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import { CONFIDENCE_ALIASES, salvageSourceRanges, type AnalysisConfidence, type BaselineUnitResult } from './contract.js';
@@ -266,8 +266,8 @@ export function parseCrossUnitMessageHeader(text: string): CrossUnitMessageHeade
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const closed = Number(match[1]);
-  const total = Number(match[2]);
+  const closed = modelNumber(match[1]);
+  const total = modelNumber(match[2]);
   if (!Number.isSafeInteger(closed) || closed < 2 || !Number.isSafeInteger(total) || total < closed) return null;
   return { closed, total, unitSetDigest: match[3]! };
 }
@@ -287,7 +287,7 @@ export function parseCrossUnitCitedBlocks(text: string): Map<number, string[]> {
     const match = CITED_BLOCKS_LINE_PATTERN.exec(line);
     if (match === null) continue;
     const blockIds = match[2]!.split(contract.blockIdSeparator).filter((blockId) => BLOCK_ID_PATTERN.test(blockId));
-    cited.set(Number(match[1]), blockIds);
+    cited.set(modelNumber(match[1]), blockIds);
   }
   return cited;
 }
@@ -375,7 +375,7 @@ export function parseCrossUnitResult(
     const sides: CrossUnitFindingSide[] = [];
     const section = `findings.${index}.sides`;
     for (const [sideIndex, side] of reader.array(candidate.sides, section, MAX_SIDES).entries()) {
-      const ordinal = hasKeys(side, ['unitOrdinal']) ? Number(side.unitOrdinal) : NaN;
+      const ordinal = hasKeys(side, ['unitOrdinal']) ? modelNumber(side.unitOrdinal) : NaN;
       if (!hasKeys(side, ['unitOrdinal']) || !Number.isSafeInteger(ordinal) || !closed.has(ordinal)) {
         reader.drop(section, sideIndex, 'unit-out-of-set'); continue;
       }

@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasExactKeys, hasKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasExactKeys, hasKeys, isRecord, modelNumber, sha256Hex } from './canonical.js';
 import {
   CUSTOM_ANALYSIS_CONTRACT_VERSION,
   CUSTOM_ANALYSIS_DIMENSION_SCHEMA,
@@ -207,7 +207,7 @@ export function parseCustomAnalysisUnitResult(text: string, expected: { unitOrdi
     if (!hasKeys(candidate, ['answer', 'blockOrdinal', 'quote']) || !boundedText(candidate.quote, MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES)) {
       reader.drop('rows', index, 'quote-invalid'); continue;
     }
-    const ordinal = typeof candidate.blockOrdinal === 'string' && candidate.blockOrdinal.trim() !== '' ? Number(candidate.blockOrdinal) : candidate.blockOrdinal;
+    const ordinal = modelNumber(candidate.blockOrdinal);
     if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > expected.blockCount) {
       reader.drop('rows', index, 'quote-not-in-block'); continue;
     }

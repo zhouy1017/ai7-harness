@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, graphemeCount, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, graphemeCount, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
 import type { CoverageManifestUnitProjection, FactualVerificationPolicyPinProjection } from '../../shared/protocol.js';
 import {
   FACTUAL_ASSERTION_CATEGORIES,
@@ -89,6 +89,8 @@ export interface FactualReviewUnitResult extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_REVIEW_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly assertions: ReadonlyArray<FactualUnitAssertion>;
+  /** Original zero-based positions, used by retrieval validation after per-entry filtering. */
+  readonly acceptedIndexes?: ReadonlyArray<number>;
 }
 
 /**
@@ -121,7 +123,7 @@ export function parseFactualAssertion(candidate: unknown, expected: { blockCount
   if (!hasKeys(candidate, ['quote', 'blockOrdinal']) || !boundedText(candidate.quote, MAX_QUOTE_GRAPHEMES)) {
     reader.drop('assertions', index, 'quote-invalid'); return null;
   }
-  const ordinal = typeof candidate.blockOrdinal === 'string' && candidate.blockOrdinal.trim() !== '' ? Number(candidate.blockOrdinal) : candidate.blockOrdinal;
+  const ordinal = modelNumber(candidate.blockOrdinal);
   if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > expected.blockCount) {
     reader.drop('assertions', index, 'quote-not-in-block'); return null;
   }
@@ -141,12 +143,15 @@ export function parseFactualReviewUnitResult(
 ): FactualUnitResultParse {
   const reader = ModelResultReader.read(text, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
   if (reader === null) return ModelResultReader.failure(text);
+  const acceptedIndexes: number[] = [];
   const assertions = reader.array(reader.value.assertions, 'assertions', MAX_ASSERTIONS).flatMap((candidate, index) => {
     const assertion = parseFactualAssertion(candidate, expected, reader, index);
+    if (assertion !== null) acceptedIndexes.push(index);
     return assertion === null ? [] : [assertion];
   });
   if (assertions.length === 0 && !reader.empty('assertions')) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
-  return reader.finish<FactualReviewUnitResult>({ schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions });
+  return reader.finish<FactualReviewUnitResult>({ schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions,
+    ...(acceptedIndexes.some((original, index) => original !== index) ? { acceptedIndexes } : {}) });
 }
 
 /** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
@@ -232,8 +237,8 @@ export function parseFactualReviewUnitMessageHeader(text: string): FactualUnitMe
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const ordinal = Number(match[1]);
-  const total = Number(match[2]);
+  const ordinal = modelNumber(match[1]);
+  const total = modelNumber(match[2]);
   if (!Number.isSafeInteger(ordinal) || ordinal < 1 || !Number.isSafeInteger(total) || total < ordinal) return null;
   return { ordinal, total, unitDigest: match[3]! };
 }

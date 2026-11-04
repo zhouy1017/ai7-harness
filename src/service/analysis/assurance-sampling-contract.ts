@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, requireAnalysis, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, modelNumber, requireAnalysis, sha256Hex } from './canonical.js';
 import type {
   AnalysisAssuranceSampleStratumProjection,
   CoverageManifestProjection,
@@ -246,8 +246,8 @@ export function parseAssuranceSamplingMessageHeader(text: string): AssuranceSamp
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const unitOrdinal = Number(match[1]);
-  const totalUnits = Number(match[2]);
+  const unitOrdinal = modelNumber(match[1]);
+  const totalUnits = modelNumber(match[2]);
   if (!Number.isSafeInteger(unitOrdinal) || unitOrdinal < 1 || !Number.isSafeInteger(totalUnits) || totalUnits < unitOrdinal) return null;
   return { unitOrdinal, totalUnits, unitDigest: match[3]!, sampleDigest: match[4]! };
 }

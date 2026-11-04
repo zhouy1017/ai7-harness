@@ -87,6 +87,12 @@ export function hasKeys(value: unknown, required: readonly string[], _optional: 
   return isRecord(value) && required.every((key) => Object.hasOwn(value, key));
 }
 
+/** Never invoke object coercion on model ordinals/references; callers enforce their own bounds. */
+export function modelNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  return typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+}
+
 export type { ModelResultSalvage, SalvagedModelResult } from '../../shared/protocol/analysis.js';
 
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;

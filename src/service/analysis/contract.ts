@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, CONFIDENCE_LEVELS, ModelResultReader, NO_USABLE_MODEL_ENTRIES, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, CONFIDENCE_LEVELS, ModelResultReader, NO_USABLE_MODEL_ENTRIES, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, isRecord, modelNumber, sha256Hex } from './canonical.js';
 import type {
   AnalysisConflictProjection,
   AnalysisEntityKind,
@@ -292,8 +292,8 @@ export function parseUnitMessageHeader(text: string): UnitMessageHeader | null {
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const ordinal = Number(match[1]);
-  const total = Number(match[2]);
+  const ordinal = modelNumber(match[1]);
+  const total = modelNumber(match[2]);
   if (!Number.isSafeInteger(ordinal) || ordinal < 1 || !Number.isSafeInteger(total) || total < ordinal) return null;
   return { ordinal, total, unitDigest: match[3]! };
 }

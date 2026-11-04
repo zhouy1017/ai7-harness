@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { markRetrievalResult } from '../../src/service/retrieval/result-validator.js';
+import { markRetrievalResult, notExactFetched, prepareRetrievalResult } from '../../src/service/retrieval/result-validator.js';
+import { parseFactualReviewUnitResult } from '../../src/service/analysis/factual-review-contract.js';
+import { parseFactualReviewUnitResultV2 } from '../../src/service/analysis/factual-review-contract-v2.js';
+import { parseFactualClaimExtraction } from '../../src/service/analysis/factual-claim-contract.js';
 import { deriveCoverageManifest, type ManifestBlockInput } from '../../src/service/analysis/coverage-manifest.js';
 import {
   FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
@@ -84,6 +87,33 @@ function reduce(outcomes: ReadonlyArray<FactualUnitOutcome>) {
 }
 
 describe('the factual review reduction', () => {
+  const factualParsers = [parseFactualReviewUnitResult, parseFactualReviewUnitResultV2, parseFactualClaimExtraction];
+  it.each(factualParsers)('keeps the surviving assertion when a dropped assertion has an unmatched retrieval anchor (%#)', (parse) => {
+    const validated = prepareRetrievalResult(JSON.stringify({ assertions: [
+      { ...assertion(), blockOrdinal: messageBlockIds.length + 1, retrievalAnchor: 'a'.repeat(64) }, assertion(),
+    ] }), null);
+    const parsed = parse(validated.text, { unitOrdinal: unit.ordinal, blockCount: messageBlockIds.length });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    markRetrievalResult(parsed.result, validated.rejected);
+    expect(notExactFetched(parsed.result.assertions[0])).toBe(false);
+    const reduction = reduce([closed(parsed.result.assertions)]);
+    expect(reduction.findings).toHaveLength(1);
+    expect(reduction.excluded).toEqual([]);
+  });
+  it.each(factualParsers)('excludes the surviving assertion with an unmatched anchor after an earlier assertion is dropped (%#)', (parse) => {
+    const validated = prepareRetrievalResult(JSON.stringify({ assertions: [
+      { ...assertion(), blockOrdinal: messageBlockIds.length + 1 }, { ...assertion(), retrievalAnchor: 'a'.repeat(64) },
+    ] }), null);
+    const parsed = parse(validated.text, { unitOrdinal: unit.ordinal, blockCount: messageBlockIds.length });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    markRetrievalResult(parsed.result, validated.rejected);
+    expect(notExactFetched(parsed.result.assertions[0])).toBe(true);
+    const reduction = reduce([closed(parsed.result.assertions)]);
+    expect(reduction.findings).toEqual([]);
+    expect(reduction.excluded.map((entry) => entry.reason)).toEqual(['not-exact-fetched']);
+  });
   it('pins UTF-16 anchoring and exact grapheme slices separately from historical reductions (#1022)', () => {
     const { sourceRangeMapping, ...historical } = FACTUAL_REVIEW_REDUCER_DESCRIPTOR;
     expect(sourceRangeMapping).toBe('folded-utf16-code-units-to-source-graphemes');

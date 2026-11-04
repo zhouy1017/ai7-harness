@@ -36,9 +36,9 @@ export function prepareRetrievalResult(text: string, index: RetrievalIndex | nul
 }
 
 /**
- * Persist the validator's decision with the unit finding so continuations/reuse preserve the exclusion. Review contract v2
- * (#1084) keeps only the findings it accepted, so a citation's original position is read through `acceptedIndexes`; a
- * finding the contract already rejected carries its own reason and nothing is marked in its place.
+ * Persist the validator's decision so continuations/reuse preserve the exclusion. Review and factual contracts keep only
+ * accepted entries, so original positions are read through `acceptedIndexes`; an entry the parser already dropped
+ * carries its own reason and nothing is marked in its place.
  */
 export function markRetrievalResult(result: unknown, rejected: readonly RejectedCitation[]): void {
   if (!isRecord(result)) return;
@@ -49,9 +49,9 @@ export function markRetrievalResult(result: unknown, rejected: readonly Rejected
     salvaged.push({ section: citation.path?.join('.') ?? collection, index: citation.ordinal, reason: 'retrieval-reference-not-exact-fetched' });
     result.salvaged = salvaged;
     if (collection !== 'findings' && collection !== 'assertions') continue;
-    const ordinal = accepted === null || collection !== 'findings' ? citation.ordinal : accepted.indexOf(citation.ordinal);
+    const ordinal = accepted === null ? citation.ordinal : accepted.indexOf(citation.ordinal);
     if (ordinal < 0) continue;
-    const path = accepted === null || collection !== 'findings' ? citation.path : citation.path?.map((key, depth) => depth === 1 ? ordinal : key);
+    const path = accepted === null ? citation.path : citation.path?.map((key, depth) => depth === 1 ? ordinal : key);
     const entries = result[collection];
     const item = Array.isArray(entries) ? entries[ordinal] as unknown : null;
     if (isRecord(item)) item.retrievalValidation = 'not-exact-fetched';

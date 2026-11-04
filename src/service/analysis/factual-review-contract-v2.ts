@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, canonicalJson, hasKeys, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
 import {
   EVIDENCE_LINEAGE_CLASSES,
   EVIDENCE_RELATIONS,
@@ -60,6 +60,8 @@ export interface FactualReviewUnitResultV2 extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA;
   readonly unitOrdinal: number;
   readonly assertions: ReadonlyArray<FactualUnitAssertionV2>;
+  /** Original zero-based positions, used by retrieval validation after per-entry filtering. */
+  readonly acceptedIndexes?: ReadonlyArray<number>;
   readonly corrections: ReadonlyArray<FactualCorrectionEntry>;
 }
 
@@ -117,7 +119,7 @@ export function parseFactualReviewUnitResultV2(
   const corrections: FactualCorrectionEntry[] = [];
   const seen = new Set<number>();
   for (const [index, entry] of reader.array(reader.value.corrections, 'corrections', MAX_ASSERTIONS).entries()) {
-    const ref = hasKeys(entry, ['assertionRef']) ? Number(entry.assertionRef) : NaN;
+    const ref = hasKeys(entry, ['assertionRef']) ? modelNumber(entry.assertionRef) : NaN;
     const mapped = remap.get(ref);
     if (!hasKeys(entry, ['assertionRef']) || !Number.isSafeInteger(ref) || mapped === undefined || seen.has(mapped)) {
       reader.drop('corrections', index, 'assertionRef-invalid'); continue;
@@ -129,7 +131,9 @@ export function parseFactualReviewUnitResultV2(
     corrections.push({ assertionRef: mapped, variants });
   }
   if (assertions.length === 0 && !reader.empty('assertions')) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
-  return reader.finish<FactualReviewUnitResultV2>({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions, corrections });
+  const acceptedIndexes = [...remap.keys()].map((ref) => ref - 1);
+  return reader.finish<FactualReviewUnitResultV2>({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions, corrections,
+    ...(acceptedIndexes.some((original, index) => original !== index) ? { acceptedIndexes } : {}) });
 }
 
 /** The system lines v2 shares at both levels it serves. Every one is model-facing text or a fixed format. */

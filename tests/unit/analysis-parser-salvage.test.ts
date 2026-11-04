@@ -90,3 +90,24 @@ it('validates relation strings before canonicalization and never trims an exact 
   ] }), { claimId: 'claim-1', assertion });
   expect(parsed).toMatchObject({ ok: true, result: { claimId: 'claim-1', evidenceRelations: [{ ...relation, excerptRef: null }] } });
 });
+
+const invalidOrdinals = [{ toString: 0 }, {}, [], [1], true, null, '', ' '];
+it.each(invalidOrdinals.map((unitOrdinal) => ({ unitOrdinal })))('drops only a cross-unit side with a nonnumeric ordinal ($unitOrdinal)', ({ unitOrdinal }) => {
+  const parsed = parseCrossUnitResult(JSON.stringify({ findings: [
+    { kind: 'contradiction', description: '保留发现', sides: [{ unitOrdinal }, { unitOrdinal: '1' }, { unitOrdinal: 2 }] },
+    { kind: 'contradiction', description: '降为备注', sides: [{ unitOrdinal }, { unitOrdinal: 1 }] },
+  ] }), { closedOrdinals: [1, 2], citedBlocksByUnit: new Map() });
+  expect(parsed).toMatchObject({ ok: true, result: { findings: [{ description: '保留发现', sides: [{ unitOrdinal: 1 }, { unitOrdinal: 2 }] }], notes: ['降为备注'] } });
+  if (parsed.ok) expect(parsed.result.salvaged).toEqual(expect.arrayContaining([
+    { section: 'findings.0.sides', index: 0, reason: 'unit-out-of-set' },
+    { section: 'findings.1.sides', index: 0, reason: 'unit-out-of-set' },
+  ]));
+});
+
+it.each(invalidOrdinals.map((assertionRef) => ({ assertionRef })))('drops only a factual correction with a nonnumeric ref ($assertionRef)', ({ assertionRef }) => {
+  const parsed = parseFactualReviewUnitResultV2(JSON.stringify({ assertions: [assertion], corrections: [
+    { assertionRef, variants: [{ text: '不可接受的更正' }] }, { assertionRef: '1', variants: [{ text: '保留更正' }] },
+  ] }), expected);
+  expect(parsed).toMatchObject({ ok: true, result: { assertions: [assertion], corrections: [{ assertionRef: 1, variants: [{ text: '保留更正' }] }] } });
+  if (parsed.ok) expect(parsed.result.salvaged).toContainEqual({ section: 'corrections', index: 0, reason: 'assertionRef-invalid' });
+});
