@@ -201,11 +201,11 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     section.dataset['maintenanceWithdrawn'] = String(maintenance.withdrawn);
     section.dataset['maintenanceArchived'] = String(maintenance.archived);
     const heading = el('h5', undefined, MAINTENANCE_HEADING);
+    if (maintenance.archived) heading.append(' · ', el('span', 'maintenance-archived', MAINTENANCE_ARCHIVED));
     heading.id = uid('heading');
     section.setAttribute('aria-labelledby', heading.id);
     section.append(heading);
     if (maintenance.withdrawn) section.append(el('p', 'attention-note maintenance-withdrawn', `${MAINTENANCE_WITHDRAWN}：${MAINTENANCE_INTERNAL_ONLY}`));
-    if (maintenance.archived) section.append(el('p', 'field-note maintenance-archived', MAINTENANCE_ARCHIVED));
     // Keep one older page beside the newest cases; return to the start to revisit earlier pages.
     const listed = new Set(maintenance.cases.map((summary) => summary.caseId));
     const shown = [...maintenance.cases, ...(older.get(designation.publicationVersionId) ?? []).filter((summary) => !listed.has(summary.caseId))];
@@ -307,9 +307,10 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const form = el('form', 'maintenance-draft');
     form.noValidate = true;
     form.addEventListener('submit', (event) => event.preventDefault());
-    form.append(el('p', 'field-note maintenance-draft-target', maintenanceDraftTargetLine(designationLabel(designation))));
     const choices = el('fieldset', 'maintenance-classifications');
-    choices.append(el('legend', undefined, MAINTENANCE_CLASSIFICATION_LEGEND));
+    const legend = el('legend', undefined, MAINTENANCE_CLASSIFICATION_LEGEND);
+    legend.append(' · ', el('span', 'maintenance-draft-target', maintenanceDraftTargetLine(designationLabel(designation))));
+    choices.append(legend);
     const name = uid('classification');
     for (const classification of MAINTENANCE_CLASSIFICATIONS) {
       const option = el('label', 'maintenance-classification-option');
