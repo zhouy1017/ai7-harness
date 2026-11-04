@@ -85,6 +85,15 @@ describe('taskAuthorizationDispatchNote', () => {
 });
 
 describe('analysisKindSubtitle', () => {
+  it('keeps the recorded provider boundary in ordinary mode', () => {
+    setTechnicalLayerVisible(false);
+    expect(analysisKindSubtitle(DENIED_PIN)).toContain('不允许向模型服务发送内容');
+    expect(analysisKindSubtitle(DENIED_POLICY_PIN)).toContain('不允许向模型服务发送内容');
+    expect(analysisKindSubtitle(ELIGIBLE_PIN)).toContain('仅在满足条件时可按计划');
+    expect(analysisKindSubtitle(ELIGIBLE_POLICY_PIN)).toContain('仅在满足条件时可按计划');
+    expect(analysisKindSubtitle(null)).toBe('分析结果供编辑参考，不修改稿件。');
+    setTechnicalLayerVisible(true);
+  });
   it('reproduces the development-ci bytes the analysis card rendered as a fixed string', () => {
     expect(analysisKindSubtitle(DENIED_PIN)).toBe(CAPTURED_DEVELOPMENT_CI.analysisKindSubtitle);
   });
@@ -106,6 +115,12 @@ describe('analysisKindSubtitle', () => {
 });
 
 describe('launchPolicyIntegritySentence', () => {
+  it('states the current transmission boundary in ordinary mode', () => {
+    setTechnicalLayerVisible(false);
+    expect(launchPolicyIntegritySentence('开发与持续集成：零次实时传输')).toBe('当前设置不允许向模型服务发送内容。');
+    expect(launchPolicyIntegritySentence('开发者实时：实时传输受运行边界约束')).toBe('向模型服务发送内容受每次任务计划的范围约束。');
+    setTechnicalLayerVisible(true);
+  });
   it('reproduces the development-ci bytes J-12 pins, from the label alone', () => {
     expect(launchPolicyIntegritySentence('开发与持续集成：零次实时传输'))
       .toBe(CAPTURED_DEVELOPMENT_CI.launchPolicyIntegritySentence);
