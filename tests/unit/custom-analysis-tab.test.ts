@@ -4,6 +4,8 @@ import { CUSTOM_TAB_EMPTY, CUSTOM_TAB_FEEDBACK_NOTE, CUSTOM_TAB_NOT_RUN, CUSTOM_
 import { CUSTOM_DIMENSIONS_HEADING, CUSTOM_DIMENSION_FIXED_LINES, customDimensionVersionLine } from '../../src/renderer/knowledge-base-labels.js';
 import type { CustomAnalysisDimensionProjection, CustomAnalysisDimensionsProjection, CustomAnalysisRevisionSummaryProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 
 // Issue #922 (slice 7f): ②A's 自定义 tab and 知识库 › 工序与规则 › 自定义分析维度 on a minimal DOM — the empty states, a listed
 // dimension with its latest result and per-unit rows whose quotations jump to the manuscript, 运行 opening the prepared plan, and
@@ -19,6 +21,7 @@ let uninstall: () => void;
 let book = 0;
 beforeEach(() => {
   uninstall = installMiniDom();
+  setTechnicalLayerVisible(true);
   book += 1;
 });
 afterEach(() => uninstall());
@@ -95,6 +98,7 @@ describe('②A › 自定义', () => {
   });
 
   it('shows the latest result: axes, gaps, rows with a located quotation as a jump link and an unlocated one said so', async () => {
+    setTechnicalLayerVisible(false);
     const latest = revision();
     const { panel, api, options } = mountTab(projection([dimension({
       taskState: { taskIntentId: '66666666-6666-4666-8666-666666666666', state: 'settled', stateLabel: '已完成' }, latest, unavailableReason: null,
@@ -114,6 +118,7 @@ describe('②A › 自定义', () => {
     expect(rows[1]!.querySelector('button')).toBeNull();
     expect(rows[1]!.textContent).toContain('未定位');
     expect(panel.textContent).toContain(CUSTOM_TAB_FEEDBACK_NOTE);
+    expectNoTechnicalText(panel);
     // A result that still reads the current manuscript is read again whole.
     (panel.querySelector('[data-analysis-action="custom-run"]') as MiniElement).click();
     await settle();

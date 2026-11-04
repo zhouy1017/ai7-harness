@@ -122,7 +122,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     section.dataset['freshness'] = latest.freshness.state;
     section.dataset['coverage'] = latest.coverage.state;
     const revision = el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal));
-    revision.append(' · ', el('span', 'custom-axis', latest.coverage.label), ' · ', el('span', 'custom-axis', latest.freshness.label));
+    const freshness = { current: '与当前稿件一致', stale: '稿件已更新，分析待更新', superseded: '已有更新结果' }[latest.freshness.state];
+    revision.append(' · ', el('span', 'custom-axis', latest.coverage.label), ' · ', el('span', 'custom-axis', technicalWords(latest.freshness.label, freshness)));
     const counts = el('p', 'custom-counts', customTabCountsLine(latest.rowCounts));
     if (latest.rowsTruncated) counts.append(' · ', el('span', 'custom-more', customTabMoreRows(latest.rows.length)));
     section.append(revision, counts);
