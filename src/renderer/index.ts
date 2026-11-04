@@ -1113,6 +1113,7 @@ function renderGlobalAttention(bookId?: string | null): void {
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
+    openNetworkProxySettings: () => renderModelServiceSettings(),
     open: openGlobalAttentionItem,
   });
   const actions = element('div', 'button-row workbench-actions');
@@ -1131,6 +1132,10 @@ function renderGlobalAttention(bookId?: string | null): void {
  * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
  */
 async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
+  if (item.nextStep === 'open-network-proxy') {
+    await renderModelServiceSettings();
+    return;
+  }
   await openGlobalAttentionTarget(item.target);
 }
 

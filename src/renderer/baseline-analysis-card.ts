@@ -35,6 +35,11 @@ import type { ReviewFocus } from './review-workspace.js';
 import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisTab } from './custom-analysis.js';
 import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
 import { taskPlanQuickStartFellBack, TASK_DRAWER_TITLE, taskPlanSummaryLine, TASK_PLAN_DRIFT_HEADING } from './task-drawer-labels.js';
+
+export const ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL = '查看任务抽屉';
+export function analysisUpdateBlockedDrawerAction(blockedReason: string | null): 'task-drawer' | null {
+  return blockedReason !== null && blockedReason.startsWith('有一项运行因') ? 'task-drawer' : null;
+}
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
 import {
   RUN_REPORT_CLASSIFICATION_LABELS,
@@ -870,7 +875,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
-    if (controls.blockedReason !== null) section.append(element('p', 'attention-note', controls.blockedReason));
+    if (controls.blockedReason !== null) {
+      section.append(element('p', 'attention-note', controls.blockedReason));
+      if (analysisUpdateBlockedDrawerAction(controls.blockedReason) === 'task-drawer') {
+        const openDrawer = button(ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL, 'secondary', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent?.taskIntentId ?? null));
+        openDrawer.dataset['analysisUpdateBlockedLink'] = 'task-drawer';
+        section.append(openDrawer);
+      }
+    }
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];

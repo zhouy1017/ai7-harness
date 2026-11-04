@@ -7,6 +7,7 @@ import {
   WRITING_KIND,
   type AnalysisReusePlanCounts,
   type BaselineAnalysisRunState,
+  type ResumableStopReason,
   type BaselineAnalysisSelectedRange,
   type DeveloperLiveCeiling,
   type RunBudgetCeilingState,
@@ -326,8 +327,9 @@ export function runIsActive(state: BaselineAnalysisRunState | null): boolean {
  * Why an active Run blocks a new Task, in the words of its state — a waiting Run is never said to be under way (OFF-005,
  * OFF-006; Issue #49, S14) — and of its kind (Issue #760 review): a 写作任务 is never called an 分析任务.
  */
-export function activeRunReason(state: BaselineAnalysisRunState | null, kind: string = BASELINE_ANALYSIS_KIND): string {
+export function activeRunReason(state: BaselineAnalysisRunState | null, kind: string = BASELINE_ANALYSIS_KIND, stopReason?: ResumableStopReason): string {
   const { task, next } = activeRunWords(kind);
+  if (state === 'resumable' && stopReason !== undefined) return `有一项运行因${stopReason === 'proxy-unreachable' ? '代理不可达' : stopReason === 'model-service-unreachable' ? '模型服务不可达' : stopReason === 'outcome-unknown' ? '结果待确认' : 'AI7 关闭时正在运行'}中断，续行或取消它后才能准备新的更新。`;
   if (state === 'awaiting-connectivity') return `有一项${task}在等待联网后开始；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
   if (state === 'authorized') return `有一项${task}在等待运行名额；它开始并结束之前，或在任务抽屉里取消它之前，不能准备${next}。`;
   return `当前已有${task}在调度或执行中；在其结束前不能准备${next}。`;

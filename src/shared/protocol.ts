@@ -4310,6 +4310,9 @@ export interface SetEvaluationPreferencesInput {
  */
 export type GlobalAttentionGroupKey = 'exceptions' | 'decisions' | 'active' | 'recent';
 
+/** Why a resumable Run stopped, as shown to editors (Issue #1309). */
+export type ResumableStopReason = 'proxy-unreachable' | 'model-service-unreachable' | 'outcome-unknown' | 'shutdown';
+
 export const GLOBAL_ATTENTION_GROUP_KEYS: readonly GlobalAttentionGroupKey[] = ['exceptions', 'decisions', 'active', 'recent'];
 
 /** Only these two count toward the entry's number (V2-UX-ATTN-006); the other two stay visible without an alert. */
@@ -4428,6 +4431,7 @@ export type GlobalAttentionNextStep =
   | 'answer-clarification'
   | 'adjust-budget-redo'
   | 'resolve-model-service'
+  | 'open-network-proxy'
   // 结果待确认's 查看未确认的部分 (Issue #51, S16c): which reading ranges are unconfirmed, in the drawer.
   | 'view-unconfirmed'
   | 'reprepare'
@@ -4454,7 +4458,7 @@ export type GlobalAttentionNextStep =
 
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'open-network-proxy', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
   'view-unconfirmed', 'view-apply-receipt', 'continue-draft',
@@ -4519,6 +4523,7 @@ export type GlobalAttentionObjectProjection =
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
   clarificationOrigin?: 'model';
+  stopReason?: ResumableStopReason;
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
   progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
   /**

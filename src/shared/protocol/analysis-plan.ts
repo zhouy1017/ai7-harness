@@ -721,6 +721,10 @@ export interface BaselineAnalysisProjection {
     runRecordId: string;
     procedure?: ProcedureDefinitionPin | null;
     state: BaselineAnalysisRunState;
+    /** The editor-facing reason a resumable Run stopped, when recorded. */
+    stopReason?: import('../protocol.js').ResumableStopReason;
+    /** When this Run was explicitly resumed, if the current stop followed that resume. */
+    resumedAt?: string;
     stateLabel: string;
     recordedAt: string;
     transitions: ReadonlyArray<{ sequence: number; state: BaselineAnalysisRunState; recordedAt: string; detail: string | null }>;

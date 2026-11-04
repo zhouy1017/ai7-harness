@@ -142,6 +142,32 @@ function summary(projection: GlobalAttentionProjection, key: GlobalAttentionGrou
 }
 
 describe('待我处理 over the real store on exact sample1', () => {
+  it('projects all four resumable stop reasons without changing the Run semantics (Issue #1309)', async () => {
+    const fixture = await loadModelFixture(FIXTURES_ROOT, 'sample1-baseline-one-unit-failure');
+    const store = await open(fixture);
+    const reasons = ['proxy-unreachable', 'model-service-unreachable', 'outcome-unknown', 'shutdown'] as const;
+    try {
+      for (const reason of reasons) {
+        const book = await importBook(store, `L2 停因 ${reason}`, reason === reasons[0]);
+        const prepared = prepare(store, book.bookId, null);
+        const runRecordId = store.authorizeBaselineAnalysis(book.bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+        store.baselineAnalysisLedger.recordRunState(runRecordId, 'admitted', { detail: '已进入 AI7 调度器（单槽位）。' });
+        store.baselineAnalysisLedger.recordRunState(runRecordId, 'executing', { detail: '正在执行。' });
+        store.baselineAnalysisLedger.recordRunState(runRecordId, 'resumable', { detail: '任务已中断。', stopReason: reason, unitsSettled: 0, unitsTotal: 1 });
+      }
+      const projection = store.inspectGlobalAttention(() => null, false);
+      const projected = projection.groups.flatMap((group) => group.items)
+        .filter((item) => item.object.kind === 'analysis' && item.book.title?.startsWith('L2 停因'));
+      expect(projected.map((item) => item.facts.stopReason).sort()).toEqual([...reasons].sort());
+      expect(projected.find((item) => item.facts.stopReason === 'proxy-unreachable')?.nextStep).toBe('open-network-proxy');
+      expect(projected.find((item) => item.facts.stopReason === 'model-service-unreachable')?.nextStep).toBe('open-network-proxy');
+      expect(projected.find((item) => item.facts.stopReason === 'shutdown')?.nextStep).toBe('view-run');
+    } finally {
+      store.markCleanShutdown();
+      store.close();
+    }
+  }, 300_000);
+
   it('places each Book\'s latest baseline Task by its state, lists its completion, resolves an item once a newer Task exists, and writes nothing', async () => {
     // A launch with no executable route: 开始任务 records the Run and it is blocked before dispatch.
     const first = await open(null);
