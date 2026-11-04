@@ -48,6 +48,7 @@ describe('technical layer presentation (#1315)', () => {
     expect(disclosure.textContent).toBe('');
     expect(metadata.textContent).toContain('全稿 0%');
     expect(metadata.textContent).not.toContain('版本8');
+    expect(metadata.textContent).not.toContain('当前修订版');
   });
 
   it('scans recovery and attention identity metadata in ordinary mode', () => {

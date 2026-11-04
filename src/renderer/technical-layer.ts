@@ -24,10 +24,10 @@ export function metadataWords(text: string): string {
   if (technicalLayerVisible) return text;
   return text
     .replace(/（第\s*\d+\s*版）/gu, '')
-    .replace(/第\s*\d+\s*版/gu, '当前版本')
-    .replace(/版本\s*\d+/gu, '当前版本')
-    .replace(/\b(?:Revision\s+\d+|r\d+)\b/giu, '当前修订版')
-    .replace(/修订版\s+当前修订版/gu, '当前修订版')
+    .replace(/第\s*\d+\s*版/gu, '版本')
+    .replace(/版本\s*\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.-]+)?/gu, '版本')
+    .replace(/\b(?:Revision\s+\d+|r\d+)\b/giu, '修订版')
+    .replace(/修订版\s+修订版/gu, '修订版')
     .replace(/(?:修订日志序号|预计修订日志序号)\s*\d+/gu, '修订日志')
     .replace(/\bv\d{1,3}\b/gu, '')
     .replace(/\b\d+\.\d+\.\d+(?:-[\w.-]+)?\b/gu, '')

@@ -124,7 +124,7 @@ it('applies developer mode immediately and persists the choice (#1315)', () => {
   try {
     expect(storage.setItem).toHaveBeenCalledWith('ai7.technicalLayerVisible', 'false');
     expect(view.root.querySelector('.help-about') === null).toBe(true);
-    expect(view.root.querySelector('.help-developer-mode input')?.checked).toBe(false);
+    expect(view.root.querySelector<HTMLInputElement>('.help-developer-mode input')?.checked).toBe(false);
   } finally { setTechnicalLayerVisible(true); }
 });
 
