@@ -200,6 +200,9 @@ export function globalAttentionStateLabel(item: Pick<GlobalAttentionItemProjecti
   if (item.state === 'analysis-resumable' && item.facts.stopReason !== undefined) {
     return `任务已中断 · ${RESUMABLE_STOP_REASON_LABELS[item.facts.stopReason]}`;
   }
+  if (item.state === 'analysis-completed-with-gaps' && item.facts.completion !== undefined) {
+    return completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total);
+  }
   return item.state === 'analysis-outcome-unconfirmed' && item.object.kind === 'unconfirmed' && item.object.ranges > 0
     ? '该单元结果未知' : GLOBAL_ATTENTION_STATE_LABELS[item.state];
 }
@@ -651,12 +654,3 @@ export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
 // ---- the technical layer --------------------------------------------------------------------------------
 
 export const GLOBAL_ATTENTION_TECHNICAL_ITEM = '记录';
-
-
-export function globalAttentionStateLabel(item: GlobalAttentionItemProjection): string {
-  if (item.state === 'analysis-outcome-unconfirmed' && item.object.kind === 'unconfirmed' && item.object.ranges > 0) return '该单元结果未知';
-  if (item.state === 'analysis-completed-with-gaps' && item.facts.completion !== undefined) {
-    return completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total);
-  }
-  return GLOBAL_ATTENTION_STATE_LABELS[item.state];
-}
