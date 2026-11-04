@@ -49,7 +49,7 @@ Owner-approved scope is **sample1 full; fixed first/lower-middle/last content ch
 | 老残游记 | 1 /10 /20回 | 9–35 /246–275 /552–590 | 16 |
 | 儒林外史 | 1 /28 /56回 | 2–28 /424–439 /809–868 | 18 (8/7/3) |
 
-Final requested reading slots: **639/648 standalone**, **269/288 composite members**. These are checkpoint observations, separate from evidence closure and semantic correctness. Claim-only successors add no reading slots or extraction closure. Scope report: `assessments/chapter-scope-status-final-432267ce.json` (SHA-256 `5fc742a25373f239c24d77558c9997cef702597229b1a9c9637bfb16808ba0a8`).
+Final requested reading slots: **639/648 standalone**, **269/288 composite members**. These are checkpoint observations, separate from evidence closure and semantic correctness. Claim-only successors add no reading slots or extraction closure. Scope report: `assessments/chapter-scope-status-final-432267ce-provider-corrected.json` (SHA-256 `d78ed6a072b3b69f3ac256c43cf203306e8bf84d0f73ca59761fa0e20faa21f3`).
 
 | Book | Standalone closed/requested | Composite closed/requested |
 | --- | ---: | ---: |
