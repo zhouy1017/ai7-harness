@@ -1,4 +1,4 @@
-import { technicalWords } from './technical-layer.js';
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import {
   EVIDENCE_ASSURANCE_LEVEL_LABELS,
   FACTUAL_ACTION_NEED_LABELS,
@@ -135,7 +135,7 @@ export function sourceCardFacts(card: EvidenceSourceCardProjection, instant: (is
   return [
     ['核对状态', card.checkLabel],
     ['与断言的关系', card.relation],
-    ['来源版本', card.sourceVersion === null ? '未取回' : card.sourceVersion.slice(0, 12)],
+    ...(technicalLayerVisible ? [['来源版本', card.sourceVersion === null ? '未取回' : card.sourceVersion.slice(0, 12)] as const] : []),
     ['发布方', card.publisher ?? '未知'],
     ['获取时间', card.capturedAt === null ? '未取回' : instant(card.capturedAt)],
     ['状态', card.freshnessLabel],

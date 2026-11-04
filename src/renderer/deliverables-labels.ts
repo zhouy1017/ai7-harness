@@ -135,7 +135,7 @@ export function publicationSummaryMilestone(item: Pick<MilestoneListItemProjecti
 
 /** 稿件 in the summary: the Deliverable is the Book's primary Manuscript, read as it stands now. */
 export function publicationSummaryManuscript(manuscript: NonNullable<DeliverablesProjection['manuscript']>): string {
-  return `${PUBLICATION_SUMMARY_DELIVERABLE} · 当前修订版${technicalWords(` ${manuscript.revisionLabel}`)} · 修订日志序号 ${manuscript.journalSequence}`;
+  return technicalWords(`${PUBLICATION_SUMMARY_DELIVERABLE} · 当前修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`, '主稿件');
 }
 
 /** 与当前稿件: the current-versus-selected relationship (PUB-004), in the milestone's own words when it changed. */

@@ -28,7 +28,7 @@ export const EXCLUSIONS_TARGETS_NONE: Readonly<Record<SeriesExclusionTargetKind,
   'knowledge-item': '这个书系还没有书系知识条目。',
   'knowledge-class': '没有可选的知识类别。',
   book: '这个书系还没有成员图书。',
-  'source-version': '这个书系的成员图书还没有来源版本。',
+  'source-version': '这个书系的成员图书还没有来源文件。',
 };
 export const EXCLUSIONS_ALREADY = '已排除';
 export const EXCLUSIONS_PREVIEW_ACTION = '查看影响';
@@ -40,7 +40,7 @@ export const EXCLUSIONS_HISTORY_EMPTY = '还没有检索排除记录。';
 export const EXCLUSIONS_HISTORY_MORE = '更早的排除记录…';
 export const EXCLUSIONS_HISTORY_IMPACT = '当时显示的影响';
 /** SER-028: a Source Version is recorded and read by nothing yet, and the page says so rather than imply a guard that acts. */
-export const EXCLUSIONS_UNREAD_NOTE = '现在还没有哪项书系检索读取来源版本；这条排除先记下，以后读取来源版本的检索都要遵守。';
+export const EXCLUSIONS_UNREAD_NOTE = '尚无书系检索读取来源文件，未来检索会遵守此排除。';
 export const EXCLUSIONS_NO_REASON = '（未填写理由）';
 export const EXCLUSIONS_STATUS = {
   loading: '正在读取可以排除的对象…',

@@ -63,7 +63,7 @@ export function databaseExportActivityLine(activity: Pick<DatabaseExportActivity
 
 /** `3 本图书 · 5 个来源版本 · 资料库 2 项 · 书系 1 个`. */
 export function databaseExportContentsLine(contents: DatabaseExportContentsProjection): string {
-  return `${contents.books} 本图书 · ${contents.sourceVersions} 个来源版本 · 资料库 ${contents.libraryMaterials} 项 · 书系 ${contents.series} 个`;
+  return `${contents.books} 本图书 · ${contents.sourceVersions} ${technicalWords('个来源版本', '条来源记录')} · 资料库 ${contents.libraryMaterials} 项 · 书系 ${contents.series} 个`;
 }
 
 /** The prepared file as `按上述方式导出` will write it: name and size, place, create or replace, contents, versions. */
