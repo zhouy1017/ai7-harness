@@ -310,6 +310,10 @@ async function runSettingsPages(renderer, cancellation) {
   await clickSelector(renderer, '[data-keyboard-reset-all]', 'keyboard-reset-all');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-all-restored');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-all-restored-kept');
+  // A4: a later successful reset leaves the earlier refusal visible until the editor acknowledges it.
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('「书库」') && document.querySelector('#persistence-status')?.hidden===false`, 'keyboard-error-retained-after-success');
+  await clickSelector(renderer, '#persistence-status .status-dismiss', 'keyboard-error-dismiss');
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true`, 'keyboard-error-dismissed');
   await click(renderer, '返回', 'keyboard-done');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-done-hub');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'keyboard-done-library');
