@@ -4,10 +4,36 @@ import { Agent, Client, ProxyAgent, type Dispatcher, buildConnector } from 'undi
 import { ensureCanonicalDataDirectory, inspectCanonicalDataFile } from '../../shared/data-root.js';
 import { admittedProxyRequest } from '../../shared/network-denial.js';
 import { modelRequestNotSent } from './deepseek-adapter.js';
-import type { ModelServiceProxySetting } from '../../shared/protocol.js';
+import type { ModelServiceProxySetting, ProxyProbeResult } from '../../shared/protocol.js';
 
 export const DIRECT_PROXY_SETTING: ModelServiceProxySetting = { mode: 'direct' };
 export const PROXY_UNREACHABLE = 'AI7_PROXY_UNREACHABLE';
+
+/** CONNECT only: no provider credentials, model request, or manuscript is sent. */
+export type ProxyProbeConnector = (proxy: URL, target: URL) => Promise<number>;
+const connectProbe: ProxyProbeConnector = async (proxy, target) => {
+  const token = admittedProxyRequest(target.href, { host: proxy.hostname.replace(/^\[|\]$/gu, ''), port: Number(proxy.port || (proxy.protocol === 'https:' ? 443 : 80)) });
+  const client = new Client(proxy.origin, { connectTimeout: 5_000, headersTimeout: 5_000 });
+  try {
+    const answer = await token.run(() => client.connect({ path: `${target.hostname}:${target.port || (target.protocol === 'https:' ? 443 : 80)}`, signal: AbortSignal.timeout(5_000) }));
+    answer.socket.destroy();
+    return answer.statusCode;
+  } finally { token.revoke(); await client.destroy(); }
+};
+
+export async function probeProxy(setting: Extract<ModelServiceProxySetting, { mode: 'proxy' }>, endpoint: string,
+  connect: ProxyProbeConnector = connectProbe): Promise<ProxyProbeResult> {
+  let status: ProxyProbeResult['status'] = 'unreachable';
+  try {
+    const answer = await connect(new URL(`${setting.protocol}://${setting.hostPort}`), new URL(endpoint));
+    status = answer === 200 ? 'available' : answer === 407 ? 'authentication-required' : 'unreachable';
+  } catch (error) {
+    const code = error !== null && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+    if (code === 'ECONNREFUSED') status = 'connection-refused';
+    else if (setting.protocol === 'https' && (code === 'ECONNRESET' || code.startsWith('ERR_SSL_') || code.startsWith('ERR_TLS_'))) status = 'https-rejected';
+  }
+  return { status, checkedAt: new Date().toISOString() };
+}
 
 export class ProxySettingError extends Error {
   readonly code = 'MODEL_SERVICE_PROXY_INVALID';

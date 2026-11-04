@@ -498,6 +498,14 @@ describe('结果待确认 a completed Run left (Issue #757)', () => {
       while (!progress.done) progress = store.advanceInitialEvaluationPreparationWork(progress.workId!);
       expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null }).resend).toEqual({ units: [3], statement: resendDisclosure([3]) });
 
+      // A later failed reread of the same content does not settle the original unknown request.
+      const invalid: ResolvedModelFixture = { ...authored, entries: new Map([...authored.entries].map(([key, entry]) => [key,
+        entry.unitOrdinal === 3 ? { ...entry, response: { kind: 'unit-result' as const, text: '{}', usage: { inputTokens: 1, outputTokens: 1 } } } : entry])) };
+      await run(invalid, bookId);
+      expect(store.inspectInitialEvaluation(bookId).resultSetRevision?.gaps).toEqual(expect.arrayContaining([expect.objectContaining({ unitOrdinal: 3, code: 'contract-invalid' })]));
+      expect(store.inspectTaskPlan({ bookId, kind: 'initial-evaluation', ref: null }).unconfirmed?.ranges).toMatchObject([{ unitOrdinal: 3, rereadFailed: true }]);
+      expect(unconfirmedItem(store, bookId, 'initial-evaluation')).toBeDefined();
+
       // That 初评 reads unit 3 to a result: nothing is left to confirm, and the next plan names no re-send.
       await run(authored, bookId);
       expect(store.inspectInitialEvaluation(bookId).resultSetRevision?.gaps).toEqual([]);

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { buildConnector } from 'undici';
 import { admittedProxyRequest, armSingleHostAllowance, guardedConnect, guardedLookup } from '../../src/shared/network-denial.js';
 import {
-  ProxyConnectionEvidence, createProxyDispatcher, parseProxyUrl, proxyAwareFetch, readProxySetting, writeProxySetting, type ProxyDispatcherFactory,
+  ProxyConnectionEvidence, createProxyDispatcher, parseProxyUrl, probeProxy, proxyAwareFetch, readProxySetting, writeProxySetting, type ProxyDispatcherFactory,
 } from '../../src/service/provider/proxy-setting.js';
 import { DeepSeekOpenAiCompatibleAdapter, classifyTransportError } from '../../src/service/provider/deepseek-adapter.js';
 import { CredentialBroker } from '../../src/service/provider/credential-broker.js';
@@ -18,6 +18,23 @@ import { reconnectPreflight } from '../../src/service/reconnect-preflight.js';
 
 const proxy = { host: 'proxy.invalid', port: 8080 };
 const modelUrl = 'https://model.invalid/v1/messages';
+describe('save-time proxy probe', () => {
+  it.each([
+    ['ECONNRESET', 'https-rejected'], ['ERR_SSL_WRONG_VERSION_NUMBER', 'https-rejected'],
+    ['ECONNREFUSED', 'connection-refused'], [407, 'authentication-required'], [200, 'available'],
+    ['ETIMEDOUT', 'unreachable'],
+  ] as const)('classifies connector result %s without sending credentials', async (answer, status) => {
+    const connect = vi.fn(async () => {
+      if (typeof answer === 'string') throw Object.assign(new Error('private native detail'), { code: answer });
+      return answer;
+    });
+    const result = await probeProxy({ mode: 'proxy', protocol: 'https', hostPort: '127.0.0.1:7897' }, modelUrl, connect);
+    expect(result.status).toBe(status);
+    expect(Number.isNaN(Date.parse(result.checkedAt))).toBe(false);
+    expect(connect).toHaveBeenCalledWith(new URL('https://127.0.0.1:7897'), new URL(modelUrl));
+    expect(JSON.stringify(result)).not.toContain('private native detail');
+  });
+});
 beforeAll(() => armSingleHostAllowance({ host: 'model.invalid', port: 443 }));
 const directories: string[] = [];
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
@@ -245,6 +262,24 @@ describe('physical proxy no-send proof through the production connector (#1131)'
     const failure = await fetch('http://model.invalid:443/v1/messages', init).catch((error: unknown) => error);
     expect(connections).toBe(2);
     expect(classifyTransportError(failure, true, init).code).toBe('AI7_OUTCOME_UNKNOWN');
+  });
+
+  it.each([200, 407])('probes a real CONNECT %s without sending a provider request', async (statusCode) => {
+    let received = '';
+    const port = await listen((socket) => socket.on('data', (chunk: Buffer) => {
+      received += chunk.toString('latin1');
+      socket.end(`HTTP/1.1 ${statusCode} Answer\r\nContent-Length: 0\r\n\r\n`);
+    }));
+    const result = await probeProxy({ mode: 'proxy', protocol: 'http', hostPort: `127.0.0.1:${port}` }, modelUrl);
+    expect(result.status).toBe(statusCode === 200 ? 'available' : 'authentication-required');
+    expect(received).toContain('CONNECT model.invalid:443 HTTP/1.1');
+    expect(received).not.toMatch(/authorization|GET |POST /iu);
+  });
+
+  it('distinguishes a real TLS reset from a closed local proxy port', async () => {
+    const port = await listen((socket) => socket.once('data', () => socket.destroy()));
+    expect((await probeProxy({ mode: 'proxy', protocol: 'https', hostPort: `127.0.0.1:${port}` }, modelUrl)).status).toBe('https-rejected');
+    expect((await probeProxy({ mode: 'proxy', protocol: 'http', hostPort: `127.0.0.1:${await closedPort()}` }, modelUrl)).status).toBe('connection-refused');
   });
 
   it('proves a refused proxy connection sent nothing, for that exact request only', async () => {

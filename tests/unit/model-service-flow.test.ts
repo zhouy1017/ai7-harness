@@ -83,10 +83,16 @@ describe('the one model-service flow', () => {
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
 
-  it('keeps the chosen channel through a settings repaint and resets it when the shell reopens the screen', async () => {
+  it.each([
+    ['available', '代理可用', 'success'],
+    ['https-rejected', '代理不接受 HTTPS 连接，请改用 http://host:port', 'error'],
+    ['connection-refused', '代理不可达：端口没有在监听', 'error'],
+    ['authentication-required', '代理要求认证，当前版本不支持', 'error'],
+  ] as const)('shows %s after saving and retains the result through settings navigation', async (status, message, tone) => {
     const projection = { ...settings([], null), roles: [],
       routeChoice: { ...settings([], null).routeChoice, unsupportedProviders: [] },
-      proxy: { mode: 'direct' }, searchBackends: { backends: [], candidates: [] },
+      proxy: { mode: 'proxy', protocol: 'http', hostPort: '127.0.0.1:7897' },
+      lastProxyProbe: { status, checkedAt: '2026-11-04T12:00:00.000Z' }, searchBackends: { backends: [], candidates: [] },
       protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
       launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
         externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
@@ -112,11 +118,16 @@ describe('the one model-service flow', () => {
       });
       await screen.renderModelServiceSettings();
       const page = root as unknown as MiniElement;
+      expect(page.querySelector('[aria-label="代理 URL"]')!.placeholder).toBe('http://127.0.0.1:端口');
+      expect(page.textContent).toContain('只有代理本身提供 TLS 入口时才用 https://');
       pickChannel(page, 'anthropic-claude');
       page.querySelector('[data-model-service-proxy] form')!.dispatchEvent({ type: 'submit' });
-      await vi.waitFor(() => expect(calls.saveModelServiceProxy).toHaveBeenCalledWith({ mode: 'direct' }));
+      await vi.waitFor(() => expect(calls.saveModelServiceProxy).toHaveBeenCalledWith({ mode: 'proxy', protocol: 'http', hostPort: '127.0.0.1:7897', probeRoute: 'anthropic-claude' }));
+      await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(message, tone));
       expect(page.querySelector('[data-model-service-flow]')!.dataset['flowChannel']).toBe('anthropic-claude');
       await screen.renderModelServiceSettings();
+      expect(page.querySelector(`[data-proxy-probe-status="${status}"]`)!.textContent).toContain(message);
+      expect(page.textContent).toContain(new Date(projection.lastProxyProbe!.checkedAt).toLocaleString());
       expect(page.querySelector('[data-model-service-flow]')!.dataset['flowChannel']).toBe('opencode-go');
       expect(setStatus).toHaveBeenLastCalledWith('模型服务设置已打开');
       page.querySelectorAll('button').find((node) => node.textContent === '返回')!.click();
