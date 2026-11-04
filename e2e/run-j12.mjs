@@ -1813,10 +1813,9 @@ async function main() {
     await click(primary, '按所选方式导入', 'database-import-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.replacementId !== undefined && document.querySelector('.database-import')?.dataset.pending === 'true'`, 'database-import-pending');
     const pendingLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const replaceBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[1] ?? '' : '')?.[1];
+    const replaceBackup = /^已准备好用「AI7 数据库\.ai7db」替换本机全部数据；本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(pendingLines) && pendingLines.length === 3 && pendingLines[0] === '已准备好用「AI7 数据库.ai7db」替换本机全部数据。' &&
-        replaceBackup !== undefined && pendingLines[2] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
+      Array.isArray(pendingLines) && pendingLines.length === 2 && replaceBackup !== undefined && pendingLines[1] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
       'database-import-pending-words',
       pendingLines,
     );
