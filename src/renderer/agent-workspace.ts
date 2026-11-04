@@ -124,7 +124,7 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
   pageControls.append(previous, next);
   const chosen = el('p', 'agent-workspace-selection', words.noSelection);
   chosen.dataset['agentWorkspaceSelection'] = 'none';
-  pick.append(el('h3', undefined, words.pick), el('p', 'field-note', words.pickNote), pages, pageControls, chosen);
+  pick.append(el('h3', undefined, words.pick), pages, pageControls, chosen);
 
   const form = el('section', 'agent-workspace-instruction');
   const instructionId = `agent-workspace-instruction-${bookId}`;
