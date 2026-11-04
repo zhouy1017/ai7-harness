@@ -1456,7 +1456,7 @@ async function main() {
         sentence('reducer-closure').includes('没有读成的范围不在其中') &&
         sentence('assurance').startsWith(${JSON.stringify(ASSURANCE_STATEMENT)}) &&
         sentence('assurance').includes(${JSON.stringify(`另有 ${leads} 处前后不一致的线索、${revision.assurance.unresolvedItemCount} 项未决事项，归入审阅的「情节逻辑与前后一致」`)}) &&
-        axes.every((axis)=>axis.querySelector('.analysis-axis-next')?.textContent.startsWith('下一步：')) &&
+        axes.every((axis)=>!axis.querySelector('.analysis-axis-next')) &&
         decision.querySelector('.analysis-synopsis')?.textContent===${JSON.stringify(revision.synthesis.synopsis)} &&
         !/blk_|[0-9a-f]{64}/u.test(decision.textContent) && !/单元|Revision|归约|reducer|摘要/u.test(axes.map((axis)=>axis.textContent).join('')) &&
         !decision.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
