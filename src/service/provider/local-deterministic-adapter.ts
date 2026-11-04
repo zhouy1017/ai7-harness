@@ -263,6 +263,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     options: {
       readonly localFixture?: { readonly catalog: LocalFixturePolicyCatalog; readonly execution: LocalFixtureExecutionContext };
       readonly resolveBy?: FixtureResolution;
+      readonly sourceDigest?: string;
       /**
        * What each unit attempted in the Run's earlier executions (Issue #422, S76d): a continuation's attempts carry on
        * from there, so a retry made after the Run stopped is still that unit's second attempt.
@@ -282,7 +283,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     } = {},
   ) {
     this.#fixture = fixture;
-    this.#sourceDigest = options.localFixture?.execution.sourceDigest ?? null;
+    this.#sourceDigest = options.sourceDigest ?? options.localFixture?.execution.sourceDigest ?? null;
     if (options.localFixture !== undefined && options.resolveBy === 'content-digest')
       throw new Error('LOCAL_FIXTURE_PROFILE_REQUIRES_EXACT_REQUEST_KEYS');
     this.#profileEntryKeys = options.localFixture?.catalog.entriesFor(options.localFixture.execution, fixture, promptContractDigest) ?? null;

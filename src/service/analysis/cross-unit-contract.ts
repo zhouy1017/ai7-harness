@@ -384,7 +384,7 @@ export function parseCrossUnitResult(
       sides.push({ unitOrdinal: ordinal, sourceRanges });
     }
     const rawKind = typeof candidate.kind === 'string' ? candidate.kind.trim().toLowerCase().replace(/[\s_]+/gu, '-') : '';
-    const kind = CROSS_UNIT_FINDING_KINDS.find((kind) => kind === rawKind) ?? kinds[rawKind];
+    const kind = CROSS_UNIT_FINDING_KINDS.find((kind) => kind === rawKind) ?? (Object.hasOwn(kinds, rawKind) ? kinds[rawKind] : undefined);
     if (kind === undefined || new Set(sides.map((side) => side.unitOrdinal)).size < 2) {
       notes.push(description);
       reader.drop('findings', index, kind === undefined ? 'kind-downgraded-to-note' : 'sides-downgraded-to-note');

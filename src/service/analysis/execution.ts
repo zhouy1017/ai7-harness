@@ -1986,7 +1986,7 @@ export class BaselineAnalysisExecutionOwner {
               const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
               const profile = localFixture === null ? {} : { localFixture: { catalog: facts.localFixtureRuntime!.catalog, execution: localFixture } };
               return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
-                { ...assurance, ...profile, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
+                { ...assurance, ...profile, sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
             }
             liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
               broker: broker,

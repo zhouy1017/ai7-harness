@@ -361,6 +361,22 @@ async function readBaseline(renderer, revisionId = null) {
     const { digest, ...body } = projection.coverageManifest;
     requireJourney(sha256Hex(canonicalJson(body)) === digest, 'coverage-manifest-page-digest');
   }
+  for (const key of ['resultSetRevision', 'inspectedRevision']) {
+    const revision = projection[key];
+    if (revision?.overviewPage === undefined || revision.synthesis !== undefined) continue;
+    const chunks = [];
+    let cursor = 0;
+    do {
+      const page = await renderer.evaluate(`window.ai7.getAnalysisRevisionOverview(${JSON.stringify({ revisionId: revision.revisionId, afterIndex: cursor })})`);
+      requireJourney(page.revisionId === revision.revisionId && (page.next === null || page.next > cursor), 'analysis-overview-page');
+      chunks.push(page.text);
+      cursor = page.next;
+    } while (cursor !== null && chunks.length < revision.overviewPage.chunkCount);
+    const text = chunks.join('');
+    requireJourney(cursor === null && chunks.length === revision.overviewPage.chunkCount && [...text].length === revision.overviewPage.totalLength &&
+      sha256Hex(text) === revision.overviewPage.sha256, 'analysis-overview-digest');
+    projection[key] = { ...revision, ...JSON.parse(text) };
+  }
   return projection;
 }
 
@@ -3541,14 +3557,11 @@ async function main() {
       units: realRevision?.units.map((unit) => ({ ordinal: unit.unitOrdinal, state: unit.state, salvaged: unit.salvaged })),
       crossUnit: realRevision?.crossUnitReduction, sampling: realRevision?.assuranceSample, usage: realRevision?.usage,
       stages: realReport?.usagePerStage, reflection: { state: realReport?.ifRedone?.state, reason: realReport?.ifRedone?.reason, count: realReport?.ifRedone?.items.length },
-      resultDigest: realRevision?.digest, reportDigest: realReport?.reportDigest }));
-    requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
-      realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
-      realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
-      realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
-      realRevision.gaps[0].parseFailure?.code === 'schema-invalid' &&
-      realRevision.gaps[0].reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && realRevision.coverage.state === 'partial' &&
-      realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
+      resultDigest: realRevision?.digest, reportDigest: realReport?.reportDigest, accountingDigest: realReport?.accountingDigest }));
+    requireJourney(recorded?.run?.state === 'completed' && recorded.taskOutcome?.classification === 'completed' &&
+      realRevision?.ordinal === 1 && realRevision.units.every((unit) => unit.state === 'closed') && realRevision.gaps.length === 0 &&
+      realRevision.units[0].unresolved.length === 7 && realRevision.units[0].salvaged?.filter((entry) => entry.reason === 'string-note-wrapped').length === 7 &&
+      realRevision.coverage.state === 'complete' && realRevision.coverage.unitsClosed === 8 && realRevision.coverage.unitsTotal === 8, 'recorded-salvaged-unit-closure');
     requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
       realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
       realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
@@ -3576,7 +3589,7 @@ async function main() {
       realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
       recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
     'recorded-zero-new-incurred-transmissions');
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed-with-gaps' && document.querySelector('[data-analysis-unit="1"][data-analysis-unit-state="gap"]') && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===7`, 'recorded-visible-gap');
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed' && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===8 && document.querySelector('[data-analysis-unit="1"] .technical-identity')`, 'recorded-visible-salvage');
     at('restart-immutable');
     await closeOwnedBrowser();
     await launchForCleanup();
@@ -3628,9 +3641,7 @@ async function main() {
         recordedPaused.run.attempt.executionBinding.fixtureSha256 === recordedFixtureDigest &&
         sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
         sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
-        kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
-        kept[0].closed.gap.parseFailure?.code === 'schema-invalid' &&
-        kept[0].closed.gap.reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        kept.every((unit) => unit.closed.state === 'closed') && kept[0].closed.result.salvaged?.length === 7 &&
         recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
       'recorded-paused-authentic-retained-checkpoints');
     } finally { await writeFile(unitHoldPath, 'release'); }
