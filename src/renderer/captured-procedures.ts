@@ -161,14 +161,18 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   ): void {
     const procedures = el('section', 'knowledge-captured-procedures');
     procedures.dataset['procedureCount'] = String(projection.procedures.length);
-    if (!options.embeddedCatalog) procedures.append(el('h3', undefined, `${PROCEDURES_SECTION_HEADING}${projection.proceduresTruncated ? ' · 仅列最近' : ''}`));
-    else if (projection.procedures.length > 0) procedures.append(el('h4', undefined, `从运行保存的审阅工序${projection.proceduresTruncated ? ' · 仅列最近' : ''}`));
-    if (projection.procedures.length === 0 && !options.embeddedCatalog) procedures.append(el('p', 'field-note captured-procedures-empty', PROCEDURES_EMPTY));
+    if (!options.embeddedCatalog) {
+      const heading = el('h3', undefined, `${PROCEDURES_SECTION_HEADING}${projection.proceduresTruncated ? ' · 仅列最近' : ''}`);
+      if (projection.procedures.length === 0) heading.append(' · ', el('span', 'captured-procedures-empty', PROCEDURES_EMPTY));
+      procedures.append(heading);
+    } else if (projection.procedures.length > 0) procedures.append(el('h4', undefined, `从运行保存的审阅工序${projection.proceduresTruncated ? ' · 仅列最近' : ''}`));
     for (const procedure of projection.procedures) procedures.append(procedureCard(procedure, procedureVersions.get(procedure.procedureId) ?? null));
     const proposals = el('section', 'knowledge-developer-proposals');
     proposals.dataset['proposalCount'] = String(projection.proposals.length);
-    proposals.append(el('h3', undefined, `${PROPOSALS_SECTION_HEADING}${projection.proposalsTruncated ? ' · 仅列最近' : ''}`),
-      el('p', `field-note${projection.proposals.length === 0 ? ' developer-proposals-empty' : ''}`, projection.proposals.length === 0 ? PROPOSALS_EMPTY : PROPOSALS_SECTION_NOTE));
+    const proposalHeading = el('h3', undefined, `${PROPOSALS_SECTION_HEADING}${projection.proposalsTruncated ? ' · 仅列最近' : ''}`);
+    proposals.append(proposalHeading);
+    if (projection.proposals.length === 0) proposalHeading.append(' · ', el('span', 'developer-proposals-empty', PROPOSALS_EMPTY));
+    else proposals.append(el('p', 'field-note', PROPOSALS_SECTION_NOTE));
     for (const proposal of projection.proposals) proposals.append(proposalCard(proposal, proposalVersions.get(proposal.proposalId) ?? null));
     host.replaceChildren(procedures, proposals);
   }

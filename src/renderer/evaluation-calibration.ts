@@ -169,7 +169,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     heading.dataset['calibrationPageHeading'] = '';
     actualsSection.append(heading);
     const books = visibleBooks();
-    if (books.length === 0) actualsSection.append(el('p', 'field-note calibration-actuals-empty', ACTUALS_EMPTY));
+    if (books.length === 0) heading.append(' · ', el('span', 'calibration-actuals-empty', ACTUALS_EMPTY));
     const list = el('ul', 'calibration-actuals-list');
     for (const book of books) list.append(bookNode(book));
     if (books.length > 0) actualsSection.append(list);

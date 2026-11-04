@@ -415,7 +415,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     const historyHeading = el('h3', undefined, SERIES_HISTORY_HEADING);
     historyHeading.tabIndex = -1;
     history.append(historyHeading);
-    if (projection.history.length === 0) history.append(el('p', 'field-note series-history-empty', SERIES_HISTORY_EMPTY));
+    if (projection.history.length === 0) historyHeading.append(' · ', el('span', 'series-history-empty', SERIES_HISTORY_EMPTY));
     else {
       const list = el('ol', 'series-history');
       for (const change of projection.history) list.append(renderChange(change, seriesChangeLine(change)));

@@ -499,9 +499,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   function renderMilestones(next: DeliverablesProjection): HTMLElement {
     const section = el('section', 'milestone-list-section');
     const milestones = next.publication.milestones;
-    section.append(el('h4', undefined, `${MILESTONE_LIST_HEADING}${next.publication.milestonesTruncated ? ` · ${milestonesTruncatedLine(milestones.length)}` : ''}`));
+    const heading = el('h4', undefined, `${MILESTONE_LIST_HEADING}${next.publication.milestonesTruncated ? ` · ${milestonesTruncatedLine(milestones.length)}` : ''}`);
+    section.append(heading);
     if (milestones.length === 0) {
-      section.append(el('p', 'field-note milestone-list-empty', MILESTONE_LIST_EMPTY));
+      heading.append(' · ', el('span', 'milestone-list-empty', MILESTONE_LIST_EMPTY));
       return section;
     }
     const list = el('ol', 'milestone-list');
@@ -541,9 +542,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   function renderHistory(next: DeliverablesProjection): HTMLElement {
     const section = el('section', 'publication-versions-section');
     const designations = next.publication.designations;
-    section.append(el('h4', undefined, `${PUBLICATION_HISTORY_HEADING}${next.publication.designationsTruncated ? ` · ${publicationsTruncatedLine(designations.length)}` : ''}`));
+    const heading = el('h4', undefined, `${PUBLICATION_HISTORY_HEADING}${next.publication.designationsTruncated ? ` · ${publicationsTruncatedLine(designations.length)}` : ''}`);
+    section.append(heading);
     if (designations.length === 0) {
-      section.append(el('p', 'field-note publication-versions-empty', PUBLICATION_HISTORY_EMPTY));
+      heading.append(' · ', el('span', 'publication-versions-empty', PUBLICATION_HISTORY_EMPTY));
       return section;
     }
     const list = el('ol', 'publication-versions');
