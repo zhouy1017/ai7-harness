@@ -15,7 +15,7 @@ describe('J-01 renderer isolation assertion', () => {
     expect(line).toContain("typeof globalThis.process === 'undefined'");
     expect(line).toContain("typeof globalThis.require === 'undefined'");
     const list = line.slice(line.indexOf(marker) + marker.length).split("'")[0]!.split(',');
-    expect([...list, 'inspectTaskOverview', 'reorderQueuedRun', 'startQuickTasks'].sort()).toEqual(preloadMembers());
+    expect(list).toEqual(preloadMembers());
     expect(new Set(list).size).toBe(list.length);
   });
 

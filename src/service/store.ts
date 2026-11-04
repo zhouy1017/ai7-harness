@@ -1,3 +1,4 @@
+import { composeTaskOverview } from './task-overview.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -760,7 +761,6 @@ import {
   RESUME_BLOCKED_OFFLINE,
   ANSWER_BLOCKED_CONNECTION,
   ANSWER_BLOCKED_OFFLINE,
-  RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
   type BaselineCancellationRanges,
   assuranceSelector,
@@ -850,7 +850,6 @@ import {
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RANGE_REASON,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   QUICK_START_RESEND,
   RULE_STATE_LABELS,
   SET_RULE_BUDGET,
@@ -4349,7 +4348,6 @@ export class EditorialStore {
     // either — and the device online when the route reaches its model over the network.
     if (plan.runControl?.resume != null) {
       const blockers: string[] = [];
-      if (connectivity.slotBusy()) blockers.push(RESUME_BLOCKED_SLOT);
       if (plan.start.needsModelConnection && (await credentialReadiness(binding)) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
       plan = withResumeBlockers(plan, blockers);
@@ -5427,7 +5425,6 @@ export class EditorialStore {
     const plan = await this.inspectTaskPlanWithConnection({ bookId: input.bookId, kind: 'review-run', ref: input.reviewRunId },
       runtime.credentialReadiness, runtime.connectivity, progress);
     if (plan.start.readiness !== 'ready') return fallBack(plan.start.readiness === 'offline' ? QUICK_START_OFFLINE : QUICK_START_NOT_READY);
-    if (runtime.connectivity.slotBusy()) return fallBack(QUICK_START_SLOT_BUSY);
     // Re-read every match after asynchronous credential readiness, before recording the one approval.
     const now = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
     const active = this.#ruleCall(() => this.#rules.activeFor(input.bookId, now.pattern));
@@ -5495,7 +5492,6 @@ export class EditorialStore {
       default:
         return fellBack(QUICK_START_NOT_READY);
     }
-    if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
     const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
       { kind: 'default-execution-rule', ruleVersionId }));
     return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId };
@@ -14959,13 +14955,28 @@ export class EditorialStore {
     });
   }
 
+  inspectTaskOverview(progress: ProgressReader, capacity: number, queuePosition: (id: string) => number | null, queueFrozen: boolean,
+    dialogueLive: (id: string) => LiveAnswer | null = () => null): import('../shared/protocol.js').TaskOverviewProjection {
+    const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title').all() as SqlRow[])
+      .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
+    const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, 'slot', dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
+    const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
+    return composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
+      if (item.runRecordId === null || !['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
+      const report = this.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: item.runRecordId }).detail?.report;
+      if (!report) return null;
+      return { calls: Object.values(report.usagePerStage).reduce((sum, stage) => sum + stage.requests, 0),
+        elapsed: report.stages.reduce((sum, stage) => sum + (stage.wallMs ?? 0), 0) };
+    });
+  }
+
   /**
    * The Book's 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044): 待我处理's readings of this
    * Book's Tasks alone — its latest baseline Task and Review Run, prepared ones included, and every finished one, the
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -14974,8 +14985,12 @@ export class EditorialStore {
       try {
         const baseline = this.#baselineAnalysis.attentionReadings(progress, '', limit, { bookId, cancelled: true });
         const review = this.#reviewRuns.attentionReadings(progress, '', limit, { bookId, prepared: true });
+        const otherOutcomes = (['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).flatMap((kind) => {
+          const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
+          return ledger === null ? [] : ledger.attentionReadings(progress, '', limit, { bookId, cancelled: true }).outcomes.map((outcome) => ({ kind, outcome }));
+        });
         return composeBookTasks({
-          bookId,
+          bookId, otherOutcomes, ...(recentLimit === undefined ? {} : { recentLimit }),
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
           waitingTasks: this.#waitingTaskAttention(bookId, limit, progress),

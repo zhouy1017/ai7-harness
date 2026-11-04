@@ -476,7 +476,7 @@ describe('暂停 and 续行 over the real store', () => {
     }
   }, 300_000);
 
-  it('refuses 续行 while the plan moved or the slot is held, saying which, and records nothing', async () => {
+  it('refuses changed plans and permits 续行 to wait on capacity without recording a new Run', async () => {
     const store = await openWithRoute();
     const execution = owner(store);
     try {
@@ -488,7 +488,7 @@ describe('暂停 and 续行 over the real store', () => {
       const input = { bookId, kind: 'baseline-analysis' as const, ref: taskIntentId };
       // The slot held by another Run: 续行 waits for it, in the service's own words.
       const busy = await store.inspectTaskPlanWithConnection(input, async () => null, { ...ONLINE, slotBusy: () => true }, () => null);
-      expect(busy.runControl?.resume?.reason).toBe(RESUME_BLOCKED_SLOT);
+      expect(busy.runControl?.resume?.reason).toBeNull();
       // This route reads a local fixture and sends nothing: it asks for no credential, and the device's network is
       // not its concern…
       const local = await store.inspectTaskPlanWithConnection(input, async () => 'missing', { ...ONLINE, reading: () => 'offline' }, () => null);

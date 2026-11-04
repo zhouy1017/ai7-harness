@@ -757,7 +757,7 @@ export class BaselineAnalysisExecutionOwner {
    * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
    * stops leaves those records recoverable; restart blocks them before dispatch and requires a fresh explicit start.
    */
-  readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
+  readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore; resume?: true }> = [];
   #disposed = false;
   readonly #stateWaiters = new Set<() => void>();
   #backgroundIdle = true;
@@ -924,6 +924,7 @@ export class BaselineAnalysisExecutionOwner {
    * reasons.
    */
   get busy(): boolean {
+    if (this.#queueFrozen) return true;
     const occupying = this.#occupiedPlaces();
     return occupying.length + (this.#curation === null ? 0 : 1) >= this.#capacity || (this.#live() !== null &&
       occupying.filter((run) => !this.#backgroundActive.has(run.runRecordId)).length >= LIVE_FOREGROUND_PLACES);
@@ -987,6 +988,24 @@ export class BaselineAnalysisExecutionOwner {
     return index < 0 ? null : index + 1;
   }
 
+  #queueFrozen = false;
+  get queueFrozen(): boolean { return this.#queueFrozen; }
+  freezeQueue(frozen: boolean): void {
+    this.#queueFrozen = frozen;
+    if (!frozen) this.#drain();
+    this.#changed();
+  }
+
+  resumeOrQueue(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    if (this.#active.has(runRecordId) || this.#queued.some((entry) => entry.runRecordId === runRecordId)) return;
+    if (!this.#queueFrozen && this.#placeForRun(runRecordId, ledger) && this.#queued.length === 0) {
+      this.admitAndDispatch(runRecordId, ledger, { resume: true });
+    } else {
+      this.#queued.push({ runRecordId, ledger, resume: true });
+      this.#changed();
+    }
+  }
+
   /** Move one admitted-but-not-started Run inside the in-memory FIFO (Issue #1328). */
   reorderQueuedRun(runRecordId: string, position: number): number {
     if (!Number.isSafeInteger(position) || position < 1) {
@@ -1019,7 +1038,7 @@ export class BaselineAnalysisExecutionOwner {
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
     // Read the persisted origin even when a caller supplies a scheduling hint: it cannot borrow the other origin's place.
     const placeFree = this.#blockOnRefusal(runRecordId, ledger, () => this.#placeForRun(runRecordId, ledger));
-    if (placeFree && (origin === 'background' || this.#queued.length === 0)) {
+    if (!this.#queueFrozen && placeFree && (origin === 'background' || this.#queued.length === 0)) {
       this.#admitInTurn(runRecordId, ledger);
       return 'admitted';
     }
@@ -1361,6 +1380,7 @@ export class BaselineAnalysisExecutionOwner {
         settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
       }
     }
+    if (this.#queueFrozen) return;
     // Then a Run the editor answered while every place was taken (Issue #422, S76d), if it still waits for that answer.
     for (let index = 0; !this.full && !this.#disposed && index < this.#pendingAnswers.length;) {
       const next = this.#pendingAnswers[index]!;
@@ -1383,14 +1403,15 @@ export class BaselineAnalysisExecutionOwner {
     for (let index = 0; !this.full && !this.#disposed && index < this.#queued.length;) {
       const next = this.#queued[index]!;
       try {
-        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') {
+        if (next.resume ? !['paused', 'resumable', 'awaiting-clarification'].includes(next.ledger.currentRunState(next.runRecordId)) : next.ledger.currentRunState(next.runRecordId) !== 'authorized') {
           this.#queued.splice(index, 1);
           continue;
         }
         const placeFree = this.#blockOnRefusal(next.runRecordId, next.ledger, () => this.#placeForRun(next.runRecordId, next.ledger));
         if (!placeFree) { index += 1; continue; }
         this.#queued.splice(index, 1);
-        this.#admitInTurn(next.runRecordId, next.ledger);
+        if (next.resume) this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true });
+        else this.#admitInTurn(next.runRecordId, next.ledger);
       } catch {
         if (this.#queued[index] === next) this.#queued.splice(index, 1);
         // Blocked before dispatch with its reason; the next start in the queue takes the place.
@@ -1403,7 +1424,7 @@ export class BaselineAnalysisExecutionOwner {
    * envelope — a new span of the same attempt, as 续行 is — at once when the governor has a place, or as soon as it has.
    */
   continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
-    if (!this.#disposed && !this.#active.has(runRecordId) && this.#placeForRun(runRecordId, ledger)) {
+    if (!this.#disposed && !this.#queueFrozen && !this.#active.has(runRecordId) && this.#placeForRun(runRecordId, ledger)) {
       this.admitAndDispatch(runRecordId, ledger, { resume: true });
       return 'continuing';
     }
@@ -1426,7 +1447,8 @@ export class BaselineAnalysisExecutionOwner {
     if (origin === 'foreground') this.#foregroundPlaceWaiters += 1;
     try {
       if (!this.#backgroundIdle) this.setBackgroundIdle(false);
-      while (this.busy && !this.#disposed) {
+      while ((this.busy || this.#queueFrozen) && !this.#disposed) {
+        if (this.#queueFrozen) { await new Promise<void>((resolve) => this.#stateWaiters.add(resolve)); continue; }
         await Promise.race([...this.#active.values()].map((active) => active.done));
       }
     } finally { if (origin === 'foreground') this.#foregroundPlaceWaiters -= 1; }
@@ -1450,6 +1472,7 @@ export class BaselineAnalysisExecutionOwner {
    * settled here at once.
    */
   cancelRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'stopping' | 'settled' {
+    this.dequeue(runRecordId);
     this.#yielded.delete(runRecordId);
     this.#changed();
     const active = this.#active.get(runRecordId);

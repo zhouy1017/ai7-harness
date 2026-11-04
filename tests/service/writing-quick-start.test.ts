@@ -15,7 +15,6 @@ import {
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RESEND,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   SET_RULE_DEVELOPER_LIVE,
   quickStartNoRuleReason,
   ruleDriftReason,
@@ -326,7 +325,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       const taskIntentId = again.taskIntent!.taskIntentId;
       const digest = again.planEnvelope!.digest;
       expect(store.inspectWritingTask(bookId).task).toMatchObject({ taskIntentId, planEnvelopeDigest: digest, state: 'prepared' });
-      const quick = await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, ONLINE());
+      const quick = await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, { ...ONLINE(), connectivity: { ...ONLINE().connectivity, slotBusy: () => true } });
       expect(quick.outcome).toBe('started');
       expect(quick.reasons).toEqual([]);
       expect(quick.dispatchRunRecordId).not.toBeNull();
@@ -389,7 +388,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
     });
   }, 300_000);
 
-  it('stops at the plan, recording nothing, when offline, when the slot is busy, or when the rule changed or was turned off', async () => {
+  it('stops at the plan, recording nothing, when offline or when the rule changed or was turned off', async () => {
     await withSession(async (session) => {
       const { store } = session;
       const { bookId, rule, reference } = await ruledBook(session, WRITING_BOOK_TITLE);
@@ -401,9 +400,6 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
       // Offline: the Task stops at its plan, whose bar offers 联网后开始任务, as the baseline's does (Issue #760, S74c).
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_OFFLINE));
       state.connectivity = 'online';
-      state.busy = true;
-      expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, rule.ruleVersionId, runtime)).toEqual(fell(QUICK_START_SLOT_BUSY));
-      state.busy = false;
       // A version the editor did not start under — a stale one — is never used.
       expect(await store.quickStartWritingTask(bookId, taskIntentId, digest, randomUUID(), runtime)).toEqual(fell(QUICK_START_RULE_CHANGED));
       // A plan that is not the Task's own is refused outright, as 开始任务 refuses it.

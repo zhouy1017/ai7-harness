@@ -2,6 +2,8 @@ import type { NativeFilePickers } from './file-pickers.js';
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import {
   IPC_CHANNELS,
+  TASK_OVERVIEW_OPERATIONS,
+  type TaskOverviewCall,
   type DeliverablesProjection,
   type DesignatePublicationVersionInput,
   type RendererApi,
@@ -510,6 +512,31 @@ export function registerProductionAndPackageHandlers(context: {
     }),
   );
 
+  // Cross-Book task control preserves this window's manuscript and Book route.
+  ipcMain.handle(IPC_CHANNELS.taskOverviewCall, (event, request: TaskOverviewCall) => envelope(async () => {
+    requireSender(event);
+    requireAuthority();
+    if (!request || !TASK_OVERVIEW_OPERATIONS.includes(request.operation) || !UUID_PATTERN.test(request.bookId)) {
+      throw new ServiceCallError('TASK_OVERVIEW_INVALID', '无法打开这项任务。');
+    }
+    return serializeEffect(async () => {
+      const result = await service.call(request.operation, { ...request.input, bookId: request.bookId });
+      // Preparation jobs stay owned here until terminal; the overview never borrows a Book-route job capability.
+      if (!['redoTaskPlan', 'prepareBaselineAnalysis', 'prepareCustomAnalysis'].includes(request.operation)) return result;
+      let job = result as ServiceJobProjection;
+      while (job.state === 'queued' || job.state === 'running') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        job = await service.call('pollServiceJob', { jobId: job.jobId });
+      }
+      return job;
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.controlAllTasks, (event, input: ServiceOperationMap['controlAllTasks']['input']) => envelope(async () => {
+    requireSender(event);
+    requireAuthority();
+    return serializeEffect(() => service.call('controlAllTasks', input));
+  }));
+
   ipcMain.handle(IPC_CHANNELS.inspectTaskOverview, (event) =>
     envelope(async () => {
       requireSender(event);
@@ -530,7 +557,7 @@ export function registerProductionAndPackageHandlers(context: {
     envelope(async () => {
       requireSender(event);
       requireAuthority();
-      return service.call('startQuickTasks', input);
+      return serializeEffect(() => service.call('startQuickTasks', input));
     }),
   );
 

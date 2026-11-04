@@ -105,7 +105,7 @@ describe('privacy-safe main notifications', () => {
     for (const [key, value] of Object.entries(preferenceDefaults())) if (key.startsWith('notifications.')) expect(value).toBe(false);
     expect(new Set(Object.values(NOTIFICATION_LABELS)).size).toBe(Object.values(NOTIFICATION_LABELS).length);
     for (const label of Object.values(NOTIFICATION_LABELS)) expect(label).not.toMatch(/Synthetic|\$\{|\{.*\}|书稿|任务已完成/u);
-    expect(completionLabel(item({ group: 'recent', state: 'review-completed' }))).toBe('审阅结果已可查看');
+    expect(completionLabel(item({ group: 'recent', state: 'review-completed' }))).toBe('《Synthetic private title》分析完成 · 审阅结果已可查看');
   });
   it('tells 结果待确认 from a failure and a pending decision, and a coalesced notice names the most pressing class', () => {
     const classes = [
@@ -244,7 +244,7 @@ describe('quiet notice lifetime', () => {
       show(item({ group: 'recent', state: 'analysis-completed' }));
       show(latest);
       expect(miniDocument.body.children).toHaveLength(1);
-      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
+      expect(host.children[0]?.textContent).toBe('《Synthetic private title》分析完成 · 审阅结果已可查看');
       const view = host.children[1]!;
       view.focus();
       host.dispatchEvent({ type: 'focusin' });

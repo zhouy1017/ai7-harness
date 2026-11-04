@@ -191,7 +191,7 @@ export interface TaskDrawerSurface {
    * Show one Task's plan; `returnFocus` finds the control focus goes back to when the drawer closes. `note` is said
    * beside the bar's actions until the next one — why a quick start stopped at this plan (Issue #421).
    */
-  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: { readonly cancel?: boolean }): void;
+  open(request: TaskPlanRequest, returnFocus: () => HTMLElement | null, note?: string, how?: { readonly cancel?: boolean; readonly view?: 'plan' | 'run'; readonly redo?: boolean }): void;
   /**
    * The Book's 任务 panel in the same slot (Issue #423, S77a; TASK-044): its Tasks in three groups. A plan opened from it
    * keeps `← 任务`, which comes back here.
@@ -222,6 +222,12 @@ export interface TaskDrawerSurface {
 
 type DrawerApi = Pick<
   RendererApi,
+  | 'inspectTaskOverview'
+  | 'controlAllTasks'
+  | 'startQuickTasks'
+  | 'reorderQueuedRun'
+  | 'taskOverviewCall'
+  | 'pollServiceJob'
   | 'inspectBookTasks'
   | 'inspectBaselineAnalysis'
   | 'inspectTaskPlan'
@@ -263,6 +269,7 @@ type DrawerApi = Pick<
 > & Pick<PreferencesRendererApi, 'getPreferences'>;
 
 export interface MountTaskDrawerOptions {
+  openTaskOverview?(): void;
   /** The shell's own side panel, beside `#screen`. */
   readonly root: HTMLElement;
   /** The element whose `data-task-drawer` says whether the central area makes room for the drawer. */
@@ -453,6 +460,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   let panelBookId: string | null = null;
   /** The plan was opened from a card's 取消任务: its Cancellation Impact Summary opens once the plan is painted. */
   let cancelOnOpen = false;
+  let redoOnOpen = false;
   root.classList.add('task-drawer');
   root.setAttribute('aria-labelledby', 'task-drawer-title');
   root.hidden = true;
@@ -503,8 +511,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     api,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
-    openPlan: (kind, ref, cancel) => {
-      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel });
+    openPlan: (kind, ref, cancel, redo) => {
+      if (panelBookId !== null) surface.open({ bookId: panelBookId, kind, ref }, returnFocus, undefined, { cancel, ...(redo === undefined ? {} : { redo }) });
     },
     // A dialogue Task's 打开对话 brings its dialogue to the foreground in the same slot (TASK-044, DIALOG-011).
     openTarget: (target) => {
@@ -642,6 +650,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   function setMode(next: TaskDrawerMode, focusToggle: boolean): void {
     mode = next;
+    root.dataset['taskDetailView'] = next === 'compact' ? 'run' : 'plan';
     rememberMode(next);
     syncModeButtons();
     if (plan !== null) paint(plan, true);
@@ -796,6 +805,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (details) details.open = true;
     }
     paintBar(next);
+    if (redoOnOpen) { redoOnOpen = false; bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
+    footer.textContent = TASK_DRAWER_FOOTER;
+    if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {
+      if (plan?.ref !== next.ref || root.hidden) return;
+      const item = overview.groups.flatMap((group) => group.items).find((item) => item.bookId === next.bookId && item.plan?.ref === next.ref);
+      footer.replaceChildren(document.createTextNode(`已记录 · ${item?.queuePosition == null ? '等待运行名额' : `排在第 ${item.queuePosition} 位`} · `));
+      const link = control('查看任务总览', 'quiet', 'overview'); link.addEventListener('click', () => options.openTaskOverview?.()); footer.append(link);
+    });
     if (interrupted) disableAll();
     if (focusCancelImpact && bar.querySelector<HTMLElement>(`#${CANCEL_IMPACT_ID} h4`) !== null) {
       focusTitle = false;
@@ -2653,6 +2670,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       view = 'plan';
       panelBookId = null;
       cancelOnOpen = how?.cancel === true;
+      redoOnOpen = how?.redo === true;
+      root.dataset['taskDetailView'] = how?.view ?? 'plan';
+      if (how?.view) { mode = how.view === 'run' ? 'compact' : 'full'; syncModeButtons(); }
       showView();
       if (request?.ref !== next.ref || request?.bookId !== next.bookId || request?.kind !== next.kind) startWhen = 'now';
       request = next;
@@ -2781,7 +2801,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     followScreen(state, bookId) {
       if (root.hidden) return;
       const book = view === 'plan' ? request?.bookId ?? null : panelBookId;
-      const kept = bookId !== null && bookId === book && COPILOT_SCREENS.includes(state);
+      const kept = state === 'task-overview' || bookId !== null && bookId === book && COPILOT_SCREENS.includes(state);
       // The composer stays beside its own Book (TASK-006): anything else collapses it, the draft left with its Book.
       if (view === 'composer') {
         if (!kept) {

@@ -17,7 +17,7 @@ const TASKS: BookTasksProjection = {
 let uninstall: () => void;
 beforeEach(() => {
   uninstall = installMiniDom();
-  (globalThis as Record<string, unknown>)['window'] = { setTimeout, clearTimeout };
+  (globalThis as Record<string, unknown>)['window'] = { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => {} };
 });
 afterEach(() => {
   delete (globalThis as Record<string, unknown>)['window'];
@@ -30,6 +30,7 @@ function harness() {
   const root = miniDocument.createElement('aside');
   miniDocument.body.append(root);
   const api = {
+    inspectTaskOverview: async () => ({ groups: ['running', 'queued', 'waiting', 'paused', 'recent'].map((key) => ({ key, items: [], total: 0 })), books: [{ bookId: selectedBook, title: '春江' }], capacity: 2, queueFrozen: false, runningCount: 0, queuedCount: 0, actionableCount: 0 }),
     inspectBookTasks: async () => { reads.tasks += 1; return { ...TASKS, bookId: selectedBook }; },
     inspectBaselineAnalysis: async () => { throw new Error('none'); },
     inspectTaskPlan: async () => { reads.plans += 1; throw new Error('none'); },

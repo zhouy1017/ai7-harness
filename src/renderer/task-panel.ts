@@ -1,3 +1,4 @@
+import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -93,11 +94,11 @@ import {
  * plan or its own surface. The panel reads; it grants nothing.
  */
 export interface TaskPanelOptions {
-  readonly api: Pick<RendererApi, 'inspectBookTasks' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun' | 'controlTaskRun'>;
+  readonly api: Pick<RendererApi, 'inspectBookTasks' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun' | 'controlTaskRun' | 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** A Task's plan in the drawer; `cancel` opens it with 取消任务's Cancellation Impact Summary open. */
-  openPlan(kind: TaskPlanKind, ref: string, cancel: boolean): void;
+  openPlan(kind: TaskPlanKind, ref: string, cancel: boolean, redo?: boolean): void;
   /** A Task's own record: ②A for an analysis, ②B for a 审阅. */
   openTarget(target: GlobalAttentionTarget): void;
   /** 查看结果: the finished Task's result in the floating window beside the text. */
@@ -212,6 +213,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
   let working = false;
   let paused = false;
   let selected: ComposeMode | null = null;
+  let overview: TaskOverviewSurface | undefined;
 
   function clearTimer(): void {
     if (timer !== undefined) window.clearTimeout(timer);
@@ -271,26 +273,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     scope.textContent = taskPanelScopeLine(total);
     paintParked();
     paintCompose();
-    groups.replaceChildren(...tasks.groups.map((group) => {
-      const section = el('section', 'task-panel-group');
-      section.dataset['taskGroup'] = group.key;
-      const heading = el('h3', undefined, TASK_PANEL_GROUP_LABELS[group.key]);
-      heading.id = uid(`group-${group.key}`);
-      section.setAttribute('aria-labelledby', heading.id);
-      const count = el('span', 'task-panel-count', String(group.total));
-      heading.append(' ', count);
-      section.append(heading);
-      if (group.items.length === 0) {
-        section.append(el('p', 'field-note task-panel-empty', TASK_PANEL_EMPTY_LINES[group.key]));
-      } else {
-        const list = el('ul', 'task-panel-list');
-        for (const entry of group.items) list.append(card(entry));
-        section.append(list);
-        const more = taskPanelMoreLine(group.key, group.items.length, group.total);
-        if (more !== null) section.append(el('p', 'field-note', more));
-      }
-      return section;
-    }));
+    overview?.refresh();
     if (restore !== null) {
       const target = restore.item !== null && restore.action !== null
         ? element.querySelector<HTMLElement>(`[data-task-item-id="${CSS.escape(restore.item)}"] [data-task-action="${restore.action}"]`)
@@ -300,35 +283,6 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     }
     // Every group's order and every control's state follow a read; so does whether the whole panel is disabled.
     if (working) for (const control of element.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
-  }
-
-  function card(entry: BookTaskItemProjection): HTMLElement {
-    const view = taskPanelCardView(entry);
-    const item = el('li', 'task-card');
-    item.dataset['taskItemId'] = entry.item.itemId;
-    item.dataset['taskState'] = entry.item.state;
-    item.dataset['taskBlocked'] = String(entry.item.blocked);
-    const title = el('h4', 'task-card-title', view.title);
-    title.id = uid('card');
-    item.setAttribute('aria-labelledby', title.id);
-    const pill = el('span', `state-term status-pill review-pill task-card-pill review-pill-${view.pill.tone}`, view.stateLabel);
-    pill.dataset['pillTone'] = view.pill.tone;
-    pill.dataset['pillShape'] = view.pill.shape;
-    const head = el('div', 'task-card-head');
-    head.append(title, pill);
-    const actions = el('div', 'button-row compact-actions task-card-actions');
-    for (const entryAction of view.actions) actions.append(actionButton(entry, entryAction));
-    item.append(el('p', 'task-card-kind', view.kindLabel), head, el('p', 'task-card-reason', view.reason), el('p', 'field-note task-card-time', view.timeLine), actions);
-    return item;
-  }
-
-  function actionButton(entry: BookTaskItemProjection, entryAction: TaskPanelAction): HTMLButtonElement {
-    const node = el('button', entryAction.primary ? 'secondary' : 'quiet', entryAction.label);
-    node.type = 'button';
-    node.dataset['taskAction'] = entryAction.key;
-    node.disabled = working;
-    node.addEventListener('click', () => void act(entry, entryAction));
-    return node;
   }
 
   /** The Task Intent a baseline card names; `null` for any other Task. */
@@ -524,6 +478,12 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       scope.textContent = '';
       compose.replaceChildren();
       groups.replaceChildren(el('p', 'field-note task-panel-loading', TASK_PANEL_STATUS_LINES.loading));
+      overview?.destroy();
+      overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus,
+        openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, false, view === 'redo'); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
+        jumpToSelection: (item) => { if (item.selection) options.jumpToSelection({ item: item.attention, result: item.result, selection: item.selection }); },
+        openBook: () => {}, openResult: (item) => { const entry = tasks?.groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === item.itemId); if (entry) options.openResult(entry); },
+      });
       read(true);
     },
     refresh() {
@@ -535,12 +495,16 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       ticket += 1;
       clearTimer();
       bookId = null;
+      overview?.destroy();
+      overview = undefined;
       paused = false;
     },
     pause() {
       ticket += 1;
       clearTimer();
       paused = true;
+      overview?.destroy();
+      overview = undefined;
     },
   };
 }

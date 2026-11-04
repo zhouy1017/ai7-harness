@@ -1,101 +1,48 @@
-import type {
-  GlobalAttentionItemProjection,
-  GlobalAttentionProjection,
-  TaskOverviewGroupKey,
-  TaskOverviewItemProjection,
-  TaskOverviewProjection,
-} from '../shared/protocol.js';
+import type { BookTaskItemProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewGroupKey, TaskOverviewItemProjection, TaskOverviewProjection, TaskPlanKind } from '../shared/protocol.js';
 
 const GROUPS: readonly TaskOverviewGroupKey[] = ['running', 'queued', 'waiting', 'paused', 'recent'];
-
-function runRecordIdOf(item: GlobalAttentionItemProjection): string | null {
-  const row = item.technical.find((entry) => entry.key === 'run-record' || entry.key === 'run-records');
-  if (row === undefined) return null;
-  return row.value.split(' · ')[0] ?? null;
+export function taskPlanTarget(item: GlobalAttentionItemProjection): { kind: TaskPlanKind; ref: string | null } | null {
+  const target = item.target;
+  if (target.kind === 'analysis' || target.kind === 'analysis-plan') return { kind: 'baseline-analysis', ref: target.taskIntentId };
+  if (target.kind === 'review' || target.kind === 'review-plan') return { kind: 'review-run', ref: target.reviewRunId };
+  if (target.kind === 'task-plan') return { kind: target.taskKind, ref: target.ref };
+  return null;
 }
-
-function taskKindOf(item: GlobalAttentionItemProjection): string {
-  switch (item.object.kind) {
-    case 'analysis': return '分析';
-    case 'review': return '审阅';
-    case 'dialogue': return '对话';
-    case 'task': return item.object.taskKind;
-    default: return '任务';
+const KIND_LABELS: Record<string, string> = { 'baseline-analysis': '分析', 'review-run': '审阅', 'initial-evaluation': '评估', 'readers-report': '评估', 'evaluation-rewrite': '评估', writing: '写作', 'fixed-task': '工序' };
+export function taskOverviewItem(item: GlobalAttentionItemProjection, queuePosition: (id: string) => number | null, result: BookTaskItemProjection['result'] = null): TaskOverviewItemProjection {
+  const runRecordId = item.technical.find((row) => row.key === 'run-record' || row.key === 'run-records')?.value.split(' · ')[0] ?? null;
+  const position = runRecordId === null ? null : queuePosition(runRecordId);
+  let group: TaskOverviewGroupKey = item.group === 'recent' ? 'recent' : item.group === 'exceptions' || item.group === 'decisions' ? 'waiting'
+    : position !== null || ['analysis-waiting-capacity', 'analysis-waiting-idle', 'review-waiting'].includes(item.state) ? 'queued'
+    : ['analysis-paused', 'analysis-pausing', 'analysis-resumable', 'analysis-yielded'].includes(item.state) ? 'paused' : 'running';
+  const plan = taskPlanTarget(item);
+  const taskKind = item.object.kind === 'dialogue' ? '对话' : KIND_LABELS[plan?.kind ?? ''] ?? '工序';
+  const modes: Record<string, string> = { 'first-baseline': '全书', 'reanalyze-book': '重新分析全书', 'reanalyze-range': '重新分析所选范围', 'sync-current': '同步到当前稿件' };
+  const label = item.object.kind === 'analysis' ? `基线分析 · ${modes[item.object.mode] ?? '全书'}`
+    : item.object.kind === 'dialogue' ? `对话${item.object.question ? ` · ${item.object.question}` : ''}`
+    : item.object.kind === 'review' ? `审阅 · 第 ${item.object.ordinal} 次`
+    : item.object.kind === 'draft' ? `任务草稿 · 「${item.object.goal}」` : taskKind;
+  return { itemId: item.itemId, bookId: item.book.bookId, bookTitle: item.book.title, taskKind, label, at: item.at,
+    selection: null, attention: item, detail: item.object.kind === 'dialogue' ? item.object.question : null, plan, result,
+    state: group === 'recent' ? item.state === 'analysis-cancelled' ? 'cancelled' : ['analysis-interrupted', 'analysis-failed', 'review-stopped', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'].includes(item.state) ? 'stopped' : 'completed' : group,
+    progress: item.facts.progress === null ? null : { done: item.facts.progress.unitsSettled, total: item.facts.progress.unitsTotal, currentUnitLabel: null, elapsedMs: null, modelWaiting: item.state === 'analysis-running' && item.facts.progress.stage !== 'units' },
+    queuePosition: position, eta: null, usage: null, nextAction: item.nextStep, runRecordId, target: item.target };
+}
+/** Pure navigation projection; the Book ledgers and governor retain all authority. */
+export function composeTaskOverview(attention: GlobalAttentionProjection, capacity: number, queuePosition: (id: string) => number | null,
+  entries?: readonly BookTaskItemProjection[], books: TaskOverviewProjection['books'] = [], queueFrozen = false,
+  usage: (item: TaskOverviewItemProjection) => TaskOverviewItemProjection['usage'] = () => null): TaskOverviewProjection {
+  const source: readonly BookTaskItemProjection[] = entries ?? attention.groups.flatMap((group) => group.items).map((item) => ({ item, result: null }));
+  const unique = new Map<string, TaskOverviewItemProjection>();
+  for (const entry of source) {
+    if (!['analysis', 'analysis-plan', 'review', 'review-plan', 'task-plan', 'dialogue', 'task-intent-draft'].includes(entry.item.target.kind)) continue;
+    const item = taskOverviewItem(entry.item, queuePosition, entry.result);
+    unique.set(item.itemId, { ...item, selection: entry.selection ?? null, label: item.label + (entry.selection ? ' · 所选段落' : ''), usage: usage(item) });
   }
-}
-
-function labelOf(item: GlobalAttentionItemProjection): string {
-  switch (item.object.kind) {
-    case 'analysis': return item.object.mode === 'first-baseline' ? '基线分析 · 全书' : '基线分析 · 重新分析全书';
-    case 'review': return '审阅';
-    case 'dialogue': return '对话';
-    case 'task': return item.object.taskKind;
-    default: return '任务';
-  }
-}
-
-function groupOf(item: GlobalAttentionItemProjection): TaskOverviewGroupKey {
-  if (item.group === 'recent') return 'recent';
-  if (item.group === 'exceptions' || item.group === 'decisions') return 'waiting';
-  if (item.state === 'analysis-waiting-capacity' || item.state === 'analysis-waiting-idle') return 'queued';
-  if (item.state === 'analysis-paused' || item.state === 'analysis-pausing' || item.state === 'analysis-resumable' || item.state === 'analysis-yielded') return 'paused';
-  return 'running';
-}
-
-function stateOf(group: TaskOverviewGroupKey, item: GlobalAttentionItemProjection): TaskOverviewItemProjection['state'] {
-  if (group === 'recent' && item.state === 'analysis-cancelled') return 'cancelled';
-  if (group === 'recent' && (item.state === 'analysis-interrupted' || item.state === 'review-stopped')) return 'stopped';
-  if (group === 'recent') return 'completed';
-  return group;
-}
-
-function overviewItem(item: GlobalAttentionItemProjection, queuePosition: (runRecordId: string) => number | null): TaskOverviewItemProjection {
-  const group = groupOf(item);
-  const runRecordId = runRecordIdOf(item);
-  const progress = item.facts.progress === null ? null : {
-    done: item.facts.progress.unitsSettled,
-    total: item.facts.progress.unitsTotal,
-    currentUnitLabel: null,
-    elapsedMs: null,
-    modelWaiting: item.state === 'analysis-running' && item.facts.progress.stage !== 'units',
-  };
-  return {
-    itemId: item.itemId,
-    bookId: item.book.bookId,
-    bookTitle: item.book.title,
-    taskKind: taskKindOf(item),
-    label: labelOf(item),
-    state: stateOf(group, item),
-    progress,
-    queuePosition: group === 'queued' && runRecordId !== null ? queuePosition(runRecordId) : null,
-    eta: null,
-    usage: null,
-    nextAction: item.nextStep,
-    runRecordId,
-    target: item.target,
-  };
-}
-
-/** Build the cross-Book navigation projection without creating a second task ledger (Issue #1328). */
-export function composeTaskOverview(
-  attention: GlobalAttentionProjection,
-  capacity: number,
-  queuePosition: (runRecordId: string) => number | null,
-): TaskOverviewProjection {
-  const items = attention.groups.flatMap((group) => group.items)
-    .filter((item) => item.target.kind === 'analysis' || item.target.kind === 'analysis-plan' || item.target.kind === 'review' || item.target.kind === 'review-plan' || item.target.kind === 'task-plan' || item.target.kind === 'dialogue')
-    .map((item) => overviewItem(item, queuePosition));
   const groups = GROUPS.map((key) => {
-    const members = items.filter((item) => item.state === key || key === 'waiting' && item.state === 'waiting');
-    return { key, items: members, total: members.length };
+    const items = [...unique.values()].filter((item) => key === 'recent' ? ['completed', 'cancelled', 'stopped'].includes(item.state) : item.state === key);
+    items.sort((a, b) => key === 'queued' ? (a.queuePosition ?? Infinity) - (b.queuePosition ?? Infinity) : key === 'recent' ? b.at.localeCompare(a.at) : a.at.localeCompare(b.at));
+    return { key, items, total: items.length };
   });
-  const runningCount = groups.find((group) => group.key === 'running')!.total;
-  const queuedCount = groups.find((group) => group.key === 'queued')!.total;
-  return {
-    groups,
-    capacity,
-    runningCount,
-    queuedCount,
-    actionableCount: groups.find((group) => group.key === 'waiting')!.total,
-  };
+  return { groups, capacity, books, queueFrozen, runningCount: groups[0]!.total, queuedCount: groups[1]!.total, actionableCount: groups[2]!.total };
 }

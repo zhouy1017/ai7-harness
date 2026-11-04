@@ -452,6 +452,11 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       requireInput(value.input, [], tentativeId);
       break;
     }
+    case 'controlAllTasks': {
+      const input = requireInput(value.input, ['action'], tentativeId);
+      if (input.action !== 'pause' && input.action !== 'resume') throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'reorderQueuedRun': {
       const input = requireInput(value.input, ['runRecordId', 'position'], tentativeId);
       if (!validUuid(input.runRecordId) || !isSafeInteger(input.position, 1)) throw new ProtocolError(tentativeId);

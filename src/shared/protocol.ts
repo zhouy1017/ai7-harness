@@ -752,6 +752,8 @@ export const IPC_CHANNELS = {
   inspectTaskOverview: 'ai7:tasks:inspect-overview',
   reorderQueuedRun: 'ai7:tasks:reorder-queued-run',
   startQuickTasks: 'ai7:tasks:start-quick-tasks',
+  taskOverviewCall: 'ai7:tasks:call',
+  controlAllTasks: 'ai7:tasks:control-all',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   askAboutSelection: 'ai7:j16:ask-about-selection',
   inspectDialogue: 'ai7:j16:inspect-dialogue',
@@ -4639,6 +4641,12 @@ export interface TaskOverviewItemProjection {
   readonly bookTitle: string | null;
   readonly taskKind: string;
   readonly label: string;
+  readonly at: string;
+  readonly detail: string | null;
+  readonly attention: GlobalAttentionItemProjection;
+  readonly selection: BookTaskItemProjection['selection'] | null;
+  readonly plan: { readonly kind: TaskPlanKind; readonly ref: string | null } | null;
+  readonly result: BookTaskResultRef | null;
   readonly state: 'running' | 'queued' | 'waiting' | 'paused' | 'completed' | 'cancelled' | 'stopped';
   readonly progress: TaskOverviewProgressProjection | null;
   readonly queuePosition: number | null;
@@ -4659,10 +4667,26 @@ export interface TaskOverviewGroupProjection {
 export interface TaskOverviewProjection {
   readonly groups: ReadonlyArray<TaskOverviewGroupProjection>;
   readonly capacity: number;
+  readonly queueFrozen: boolean;
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
   readonly runningCount: number;
   readonly queuedCount: number;
   readonly actionableCount: number;
 }
+
+/** Existing Book-owned drawer commands reachable from the cross-Book task page. */
+export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
+  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'answerBaselineAnalysisClarification',
+  'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
+  'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
+  'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',
+  'editTaskPlan', 'editBaselineAnalysisPlan', 'resolveUnconfirmedOutcomes', 'startTaskWhenOnline', 'startTaskWhenIdle',
+  'startBaselineAnalysisWhenOnline', 'setDefaultExecutionRule', 'inspectBookTasks', 'inspectBaselineAnalysis',
+  'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
+  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis'] as const;
+export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
+export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
+export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
 
 export interface StartQuickTasksInput {
   readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string }>;
@@ -6607,6 +6631,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * no Book, because it reads across them; it is a read and records nothing.
    */
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
+  controlAllTasks: { input: { action: 'pause' | 'resume' }; output: TaskOverviewProjection };
   inspectTaskOverview: { input: Record<string, never>; output: TaskOverviewProjection };
   reorderQueuedRun: { input: { runRecordId: string; position: number }; output: TaskOverviewProjection };
   startQuickTasks: { input: StartQuickTasksInput; output: StartQuickTasksResult };
@@ -7160,6 +7185,8 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
+  taskOverviewCall(input: TaskOverviewCall): Promise<ServiceWireOutput<TaskOverviewCallResult>>;
+  controlAllTasks(input: { action: 'pause' | 'resume' }): Promise<TaskOverviewProjection>;
   inspectTaskOverview(): Promise<TaskOverviewProjection>;
   reorderQueuedRun(input: { runRecordId: string; position: number }): Promise<TaskOverviewProjection>;
   startQuickTasks(input: StartQuickTasksInput): Promise<StartQuickTasksResult>;

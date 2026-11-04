@@ -1,3 +1,4 @@
+import { startQuickTasks } from './quick-tasks.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { refreshModelServiceModels } from './provider/model-discovery.js';
 import { PROVIDER_ROUTE_PROFILES, providerModelsEndpoint } from './provider/deepseek-adapter.js';
@@ -66,7 +67,6 @@ import type { FastRoleRequests } from './fast-role/fast-role-suggestions.js';
 import { HARNESS_SESSION_LOG_DIRECTORY } from './harness/session-log.js';
 import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
-import { composeTaskOverview } from './task-overview.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
 import { proxyAwareFetch, probeProxy } from './provider/proxy-setting.js';
@@ -583,7 +583,7 @@ async function dispatch(
         else {
           // As 续行 of a baseline Run: a refusal from the owner reaches the drawer in its own words, the Run left as it was.
           try {
-            analysisExecution.admitAndDispatch(runRecordId, ledger, { resume: true });
+            analysisExecution.resumeOrQueue(runRecordId, ledger);
           } catch (error) {
             const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
             throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
@@ -652,7 +652,7 @@ async function dispatch(
       const reason = plan.runControl?.resume?.reason ?? '这项任务现在不能续行。';
       if (plan.runControl?.resume?.reason !== null) throw new StoreErrorClass('ANALYSIS_RESUME_BLOCKED', reason);
       try {
-        analysisExecution.admitAndDispatch(runRecordId, store.executionLedgerForRun(runRecordId), { resume: true });
+        analysisExecution.resumeOrQueue(runRecordId, store.executionLedgerForRun(runRecordId));
       } catch (error) {
         const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
         throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
@@ -1579,23 +1579,36 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes),
       };
-    case 'inspectTaskOverview': {
-      const attention = await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes);
-      return { id: request.id, ok: true, op: request.op,
-        result: composeTaskOverview(attention, analysisExecution.capacity, (runRecordId) => analysisExecution.queuePosition(runRecordId)) };
-    }
+    case 'inspectTaskOverview':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity,
+        (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen, (id) => dialogues.liveText(id)) };
     case 'reorderQueuedRun':
       analysisExecution.reorderQueuedRun(request.input.runRecordId, request.input.position);
-      {
-        const attention = await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes);
-        return { id: request.id, ok: true, op: request.op,
-          result: composeTaskOverview(attention, analysisExecution.capacity, (runRecordId) => analysisExecution.queuePosition(runRecordId)) };
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity,
+        (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen) };
+    case 'controlAllTasks': {
+      // Freeze first: pausing a Run must not admit another between two controls.
+      analysisExecution.freezeQueue(true);
+      const overview = store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), true);
+      const items = overview.groups.find((group) => group.key === (request.input.action === 'pause' ? 'running' : 'paused'))!.items;
+      for (const item of items) {
+        if (item.plan === null || item.plan.kind === 'fixed-task' || item.plan.ref === null || item.bookId === null) continue;
+        const input = item.plan.kind === 'baseline-analysis'
+          ? { id: request.id, op: request.input.action === 'pause' ? 'pauseBaselineAnalysisRun' as const : 'resumeBaselineAnalysisRun' as const,
+            input: { bookId: item.bookId, taskIntentId: item.plan.ref } }
+          : { id: request.id, op: 'controlTaskRun' as const, input: { bookId: item.bookId, kind: item.plan.kind, ref: item.plan.ref, action: request.input.action } };
+        await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace,
+          input, importControl, launchPolicy, connectivity, background);
       }
-    case 'startQuickTasks':
-      // Preparation remains owned by each Book's existing quick-start surface. This command intentionally
-      // reports the requested batch without inventing plan or authorization records (Issue #1328).
-      return { id: request.id, ok: true, op: request.op,
-        result: { started: 0, queued: 0, results: request.input.tasks.map(({ bookId, procedureId }) => ({ bookId, procedureId, state: 'prepared' as const })) } };
+      if (request.input.action === 'resume') analysisExecution.freezeQueue(false);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen) };
+    }
+    case 'startQuickTasks': {
+      const result = await startQuickTasks(request.input, { store, jobs, policy: launchPolicy, execution: analysisExecution,
+        connectivity: connectivity.planConnectivity, credentialReadiness: (binding) => analysisExecution.liveCredentialReadiness(binding),
+        driveReview: (id) => driveReviewRun(reviewRuns, id) });
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     // 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014): no plan and no 开始任务 (the Owner, 2026-10-07) — asking records the
     // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or
     // not; a read joins the records to the Harness Session Ledger, and to what the answer in flight has streamed so far.

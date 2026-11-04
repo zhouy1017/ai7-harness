@@ -1177,6 +1177,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // behaviour that broke.
   'J-09': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
+    'task-overview-continuous-enqueue',
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',

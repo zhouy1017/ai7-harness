@@ -2547,3 +2547,34 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 /* #1315: one development disclosure control; disabled technical content has no DOM payload. */
 [data-technical-layer][hidden], [data-technical-layer] > summary[hidden] { display: none !important; }
 .technical-layer-control { position: fixed; right: 1rem; bottom: 3rem; z-index: 90; padding: .6rem .8rem; background: var(--surface); border: 1px solid var(--boundary); border-radius: .4rem; }
+
+/* T1 task cards and shared in-Book pane (Issue #1328). */
+.task-overview-card { display:flex; align-items:center; gap:16px; position:relative; padding:14px 16px; }
+.task-overview-card-body { min-width:0; flex:1; }
+.task-overview-card-title, .task-overview-card-line { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.task-overview-card-title { display:flex; gap:6px; align-items:center; }
+.task-overview-card-title strong { overflow:hidden; text-overflow:ellipsis; }
+.task-overview-card-actions { position:static; display:flex; align-items:center; gap:4px; flex-shrink:0; }
+.task-overview-card:focus { outline:2px solid var(--accent); outline-offset:2px; }
+.task-overview-more { position:relative; }
+.task-overview-more > summary { cursor:pointer; opacity:0; }
+.task-overview-card:hover .task-overview-more > summary, .task-overview-card:focus-within .task-overview-more > summary { opacity:1; }
+.task-overview-more[open] { z-index:4; }
+.task-overview-more[open] > button { display:block; background:var(--surface); }
+.task-overview-more > button { white-space:nowrap; }
+.task-overview-confirm { position:sticky; bottom:0; background:var(--surface); border:1px solid var(--boundary); padding:12px; display:flex; gap:12px; align-items:center; z-index:6; }
+.task-overview-confirm[hidden] { display:none; }
+.task-overview-sheet { width:min(760px, calc(100vw - 40px)); }
+.task-overview-sheet-books { display:grid; gap:10px; margin-bottom:18px; }
+.task-overview-sheet-book { display:flex; gap:10px; align-items:center; }
+.task-overview-sheet .sheet-foot { display:flex; gap:12px; align-items:center; }
+body:has([data-screen="task-overview"]) { --task-drawer-width:500px; }
+body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:calc(100vw - 40px); }
+.task-panel .task-overview-card { flex-wrap:wrap; }
+.task-panel .task-overview-card-actions { width:100%; justify-content:flex-end; }
+.task-panel .task-overview-heading-row { flex-wrap:wrap; }
+@media (max-width:900px) { .task-overview-card { flex-wrap:wrap; } .task-overview-card-actions { width:100%; justify-content:flex-end; } }
+
+.task-overview-card-title { flex-wrap:nowrap; }
+.task-overview-count { display:inline-block; border:1px solid var(--boundary); border-radius:12px; padding:0 6px; color:var(--text-subdued); }
+@media (forced-colors:active) { .task-overview-card { border-left:3px solid CanvasText; } .task-overview-count { border:1px solid CanvasText; } }

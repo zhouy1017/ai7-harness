@@ -765,6 +765,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
+  taskOverviewCall: (input: Parameters<RendererApi['taskOverviewCall']>[0]) => invoke<Awaited<ReturnType<RendererApi['taskOverviewCall']>>>(IPC_CHANNELS.taskOverviewCall, input),
+  controlAllTasks: (input: { action: 'pause' | 'resume' }) => invoke<ServiceOperationMap['controlAllTasks']['output']>(IPC_CHANNELS.controlAllTasks, input),
   inspectTaskOverview: () =>
     invoke<ServiceOperationMap['inspectTaskOverview']['output']>(IPC_CHANNELS.inspectTaskOverview, {}),
   reorderQueuedRun: (input: ServiceOperationMap['reorderQueuedRun']['input']) =>

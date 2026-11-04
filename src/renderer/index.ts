@@ -205,6 +205,8 @@ import { SETTINGS_HUB_GROUPS, SETTINGS_HUB_WORDS, SHELL_LABELS, type SettingsRou
 import { createBaselineAnalysisCard, analysisTabChoice, type AnalysisTabId } from './baseline-analysis-card.js';
 import { createImportReview, type RecoveryReturnContext } from './import-review.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
+import { taskOverviewApi } from './task-overview-api.js';
+import type { RendererApi, TaskOverviewItemProjection } from '../shared/protocol.js';
 
 function requiredElement(selector: string): HTMLElement {
   const node = document.querySelector<HTMLElement>(selector);
@@ -232,10 +234,13 @@ let taskSurfaceRefresh: Partial<Record<TaskPlanKind, () => void>> = {};
  * destination of the same Book is on screen (task-drawer.ts). The surfaces that raise a Task only open it;
  * since Issue #420 (S74a) its authorization bar is where every Task is started.
  */
+let overviewDrawerBookId: string | null = null;
+const overviewApi = taskOverviewApi(window.ai7, () => overviewDrawerBookId);
 const taskDrawer = mountTaskDrawer({
   root: requiredElement('#task-drawer'),
   shell: document.body,
-  api: window.ai7,
+  api: overviewApi,
+  openTaskOverview: () => void leaveThen(async () => renderTaskOverview()),
   technicalDetails,
   errorMessage: rendererErrorMessage,
   errorCode: (error) => rendererErrorData(error)?.code ?? null,
@@ -244,12 +249,16 @@ const taskDrawer = mountTaskDrawer({
   onOpen: () => manuscriptOnScreen?.closeSupportingPanel(),
   onRecorded: (kind, bookId, ref) => {
     taskSurfaceRefresh[kind]?.();
+    taskOverviewSurface?.refresh();
     // A Run started or changed here is read at once, so 待我处理 follows it in flight to its outcome and the quiet completion
     // notice hears it without the editor leaving the screen (Issue #937; NOTIF-003).
     globalAttentionReader.refresh();
     if (kind === 'review-run') manuscriptOnScreen?.followReviewMarks(bookId, ref);
   },
-  openRunSurface: (plan) => void leaveThen(() => openTaskRunSurface(plan)),
+  openRunSurface: (plan) => {
+    if ((screen.firstElementChild as HTMLElement | null)?.dataset['screen'] === 'task-overview') taskDrawer.open({ bookId: plan.bookId, kind: plan.kind, ref: plan.ref }, () => null, undefined, { view: 'run' });
+    else void leaveThen(() => openTaskRunSurface(plan));
+  },
   openConnectionSettings: () => void renderModelServiceSettings(),
   openRules: () => void renderKnowledgeBase(technicalLayerVisible ? 'rules' : 'guidelines'),
   // ① 任务面 (Issue #423, S77a): a card's own record, 查看结果's floating window and 发起全书任务.
@@ -311,12 +320,12 @@ let taskResultWindow: TaskResultWindow | undefined;
  * 查看结果 (TASK-045): the finished Task's result beside the text — level with the manuscript's text column while the
  * manuscript is on screen. Its jumps land in the manuscript and leave 回到<位置>; closing it opens the panel again.
  */
-function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void): void {
+function openTaskResult(entry: BookTaskItemProjection, backToPanel: () => void, api: RendererApi = window.ai7): void {
   taskResultWindow?.close(false);
   const bookId = entry.item.book.bookId;
   taskResultWindow = openTaskResultWindow({
     entry,
-    api: window.ai7,
+    api,
     column: () => {
       const text = screen.querySelector<HTMLElement>('[data-screen="editor"] .editor-window .ProseMirror');
       const pane = text?.closest<HTMLElement>('.editor-window') ?? null;
@@ -752,11 +761,17 @@ const globalAttentionEntry = ((): HTMLButtonElement => {
 })();
 mountGlobalAttentionEntry({ button: globalAttentionEntry, reader: globalAttentionReader, open: () => void openGlobalAttention() });
 mountProcessingIndicator(requiredElement('#processing-indicator'), globalAttentionReader);
-const showQuietNotice = mountQuietNotice((item) => void leaveThen(() => openGlobalAttentionItem(item)));
+const showQuietNotice = mountQuietNotice((item) => void leaveThen(async () => { renderTaskOverview(item.itemId); const overview = await window.ai7.inspectTaskOverview(); const task = overview.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId); if (task) await openOverviewResult(task); }));
 const observeNotifications = createNotificationObserver({
   api: window.ai7,
   focused: () => document.hasFocus(),
-  completed: showQuietNotice,
+  completed: (item) => {
+    showQuietNotice(item);
+    const currentBookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
+    if (currentBookId === item.book.bookId && localStorage.getItem('ai7.task-overview.auto-result') !== 'off') {
+      void window.ai7.inspectBookTasks().then((tasks) => { const entry = tasks.groups.flatMap((group) => group.items).find((entry) => entry.item.itemId === item.itemId); if (entry?.result) openTaskResult(entry, () => {}); });
+    }
+  },
 });
 globalAttentionReader.subscribe((reading) => {
   if (reading.kind === 'projection') observeNotifications(reading.projection);
@@ -764,12 +779,15 @@ globalAttentionReader.subscribe((reading) => {
 window.ai7.onNotificationNavigate((target) => {
   void leaveThen(async () => {
     if (target.eventId !== null && target.target !== undefined) {
-      await openGlobalAttentionTarget(target.target);
+      renderTaskOverview(target.eventId);
+      const overview = await window.ai7.inspectTaskOverview();
+      const task = overview.groups.flatMap((group) => group.items).find((item) => item.itemId === target.eventId);
+      if (task) { if (['completed', 'cancelled', 'stopped'].includes(task.state)) await openOverviewResult(task); else openOverviewTask(task); }
       return;
     }
     const projection = await window.ai7.inspectGlobalAttention();
     const item = projection.groups.flatMap((group) => group.items).find((entry) => entry.itemId === target.eventId && entry.book.bookId === target.bookId);
-    if (item) await openGlobalAttentionItem(item);
+    if (item) { renderTaskOverview(item.itemId); const overview = await window.ai7.inspectTaskOverview(); const task = overview.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId); if (task) openOverviewTask(task); }
     else await openGlobalAttention(target.bookId);
   });
 });
@@ -1038,6 +1056,7 @@ function restoreCurrentScreen(): () => void | Promise<void> {
 }
 
 function replaceScreen(state: string, content: HTMLElement, place: ShellPlace | null = null): void {
+  if (state !== 'task-overview') overviewDrawerBookId = null;
   screenReturns.enter(state, restoreCurrentScreen());
   const previous = screen.firstElementChild;
   const recoveryReturn = currentRecoveryReturn();
@@ -1128,6 +1147,7 @@ function renderGlobalAttention(bookId?: string | null): void {
     return { ...projection, groups, actionableCount };
   };
   const surface = mountGlobalAttention({
+    openTasks: () => renderTaskOverview(),
     root: content,
     reader: bookId === undefined ? globalAttentionReader : {
       ...globalAttentionReader,
@@ -1150,17 +1170,34 @@ function renderGlobalAttention(bookId?: string | null): void {
 }
 
 /** Global cross-Book task queue (Issue #1328): the page is a projection; records remain Book-owned. */
-function renderTaskOverview(): void {
-  const content = panel();
-  content.classList.add('task-overview');
-  const surface = mountTaskOverview({
-    root: content,
-    api: window.ai7,
-    setStatus,
-    openTarget: (item) => void openGlobalAttentionTarget(item.target),
+function openOverviewTask(item: TaskOverviewItemProjection, view: 'plan' | 'run' | 'redo' = 'run'): void {
+  overviewDrawerBookId = item.bookId;
+  const finder = () => [...screen.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId) ?? null;
+  if (item.target.kind === 'dialogue') taskDrawer.openDialogue(item.target.bookId, item.target.dialogueId, finder);
+  else if (item.bookId && item.plan) taskDrawer.open({ bookId: item.bookId, ...item.plan }, finder, undefined, { view: view === 'redo' ? 'plan' : view, redo: view === 'redo' });
+}
+async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
+  if (!item.bookId) return;
+  const api = taskOverviewApi(window.ai7, () => item.bookId);
+  if (item.result) openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), api);
+  else openOverviewTask(item, 'run');
+}
+function renderTaskOverview(focusItemId?: string): void {
+  taskDrawer.close(false);
+  const content = panel(); content.classList.add('task-overview');
+  const surface = mountTaskOverview({ root: content, api: window.ai7, setStatus,
+    openTarget: openOverviewTask,
+    openBook: (bookId) => void requestBookWorkbenchRoute({ kind: 'book', bookId }),
+    jumpToSelection: (item) => { if (item.bookId && item.selection) void jumpToSelectionText(item.bookId, item.selection); },
+    openResult: (item) => void openOverviewResult(item), closeDrawer: () => taskDrawer.close(true),
+    configure: (bookId, kind) => void requestBookWorkbenchRoute({ kind: 'book', bookId }, async (route) => {
+      if (kind === 'review') renderBookReview(bookId, route.bookTitle);
+      else renderBookDeliverables(bookId, route.bookTitle);
+      const back = button('返回任务总览', 'quiet', () => renderTaskOverview()); content.append(back); screen.firstElementChild?.append(back);
+    }),
   });
-  replaceScreen('task-overview', content);
-  taskOverviewSurface = surface;
+  replaceScreen('task-overview', content); taskOverviewSurface = surface;
+  if (focusItemId) { surface.focus(focusItemId); window.setTimeout(() => surface.focus(focusItemId), 300); }
 }
 
 /**

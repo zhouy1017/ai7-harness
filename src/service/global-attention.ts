@@ -300,6 +300,7 @@ export interface GlobalAttentionReadings {
   readonly imports: ReadonlyArray<ImportAttentionReading>;
   readonly recoveries: ReadonlyArray<RecoveryAttentionReading>;
   readonly conflicts: ReadonlyArray<ConflictAttentionReading>;
+  readonly recentLimit?: number;
   readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
   readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
   /** Every other ledger kind's Runs waiting to start once online, or blocked because their plan moved (Issue #760). */
@@ -1009,7 +1010,9 @@ export function composeGlobalAttention(readings: GlobalAttentionReadings, now: D
  * cancelled — and 最近完成 without an age limit.
  */
 export interface BookTaskReadings {
+  readonly otherOutcomes?: ReadonlyArray<{ kind: 'initial-evaluation' | 'readers-report' | 'evaluation-rewrite' | 'writing'; outcome: AnalysisOutcomeAttentionReading }>;
   readonly bookId: string;
+  readonly recentLimit?: number;
   readonly analysisTasks: ReadonlyArray<AnalysisTaskAttentionReading>;
   readonly analysisOutcomes: ReadonlyArray<AnalysisOutcomeAttentionReading>;
   /** The Book's other ledger kinds' Runs waiting to start once online, or blocked because their plan moved (Issue #760). */
@@ -1194,6 +1197,11 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
       result: reading.revisionId === null ? null : { kind: 'analysis-revision', revisionId: reading.revisionId },
     });
   }
+  for (const { kind, outcome } of readings.otherOutcomes ?? []) {
+    const built = analysisOutcomeItem(outcome);
+    entries.push({ item: { ...built, itemId: `task-outcome:${outcome.runRecordId}`, object: { kind: 'task', taskKind: kind },
+      target: { kind: 'task-plan', bookId: outcome.bookId, taskKind: kind, ref: outcome.taskIntentId } }, result: null });
+  }
   // A selection Run's card carries the paragraphs it was started on, for 跳到所选文字 (Issue #423, S77 deferred item d).
   const onSelection = (reading: ReviewRunAttentionReading): Pick<BookTaskItemProjection, 'selection'> =>
     reading.selection === undefined ? {} : { selection: { manuscriptId: reading.selection.manuscriptId, fromBlockId: reading.selection.fromBlockId, toBlockId: reading.selection.toBlockId } };
@@ -1222,7 +1230,7 @@ export function composeBookTasks(readings: BookTaskReadings): BookTasksProjectio
     const order: GlobalAttentionGroupKey = key === 'waiting' ? 'decisions' : key === 'running' ? 'active' : 'recent';
     const byItem = new Map(members.map((entry) => [entry.item, entry] as const));
     const ordered = orderGlobalAttentionItems(order, members.map((entry) => entry.item)).map((entry) => byItem.get(entry)!);
-    const limit = key === 'recent' ? BOOK_TASK_RECENT_LIMIT : GLOBAL_ATTENTION_GROUP_LIMIT;
+    const limit = key === 'recent' ? readings.recentLimit ?? BOOK_TASK_RECENT_LIMIT : GLOBAL_ATTENTION_READ_LIMIT;
     return { key, items: ordered.slice(0, limit), total: ordered.length };
   });
   return {

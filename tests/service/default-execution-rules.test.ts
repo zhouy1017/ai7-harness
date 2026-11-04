@@ -15,7 +15,6 @@ import {
   QUICK_START_OFFLINE,
   QUICK_START_RANGE_REASON,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   SET_RULE_FIRST_BASELINE,
   quickStartNoRuleReason,
 } from '../../src/service/default-execution-rules.js';
@@ -333,7 +332,7 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
         .toEqual({ available: true, reason: null, rule: { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: 1, name: rule.name } });
 
       const plan = prepare(store, bookId, 'reanalyze-book');
-      const state = { connectivity: 'online' as Connectivity, busy: false };
+      const state = { connectivity: 'online' as Connectivity, busy: true };
       const quick = await store.quickStartBaselineAnalysis(bookId, plan.taskIntent!.taskIntentId, plan.planEnvelope!.digest, rule.ruleVersionId,
         { credentialReadiness: async () => null, connectivity: reader(state) });
       expect(quick.outcome).toBe('started');
@@ -365,7 +364,7 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
     }
   }, 300_000);
 
-  it('stops at the plan, recording nothing, when offline, when the slot is busy, or when the rule was turned off', async () => {
+  it('stops at the plan, recording nothing, when offline or when the rule was turned off', async () => {
     const store = await openWithRoute();
     const owner = ownerOf(store);
     try {
@@ -379,10 +378,6 @@ describe('快速开始 over the real store (TASK-017, TASK-020, TASK-026, TASK-0
       expect(await store.quickStartBaselineAnalysis(bookId, taskIntentId, digest, rule.ruleVersionId, runtime))
         .toEqual({ outcome: 'fell-back', reasons: [QUICK_START_OFFLINE], dispatchRunRecordId: null });
       state.connectivity = 'online';
-      state.busy = true;
-      expect(await store.quickStartBaselineAnalysis(bookId, taskIntentId, digest, rule.ruleVersionId, runtime))
-        .toEqual({ outcome: 'fell-back', reasons: [QUICK_START_SLOT_BUSY], dispatchRunRecordId: null });
-      state.busy = false;
       // A version the editor did not start under — a stale one — is never used.
       expect(await store.quickStartBaselineAnalysis(bookId, taskIntentId, digest, randomUUID(), runtime))
         .toEqual({ outcome: 'fell-back', reasons: [QUICK_START_RULE_CHANGED], dispatchRunRecordId: null });
