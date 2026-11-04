@@ -38,10 +38,11 @@ async function assertShellFrame(renderer, name) {
     const header=document.querySelector('#context-header'), content=document.querySelector('.content');
     if(!header || !content || header.getBoundingClientRect().height>48 || getComputedStyle(header).flexWrap!=='nowrap' || content.querySelector('.panel') || document.querySelector('[data-shell-book-switcher]')) return false;
     const framed=(node)=>{const s=getComputedStyle(node); return s.display!=='none' && ((parseFloat(s.borderTopWidth)>0 && parseFloat(s.borderRightWidth)>0 && parseFloat(s.borderBottomWidth)>0 && parseFloat(s.borderLeftWidth)>0 && parseFloat(s.borderTopLeftRadius)>0) || s.boxShadow!=='none');};
-    for(const card of content.querySelectorAll('section,article,fieldset,div,li')) {
+    const drawer=document.querySelector('#task-drawer');
+    for(const root of [content, ...(drawer && !drawer.hidden ? [drawer] : [])]) for(const card of root.querySelectorAll('section,article,fieldset,div,li')) {
       if(!card.getClientRects().length || !framed(card) || !card.querySelector('button,input,select,textarea,a,summary,[contenteditable]')) continue;
       let depth=0;
-      for(let node=card;node && node!==content;node=node.parentElement) if(framed(node)) depth++;
+      for(let node=card;node && node!==root;node=node.parentElement) if(framed(node)) depth++;
       if(depth>2) return false;
     }
     const line=[...header.children].filter(n=>n.getClientRects().length && getComputedStyle(n).position!=='absolute');
