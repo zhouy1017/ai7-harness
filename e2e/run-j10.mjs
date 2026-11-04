@@ -1109,7 +1109,7 @@ async function main() {
       (resumable.taskOutcome ?? null) === null,
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', notePrefix: `${RESUMABLE_NOTE}；上次续行于 `, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行', note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
