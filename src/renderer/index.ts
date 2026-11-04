@@ -1877,11 +1877,10 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   if (recovery.snapshot.state !== 'eligible') {
     const unavailable = element('section', 'recovery-snapshot-disclosure');
     unavailable.dataset['snapshotState'] = recovery.snapshot.state;
-    unavailable.append(
-      element('strong', undefined, '独立恢复快照不可作为本次选择'),
-      element('p', undefined, recovery.snapshot.state === 'none' ? recovery.snapshot.limitation : recovery.snapshot.verification),
-      element('p', 'field-note', recovery.snapshot.limitation),
-    );
+    const snapshotWords = recovery.snapshot.state === 'none' || recovery.snapshot.verification === recovery.snapshot.limitation
+      ? recovery.snapshot.limitation
+      : `${recovery.snapshot.verification.replace(/。$/u, '')}；${recovery.snapshot.limitation}`;
+    unavailable.append(element('strong', undefined, '独立恢复快照不可作为本次选择'), element('p', undefined, snapshotWords));
     content.append(unavailable);
   }
   content.append(consequence);
@@ -2524,12 +2523,12 @@ async function renderBookWorkbenchChooser(
       if (summary.bookId === currentOverview.book.bookId) continue;
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
         open.disabled = true;
-        setStatus('正在打开精确图书工作台…', 'busy');
+        setStatus('正在打开图书…', 'busy');
         try {
           await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId });
         } catch (error) {
           open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
         }
       });
       open.dataset['bookId'] = summary.bookId;
@@ -3590,7 +3589,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     });
     cancel.hidden = true;
     actions.append(prepare, cancel);
-    form.append(label, goal, element('p', 'field-note', '目标由当前 J-03 工作流固定；不会构造模型请求。'), actions);
+    form.append(label, goal, element('p', 'field-note', technicalWords('目标由当前 J-03 工作流固定；不会构造模型请求。', '目标已确定，本次不会调用模型。')), actions);
     card.append(form);
   } else {
     const checkpoint = projection.checkpoint!;
@@ -3781,7 +3780,7 @@ async function renderSeriesList(focusSeriesId: string | null): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button('返回', 'quiet', () => void returnToOrigin()));
-  content.append(element('p', 'section-label', SERIES_TITLE), element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
+  content.append(element('h2', undefined, SERIES_TITLE), element('p', 'field-note series-lede', SERIES_LEDE), host, back);
   replaceScreen('series-list', content);
   setStatus(SERIES_STATUS.loading, 'busy');
   const surface = mountSeriesList({
@@ -3810,7 +3809,7 @@ async function renderSeries(seriesId: string): Promise<void> {
   const host = element('div');
   const back = element('div', 'button-row');
   back.append(button(SERIES_BACK_TO_LIST, 'quiet', () => void renderSeriesList(seriesId)));
-  content.append(element('p', 'section-label', SERIES_TITLE), heading, note, host, back);
+  content.append(heading, note, host, back);
   replaceScreen('series', content);
   setStatus(SERIES_STATUS.loading, 'busy');
   const surface = mountSeries({ root: host, seriesId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage });
@@ -4417,12 +4416,12 @@ function renderLanding(
     for (const summary of books.items) {
       const open = button(`${summary.title} · ${summary.manuscriptStateLabel}`, 'secondary', async () => {
         open.disabled = true;
-        setStatus('正在打开精确图书工作台…', 'busy');
+        setStatus('正在打开图书…', 'busy');
         try {
           await requestBookWorkbenchRoute({ kind: 'book', bookId: summary.bookId }, undefined, activeRecoveryReturn);
         } catch (error) {
           open.disabled = false;
-          setStatus(rendererErrorMessage(error, '无法打开精确图书工作台。'), 'error');
+          setStatus(rendererErrorMessage(error, '无法打开图书。'), 'error');
         }
       });
       open.dataset['bookId'] = summary.bookId;
@@ -4430,10 +4429,12 @@ function renderLanding(
       row.append(open);
       // 作者, 责编 and 相关人 on the card (Issue #431, S83; BOOK-006).
       const peopleLine = bookCardPeopleLine(summary.people);
-      if (peopleLine !== null) row.append(element('p', 'book-people-line', peopleLine));
       const relatedLine = bookCardRelatedLine(summary.people);
-      if (relatedLine !== null) row.append(element('p', 'field-note book-related-line', relatedLine));
-      if (summary.internalNumber !== null) row.append(element('p', 'field-note', `内部编号 ${summary.internalNumber}`));
+      const facts = element('p', 'book-people-line');
+      if (peopleLine !== null) facts.append(peopleLine);
+      if (relatedLine !== null) facts.append(peopleLine === null ? '' : ' · ', element('span', 'book-related-line', relatedLine));
+      if (summary.internalNumber !== null) facts.append(facts.childNodes.length === 0 ? '' : ' · ', `内部编号 ${summary.internalNumber}`);
+      if (facts.childNodes.length > 0) row.append(facts);
       row.append(bookIdentityDisclosure(summary));
       list.append(row);
     }
@@ -4470,7 +4471,7 @@ function renderLanding(
       const open = button(
         item.recoveryAttention
           ? `${item.bookTitle} · 恢复待确认状态`
-          : `${item.bookTitle} · ${item.revisionLabel}`,
+          : `${item.bookTitle} · 当前稿件 ${item.revisionLabel}`,
         'secondary', async () => {
         open.disabled = true;
         setStatus(item.recoveryAttention ? '正在打开稿件恢复比较…' : '正在重新打开本地稿件…', 'busy');
