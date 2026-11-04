@@ -1061,8 +1061,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       planSection(4, facts([
         ...(!technicalLayerVisible ? [
           [TASK_PLAN_SERVICE_TERMS[1], ordinaryProviderName(next.service.provider)] as const,
-          [TASK_PLAN_SERVICE_TERMS[5], usage] as const,
-          [TASK_PLAN_SERVICE_TERMS[6], next.service.duration] as const,
+          ['预计用时', next.service.duration] as const,
         ] : [
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
         [TASK_PLAN_SERVICE_TERMS[1], next.service.provider],
