@@ -502,7 +502,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (latest === null) section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
     const initialBlocked = page.materialReferences?.blocked.initial === true;
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
-    if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'field-note', initial.task.historicalMarker));
     if (page.market.series.length > 0 && initial.prepare.allowed) {
       const row = el('label', 'evaluation-field');
       row.append(el('span', undefined, '参考什么'));
@@ -516,14 +515,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       row.append(select);
       section.append(row);
     }
-    if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
+    if (initial.task !== null) {
+      const taskLine = el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task));
+      if (initial.task.historicalMarker !== undefined) taskLine.append(` · ${initial.task.historicalMarker}`);
+      section.append(taskLine);
+    }
     const initialProfile = latest?.profile ?? page.profile;
     if (latest !== null) {
       section.dataset['initialRevision'] = latest.revisionId;
       section.dataset['initialCurrent'] = String(latest.current);
-      section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(initialProfile, latest)));
+      const latestLine = el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(initialProfile, latest));
       const unread = evaluationAi7UnreadLine(latest);
-      if (unread !== null) section.append(el('p', 'field-note evaluation-initial-unread', unread));
+      if (unread !== null) latestLine.append(' · ', el('span', 'evaluation-initial-unread', unread));
+      section.append(latestLine);
       const items = el('ul', 'evaluation-initial-items');
       for (const item of initialProfile.items) {
         const ai7 = latest.items.find((entry) => entry.itemId === item.itemId);
@@ -583,12 +587,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const section = el('section', 'evaluation-market');
     const heading = el('h3', undefined, EVALUATION_MARKET_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note evaluation-market-basis', `${EVALUATION_MARKET_LEDE.replace(/。$/u, '')}；${EVALUATION_MARKET_OFFLINE.replace(/。$/u, '')}；${EVALUATION_COMPARABLES_NO_WEB}`));
     const market = record.initial?.market ?? null;
+    const context = el('p', 'field-note');
+    context.append(EVALUATION_MARKET_LEDE.replace(/。$/u, ''), '；', el('span', 'evaluation-market-basis', EVALUATION_MARKET_OFFLINE.replace(/。$/u, '')), '；',
+      el('span', 'evaluation-comparables-web', market === null ? EVALUATION_COMPARABLES_NO_WEB.replace(/。$/u, '') : EVALUATION_COMPARABLES_NO_WEB));
+    if (market === null) context.append('；', el('span', 'evaluation-market-none', record.initial === null ? EVALUATION_MARKET_NONE_ALONE : EVALUATION_MARKET_NONE_INITIAL));
+    section.append(heading, context);
     section.dataset['marketAi7'] = String(market !== null);
-    if (market === null) {
-      section.append(el('p', 'field-note evaluation-market-none', record.initial === null ? EVALUATION_MARKET_NONE_ALONE : EVALUATION_MARKET_NONE_INITIAL));
-    } else {
+    if (market !== null) {
       const lists = el('div', 'evaluation-market-lists');
       for (const key of ['readers', 'sellingPoints', 'channels'] as const) {
         const card = el('div', 'evaluation-market-list');
@@ -602,15 +608,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       section.append(lists);
       // What AI7 wrote but the page does not show, and why: a quantity it cannot support, or a part out of shape (S81b2).
-      for (const reason of market.withheld) section.append(el('p', 'field-note evaluation-market-withheld', reason));
+      if (market.withheld.length > 0) {
+        const withheld = el('ul', 'evaluation-market-warnings');
+        for (const reason of market.withheld) withheld.append(el('li', 'evaluation-market-withheld', reason));
+        section.append(withheld);
+      }
     }
     // Comparable books from house data, each tagged with its source (EVAL-009); no other house's book while the web is not connected.
     const comparables = el('div', 'evaluation-comparables');
-    comparables.append(el('h4', undefined, EVALUATION_COMPARABLES_HEADING));
-    if (page.market.seriesUnreadable) {
-      comparables.append(el('p', 'field-note evaluation-comparables-none', EVALUATION_COMPARABLES_UNREADABLE));
-    } else if (page.market.comparables.length === 0) {
-      comparables.append(el('p', 'field-note evaluation-comparables-none', page.market.series.length === 0 ? EVALUATION_COMPARABLES_NO_SERIES : EVALUATION_COMPARABLES_EMPTY_SERIES));
+    const comparablesHeading = el('h4', undefined, EVALUATION_COMPARABLES_HEADING);
+    comparables.append(comparablesHeading);
+    if (page.market.seriesUnreadable || page.market.comparables.length === 0) {
+      const none = page.market.seriesUnreadable ? EVALUATION_COMPARABLES_UNREADABLE : page.market.series.length === 0 ? EVALUATION_COMPARABLES_NO_SERIES : EVALUATION_COMPARABLES_EMPTY_SERIES;
+      comparablesHeading.append(' · ', el('span', 'evaluation-comparables-none', none));
     } else {
       const list = el('ul', 'evaluation-comparable-list');
       for (const comparable of page.market.comparables) {
@@ -622,7 +632,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       comparables.append(list);
       const more = evaluationComparablesMoreLine(page.market);
-      if (more !== null) comparables.append(el('p', 'field-note', more));
+      if (more !== null) comparablesHeading.append(` · ${more}`);
     }
     section.append(comparables);
     // 预测 · 低确定性 (EVAL-009, EVAL-010): a block of its own, never a promise.
@@ -865,7 +875,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       versions.append(list);
       const unreadable = evaluationUnreadableLine(workspace.unreadableRecords);
-      if (unreadable !== null) versions.append(el('p', 'field-note evaluation-unreadable', unreadable));
+      if (unreadable !== null) heading.append(' · ', el('span', 'evaluation-unreadable', unreadable));
       if (leaving !== null && workspace.record !== null) {
         // Typed work is never lost by a click on the list: staying is the first way, and the discard says what it does.
         const target = leaving;
@@ -913,8 +923,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       // While the latest version cannot be read (Issue #726), the start names the 定稿 it will seed from and says what it skips.
       const begin = action(evaluationStartLabel(workspace.start), workspace.start.kind === 'first' && fromInitial === null ? 'primary' : 'secondary', 'start', () => void begin_(false));
       begin.disabled = busy;
+      if (workspace.start.skipDamaged !== null) begin.append(' · ', el('span', 'evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
       start.append(begin);
-      if (workspace.start.skipDamaged !== null) start.append(el('p', 'field-note evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
     } else {
       start.append(el('p', 'field-note evaluation-start-reason', workspace.start.reason));
     }
@@ -1231,7 +1241,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.append(lists);
     // The conclusion: none chosen until the editor chooses (EVAL-007).
     const conclusion = el('fieldset', 'evaluation-conclusion');
-    conclusion.append(el('legend', undefined, EVALUATION_CONCLUSION_LEGEND));
+    const conclusionLegend = el('legend', undefined, EVALUATION_CONCLUSION_LEGEND);
+    if (initial !== null && initial.suggestedConclusion === null) conclusionLegend.append(' · ', el('span', 'evaluation-ai7-conclusion', evaluationAi7ConclusionLine(record.profile, null)));
+    conclusion.append(conclusionLegend);
     for (const option of record.profile.conclusions) {
       const choice = radio(`evaluation-conclusion-${record.recordId}`, option.conclusion, option.label, record.content.conclusion === option.conclusion, readOnly);
       choice.dataset['conclusion'] = option.conclusion;
@@ -1239,7 +1251,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (initial?.suggestedConclusion === option.conclusion) choice.append(el('span', 'status-pill evaluation-ai7-suggested', EVALUATION_AI7_SUGGESTED));
       conclusion.append(choice);
     }
-    if (initial !== null) conclusion.append(el('p', 'field-note evaluation-ai7-conclusion', evaluationAi7ConclusionLine(record.profile, initial.suggestedConclusion)));
     const blocked = el('p', 'field-note evaluation-recommend-blocked', EVALUATION_RECOMMEND_BLOCKED);
     blocked.id = `evaluation-blocked-${record.recordId}`;
     conclusion.append(blocked);

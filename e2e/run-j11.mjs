@@ -416,7 +416,7 @@ const READ_EVALUATION = `(() => {
   return {
     state: host.dataset.evaluation ?? null,
     empty: host.querySelector('.evaluation-empty')?.textContent ?? null,
-    start: host.querySelector('[data-evaluation-action="start"]')?.textContent ?? null,
+    start: host.querySelector('[data-evaluation-action="start"]')?.firstChild?.textContent ?? null,
     startReason: host.querySelector('.evaluation-start-reason')?.textContent ?? null,
     versions: Array.from(host.querySelectorAll('.evaluation-version-list button'), (button) => button.textContent),
     refusal: host.querySelector('.evaluation-refusal')?.textContent ?? null,
@@ -428,9 +428,9 @@ const READ_EVALUATION = `(() => {
       const section = host.querySelector('.evaluation-initial');
       return section === null ? null : {
         state: section.dataset.initialState ?? null,
-        task: section.querySelector('.evaluation-initial-task')?.textContent ?? null,
+        task: section.querySelector('.evaluation-initial-task')?.firstChild?.textContent ?? null,
         none: section.querySelector('.evaluation-initial-none')?.textContent ?? null,
-        latest: section.querySelector('.evaluation-initial-latest')?.textContent ?? null,
+        latest: section.querySelector('.evaluation-initial-latest')?.firstChild?.textContent ?? null,
         items: Array.from(section.querySelectorAll('.evaluation-initial-items li'), (line) => [line.dataset.itemId, line.dataset.sufficiency, line.textContent]),
         conclusion: section.querySelector('.evaluation-initial-conclusion')?.textContent ?? null,
         actions: Array.from(section.querySelectorAll('.evaluation-initial-actions button'), (button) => [button.dataset.evaluationAction, button.textContent, button.disabled]),
@@ -440,7 +440,7 @@ const READ_EVALUATION = `(() => {
     record: record === null ? null : {
       state: record.dataset.evaluationState,
       entries: record.dataset.entries,
-      heading: record.querySelector('h3')?.textContent ?? null,
+      heading: record.querySelector('h3')?.firstChild?.textContent ?? null,
       revision: record.querySelector('.evaluation-revision')?.textContent ?? null,
       finalized: record.querySelector('.evaluation-finalized')?.textContent ?? null,
       ai7: record.querySelector('.evaluation-ai7')?.textContent ?? null,
@@ -452,7 +452,7 @@ const READ_EVALUATION = `(() => {
         : [record.querySelector('.evaluation-comparison h4')?.textContent ?? null, ...Array.from(record.querySelectorAll('.evaluation-comparison li'), (item) => item.textContent)],
       items: Array.from(record.querySelectorAll('.evaluation-item'), (item) => {
         const band = item.querySelector('.evaluation-band');
-        return [item.dataset.itemId, item.querySelector('legend')?.textContent ?? null, item.querySelector('[data-evaluation-field="score"]')?.value ?? null,
+        return [item.dataset.itemId, item.querySelector('legend')?.firstChild?.textContent ?? null, item.querySelector('[data-evaluation-field="score"]')?.value ?? null,
           band instanceof HTMLElement && !band.hidden ? band.textContent : null, item.querySelector('[data-evaluation-field="not-rated"]')?.checked ?? null];
       }),
       conclusions: Array.from(record.querySelectorAll('.evaluation-conclusion [data-conclusion]'), (choice) => [choice.dataset.conclusion, choice.querySelector('input')?.checked ?? null, choice.querySelector('input')?.disabled ?? null]),
@@ -1873,14 +1873,14 @@ async function main() {
       JSON.stringify(draft.record.ai7Evidence) === JSON.stringify(['AI7 的依据（9 条）', 'AI7 的依据（3 条）', 'AI7 的依据（8 条）', 'AI7 的依据（7 条）', null]) &&
       draft.record.ai7Unread === null &&
       JSON.stringify(draft.record.suggested) === JSON.stringify([null, 'AI7 建议', null, null]) &&
-      draft.record.ai7Conclusion === 'AI7 建议的结论：修改后再议（由你选定）' && JSON.stringify(draft.record.actions) === JSON.stringify(['保存评估', '定稿']) && draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100'),
+      draft.record.ai7Conclusion === null && JSON.stringify(draft.record.actions) === JSON.stringify(['保存评估', '定稿']) && draft.versions[0].startsWith('第 14 版 · AI7 初稿 · 修订版 r1 · 总分 73 / 100'),
     'initial-evaluation-draft-words', draft.record);
 
     at('evaluation-market');
     // The market section of 第 14 版 (Issue #429, S81b2; EVAL-009, EVAL-010): AI7's three lists from the 初评 it began from, marked as
     // AI7's and as resting on the Book alone — 未联网核查 — no 书系 comparable for a Book in none and no other house's book, and the
     // 预测 · 低确定性 block: 市场回报 暂无法预测, 评奖可能性 with its in-book basis, and 定价与首印 waiting for thirty published Books.
-    requireJourney(draft.market !== null && draft.market.ai7 === 'true' && draft.market.basis === MARKET_OFFLINE && draft.market.none === null &&
+    requireJourney(draft.market !== null && draft.market.ai7 === 'true' && draft.market.basis === MARKET_OFFLINE.replace(/。$/u, '') && draft.market.none === null &&
       JSON.stringify(draft.market.lists) === JSON.stringify(MARKET_LISTS) && draft.market.withheld.length === 0 &&
       JSON.stringify(draft.market.comparables) === JSON.stringify([]) &&
       draft.market.comparablesNone === '这本书不在任何书系中，没有可以列出的同书系图书。' && draft.market.comparablesWeb === '外网检索尚未接通：不列他社同类书。' &&
