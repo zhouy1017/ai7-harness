@@ -294,7 +294,7 @@ describe('the milestone form', () => {
       note: '说明 · 可选',
       save: '保存里程碑版本',
     });
-    expect(MILESTONE_PURPOSE_NOTE).toBe('用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。');
+    expect(MILESTONE_PURPOSE_NOTE).toBe('说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。');
   });
 
   it('keep 保存里程碑版本 unavailable until a label and a purpose are given, and say why', () => {

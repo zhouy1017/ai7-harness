@@ -286,7 +286,7 @@ export const MILESTONE_FORM_WORDS = {
   save: '保存里程碑版本',
 } as const;
 /** V2-UX-MILE-009: a purpose states the intended next use only and grants nothing. */
-export const MILESTONE_PURPOSE_NOTE = '用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。';
+export const MILESTONE_PURPOSE_NOTE = '说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。';
 
 /** What saving a milestone still needs: a label, a purpose, and the editor's words for 自行输入. */
 export function milestoneFormBlockers(state: { label: string; purposeKind: MilestonePurposeKind | null; customWords: string }): string[] {

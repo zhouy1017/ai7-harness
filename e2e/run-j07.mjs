@@ -1223,7 +1223,7 @@ async function main() {
       const custom = section.querySelector('#milestone-purpose-custom');
       const save = window.__j07.milestoneSave();
       return section.querySelector('label[for="milestone-label"]')?.textContent === '标签' &&
-        section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。' &&
+        section.querySelector('fieldset.milestone-purpose-options > legend')?.textContent === '用途 · 说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。' &&
         section.querySelector('label[for="milestone-note"]')?.textContent === '说明 · 可选' &&
         radios.map((radio) => radio.closest('label')?.textContent).join('|') === '阶段留档|送审候选|交付候选|其他|自行输入' &&
         radios.every((radio) => !radio.checked) && custom instanceof HTMLInputElement && custom.hidden &&
@@ -1308,7 +1308,7 @@ async function main() {
         JSON.stringify(terms) === '["图书","稿件","里程碑版本","与当前稿件","操作人","时间"]' &&
         scope instanceof HTMLInputElement && scope.required && scope.closest('label')?.querySelector('.publication-field-label')?.textContent === '发稿范围' &&
         basis instanceof HTMLTextAreaElement && basis.required && basis.closest('label')?.querySelector('.publication-field-label')?.textContent === '依据' &&
-        confirm instanceof HTMLButtonElement && confirm.disabled && confirm.textContent === '设为发稿版本' &&
+        confirm instanceof HTMLButtonElement && confirm.disabled && confirm.getAttribute('aria-label') === '设为发稿版本' &&
         cancel instanceof HTMLButtonElement && !cancel.disabled && cancel.textContent === '取消' &&
         reason instanceof HTMLElement && !reason.hidden && (reason.textContent ?? '').startsWith('还需要选择一个里程碑版本');
     })()`, 'designate-form-states-everything-and-preselects-nothing');
