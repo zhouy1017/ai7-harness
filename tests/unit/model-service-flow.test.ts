@@ -85,6 +85,34 @@ describe('the one model-service flow', () => {
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
 
+  it('shows refresh failure as an error with the discovery reason', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), {
+      modelDiscovery: { status: 'failure', code: 'AI7_PROXY_UNREACHABLE', reason: '代理不可达：请检查网络代理设置' },
+    });
+    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
+    button(node, 'refresh-model-list').click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('代理不可达：请检查网络代理设置', 'error'));
+  });
+
+  it('shows the model count after a successful refresh', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), { modelDiscovery: { status: 'success', modelCount: 7 } });
+    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
+    button(node, 'refresh-model-list').click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('模型列表已刷新，共 7 个可用模型。', 'success'));
+  });
+
+  it('shows saved credentials separately when discovery fails', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), {
+      modelDiscovery: { status: 'failure', code: 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', reason: '模型服务拒绝了凭据' },
+    });
+    const { node, setStatus } = flow(settings([], null), api(responseProjection));
+    pickChannel(node, 'anthropic-claude');
+    const secret = node.querySelectorAll('input').find((input) => input.type === 'password')!;
+    secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
+    node.querySelector('form')!.dispatchEvent({ type: 'submit', preventDefault: () => undefined });
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('凭据已保存，但无法获取模型列表：模型服务拒绝了凭据', 'error'));
+  });
+
   it.each([
     ['available', '代理可用', 'success'],
     ['https-rejected', '代理不接受 HTTPS 连接，请改用 http://host:port', 'error'],
@@ -96,6 +124,7 @@ describe('the one model-service flow', () => {
       proxy: { mode: 'proxy', protocol: 'http', hostPort: '127.0.0.1:7897' },
       lastProxyProbe: { status, checkedAt: '2026-11-04T12:00:00.000Z' }, searchBackends: { backends: [], candidates: [] },
       protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
+      modelDiscovery: { status: 'failure', code: 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', reason: '模型服务拒绝了凭据' },
       launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
         externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
     } as unknown as ModelServiceSettingsProjection;
@@ -122,6 +151,7 @@ describe('the one model-service flow', () => {
       const page = root as unknown as MiniElement;
       expect(page.querySelector('[aria-label="代理 URL"]')!.placeholder).toBe('http://127.0.0.1:端口');
       expect(page.textContent).toContain('只有代理本身提供 TLS 入口时才用 https://');
+      expect(page.querySelector('.model-service-technical [data-model-discovery-code]')!.textContent).toContain('MODEL_DISCOVERY_CREDENTIAL_REJECTED');
       pickChannel(page, 'anthropic-claude');
       page.querySelector('[data-model-service-proxy] form')!.dispatchEvent({ type: 'submit' });
       await vi.waitFor(() => expect(calls.saveModelServiceProxy).toHaveBeenCalledWith({ mode: 'proxy', protocol: 'http', hostPort: '127.0.0.1:7897', probeRoute: 'anthropic-claude' }));

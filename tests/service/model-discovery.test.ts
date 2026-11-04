@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { refreshModelServiceModels } from '../../src/service/provider/model-discovery.js';
-import { listProviderModels, PROVIDER_ROUTE_PROFILES } from '../../src/service/provider/deepseek-adapter.js';
+import { listProviderModels, modelRequestNotSent, PROVIDER_ROUTE_PROFILES } from '../../src/service/provider/deepseek-adapter.js';
 import { createServiceTestRoots } from '../support/temp-data-root.js';
 
 let store: EditorialStore | undefined;
@@ -54,15 +54,62 @@ describe('account model discovery', () => {
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     store.saveModelServiceConnection('Synthetic account', null, 'ready', 'anthropic-claude');
     const resolver = { resolve: vi.fn(async () => 'synthetic') };
-    await refreshModelServiceModels(store, null, 'anthropic-claude', resolver);
+    expect(await refreshModelServiceModels(store, null, 'anthropic-claude', resolver)).toMatchObject({ status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE' });
     expect(resolver.resolve).not.toHaveBeenCalled();
     const send = vi.fn<typeof fetch>(async () => response({ data: [{ id: 'account-opus', display_name: 'Account Opus' }, { id: 'account-haiku' }] }));
-    await refreshModelServiceModels(store, { scope: 'ordinary-production', nativeFetch: send }, 'anthropic-claude', resolver);
+    expect(await refreshModelServiceModels(store, { scope: 'ordinary-production', nativeFetch: send }, 'anthropic-claude', resolver)).toEqual({ status: 'success', modelCount: 2 });
     store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     send.mockRejectedValueOnce(new Error('offline'));
-    await refreshModelServiceModels(store, { scope: 'ordinary-production', nativeFetch: send }, 'anthropic-claude', resolver);
+    expect(await refreshModelServiceModels(store, { scope: 'ordinary-production', nativeFetch: send }, 'anthropic-claude', resolver)).toMatchObject({ status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE' });
     const models = modelServiceChannels((route) => store!.getModelServiceModels(route)).find((channel) => channel.route === 'anthropic-claude')!.models;
     expect(models).toEqual(expect.arrayContaining([expect.objectContaining({ modelId: 'account-opus', modelLabel: 'Account Opus', main: 'eligible', fast: 'eligible' }), expect.objectContaining({ modelId: 'account-haiku' })]));
+  });
+
+  it.each([
+    ['connect timeout', 'MODEL_SERVICE_UNREACHABLE', (init?: RequestInit) => { throw modelRequestNotSent(init!, Object.assign(new Error('connect timeout'), { code: 'UND_ERR_CONNECT_TIMEOUT' })); }],
+    ['401', 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', async () => new Response('', { status: 401 })],
+    ['403', 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', async () => new Response('', { status: 403 })],
+    ['HTTP 500', 'MODEL_DISCOVERY_UNAVAILABLE', async () => new Response('', { status: 500 })],
+    ['empty data', 'MODEL_DISCOVERY_EMPTY', async () => response({ data: [] })],
+    ['invalid JSON', 'MODEL_DISCOVERY_INVALID', async () => new Response('{', { headers: { 'content-type': 'application/json' } })],
+  ] as const)('reports %s and retains the last successful catalogue', async (_name, code, fetchResult) => {
+    const roots = await createServiceTestRoots('ai7-model-discovery-');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const connection = store.saveModelServiceConnection('Synthetic account', null, 'ready', 'anthropic-claude');
+    const resolver = { resolve: async () => 'synthetic' };
+    const runtime = (nativeFetch: typeof fetch) => ({ scope: 'ordinary-production' as const, nativeFetch });
+    const success = vi.fn<typeof fetch>(async () => response({ data: [{ id: 'last-good-model' }] }));
+    expect(await refreshModelServiceModels(store!, runtime(success), 'anthropic-claude', resolver)).toEqual({ status: 'success', modelCount: 1 });
+    const failingFetch = vi.fn<typeof fetch>((input, init) => Promise.resolve(fetchResult(init)) as Promise<Response>);
+    const result = await refreshModelServiceModels(store, runtime(failingFetch), 'anthropic-claude', resolver);
+    expect(result).toMatchObject({ status: 'failure', code });
+    if (code === 'MODEL_DISCOVERY_UNAVAILABLE') expect(result).toEqual({ status: 'failure', code, reason: '模型服务没有返回模型列表（HTTP 500）' });
+    expect(store.getModelServiceModels('anthropic-claude').some((model) => model.modelId === 'last-good-model')).toBe(true);
+    expect(store.getModelServiceRouteConnection('anthropic-claude')?.credentialReference).toBe(connection.credentialReference);
+  });
+
+  it('classifies a response body interrupted after HTTP 200 as a transport failure', async () => {
+    const interrupted = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"data":')); controller.error(new Error('stream interrupted')); },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const send = vi.fn<typeof fetch>(async () => interrupted);
+    await expect(listProviderModels(PROVIDER_ROUTE_PROFILES['anthropic-claude'], send, 'synthetic'))
+      .rejects.toMatchObject({ code: 'TRANSPORT_FAILED' });
+  });
+
+  it('keeps the last successful catalogue when re-saving the credential precedes failed discovery', async () => {
+    const roots = await createServiceTestRoots('ai7-model-discovery-');
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const connection = store.saveModelServiceConnection('Synthetic account', null, 'ready', 'anthropic-claude');
+    const resolver = { resolve: async () => 'synthetic' };
+    const runtime = (nativeFetch: typeof fetch) => ({ scope: 'ordinary-production' as const, nativeFetch });
+    const success = vi.fn<typeof fetch>(async () => response({ data: [{ id: 'last-good-model' }] }));
+    await refreshModelServiceModels(store, runtime(success), 'anthropic-claude', resolver);
+    store.saveModelServiceConnection('Synthetic account', connection.credentialReference, 'needs-attention', 'anthropic-claude');
+    store.saveModelServiceConnection('Synthetic account', connection.credentialReference, 'ready', 'anthropic-claude');
+    const failed = vi.fn<typeof fetch>(async () => new Response('', { status: 500 }));
+    expect(await refreshModelServiceModels(store, runtime(failed), 'anthropic-claude', resolver)).toMatchObject({ status: 'failure', code: 'MODEL_DISCOVERY_UNAVAILABLE' });
+    expect(store.getModelServiceModels('anthropic-claude').some((model) => model.modelId === 'last-good-model')).toBe(true);
   });
 
   it('falls back to defaults when a gateway has no models endpoint', async () => {

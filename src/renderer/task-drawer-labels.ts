@@ -5,6 +5,7 @@ import type {
   TaskPlanKind,
   TaskPlanProjection,
   TaskPlanRunControlProjection,
+  ResumableStopReason,
   TaskPlanStartReadiness,
   TaskPlanStateKey,
   TaskPlanUnconfirmedProjection,
@@ -317,6 +318,31 @@ export const TASK_BAR_SAVED = '计划已保存，可稍后开始';
 export const TASK_BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
 /** §10: 凭据引用 readiness missing reads 未连接 · 缺少凭据 → 去设置连接, never 设置模型服务. */
 export const TASK_BAR_CONNECT = '去设置连接';
+/** Network remediation for a Run stopped by an unreachable proxy or model service. */
+export const TASK_BAR_PROXY_SETTINGS = '去设置 › 模型服务 › 网络代理';
+export const RESUMABLE_STOP_REASON_LABELS: Readonly<Record<ResumableStopReason, string>> = {
+  'proxy-unreachable': '代理不可达',
+  'model-service-unreachable': '模型服务不可达',
+  'outcome-unknown': '结果待确认',
+  shutdown: 'AI7 关闭时正在运行',
+};
+export function resumableStopReasonLabel(reason: ResumableStopReason): string {
+  return RESUMABLE_STOP_REASON_LABELS[reason];
+}
+export function taskBarResumableStatement(reason: ResumableStopReason): string {
+  if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后续行。';
+  if (reason === 'model-service-unreachable') return '模型服务不可达：去 设置 › 模型服务 › 网络代理 检查网络或代理后续行。';
+  if (reason === 'outcome-unknown') return '结果待确认：这次运行不能续行，请先查看未确认的部分。';
+  return 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+}
+export function taskBarResumableStatus(reason: ResumableStopReason): string {
+  return `任务已中断 · ${resumableStopReasonLabel(reason)}`;
+}
+export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: boolean): { message: string; tone: 'success' | 'error' } {
+  return repeated
+    ? { message: `续行后仍然 ${resumableStopReasonLabel(reason)}；没有发送任何书稿内容`, tone: 'error' }
+    : { message: '已续行，从已保存的进度接着读。', tone: 'success' };
+}
 /** AUTH-006: a plan whose key content changed offers these two, and no start. */
 export const TASK_BAR_RECONFIRM = '重新确认计划';
 /**
@@ -507,6 +533,10 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
+}
+
+export function taskBarStopReasonNote(reason: ResumableStopReason, at: string): string {
+  return `上次续行于 ${localInstantLabel(at)} 因 ${resumableStopReasonLabel(reason)} 停下`;
 }
 
 /**
@@ -839,14 +869,19 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       // 取消任务, whose summary says what it kept; and the way to the Run.
       if (control.resume !== null) {
         const continuation = control.continuation;
+        const continuationNote = plan.state.label === TASK_BAR_YIELDED ? TASK_BAR_YIELDED_NOTE
+          : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
+            plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total);
+        const stopNote = control.stopReason === undefined || control.stopAt === undefined ? null : taskBarStopReasonNote(control.stopReason, control.stopAt);
         return {
           readiness,
           summary,
-          statement: null,
-          note: plan.state.label === TASK_BAR_YIELDED ? TASK_BAR_YIELDED_NOTE : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
-            plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total),
-          status: plan.state.label,
+          statement: control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason),
+          note: [continuationNote, stopNote].filter((entry): entry is string => entry !== null).join('；') || null,
+          status: control.stopReason === undefined ? plan.state.label : taskBarResumableStatus(control.stopReason),
           actions: [
+            ...(control.stopReason === 'proxy-unreachable' || control.stopReason === 'model-service-unreachable'
+              ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },

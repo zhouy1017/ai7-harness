@@ -162,6 +162,8 @@ export interface MountGlobalAttentionOptions {
   technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
+  /** Open the model-service settings surface for an attention item whose next step is network remediation. */
+  openNetworkProxySettings(): Promise<void> | void;
   /** Open the item's own record in this window; a refusal is the caller's to report. */
   open(item: GlobalAttentionItemProjection): Promise<void>;
 }
@@ -298,7 +300,8 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     for (const node of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) node.disabled = true;
     options.setStatus(GLOBAL_ATTENTION_STATUS_LINES.opening, 'busy');
     try {
-      await options.open(item);
+      if (item.nextStep === 'open-network-proxy') await options.openNetworkProxySettings();
+      else await options.open(item);
     } catch (error) {
       options.setStatus(options.errorMessage(error, GLOBAL_ATTENTION_STATUS_LINES.openFailed), 'error');
     } finally {
