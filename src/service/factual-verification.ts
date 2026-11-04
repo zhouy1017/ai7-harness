@@ -48,6 +48,7 @@ import {
 import { UUID_PATTERN, canonicalJson, canonicalRecord, sha256Hex } from './analysis/canonical.js';
 import { FACTUAL_VERIFICATION_POLICY_VERSION, graphemeCount } from './analysis/factual-review-contract.js';
 import { retrievalCandidateOf, type FactualEvidenceRelation } from './analysis/factual-review-contract-v2.js';
+import { ResearchEvidenceLedger } from './research-evidence.js';
 import { evidenceStaleness, titleSiteLabel } from './analysis/factual-review-evidence.js';
 import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_FOREIGN_KEYS, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from './factual-verification-schema.js';
 import type { FactualClaimLedger } from './analysis/factual-claim-ledger.js';
@@ -116,6 +117,7 @@ export interface FactualClaimRound {
   readonly state: 'pending' | 'closed' | 'incomplete' | 'unknown';
   readonly result: FactualClaimVerificationResult | null;
   readonly evidence: import('./analysis/factual-review-evidence.js').RetainedUnit;
+  readonly fallbackSources?: ReadonlyArray<readonly [string, import('./provider/platform-tool-session.js').SearchFallbackAttribution]>;
 }
 
 export interface FactualRecheckSelection {
@@ -438,6 +440,25 @@ export class FactualVerificationLedger {
     return row === undefined ? null : { ...JSON.parse(String(row.canonical_json)) as Omit<FactualClaimLedger, 'digest'>, digest: String(row.ledger_digest) };
   }
 
+  /** Claim work is distinct from extraction-unit coverage, including older terminal Runs. */
+  claimProgress(runRecordId: string) {
+    if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='factual_claim_ledgers'").get() === undefined) return null;
+    const membership = this.#db.prepare("SELECT json_array_length(canonical_json,'$.claims') total FROM factual_claim_ledgers WHERE run_record_id=?").get(runRecordId);
+    if (membership === undefined) return null;
+    const rows = this.#db.prepare(`SELECT json_extract(e.canonical_json,'$.state') state FROM factual_claim_sessions s
+      LEFT JOIN factual_claim_events e ON e.session_id=s.session_id AND e.kind='verification-result'
+        AND e.sequence=(SELECT MAX(last.sequence) FROM factual_claim_events last WHERE last.session_id=s.session_id AND last.kind='verification-result')
+      WHERE s.run_record_id=? AND s.stage='web-verification'`).all(runRecordId);
+    const total = Number(membership.total);
+    const progress = { total, closed: 0, unknown: 0, unfinished: 0, notStarted: total - rows.length };
+    for (const row of rows) {
+      if (row.state === 'closed') progress.closed += 1;
+      else if (row.state === 'unknown') progress.unknown += 1;
+      else progress.unfinished += 1;
+    }
+    return progress;
+  }
+
   /** The session key survives restart; a new technical session cannot inherit or reset its counters. */
   admitClaimSession(input: FactualClaimSession): FactualClaimSession {
     const prior = this.#db.prepare('SELECT canonical_json FROM factual_claim_sessions WHERE run_record_id = ? AND stage = ? AND scope_id = ?')
@@ -513,6 +534,14 @@ export class FactualVerificationLedger {
     return this.claimRounds(sessionId).flatMap((round) => round.result === null ? [] : [round.result]);
   }
 
+  /** A reading checkpoint can contain several independently settled claim sessions. */
+  #claimResearch(runRecordId: string, claimId: string): FactualResearchReach {
+    const session = this.claimSession(runRecordId, 'web-verification', claimId);
+    if (session === null) return 'not-attempted';
+    const state = this.#db.prepare("SELECT json_extract(canonical_json,'$.state') state FROM factual_claim_events WHERE session_id=? AND kind='verification-result' ORDER BY sequence DESC LIMIT 1").get(session.sessionId)?.state;
+    return state === 'closed' ? 'researched' : 'incomplete';
+  }
+
   excludedClaimSources(claimId: string): readonly string[] {
     return [...new Set(this.#db.prepare(`SELECT e.canonical_json FROM factual_claim_events e
       JOIN factual_claim_sessions s ON s.session_id = e.session_id WHERE s.scope_id = ? AND e.kind = 'source-exclusion'
@@ -525,7 +554,9 @@ export class FactualVerificationLedger {
     const ledger = this.claims(runRecordId);
     if (ledger === null || (prior !== undefined && ledger.digest !== prior.ledgerDigest)) return null;
     const matching = ledger.claims.filter((claim) => prior === undefined
-      ? `fnd_${claim.claimId.slice(0, 24)}` === result.findingId
+      ? `fnd_${claim.claimId.slice(0, 24)}` === result.findingId && claim.occurrence.block === result.blockId &&
+        claim.occurrence.exactRange.fromGrapheme === result.fromGrapheme && claim.occurrence.exactRange.toGrapheme === result.toGrapheme &&
+        claim.occurrence.quote === result.body.quote && claim.occurrence.question === result.body.normalizedStatement
       : claim.claimId === prior.claimId && claim.occurrence.block === result.blockId &&
         claim.occurrence.exactRange.fromGrapheme === result.fromGrapheme && claim.occurrence.exactRange.toGrapheme === result.toGrapheme &&
         claim.occurrence.quote === result.body.quote && claim.occurrence.question === result.body.normalizedStatement);
@@ -660,6 +691,7 @@ export class FactualVerificationLedger {
     const level: EvidenceAssuranceLevel = assurance?.effectiveLevel ?? plannedLevel;
     const disclosure = assurance?.disclosure ?? null;
     const units = this.#researchUnits(input.runRecordId);
+    const claims = this.claims(input.runRecordId)?.claims;
     const insert = this.#db.prepare(`INSERT INTO factual_verification_results(result_id, book_id, assertion_key, version, review_run_id, review_finding_id,
       finding_id, run_record_id, revision_id, manuscript_revision_id, block_id, from_grapheme, to_grapheme, level, policy_sha256, reference_integrity,
       claim_support, factual_verification, producer, recorded_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -671,7 +703,11 @@ export class FactualVerificationLedger {
       const version = (latest.version === null ? 0 : Number(latest.version)) + 1;
       const relationsStated = contractLevel !== null && finding.relations !== null;
       const sources = relationsStated && level !== 'quick' ? this.#sources(input.bookId, input.runRecordId, finding.relations!, finding.assertionClass, true, now) : [];
-      const researchReach: FactualResearchReach = finding.unitOrdinals.some((ordinal) => units.get(ordinal) === 'incomplete') ? 'incomplete'
+      const ownClaims = claims?.filter((claim) => `fnd_${claim.claimId.slice(0, 24)}` === finding.findingId &&
+        claim.occurrence.block === finding.blockId && claim.occurrence.exactRange.fromGrapheme === finding.fromGrapheme &&
+        claim.occurrence.exactRange.toGrapheme === finding.toGrapheme && claim.occurrence.quote === finding.quote && claim.occurrence.question === finding.question);
+      const researchReach: FactualResearchReach = ownClaims?.length === 1 ? this.#claimResearch(input.runRecordId, ownClaims[0]!.claimId)
+        : finding.unitOrdinals.some((ordinal) => units.get(ordinal) === 'incomplete') ? 'incomplete'
         : finding.unitOrdinals.some((ordinal) => units.get(ordinal) === 'completed') ? 'researched' : 'not-attempted';
       const mapped = mapVerificationOutcome({
         level, relationsStated, research: researchReach,
@@ -705,10 +741,7 @@ export class FactualVerificationLedger {
   #researchUnits(runRecordId: string): Map<number, 'completed' | 'incomplete' | 'not-searched'> {
     const units = new Map<number, 'completed' | 'incomplete' | 'not-searched'>();
     if (this.#db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'research_evidence_units'").get() === undefined) return units;
-    for (const row of this.#db.prepare('SELECT unit_ordinal, search_state FROM research_evidence_units WHERE run_record_id = ?').all(runRecordId) as SqlRow[]) {
-      units.set(Number(row.unit_ordinal), String(row.search_state) as 'completed' | 'incomplete' | 'not-searched');
-    }
-    return units;
+    return new ResearchEvidenceLedger(this.#db).unitStates(runRecordId);
   }
 
   /**
@@ -762,14 +795,14 @@ export class FactualVerificationLedger {
     return drafted.map((source) => ({ ...source, group: source.exact ? groups[exactOnes.indexOf(source)] ?? null : null }));
   }
 
-  #result(row: SqlRow): StoredResult {
+  #result(row: SqlRow, resolveClaim = true): StoredResult {
     const json = String(row.canonical_json);
     requireVerification(sha256Hex(json) === String(row.sha256), 'FACTUAL_VERIFICATION_RECORD_INVALID', '事实核查结果记录已损坏。');
     const record = JSON.parse(json) as Record<string, unknown> & { body: StoredResult['body'] };
     requireVerification(record.schema === RESULT_SCHEMA && record.resultId === row.result_id && record.assertionKey === row.assertion_key &&
       record.version === row.version && record.factualVerification === row.factual_verification && record.level === row.level,
     'FACTUAL_VERIFICATION_RECORD_INVALID', '事实核查结果记录已损坏。');
-    return {
+    const result: StoredResult = {
       rowid: Number(row.rowid), resultId: String(row.result_id), bookId: String(row.book_id), assertionKey: String(row.assertion_key), version: Number(row.version),
       reviewRunId: String(row.review_run_id), reviewFindingId: String(row.review_finding_id), findingId: String(row.finding_id),
       runRecordId: String(row.run_record_id), revisionId: String(row.revision_id), manuscriptRevisionId: String(row.manuscript_revision_id),
@@ -777,6 +810,19 @@ export class FactualVerificationLedger {
       level: String(row.level) as EvidenceAssuranceLevel, outcome: String(row.factual_verification) as FactualVerificationOutcome,
       claimSupport: String(row.claim_support) as FactualEvidenceState, recordedAt: String(row.recorded_at), body: record.body,
     };
+    // Correct the read model of old unit-attributed results without rewriting their immutable bytes.
+    if (!resolveClaim || result.body.factualDecision !== undefined) return result;
+    const lineage = this.#claimLineage(result);
+    if (lineage === null) return result;
+    const research = this.#claimResearch(lineage.runRecordId, lineage.claim.claimId);
+    if (research === result.body.research) return result;
+    const relationsStated = this.#contractLevel(result.runRecordId) !== null;
+    const mapped = mapVerificationOutcome({ level: result.level, relationsStated, research, relations: result.body.sources });
+    const disclosure = '当前显示按本条断言的独立核查记录校正；历史结果原文保留在版本记录中。';
+    const limitations = limitationsOf({ level: result.level, plannedLevel: result.body.plannedLevel, disclosure: result.body.disclosure,
+      relationsStated, sources: result.body.sources, gateUnmet: mapped.gateUnmet, research });
+    return { ...result, outcome: mapped.outcome, claimSupport: mapped.claimSupport,
+      body: { ...result.body, research, gateUnmet: mapped.gateUnmet, limitations: [disclosure, ...limitations] } };
   }
 
   #requireResult(bookId: string, resultId: string): StoredResult {
@@ -840,6 +886,8 @@ export class FactualVerificationLedger {
     const boundToThis = latestDecision !== null && latestDecision.boundVersion === result.version && latestDecision.resultId === result.resultId;
     const correctionAvailable = this.#correctionOffer(result, latestDecision, anchorCurrent) !== null;
     const actionNeed: FactualActionNeed = correctionAvailable && boundToThis ? 'correction' : !boundToThis && result.version === latestVersion ? 'review' : 'none';
+    const claim = result.body.factualDecision === undefined ? this.#claimLineage(result) : null;
+    const notAttempted = claim !== null && this.claimSession(claim.runRecordId, 'web-verification', claim.claim.claimId) === null;
     return {
       resultId: result.resultId, version: result.version, assertionKey: result.assertionKey, reviewRunId: result.reviewRunId,
       reviewFindingId: result.reviewFindingId, findingId: result.findingId, runRecordId: result.runRecordId, taskIntentId: result.body.taskIntentId,
@@ -848,7 +896,8 @@ export class FactualVerificationLedger {
       plannedLevel: result.body.plannedLevel, level: result.level, levelLabel: EVIDENCE_ASSURANCE_LEVEL_LABELS[result.level], disclosure: result.body.disclosure,
       states: { referenceIntegrity: 'verified', claimSupport: effective.claimSupport, factualVerification: effective.outcome },
       sourceCondition, actionNeed, sourceCounts: { checked, candidates, independent, reused: sources.filter((source) => source.reused).length },
-      limitations: result.body.limitations, policyPin: result.body.policy, producer: FACTUAL_VERIFICATION_PRODUCER, recordedAt: result.recordedAt,
+      limitations: notAttempted ? ['这条断言尚未开始联网核查；同一阅读范围内其他断言的证据不代表已核查本条。', ...result.body.limitations] : result.body.limitations,
+      policyPin: result.body.policy, producer: FACTUAL_VERIFICATION_PRODUCER, recordedAt: result.recordedAt,
       anchor: anchorCurrent ? { state: 'current', label: null } : { state: 'stale', label: STALE_VERIFICATION_ANCHOR_LABEL },
       decision: latestDecision === null ? null : this.#decisionProjection(latestDecision, latestVersion),
       pendingReview: result.version === latestVersion && !boundToThis,
@@ -933,7 +982,7 @@ export class FactualVerificationLedger {
       point: `「${left.excerpt ?? ''}」与「${right.excerpt ?? ''}」所述不一致；AI7 不替你选择哪一方。`,
     })));
     const versions = (this.#db.prepare('SELECT rowid, * FROM factual_verification_results WHERE assertion_key = ? ORDER BY version').all(result.assertionKey) as SqlRow[])
-      .map((row) => this.#result(row));
+      .map((row) => this.#result(row, false));
     const latestVersion = versions.at(-1)!.version;
     return {
       bookId, result: projected, sources: page, ...(this.#claimLineage(result) === null ? {} : { claimRecheckAvailable: true }),

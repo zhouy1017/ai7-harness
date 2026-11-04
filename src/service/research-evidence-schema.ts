@@ -74,6 +74,19 @@ export const RESEARCH_EVIDENCE_TRIGGER_SQL: Readonly<Record<string, string>> = O
   ]),
 );
 
+/** Additive revision 107: complete a claim Run's older retained prefix without rewriting its history. */
+export const RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL = {
+  research_evidence_unit_revisions: RESEARCH_EVIDENCE_SCHEMA_SQL.research_evidence_units
+    .replace('CREATE TABLE research_evidence_units', 'CREATE TABLE research_evidence_unit_revisions')
+    .replace('PRIMARY KEY(run_record_id, unit_ordinal)', `revision INTEGER NOT NULL CHECK(revision >= 2),
+  PRIMARY KEY(run_record_id, unit_ordinal, revision),
+  FOREIGN KEY(run_record_id, unit_ordinal) REFERENCES research_evidence_units(run_record_id, unit_ordinal)`),
+} as const;
+export const RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL = Object.fromEntries(
+  Object.entries(RESEARCH_EVIDENCE_TRIGGER_SQL).filter(([name]) => name.startsWith('research_evidence_units_'))
+    .map(([name, sql]) => [name.replace('research_evidence_units', 'research_evidence_unit_revisions'), sql.replaceAll('research_evidence_units', 'research_evidence_unit_revisions')]),
+);
+
 export const RESEARCH_EVIDENCE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArray<string>>> = {
   research_evidence_contents: [],
   research_evidence: [
@@ -81,6 +94,11 @@ export const RESEARCH_EVIDENCE_FOREIGN_KEYS: Readonly<Record<string, ReadonlyArr
     'content_sha256>research_evidence_contents.content_sha256:NO ACTION/NO ACTION/NONE',
   ],
   research_evidence_units: ['book_id>books.book_id:NO ACTION/NO ACTION/NONE'],
+  research_evidence_unit_revisions: [
+    'book_id>books.book_id:NO ACTION/NO ACTION/NONE',
+    'run_record_id>research_evidence_units.run_record_id:NO ACTION/NO ACTION/NONE',
+    'unit_ordinal>research_evidence_units.unit_ordinal:NO ACTION/NO ACTION/NONE',
+  ],
   research_evidence_materials: [
     'evidence_id>research_evidence.evidence_id:NO ACTION/NO ACTION/NONE',
     'material_id>library_materials.material_id:NO ACTION/NO ACTION/NONE',

@@ -96,7 +96,7 @@ describe('图书交付包 (S67a)', () => {
         ['work-records', true, '暂无审阅记录', null],
       ]);
       expect([bundle.ready, bundle.unmet, bundle.versions, bundle.changedSinceLatest]).toEqual([
-        false, ['发稿版本', '新闻稿', '宣传文章', '评论文章', '发布会材料', '营销要点'], [], false,
+        false, ['发稿版本'], [], false,
       ]);
       expect(bundle.statement).toBe('图书交付包把已完成的工作放在一起：它不是发稿，也不是交付；准备它不改变任何记录，也不生成文件。');
       const prepare = (purpose: string, digest: string) => store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose, expectedContentDigest: digest });
@@ -105,6 +105,9 @@ describe('图书交付包 (S67a)', () => {
       // 发稿版本 set; the 新闻稿 made and delivered; the other four types 本书不做.
       const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '一审稿', 'stage-archive', null, '');
       store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '纸质版首印', basis: '三审通过' });
+      bundle = store.inspectBookDeliveryPackage(book.bookId);
+      expect([bundle.ready, bundle.unmet]).toEqual([true, []]);
+      expect(bundle.content.excluded.filter(item => item.detail === '尚未创建')).toHaveLength(5);
       const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22, 23]));
       const news = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId })).document!;
       bundle = store.inspectBookDeliveryPackage(book.bookId);
@@ -183,11 +186,13 @@ describe('图书交付包 (S67a)', () => {
       bundle = store.inspectBookDeliveryPackage(book.bookId);
       expect(bundle.conditions[1]).toMatchObject({ met: true, stateLabel: '第 3 次交付 · 版本 1', notice: null, route: null });
       expect(bundle.content.limitations.filter((line) => line.includes('交付后有修改'))).toEqual([]);
-      // 恢复 of a type takes its row back to unmet.
+      // Restoring an optional type changes the preview without blocking the manuscript package.
       store.decideProductionDocumentType({ bookId: book.bookId, typeId: 'marketing-points', notForThisBook: false });
       bundle = store.inspectBookDeliveryPackage(book.bookId);
-      expect([bundle.ready, bundle.unmet]).toEqual([false, ['营销要点']]);
-      expect(code(() => prepare('交印厂', bundle.content.digest))).toBe('BOOK_DELIVERY_PACKAGE_NOT_READY');
+      expect([bundle.ready, bundle.unmet]).toEqual([true, []]);
+      expect(bundle.content.excluded).toContainEqual({ kind: 'exclusion', label: '营销要点', detail: '尚未创建' });
+      expect(prepare('交印厂', bundle.content.digest)).toMatchObject({ outcome: 'prepared', version: 3 });
+      bundle = store.inspectBookDeliveryPackage(book.bookId);
 
       // No word of the package says it was sent, published or delivered.
       const words = JSON.stringify(bundle);
@@ -203,7 +208,7 @@ describe('图书交付包 (S67a)', () => {
     try {
       expect(() => database.prepare("UPDATE book_delivery_package_versions SET purpose = '改'").run()).toThrow(/BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE/);
       expect(() => database.prepare('DELETE FROM book_delivery_package_versions').run()).toThrow(/BOOK_DELIVERY_PACKAGE_LEDGER_IMMUTABLE/);
-      expect((database.prepare('SELECT count(*) count FROM book_delivery_package_versions').get() as { count: number }).count).toBe(2);
+      expect((database.prepare('SELECT count(*) count FROM book_delivery_package_versions').get() as { count: number }).count).toBe(3);
     } finally {
       database.close();
     }
@@ -216,7 +221,7 @@ describe('图书交付包 (S67a)', () => {
     }
   }, 180_000);
 
-  it('holds the work records when every Review Run that ran has finished and reported', () => {
+  it('discloses unfinished review reports without requiring them for package preparation', () => {
     // The work-records row over stand-in readings: a real Run needs a provider fixture, and the row reads only states.
     const database = new DatabaseSync(':memory:', { enableForeignKeyConstraints: false });
     try {
@@ -226,8 +231,9 @@ describe('图书交付包 (S67a)', () => {
       database.prepare('INSERT INTO books(book_id) VALUES (?)').run(bookId);
       const report = (version: number) => ({ reportId: randomUUID(), version, digest: String(version).repeat(64).slice(0, 64), generatedAt: '2026-09-24T00:00:00.000Z' });
       let runs: PackageReviewRunReading[] = [];
+      let publication: import('../../src/service/book-delivery-packages.js').PackagePublicationReading | null = null;
       const packages = new BookDeliveryPackages(database, {
-        publication: () => null,
+        publication: () => publication,
         documents: () => [],
         reviewRuns: () => runs,
       });
@@ -251,9 +257,20 @@ describe('图书交付包 (S67a)', () => {
         '第 3 次审阅未能完成，报告写明了原因。',
         '第 4 次审阅没有开始，不在包中。',
       ]);
+      runs = [run(1, 'running', null), run(2, 'settled', null)];
+      expect(packages.inspect(bookId).content.limitations).toEqual([
+        '第 1 次审阅正在进行，尚无当前报告，不在包中。',
+        '第 2 次审阅尚未生成当前报告，不在包中。',
+      ]);
       // Without a 发稿版本 nothing is prepared, whatever else holds.
       expect(bundle.ready).toBe(false);
       expect(bundle.unmet).toEqual(['发稿版本']);
+      publication = { publicationVersionId: randomUUID(), ordinal: 1, milestoneId: randomUUID(), milestoneLabel: '交付候选', revisionId: randomUUID(), revisionLabel: 'r1', revisionDigest: 'a'.repeat(64), scope: '公开样书', basis: '本机编辑选择', changedSince: false, withdrawn: false };
+      database.exec('CREATE TABLE publication_versions (publication_version_id TEXT, created_at TEXT)');
+      database.prepare('INSERT INTO publication_versions VALUES (?, ?)').run(publication.publicationVersionId, '2026-09-24T00:00:00.000Z');
+      const available = packages.inspect(bookId);
+      expect([available.ready, available.unmet]).toEqual([true, []]);
+      expect(packages.prepare({ bookId, purpose: '交付候选', expectedContentDigest: available.content.digest })).toMatchObject({ outcome: 'prepared', version: 1 });
     } finally {
       database.close();
     }

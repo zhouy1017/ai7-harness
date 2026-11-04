@@ -107,8 +107,13 @@ jobs:
     name: Full Gate over the final dev
     needs: resolve
     if: ${{ always() && needs.resolve.result == 'success' }}
+    # The reused workflow's optional manual publisher declares these scopes. A called workflow
+    # cannot widen this grant even when that publisher is skipped; its full test job narrows to read.
     permissions:
       contents: read
+      pull-requests: read
+      actions: read
+      statuses: write
     uses: ./.github/workflows/e2e-nightly.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}

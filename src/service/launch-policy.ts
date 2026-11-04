@@ -1655,7 +1655,7 @@ export interface SearchFallbackTerms {
   readonly eligibleBackendIds: readonly string[];
   readonly frozenInPlan: readonly ['backendId', 'host', 'configurationDigest', 'credentialReference'];
   readonly ledgerAttribution: 'fallback-from';
-  /** At most one resend per failed submission, only for these failure classes; an accepted (possibly billed) one never. */
+  /** Primary-channel retries only: at most one, for these classes; an accepted/possibly billed submission is never retried. */
   readonly maximumResendsPerFailedSubmission: 1;
   readonly resendableFailureClasses: readonly ['transport-failure-before-any-response-byte', 'http-5xx', 'http-429'];
   readonly http429RetryAfterHonoured: true;
@@ -1669,6 +1669,8 @@ export function readSearchFallbackTerms(rule: unknown): SearchFallbackTerms {
   const research = isRecord(contract) ? contract['research'] : null;
   requirePolicy(isRecord(rule) && isRecord(research) && isRecord(rule['platformTools']) && isRecord(rule['platformTools']['websearch']));
   const fallback = research['backendFallback'], resend = research['knownOrUnknownFailedSubmissionResendAllowed'];
+  // Backup eligibility binds an existing measured profile. Its selection after an exact account rejection is distinct
+  // from retrying the same primary submission; the Owner's Wave23 clarification does not add a retry class or plan field.
   const shipped = ((rule['platformTools']['websearch'] as Record<string, unknown>)['backends'] as Array<{ id: string }>).map((backend) => backend.id);
   requirePolicy(isRecord(fallback) && Array.isArray(fallback['eligibleBackendIds']) && fallback['eligibleBackendIds'].length > 0 &&
     fallback['eligibleBackendIds'].every((id: unknown) => typeof id === 'string' && shipped.includes(id)) && sameValue(fallback, {

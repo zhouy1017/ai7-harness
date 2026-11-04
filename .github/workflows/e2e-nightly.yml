@@ -1,5 +1,5 @@
 name: E2E Nightly Full Gate
-run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}
+run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}${{ inputs.pr && format(' · PR {0} · {1}', inputs.pr, inputs.base) || '' }}
 
 # The daily `schedule` moved to `e2e-nightly-queue.yml` under ADR 0081, which runs this full Gate
 # over each open pull request and then calls this workflow once for the final `dev` tip. What this
@@ -16,25 +16,79 @@ on:
         description: Full 40-character commit SHA to run the admitted Journey set against
         required: true
         type: string
+      pr:
+        description: Optional same-repository PR targeting a branch other than main; publish its existing required Gate status
+        required: false
+        default: ''
+        type: string
+      base:
+        description: Exact current PR base SHA; required with pr (ref must be its exact head)
+        required: false
+        default: ''
+        type: string
   workflow_call:
     inputs:
       ref:
         description: Full 40-character commit SHA to run the admitted Journey set against
         required: true
         type: string
+      pr:
+        required: false
+        default: ''
+        type: string
+      base:
+        required: false
+        default: ''
+        type: string
 
-permissions:
-  contents: read
+# Each job states its own token scopes. The candidate test job holds contents: read only;
+# a reusable caller must grant the optional trusted publisher's declared scopes too.
 
 concurrency:
   group: e2e-nightly-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  resolve:
+    name: Resolve exact Full Gate pull request
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.pr != '' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # The authorized integration role explicitly dispatches a reviewed workflow revision. Control never
+      # executes the candidate checkout, even while dev still contains an older publisher.
+      - name: Check out dispatched control source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Bind the current same-repository head and base
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.ref }}
+          BASE_SHA: ${{ inputs.base }}
+        run: >-
+          node tools/nightly-queue.mjs full-gate-candidate
+          --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          --head "$HEAD_SHA" --expected-dev-tip "$BASE_SHA"
+
   full:
+    needs: resolve
+    if: ${{ always() && !cancelled() && (inputs.pr == '' || needs.resolve.result == 'success') }}
     name: J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 + J-10 + J-11 + J-16 + J-13 (${{ matrix.label }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -101,3 +155,37 @@ jobs:
 
       - name: Run every admitted Journey
         run: pnpm run e2e:all
+
+  result:
+    name: Publish E2E Functional Gate result
+    needs: [resolve, full]
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.pr != '' && needs.resolve.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      statuses: write
+    steps:
+      - name: Check out dispatched control source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select exact Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.1
+          check-latest: false
+      - name: Publish the actual same-run full Journey result for the current candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+          HEAD_SHA: ${{ inputs.ref }}
+          BASE_SHA: ${{ inputs.base }}
+          FULL_GATE_CONTROL_SHA: ${{ github.workflow_sha }}
+        run: >-
+          node tools/nightly-queue.mjs full-gate-status
+          --pr "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"
+          --head "$HEAD_SHA" --expected-dev-tip "$BASE_SHA"

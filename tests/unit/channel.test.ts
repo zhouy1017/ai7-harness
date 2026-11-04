@@ -40,8 +40,11 @@ describe('distribution marker and packaged authority', () => {
       trustedOperationalScope: 'ordinary-production', runBudgetCeiling: null, providerCacheRoot: null, validation: null,
     } });
     expect(packagedLaunchForm(['--self-check']).selfCheck).toBe(true);
+    expect(packagedLaunchForm(['--remote-debugging-pipe'])).toEqual(packagedLaunchForm([]));
+    expect(packagedLaunchForm(['--remote-debugging-pipe', '--self-check']).selfCheck).toBe(true);
     for (const args of [['--data-root', root], ['--trusted-operational-scope', 'developer-live'], ['--launcher-pid', '1'],
-      ['--self-check', '--self-check'], ['--j04-model-adapter', 'fixture']]) expect(() => packagedLaunchForm(args)).toThrow();
+      ['--self-check', '--self-check'], ['--j04-model-adapter', 'fixture'], ['--remote-debugging-port=9222'],
+      ['--remote-debugging-pipe', '--data-root', root]]) expect(() => packagedLaunchForm(args)).toThrow();
     // Only macOS's Finder serial number is ignored, and only there; it never smuggles a control past the check.
     expect(packagedLaunchForm(['-psn_0_12345'], 'darwin').selfCheck).toBe(false);
     expect(packagedLaunchForm(['-psn_0_12345', '--self-check'], 'darwin').selfCheck).toBe(true);

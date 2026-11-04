@@ -4,8 +4,9 @@ import type { ManuscriptBlockProjection, TextBoxDisposition } from '../shared/pr
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
 import { DOCX_NOTE_PARSER_IDENTITY, DOCX_PARSER_IDENTITY, DOCX_SPLIT_PARSER_IDENTITY, DOCX_PARSER_IDENTITY_V1, DOCX_PARSER_IDENTITY_V2,
   WORD_DOCX_PARSER_IDENTITY, type ParsedTextBox, type ParsedDocx, type ParsedDocxBlock,
-  type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
+  wordIntakeForPinnedReadings, type NativeDocxIntakeParse, type WordTrackedCompilation } from './docx.js';
 import type { ParsedImportedMark } from './docx-marks.js';
+import type { ParsedNoteSource } from './docx-notes.js';
 import { stageNoteSources, stagedNoteSourcesMatch, type StagedNoteSource } from './manuscript/note-blocks.js';
 import { stageParagraphPieces, stagedParagraphPiecesMatch, type StagedParagraphPiece } from './manuscript/import-structure.js';
 import { LOCAL_LEARNING_POLICY_BASIS } from './learning-eligibility.js';
@@ -135,13 +136,55 @@ export interface WordNormalizationGroup {
 export interface WordReadingBlock {
   blockId: string;
   position: number;
-  kind: 'title' | 'heading' | 'paragraph';
+  kind: 'title' | 'heading' | 'paragraph' | 'note';
   level: number | null;
   text: string;
   digest: string;
   graphemeLength: number;
   sourceParagraphIndices: number[];
   groups: WordNormalizationGroup[];
+  note?: ParsedNoteSource;
+}
+
+/** Reading identity includes projected notes; source atoms and editorial-learning segments remain body-owned. */
+export function wordReadingWithBlocks(reading: WordCompiledReading, blocks: WordReadingBlock[]): WordCompiledReading {
+  const { readingDigest: _priorDigest, ...prior } = reading;
+  const facts = { ...prior, blocks,
+    contentDigest: sha256Hex(blocks.map((block) => block.text).join('\u001e')),
+    structureDigest: sha256Hex(wordCanonicalJson(blocks.map(({ blockId, position, kind, level, digest }) => ({ blockId, position, kind, level, digest })))),
+    characterCount: blocks.reduce((sum, block) => sum + block.graphemeLength, 0) };
+  return { ...facts, readingDigest: sha256Hex(wordCanonicalJson({ schema: 'ai7.word-selected-reading/1', ...facts })) };
+}
+
+/** Exact historical pins may name the earlier body-only reading of the same retained original. */
+export function wordReadingForDigest(reading: WordCompiledReading, digest: string): WordCompiledReading {
+  if (reading.readingDigest === digest) return reading;
+  const body = wordReadingWithBlocks(reading, reading.blocks.filter((block) => block.kind !== 'note'));
+  requireRetention(body.readingDigest === digest, 'WORD_READING_UNAVAILABLE', 'Word 阅读与已记录的精确固定摘要不一致。');
+  return body;
+}
+
+export function wordCompilationForReadings(compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>,
+  pins: { rejected: { digest: string }; accepted: { digest: string } }): Extract<WordTrackedCompilation, { kind: 'ready' }> {
+  const rejected = wordReadingForDigest(compiled.readings.rejected, pins.rejected.digest);
+  const accepted = wordReadingForDigest(compiled.readings.accepted, pins.accepted.digest);
+  return rejected === compiled.readings.rejected && accepted === compiled.readings.accepted ? compiled
+    : { ...compiled, readings: { rejected, accepted } };
+}
+
+/** Recover an exact earlier staged reading without replacing its independently pinned original/preview. */
+export function wordIntakeForStagedReading(db: DatabaseSync, draftId: string, native: NativeDocxIntakeParse): NativeDocxIntakeParse {
+  if (native.kind !== 'word') return native;
+  const row = db.prepare('SELECT canonical_json, sha256 FROM staged_word_revision_intakes WHERE draft_id = ?').get(draftId);
+  requireRetention(row !== undefined && typeof row.canonical_json === 'string' && sha256Hex(row.canonical_json) === row.sha256,
+    'WORD_STAGING_INVALID', 'Word 暂存固定记录无法完整读取。');
+  const pinned: unknown = JSON.parse(row.canonical_json);
+  requireRetention(isRecord(pinned) && pinned.compatibility === 'ready' && isRecord(pinned.readings) &&
+    isRecord(pinned.readings.rejected) && typeof pinned.readings.rejected.digest === 'string' &&
+    isRecord(pinned.readings.accepted) && typeof pinned.readings.accepted.digest === 'string',
+  'WORD_STAGING_INVALID', 'Word 暂存阅读固定记录无效。');
+  return wordIntakeForPinnedReadings(native, { rejected: { digest: pinned.readings.rejected.digest },
+    accepted: { digest: pinned.readings.accepted.digest } });
 }
 
 export interface WordSourceSegment {
@@ -203,8 +246,8 @@ export function requireWordManuscriptSourceSegments(db: DatabaseSync, bookId: st
   ReturnType<typeof bindWordReadingToRevision> {
   validateWordImportChoiceRecord(choice);
   const selected = choice.mode === 'suggestions' ? 'rejected' : 'accepted';
-  requireRetention(reading.reading === selected && reading.readingDigest === choice.readings[selected].digest,
-    'WORD_MAPPING_INVALID', 'Word 稿件对应使用了另一条阅读。');
+  requireRetention(reading.reading === selected, 'WORD_MAPPING_INVALID', 'Word 稿件对应使用了另一条阅读。');
+  reading = wordReadingForDigest(reading, choice.readings[selected].digest);
   const bound = bindWordReadingToRevision(db, bookId, choice.revisionId, choice.sourceVersionId, reading);
   requireRetention(db.prepare('SELECT 1 FROM manuscript_block_sources WHERE revision_id = ? LIMIT 1').get(choice.revisionId) === undefined,
     'WORD_MAPPING_INVALID', 'Word 片段对应不能同时冒充历史段落对应。');
@@ -436,6 +479,8 @@ export function stageWordRevisionIntake(db: DatabaseSync, draftId: string, resul
     db.prepare(`INSERT INTO staged_word_revision_intakes(draft_id, source_digest, compiler_identity, inventory_digest, compatibility,
       preview_reading, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(draftId, record.value.sourceDigest,
       record.value.compilerIdentity, record.value.inventoryDigest, record.value.compatibility, record.value.previewReading, record.json, record.digest);
+    if (result.kind === 'word') stageNoteSources(db, draftId, result.word.readings[result.word.previewReading].blocks
+      .flatMap((block) => block.note === undefined ? [] : [{ position: block.position, ...block.note }]));
   }
   return requireWordStagedIntake(db, draftId, result);
 }

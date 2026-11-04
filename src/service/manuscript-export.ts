@@ -51,7 +51,7 @@ import {
 import { WORD_DOCX_PARSER_IDENTITY, compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
 import { revisionNoteSources } from './manuscript/note-blocks.js';
 import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
-  requireWordManuscriptSourceSegments, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
+  requireWordManuscriptSourceSegments, wordCompilationForReadings, WORD_EXTRACTOR_IDENTITY } from './import-retention.js';
 import { REPORT_EXPORT_WRITER_IDENTITIES, renderReportExport, type ReportExportInput } from './report-export.js';
 import { MARKDOWN_EXPORT_WRITER_IDENTITY, PDF_EXPORT_WRITER_IDENTITY, renderMarkdownExport, renderPdfHtmlExport } from './text-export.js';
 
@@ -358,8 +358,9 @@ export function readWordManuscriptExportSource(db: DatabaseSync, bookId: string,
     .get(choice.fidelityReviewId);
   requireExport(box === undefined || box.choice === 'retain' || box.choice === 'merge', 'EXPORT_RECORD_INVALID', 'Word 文本框处置记录无效。');
   const textBoxes = box?.choice === 'merge' ? 'merge' : 'retain';
-  const compiled = compileWordTrackedDocxBytes(original, { textBoxDisposition: textBoxes });
-  requireExport(compiled.kind === 'ready', 'EXPORT_RECORD_INVALID', 'Word 原文件不再符合已提交的编译契约。');
+  const currentCompilation = compileWordTrackedDocxBytes(original, { textBoxDisposition: textBoxes });
+  requireExport(currentCompilation.kind === 'ready', 'EXPORT_RECORD_INVALID', 'Word 原文件不再符合已提交的编译契约。');
+  const compiled = wordCompilationForReadings(currentCompilation, choice.readings);
   const boxCategory = db.prepare(`SELECT item_count FROM import_fidelity_categories WHERE fidelity_review_id = ? AND category_key = 'text-boxes'`)
     .get(choice.fidelityReviewId);
   requireExport(boxCategory && typeof boxCategory.item_count === 'number' && Number.isSafeInteger(boxCategory.item_count) && boxCategory.item_count >= 0 &&

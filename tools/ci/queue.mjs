@@ -3,7 +3,7 @@ import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { queueTarget, documentationOnly, gateResultPassed, hostedGatePassed } from './release-authority.mjs';
+import { queueTarget, documentationOnly, gateResultPassed, hostedGatePassed, manualFullGatePassed, fullGateRunTitle } from './release-authority.mjs';
 
 // The nightly merge queue of ADR 0081: the scheduled orchestrator lists the candidates, builds the
 // tree each one would land, and merges the ones the full Gate passed. Every pull-request-touching
@@ -687,7 +687,8 @@ function mergeCommand(options) {
   if (String(options['gate-run']) === process.env.GITHUB_RUN_ID) {
     candidateRefHead = api(repo, `git/ref/heads/nightly/candidate-${pr}-${options['gate-run']}`).object?.sha;
   }
-  const proofCommit = gateRun.path === '.github/workflows/e2e.yml' ? head : tested;
+  const fullHead = gateRun.path === '.github/workflows/e2e-nightly.yml' && gateRun.display_title === fullGateRunTitle(pr, head, devTip);
+  const proofCommit = gateRun.path === '.github/workflows/e2e.yml' || fullHead ? head : tested;
   if (gateRun.repository?.full_name !== repo || !hostedGatePassed({ run: gateRun, jobs: allJobs, pr, candidate: proofCommit,
     head, base: devTip, docs: documentationOnly(pullRequestFiles(repo, pr, record)),
     currentRun: process.env.GITHUB_ACTIONS === 'true' ? process.env.GITHUB_RUN_ID : undefined, candidateRefHead })) {
@@ -711,6 +712,39 @@ function mergeCommand(options) {
 }
 
 // ---- Existing PR Gate projection, executed only by its trusted control jobs -----------------
+
+/** A manually dispatched full Gate can bootstrap reviewed CI control before it reaches dev. */
+function fullGateCandidate(options) {
+  const { repo, pr, head, expectedDevTip } = options;
+  const record = pullRequest(repo, pr);
+  if (!queueTarget(record.baseRefName) || record.state !== 'OPEN' || record.isDraft ||
+      record.headRepository?.nameWithOwner !== repo || record.headRefOid !== head || record.baseRefOid !== expectedDevTip) return false;
+  const fetchedHead = fetchRef('origin', `refs/pull/${pr}/head`, `refs/remotes/origin/nightly/full-gate-${pr}`);
+  const fetchedBase = fetchRef('origin', `refs/heads/${record.baseRefName}`, `refs/remotes/origin/${record.baseRefName}`);
+  return fetchedHead === head && fetchedBase === expectedDevTip &&
+    run('git', ['merge-base', '--is-ancestor', expectedDevTip, head]).status === 0;
+}
+
+function fullGateCommand(options) {
+  const runId = process.env.GITHUB_RUN_ID;
+  const controlSha = process.env.FULL_GATE_CONTROL_SHA;
+  if (process.env.GITHUB_EVENT_NAME !== 'workflow_dispatch' || !/^[0-9]+$/u.test(runId ?? '') ||
+      !/^[a-f0-9]{40}$/u.test(controlSha ?? '') ||
+      process.env.GITHUB_WORKFLOW_REF !== `${options.repo}/.github/workflows/e2e-nightly.yml@${process.env.GITHUB_REF}`) {
+    throw new Error('full-gate-needs-dispatched-workflow-control');
+  }
+  const { run: occurrence, jobs } = gateOccurrence(options.repo, runId);
+  if (occurrence.repository?.full_name !== options.repo || occurrence.head_sha !== controlSha) throw new Error('full-gate-control-mismatch');
+  const passed = manualFullGatePassed({ run: occurrence, jobs, pr: options.pr, head: options.head,
+    base: options.expectedDevTip, currentRun: runId, controlSha });
+  const first = passed && fullGateCandidate(options);
+  publishGateStatus(options.repo, options.head, first);
+  const settled = passed && fullGateCandidate(options);
+  if (settled !== first) publishGateStatus(options.repo, options.head, settled);
+  if (!settled) throw new Error('full-gate-tests-failed-or-candidate-moved');
+  process.stdout.write('E2E_GATE/current-candidate-full-set-passed\n');
+  return 0;
+}
 
 /** Project the trusted workflow's build/test result onto its exact current candidate. */
 function gateDecision(options) {
@@ -819,6 +853,8 @@ const USAGE = `usage: node tools/nightly-queue.mjs <command> [options]
   report    --pr <n> [--platform <label> --log <file> | --reason conflict|moved|reserved
             [--dev <branch> --dev-tip <sha> --reserved-path <path>]] [--dry-run]
   gate-status --pr <n> --head <sha> --expected-dev-tip <sha> [--gate-result <result>] [--output <file>]
+  full-gate-candidate --pr <n> --head <sha> --expected-dev-tip <sha>
+  full-gate-status --pr <n> --head <sha> --expected-dev-tip <sha>
 
   The gate-* commands run only in the PR Gate's trusted control jobs. --dev never retargets a pull
   request; it only has to name its actual target. --dry-run prints what would be pushed and merged
@@ -876,12 +912,19 @@ export function main(argv) {
 
   if (command === 'list') return listCommand(options);
 
-  if (command === 'gate-status') {
+  if (['gate-status', 'full-gate-candidate', 'full-gate-status'].includes(command)) {
     for (const required of ['pr', 'head', 'expected-dev-tip']) {
       if (options[required] === undefined) throw new Error(`${command} needs --${required}`);
     }
     if (!/^[a-f0-9]{40}$/u.test(options.head) || !/^[a-f0-9]{40}$/u.test(options['expected-dev-tip'])) throw new Error('invalid-gate-candidate');
     const gateOptions = { ...options, pr: Number(options.pr), expectedDevTip: options['expected-dev-tip'] };
+    if (!/^[1-9][0-9]*$/u.test(options.pr) || !Number.isSafeInteger(gateOptions.pr)) throw new Error('invalid-gate-pull-request');
+    if (command === 'full-gate-candidate') {
+      if (!fullGateCandidate(gateOptions)) throw new Error('unsupported-or-moved-full-gate-candidate');
+      process.stdout.write('E2E_GATE/exact-full-set-candidate\n');
+      return 0;
+    }
+    if (command === 'full-gate-status') return fullGateCommand(gateOptions);
     return gateCommand(gateOptions);
   }
 

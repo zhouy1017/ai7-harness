@@ -1485,7 +1485,10 @@ async function main() {
     // candidate are refused, and clearing succeeds. Choosing a keyed fallback is composed service evidence (tests/service/search-fallback.test.ts).
     await assertRenderer(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-search-backend]'));
       return cards.length===5 && cards.every((card)=>{ const control=card.querySelector('[data-action="select-search-fallback"]'); return control instanceof HTMLButtonElement && control.textContent==='设为备用来源' && control.disabled && card.dataset.fallback==='false'; }) &&
-        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源');
+        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源') &&
+        document.querySelector('[data-search-backends]').textContent.includes('设置备用来源后') &&
+        document.querySelector('[data-search-backends]').textContent.includes('余额或套餐额度不足时，直接切换一次') &&
+        document.querySelector('[data-search-backends]').textContent.includes('其他认证错误不会切换');
     })()`, 'search-fallback-control');
     const fallbackRefusals = await primary.evaluate(`Promise.all([
       window.ai7.selectSearchBackend({backendId:'search-brave',role:'fallback'}).then(()=>null,(error)=>error.code),

@@ -12,6 +12,7 @@ import {
 import { htmlToMarkdown } from '../provider/html-to-markdown.js';
 import { declaredCharset, decodeInCharset } from '../provider/public-source-fetch.js';
 import type { ResearchSnapshot } from '../provider/research-snapshot-cache.js';
+import { httpsAddresses, withoutHttpsAddresses } from '../provider/platform-tools.js';
 import { sha256Hex } from './canonical.js';
 
 /**
@@ -76,6 +77,17 @@ function fold(text: string): FoldedText {
 const SENTENCE_END = new Set(['。', '！', '？', '!', '?', '；', ';', '…']);
 const CLOSERS = new Set(['”', '’', '」', '』', '）', ')', '》', '"', "'", ']', '】']);
 
+/** Keep initials, titles and dotted abbreviations with their following context in the untouched capture. */
+function periodContinues(text: string, index: number): boolean {
+  let next = index + 1;
+  while (next < text.length && /\s/u.test(text[next]!)) next += 1;
+  if (next === text.length) return false;
+  const before = text.slice(Math.max(0, index - 24), index + 1);
+  if (/(?:^|[^\p{L}])(?:[a-z]\.){2,}$/iu.test(before)) return true;
+  return /[\p{L}\p{N}]/u.test(text[next]!) &&
+    (/(?:^|[^\p{L}])[A-Z]\.$/u.test(before) || /\b(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St)\.$/iu.test(before));
+}
+
 /** The captured text's sentences, as [from, to) ranges in order: Chinese and Latin enders, closing quotes kept, blank lines. */
 export function evidenceSentences(text: string): Array<{ from: number; to: number }> {
   const sentences: Array<{ from: number; to: number }> = [];
@@ -94,7 +106,7 @@ export function evidenceSentences(text: string): Array<{ from: number; to: numbe
       push(index + 1);
       continue;
     }
-    const latinStop = character === '.' && (index + 1 === text.length || /\s/u.test(text[index + 1]!)) && index > 0 && /[\p{L}\p{N})"'”]/u.test(text[index - 1]!);
+    const latinStop = character === '.' && (index + 1 === text.length || /\s/u.test(text[index + 1]!)) && index > 0 && /[\p{L}\p{N})"'”]/u.test(text[index - 1]!) && !periodContinues(text, index);
     if (SENTENCE_END.has(character) || latinStop) {
       let end = index + 1;
       while (end < text.length && (CLOSERS.has(text[end]!) || SENTENCE_END.has(text[end]!))) end += 1;
@@ -265,14 +277,7 @@ export interface EvidenceCitation {
 const QUOTED = /[「“『"]([^」”』"]{2,200})[」”』"]/gu;
 const LABEL_BREAK = /\s[-–—|｜_]\s|[|｜_]/u;
 
-/** Every absolute `https` address in a text, with trailing sentence punctuation trimmed by one backward walk. */
-export function httpsAddresses(text: string): string[] {
-  return [...text.matchAll(/https:\/\/[^\s<>"'()[\]{}，。；、）》」”]+/gu)].map((match) => {
-    let end = match[0].length;
-    while (end > 0 && '.,;:!?'.includes(match[0][end - 1]!)) end -= 1;
-    return match[0].slice(0, end);
-  });
-}
+export { httpsAddresses };
 
 /** The site a result's title names after its separator — 「…… - 维基百科」 names 维基百科 — or `null`. */
 export function titleSiteLabel(title: string | null): string | null {
@@ -309,7 +314,7 @@ export function evidenceCitations(findings: ReadonlyArray<UnitResearchFinding>, 
     for (const address of httpsAddresses(basis)) urls.add(addressKey(address));
     // A precise URL must not also cite every other result from its host. A site name alone can identify a page only when
     // that site contributed exactly one result; otherwise no exact source has been named.
-    const namedText = basis.replace(/https:\/\/[^\s<>"'()[\]{}，。；、）》」”]+/gu, '');
+    const namedText = withoutHttpsAddresses(basis);
     for (const source of sources) {
       let host: string | null = null;
       try { host = new URL(source.url).hostname; } catch { host = null; }
@@ -361,11 +366,25 @@ export function evidenceStaleness(input: {
 
 // ---- 来源译文 ---------------------------------------------------------------------------------------------------------
 
-/** Whether a captured text is not Chinese: fewer than three Han characters in ten of its letters. */
+const SOURCE_LINK = /!?\[([^\]\n]*)\]\([^\n)]*\)/gu;
+const SOURCE_ADDRESS = /https?:\/\/[^\s<>]+/gu;
+
+/** Language detection reads prose, without counting addresses or link-only navigation as foreign words. */
+function sourceProse(text: string): string {
+  return text.split('\n').map((line) => {
+    const diagnostic = line.replace(/[*`]/gu, '').trim();
+    if (/^(?:PHP\s+)?(?:Warning|Fatal error|Parse error|Notice):.*(?:require(?:_once)?|include(?:_once)?|Uncaught|on line \d|failed to open stream)/iu.test(diagnostic)) return '';
+    const prose = line.replace(SOURCE_LINK, '').replace(SOURCE_ADDRESS, '');
+    if (!/\p{L}/u.test(prose) || /^\s*#{1,6}\s/u.test(line)) return '';
+    return line.replace(SOURCE_LINK, '$1').replace(SOURCE_ADDRESS, '');
+  }).join('\n');
+}
+
+/** Whether a captured text's prose is not Chinese: fewer than three Han characters in ten of its letters. */
 export function needsSourceTranslation(text: string): boolean {
   let han = 0;
   let letters = 0;
-  for (const character of text) {
+  for (const character of sourceProse(text)) {
     if (/\p{Script=Han}/u.test(character)) { han += 1; letters += 1; } else if (/\p{L}/u.test(character)) letters += 1;
   }
   return letters >= 8 && han / letters < 0.3;
@@ -403,13 +422,33 @@ export async function sourceTranslation(input: {
   readonly rule: SourceTranslationRule | null;
   readonly translator: SourceTranslator | null;
 }): Promise<ResearchEvidenceTranslation | null> {
-  if (!needsSourceTranslation(input.captured)) return null;
+  // Keep offsets in the untouched capture. Filter whole lines before splitting sentences so punctuation in
+  // navigation URLs cannot leave a URL fragment looking like an article sentence.
+  const sentences: Array<{ from: number; to: number }> = [];
+  let lineFrom = 0;
+  for (const line of input.captured.split('\n')) {
+    if (sourceProse(line).trim().length > 0) {
+      for (const sentence of evidenceSentences(line)) {
+        if (needsSourceTranslation(line.slice(sentence.from, sentence.to))) {
+          sentences.push({ from: lineFrom + sentence.from, to: lineFrom + sentence.to });
+        }
+      }
+    }
+    lineFrom += line.length + 1;
+  }
+  const anchored = sentences.find((sentence) => input.anchors.some((anchor) => anchor.from < sentence.to && anchor.to > sentence.from));
+  if (anchored === undefined && !needsSourceTranslation(input.captured)) return null;
+  // Without a quotation anchor, prefer a complete prose statement over page headings, dates and slogans.
+  // This is deliberately conservative; a short, genuinely anchored quotation does not need this fallback.
+  const range = anchored ?? sentences.find((sentence) => {
+    const text = sourceProse(input.captured.slice(sentence.from, sentence.to)).trim();
+    return /[.。！!][\s”’"')\]]*$/u.test(text) && (text.match(/\p{L}[\p{L}\p{M}’'-]*/gu)?.length ?? 0) >= 5 &&
+      !/\b(?:back soon|under maintenance|temporarily unavailable|scheduled maintenance)\b/iu.test(text) &&
+      !/^(?:copyright\b|log\s?in\b|sign\s?in\b|notice:\s+(?:the|this)\s+content\b)/iu.test(text);
+  });
+  if (range === undefined) return null;
   if (!sourceTranslationAdmitted(input.rule)) return { state: 'refused', reason: SOURCE_TRANSLATION_NOT_ADMITTED };
   if (input.translator === null) return { state: 'refused', reason: SOURCE_TRANSLATION_UNAVAILABLE };
-  const sentences = evidenceSentences(input.captured);
-  const range = input.anchors.length > 0
-    ? { from: sentences[input.anchors[0]!.sentence - 1]?.from ?? 0, to: sentences[input.anchors[input.anchors.length - 1]!.sentence - 1]?.to ?? input.captured.length }
-    : { from: sentences[0]?.from ?? 0, to: sentences[0]?.to ?? Math.min(input.captured.length, MAX_PASSAGE_CHARACTERS) };
   const to = Math.min(range.to, range.from + MAX_PASSAGE_CHARACTERS);
   const translated = await input.translator({ text: input.captured.slice(range.from, to), url: input.url });
   if (translated === null || translated.text.trim().length === 0) return { state: 'refused', reason: '模型没有给出可用的译文；只保留原文。' };
@@ -462,6 +501,14 @@ export interface RetainedUnit {
   readonly failedRetrievals: number;
   readonly findings: ReadonlyArray<{ readonly findingId: string; readonly blockId: string; readonly quote: string; readonly category: FactualAssertionCategory; readonly sources: number }>;
   readonly evidence: ReadonlyArray<RetainedEvidence>;
+}
+
+/** The immutable claim rounds are the source of a unit's complete retention aggregate. */
+export function mergeClaimEvidenceUnits(retained: ReadonlyArray<RetainedUnit>): RetainedUnit {
+  return { state: retained.some((entry) => entry.state === 'incomplete') ? 'incomplete' : 'completed',
+    searchCalls: retained.reduce((sum, entry) => sum + entry.searchCalls, 0), retentionFetches: 0,
+    failedRetrievals: retained.reduce((sum, entry) => sum + entry.failedRetrievals, 0),
+    findings: retained.flatMap((entry) => entry.findings), evidence: retained.flatMap((entry) => entry.evidence) };
 }
 
 // ---- Reading the Research Snapshot Cache ------------------------------------------------------------------------------

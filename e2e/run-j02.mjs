@@ -1,11 +1,11 @@
 import { createWriteStream, existsSync, statSync } from 'node:fs';
-import { lstat, mkdtemp, opendir, realpath, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, opendir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { once } from 'node:events';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugArtifactRoot, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, SIDEBAR, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 import { measureCpuShares } from './readiness-trace.mjs';
 
@@ -354,6 +354,75 @@ async function waitFor(renderer, expression, location, timeout = 60_000) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   throw journeyCheckFailure('J-02', location);
+}
+
+async function observeSearchJump(renderer) {
+  const observed=await renderer.evaluate(`(() => {
+    const trace=[],start=performance.now(),editor=document.querySelector('[data-testid="manuscript-editor"]'),pane=document.querySelector('.editor-window'),host=editor.parentElement;
+    let closed=false,everMatchVisible=false,everDomRange=false,everFrameworkRange=false;
+    const domPoint=(node,offset)=>{
+      if(!node||!editor.contains(node))return null;
+      const block=(node.nodeType===Node.ELEMENT_NODE?node:node.parentElement)?.closest('[data-block-id]');
+      if(!block)return null;
+      const range=document.createRange();range.selectNodeContents(block);range.setEnd(node,offset);
+      return {blockId:block.dataset.blockId,grapheme:[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(range.cloneContents().textContent)].length};
+    };
+    const snapshot=(kind)=>{
+      const selection=getSelection(),state=editor.dataset.selectionSnapshot?JSON.parse(editor.dataset.selectionSnapshot):null,from=state?.from,to=state?.to;
+      const matchingBlocks=[...editor.children].filter(block=>block.textContent.includes(${JSON.stringify(SEARCH_TEXT)})).length;
+      const selectedBlock=state?[...editor.children].find(block=>block.dataset.blockId===state.anchor.blockId):null;
+      const selectedGraphemes=selectedBlock?[...new Intl.Segmenter('zh',{granularity:'grapheme'}).segment(selectedBlock.textContent)].map(part=>part.segment):[];
+      const domMatches=selection?.toString()===${JSON.stringify(SEARCH_TEXT)},frameworkMatches=state?state.anchor.blockId===state.head.blockId&&selectedGraphemes.slice(Math.min(state.anchor.grapheme,state.head.grapheme),Math.max(state.anchor.grapheme,state.head.grapheme)).join('')===${JSON.stringify(SEARCH_TEXT)}:null;
+      const anchor=domPoint(selection?.anchorNode,selection?.anchorOffset),head=domPoint(selection?.focusNode,selection?.focusOffset);
+      const domPinsMatch=state&&anchor&&head?anchor.blockId===state.anchor.blockId&&anchor.grapheme===state.anchor.grapheme&&head.blockId===state.head.blockId&&head.grapheme===state.head.grapheme:null;
+      everMatchVisible ||= matchingBlocks>0;everDomRange ||= domMatches;everFrameworkRange ||= frameworkMatches===true;
+      return {kind,ms:Math.round(performance.now()-start),matchingBlocks,domMatches,frameworkMatches,domPinsMatch,domCollapsed:selection?.isCollapsed,rangeCharacters:selection?.rangeCount?selection.getRangeAt(0).toString().length:null,selectedCharacters:selection?.toString().length,anchorOffset:selection?.anchorOffset,headOffset:selection?.focusOffset,anchorInEditor:editor.contains(selection?.anchorNode),headInEditor:editor.contains(selection?.focusNode),frameworkFrom:from,frameworkTo:to,documentFocused:document.hasFocus(),editorFocused:editor.contains(document.activeElement),position:Number(document.querySelector('#manuscript-position')?.value),scrollTop:pane.scrollTop,viewportHeight:pane.clientHeight,scrollHeight:pane.scrollHeight,metaLength:document.querySelector('.editor-meta')?.textContent.length,statusLength:document.querySelector('#persistence-status')?.textContent.length,searchError:document.querySelector('#persistence-status')?.textContent==='无法在当前稿件状态中精确定位该匹配。',windowLoads:(host.dataset.windowLoads??'').split(',').map(value=>['navigation-block','navigation-cursor','navigation-window-start','review-settled','unnamed'].includes(value)?value:'other').slice(-12)};
+    };
+    const record=(kind)=>{if(closed)return;trace.push(snapshot(kind));if(trace.length>48)trace.shift();};
+    const selection=()=>record('selection'),scroll=()=>record('scroll'),focus=()=>record('focus'),blur=()=>record('blur');
+    document.addEventListener('selectionchange',selection);pane.addEventListener('scroll',scroll);window.addEventListener('focus',focus);window.addEventListener('blur',blur);
+    const observer=new MutationObserver(()=>record('window'));observer.observe(host,{attributes:true,attributeFilter:['data-window-loads']});
+    globalThis.__ai7SearchJumpObservation={read:()=>({current:snapshot('read'),everMatchVisible,everDomRange,everFrameworkRange,trace:[...trace]}),dispose:()=>{closed=true;observer.disconnect();document.removeEventListener('selectionchange',selection);pane.removeEventListener('scroll',scroll);window.removeEventListener('focus',focus);window.removeEventListener('blur',blur);}};
+    record('start');
+    return Boolean(editor.dataset.selectionSnapshot);
+  })()`);
+  requireJourney(observed,'search-framework-observer-ready');
+}
+
+function searchJumpFailureReason(observed) {
+  if (observed === null) return 'observation-unavailable';
+  if (!observed.everMatchVisible) return 'match-never-in-window';
+  if (observed.everDomRange) {
+    const range = observed.current.matchingBlocks === 0 ? 'window-left'
+      : observed.current.frameworkMatches === false ? 'framework'
+        : observed.current.frameworkMatches === true ? 'dom' : 'no-framework';
+    const lastLoad = observed.current.windowLoads.at(-1);
+    const cause = lastLoad === 'navigation-cursor' ? 'cursor'
+      : lastLoad === 'navigation-block' ? 'block'
+        : lastLoad === 'navigation-window-start' ? 'return'
+          : lastLoad === 'review-settled' ? 'review' : 'other';
+    const windowFocus = observed.current.documentFocused ? 'window-focused' : 'window-unfocused';
+    const editorFocus = observed.current.editorFocused ? 'editor-focused' : 'editor-unfocused';
+    return `range-lost-${range}-${cause}-${windowFocus}-${editorFocus}`;
+  }
+  if (observed.current.frameworkMatches) return 'dom-selection-mismatch';
+  if (observed.current.searchError) return 'navigation-refused';
+  if (!observed.current.documentFocused) return 'window-unfocused';
+  return 'match-without-range';
+}
+
+async function waitForExactSearchRange(renderer) {
+  try {
+    await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+    if(localDebugEnabled())recordDebugDetail('J-02',`search jump observed ${JSON.stringify(await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()'))}`);
+  } catch (error) {
+    const observed=await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.read()').catch(()=>null);
+    if(localDebugEnabled())recordDebugDetail('J-02',`search jump mismatch ${JSON.stringify(observed)}`);
+    const reason=searchJumpFailureReason(observed);
+    throw journeyCheckFailure('J-02',`search-exact-range-${reason}`,{cause:error});
+  } finally {
+    await renderer.evaluate('globalThis.__ai7SearchJumpObservation?.dispose()').catch(()=>undefined);
+  }
 }
 
 async function waitForChecks(renderer, expression, location, timeout = 60_000) {
@@ -1188,12 +1257,33 @@ async function runWorkspaceJourney(renderer, dataRoot) {
   await waitFor(renderer, `document.querySelector('.search-section .field-note')?.textContent.includes('共 ${EXPECTED_MATCHES} 处')`, 'search-results', 120_000);
   await assertRenderer(renderer, `document.querySelectorAll('.search-result').length === 24 && !Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '下一组结果')?.hidden`, 'search-virtualized');
   await assertRenderer(renderer, `(() => { const encoded = (value) => new TextEncoder().encode(JSON.stringify(value)).length; const rows = Array.from(document.querySelectorAll('.search-result')); const ids = rows.map((row) => row.querySelector('input')?.dataset.matchId); return rows.length === 24 && new Set(ids).size === ids.length && rows.every((row) => { const heading = row.querySelector('.field-note')?.textContent ?? ''; const context = row.querySelector('button')?.textContent ?? ''; return encoded(heading) <= 2048 && encoded(context) <= 2048; }); })()`, 'search-display-frame-bounded-and-identities-unique');
-  await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
+  const readableEditor = `(() => { const pane=document.querySelector('.editor-window'),editor=document.querySelector('[data-testid="manuscript-editor"]'),style=getComputedStyle(pane);return pane.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom)>=2*parseFloat(getComputedStyle(editor).lineHeight);})()`;
+  await assertRenderer(renderer, readableEditor, 'search-readable-editor');
+  await assertRenderer(renderer, `(() => { const rows=[...document.querySelectorAll('.outline-list button')];return rows.length>0&&rows.every((row,index)=>{const range=document.createRange();range.selectNodeContents(row);return range.getBoundingClientRect().height<=row.clientHeight+1&&(index===0||row.getBoundingClientRect().top>=rows[index-1].getBoundingClientRect().bottom-1);});})()`, 'outline-long-headings-do-not-overlap');
+  await observeSearchJump(renderer);
+  await assertRenderer(renderer, `(() => { const surface = document.querySelector('.editor-window'); const blocks = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')); const block = blocks[5]; const text = block?.firstChild; if (!(surface instanceof HTMLElement) || !(block instanceof HTMLElement) || !(text instanceof Text) || text.length < 5) return false; block.scrollIntoView({ block: 'center' }); const containerTop = surface.getBoundingClientRect().top; const visible = blocks.find((candidate) => candidate.getBoundingClientRect().bottom >= containerTop); const selection = window.getSelection(); selection.setBaseAndExtent(text, 4, text, 1); globalThis.__ai7SearchReturn = { meta: document.querySelector('.editor-meta')?.textContent, blockId: block.dataset.blockId, text: selection.toString(), nodeText: text.data, anchor: 4, head: 1, scrollBlockId: visible?.dataset.blockId, scrollOffset: visible?.getBoundingClientRect().top - containerTop }; return true; })()`, 'search-return-prepare');
   await assertRenderer(renderer, `(() => { const open = document.querySelector('.search-result button'); if (!open) return false; open.click(); return true; })()`, 'search-jump');
   await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent !== globalThis.__ai7SearchReturn.meta`, 'search-jump-resolved');
-  await waitFor(renderer, `window.getSelection()?.toString() === ${JSON.stringify(SEARCH_TEXT)}`, 'search-exact-range');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.startsWith('已到达')`, 'search-arrival-settled');
+  await assertRenderer(renderer, readableEditor, 'search-arrival-readable-editor');
+  await waitForExactSearchRange(renderer);
   await clickButton(renderer, '返回查找前位置', 'search-return');
-  await waitFor(renderer, `(() => { const expected = globalThis.__ai7SearchReturn; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelector('.editor-meta')?.textContent === expected.meta && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'search-return-exact-selection-scroll');
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.startsWith('已返回查找前')`, 'search-return-settled');
+  await assertRenderer(renderer, readableEditor, 'search-return-readable-editor');
+  try {
+    await waitFor(renderer, `(() => { const expected = globalThis.__ai7SearchReturn; const selection = window.getSelection(); const surface = document.querySelector('.editor-window'); const scrollBlock = document.querySelector('[data-block-id="' + expected.scrollBlockId + '"]'); return document.querySelector('.editor-meta')?.textContent === expected.meta && selection?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId === expected.blockId && selection.anchorOffset === expected.anchor && selection.focusOffset === expected.head && selection.toString() === expected.text && surface instanceof HTMLElement && scrollBlock instanceof HTMLElement && Math.abs((scrollBlock.getBoundingClientRect().top - surface.getBoundingClientRect().top) - expected.scrollOffset) <= 3; })()`, 'search-return-exact-selection-scroll');
+  } catch (error) {
+    if (localDebugEnabled()) {
+      // Observe each original conjunct and layout delta; retain no manuscript or heading text.
+      const observed = await renderer.evaluate(`(() => { const e=globalThis.__ai7SearchReturn,s=getSelection(),pane=document.querySelector('.editor-window'),block=document.querySelector('[data-block-id="'+e.scrollBlockId+'"]');return {metaMatches:document.querySelector('.editor-meta')?.textContent===e.meta,anchorBlockMatches:s?.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId===e.blockId,headBlockMatches:s?.focusNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId===e.blockId,anchorOffset:s?.anchorOffset,expectedAnchor:e.anchor,headOffset:s?.focusOffset,expectedHead:e.head,textMatches:s?.toString()===e.text,selectedCharacters:s?.toString().length,expectedCharacters:e.text.length,rangeCharacters:s?.rangeCount?s.getRangeAt(0).toString().length:null,rangeTextMatches:s?.rangeCount?s.getRangeAt(0).toString()===e.text:null,anchorNodeTextMatches:s?.anchorNode?.textContent===e.nodeText,headNodeTextMatches:s?.focusNode?.textContent===e.nodeText,domCollapsed:s?.isCollapsed,scrollBlockPresent:!!block,scrollDelta:block&&pane?block.getBoundingClientRect().top-pane.getBoundingClientRect().top-e.scrollOffset:null,expectedScrollOffset:e.scrollOffset,viewportHeight:pane?.clientHeight,scrollTop:pane?.scrollTop,scrollHeight:pane?.scrollHeight,position:Number(document.querySelector('#manuscript-position')?.value),statusLength:document.querySelector('#persistence-status')?.textContent.length,metaLength:document.querySelector('.editor-meta')?.textContent.length,expectedMetaLength:e.meta?.length};})()`).catch(() => ({ observationUnavailable: true }));
+      recordDebugDetail('J-02', `search return mismatch ${JSON.stringify(observed)}`);
+    }
+    throw error;
+  }
+  if (localDebugEnabled()) {
+    const { data } = await renderer.send('Page.captureScreenshot', { format: 'png' });
+    await writeFile(join(localDebugArtifactRoot('J-02'), 'search-return-readable.png'), Buffer.from(data, 'base64'));
+  }
   await clickButton(renderer, '下一组结果', 'search-next');
   await waitFor(renderer, `document.querySelectorAll('.search-result').length === 1`, 'search-next-results');
   await clickButton(renderer, '上一组结果', 'search-previous');

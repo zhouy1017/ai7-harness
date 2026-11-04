@@ -1205,7 +1205,7 @@ async function main() {
       return bundle.querySelector(':scope > h3')?.textContent === '图书交付包' && bundle.parentElement?.parentElement?.lastElementChild === bundle.parentElement &&
         window.__j07.condition('publication')?.dataset.conditionMet === 'false' && window.__j07.condition('work-records')?.dataset.conditionMet === 'true' &&
         prepare instanceof HTMLButtonElement && prepare.disabled &&
-        window.__j07.packageReason() === '还不能准备：发稿版本、新闻稿、宣传文章、评论文章、发布会材料、营销要点未满足。' && window.__j07.packageVersions().length === 0;
+        window.__j07.packageReason() === '还不能准备：发稿版本未满足。' && window.__j07.packageVersions().length === 0;
     })()`, 'package-unavailable-before-a-milestone');
     const nothing = await renderer.evaluate(READ_PUBLICATION);
     requireJourney(nothing?.bookId === bookId && nothing.milestones.length === 0 && nothing.designations.length === 0 &&
@@ -1996,9 +1996,9 @@ async function main() {
     at('package-conditions');
     // 图书交付包 (Issue #416, S67a; BUNDLE-001 to 005): the last block of 交付物 says what a package is and is not and
     // lists its conditions — the 发稿版本 set, with 自发稿版本后有修改 beside it; the 新闻稿 delivered; the four other
-    // types neither made nor 本书不做; no review to finish — and 准备图书交付包 waits, naming the four. A row's route
+    // types absent; these optional items are excluded and preparation waits only for a purpose. A row's route
     // takes the editor to where it is met: here, the type's own card.
-    await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'false' && window.__j07.condition('document:news-release')?.dataset.conditionMet === 'true'`, 'package-read');
+    await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'true' && window.__j07.condition('document:news-release')?.dataset.conditionMet === 'true'`, 'package-read');
     await assertRenderer(renderer, `(() => {
       const bundle = window.__j07.pkg();
       const rows = Array.from(bundle.querySelectorAll('ol.package-condition-list > li'))
@@ -2013,9 +2013,10 @@ async function main() {
         ]))} &&
         window.__j07.condition('publication').querySelector('.package-condition-notice')?.textContent === '自发稿版本后有修改：可以另设发稿版本，也可以按当前发稿版本打包。' &&
         window.__j07.condition('document:news-release').querySelector('[data-package-route]') === null &&
-        prepare instanceof HTMLButtonElement && prepare.disabled && window.__j07.packageReason() === '还不能准备：宣传文章、评论文章、发布会材料、营销要点未满足。' &&
+        prepare instanceof HTMLButtonElement && prepare.disabled && window.__j07.packageReason() === '先写明交付包用途。' &&
         !/%|百分/.test(bundle.textContent ?? '');
     })()`, 'package-conditions-name-what-is-missing');
+    await assertRenderer(renderer, `(() => { const input=window.__j07.pkg().querySelector('[data-package-field=purpose]'); input.value='未创建附属文档也可打包'; input.dispatchEvent(new Event('input',{bubbles:true})); const enabled=!window.__j07.pkg().querySelector('[data-package-action=prepare]').disabled; input.value=''; input.dispatchEvent(new Event('input',{bubbles:true})); return enabled; })()`, 'package-optional-documents-do-not-block');
     await clickSelector(renderer, '[data-screen="book-deliverables"] li[data-condition-id="document:promotion-article"] [data-package-route="document"]', 'package-route-document');
     await waitFor(renderer, `document.activeElement === window.__j07.cardAction('promotion-article', 'create')`, 'package-route-focuses-the-card');
 

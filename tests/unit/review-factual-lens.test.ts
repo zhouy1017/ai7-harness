@@ -114,6 +114,8 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
   it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {
     const view = mount('settled'); await flush();
+    expect(view.root.textContent).toContain('证据支持');
+    expect(view.root.textContent).not.toContain('未外部复核');
     expect(view.root.querySelectorAll('.review-finding-quote').length).toBe(1);
     expect(view.root.querySelectorAll('.fact-lens-row .review-finding').length).toBe(1);
     expect(view.root.querySelectorAll('.fact-lens-row [data-review-action="mark-handled"]').length).toBe(1);
@@ -126,6 +128,7 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     const view = mount('failed');
     view.inspectFactualVerification.mockResolvedValue(lens(RUN, [])); await flush();
     expect(view.root.querySelectorAll('.fact-lens-row').length).toBe(0);
+    expect(view.root.textContent).toContain('未外部复核');
     expect(view.root.querySelectorAll('.review-finding-quote').length).toBe(1);
     expect(view.root.querySelectorAll('[data-review-action="mark-handled"]').length).toBe(1);
   });

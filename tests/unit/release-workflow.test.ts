@@ -35,7 +35,7 @@ async function fixture(root: string, platform: string) {
   await mkdir(join(root, 'config'), { recursive: true });
   await mkdir(join(root, 'dist'));
   const manifest = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
-  await writeFile(join(root, 'package.json'), JSON.stringify(manifest));
+  await writeFile(join(root, 'package.json'), JSON.stringify({ ...manifest, version: candidate.version }));
   await writeFile(join(root, 'dist/build-identity.json'), JSON.stringify(identity));
   await writeFile(join(root, 'pnpm-lock.yaml'), 'synthetic lock');
   await writeFile(join(root, 'config/dependency-artifacts.json'), '{}');

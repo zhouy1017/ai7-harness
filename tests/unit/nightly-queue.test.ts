@@ -176,6 +176,46 @@ describe('trusted Gate status publication without role comments', () => {
   });
 });
 
+describe('reviewed manual full Gate status publication', () => {
+  it.each(['success', 'head-moved', 'base-moved', 'move-after-publish', 'fork', 'main-base', 'main-head',
+    'failure', 'cancelled', 'skipped', 'wrong-job', 'wrong-run', 'wrong-control'])('handles %s from actual same-run evidence', (scenario) => {
+    const entry = new URL('../../tools/nightly-queue.mjs', import.meta.url).href;
+    const script = `
+      import assert from 'node:assert/strict';import childProcess from 'node:child_process';import{syncBuiltinESMExports}from'node:module';
+      const scenario=${JSON.stringify(scenario)},head='a'.repeat(40),base='b'.repeat(40),control='d'.repeat(40),statuses=[];let views=0;
+      Object.assign(process.env,{GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ID:'200',GITHUB_REPOSITORY:'owner/repo',
+        GITHUB_REF:'refs/heads/owner/reviewed-control',GITHUB_WORKFLOW_REF:'owner/repo/.github/workflows/e2e-nightly.yml@refs/heads/owner/reviewed-control',FULL_GATE_CONTROL_SHA:control});
+      const fullName='J-01 + J-02 + J-08 + J-12 + J-15 + J-03 + J-04 + J-05 + J-06 + J-07 + J-09 + J-10 + J-11 + J-16 + J-13 (Windows Server 2025 x64 CI)';
+      childProcess.spawnSync=(command,args)=>{let stdout='';
+        if(command==='gh'&&args[0]==='pr'){views++;stdout=JSON.stringify({number:1290,state:'OPEN',isDraft:false,
+          baseRefName:scenario==='main-base'?'main':'beta/owner-selected',headRefName:scenario==='main-head'?'main':'wave/1290',
+          headRefOid:scenario==='head-moved'||scenario==='move-after-publish'&&views>1?'c'.repeat(40):head,
+          baseRefOid:scenario==='base-moved'?'c'.repeat(40):base,headRepository:{nameWithOwner:scenario==='fork'?'other/repo':'owner/repo'}});
+        }else if(command==='gh'&&args.includes('POST')){statuses.push(args.find(a=>a.startsWith('state=')));
+        }else if(command==='gh'&&args.includes('--paginate')){stdout=JSON.stringify([{jobs:[
+          {name:'Resolve exact Full Gate pull request',status:'completed',conclusion:'success'},
+          {name:scenario==='wrong-job'?'Unrelated job':fullName,status:'completed',conclusion:['failure','cancelled','skipped'].includes(scenario)?scenario:'success'},
+          {name:'Publish E2E Functional Gate result',status:'in_progress',conclusion:null}].map(job=>({...job,run_id:200}))}]);
+        }else if(command==='gh'&&args[0]==='api'){stdout=JSON.stringify({id:scenario==='wrong-run'?201:200,
+          repository:{full_name:'owner/repo'},head_branch:'owner/reviewed-control',head_sha:scenario==='wrong-control'?'e'.repeat(40):control,
+          path:'.github/workflows/e2e-nightly.yml',event:'workflow_dispatch',status:'in_progress',conclusion:null,
+          display_title:'E2E Nightly Full Gate · '+head+' · PR 1290 · '+base});
+        }else if(command==='git'&&args[0]==='fetch'){
+        }else if(command==='git'&&args[0]==='rev-parse'){stdout=args[1].endsWith('beta/owner-selected')?base:head;
+        }else if(command==='git'&&args[0]==='merge-base'){
+        }else throw Error('Unexpected command');return{status:0,stdout,stderr:''};};
+      syncBuiltinESMExports();const queue=await import(${JSON.stringify(entry)});
+      const publish=()=>queue.main(['full-gate-status','--pr','1290','--repo','owner/repo','--head',head,'--expected-dev-tip',base]);
+      if(['success','main-head'].includes(scenario))assert.equal(publish(),0);else assert.throws(publish);
+      assert.deepEqual(statuses,['success','main-head'].includes(scenario)?['state=success']:scenario==='wrong-control'?[]:
+        scenario==='move-after-publish'?['state=success','state=failure']:['state=failure']);
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '--eval', script], { cwd: tmpdir(), encoding: 'utf8', windowsHide: true });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+});
+
 // PR #449 as the live repository reports it: an ADR whose own status line reads `proposed`.
 const PROPOSED_ADR = {
   path: 'docs/adr/0080-assign-a-provider-route-and-model-to-every-task-that-transmits.md',
@@ -642,6 +682,29 @@ describe('the orchestrator grants every scope the workflows it calls ask for', (
     const nightly = (await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
     expect(nightly).toContain('run-name: E2E Nightly Full Gate · ${{ inputs.ref || github.sha }}');
     expect(nightly).toContain('[[ "$SELECTED_REF" =~ ^[a-f0-9]{40}$ ]]');
+  });
+
+  it('keeps optional manual full-Gate control pinned and all candidate execution read-only', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const nightly = (await readFile(new URL('e2e-nightly.yml', WORKFLOWS), 'utf8')).replace(/\r\n/gu, '\n');
+    const resolve = nightly.split('\n  resolve:')[1]!.split('\n  full:')[0]!;
+    const full = nightly.split('\n  full:')[1]!.split('\n  result:')[0]!;
+    const result = nightly.split('\n  result:')[1]!;
+    for (const control of [resolve, result]) {
+      expect(control).toContain('ref: ${{ github.workflow_sha }}');
+      expect(control).toContain('persist-credentials: false');
+      expect(control).not.toContain('ref: ${{ inputs.ref }}');
+    }
+    expect(resolve).toContain('full-gate-candidate');
+    expect(full).toContain('ref: ${{ inputs.ref }}');
+    expect(full).toContain('permissions:\n      contents: read');
+    expect(full).not.toContain('statuses: write');
+    expect(full).toContain('run: pnpm run e2e:all');
+    expect(full).toContain("inputs.pr == '' || needs.resolve.result == 'success'");
+    expect(result).toContain('statuses: write');
+    expect(result).toContain('actions: read');
+    expect(result).toContain('FULL_GATE_CONTROL_SHA: ${{ github.workflow_sha }}');
+    expect(result).toContain('full-gate-status');
   });
 
   it('never runs a fork candidate under pull_request_target and gives its Journey job no other scope', async () => {

@@ -23,7 +23,7 @@ import { LearningEligibilityError, LearningEligibilityLedger, LOCAL_LEARNING_POL
   type LearningMaterialCandidate } from '../learning-eligibility.js';
 import { readWordParentSourcePin, wordParentSourcePinRecord, requireWordRevisionSource, wordTemplateKey,
   wordTrackedSampleRecord, wordTrackedSamples, WORD_EXTRACTOR_IDENTITY,
-  readWordImportChoiceRecord, ImportRetentionError,
+  readWordImportChoiceRecord, wordReadingForDigest, ImportRetentionError,
   type WordTrackedEditSample, type WordRevisionGraph, type WordImportChoiceRecord, type WordLocalImportAdmission,
   type WordImportControlsSnapshot, type WordSampleDetailSource } from '../import-retention.js';
 import { WORD_DOCX_PARSER_IDENTITY, type WordTrackedCompilation } from '../docx.js';
@@ -604,8 +604,8 @@ export class EditorialLearningLedger {
         compiled.templateManifestDigest === choice.templateManifestDigest);
       requireWordRevisionSource(this.db, readWordParentSourcePin(this.db, bookId, choice.sourceVersionId), compiled.graph);
       for (const kind of ['rejected', 'accepted'] as const) {
-        const reading = compiled.readings[kind];
         const pin = choice.readings[kind];
+        const reading = wordReadingForDigest(compiled.readings[kind], pin.digest);
         requireLearning(reading.readingDigest === pin.digest && reading.blocks.length === pin.blockCount && reading.usable === pin.usable);
       }
       const samples = wordTrackedSamples(bookId, compiled.graph, compiled.templates);

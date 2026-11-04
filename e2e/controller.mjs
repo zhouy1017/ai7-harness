@@ -309,7 +309,7 @@ const J01_LAUNCH_SCENARIOS = Object.freeze([
   'word-accepted-empty-book',
   'word-all-inserted-accepted',
   'word-detail-beyond-first-page',
-  'word-accepted-degradation',
+  'word-suggestions-notes', 'word-accepted-notes',
   'word-exact-review-recovery',
   'word-committed-recovery',
 ]);
@@ -481,7 +481,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'word-accepted-empty-book',
     'word-all-inserted-accepted',
     'word-detail-beyond-first-page',
-    'word-accepted-degradation',
+    'word-suggestions-notes', 'word-accepted-notes',
   ]),
   'J-02': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,

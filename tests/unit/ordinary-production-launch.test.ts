@@ -384,10 +384,14 @@ describe('the enrollment helper\'s named-reference form (Issue #811 item 5)', ()
     }
   });
 
-  it('keeps the slot list it duplicates and refuses CI and a native-carrier override as the store form does', async () => {
-    const source = await (await import('node:fs/promises')).readFile(fileURLToPath(new URL('../../tools/enroll-dev-credential.mjs', import.meta.url)), 'utf8');
-    expect(source).toContain("export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);");
-    // The named form reaches the store only past the same two refusals as the development store form.
-    expect(source).toMatch(/requireEnrollment\(request\.mode !== 'check' && !continuousIntegrationPresent\(deps\.env\)\);\s*const entry = await openEntry\(request\.credentialReference, deps\);/u);
+  it('refuses CI and a native-carrier override before opening a named credential entry', async () => {
+    // @ts-expect-error Plain development tooling has no TypeScript declaration.
+    const helper = await import('../../tools/enroll-dev-credential.mjs');
+    const carrier = vi.fn(async () => { throw new Error('No native credential access is permitted'); });
+    const argv = ['--slot', 'opencode-go', '--credential-reference', randomUUID(), '--from-file', KEY_PATH];
+    for (const env of [{ CI: 'true' }, { NAPI_RS_NATIVE_LIBRARY_PATH: 'synthetic-override' }]) {
+      await expect(helper.storeEnrollment(argv, { env, importKeyring: carrier })).rejects.toThrow(/AI7_ENROLLMENT_INVALID/u);
+    }
+    expect(carrier).not.toHaveBeenCalled();
   });
 });

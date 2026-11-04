@@ -34,7 +34,7 @@ import {
   normalizeWordParagraph,
 } from './docx-marks.js';
 import { canonicalJson as wordCanonicalJson, sha256Hex } from './analysis/canonical.js';
-import { WORD_EXTRACTOR_IDENTITY, WORD_INTAKE_PROFILE, WORD_SOURCE_SCHEMA,
+import { WORD_EXTRACTOR_IDENTITY, WORD_INTAKE_PROFILE, WORD_SOURCE_SCHEMA, wordReadingWithBlocks, wordCompilationForReadings,
   type WordCompiledReading, type WordEventKind, type WordImportMode, type WordIncompatibility, type WordIntakeInventory,
   type WordRevisionGraph, type WordReadingBlock, type WordSampleTemplate, type WordSourceAtom, type WordSourceEvent,
   type WordSourceParagraph } from './import-retention.js';
@@ -1162,13 +1162,14 @@ const WORD_REVISION_DETAILS: Record<WordFidelityVariant, string> = {
 };
 
 function buildWordFidelityReport(signals: DocumentSignalsV2, headersFooters: number,
-  disposition: TextBoxDisposition, variant: WordFidelityVariant): FidelityCategoryProjection[] {
-  return buildFidelityReportV2(signals, headersFooters, undefined, disposition).map((category) => {
+  disposition: TextBoxDisposition, variant: WordFidelityVariant, projectedNotes = false): FidelityCategoryProjection[] {
+  const report = buildFidelityReportV2(signals, headersFooters, undefined, disposition).map((category) => {
     if (category.key === 'comments-revisions') return { ...category, ...PRESERVED, detail: WORD_REVISION_DETAILS[variant] };
     if (category.key === 'round-trip-export') return { ...category,
       detail: '导出按最终确认的阅读和之后的稿件文字写出。原文件留存不代表版式往返保证；合段等无法原样恢复的部分，在导出保真审阅中说明。' };
     return category;
   });
+  return projectedNotes ? withNoteBlocksRow(report) : report;
 }
 
 /** The actual selected reading supplies its mark count; preview never chooses this mode. */
@@ -1182,7 +1183,8 @@ export function wordImportFidelityReport(preview: unknown, mode: WordImportMode,
     notes: counts[2]!, tables: counts[3]!, imagesCaptions: counts[4]!, sections: counts[5]!, textBoxes: counts[7]!, fields: counts[8]! };
   if (disposition === 'merge' && signals.textBoxes === 0) return undefined;
   return buildWordFidelityReport(signals, counts[6]!, disposition,
-    mode === 'suggestions' ? 'word-suggestions' : 'word-accepted-baseline');
+    mode === 'suggestions' ? 'word-suggestions' : 'word-accepted-baseline',
+    Array.isArray(preview) && preview.some((row: FidelityCategoryProjection) => row.key === 'notes' && row.status === 'retained'));
 }
 
 /**
@@ -1316,10 +1318,11 @@ function reportsForCandidateCounts(
   }
   const dispositions: ReadonlyArray<TextBoxDisposition | null> = signals.textBoxes === 0 ? [null] : ['retain', 'merge'];
   if (parserIdentity === WORD_DOCX_PARSER_IDENTITY) return dispositions.flatMap((disposition) =>
-    (['word-preview', 'word-suggestions', 'word-accepted-baseline'] as const).map((variant) => ({
-      report: buildWordFidelityReport(signals, counts[6]!, disposition ?? 'retain', variant),
+    (['word-preview', 'word-suggestions', 'word-accepted-baseline'] as const).flatMap((variant) =>
+      (signals.notes > 0 ? [false, true] : [false]).map((projectedNotes) => ({
+      report: buildWordFidelityReport(signals, counts[6]!, disposition ?? 'retain', variant, projectedNotes),
       textBoxDisposition: disposition, commentsRevisions: variant,
-    })));
+    }))));
   // Revision 3 rebuilds the 批注与修订 row in every form its count admits: with no mark it may be absent or
   // present (a formatting revision alone), and a reimport states it as its own.
   const variants: ReadonlyArray<CommentsRevisionsVariant> = !current
@@ -1483,6 +1486,19 @@ export type NativeDocxIntakeParse =
   | { kind: 'legacy'; parsed: ParsedDocx; word: Extract<WordTrackedCompilation, { kind: 'unsupported' }> | null }
   | { kind: 'word'; parsed: ParsedWordDocx; word: Extract<WordTrackedCompilation, { kind: 'ready' }>; legacy: WordLegacyIntakeView };
 
+/** Existing source and draft pins retain the earlier body-only reading; new imports project note blocks. */
+export function wordIntakeForPinnedReadings(native: Extract<NativeDocxIntakeParse, { kind: 'word' }>,
+  pins: { rejected: { digest: string }; accepted: { digest: string } }): Extract<NativeDocxIntakeParse, { kind: 'word' }> {
+  const word = wordCompilationForReadings(native.word, pins);
+  if (word === native.word) return native;
+  const preview = word.readings[word.previewReading];
+  const notes = native.parsed.fidelity.find((row) => row.key === 'notes')!;
+  const bodyOnlyNotes = buildFidelityReportV2({ ...NO_SIGNALS, notes: notes.count }, 0).find((row) => row.key === 'notes')!;
+  return { ...native, word, parsed: { ...native.parsed, blockCount: preview.blocks.length, characterCount: preview.characterCount,
+    contentDigest: preview.contentDigest, structureDigest: preview.structureDigest,
+    fidelity: native.parsed.fidelity.map((row) => row.key === 'notes' && !preview.blocks.some((block) => block.kind === 'note') ? bodyOnlyNotes : row) } };
+}
+
 /**
  * Source-only and reimport retain the real legacy result or its actual refusal. Neither may consume
  * Word preview blocks as historical rows. A reader refusal is usable only while original bytes match.
@@ -1605,7 +1621,8 @@ function wordNativePreviewResult(compiled: Extract<WordTrackedCompilation, { kin
     : { value: fallbackTitle, sourceLabel: '文件名' as const };
   requireDocx(titleSuggestion.value.length > 0, 'no usable title suggestion');
   const fidelity = buildWordFidelityReport(archive.document.signals,
-    archive.entryNames.filter((entry) => /^word\/(?:header|footer)[^/]*\.xml$/i.test(entry)).length, 'retain', 'word-preview');
+    archive.entryNames.filter((entry) => /^word\/(?:header|footer)[^/]*\.xml$/i.test(entry)).length, 'retain', 'word-preview',
+    preview.blocks.some((block) => block.kind === 'note'));
   requireDocx(deriveImportFidelityPlan(fidelity, compiled.sourceDigest, compiled.archiveBytes, undefined, WORD_DOCX_PARSER_IDENTITY) !== undefined,
     'Word preview fidelity report is malformed');
   return { kind: 'word', word: compiled, legacy, parsed: { parserIdentity: WORD_DOCX_PARSER_IDENTITY, sourceDigest: compiled.sourceDigest,
@@ -1634,7 +1651,8 @@ interface RawWordPart {
   atoms: RawWordAtom[];
   paragraphs: WordSourceParagraph[];
   decoded: Map<number, string>;
-  comments: { comments?: string; commentsExtended?: string };
+  comments: { comments?: string; commentsExtended?: string; notes?: ReadonlyMap<NotePart, string> };
+  noteReferences: { part: NotePart; noteId: string; paragraphIndex: number; rejected: boolean; accepted: boolean }[];
 }
 interface RawWordRange { start: number; end: number | null; container: string }
 interface WordXmlFrame {
@@ -1702,6 +1720,7 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
   const events: RawWordEvent[] = [];
   const atoms: RawWordAtom[] = [];
   const paragraphs: WordSourceParagraph[] = [];
+  const noteReferences: RawWordPart['noteReferences'] = [];
   const decoded = new Map<number, string>();
   const ranges = new Map<string, RawWordRange>();
   const paragraphBoundaryEvents = new Map<number, number[]>();
@@ -1783,6 +1802,15 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
     const supportedStory = main && inBody && !inBox;
     const inProperties = frames.some((ancestor) => isWord(ancestor) &&
       (ancestor.local.endsWith('Pr') || ancestor.local.endsWith('PrChange')));
+    if (supportedStory && word && NOTE_REFERENCE_PARTS[tag.local] !== undefined && !inProperties) {
+      const paragraph = activeParagraph(), noteId = wordAttribute(tag, 'id');
+      if (paragraph !== undefined && noteId !== null) {
+        const presence = runAncestors().map((index) => events[index]!);
+        noteReferences.push({ part: NOTE_REFERENCE_PARTS[tag.local]!, noteId, paragraphIndex: paragraph.paragraphIndex,
+          rejected: !presence.some((event) => event.kind === 'ins' || event.kind === 'moveTo'),
+          accepted: !presence.some((event) => event.kind === 'del' || event.kind === 'moveFrom') });
+      }
+    }
     if (word && tag.local === 'txbxContent' && main && inBody) {
       const anchor = activeParagraph();
       requireDocx(!inBox && anchor !== undefined && boxCount < MAX_TEXT_BOXES, 'invalid or excessive Word text boxes');
@@ -1980,7 +2008,7 @@ function createWordPartParser(part: string, inventory: WordInventoryDraft,
         }
       }
     }
-    return { events, atoms, paragraphs, decoded, comments };
+    return { events, atoms, paragraphs, decoded, comments, noteReferences };
   } };
 }
 
@@ -2121,8 +2149,29 @@ function finishWordCompilation(archive: ReadDocxArchive<RawWordPart>, inventory:
     return { ...base(), kind: 'unsupported', reasons: inventory.locations };
   }
   const templates = wordSampleTemplates(graph, raw.decoded, signal);
-  const readings = { rejected: compileWordReading(graph, raw.decoded, 'rejected', templates, comments.bodies, textBoxes, signal),
-    accepted: compileWordReading(graph, raw.decoded, 'accepted', templates, comments.bodies, textBoxes, signal) };
+  const projectNotes = (reading: WordCompiledReading): WordCompiledReading => {
+    if (!reading.usable) return reading;
+    const references = raw.noteReferences.filter((reference) => reference[reading.reading]).map((reference): NoteReference => {
+      const block = reading.blocks.find((candidate) => candidate.sourceParagraphIndices.includes(reference.paragraphIndex));
+      const preceding = block ?? reading.blocks.findLast((candidate) => candidate.sourceParagraphIndices.some((index) => index < reference.paragraphIndex));
+      return { part: reference.part, noteId: reference.noteId, referencePosition: preceding?.position ?? null };
+    });
+    const notes = noteBlocks(references, raw.comments.notes ?? new Map());
+    if (notes.length === 0) return reading;
+    requireDocx(reading.blocks.length + notes.length <= MAX_BLOCK_COUNT, 'too many manuscript blocks');
+    const blocks: WordReadingBlock[] = [...reading.blocks];
+    for (const note of notes) {
+      const position = blocks.length + 1, kind = 'note' as const, level = null, text = note.text;
+      const digest = sha256Hex(wordCanonicalJson({ kind, level, text }));
+      const graphemeLength = graphemeCount(text);
+      requireDocx(text.length <= MAX_BLOCK_CODE_UNITS && graphemeLength <= MAX_BLOCK_GRAPHEMES, 'note exceeds the bounded block size');
+      blocks.push({ blockId: `blk_${sha256Hex(`${position}\u0000${digest}`).slice(0, 24)}`, position, kind, level, text, digest,
+        graphemeLength, sourceParagraphIndices: [], groups: [], note: note.source });
+    }
+    return wordReadingWithBlocks(reading, blocks);
+  };
+  const readings = { rejected: projectNotes(compileWordReading(graph, raw.decoded, 'rejected', templates, comments.bodies, textBoxes, signal)),
+    accepted: projectNotes(compileWordReading(graph, raw.decoded, 'accepted', templates, comments.bodies, textBoxes, signal)) };
   signal?.throwIfAborted();
   if (!readings.rejected.usable && !readings.accepted.usable) {
     inventory.locations.push(...readings.rejected.refusals, ...readings.accepted.refusals);

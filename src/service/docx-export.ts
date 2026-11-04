@@ -6,7 +6,7 @@ import { graphemesOf } from '../shared/mark-anchor.js';
 import { canonicalJson, sha256Hex } from './analysis/canonical.js';
 import { compileWordTrackedDocxBytes, type WordTrackedCompilation } from './docx.js';
 import { mapInline, type InlineContainer, type MappedInline, type MarkBounds, type SourceInline } from './docx-run-mapping.js';
-import { bindWordReadingBlocks, type WordBlockBinding, type WordImportMode, type WordReadingKind,
+import { bindWordReadingBlocks, wordReadingForDigest, type WordBlockBinding, type WordImportMode, type WordReadingKind,
   type WordRevisionGraph, type WordSourceSegment } from './import-retention.js';
 import {
   type ManuscriptBlockKind,
@@ -212,6 +212,7 @@ export interface WordMappedDocxSource {
   kind: 'mapped';
   original: Uint8Array;
   textBoxes: 'retain' | 'merge';
+  notes?: ReadonlyArray<DocxExportNoteRow>;
   mapping: { kind: 'word-revisions'; mode: WordImportMode; reading: WordReadingKind;
     graph: WordRevisionGraph; graphDigest: string; readingDigest: string;
     blockBindings: ReadonlyArray<WordBlockBinding>; segments: ReadonlyArray<WordSourceSegment>; mappingDigest: string };
@@ -243,7 +244,9 @@ export function wordMappedDocxSource(original: Uint8Array, compiled: Extract<Wor
     'DOCX_EXPORT_MAPPING_INVALID', '所选 Word 读法、文本框处理方式不可用或原文件已经变化。');
   const bindings = blockBindings === undefined ? selected.blocks.map((block) => ({ sourceBlockId: block.blockId, blockId: block.blockId })) : blockBindings;
   const bound = bindWordReadingBlocks(selected, bindings);
-  return { kind: 'mapped', original, textBoxes, mapping: { kind: 'word-revisions', mode, reading, graph: compiled.graph,
+  const notes = bound.blocks.flatMap((block) => block.note === undefined ? [] : [{ blockId: block.blockId,
+    part: block.note.part, noteId: block.note.noteId, sourceNoteDigest: block.digest }]);
+  return { kind: 'mapped', original, textBoxes, ...(notes.length === 0 ? {} : { notes }), mapping: { kind: 'word-revisions', mode, reading, graph: compiled.graph,
     graphDigest: compiled.graphDigest, readingDigest: selected.readingDigest, blockBindings: bindings, segments: bound.segments, mappingDigest: bound.mappingDigest } };
 }
 
@@ -1925,7 +1928,7 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
   requireExport(binding.reading === (binding.mode === 'suggestions' ? 'rejected' : 'accepted') &&
     binding.graphDigest === compiled.graphDigest && canonicalJson(binding.graph) === canonicalJson(compiled.graph),
   'DOCX_EXPORT_MAPPING_INVALID', 'Word 来源图或所选导入方式已经变化。');
-  const compiledReading = compiled.readings[binding.reading];
+  const compiledReading = wordReadingForDigest(compiled.readings[binding.reading], binding.readingDigest);
   requireExport(compiledReading.usable && binding.readingDigest === compiledReading.readingDigest && Array.isArray(binding.blockBindings),
     'DOCX_EXPORT_MAPPING_INVALID', 'Word 所选读法或稿件块对应已经变化。');
   const bound = bindWordReadingBlocks(compiledReading, binding.blockBindings);
@@ -1965,7 +1968,8 @@ function rewriteWordDocument(documentXml: string, input: DocxExportInput, source
     priorPosition = edited.position;
   }
   const pending = input.blocks.filter((block) => !originalBlocks.has(block.blockId));
-  const emitted = new Set<string>();
+  const emitted = new Set<string>(input.blocks.filter((block) => block.kind === 'note' &&
+    originalBlocks.get(block.blockId)?.kind === 'note').map((block) => block.blockId));
   let restoredBlocks = 0;
   let regeneratedBlocks = 0;
   const unmapped = new Set<string>();
@@ -2085,7 +2089,7 @@ const NOTE_PARTS: Readonly<Record<DocxExportNoteRow['part'], string>> = { footno
  * The notes whose note block was edited (Issue #1204), by part and note: each is written back with the block's words, and its
  * block's position is disclosed. A note block whose words are its note's is restored with the part as it was.
  */
-function editedNotes(input: DocxExportInput, source: LegacyMappedDocxSource, facts: ReviewFacts): Map<string, Map<string, string>> {
+function editedNotes(input: DocxExportInput, source: LegacyMappedDocxSource | WordMappedDocxSource, facts: ReviewFacts): Map<string, Map<string, string>> {
   const blocks = new Map(input.blocks.map((block) => [block.blockId, block]));
   const edits = new Map<string, Map<string, string>>();
   for (const row of source.notes ?? []) {
@@ -2157,7 +2161,7 @@ function mappedPackage(input: DocxExportInput, source: Extract<DocxExportSource,
   facts.tallies['headers-footers'].total = original.names.filter((name) => /^word\/(header|footer)\d*\.xml$/i.test(name)).length;
   if (isWordMappedDocxSource(source)) facts.wordMode = source.mapping.mode;
   const makeWriter = (prefix: string): MarkupWriter => new MarkupWriter(prefix, identities.nextId, identities.paraIds);
-  const notes = isWordMappedDocxSource(source) ? new Map<string, Map<string, string>>() : editedNotes(input, source, facts);
+  const notes = editedNotes(input, source, facts);
   const walk = isWordMappedDocxSource(source)
     ? { kind: 'word' as const, ...rewriteWordDocument(documentXml, input, source, plan, facts, makeWriter) }
     : { kind: 'legacy' as const, ...rewriteDocument(documentXml, input, source, plan, facts, makeWriter) };

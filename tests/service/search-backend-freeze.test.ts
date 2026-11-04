@@ -8,6 +8,38 @@ import { createServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
 
 describe('a review Run freezes its search backend', () => {
+  it('prepares a fresh factual Task on the same book after changing search backend, preserving the old plan', async () => {
+    const roots = await createServiceTestRoots();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'developer-live');
+      const launch = { operationalScope: 'developer-live' as const, policy, live: {
+        ...DEVELOPER_LIVE_POLICY_BINDING, credentialReference: DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE,
+        runBudgetCeiling: { kind: 'tokens' as const, maxTotalTokens: 500_000 },
+      } };
+      store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
+      const book = await importSample1Book(store, roots.codeRoot, '重新准备检索选择');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId); recordMissingCredentialConnection(store, '合成连接');
+      const prepare = () => {
+        let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+        while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+        return work.projection!.run!;
+      };
+      store.selectSearchBackend('search-brave');
+      const first = prepare();
+      const original = store.factualReviewLedger.inspect(book.bookId);
+      const frozen = store.factualReviewLedger.frozenPlan(original.taskIntent!.taskIntentId, original.planEnvelope!.digest);
+      expect(prepare().categories[0]!.taskIntentId).toBe(first.categories[0]!.taskIntentId);
+      store.selectSearchBackend('search-bochaai');
+      const second = prepare();
+      expect(second.categories[0]!.taskIntentId).not.toBe(first.categories[0]!.taskIntentId);
+      expect(store.factualReviewLedger.inspect(book.bookId).providerResolutionPlan!.webToolsBackend?.backendId).toBe('search-bochaai');
+      expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: second.reviewRunId }).start.readiness).toBe('ready');
+      expect(store.factualReviewLedger.frozenPlan(original.taskIntent!.taskIntentId, original.planEnvelope!.digest)).toEqual(frozen);
+      expect(store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: first.reviewRunId }).service.provider).toContain('Brave');
+    } finally { store.close(); await roots.dispose(); }
+  });
+
   it('refuses a production Run without its selected backend key, naming the backend and 设置', async () => {
     const roots = await createServiceTestRoots();
     const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -24,6 +56,42 @@ describe('a review Run freezes its search backend', () => {
         let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
         while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
       }).toThrow(/TinyFish.*设置/u);
+    } finally { store.close(); await roots.dispose(); }
+  });
+
+  it('uses a newly chosen or cleared fallback in a fresh same-book preparation', async () => {
+    const roots = await createServiceTestRoots();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS[0], credentialReference: randomUUID() };
+      store.saveModelServiceConnection('合成连接', configured.credentialReference, 'ready', 'opencode-go');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+      const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
+      store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
+      const book = await importSample1Book(store, roots.codeRoot, '重新准备检索凭据和备用来源');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      const connections = store.getSearchBackendConnections();
+      const primary = connections.find((row) => row.backendId === 'search-bochaai')!.credentialReference;
+      const backup = connections.find((row) => row.backendId === 'search-brave')!.credentialReference;
+      store.saveSearchBackendCredential('search-bochaai', primary, 'ready');
+      store.saveSearchBackendCredential('search-brave', backup, 'ready');
+      store.selectSearchBackend('search-bochaai');
+      const prepare = () => {
+        let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+        while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
+        return store.factualReviewLedger.inspect(book.bookId);
+      };
+      const original = prepare();
+      store.selectSearchBackend('search-brave', 'fallback');
+      const withBackup = prepare();
+      expect(withBackup.taskIntent!.taskIntentId).not.toBe(original.taskIntent!.taskIntentId);
+      expect(withBackup.providerResolutionPlan!.webToolsFallback?.backendId).toBe('search-brave');
+      store.selectSearchBackend(null, 'fallback');
+      const cleared = prepare();
+      expect(cleared.taskIntent!.taskIntentId).not.toBe(withBackup.taskIntent!.taskIntentId);
+      expect(cleared.providerResolutionPlan!.webToolsFallback).toBeUndefined();
+      expect(prepare().taskIntent!.taskIntentId).toBe(cleared.taskIntent!.taskIntentId);
+      expect(store.factualReviewLedger.frozenPlan(original.taskIntent!.taskIntentId, original.planEnvelope!.digest).components['provider-resolution-plan']).toEqual(original.providerResolutionPlan);
     } finally { store.close(); await roots.dispose(); }
   });
 

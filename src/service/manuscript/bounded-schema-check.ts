@@ -51,7 +51,7 @@ import { WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from '../writing-ta
 import { MATERIAL_INDEX_LAYER_SCHEMA_SQL, MATERIAL_INDEX_LAYER_TRIGGER_SQL, MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL, MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL, validateMaterialTranslationAttemptSchema, MATERIAL_INDEX_SCHEMA_SQL, MATERIAL_INDEX_TRIGGER_SQL } from '../material-index.js';
 import { EVALUATION_PROFILE_SCHEMA_SQL, EVALUATION_PROFILE_TRIGGER_SQL } from '../evaluation-profiles.js';
 import { IMPORTED_EXEMPLAR_SCHEMA_SQL, IMPORTED_EXEMPLAR_TRIGGER_SQL } from '../imported-exemplars.js';
-import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL } from '../research-evidence-schema.js';
+import { RESEARCH_EVIDENCE_SCHEMA_SQL, RESEARCH_EVIDENCE_TRIGGER_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL, RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL } from '../research-evidence-schema.js';
 import { FACTUAL_CLAIM_SCHEMA_SQL, FACTUAL_CLAIM_TRIGGER_SQL, FACTUAL_VERIFICATION_SCHEMA_SQL, FACTUAL_VERIFICATION_TRIGGER_SQL } from '../factual-verification-schema.js';
 import { OUTCOME_RESOLUTION_SCHEMA_SQL, OUTCOME_RESOLUTION_TRIGGER_SQL } from '../analysis/outcome-resolutions.js';
 import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL, BACKGROUND_ANALYSIS_ENROLLMENT_TRIGGER_SQL } from '../background-analysis-enrollments.js';
@@ -448,6 +448,7 @@ export function requireManuscriptReimportTargetSchema(
   const includeImportedExemplarTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= IMPORTED_EXEMPLAR_SCHEMA_VERSION || committed(IMPORTED_EXEMPLAR_SCHEMA_SQL);
   // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
   const includeResearchEvidenceTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= RESEARCH_EVIDENCE_SCHEMA_VERSION || committed(RESEARCH_EVIDENCE_SCHEMA_SQL);
+  const includeResearchEvidenceUnitRevisions = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 107 || committed(RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL);
   // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
   const includeMaterialIndexLayerTables = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MATERIAL_INDEX_LAYER_SCHEMA_VERSION || committed(MATERIAL_INDEX_LAYER_SCHEMA_SQL);
   const includeMaterialTranslationAttempts = Number(db.prepare('PRAGMA user_version').get()?.user_version) >= MODEL_SELECTION_SCHEMA_VERSION || committed(MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL);
@@ -639,6 +640,7 @@ export function requireManuscriptReimportTargetSchema(
       ...(includeImportedExemplarTables ? IMPORTED_EXEMPLAR_SCHEMA_SQL : {}),
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_SCHEMA_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_SCHEMA_SQL : {}),
+      ...(includeResearchEvidenceUnitRevisions ? RESEARCH_EVIDENCE_UNIT_REVISION_SCHEMA_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_SCHEMA_SQL : {}),
       ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_SCHEMA_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_SCHEMA_SQL : {}),
@@ -719,6 +721,7 @@ export function requireManuscriptReimportTargetSchema(
       ...(includeImportedExemplarTables ? IMPORTED_EXEMPLAR_TRIGGER_SQL : {}),
       ...(includeEvaluationProfileTables ? EVALUATION_PROFILE_TRIGGER_SQL : {}),
       ...(includeResearchEvidenceTables ? RESEARCH_EVIDENCE_TRIGGER_SQL : {}),
+      ...(includeResearchEvidenceUnitRevisions ? RESEARCH_EVIDENCE_UNIT_REVISION_TRIGGER_SQL : {}),
       ...(includeMaterialIndexLayerTables ? MATERIAL_INDEX_LAYER_TRIGGER_SQL : {}),
       ...(includeMaterialTranslationAttempts ? MATERIAL_TRANSLATION_ATTEMPT_TRIGGER_SQL : {}),
       ...(includeFactualVerificationTables ? FACTUAL_VERIFICATION_TRIGGER_SQL : {}),

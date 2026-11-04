@@ -104,6 +104,9 @@ describe('the 备用来源 control in 联网检索 (#1226)', () => {
     const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(async () => settings), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     const control = (id: string) => node.querySelector(`[data-search-backend="${id}"]`)!.querySelectorAll('button').find((item) => item.dataset['action']?.endsWith('search-fallback'))!;
+    expect(node.textContent).toContain('设置备用来源后');
+    expect(node.textContent).toContain('余额或套餐额度不足时，直接切换一次');
+    expect(node.textContent).toContain('其他认证错误不会切换');
     expect(control('search-tinyfish').disabled).toBe(true);
     expect(control('search-deepseek').disabled).toBe(true);
     expect(node.querySelector('[data-search-backend="search-parallel"]')!.dataset['fallback']).toBe('true');

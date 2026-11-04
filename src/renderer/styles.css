@@ -1480,8 +1480,8 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .navigator-section label { font-size: .84rem; font-weight: 700; }
 .navigator-section .button-row { margin-top: .35rem; gap: .35rem; }
 .navigator-section .button-row button { padding-inline: .55rem; }
-.outline-list { display: grid; max-height: 220px; overflow: auto; }
-.outline-list button { min-height: 36px; padding: .35rem .25rem .35rem calc(.25rem + var(--outline-depth, 0) * .8rem); text-align: left; overflow-wrap: anywhere; }
+.outline-list { display: grid; grid-auto-rows: min-content; align-content: start; min-width: 0; max-height: 220px; overflow: auto; }
+.outline-list button { min-width: 0; max-width: 100%; min-height: 36px; padding: .35rem .25rem .35rem calc(.25rem + var(--outline-depth, 0) * .8rem); text-align: left; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .replacement-exclusions { max-height: 8rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .search-results { display: grid; gap: .45rem; max-height: 260px; overflow: auto; }
 .search-result { padding: .45rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); }

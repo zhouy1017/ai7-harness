@@ -28,7 +28,7 @@ import { BUILTIN_PRODUCTION_DOCUMENT_TYPES, BUILTIN_PRODUCTION_DOCUMENT_TYPES_DI
  * record and the digest of the entry that finalized it, and each template's 审稿意见 at the version 设为发稿版本时的最新一版 (a
  * draft that came after the designation at the version latest when the package is read), each pinned by its digest. Neither
  * is a condition: a Book without one lists it under 不包含 with the reason, and nothing is copied — the package names the
- * records and the export writes them (`book-delivery-package-exports.ts`). A condition table says what is still missing and where to go; `准备图书交付包` freezes
+ * records and the export writes them (`book-delivery-package-exports.ts`). The content table shows available and missing material; only a valid publication payload is required; `准备图书交付包` freezes
  * exactly the content the editor saw, with the purpose they wrote, as the package's next version — v1, v2 … — each
  * naming the one before it. Preparing chooses no destination, writes no file and changes no record: a package is
  * neither 发稿 nor 交付 and proves neither (BUNDLE-005, DPKG-010). Its export is S67b's.
@@ -343,7 +343,7 @@ export class BookDeliveryPackages {
 
   /**
    * `准备图书交付包` (BUNDLE-003, BUNDLE-004, DPKG-007, DPKG-008): inside the caller's transaction, the content read
-   * again must be the content the editor saw and every condition must hold. The same content and purpose as the newest
+   * again must be the content the editor saw and its publication payload must be available. The same content and purpose as the newest
    * version is that version, unchanged; anything else is the next version, naming the one before it. Nothing is
    * written anywhere else, and no file is made.
    */
@@ -463,6 +463,10 @@ export class BookDeliveryPackages {
           detail: `${deliveryLabel(latest.ordinal, latest.versionLabel)} · ${latest.recipientLabel}；交付记录 ${deliveries.length} 条`,
         });
         if (notice !== null) limitations.push(`${type.typeLabel}：交付后有修改，本包按交付时的${latest.versionLabel}。`);
+      } else {
+        const reason = type.document === null ? BOOK_DELIVERY_PACKAGE_WORDS.documentMissing : BOOK_DELIVERY_PACKAGE_WORDS.documentUndelivered;
+        excluded.push({ kind: 'exclusion', label: type.typeLabel, detail: reason });
+        limitations.push(`${type.typeLabel}：${reason}，不在包中。`);
       }
     }
 
@@ -479,6 +483,7 @@ export class BookDeliveryPackages {
       }
       if (run.state === 'running') {
         unfinished ??= `${run.label}审阅正在进行`;
+        reviewLimitations.push(`${run.label}审阅正在进行，尚无当前报告，不在包中。`);
         continue;
       }
       // A Run a Series Retrieval Exclusion stopped, or the editor then cancelled (Issue #64, S29b), never goes on: without a
@@ -489,6 +494,7 @@ export class BookDeliveryPackages {
       }
       if (run.report === null) {
         unfinished ??= `${run.label}审阅尚未生成报告`;
+        reviewLimitations.push(`${run.label}审阅尚未生成当前报告，不在包中。`);
         continue;
       }
       reports.push({ reviewRunId: run.reviewRunId, reportId: run.report.reportId, version: run.report.version, digest: run.report.digest });
@@ -572,7 +578,9 @@ export class BookDeliveryPackages {
       typeConfiguration: { version: BUILTIN_PRODUCTION_DOCUMENT_TYPES.version, digest: BUILTIN_PRODUCTION_DOCUMENT_TYPES_DIGEST },
     };
     const contentDigest = canonicalRecord(content).digest;
-    const unmet = conditions.filter((condition) => !condition.met).map((condition) => condition.label);
+    // Only the manuscript payload is required. Optional production documents and
+    // unfinished review reports are disclosed above, never preparation rituals.
+    const unmet = conditions.filter((condition) => condition.key === 'publication' && !condition.met).map((condition) => condition.label);
     return {
       conditions,
       unmet,

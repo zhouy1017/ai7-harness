@@ -256,6 +256,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
   };
+  const positionWords = (windowNow: ManuscriptWindowProjection): string => {
+    const block = windowNow.blocks.find((candidate) => candidate.blockId === windowNow.focusBlockId) ?? windowNow.blocks[0];
+    if (block === undefined) return windowNow.position.label;
+    return `${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${(windowNow.position.proportion * 100).toFixed(3)}%`;
+  };
   title.append(
     element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle} · 主分支`),
     element('h2', undefined, productionDocument !== undefined
@@ -263,7 +268,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       : `稿件修订版 ${initialWindow.revisionLabel}`),
   );
   const meta = element('div', 'editor-meta');
-  const position = element('span', undefined, initialWindow.position.label);
+  const position = element('span', undefined, positionWords(initialWindow));
+  position.setAttribute('title', initialWindow.position.label);
   const revision = element('span', undefined, revisionWords(initialWindow));
   const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
   journal.dataset['editorTechnical'] = 'true';
@@ -832,7 +838,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const updateWindowChrome = (): void => {
     updatePersistenceMenu();
     refreshMilestonePersistence();
-    position.textContent = currentWindow.position.label;
+    position.textContent = positionWords(currentWindow);
+    position.setAttribute('title', currentWindow.position.label);
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
     journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
@@ -1124,6 +1131,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     targetOrPrepare: NavigationRequest['target'] | (() => NavigationRequest | undefined),
     continuity?: EditorContinuity,
     preserveOffWindowContinuity = false,
+    onArrival?: () => boolean,
   ): Promise<boolean> {
     if (authoritativeMutationBusy() || edgeNavigation || !editor) return false;
     edgeNavigation = true;
@@ -1163,6 +1171,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
+      // A search range belongs to this loaded window. Apply it before a slow position write releases
+      // the arrival to later paging; otherwise its continuation can select in a window already left.
+      if (onArrival && !onArrival()) return false;
       // The position write starts the moment the window is on screen, and the status that names the
       // arrival still waits for it — the guard does not. `edgeNavigation` covers the window load and
       // the two frames in which the load's own scroll restoration fires `scroll` events this surface
@@ -1176,7 +1187,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // With the guard released a later navigation may already have put its own window on screen; its
       // arrival is then the one to name, and naming this one over it would state a place already left.
       if (!destroyed && currentWindow === next) {
-        setStatus(`已到达${next.position.structureLabel ? `“${next.position.structureLabel}”附近，` : ''}${next.position.label}。`, 'success');
+        setStatus(`已到达${positionWords(next)}。`, 'success');
       }
       return true;
     } catch (error) {
@@ -1297,9 +1308,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       outlinePage = page;
       outlineList.replaceChildren();
       for (const entry of page.entries) {
-        const open = button(`${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}${entry.displayTextTruncated ? '（显示已截断）' : ''}`, 'quiet', () =>
+        const label = `${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}${entry.displayTextTruncated ? '（显示已截断）' : ''}`;
+        const open = button(label, 'quiet', () =>
           void navigate({ kind: 'block', blockId: entry.blockId }),
         );
+        open.setAttribute('title', label);
+        open.setAttribute('aria-label', label);
         open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
         open.setAttribute('role', 'listitem');
         outlineList.append(open);
@@ -1505,6 +1519,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
 
   async function returnToSearchPosition(): Promise<void> {
     if (authoritativeMutationBusy() || !(await settleLocalEdit()) || !editor) return;
+    // The match is already visible while its arrival is still settling. An immediate explicit return
+    // waits for those frames, rather than being dropped by navigate's viewport-navigation guard.
+    while (edgeNavigation) {
+      await navigationIdle;
+      if (destroyed) return;
+    }
     if (!searchReturn) return;
     const binding = editor.currentWindow();
     if (
@@ -1519,7 +1539,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       { kind: 'window-start', blockId: searchReturn.window.blocks[0]!.blockId },
       searchReturn.continuity,
     );
-    if (restored) setStatus(`已返回查找前的精确选择与滚动位置；${currentWindow.position.label}。`, 'success');
+    if (restored) setStatus(`已返回查找前的精确选择与滚动位置；${positionWords(currentWindow)}。`, 'success');
   }
 
   async function loadSearchResults(cursor: string | null, searchId?: string): Promise<void> {
@@ -1586,8 +1606,22 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       searchReturn = { window: editor.currentWindow(), continuity: editor.captureContinuity() };
       returnFromSearch.hidden = false;
     }
-    await navigate({ kind: 'block', blockId: match.blockId });
-    if (!editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme)) {
+    // Keep the click's return origin before waiting: a viewport arrival already in flight may land
+    // meanwhile. The explicit search command follows it instead of vanishing behind its guard.
+    while (edgeNavigation) {
+      await navigationIdle;
+      if (destroyed) return;
+    }
+    if (authoritativeMutationBusy() || !editor) return;
+    const arrived = editor.currentWindow();
+    if (!searchPage || arrived.revisionId !== searchPage.revisionId ||
+        arrived.journalSequence !== searchPage.journalSequence || arrived.workingDigest !== searchPage.workingDigest) {
+      setStatus('稿件已变化；请重新查找后再跳转到精确范围。', 'error');
+      return;
+    }
+    const selected = await navigate({ kind: 'block', blockId: match.blockId }, undefined, false,
+      () => editor?.selectRange(match.blockId, match.fromGrapheme, match.toGrapheme) === true);
+    if (!selected) {
       setStatus('无法在当前稿件状态中精确定位该匹配。', 'error');
     }
   }

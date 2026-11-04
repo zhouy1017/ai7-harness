@@ -669,6 +669,22 @@ async function arrangePreferenceJudgments(session: Session, book: Book): Promise
 }
 
 describe('a Review Run over the real store on exact sample1', () => {
+  it('settles cancellation only in the Review that dispatched a shared prepared Task', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const first = prepare(session, book, [TYPOS], WHOLE);
+      const second = prepare(session, book, [TYPOS], WHOLE);
+      expect(second.categories[0]!.taskIntentId).toBe(first.categories[0]!.taskIntentId);
+      session.store.authorizeReviewRun(book.bookId, second.reviewRunId, approvals(second));
+      const handoff = session.store.reviewRunDriveSteps.start(second.reviewRunId, TYPOS)!;
+      session.store.reviewRunDriveSteps.recordDispatch(second.reviewRunId, TYPOS, handoff.runRecordId);
+      handoff.ledger.cancelWaiting(book.bookId, second.categories[0]!.taskIntentId!);
+      const untouched = workspace(session, book, first.reviewRunId).run!.categories;
+      session.store.finishCancelledReviewRun(handoff.runRecordId);
+      expect(workspace(session, book, first.reviewRunId).run!.categories).toEqual(untouched);
+      expect(workspace(session, book, second.reviewRunId).run!.categories[0]!.state).toBe('interrupted');
+    });
+  });
+
   it('marks the edited first paragraph in J-16 through its current authored review fixture', async () => {
     await withBook('sample1-agent-workspace-cross-chapter', async (session, book) => {
       await runBaseline(session, book);

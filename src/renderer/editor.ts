@@ -425,6 +425,13 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   // left behind while its `scroll` event is still to come.
   let pendingRestore: { frame: number; run: () => void } | undefined;
   let ownScroll: { top: number } | undefined;
+  const markOwnScroll = (): void => {
+    const mark = { top: options.scrollContainer.scrollTop };
+    ownScroll = mark;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (ownScroll === mark) ownScroll = undefined;
+    }));
+  };
   let activeMark: { markId: string; previewText: string | null } | undefined;
   // Focus has just entered the text and the browser's caret reveal, if it makes one, is still to be heard.
   let focusReveal: object | undefined;
@@ -659,11 +666,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       // Where this restore left the pane is the editor's doing, not the reader's. The mark lapses two
       // frames on — past the frame that dispatches its `scroll` event, and past it even when the position
       // did not change and no event comes — so it never swallows the next scroll the reader makes.
-      const mark = { top: options.scrollContainer.scrollTop };
-      ownScroll = mark;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        if (ownScroll === mark) ownScroll = undefined;
-      }));
+      markOwnScroll();
     };
     pendingRestore = { frame: requestAnimationFrame(run), run };
   };
@@ -697,7 +700,16 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     salvageExport: 'unavailable',
   };
 
-  const announceState = (): void =>
+  const announceState = (): void => {
+    // Read-only selection coordinates for the same bounded surface as data-window-loads. Keep
+    // manuscript text out of diagnostics; browser checks resolve these pins against rendered blocks.
+    const selection = view.state.selection;
+    view.dom.dataset['selectionSnapshot'] = JSON.stringify({
+      from: selection.from,
+      to: selection.to,
+      anchor: pointAtPosition(view.state.doc, selection.anchor),
+      head: pointAtPosition(view.state.doc, selection.head),
+    });
     options.onStateChange({
       dirty: changedBlocks(view.state.doc).length > 0,
       interrupted,
@@ -709,6 +721,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       operationLocked,
       protection: protectionView(),
     });
+  };
 
   const clearRetryTimer = (): void => {
     if (retryTimer !== undefined) window.clearTimeout(retryTimer);
@@ -1200,12 +1213,14 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         toGrapheme <= fromGrapheme ||
         toGrapheme > text.length
       ) return false;
+      settlePendingRestore();
       deferredNavigationContinuity = undefined;
       applyEditableState();
       const from = found.position + 1 + text.slice(0, fromGrapheme).join('').length;
       const to = found.position + 1 + text.slice(0, toGrapheme).join('').length;
       view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, from, to)).scrollIntoView());
       view.focus();
+      markOwnScroll();
       return true;
     },
     currentWindow: () => windowProjection,

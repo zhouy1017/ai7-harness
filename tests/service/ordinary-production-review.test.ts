@@ -10,6 +10,7 @@ import { renderReportExport } from '../../src/service/report-export.js';
 import { EditorialStore } from '../../src/service/store.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { ReviewRunDriver } from '../../src/service/review/review-run-driver.js';
+import { reviewCategoryProgressLine } from '../../src/renderer/review-labels.js';
 import { DialogueExecutionOwner, productionDialogueRoute } from '../../src/service/dialogue/dialogue-execution.js';
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from '../../src/service/dialogue/global-agent-session.js';
 import { FastRoleExecutionOwner, productionFastRoleRoutes, testModelServiceConnection } from '../../src/service/fast-role/fast-role-execution.js';
@@ -298,6 +299,35 @@ it('retains unit evidence when synthesis asks for a tool and sends no second syn
   expect(settled.resultSetRevision?.findings).toHaveLength(1);
   expect(settled.resultSetRevision?.crossChapterSynthesis?.state).toBe('gap');
   expect(settled.taskOutcome?.classification).toBe('completed-with-gaps');
+});
+
+it('discloses a retained unknown synthesis beside complete unit findings after restart without resending', async () => {
+  const result = await productionReview(['style-and-format'], () => 'valid', undefined, false, false, { response: async (response, _signal, body) => {
+    const request = JSON.parse(body) as { messages: Array<{ role: string; content: string }> };
+    if (parseReviewCrossChapterMessage(request.messages.findLast((entry) => entry.role === 'user')!.content) === null) return response;
+    throw Object.assign(new Error('synthetic accepted synthesis connection loss'), { code: 'TRANSPORT_FAILED' });
+  } });
+  const definition = reviewCategoryKindDefinition(reviewCategoryContractInput(reviewCategoryEntry('style-and-format')!));
+  const revision = result.store.inspectReviewCategory(result.bookId, definition).resultSetRevision!;
+  expect(revision.coverage).toMatchObject({ state: 'complete', unitsClosed: 8, unitsTotal: 8, gapCount: 0 });
+  expect(revision.crossChapterSynthesis).toMatchObject({ state: 'gap', code: 'outcome-unknown' });
+  const inspect = (opened: EditorialStore) => {
+    const run = opened.inspectReviewWorkspace(result.bookId, result.reviewRunId).run!;
+    expect(run.findings).toHaveLength(1);
+    const category = run.categories[0]!;
+    expect(category.state).toBe('settled');
+    expect(category.detail).toContain('已读完 8/8 个阅读范围');
+    expect(category.detail).toContain('跨章汇总结果待确认');
+    expect(category.detail).not.toMatch(/未闭合|outcome-unknown|requestDigest/);
+    expect(reviewCategoryProgressLine(category, Date.now())).toContain(category.detail!);
+  };
+  inspect(result.store);
+  const launch = result.store.baselineAnalysisLedger.launch;
+  await driver!.dispose(); await owner!.dispose(); result.store.markCleanShutdown(); result.store.close();
+  store = await EditorialStore.open(roots!.dataRoot, roots!.codeRoot);
+  store.baselineAnalysisLedger.bindLaunch({ ...launch, live: null });
+  inspect(store);
+  expect(result.requests.filter((request) => request.ordinal === 0)).toHaveLength(1);
 });
 
 it('proves current academic Series preparation and exact initial and retained consistency source pins (#1131 rev21)', async () => {
@@ -1125,6 +1155,14 @@ it('admits one byte-identical contract retry under v26 and publishes risk points
   const risk = settled.findings.filter((finding) => finding.categoryId === 'publication-risk');
   expect(risk).toHaveLength(1);
   expect(risk.every((finding) => finding.riskPoint && finding.stateLine === '未联网核查' && finding.note.includes('未联网核查'))).toBe(true);
+}, 60_000);
+
+it('admits repeated tool-call IDs in a contract retry that starts a fresh technical session', async () => {
+  const result = await productionReview(['style-and-format'], (_category, ordinal, prior) =>
+    ordinal === 1 ? prior === 0 || prior === 2 ? 'tools' : prior === 1 ? 'invalid' : 'valid' : 'valid');
+  expect(result.requests.filter((request) => request.ordinal === 1)).toHaveLength(4);
+  const review = result.store.inspectReviewWorkspace(result.bookId, result.reviewRunId).run!;
+  expect(review.categories.every((category) => category.state === 'settled')).toBe(true);
 }, 60_000);
 
 it('admits a two-tool turn under the verified ordinary-production policy and settles its anchored review', async () => {

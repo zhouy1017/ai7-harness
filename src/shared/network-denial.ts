@@ -14,6 +14,18 @@ export const NETWORK_ALLOWANCE_LATE_CODE = 'AI7_NETWORK_ALLOWANCE_LATE';
 export const NETWORK_ALLOWANCE_INVALID_CODE = 'AI7_NETWORK_ALLOWANCE_INVALID';
 let networkDenialInstalled = false;
 
+// net.connect forwards Node's branded [options, callback] tuple to Socket.connect.
+// Use its actual brand: an arbitrary array must not describe a different target to the guard.
+const normalizedConnectBrand = Object.getOwnPropertySymbols(
+  (net as typeof net & { _normalizeArgs(args: unknown[]): unknown[] })._normalizeArgs([]),
+).find((symbol) => symbol.description === 'normalizedArgs');
+
+function connectionArguments(args: readonly unknown[]): readonly unknown[] {
+  const first = args[0];
+  return args.length === 1 && Array.isArray(first) && normalizedConnectBrand !== undefined && Reflect.get(first, normalizedConnectBrand) === true
+    ? first : args;
+}
+
 /**
  * One host allowance of the developer-live scope (ADR 0065, Issue #272). The service entry arms the
  * model endpoint's under Provider Processing v5, only before the denial is installed, so the denial's
@@ -425,7 +437,7 @@ export function guardedConnect(original: (...args: unknown[]) => unknown): (...a
 
 /** The host and port one `connect` call addresses, as `net`, `tls`, and `Socket.prototype.connect` accept them; IPC paths never resolve. */
 export function connectionTargetOf(args: readonly unknown[]): { host: string; port: number } | null {
-  const first = args[0];
+  const first = connectionArguments(args)[0];
   if (typeof first === 'number' || (typeof first === 'string' && /^\d+$/u.test(first))) {
     const port = Number(first);
     const host = typeof args[1] === 'string' ? args[1] : 'localhost';
@@ -449,7 +461,8 @@ export function allowanceAdmitsConnection(args: readonly unknown[]): boolean {
   if (armedAllowanceFor(target)) return true;
   // A ticket host is reached only through the gated `dns.lookup`, whose answer is vetted: a connect that brings its own
   // `lookup` would resolve the name past that check, so it is denied.
-  const options = args[0] !== null && typeof args[0] === 'object' ? (args[0] as Record<string, unknown>) : null;
+  const first = connectionArguments(args)[0];
+  const options = first !== null && typeof first === 'object' ? (first as Record<string, unknown>) : null;
   return heldByTicket(target) && options?.['lookup'] === undefined;
 }
 

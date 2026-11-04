@@ -24,6 +24,7 @@ import {
   PlatformToolBreaker,
   canonicalPublicUrl,
   canonicalToolArguments,
+  httpsAddresses as urlsIn,
   toolArgumentsDigest,
   isLocalToolName,
   ruleNamedToolSchemas,
@@ -47,10 +48,12 @@ interface DispatchAccounting {
   observation: BreakerVerdict | null;
 }
 
-/** Why a search went to the 备用来源 (Issue #1226): the policy's admitted class of the default's second failure. */
+/** Failures eligible for the policy's bounded retry to the same primary (Issue #1226). */
 export type SearchResendClass = 'transport-failure-before-any-response-byte' | 'http-5xx' | 'http-429';
+/** A rejected account is not retried; an already-bound backup can serve the query once. */
+export type SearchFallbackFailureClass = SearchResendClass | 'provider-account-quota';
 /** A source the 备用来源 returned: the backend it was actually sent to, the default it fell back from, and why. */
-export interface SearchFallbackAttribution { readonly backendId: string; readonly fallbackFrom: string; readonly failureClass: SearchResendClass }
+export interface SearchFallbackAttribution { readonly backendId: string; readonly fallbackFrom: string; readonly failureClass: SearchFallbackFailureClass }
 /** Where one search submission goes: the binding and gate book it is ticketed under, and its snapshot origin. */
 interface SearchTarget { readonly binding: EgressBindingFacts; readonly book: EgressTicketBook; readonly backend: SearchBackendBinding; readonly origin: string }
 
@@ -451,7 +454,8 @@ export class PlatformToolSession implements PlatformToolOwner {
   }
 
   async #settle<Authorized>(item: PlatformToolCallItem, call: { authorize(): Authorized; send(authorized: Authorized): Promise<PlatformToolCallResult> },
-    backend: SearchBackendBinding | undefined = this.#binding.searchBackend): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
+    backend: SearchBackendBinding | undefined = this.#binding.searchBackend): Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean; failureClass?: SearchFailureClass }> {
+    let failureClass: SearchFailureClass | undefined;
     const measured = { authorize: call.authorize, send: async (authorized: Authorized): Promise<PlatformToolCallResult> => {
       if (this.#evidenceOnly && item.kind === 'search-call' && Object.values(this.usage.searchCalls).some((count) => count > 0)) {
         this.evidenceNeedsCommander = true;
@@ -463,6 +467,8 @@ export class PlatformToolSession implements PlatformToolOwner {
         this.usage.searchCalls[id] = (this.usage.searchCalls[id] ?? 0) + 1;
       } else this.usage.fetchCount += 1;
       const result = await call.send(authorized);
+      if (item.kind === 'search-call' && result.status === 403 && backend !== undefined && searchFailureClass({ status: result.status,
+        backendId: backend.backendId, body: new TextDecoder().decode(result.bytes) }) === 'quota') failureClass = 'quota';
       if (item.kind === 'fetch') this.usage.fetchBytes += result.bytes.byteLength;
       if (backend?.backendId === 'search-deepseek' && item.kind === 'search-call') {
         try {
@@ -478,9 +484,12 @@ export class PlatformToolSession implements PlatformToolOwner {
         host: item.host, capturedAt: new Date().toISOString(), argumentsDigest: item.argumentsDigest, responseDigest: sha256Hex(result.bytes) });
       return result;
     } };
-    if (this.#cache !== null && this.#snapshots !== null) return platformToolCallOnce(this.#cache, this.#snapshots, item, measured);
+    if (this.#cache !== null && this.#snapshots !== null) {
+      const settled = await platformToolCallOnce(this.#cache, this.#snapshots, item, measured);
+      return failureClass === undefined ? settled : { ...settled, failureClass };
+    }
     const result = await measured.send(measured.authorize());
-    return { status: result.status, replayed: false, snapshot: result.status !== 200 || result.text === null ? null : {
+    return { status: result.status, replayed: false, ...(failureClass === undefined ? {} : { failureClass }), snapshot: result.status !== 200 || result.text === null ? null : {
       kind: item.kind, origin: item.origin, argumentsDigest: item.argumentsDigest, url: result.url, retrievedAt: new Date().toISOString(), status: result.status,
       contentType: result.contentType, responseDigest: sha256Hex(result.bytes), responseBytes: result.bytes.byteLength, bodyBase64: Buffer.from(result.bytes).toString('base64'), text: result.text,
     } };
@@ -490,20 +499,22 @@ export class PlatformToolSession implements PlatformToolOwner {
    * One canonical query under a frozen 备用来源 (Issue #1226; ADR 0094 §2; v32 `knownOrUnknownFailedSubmissionResendAllowed`): sent to
    * the default; on an admitted class — a transport that failed before any response byte, HTTP 5xx, or HTTP 429 after its
    * Retry-After (at most the search deadline) — resent once to the default; on a second admitted failure sent once to the
-   * fallback. A submission that was answered (any other status, or a body that then failed) or that the Run cancelled is never
-   * sent again anywhere. Every send is its own gate ticket under the same reservation, counted in the per-claim tool budget and
+   * fallback. The adapter's exact account-quota rejection instead goes directly to the frozen backup once, without retrying
+   * the exhausted default. Other answered submissions, broken bodies and cancellations are never resent. Every send has its
+   * own gate ticket under the same reservation, counted in the per-claim tool budget and
    * the Run's usage; the breaker is not observed again. The last failure is returned or thrown as the single send's would be.
    */
   async #searchWithFallback(args: Extract<PlatformToolArguments, { tool: 'websearch' }>, first: SearchServiceTicket, call: PlatformToolExecution):
-    Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean }> {
+    Promise<{ snapshot: ResearchSnapshot | null; status: number; replayed: boolean; failureClass?: SearchFailureClass }> {
     const fallback = this.#fallback!;
     const primary: SearchTarget = { binding: this.#binding, book: this.#book!, backend: this.#binding.searchBackend!, origin: this.#searchOrigin };
     const credentialed = this.#broker === undefined ? undefined : { broker: this.#broker, admitHost: this.#admitHost, modelRole: 'Main Editorial Role' as const };
     let ticket: SearchServiceTicket | null = first;
-    let last: { readonly settled: { snapshot: ResearchSnapshot | null; status: number; replayed: boolean } } | { readonly error: unknown } | null = null;
-    let cause: SearchResendClass | null = null;
+    let last: { readonly settled: { snapshot: ResearchSnapshot | null; status: number; replayed: boolean; failureClass?: SearchFailureClass } } | { readonly error: unknown } | null = null;
+    let cause: SearchFallbackFailureClass | null = null;
     let superseded: SearchFailureClass | null = null;
-    for (const [attempt, target] of ([primary, primary, fallback.target] as const).entries()) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const target = attempt === 2 ? fallback.target : primary;
       if (ticket === null) {
         if (this.#claimAccounting !== null && !this.#claimAccounting.reserveTool(`${call.callId}#${attempt === 1 ? 'resend' : 'fallback'}`)) break;
         const decision = evaluateSearchServiceCall({ arguments: args }, target.binding, this.egressScope, target.book);
@@ -531,14 +542,16 @@ export class PlatformToolSession implements PlatformToolOwner {
           }
           return settled;
         }
-        cause = settled.status === 429 ? 'http-429' : settled.status >= 500 && settled.status <= 599 ? 'http-5xx' : null;
+        cause = settled.failureClass === 'quota' ? 'provider-account-quota'
+          : settled.status === 429 ? 'http-429' : settled.status >= 500 && settled.status <= 599 ? 'http-5xx' : null;
       } catch (error) {
         last = { error };
         cause = seen.responded || call.signal.aborted ? null : 'transport-failure-before-any-response-byte';
       }
-      if (attempt === 2 || cause === null || !fallback.classes.includes(cause) || call.signal.aborted) break;
-      superseded = 'settled' in last ? searchFailureClass({ status: last.settled.status }) : searchFailureClass({ code: errorCode(last.error) });
+      if (attempt === 2 || cause === null || (cause !== 'provider-account-quota' && !fallback.classes.includes(cause)) || call.signal.aborted) break;
+      superseded = 'settled' in last ? last.settled.failureClass ?? searchFailureClass({ status: last.settled.status }) : searchFailureClass({ code: errorCode(last.error) });
       if (attempt === 0 && cause === 'http-429') await retryAfterWait(seen.retryAfter, call.signal);
+      if (cause === 'provider-account-quota') attempt = 1; // The next turn is the existing backup, never a primary resend.
       ticket = null;
     }
     if (last === null || 'error' in last) throw last?.error ?? new Error('PLATFORM_TOOL_FAILED');
@@ -613,7 +626,7 @@ export class PlatformToolSession implements PlatformToolOwner {
           });
         if (settled.replayed && this.#fallback === null) this.#book.revoke(decision.ticket);
         if (settled.snapshot === null) {
-          this.#countSearchFailure(searchFailureClass({ status: settled.status }));
+          this.#countSearchFailure(settled.failureClass ?? searchFailureClass({ status: settled.status }));
           return refusal(`搜索服务没有返回可用结果（状态 ${settled.status}）。`);
         }
         for (const url of urlsIn(settled.snapshot.text)) this.cite(url);
@@ -688,11 +701,4 @@ function refusal(text: string): { readonly text: string; readonly sourceUrl: nul
 }
 
 /** Every absolute `https` URL a search answer names, for the citation set a later `webfetch` is bounded by. */
-export function urlsIn(text: string): string[] {
-  return [...text.matchAll(/https:\/\/[^\s<>"'()[\]{}，。；、）》]+/gu)].map((match) => {
-    // Trailing sentence punctuation is not part of the address; trimmed by one backward walk, never a backtracking pattern.
-    let end = match[0].length;
-    while (end > 0 && '.,;:!?'.includes(match[0][end - 1]!)) end -= 1;
-    return match[0].slice(0, end);
-  });
-}
+export { urlsIn };

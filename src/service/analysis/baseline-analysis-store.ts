@@ -43,7 +43,7 @@ import {
   type AnalysisKindDefinition,
   baselineAnalysisKindDefinition,
 } from './kind-definition.js';
-import { factualClaimKindDefinition } from './factual-claim-contract.js';
+import { factualClaimKindDefinition, FACTUAL_CLAIM_UPDATE_MODES } from './factual-claim-contract.js';
 import {
   FACTUAL_REVIEW_KIND,
   MODEL_SERVICE_CONNECTION_IDS,
@@ -558,7 +558,8 @@ export class BaselineAnalysisStore {
   /** The definition one plan version executes: its level's for the factual kind (Issue #901), the ledger's own for every other. */
   #planDefinition(edits: PlanEdits, mode?: string): AnalysisKindDefinition {
     if (this.definition.kind !== FACTUAL_REVIEW_KIND) return this.#definition;
-    if (mode !== undefined && mode !== 'whole-manuscript' && this.#definition.factualClaims !== undefined) {
+    // A whole-book repeat keeps the admitted claim pipeline; historical range updates retain their frozen contract.
+    if (mode !== undefined && mode !== 'whole-manuscript' && mode !== 'review-again' && this.#definition.factualClaims !== undefined) {
       const successor = this.#factualDefinitionFor(planEditAssuranceLevel(edits));
       return { ...factualReviewLevelDefinition(planEditAssuranceLevel(edits)), outOfScope: successor.outOfScope,
         modes: successor.modes, updateModes: successor.updateModes, mode: successor.mode };
@@ -818,7 +819,7 @@ export class BaselineAnalysisStore {
       expectedOutcome: intent.expectedOutcome,
       createdAt: intent.createdAt,
       mode: intent.mode,
-      modeLabel: this.#definition.mode(intent.mode).label,
+      modeLabel: this.#recordedMode(intent.mode).label,
       ...(this.#definition.kind !== BASELINE_ANALYSIS_KIND ? {} : {
         redoOf: intent.redoOfRunRecordId === null
           ? null
@@ -1958,7 +1959,14 @@ export class BaselineAnalysisStore {
 
   /** A mode that starts a Result Set rather than updating one; the kind's definition decides which. */
   #isInitial(mode: AnalysisTaskMode): boolean {
-    return this.#definition.mode(mode).initial;
+    return this.#recordedMode(mode).initial;
+  }
+
+  /** History keeps its intent vocabulary when today's model/policy is unconfigured.
+   * Preparation still uses the current definition's admitted modes and update controls. */
+  #recordedMode(mode: AnalysisTaskMode) {
+    return (this.#definition.kind === FACTUAL_REVIEW_KIND ? FACTUAL_CLAIM_UPDATE_MODES.find(entry => entry.mode === mode) : undefined)
+      ?? this.#definition.mode(mode);
   }
 
   /**
@@ -1967,7 +1975,7 @@ export class BaselineAnalysisStore {
    * unreviewed. Only a whole first Task carries none — it reads every unit, and there is nothing to plan.
    */
   #carriesPlan(mode: AnalysisTaskMode): boolean {
-    const definition = this.#definition.mode(mode);
+    const definition = this.#recordedMode(mode);
     return !definition.initial || definition.rangeBound;
   }
 
@@ -2025,7 +2033,7 @@ export class BaselineAnalysisStore {
     const intentDraftVersionId = isRecord(record) && typeof record.intentDraftVersionId === 'string' && UUID_PATTERN.test(record.intentDraftVersionId)
       ? record.intentDraftVersionId : null;
     requireAnalysis(isRecord(record) && (record.intentDraftVersionId === undefined || intentDraftVersionId !== null) &&
-      (intentDraftVersionId === null ? goal === this.#definition.mode(mode).goal : isDraftGoal(goal) && record.goal === goal),
+      (intentDraftVersionId === null ? goal === this.#recordedMode(mode).goal : isDraftGoal(goal) && record.goal === goal),
     'ANALYSIS_RECORD_INVALID', '任务意图的目标与更新方式不一致。');
     requireAnalysis(isRecord(record) && record.taskIntentId === row.task_intent_id && typeof record.expectedOutcome === 'string' &&
       (record.redoOfRunRecordId === undefined || (typeof record.redoOfRunRecordId === 'string' && UUID_PATTERN.test(record.redoOfRunRecordId))) &&
@@ -2462,7 +2470,7 @@ export class BaselineAnalysisStore {
       };
     }
     const update = body.update as Omit<BaselineAnalysisRevisionUpdateProjection, 'modeLabel'>;
-    return { ...update, modeLabel: this.#definition.mode(update.mode).label };
+    return { ...update, modeLabel: this.#recordedMode(update.mode).label };
   }
 
   #unitLineage(unit: Record<string, unknown>): AnalysisUnitLineage {
@@ -2802,8 +2810,8 @@ export class BaselineAnalysisStore {
       // re-verify is not that a predecessor is still the latest revision but that there is still none.
       return {
         mode: intent.mode,
-        modeLabel: this.#definition.mode(intent.mode).label,
-        meaning: this.#definition.mode(intent.mode).meaning,
+        modeLabel: this.#recordedMode(intent.mode).label,
+        meaning: this.#recordedMode(intent.mode).meaning,
         predecessor: null,
         predecessorCurrent: latest === null,
         selectedRange: reusePlan === null ? intent.selectedRange : reusePlan.selectedRange,
@@ -2816,8 +2824,8 @@ export class BaselineAnalysisStore {
     const pin = body.manuscriptPin as BaselineAnalysisResultSetRevisionProjection['manuscriptPin'];
     return {
       mode: intent.mode as BaselineAnalysisUpdateMode,
-      modeLabel: this.#definition.mode(intent.mode).label,
-      meaning: this.#definition.mode(intent.mode).meaning,
+      modeLabel: this.#recordedMode(intent.mode).label,
+      meaning: this.#recordedMode(intent.mode).meaning,
       predecessor: {
         revisionId: intent.predecessorRevisionId,
         ordinal: asNumber(predecessorRow.ordinal),
@@ -3114,16 +3122,24 @@ export class BaselineAnalysisStore {
     // imported anew since (Issue #427 review): its plan could never execute under this contract, so the preparation is a
     // new Task Intent under the contract that applies now.
     // So is one whose plan froze another assurance sampling contract (Issue #826): the composition does not pin it.
-    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId).promptContractDigest &&
+    const currentDefinition = this.#selectedDefinition(this.#planDefinition(existing.planVersion?.edits ?? NO_PLAN_EDITS, existing.taskIntent?.mode), input.bookId);
+    const contractCurrent = existing.planEnvelope === null || (existing.planEnvelope.promptContractDigest === currentDefinition.promptContractDigest &&
       (existing.executionPlan === null ||
-        !assuranceContractMoved(this.#definition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
+        !assuranceContractMoved(currentDefinition, frozenAssurancePromptContractDigest(existing.executionPlan as unknown as Record<string, unknown>))));
     // Nor is a Task whose frozen scope plan the chain no longer derives (#711 review P3-4): 重新准备 makes it anew.
     const planDerives = existing.coverageManifest === null || existing.authorization !== null || this.#frozenPlanDerives(existing.update, existing.coverageManifest);
     // A Task the 后台分析登记 dispatcher prepared is never the editor's to revise or resume, and the dispatcher never takes up any
     // Task Intent but the one it creates now (#713 review, P1-2): each side's preparation is a Task of its own.
     const selectedProcedure = background === null ? selectedProcedureForBook(this.#db, input.bookId, this.#definition.kind) : null;
     const sameProcedure = canonicalJson(latestIntent?.record.procedure ?? null) === canonicalJson(selectedProcedure);
-    const sameTask = sameProcedure && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
+    // A fresh initiation uses the search selection now, while the earlier Review keeps its frozen Task.
+    // Search is not part of the model material-input comparison; reusing that Task would silently send to its old backend.
+    const priorProvider = existing.providerResolutionPlan;
+    const searchCurrent = priorProvider === null || existing.run !== null || canonicalJson({
+      ...(priorProvider.webToolsBackend === undefined ? {} : { webToolsBackend: priorProvider.webToolsBackend, searchCredentialReference: priorProvider.searchCredentialReference }),
+      ...(priorProvider.webToolsFallback === undefined ? {} : { webToolsFallback: priorProvider.webToolsFallback }),
+    }) === canonicalJson(this.#currentSearchPlan(currentDefinition, latestIntent?.preparedByEnrollmentVersionId ?? null, input.launchPolicy));
+    const sameTask = sameProcedure && (input.reconfirm || searchCurrent) && background === null && input.newTask !== true && intentDraft === null && latestIntent !== null && latestIntent.preparedByEnrollmentVersionId === null &&
       existing.run === null && latestIntent.mode === mode &&
       latestIntent.predecessorRevisionId === (latest?.revisionId ?? null) && (input.reconfirm || checkpointCurrent) && contractCurrent && planDerives;
     if (sameTask && existing.checkpoint !== null) {
@@ -3259,6 +3275,24 @@ export class BaselineAnalysisStore {
       checkpointRecord.json, checkpointRecord.digest, instant);
     this.#writePlanVersion({ intent, checkpoint, checkpointDigest: checkpointRecord.digest, ordinal: 1, selectedRange: intent.selectedRange,
       planRevisionId: null, instant, edits: this.#redoPlanEdits(intent), policy: launchPolicy });
+  }
+
+  /** Derive the search pins for both fresh preparation reuse and plan freezing. */
+  #currentSearchPlan(definition: AnalysisKindDefinition, enrollmentVersionId: string | null, policy = this.#launch.policy): {
+    webToolsBackend?: FrozenWebToolsBackend; searchCredentialReference?: string; webToolsFallback?: FrozenWebToolsFallback;
+  } {
+    const admitted = definition.kind === BASELINE_ANALYSIS_KIND || enrollmentVersionId !== null ? null : liveKindRule(this.#launch.policy, definition.kind);
+    if (this.#launch.live === null || admitted === null || !kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration).webSearch) return {};
+    const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
+    requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
+    const adapter = searchBackend(asString(row.backend_id));
+    const production = this.#launch.live.scope === 'ordinary-production';
+    if (production) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
+      'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
+    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
+    const searchCredentialReference = production ? asString(row.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
+    const webToolsFallback = production ? freezeSearchFallback(this.#db, searchFallbackTermsOf(policy), adapter.declaration.id) : undefined;
+    return { webToolsBackend, searchCredentialReference, ...(webToolsFallback === undefined ? {} : { webToolsFallback }) };
   }
 
   /**
@@ -3404,18 +3438,7 @@ export class BaselineAnalysisStore {
     // A Task a 后台分析登记 prepared declares no research, as before the declaration existed (#744 keeps #887's guard).
     const researchDeclaration = admittedToolRule === null ? { webSearch: false, searchEngine: null } as const
       : kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration);
-    const toolsDeclared = live !== null && researchDeclaration.webSearch;
-    let webToolsBackend: FrozenWebToolsBackend | undefined;
-    let searchCredentialReference: string | undefined; let webToolsFallback: FrozenWebToolsFallback | undefined;
-    if (toolsDeclared) {
-      const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
-      requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
-      const adapter = searchBackend(asString(row.backend_id));
-      if (production !== null) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
-        'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
-      webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
-      searchCredentialReference = production === null ? CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot] : asString(row.credential_reference); if (production !== null) webToolsFallback = freezeSearchFallback(this.#db, searchFallbackTermsOf(input.policy ?? this.#launch.policy), adapter.declaration.id);
-    }
+    const { webToolsBackend, searchCredentialReference, webToolsFallback } = this.#currentSearchPlan(definition, intent.preparedByEnrollmentVersionId, input.policy);
     const leafMode = intent.mode === 'review-first' && intent.selectedRange === null && intent.preparedByEnrollmentVersionId === null;
     const composition = live === null
       ? describeComposition(LOCAL_DETERMINISTIC_ROUTE, LOCAL_DETERMINISTIC_MODEL, promptContractDigest, this.#newCompositionOptions(checkpoint.bookId, leafMode, definition, selected))
@@ -3492,7 +3515,7 @@ export class BaselineAnalysisStore {
           ...editorEdits,
         };
     // The sampling contract, only when it is not /1 (Issue #826): every other plan's record reads exactly as before.
-    const assurance = this.#definition.assurance;
+    const assurance = definition.assurance;
     const samplingPin = assurance !== null && assurance.promptContractDigest !== ASSURANCE_SAMPLING_PROMPT_CONTRACT_DIGEST
       ? { assurancePromptContractDigest: assurance.promptContractDigest }
       : {};

@@ -52,6 +52,19 @@ describe('one x.y.z version across package.json, the ledger, PROGRESS and the pl
       .toContain('package-ledger-mismatch:1.0.0!=0.4.1');
   });
 
+  it('records a Beta candidate without inventing a later wave or release', () => {
+    const candidate = {
+      packageJson: { version: '0.5.0' },
+      ledgerMarkdown: ledger.split('\n').filter((line) => !line.includes('| 0.2.0 |') && !line.includes('| 0.3.0 |'))
+        .join('\n').replace('| 0.5.0 | planned |', '| 0.5.0 | candidate |'),
+      progressMarkdown: 'Version: candidate **0.5.0** (Wave 23 Beta); human testing pending.',
+      planMarkdown: plan,
+    };
+    expect(checkVersionConsistency(candidate)).toEqual([]);
+    expect(checkVersionConsistency({ ...candidate, packageJson: { version: '1.0.0' } }))
+      .toContain('package-ledger-mismatch:1.0.0!=0.5.0');
+  });
+
   it('names each disagreement instead of guessing', () => {
     expect(checkVersionConsistency({ ...agreeing, packageJson: { version: '0.2.0' } })).toContain('package-ledger-mismatch:0.2.0!=0.1.0');
     expect(checkVersionConsistency({ ...agreeing, packageJson: { version: 'v0.1.0' } })).toContain('package-version-invalid');

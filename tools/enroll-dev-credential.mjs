@@ -1,7 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import { createServer, createConnection } from 'node:net';
+import { spawn } from 'node:child_process';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.generated.mjs';
+
 
 /**
  * The developer-host enrollment helper for the development credentials (ADR 0067, ADR 0073 §4).
@@ -25,10 +28,14 @@ import { DEVELOPMENT_CREDENTIAL_SLOTS } from './provider-credential-slots.genera
  *   node tools/enroll-dev-credential.mjs --slot opencode-go --check              (prints `present`, `absent`, or `unavailable`)
  *   node tools/enroll-dev-credential.mjs --slot <slot> --credential-reference <uuid> --from-file <path>   (silent; exit 0)
  *
+ * #1290 additionally permits --to-guest ai7-testbed-0[12]-nat on the named form: SSH stdin alone
+ * carries the value to this same helper's --from-stdin receiver. --delete clears only the named
+ * task-owned connection after the separately authorized packaged live acceptance; ordinary Journeys/CI refuse all forms.
+ *
  * The third form (Issue #811 brief item 5, an ADR 0067 extension recorded there) writes one Owner-supplied development key
  * under a production connection's own Credential Reference — the one the product minted when its 模型服务 connection was
  * configured on a throwaway data root — so one live evidence Task can run through the ordinary-production path. It accepts
- * only the two slots an ordinary-production binding configures, a well-formed reference, and never a reference any provider
+ * the admitted model/search slots for #1290, a well-formed reference, and never a reference any provider
  * document fixes for development; it refuses CI and a native-carrier override exactly as the other two forms do, and it is
  * silent exactly as the store form is. The product never invokes this helper.
  *
@@ -60,6 +67,9 @@ const DEVELOPMENT_REFERENCES = new Set([...SLOTS.values()].map((reference) => re
  * service's allowed bindings because this file runs before any build; `tests/unit/enroll-dev-credential.test.ts` pins them equal.
  */
 export const PRODUCTION_CONNECTION_SLOTS = Object.freeze(['opencode-go', 'deepseek-api-key']);
+// #1290: the already-authorized search evaluation keys may also populate a disposable
+// ordinary-production connection, through this helper alone, for the Beta walkthrough.
+const PRODUCTION_SEARCH_CONNECTION_SLOTS = ['search-bochaai', 'search-brave', 'search-tinyfish', 'search-parallel', 'search-deepseek'];
 const CREDENTIAL_REFERENCE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_SECRET_BYTES = 16_384;
 
@@ -74,6 +84,8 @@ export function parseEnrollmentArguments(argv) {
   requireEnrollment(Array.isArray(argv));
   const values = new Map();
   let check = false;
+  let fromStdin = false;
+  let remove = false;
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     if (key === '--check') {
@@ -81,7 +93,13 @@ export function parseEnrollmentArguments(argv) {
       check = true;
       continue;
     }
-    requireEnrollment(key === '--slot' || key === '--from-file' || key === '--credential-reference');
+    if (key === '--from-stdin' || key === '--delete') {
+      requireEnrollment(key === '--from-stdin' ? !fromStdin : !remove);
+      if (key === '--from-stdin') fromStdin = true;
+      else remove = true;
+      continue;
+    }
+    requireEnrollment(['--slot', '--from-file', '--credential-reference', '--to-guest', '--guest-session'].includes(key));
     const value = argv[index + 1];
     requireEnrollment(typeof value === 'string' && value.length > 0 && !values.has(key));
     values.set(key, value);
@@ -89,13 +107,22 @@ export function parseEnrollmentArguments(argv) {
   }
   const slot = values.get('--slot');
   const named = values.get('--credential-reference');
+  const guest = values.get('--to-guest');
+  const guestSession = values.get('--guest-session');
+  requireEnrollment(guestSession === undefined || (typeof named === 'string' && CREDENTIAL_REFERENCE_PATTERN.test(guestSession) && !check && !remove && (guest !== undefined || fromStdin)));
+  requireEnrollment(guest === undefined || ['ai7-testbed-01-nat', 'ai7-testbed-02-nat'].includes(guest));
   if (named !== undefined) {
     // The named-reference form: a production connection's own reference, never a development one, and only a store.
     const fromFile = values.get('--from-file');
-    requireEnrollment(!check && typeof fromFile === 'string' && typeof slot === 'string' && PRODUCTION_CONNECTION_SLOTS.includes(slot) &&
+    requireEnrollment(!check && Number(fromFile !== undefined) + Number(fromStdin) + Number(remove) === 1 &&
+      !(guest !== undefined && fromStdin) && typeof slot === 'string' &&
+      [...PRODUCTION_CONNECTION_SLOTS, ...PRODUCTION_SEARCH_CONNECTION_SLOTS].includes(slot) &&
       CREDENTIAL_REFERENCE_PATTERN.test(named) && !DEVELOPMENT_REFERENCES.has(named.toLowerCase()));
-    return { mode: 'store-named', slot, credentialReference: named.toLowerCase(), fromFile: resolve(fromFile) };
+    return { mode: remove ? 'delete-named' : fromStdin ? 'store-stdin' : 'store-named', slot,
+      credentialReference: named.toLowerCase(), fromFile: fromFile === undefined ? null : resolve(fromFile),
+      ...(guest === undefined ? {} : { guest }), ...(guestSession === undefined ? {} : { guestSession }) };
   }
+  requireEnrollment(!fromStdin && !remove && guest === undefined);
   requireEnrollment(typeof slot === 'string' && SLOTS.has(slot));
   const fromFile = values.get('--from-file');
   requireEnrollment(check ? fromFile === undefined : typeof fromFile === 'string');
@@ -163,12 +190,85 @@ async function readSecret(path) {
   return secret;
 }
 
+/** Only the helper receives the encrypted SSH pipe; no file, argument or environment carries its value. */
+async function readStdinSecret() {
+  let secret = '';
+  process.stdin.setEncoding('utf8');
+  for await (const chunk of process.stdin) {
+    secret += chunk;
+    requireEnrollment(Buffer.byteLength(secret, 'utf8') <= MAX_SECRET_BYTES);
+  }
+  secret = secret.trim();
+  requireEnrollment(secret.length > 0 && secret.isWellFormed());
+  return secret;
+}
+
+/** #1290's separate local packaged acceptance, never an ordinary Journey or hosted run. */
+async function enrollGuest(request, read = readSecret, start = spawn) {
+  const args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', request.guest, 'node',
+    'C:/ai7/harness/tools/enroll-dev-credential.mjs', '--slot', request.slot,
+    '--credential-reference', request.credentialReference, request.mode === 'delete-named' ? '--delete' : '--from-stdin'];
+  if(request.guestSession!==undefined)args.push('--guest-session',request.guestSession);
+  const secret = request.mode === 'delete-named' ? null : await read(request.fromFile);
+  const child = start('ssh.exe', args, { windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] });
+  await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.stdin.on('error', () => {});
+    child.once('exit', (code) => code === 0 ? resolve() : reject(new EnrollmentError('AI7_ENROLLMENT_INVALID')));
+    child.stdin.end(secret ?? undefined);
+  });
+}
+
 /** The silent store path, with injected carrier/file readers for provider-free tests; never used by the product. */
 export async function storeEnrollment(argv, deps = {}) {
   const request = parseEnrollmentArguments(argv);
   requireEnrollment(request.mode !== 'check' && !continuousIntegrationPresent(deps.env));
+  if (request.guest !== undefined) {
+    await enrollGuest(request, deps.readSecret ?? readSecret, deps.spawn ?? spawn);
+    return;
+  }
+  if(request.guestSession!==undefined){
+    await forwardGuestEnrollment(request,await (deps.readStdinSecret??readStdinSecret)());return;
+  }
   const entry = await openEntry(request.credentialReference, deps);
-  await entry.setPassword(await (deps.readSecret ?? readSecret)(request.fromFile));
+  if (request.mode === 'delete-named') await entry.deleteCredential();
+  else await entry.setPassword(await (request.mode === 'store-stdin' ? (deps.readStdinSecret ?? readStdinSecret)() : (deps.readSecret ?? readSecret)(request.fromFile)));
+}
+
+
+const guestPipe=(nonce)=>{requireEnrollment(CREDENTIAL_REFERENCE_PATTERN.test(nonce));return String.raw`\\.\pipe\ai7-beta-enrollment-${nonce}`;};
+async function forwardGuestEnrollment(request,secret){
+ requireEnrollment(process.platform==='win32'&&/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''));
+ await new Promise((ok,no)=>{
+  const socket=createConnection(guestPipe(request.guestSession));let reply='';
+  socket.setTimeout(30000,()=>socket.destroy(new EnrollmentError('AI7_ENROLLMENT_INVALID')));
+  socket.on('error',no);socket.on('data',chunk=>{reply+=chunk.toString();if(reply.length>8)socket.destroy(new EnrollmentError('AI7_ENROLLMENT_INVALID'));});
+  socket.on('end',()=>reply==='ok'?ok():no(new EnrollmentError('AI7_ENROLLMENT_INVALID')));
+  socket.on('connect',()=>socket.write(JSON.stringify({slot:request.slot,credentialReference:request.credentialReference,secret})+'\n'));
+ });
+}
+/** Only the Owner-authorized interactive Beta runner opens this nonce-scoped receiver. No credential is persisted outside the OS store. */
+export async function serveGuestEnrollment(nonce,references,deps={}){
+ requireEnrollment(!continuousIntegrationPresent(deps.env)&&process.platform==='win32'&&/^AI7-TESTBED-0[12]$/i.test(process.env.COMPUTERNAME??''));
+ const allowed=new Set(references.map(ref=>{parseEnrollmentArguments(['--slot',ref.slot,'--credential-reference',ref.credentialReference,'--from-stdin']);return ref.slot+'/'+ref.credentialReference;}));
+ const ephemeral=new Set(references.filter(ref=>ref.ephemeral===true).map(ref=>ref.slot+'/'+ref.credentialReference));
+ const server=createServer(socket=>{
+  let body='',handled=false;socket.setEncoding('utf8');socket.setTimeout(30000,()=>socket.destroy());
+  socket.on('error',()=>{});socket.on('data',chunk=>{
+   if(handled){socket.destroy();return;}body+=chunk;
+   if(Buffer.byteLength(body,'utf8')>MAX_SECRET_BYTES+1024){socket.destroy();return;}
+   if(!body.endsWith('\n'))return;handled=true;
+   void(async()=>{
+    try{const input=JSON.parse(body);body='';requireEnrollment(allowed.has(input.slot+'/'+input.credentialReference)&&typeof input.secret==='string'&&input.secret.length>0&&Buffer.byteLength(input.secret,'utf8')<=MAX_SECRET_BYTES);
+     await storeEnrollment(['--slot',input.slot,'--credential-reference',input.credentialReference,'--from-stdin'],{...deps,readStdinSecret:async()=>input.secret});input.secret='';
+     if(ephemeral.has(input.slot+'/'+input.credentialReference)){requireEnrollment(await resolveCheckReading(input.credentialReference,deps)==='present');await storeEnrollment(['--slot',input.slot,'--credential-reference',input.credentialReference,'--delete'],deps);requireEnrollment(await resolveCheckReading(input.credentialReference,deps)==='absent');}
+     socket.end('ok');
+    }catch{socket.end('no');}
+   })();
+  });
+ });
+ await new Promise((ok,no)=>{server.once('error',no);server.listen(guestPipe(nonce),()=>{server.removeListener('error',no);ok();});});
+ return async()=>new Promise((ok,no)=>server.close(error=>error?no(error):ok()));
 }
 
 async function main() {

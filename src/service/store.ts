@@ -11,6 +11,8 @@ import { initializeNoteBlockSchema } from './manuscript/note-schema.js';
 import { ManuscriptSourceObjects } from './manuscript/source-objects.js';
 import {
   commitNoteSources,
+  stageNoteSources,
+  stagedNoteSourcesMatch,
   legacyBlockSources,
   routeBlockSource,
   type LegacyBlockSources,
@@ -785,6 +787,7 @@ import {
   recordedTextBoxChoice,
   stageImportSources,
   stageWordRevisionIntake,
+  wordIntakeForStagedReading,
   requireWordStagedIntake,
   bindWordReadingBlocks,
   wordTrackedSamples,
@@ -941,6 +944,7 @@ import {
   ResearchEvidenceError,
   ResearchEvidenceLedger,
   initializeResearchEvidenceSchema,
+  initializeResearchEvidenceUnitRevisionSchema,
 } from './research-evidence.js';
 import {
   FactualVerificationLedger,
@@ -3196,6 +3200,7 @@ export class EditorialStore {
       initializeSearchBackendSchema(authority); initializeSearchFallbackSchema(authority);
       // Revision 75 (Issue #425, S70): the retained external evidence of research Runs.
       initializeResearchEvidenceSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
+      initializeResearchEvidenceUnitRevisionSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       // Revision 76 (Issue #892): the Material Index's similarity vectors and 来源译文.
       initializeMaterialIndexLayerSchema(authority, asNumber((authority.prepare('PRAGMA user_version').get() as SqlRow).user_version));
       initializeProposalReviewSchema(authority);
@@ -4708,9 +4713,9 @@ export class EditorialStore {
   }
 
   finishCancelledReviewRun(runRecordId: string): void {
-    for (const row of this.#authority.prepare(`SELECT rr.review_run_id, rr.book_id FROM review_runs rr
-      JOIN json_each(rr.canonical_json, '$.categories') c JOIN analysis_run_records r
-      ON r.task_intent_id = json_extract(c.value, '$.task.taskIntentId') WHERE r.run_record_id = ?`).all(runRecordId) as SqlRow[]) {
+    for (const row of this.#authority.prepare(`SELECT DISTINCT rr.review_run_id, rr.book_id FROM review_runs rr
+      JOIN review_run_category_events e ON e.review_run_id = rr.review_run_id
+      WHERE e.run_record_id = ? AND e.state = 'dispatched'`).all(runRecordId) as SqlRow[]) {
       this.#reviewCall(() => this.#reviewRuns.finishCancelled(asString(row.book_id), asString(row.review_run_id)));
       this.materializeFactualVerification(asString(row.review_run_id));
     }
@@ -11661,7 +11666,7 @@ export class EditorialStore {
              JOIN staged_import_block_sources s ON s.draft_id = b.draft_id AND s.position = b.position
              WHERE b.draft_id = ? ORDER BY b.position`,
         ).run(revisionId, sourceVersionId, now, input.draftId) : null;
-        const noted = word === undefined ? commitNoteSources(this.#authority, { revisionId, sourceVersionId, draftId: input.draftId, createdAt: now }) : 0;
+        const noted = commitNoteSources(this.#authority, { revisionId, sourceVersionId, draftId: input.draftId, createdAt: now });
         requireStore(mapped === null || Number(mapped.changes) + noted === snapshot.blockCount, 'IMPORT_POSTCONDITION_FAILED', '稿件内容块的来源段落对应不完整。');
       } else {
         ({ blockCount, unmapped: unmappedBlocks } = insertMergedImportBlocks(this.#authority,
@@ -11846,7 +11851,8 @@ export class EditorialStore {
         sourceBytes: snapshot.sourceBytes,
         conversion: snapshot.conversion,
         parserIdentity: snapshot.parserIdentity!,
-        ...(word === undefined ? {} : { word: { commitId: input.commitId, compiled: word.compiled } }),
+        ...(word === undefined ? {} : { word: { commitId: input.commitId, compiled: word.compiled,
+          noteCount: word.reading.blocks.filter((block) => block.kind === 'note').length } }),
       });
       this.#authority.prepare('DELETE FROM staged_import_snapshots WHERE draft_id = ?').run(input.draftId);
       this.#assertForeignKeys(this.#authority);
@@ -17927,7 +17933,8 @@ export class EditorialStore {
       }
       requireStore(readSync(descriptor, Buffer.alloc(1), 0, 1, offset) === 0 && sha256(bytes) === snapshot.sourceDigest,
         'WORD_SOURCE_UNAVAILABLE', 'Word 原文件字节与留存摘要不一致。');
-      const native = parseNativeDocxIntakeBytes(bytes, snapshot.displayName, { formatIdentified: true });
+      const native = this.#retentionCall(() => wordIntakeForStagedReading(this.#authority, snapshot.draftId,
+        parseNativeDocxIntakeBytes(bytes, snapshot.displayName, { formatIdentified: true })));
       this.#retentionCall(() => requireWordStagedIntake(this.#authority, snapshot.draftId, native));
       return { native, original: bytes };
     } catch (error) {
@@ -17994,7 +18001,7 @@ export class EditorialStore {
 
   /** Replace only the transient parse rows; the original compatibility/preview record remains independently pinned. */
   #replaceStagedReading(snapshot: DraftSnapshot, parsed: ParsedDocx | ParsedWordDocx,
-    blocks: ReadonlyArray<Pick<ParsedDocxBlock, 'position' | 'kind' | 'level' | 'text' | 'digest' | 'graphemeLength'>>,
+    blocks: ReadonlyArray<Pick<ParsedDocxBlock, 'position' | 'kind' | 'level' | 'text' | 'digest' | 'graphemeLength' | 'note'>>,
     sources: StagedImportSources | null): void {
     requireStore(this.#authority.isTransaction && blocks.length === parsed.blockCount && blocks.length > 0,
       'WORD_STAGING_INVALID', '阅读切换必须形成原子的非空暂存快照。');
@@ -18018,6 +18025,8 @@ export class EditorialStore {
     if (sources !== null) {
       this.#retentionCall(() => stageImportSources(this.#authority, snapshot.draftId, sources));
       this.#importedMarkCall(() => stageImportedMarks(this.#authority, snapshot.draftId, parsed.importedMarks));
+    } else {
+      stageNoteSources(this.#authority, snapshot.draftId, blocks.flatMap((block) => block.note === undefined ? [] : [{ position: block.position, ...block.note }]));
     }
     this.#boundedCall(() => this.#boundedAuthority.assertStagedDraftIntegrity(snapshot.draftId));
   }
@@ -18039,7 +18048,10 @@ export class EditorialStore {
       offset += block.graphemeLength;
       return valid;
     }), 'WORD_PREPARATION_INVALID', 'Word 暂存没有完整对应已确认的阅读。');
-    for (const table of ['staged_import_block_sources', 'staged_import_note_sources', 'staged_import_paragraph_pieces', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
+    requireStore(stagedNoteSourcesMatch(this.#authority, snapshot.draftId,
+      reading.blocks.flatMap((block) => block.note === undefined ? [] : [{ position: block.position, ...block.note }])),
+    'WORD_PREPARATION_INVALID', 'Word 注释来源与明确选择的阅读不一致。');
+    for (const table of ['staged_import_block_sources', 'staged_import_paragraph_pieces', 'staged_import_text_box_paragraphs', 'staged_import_marks']) requireStore(
       this.#authority.prepare(`SELECT 1 FROM ${table} WHERE draft_id = ? LIMIT 1`).get(snapshot.draftId) === undefined,
       'WORD_PREPARATION_INVALID', 'Word 图与片段不能冒充历史段落或标记暂存。');
   }
@@ -18870,7 +18882,7 @@ export class EditorialStore {
     sourceBytes: number;
     conversion: ManuscriptConversionProjection | null;
     parserIdentity: string;
-    word?: { commitId: string; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }> };
+    word?: { commitId: string; compiled: Extract<WordTrackedCompilation, { kind: 'ready' }>; noteCount: number };
   }): void {
     const counts = one(
       this.#authority
@@ -18969,7 +18981,7 @@ export class EditorialStore {
         asNumber(counts.degradation_decisions) === (input.degradationDecisionId === null ? 0 : 1) &&
         asNumber(counts.workflows) === 1 &&
         asNumber(counts.imports) === 1 &&
-        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount - input.unmappedBlocks : 0) &&
+        asNumber(counts.block_sources) === (input.word === undefined ? input.blockCount - input.unmappedBlocks : input.word.noteCount) &&
         // Issue #411: exactly the marks the review counted, every one pinned on r1.
         asNumber(counts.imported_marks) === input.fidelityPlan.importedMarks,
       'IMPORT_POSTCONDITION_FAILED',

@@ -7,7 +7,7 @@ import {
   type ProducedEditorialMarkInput,
 } from './editorial-marks.js';
 import { readWordImportChoiceRecord, readWordParentSourcePin, requireWordRevisionSource,
-  requireWordManuscriptSourceSegments, wordImportMarkSourceRecord } from './import-retention.js';
+  requireWordManuscriptSourceSegments, wordImportMarkSourceRecord, wordReadingForDigest } from './import-retention.js';
 import type { WordTrackedCompilation } from './docx.js';
 
 /**
@@ -237,7 +237,8 @@ export function validateWordImportedMarkSources(db: DatabaseSync, bookId: string
   requireImported(compiled.sourceDigest === choice.originalDigest && compiled.graphDigest === choice.graphDigest &&
     compiled.templateManifestDigest === choice.templateManifestDigest,
   'WORD_MARK_SOURCE_INVALID', 'Word 标记来源与原始编译结果不一致。');
-  const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+  const selected = choice.mode === 'suggestions' ? 'rejected' : 'accepted';
+  const reading = wordReadingForDigest(compiled.readings[selected], choice.readings[selected].digest);
   requireImported(reading.usable && reading.readingDigest === choice.readings[reading.reading].digest,
     'WORD_MARK_SOURCE_INVALID', 'Word 标记来源缺少已确认的阅读。');
   const revision = db.prepare('SELECT manuscript_id, branch_id FROM manuscript_revisions WHERE revision_id = ?').get(choice.revisionId);
@@ -261,7 +262,8 @@ export function createWordImportedMarks(db: DatabaseSync, marks: EditorialMarkSt
     compiled.templateManifestDigest === choice.templateManifestDigest,
   'WORD_MARK_SOURCE_INVALID', 'Word 标记计划与已确认的原始来源不一致。');
   requireWordRevisionSource(db, readWordParentSourcePin(db, bookId, choice.sourceVersionId), compiled.graph);
-  const reading = compiled.readings[choice.mode === 'suggestions' ? 'rejected' : 'accepted'];
+  const selected = choice.mode === 'suggestions' ? 'rejected' : 'accepted';
+  const reading = wordReadingForDigest(compiled.readings[selected], choice.readings[selected].digest);
   requireImported(reading.usable && reading.refusals.length === 0 && reading.marks.every(({ mark }, index) => mark.ordinal === index + 1),
     'WORD_MARK_SOURCE_INVALID', 'Word 标记计划不完整或不可用。');
   const bound = requireWordManuscriptSourceSegments(db, bookId, choice, reading);

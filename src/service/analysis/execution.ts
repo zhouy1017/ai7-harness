@@ -8,7 +8,7 @@ import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '.
 import { learningCurationRule } from './live-kind-admission.js';
 import type { EditorialStore } from '../store.js';
 import { ResearchSnapshotCache } from '../provider/research-snapshot-cache.js';
-import { researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit, type SourceTranslator } from './factual-review-evidence.js';
+import { mergeClaimEvidenceUnits, researchSnapshotDigest, retainUnitEvidence, retainedPageOf, searchHitsOf, type RetainedPage, type RetainedUnit, type SourceTranslator } from './factual-review-evidence.js';
 import { factualFindingId, locatedUnitFindings } from './factual-review-reducers.js';
 import { FACTUAL_REVIEW_KIND, type FactualReviewUnitResult } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, markInBookExactFetch, type FactualReviewUnitResultV2 } from './factual-review-contract-v2.js';
@@ -1243,7 +1243,7 @@ export class BaselineAnalysisExecutionOwner {
       cancelRequested: options.cancel === true,
       pauseRequested: false,
       idleYieldRequested: false,
-      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND,
+      resumableOnInterrupt: ledger.definition.kind === BASELINE_ANALYSIS_KIND || ledger.definition.factualClaims !== undefined,
       done: Promise.resolve(),
     };
     this.#active.set(runRecordId, active);
@@ -1778,6 +1778,7 @@ export class BaselineAnalysisExecutionOwner {
       claimSession?: FactualClaimSession, contextDefinition: AnalysisKindDefinition = definition, claimMessage?: string) => {
       const definition = contextDefinition;
       const promptContractDigest = definition.promptContractDigest;
+      const perUnitSession = claimSession === undefined && (live !== null || facts.localFixtureProfile?.kind === 'rule');
       const webTools = claimSession?.stage === 'web-verification' || (claimSession === undefined && definition.factualClaims === undefined && facts.webToolsBackend !== undefined && definition.evidenceAssuranceLevel !== 'quick');
       const compositionOptions = claimSession === undefined ? facts.compositionOptions : {
         ...facts.compositionOptions, platformTools: webTools, localTools: false,
@@ -1959,7 +1960,7 @@ export class BaselineAnalysisExecutionOwner {
           promptContractDigest,
           // One technical Session per Analysis Unit under developer-live; the deterministic route keeps its single
           // accumulating Session, so J-04's proven composition is untouched.
-          ...(claimSession !== undefined ? { sessionMode: 'single' as const } : live === null && facts.localFixtureProfile?.kind !== 'rule' ? {} : { sessionMode: 'per-unit' as const }),
+          ...(claimSession !== undefined ? { sessionMode: 'single' as const } : perUnitSession ? { sessionMode: 'per-unit' as const } : {}),
           ...(firstUnitSessionId === undefined ? {} : { nextSessionId: () => nextUnitSessionId! }),
           adapterFactory: (codes) => {
             // A continuation's retry is the unit's second attempt however many executions it took to reach it (Issue #422,
@@ -2096,7 +2097,7 @@ export class BaselineAnalysisExecutionOwner {
       })();
       const context = {
         harness, retrieval, liveAdapter, admittedUserMessages, acceptedOutputDigests, pendingLoopUsage,
-        ceilingState, bind, finish, beginTurn, closeProducer,
+        ceilingState, bind, finish, beginTurn, closeProducer, freshToolSession: childProfile || perUnitSession,
         get currentBindingDigest() { return currentBindingDigest; },
         get bindingFacts() { return bindingFacts; },
         set bindingFacts(value: EgressBindingFacts | null) { bindingFacts = value; },
@@ -2479,7 +2480,9 @@ export class BaselineAnalysisExecutionOwner {
             requestDigest: definition.requestDigest(unit.ordinal, unit.digest), inputDigest: unit.digest, contractDigest: promptContractDigest });
           return true;
         };
-        context.platformSession?.startUnit(childProfile);
+        // A new technical session may legitimately receive the same provider call IDs (including a
+        // cached contract retry). Its tool receipts must start with it; single-session claims retain theirs.
+        context.platformSession?.startUnit(context.freshToolSession);
         let turn: HarnessTurnOutcome;
         try { turn = await harness.submitUnit(message); } finally { context.recoverPreSend = null; }
         if (context.platformSession?.evidenceNeedsCommander === true) throw new ExecutionAdmissionError('PLATFORM_TOOL_EVIDENCE_MORE_SEARCH_REQUIRED', '本证据项需要第二次新检索；等待 Commander。');
@@ -3350,10 +3353,12 @@ export class BaselineAnalysisExecutionOwner {
                   exact: relation.excerptRef !== null && pages.has(relation.sourceRef) && excerptLocated(pages.get(relation.sourceRef)!.text, relation.excerptRef), group: groups[index] ?? null })) });
               const pending = result !== null && !['证据支持', '疑似错误', '证据冲突'].includes(mapped.outcome) && rounds.length === 0 && claimOwner.claimAllowance(session.sessionId).search > 0;
               const round = claimOwner.recordClaimVerification({ sessionId: session.sessionId, result, evidence,
+                ...(isolated.platformSession!.fallbackSources.size === 0 ? {} : { fallbackSources: [...isolated.platformSession!.fallbackSources] }),
                 state: ambiguousTurnReason(turn.signals) !== null ? 'unknown' : result === null ? 'incomplete' : pending ? 'pending' : 'closed' });
               ledger.checkpointFactualRequests(facts.runRecordId, round);
               rounds = claimOwner.claimRounds(session.sessionId);
             }
+            for (const round of rounds) for (const [url, source] of round.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source);
             retainedByUnit.set(producer.sourceUnitOrdinal, [...(retainedByUnit.get(producer.sourceUnitOrdinal) ?? []), ...rounds.map((round) => round.evidence)]);
           } finally {
             for (const [url, source] of isolated.platformSession?.fallbackSources ?? []) if (!fallbackSources.has(url)) fallbackSources.set(url, source);
@@ -3364,14 +3369,11 @@ export class BaselineAnalysisExecutionOwner {
             await isolated.finish(); contexts.delete(isolated);
           }
         }
+        if (stopWithoutEnding()) return;
         for (const [unitOrdinal, retained] of retainedByUnit) {
           this.#deps.researchEvidence?.({ bookId: facts.bookId, runRecordId: facts.runRecordId, unitOrdinal, ...(fallbackSources.size === 0 ? {} : { fallbackSources }),
-            backendId: facts.webToolsBackend!.backendId, unit: { state: retained.some((entry) => entry.state === 'incomplete') ? 'incomplete' : 'completed',
-              searchCalls: retained.reduce((sum, entry) => sum + entry.searchCalls, 0), retentionFetches: 0,
-              failedRetrievals: retained.reduce((sum, entry) => sum + entry.failedRetrievals, 0),
-              findings: retained.flatMap((entry) => entry.findings), evidence: retained.flatMap((entry) => entry.evidence) } });
+            backendId: facts.webToolsBackend!.backendId, unit: mergeClaimEvidenceUnits(retained) });
         }
-        if (stopWithoutEnding()) return;
       }
       const closedOutcomes = outcomes
         .filter((outcome): outcome is ClosedUnitOutcome<BaselineUnitResult> => outcome.state === 'closed')
