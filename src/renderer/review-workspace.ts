@@ -1902,7 +1902,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   async function act(busy: string, failure: string, run: () => Promise<void>, onError?: (error: unknown) => boolean): Promise<void> {
     if (destroyed || working) return;
     working = true;
-    for (const control of card?.querySelectorAll<HTMLButtonElement | HTMLSelectElement>('button[data-review-action], select[data-review-filter]') ?? []) control.disabled = true;
+    for (const control of card?.querySelectorAll<HTMLButtonElement>('button[data-review-action], [data-review-filter] button, [data-fact-filter] button') ?? []) control.disabled = true;
     options.setStatus(busy, 'busy');
     try {
       await run();

@@ -1,3 +1,4 @@
+import { filterChoices } from './components/controls.js';
 import { windowStep } from './components/controls.js';
 import { createButton } from './components/controls.js';
 import type {
@@ -454,10 +455,13 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
   section.dataset['editQualitySignals'] = '';
   const heading = document.createElement('h3');
   heading.textContent = '编辑改动质量信号';
-  const select = document.createElement('select');
-  select.setAttribute('aria-label', '改动质量信号的图书');
-  const all = document.createElement('option');
-  all.value = ''; all.textContent = '本社全部图书'; select.append(all);
+  let chosenBook = '';
+  const bookChoices: Array<readonly [string, string]> = [['', '本社全部图书']];
+  const filters = document.createElement('div');
+  filters.dataset['qualitySignalsFilter'] = 'book';
+  const paintBooks = () => filters.replaceChildren(filterChoices({ label: '改动质量信号的图书', choices: bookChoices, value: chosenBook,
+    change: (value) => { chosenBook = value; void load().catch(() => { body.textContent = '无法读取质量信号。'; }); },
+  }));
   let cursor: import('../shared/protocol.js').BookSummaryCursor | null = null;
   const more = createButton(); more.type = 'button'; more.textContent = '更多图书…';
   const loadBooks = async () => {
@@ -465,9 +469,10 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     try {
       const page = await api.listBooks({ after: cursor });
       for (const book of page.items) {
-        const option = document.createElement('option'); option.value = book.bookId; option.textContent = book.title; select.append(option);
+        bookChoices.push([book.bookId, book.title]);
       }
       cursor = page.nextCursor; more.hidden = cursor === null;
+      paintBooks();
     } finally { more.disabled = false; }
   };
   more.addEventListener('click', () => void loadBooks().catch(() => { body.textContent = '无法读取更多图书。'; }));
@@ -482,7 +487,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     const current = ++generation;
     adoptionMore.disabled = true;
     if (reset) { adoptionAfter = null; adoptionRows = []; adoptionMore.hidden = true; }
-    const metric = await api.inspectEditQualitySignals({ bookId: select.value || null, preferenceAfter: adoptionAfter }).catch((error: unknown) => {
+    const metric = await api.inspectEditQualitySignals({ bookId: chosenBook || null, preferenceAfter: adoptionAfter }).catch((error: unknown) => {
       if (current === generation) adoptionMore.disabled = false;
       throw error;
     });
@@ -502,7 +507,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用；分母包含尚未处理的发现。此比较不证明规则导致采纳。'));
   };
   adoptionMore.addEventListener('click', () => void load(false).catch(() => { adoptionMore.disabled = false; body.textContent = '无法读取更多规则采纳率。'; }));
-  select.addEventListener('change', () => void load().catch(() => { body.textContent = '无法读取编辑改动质量信号。'; }));
-  section.append(heading, select, more, body, adoption, adoptionMore); root.append(section);
+  paintBooks();
+  section.append(heading, filters, more, body, adoption, adoptionMore); root.append(section);
   await Promise.all([load(), loadBooks()]);
 }
