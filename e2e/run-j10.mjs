@@ -1249,7 +1249,7 @@ async function main() {
     requireJourney(askedPlan?.taskIntent?.taskIntentId === fourthIntentId && askedPlan.planVersion?.ordinal === 2 &&
       JSON.stringify(askedPlan.planVersion.edits?.askFirstAdaptations) === JSON.stringify(['safe-retry']) &&
       JSON.stringify(askedPlan.planEnvelope?.boundary?.askFirst?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry']) &&
-      JSON.stringify(askedPlan.planEnvelope.boundary.adaptable) === '[]' && askedPlan.planEnvelope.boundary.participation?.expected === true,
+      JSON.stringify(askedPlan.planEnvelope.boundary.adaptable.map((entry) => entry.adaptationClass)) === JSON.stringify(['contract-retry']) && askedPlan.planEnvelope.boundary.participation?.expected === true,
     'ask-first-version', { edits: askedPlan?.planVersion?.edits ?? null, boundary: askedPlan?.planEnvelope?.boundary ?? null });
     await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-participation li')?.textContent===${JSON.stringify(ASK_FIRST_STATEMENT)} && document.querySelector('#task-drawer [data-task-plan-boundary="ask-first"] [data-task-plan-item="safe-retry"] .task-plan-edit-tag')?.textContent==='你改的 · 先问你'`, 'ask-first-plan-words');
 
