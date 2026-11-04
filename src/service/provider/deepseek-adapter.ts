@@ -316,18 +316,34 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
   const signal = AbortSignal.timeout(10_000);
   const pages = new Set<string>();
   for (;;) {
-    if (pages.has(url.href)) throw new Error('MODEL_DISCOVERY_PAGINATION_INVALID');
+    if (pages.has(url.href)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     pages.add(url.href);
-    const response = await send(url.href, { method: 'GET', redirect: 'error', signal, headers: {
+    const init: RequestInit = { method: 'GET', redirect: 'error', signal, headers: {
       accept: 'application/json', ...credentialHeaders(profile, secret),
       ...(profile.anthropicVersion === null ? {} : { 'anthropic-version': profile.anthropicVersion }),
-    } });
-    if (!response.ok) throw new Error('MODEL_DISCOVERY_UNAVAILABLE');
-    const body: unknown = await response.json();
-    if (!isRecord(body)) throw new Error('MODEL_DISCOVERY_INVALID');
+    } };
+    let response: Response;
+    try { response = await send(url.href, init); }
+    catch (error) {
+      const transport = classifyTransportError(error, false, init);
+      throw Object.assign(new Error(transport.message), { code: transport.code });
+    }
+    if (!response.ok) throw Object.assign(new Error('MODEL_DISCOVERY_UNAVAILABLE'), {
+      code: response.status === 401 || response.status === 403 ? 'MODEL_DISCOVERY_CREDENTIAL_REJECTED' : 'MODEL_DISCOVERY_UNAVAILABLE', status: response.status,
+    });
+    let rawBody: string;
+    try { rawBody = await response.text(); }
+    catch (error) {
+      const transport = classifyTransportError(error, false, init);
+      throw Object.assign(new Error(transport.message), { code: transport.code });
+    }
+    let body: unknown;
+    try { body = JSON.parse(rawBody) as unknown; }
+    catch { throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' }); }
+    if (!isRecord(body)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     const google = profile.credentialHeader === 'x-goog-api-key';
     const models = google ? body.models : body.data;
-    if (!Array.isArray(models)) throw new Error('MODEL_DISCOVERY_INVALID');
+    if (!Array.isArray(models)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     for (const model of models) {
       if (!isRecord(model) || (google && (!Array.isArray(model.supportedGenerationMethods) || !model.supportedGenerationMethods.includes('generateContent')))) continue;
       const id = google && typeof model.name === 'string' ? model.name.replace(/^models\//u, '') : model.id;
@@ -339,7 +355,7 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
     else if (profile.credentialHeader === 'x-api-key' && body.has_more === true && typeof body.last_id === 'string') url.searchParams.set('after_id', body.last_id);
     else break;
   }
-  if (result.size === 0) throw new Error('MODEL_DISCOVERY_EMPTY');
+  if (result.size === 0) throw Object.assign(new Error('MODEL_DISCOVERY_EMPTY'), { code: 'MODEL_DISCOVERY_EMPTY' });
   return [...result.values()];
 }
 

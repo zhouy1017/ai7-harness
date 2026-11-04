@@ -159,6 +159,16 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     );
     const technical = element('details', 'model-service-technical');
     technical.append(element('summary', undefined, '查看技术详情'), unsupported, policy, protectedStore);
+    if (projection.modelDiscovery?.status === 'failure') {
+      const discovery = element('section', 'model-service-discovery-technical');
+      discovery.dataset['modelDiscoveryCode'] = projection.modelDiscovery.code;
+      discovery.append(
+        element('h3', undefined, '模型列表获取失败'),
+        element('p', undefined, projection.modelDiscovery.reason),
+        element('p', 'field-note', `错误代码：${projection.modelDiscovery.code}`),
+      );
+      technical.append(discovery);
+    }
     const actions = element('div', 'button-row');
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
     content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }), renderModelServiceProxyBlock(projection), technical, actions);

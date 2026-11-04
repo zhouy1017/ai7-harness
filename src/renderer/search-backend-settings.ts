@@ -16,7 +16,7 @@ export interface SearchBackendSettingsOptions {
 }
 
 export const SEARCH_CANDIDATE_PROBE_LABEL = '测试连接';
-export const SEARCH_FALLBACK_NOTE = '设置备用来源后，默认来源连接未建立、服务出错或限流时，同一检索最多重试一次；仍失败再切换一次。默认使用博查且明确返回余额或套餐额度不足时，直接切换一次；其他认证错误不会切换。只能选择一个已保存密钥的后端，且不能与默认来源相同；候选接口不能作为备用来源。';
+export const SEARCH_FALLBACK_NOTE = '设置备用来源后，默认来源连接未建立、服务出错或限流时，同一检索最多重试一次；仍失败再切换一次。默认使用博查且明确返回余额或套餐额度不足时，直接切换一次；其他认证错误不会切换。只能选择一个已保存密钥的后端，且不能与默认来源相同；候选接口不能作为备用来源。随模型渠道使用自带搜索时，不会切换到本页的备用来源；开启总是使用选定后端后，按本页配置切换。';
 export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidateProbeOutcome, string>> = Object.freeze({
   succeeded: '连接成功',
   'succeeded-empty': '连接成功 · 没有结果',
@@ -25,6 +25,19 @@ export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidatePro
   'transport-interrupted': '传输中断',
   'transport-unknown': '传输结果未知',
 });
+
+/** Explain the resolver's current source using the selected Main route and only a saved, measured native backend. */
+export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjection): string {
+  const ready = projection.searchBackends.backends.filter((backend) => backend.connection.credentialOperationState === 'ready');
+  const mainRoute = projection.routeChoice?.routes.find((route) => route.inUse);
+  const native = mainRoute?.connection?.credentialOperationState !== 'ready' || projection.searchBackends.alwaysUseSelectedBackend ? undefined
+    : projection.searchBackends.backends.find((backend) => mainRoute.route.startsWith(`${backend.backendId.slice('search-'.length)}-`));
+  if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索`;
+  const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
+  return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
+    : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}（已开启总是使用选定后端）`
+    : `当前生效来源：兜底 · ${selected.name}（模型渠道没有可用的原生搜索）`;
+}
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -57,6 +70,7 @@ export function candidateProbeLines(result: SearchBackendProbeProjection): strin
   const candidate = result.candidate;
   if (candidate === undefined) return [];
   const outcome = SEARCH_CANDIDATE_OUTCOME_LABELS[candidate.outcome] + (candidate.outcome === 'http-rejected' && candidate.httpStatus !== null ? `（HTTP ${candidate.httpStatus}）` : '');
+  if (candidate.protocol !== 'deepseek-direct-search') return [`${outcome} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}`];
   return [`${outcome} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}`,
     `只说明这一次请求：${candidate.endpoint} · ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest.slice(0, 12)}`];
 }
@@ -65,7 +79,7 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   const card = element('article', 'model-role-card');
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
-  card.append(element('h4', undefined, `${candidate.name} · 未实测`), element('p', 'field-note', `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择`));
+  card.append(element('h4', undefined, `${candidate.name} · 未实测`), element('p', 'field-note', candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`));
   for (const line of candidate.disclosure) card.append(element('p', 'field-note', line));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
@@ -90,9 +104,21 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const section = element('section', 'review-section');
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
-  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务使用所选后端；已开始的运行继续使用计划里冻结的后端。'),
+  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务优先随主编辑模型渠道使用自带搜索；没有可用的自带搜索时使用已配置的检索后端。已开始的运行继续使用冻结的来源。'),
+    element('p', 'field-note', effectiveSearchSourceLine(projection)),
     element('p', 'field-note', `备用来源：${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
+  const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
+  override.dataset['action'] = 'always-use-selected-search-backend';
+  const label = element('label', 'field-note'); label.append(override, element('span', undefined, '总是使用联网检索里选定的后端'));
+  override.addEventListener('change', async () => {
+    override.disabled = true;
+    try { render(await api.selectSearchBackend({ backendId: selectedBackendId, alwaysUseSelectedBackend: override.checked })); setStatus('联网检索来源偏好已保存。'); }
+    catch (error) { override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false; setStatus(errorMessage(error, '无法保存联网检索来源偏好。'), 'error'); }
+    finally { override.disabled = false; }
+  });
+  section.append(label);
+
   const saveFallback = (backendId: string | null, done: string): void => void (async () => {
     try { render(await api.selectSearchBackend({ backendId, role: 'fallback' })); setStatus(done); }
     catch (error) { setStatus(errorMessage(error, '无法保存备用来源。'), 'error'); }
@@ -152,14 +178,15 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       secret.addEventListener('input', () => { save.disabled = secret.value.trim().length === 0; });
       card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
       actions.append(save, remove);
-      if (backend.backendId === 'search-deepseek') {
-        const source = projection.routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')?.connection;
-        const reuse = button('复用 DeepSeek 模型凭据', 'secondary', async () => {
+      const service = backend.backendId.slice('search-'.length);
+      const source = projection.routeChoice.routes.find((route) => route.route.startsWith(`${service}-`))?.connection;
+      if (source != null) {
+        const reuse = button(`复用${source.connectionName}模型凭据`, 'secondary', async () => {
           reuse.disabled = true;
-          try { render(await api.saveSearchBackendCredential({ backendId: 'search-deepseek', reuseModelCredential: true })); setStatus('DeepSeek 凭据已同步到联网检索。', 'success'); }
-          catch (error) { reuse.disabled = source?.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步 DeepSeek 凭据。'), 'error'); }
+          try { render(await api.saveSearchBackendCredential({ backendId: backend.backendId, reuseModelCredential: true })); setStatus('模型渠道凭据已同步到联网检索。', 'success'); }
+          catch (error) { reuse.disabled = source.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步模型渠道凭据。'), 'error'); }
         });
-        reuse.dataset['action'] = 'reuse-deepseek-credential'; reuse.disabled = source?.credentialOperationState !== 'ready';
+        reuse.dataset['action'] = 'reuse-model-credential'; reuse.disabled = source.credentialOperationState !== 'ready';
         actions.append(reuse);
       }
     }
@@ -168,7 +195,9 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   if (projection.searchBackends.candidates.length > 0) {
     section.append(element('h4', undefined, '候选接口 · 未实测'));
     for (const candidate of projection.searchBackends.candidates) section.append(candidateCard(candidate, options,
-      projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready')));
+      candidate.protocol === 'deepseek-direct-search'
+        ? projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready')
+        : projection.routeChoice.routes.some((route) => route.route.startsWith(`${candidate.backendId.slice('search-'.length)}-`) && route.connection?.credentialOperationState === 'ready')));
   }
   return section;
 }

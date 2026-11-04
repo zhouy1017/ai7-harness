@@ -7,7 +7,7 @@ import type {
 } from '../shared/protocol.js';
 import {
   GLOBAL_ATTENTION_NEXT_STEP_LABELS,
-  GLOBAL_ATTENTION_STATE_LABELS,
+  globalAttentionStateLabel,
   GLOBAL_ATTENTION_STATE_PILLS,
   globalAttentionObjectLabel,
   globalAttentionReason,
@@ -158,7 +158,7 @@ export function taskPanelCardView(entry: BookTaskItemProjection): TaskPanelCardV
         : item.object.kind === 'task' ? (item.object.taskKind === 'writing' ? TASK_PANEL_KIND_LABELS.writing : TASK_PANEL_KIND_LABELS.evaluation)
           : TASK_PANEL_KIND_LABELS.analysis,
     title: globalAttentionObjectLabel(item.object),
-    stateLabel: GLOBAL_ATTENTION_STATE_LABELS[item.state],
+    stateLabel: globalAttentionStateLabel(item),
     pill: GLOBAL_ATTENTION_STATE_PILLS[item.state],
     reason: globalAttentionReason(item),
     timeLine: globalAttentionTimeLine(item.group, item.at),
