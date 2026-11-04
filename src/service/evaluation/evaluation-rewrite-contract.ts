@@ -336,7 +336,8 @@ export function parseEvaluationRewriteSynthesis(text: string, input: Pick<Evalua
     if (typeof raw !== 'string' || !raw.isWellFormed() || !raw.trim()) {
       withheld.push({ itemId, reason: '没有可采用的评语。' }); mark(section, index, 'text-missing'); return null;
     }
-    const sentences = raw.match(/[^。！？.!?]+[。！？.!?]*/gu) ?? [raw];
+    // Decimal punctuation inside a number belongs to the sentence being checked, never a detachable prefix.
+    const sentences = raw.match(/(?:[^。！？.!?]|(?<=[0-9０-９])\.(?=[0-9０-９]))+[。！？.!?]*/gu) ?? [raw];
     const kept = sentences.filter((sentence) => !claimsScore(sentence, fullMarks) && !claimsConclusion(sentence, input.conclusions));
     if (kept.length !== sentences.length) { withheld.push({ itemId, reason: '含分数或结论的句子没有采用：分数与结论由你定。' }); mark(section, index, 'claim-withheld'); }
     const result = normalizeEvaluationLine(kept.join(''), maximum);

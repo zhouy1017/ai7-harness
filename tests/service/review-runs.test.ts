@@ -1271,7 +1271,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
       expect(empty.findings).toEqual([]);
       expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 4 处，未标记。');
-      expect(selectionExcludedLine(2)).toBe('所读范围内另有 2 条未能定位引文，列在排除附录中');
+      expect(selectionExcludedLine(2, ['检索引用未精确取文', '检索引用未精确取文'])).toBe('所读范围内另有 2 条发现未采用，列在排除附录中：检索引用未精确取文');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
       expect(reviewCard(session, book, first.reviewRunId)!.item.object).toEqual({ kind: 'review', ordinal: 1, onSelection: true });

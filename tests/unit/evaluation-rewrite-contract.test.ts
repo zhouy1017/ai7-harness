@@ -133,6 +133,27 @@ describe('the unit result and the synthesis', () => {
     expect(innocent.ok && innocent.result.withheld).toEqual([]);
   });
 
+  it.each(['18.5', '１８．５', '1,018.5', '18.5/20'])('withholds the complete score sentence containing %s', (score) => {
+    const parsed = parseEvaluationRewriteSynthesis(synthesis({
+      items: [{ itemId: 'literary-quality', comment: `本项可给${score}分。结构清晰。` }],
+      verdict: `本项可给${score}分。结构清晰。`,
+    }), INPUT);
+    expect(parsed).toMatchObject({ ok: true, result: {
+      items: [{ itemId: 'literary-quality', comment: '结构清晰。' }], verdict: '结构清晰。',
+      withheld: expect.arrayContaining([expect.objectContaining({ itemId: 'literary-quality' }), expect.objectContaining({ itemId: null })]),
+    } });
+  });
+
+  it.each(['总评结论是推荐出版。', '保留「推荐出版」字样，总评结论是推荐出版。', '人物暂缓了行动，但本稿结论为暂缓。'])('withholds an explicit editorial verdict: %s', (verdict) => {
+    const parsed = parseEvaluationRewriteSynthesis(synthesis({ verdict }), INPUT);
+    expect(parsed).toMatchObject({ ok: true, result: { verdict: null, withheld: [expect.objectContaining({ itemId: null })] } });
+  });
+
+  it('retains character actions and quoted conclusion labels in the synthesis', () => {
+    const verdict = '人物暂缓了行动。保留「推荐出版」字样供编辑判断。';
+    expect(parseEvaluationRewriteSynthesis(synthesis({ verdict }), INPUT)).toMatchObject({ ok: true, result: { verdict, withheld: [] } });
+  });
+
   it('builds its two messages under headers of its own, keyed by the frozen contract and what they read', () => {
     const subject = unit(2, 2, 1);
     const blocks = new Map([...subject.overlapBlockIds, ...subject.blockIds].map((blockId, index) => [blockId, { blockId, kind: 'paragraph' as const, level: null, text: `第 ${index + 1} 段` }]));

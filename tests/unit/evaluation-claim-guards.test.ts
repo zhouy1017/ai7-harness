@@ -174,7 +174,8 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
 
   it('finds a conclusion by the house\'s own labels — 推荐出版, 修改后再议, 暂缓, 不推荐 — wherever it stands in the line', () => {
     expect(CONCLUSIONS).toEqual(['推荐出版', '修改后再议', '暂缓', '不推荐']);
-    for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。']) {
+    for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。',
+      '总评结论是推荐出版。', '总评结论为推荐出版。', '保留「推荐出版」字样，总评结论是推荐出版。', '人物暂缓了行动，但本稿结论为暂缓。']) {
       expect(claimsConclusion(text, CONCLUSIONS), text).toBe(true);
     }
     for (const text of ['值得推荐给文史读者。', '推荐语可以写得更具体。', '可以先缓一缓再改第3章。', '出版前还要修改。', '人物暂缓了行动。', '不推荐删改作者声音。', '保留「推荐出版」字样供编辑判断。']) {

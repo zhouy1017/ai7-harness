@@ -525,9 +525,9 @@ export function selectionOutsideLine(count: number): string {
   return `所选范围外另有 ${count} 处，未标记`;
 }
 
-/** A 当前选区 Run's unplaceable quotes carry no paragraph, so its line names the reading ranges they came from (P3-1). */
-export function selectionExcludedLine(count: number): string {
-  return `所读范围内另有 ${count} 条未能定位引文，列在排除附录中`;
+/** A 当前选区 Run names the reading ranges and actual reasons for its excluded findings. */
+export function selectionExcludedLine(count: number, reasonLabels: ReadonlyArray<string>): string {
+  return `所读范围内另有 ${count} 条发现未采用，列在排除附录中：${[...new Set(reasonLabels)].join('；')}`;
 }
 
 /**
@@ -3235,7 +3235,7 @@ export class ReviewRunStore {
           // A local candidate has no quotation to locate; its exclusions are listed with the local check, not in the appendix.
           ...(source.excludedCount > 0
             ? [source.local !== undefined ? `另有 ${source.excludedCount} 个本地候选未通过精确定位或超出结果界限，未生成批注，列在本次本地检查的排除记录中`
-              : source.selection ? selectionExcludedLine(source.excludedCount) : `另有 ${source.excludedCount} 条发现未采用，列在排除附录中：${[...new Set((source.excluded ?? []).map((finding) => finding.reasonLabel))].join('；')}`]
+              : source.selection ? selectionExcludedLine(source.excludedCount, (source.excluded ?? []).map((finding) => finding.reasonLabel)) : `另有 ${source.excludedCount} 条发现未采用，列在排除附录中：${[...new Set((source.excluded ?? []).map((finding) => finding.reasonLabel))].join('；')}`]
             : []),
           ...(source.outsideSelection > 0 ? [selectionOutsideLine(source.outsideSelection)] : []),
         ].join('；') + '。';

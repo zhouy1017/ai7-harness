@@ -349,13 +349,14 @@ function claimsChineseScore(chars: ReadonlyArray<string>, start: number, end: nu
 export function claimsConclusion(text: string, conclusions: ReadonlyArray<string>): boolean {
   return conclusions.some((label) => {
     if (!label) return false;
-    const at = text.indexOf(label);
-    if (at < 0) return false;
-    const before = text.slice(0, at).trim();
-    const after = text.slice(at + label.length).trim();
-    // A character's action or discussion of a label is not an editorial verdict.
-    if (/^[「」“”"']|^(?:一词|字样|标签|的说法)/u.test(after)) return false;
-    return before === '' && /^(?:[。！？.!?，,；;]|出版|这部书稿|$)/u.test(after) ||
-      /(?:建议|可以|可|应当|应|宜|结论[:：]?|编辑部|总体|目前|本书|本稿|书稿|版本)$/u.test(before);
+    for (let at = text.indexOf(label); at >= 0; at = text.indexOf(label, at + label.length)) {
+      const before = text.slice(0, at).trim();
+      const after = text.slice(at + label.length).trim();
+      // A character's action or discussion of a label exempts only this occurrence.
+      if (/^[「」“”"']|^(?:一词|字样|标签|的说法)/u.test(after)) continue;
+      if (before === '' && /^(?:[。！？.!?，,；;]|出版|这部书稿|$)/u.test(after) ||
+        /(?:建议|可以|可|应当|应|宜|结论(?:是|为|[:：])?|编辑部|总体|目前|本书|本稿|书稿|版本)$/u.test(before)) return true;
+    }
+    return false;
   });
 }
