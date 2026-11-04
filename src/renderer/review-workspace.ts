@@ -2389,7 +2389,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       categories.append(label);
       if (!entry.available && entry.searchEngine && entry.unavailableReason?.includes('设置 › 联网检索') && options.openSearchSettings !== undefined) {
         const settings = actionButton('open-search-settings', 'quiet', () => { sheet.close(); options.openSearchSettings!(); });
-        settings.textContent = '设置联网检索'; categories.append(settings);
+        categories.append(settings);
       }
       categoryInputs.set(entry.categoryId, { input, label, reason, entry });
     }

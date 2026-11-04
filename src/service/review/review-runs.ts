@@ -4194,12 +4194,18 @@ export class ReviewRunStore {
     }
     let projection: AnalysisProjection;
     let researchSourceLine: string | undefined;
+    let researchUnavailableReason: string | null = null;
     try {
       const ledger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
       projection = ledger.inspect(bookId, progress);
       if (entry.searchEngine) {
-        const source = ledger.currentResearchBackend();
-        if (source?.selectionSource === 'model-channel') researchSourceLine = researchPlanLine(source);
+        try {
+          const source = ledger.currentResearchBackend();
+          if (source?.selectionSource === 'model-channel') researchSourceLine = researchPlanLine(source);
+        } catch (error) {
+          if (!(error instanceof AnalysisError)) throw error;
+          researchUnavailableReason = error.message;
+        }
       }
     } catch (error) {
       if (error instanceof AnalysisError) return { entry, unavailableReason: error.message, facts: none, projection: null };
@@ -4240,7 +4246,7 @@ export class ReviewRunStore {
     };
     return {
       entry,
-      unavailableReason: entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null,
+      unavailableReason: researchUnavailableReason ?? (entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null),
       facts,
       projection,
       ...(researchSourceLine === undefined ? {} : { researchSourceLine }),
