@@ -2481,10 +2481,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const text = el('span', 'task-plan-choice-text');
       text.append(el('span', 'task-plan-choice-label', option.label));
       if (option.recommended !== null) text.append(el('span', 'task-plan-choice-recommended', TASK_PLAN_CLARIFICATION_RECOMMENDED));
-      const explanation = el('small', 'field-note');
-      if (option.recommended !== null) explanation.append(el('span', 'task-plan-choice-why', option.recommended.replace(/。$/u, '')), '；');
-      explanation.append(el('span', 'task-plan-choice-consequence', option.consequence));
-      text.append(explanation);
+      if (card.origin !== 'model' || !option.id.startsWith('model-option-')) {
+        const explanation = el('span', 'task-plan-choice-detail');
+        if (option.recommended !== null) explanation.append(el('span', 'task-plan-choice-why', option.recommended.replace(/^推荐：/u, '').replace(/。$/u, '')), '；');
+        explanation.append(el('span', 'task-plan-choice-consequence', option.consequence));
+        text.append(' · ', explanation);
+      }
       choice.append(input, text);
       choices.append(choice);
     }
