@@ -120,6 +120,7 @@ const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被�
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
+const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 /** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
 const REDO_SUMMARY = Object.freeze([
@@ -456,6 +457,7 @@ const READ_DRAWER = `(() => {
     start: drawer.dataset.taskPlanStart ?? null,
     pill: text(drawer.querySelector('.task-drawer-pill')),
     status: text(drawer.querySelector('.task-bar-status')),
+    statement: text(drawer.querySelector('.task-bar-statement')),
     note: text(drawer.querySelector('.task-bar-note')),
     actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => {
       const described = button.getAttribute('aria-describedby');
@@ -505,14 +507,14 @@ const STOPPED_ACTIONS = Object.freeze([
  * and fail with the last reading, since a bar that is a moment behind the Run settles on its next read.
  */
 async function waitForBar(renderer, expected, name, timeout = 60_000) {
-  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, note: drawer.note, actions: drawer.actions }); })()`;
+  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, statement: drawer.statement, note: drawer.note, actions: drawer.actions }); })()`;
   const deadline = Date.now() + timeout;
   let last = null;
   while (Date.now() < deadline) {
     last = await renderer.evaluate(view).catch(() => null);
     const actual = last === null ? null : JSON.parse(last);
-    const noteMatches = expected.notePrefix === undefined ? actual?.note === expected.note : typeof actual?.note === 'string' && actual.note.startsWith(expected.notePrefix);
-    if (actual !== null && actual.state === expected.state && actual.pill === expected.pill && actual.status === expected.status && noteMatches &&
+    if (actual !== null && actual.state === expected.state && actual.pill === expected.pill && actual.status === expected.status && actual.note === expected.note &&
+      (expected.statement === undefined || actual.statement === expected.statement) &&
       JSON.stringify(actual.actions) === JSON.stringify(expected.actions)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
@@ -1109,7 +1111,8 @@ async function main() {
       (resumable.taskOutcome ?? null) === null,
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', notePrefix: `${RESUMABLE_NOTE}；上次续行于 `, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    // This Run has never continued: explain shutdown without inventing a previous continuation time (#1309).
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1386,7 +1389,8 @@ async function main() {
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
       state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
-      notePrefix: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分；上次续行于 ', actions: STOPPED_ACTIONS,
+      statement: SHUTDOWN_STATEMENT,
+      note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
     const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);

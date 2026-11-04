@@ -3227,7 +3227,8 @@ export class BaselineAnalysisExecutionOwner {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
             ...(active.idleYieldRequested ? { idleYield: true } : {}),
             detail: active.idleYieldRequested ? RUN_IDLE_YIELD_LABEL : proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
-            ...(proxyFailure === null ? {} : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
+            ...(proxyFailure === null ? (active.pauseRequested ? {} : { stopReason: 'shutdown' })
+              : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
             carriedUsage,
