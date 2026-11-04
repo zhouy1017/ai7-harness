@@ -133,6 +133,14 @@ describe('Editorial Polish Contract v1', () => {
     expect(readEditorialPolishAnswer(polish([{ original: '“慢慢的”', replacement: '“慢慢的”' }]), SELECTION))
       .toMatchObject({ kind: 'read', suggestions: [], withheld: [{ reason: '替换后的文字与原文相同' }] });
   });
+
+  it('skips a leading bracketed note before the real object or array (#1311)', () => {
+    const item = { original: '慢慢的', replacement: '慢慢地' };
+    for (const text of [polish([item]), JSON.stringify([item])]) {
+      expect(readEditorialPolishAnswer(`[说明] ${text}`, SELECTION))
+        .toMatchObject({ kind: 'read', suggestions: [{ original: '慢慢的', replacement: '慢慢地' }] });
+    }
+  });
 });
 
 const REGION = { intent: '删去重复的「里面」。', base: '走进了房间里面，', current: '走进了屋子里面，', proposed: '走进了房间，', before: '他慢慢地', after: '看见一封信。' };

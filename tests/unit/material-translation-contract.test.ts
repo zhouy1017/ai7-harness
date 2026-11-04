@@ -58,6 +58,11 @@ describe('the 生成来源译文 contract', () => {
     }
     expect(readMaterialTranslationAnswer(`解释\n\`\`\`json\n${answer(['河水上涨。'])}\n\`\`\``, 1)).toEqual(['河水上涨。']);
   });
+
+  it('skips a leading bracketed note before numbered translations (#1311)', () => {
+    expect(readMaterialTranslationAnswer(`[说明] ${answer(['甲'])}`, 1)).toEqual(['甲']);
+    expect(readMaterialTranslationAnswer('[说明] [{"n":1,"text":"甲"}]', 1)).toEqual(['甲']);
+  });
 });
 
 describe('who may ask for 来源译文', () => {

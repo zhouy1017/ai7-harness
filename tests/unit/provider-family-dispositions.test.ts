@@ -3,7 +3,7 @@ import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_C
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_UNIT_RESULT_SCHEMA, parseUnitResult } from '../../src/service/analysis/contract.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
 import { modelServiceChannels, productionBindingRefusal } from '../../src/service/launch-policy.js';
 import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
@@ -12,11 +12,10 @@ import { DeepSeekOpenAiCompatibleAdapter, PROVIDER_ROUTE_PROFILES, assembleProvi
 import { modelDisposition, providerPreflight, type ModelAspect } from '../../src/service/provider/family-dispositions.js';
 import { PROVIDER_MODEL_PROFILES, modelProfileFor, type ModelCapabilities, type ProviderModelProfile } from '../../src/service/provider/model-profile.js';
 import { GENERATED_FAMILY_DISPOSITIONS, GENERATED_ROUTE_DISPOSITIONS } from '../../src/service/provider/provider-profiles.generated.js';
-import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
+import { normalizeModelResponse, withProviderResponseSalvage } from '../../src/service/provider/response-normalization.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE, type ConfiguredRouteId } from '../../src/shared/provider-configuration.generated.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
 import { prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
-import { readEditorialPolishAnswer } from '../../src/service/fast-role/polish-contract.js';
 
 /**
  * Capability dispositions and the named preflight refusal (Issue #1180), cancellation and the stream boundaries each family
@@ -198,7 +197,13 @@ describe('cancellation per family', () => {
 });
 
 describe('stream boundaries per family', () => {
-  const partial = '{"suggestions":[{"original":"合成","replacement":"合成改写"},{"original":"未完';
+  it('keeps a valid Messages tool call beside malformed content siblings (#1311)', () => {
+    const model = declared(ROWS[1]);
+    expect(normalizeModelResponse(model, { stop_reason: 'tool_use', content: [null, { type: 'tool_use', id: 'valid', name: TOOL.name, input: {} }] },
+      { toolCallsOffered: true, offeredToolNames: [TOOL.name] }))
+      .toMatchObject({ kind: 'tool-calls', calls: [{ id: 'valid', name: TOOL.name, arguments: '{}' }], salvaged: [{ section: 'content', index: 0, reason: 'content-block-rejected' }] });
+  });
+  const partial = `{"schema":"${BASELINE_UNIT_RESULT_SCHEMA}","unitOrdinal":1,"entities":[{"name":"合成实体","kind":"person"},{"name":"未完`;
   const frame = (body: unknown): string => `data: ${JSON.stringify(body)}\n\n`;
   const truncatedStreams = [
     { route: 'deepseek-open-platform', family: 'chat-completions', frames: [frame({ choices: [{ delta: { content: partial }, finish_reason: 'length' }] }), 'data: [DONE]\n\n'] },
@@ -209,7 +214,7 @@ describe('stream boundaries per family', () => {
   it.each(truncatedStreams)('passes truncated $family text through the real harness to partial parsing (#1311)', async (row) => {
     const model = modelProfileFor(row.route, 'account-new-model')!;
     const { adapter, touched } = harness(model, async () => sse(row.frames), true);
-    const handle = await prepareExecution({ sessionId: crypto.randomUUID(), route: model.route, model: model.model,
+    const handle = await prepareExecution({ sessionId: crypto.randomUUID(), route: row.route, model: model.model,
       systemPrompt: DIALOGUE_PROMPT_CONTRACT.systemPrompt, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
       adapterFactory: () => adapter, gate: () => ({ decision: 'transmit-local', payloadDigest: 'b'.repeat(64) }), onTransmitTicket: () => undefined });
     try {
@@ -219,7 +224,10 @@ describe('stream boundaries per family', () => {
       const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
       expect(candidate?.kind).toBe('contentCandidate');
       if (candidate?.kind !== 'contentCandidate') throw new Error('No parser candidate');
-      expect(readEditorialPolishAnswer(candidate.text, '合成段落。')).toMatchObject({ kind: 'read', suggestions: [{ original: '合成', replacement: '合成改写' }] });
+      const parsed = withProviderResponseSalvage(parseUnitResult(candidate.text, { unitOrdinal: 1, blockIds: [] }), adapter.lastCanonicalResult);
+      expect(parsed).toMatchObject({ ok: true, result: { entities: [{ name: '合成实体' }], salvaged: expect.arrayContaining([
+        { section: 'response', index: -1, reason: 'truncated-json' }, { section: 'response', index: 0, reason: 'truncated' },
+      ]) } });
       expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', truncated: true, salvaged: expect.arrayContaining([{ section: 'response', index: 0, reason: 'truncated' }]) });
       expect(touched.transport).toBe(1);
     } finally { await handle.finish(); }

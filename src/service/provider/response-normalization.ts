@@ -1,4 +1,4 @@
-import { isRecord } from '../analysis/canonical.js';
+import { canonicalJson, isRecord, sha256Hex } from '../analysis/canonical.js';
 import { GEMINI_SYNTHETIC_CALL_PREFIX } from './family-gemini.js';
 import type { ProviderModelProfile } from './model-profile.js';
 
@@ -58,6 +58,15 @@ export type CanonicalModelResult =
    */
   | { readonly kind: 'tool-calls'; readonly text: string; readonly calls: ReadonlyArray<CanonicalToolCall>; readonly reasoningText: string | null; readonly usage: ModelUsage | null; readonly salvaged?: ReadonlyArray<{ section: string; index: number; reason: string }> }
   | { readonly kind: 'malformed'; readonly reason: MalformedReason; readonly usage?: ModelUsage | null };
+
+/** Carry provider recovery details into a successfully parsed business result, without changing its acceptance. */
+export function withProviderResponseSalvage<T extends { readonly ok: boolean; readonly result?: unknown }>(parsed: T, response: CanonicalModelResult | null): T {
+  if (!parsed.ok || !isRecord(parsed) || !isRecord(parsed.result) || response?.kind !== 'answer' || response.salvaged === undefined) return parsed;
+  const salvaged = [...(Array.isArray(parsed.result.salvaged) ? parsed.result.salvaged : []), ...response.salvaged];
+  const result = { ...parsed.result, salvaged };
+  const json = canonicalJson(result);
+  return { ...parsed, result, salvaged, canonicalJson: json, digest: sha256Hex(json) };
+}
 
 function nonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && (value as number) >= 0 ? (value as number) : null;
@@ -188,7 +197,8 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
     truncated = body.stop_reason === 'max_tokens';
     entries = body.content.filter((part) => isBlockOfType(part, 'tool_use'));
     reasoningPresent = profile.capabilities.reasoningChannel === 'content-thinking-blocks' && body.content.some((part) => isBlockOfType(part, 'thinking'));
-    executable &&= body.stop_reason === 'tool_use' && body.content.every((part) => isBlockOfType(part, 'text') || isBlockOfType(part, 'tool_use'));
+    executable &&= body.stop_reason === 'tool_use' && !body.content.some((part) => isRecord(part) &&
+      (part.type === 'thinking' || part.type === 'redacted_thinking' || part.signature !== undefined || part.thoughtSignature !== undefined));
     read = (part) => isRecord(part) && typeof part.id === 'string' && typeof part.name === 'string' && isRecord(part.input)
       ? { id: part.id, name: part.name, arguments: JSON.stringify(part.input) } : null;
   } else if (channel === 'output-message-text') {
@@ -235,6 +245,13 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
       ? { id: part.id, name: part.function.name, arguments: part.function.arguments } : null;
   }
   const { calls, salvaged } = readableCalls(entries, read, options, executable);
+  if (channel === 'content-text-blocks' && Array.isArray(body.content)) {
+    for (const [index, part] of body.content.entries()) {
+      if (!isRecord(part) || !['text', 'tool_use', 'thinking', 'redacted_thinking'].includes(String(part.type))) {
+        salvaged.push({ section: 'content', index, reason: 'content-block-rejected' });
+      }
+    }
+  }
   if (truncated) salvaged.push({ section: 'response', index: 0, reason: 'truncated' });
   if (body.ai7StreamTextMismatch === true) salvaged.push({ section: 'text', index: 0, reason: 'completed-text-differs-from-stream' });
   const metadata = salvaged.length === 0 ? {} : { salvaged };
