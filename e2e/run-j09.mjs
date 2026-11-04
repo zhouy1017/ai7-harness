@@ -646,7 +646,7 @@ const READ_PAGE = `(() => {
         target: item.dataset.attentionTarget,
         bookId: item.dataset.bookId ?? null,
         book: item.querySelector('.global-attention-book')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null,
         openName: item.querySelector('button.global-attention-open')?.getAttribute('aria-label') ?? null,
         pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
         shape: item.querySelector('.global-attention-pill')?.dataset.pillShape ?? null,
@@ -1055,23 +1055,23 @@ async function main() {
     const blockedItem = exceptions[0];
     requireJourney(exceptions.length === 1 && blockedItem?.itemId === `analysis:${blockedA.taskIntent.taskIntentId}` && blockedItem.state === 'analysis-blocked' &&
       blockedItem.blocked === 'true' && blockedItem.target === 'analysis' && blockedItem.bookId === bookA && blockedItem.book === `《${FIRST.title}》` &&
-      blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
+      blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `查看运行 · 《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
       blockedItem.pill === '派发前已阻止' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
-      blockedItem.next === '安全的下一步：查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
+      blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     // 等待你的决定: the second Book's Plan Revision, named as itself, with 重新确认计划 as its step.
     const decisionItem = decisions[0];
     requireJourney(decisions.length === 1 && decisionItem?.itemId === `analysis:${pendingB.taskIntent.taskIntentId}` && decisionItem.state === 'analysis-plan-revision' &&
       decisionItem.target === 'analysis-plan' && decisionItem.bookId === bookB && decisionItem.book === `《${SECOND.title}》` &&
       decisionItem.object === '基线分析 · 重新分析所选范围' && decisionItem.pill === '计划修订' && decisionItem.reason === REASON_PLAN_REVISION &&
-      decisionItem.next === '安全的下一步：重新确认计划',
+      decisionItem.next === '重新确认计划',
     'plan-revision-item', decisionItem);
     // 最近完成: the second Book's completed analysis, newest first, its time a completion.
     const completionItem = recent[0];
     requireJourney(recent.length === 1 && completionItem?.itemId === `analysis-outcome:${settledB.taskOutcome.outcomeId}` &&
       ['analysis-completed', 'analysis-completed-with-gaps'].includes(completionItem.state) && completionItem.bookId === bookB &&
       completionItem.target === 'analysis' && completionItem.reason?.startsWith('已形成第 1 份基线分析') === true &&
-      completionItem.next === '安全的下一步：查看运行' && (completionItem.time ?? '').startsWith('完成于 '),
+      completionItem.next === '查看运行' && (completionItem.time ?? '').startsWith('完成于 '),
     'completion-item', completionItem);
     // The page is the service's answer, item for item.
     requireJourney(service?.count === 2 && service.running === false &&
@@ -1253,7 +1253,7 @@ async function main() {
       itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
       queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingB.taskIntent.taskIntentId}` &&
       queuedItem.pill === '等待运行名额' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
-      queuedItem.next === '安全的下一步：查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
+      queuedItem.next === '查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
     'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
 

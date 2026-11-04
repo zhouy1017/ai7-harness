@@ -2390,10 +2390,10 @@ async function main() {
       return items.length === 1 && item.closest('section.global-attention-group')?.dataset.attentionGroup === 'decisions' &&
         item.dataset.attentionItem === ${JSON.stringify(`maintenance:${supersessionCase.caseId}`)} && item.dataset.attentionTarget === 'maintenance' &&
         item.dataset.attentionBlocked === 'false' && item.querySelector('.global-attention-book')?.textContent === ${JSON.stringify(`《${EXCERPT.title}》`)} &&
-        item.querySelector('.global-attention-open')?.textContent === '维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本' &&
+        item.querySelector('.global-attention-object-name')?.textContent === '维护事项 · 第 3 项 · 替代 · 第 1 次发稿版本' &&
         item.querySelector('.global-attention-pill')?.textContent === '维护事项待处理 · 等待另设发稿版本' &&
         item.querySelector('.global-attention-reason')?.textContent === '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。' &&
-        item.querySelector('.global-attention-next')?.textContent === '安全的下一步：关联发稿版本';
+        item.querySelector('.global-attention-next')?.textContent === '关联发稿版本';
     })()`, 'maintenance-attention-item');
     await clickSelector(renderer, `[data-screen="global-attention"] [data-attention-open="maintenance:${supersessionCase.caseId}"]`, 'maintenance-attention-open');
     await waitFor(renderer, `(() => { const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)}); return heading instanceof HTMLElement && document.activeElement === heading && heading.textContent === '第 3 项维护事项 · 替代'; })()`, 'maintenance-attention-returns-to-the-case', 60_000);

@@ -1788,13 +1788,13 @@ async function main() {
       return {
         group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
         target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
       };
     })()`);
     requireJourney(unconfirmedRow?.group === 'exceptions' && unconfirmedRow.state === 'analysis-outcome-unconfirmed' && unconfirmedRow.blocked === 'false' &&
       unconfirmedRow.target === 'task-plan' && unconfirmedRow.pill === '结果待确认' && unconfirmedRow.object === '基线分析 · 跨单元归纳' &&
-      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '安全的下一步：查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
+      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
 
     at('outcome-unconfirmed-kept');
     // The item opens ②A with the plan in the drawer, where 结果待确认 says what is known and what is missing. 查看未确认的部分 lists the

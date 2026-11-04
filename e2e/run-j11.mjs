@@ -813,7 +813,7 @@ const readAttentionItem = (selector) => `(() => {
     group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null,
     state: item.dataset.attentionState ?? null,
     book: item.querySelector('.global-attention-book')?.textContent ?? null,
-    object: item.querySelector('button.global-attention-open')?.textContent ?? null,
+    object: item.querySelector('.global-attention-object-name')?.textContent ?? null,
     pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
     next: item.querySelector('.global-attention-next')?.textContent ?? null,
   };
@@ -2259,7 +2259,7 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('[data-screen="global-attention"] section.global-attention-group').length === 4 && document.querySelector(${JSON.stringify(learningSelector)}) !== null`, 'learning-attention-listed', 30_000);
     const learningListed = await renderer.evaluate(readAttentionItem(learningSelector));
     requireJourney(learningListed?.group === 'decisions' && learningListed.state === 'learning-materials-pending' && learningListed.book === `《${THIRD.title}》` &&
-      learningListed.object === '学习材料 · 2 条待定' && learningListed.pill === '学习准入待处理' && learningListed.next === '安全的下一步：定学习准入…',
+      learningListed.object === '学习材料 · 2 条待定' && learningListed.pill === '学习准入待处理' && learningListed.next === '定学习准入…',
     'learning-attention-words', learningListed);
     await clickSelector(renderer, `${learningSelector} button.global-attention-open`, 'learning-attention-open');
     const learningOpened = await readLearning(renderer, (page) => page.books.length === 1, 'learning-opened');

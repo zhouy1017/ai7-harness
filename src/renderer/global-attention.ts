@@ -201,16 +201,15 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     node.dataset['attentionTarget'] = projection.target.kind;
     if (projection.book.bookId !== null) node.dataset['bookId'] = projection.book.bookId;
     const reasonId = uid('reason');
-    const nextId = uid('next');
     const stateId = uid('state');
-    const open = el('button', 'global-attention-open', view.object);
+    const open = el('button', 'global-attention-open global-attention-next', view.nextStep);
     open.type = 'button';
     open.dataset['attentionOpen'] = view.itemId;
-    open.setAttribute('aria-label', view.openName);
-    open.setAttribute('aria-describedby', `${stateId} ${reasonId} ${nextId}`);
+    open.setAttribute('aria-label', `${view.nextStep} · ${view.openName}`);
+    open.setAttribute('aria-describedby', `${stateId} ${reasonId}`);
     open.addEventListener('click', () => void openItem(view.itemId, open));
     const title = el('h4', 'global-attention-object');
-    title.append(open);
+    title.append(el('span', 'global-attention-book', view.book), ' · ', el('span', 'global-attention-object-name', view.object));
     const pill = el('span', `status-pill review-pill review-pill-${view.pill.tone} global-attention-pill`, view.stateLabel);
     pill.id = stateId;
     pill.dataset['pillTone'] = view.pill.tone;
@@ -219,14 +218,11 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     stateLine.append(pill, el('span', 'global-attention-time', view.time));
     const reason = el('p', 'global-attention-reason', view.reason);
     reason.id = reasonId;
-    const next = el('p', 'global-attention-next', view.nextStep);
-    next.id = nextId;
     node.append(
-      el('p', 'global-attention-book', view.book),
       title,
       stateLine,
       reason,
-      next,
+      open,
       options.technicalDetails(
         'global-attention-facts',
         ...fact(GLOBAL_ATTENTION_TECHNICAL_ITEM, view.itemId),
