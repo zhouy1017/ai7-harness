@@ -464,7 +464,6 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   const indexActions = (material: LibraryMaterialProjection): HTMLElement | null => {
     const { vectors, translation } = material.index;
     const row = el('div', 'button-row material-index-actions');
-    const notes: HTMLElement[] = [];
     if (vectors !== null && (vectors.state === 'not-built' || vectors.state === 'building')) {
       const build = action(MATERIAL_VECTORS_BUILD, 'secondary', 'build-vectors', () => void layerRequest(material, 'vectors'));
       build.disabled = busy || vectors.state === 'building';
@@ -475,15 +474,15 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       request.disabled = busy || !translation.request.available;
       row.append(request);
       if (!translation.request.available && translation.request.reason !== null) {
-        const note = el('p', 'field-note material-translation-note', translation.request.reason);
+        const note = el('span', 'material-translation-note', translation.request.reason);
         note.id = `material-translation-note-${material.materialId}`;
         request.setAttribute('aria-describedby', note.id);
-        notes.push(note);
+        row.append(note);
       }
     }
     if (row.childElementCount === 0) return null;
     const wrapper = el('div', 'material-index-layer-actions');
-    wrapper.append(row, ...notes);
+    wrapper.append(row);
     return wrapper;
   };
 
@@ -529,6 +528,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const fieldId = `material-vector-query-${material.materialId}`;
     const label = el('label', undefined, MATERIAL_VECTORS_SEARCH_LABEL);
     label.htmlFor = fieldId;
+    label.append(' · ', el('span', 'material-vector-note', MATERIAL_VECTORS_SEARCH_NOTE));
     const input = el('input');
     input.type = 'search';
     input.id = fieldId;
@@ -581,7 +581,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     });
     const row = el('div', 'button-row');
     row.append(input, run);
-    section.append(label, row, el('p', 'field-note material-vector-note', MATERIAL_VECTORS_SEARCH_NOTE), results);
+    section.append(label, row, results);
     return section;
   };
 
