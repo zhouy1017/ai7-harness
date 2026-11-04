@@ -418,13 +418,12 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       radio.name = 'background-analysis-starting-point';
       radio.value = point.value;
       radio.dataset['startingPoint'] = point.value;
-      radio.setAttribute('aria-label', point.label);
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         chosen = point.value;
         refresh();
       });
-      label.append(radio, el('span', undefined, point.label), el('span', 'field-note', point.note));
+      label.append(radio, el('span', undefined, `${point.label} · ${point.note}`));
       fieldset.append(label);
     }
     const submit = async (): Promise<void> => {

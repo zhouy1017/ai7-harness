@@ -31,8 +31,6 @@ import {
   CUSTOM_DIMENSION_REVISE,
   CUSTOM_DIMENSION_SAVE,
   CUSTOM_DIMENSION_STOP,
-  CUSTOM_DIMENSION_STOP_NOTE,
-  CUSTOM_DIMENSION_TEMPLATE_HINT,
   CUSTOM_DIMENSION_TEMPLATE_LABEL,
   CUSTOM_DIMENSION_TITLE_LABEL,
   customDimensionEnabledLine,
@@ -123,12 +121,9 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     section.dataset['revisionId'] = latest.revisionId;
     section.dataset['freshness'] = latest.freshness.state;
     section.dataset['coverage'] = latest.coverage.state;
-    section.append(
-      el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal)),
-      el('p', 'field-note custom-axis', latest.coverage.label),
-      el('p', 'field-note custom-axis', latest.freshness.label),
-      el('p', 'custom-counts', customTabCountsLine(latest.rowCounts)),
-    );
+    const revision = el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal));
+    revision.append(' · ', el('span', 'custom-axis', latest.coverage.label), ' · ', el('span', 'custom-axis', latest.freshness.label));
+    section.append(revision, el('p', 'custom-counts', customTabCountsLine(latest.rowCounts)));
     if (latest.gaps.length > 0) {
       const gaps = el('ul', 'custom-gaps');
       for (const gap of latest.gaps) {
@@ -156,12 +151,9 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
           link.addEventListener('click', () => options.jump(blockId));
           return link;
         })();
-      item.append(
-        el('span', 'custom-row-unit', `第 ${row.unitOrdinal} 单元`),
-        el('p', 'custom-answer', row.answer),
-        anchor,
-        el('p', 'field-note custom-confidence', row.confidenceNote),
-      );
+      const answer = el('p', 'custom-answer', row.answer);
+      answer.append(' · ', el('span', 'custom-confidence', row.confidenceNote));
+      item.append(el('span', 'custom-row-unit', `第 ${row.unitOrdinal} 单元`), answer, anchor);
       rows.append(item);
     }
     section.append(rows);
@@ -300,10 +292,11 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
     title.maxLength = 160;
     title.value = latest?.title ?? '';
     titleLabel.append(title);
-    const templateLabel = el('label', undefined, CUSTOM_DIMENSION_TEMPLATE_LABEL);
+    const templateLabel = el('label', undefined, `${CUSTOM_DIMENSION_TEMPLATE_LABEL} · 最多 400 字，勿粘贴稿件原文`);
     const template = el('textarea');
     template.name = 'questionTemplate';
     template.rows = 4;
+    template.placeholder = '可用 {本单元} 标出位置';
     template.maxLength = 1600;
     template.value = latest?.questionTemplate ?? '';
     templateLabel.append(template);
@@ -322,7 +315,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
         dimensionId: dimension?.dimensionId ?? null, title: titleText, questionTemplate: template.value.trim(),
       }), () => customDimensionSavedLine(titleText));
     });
-    node.append(titleLabel, templateLabel, el('p', 'field-note', CUSTOM_DIMENSION_TEMPLATE_HINT), actions);
+    node.append(titleLabel, templateLabel, actions);
     return node;
   };
 
@@ -357,13 +350,13 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
             act('正在验证并启用…', () => api.enableCustomAnalysisDimension({ versionId: version.versionId }), () => customDimensionEnabledLine(version.title, version.version))));
         }
         if (version.state !== 'stopped') {
-          actions.append(actionButton(CUSTOM_DIMENSION_STOP, 'secondary', 'stop', () =>
+          actions.append(actionButton(`${CUSTOM_DIMENSION_STOP} · 已有分析保留`, 'secondary', 'stop', () =>
             act('正在停用…', () => api.stopCustomAnalysisDimension({ versionId: version.versionId }), () => customDimensionStoppedLine(version.title, version.version))));
         }
         if (actions.children.length > 0) item.append(actions);
         versions.append(item);
       }
-      card.append(versions, el('p', 'field-note', CUSTOM_DIMENSION_STOP_NOTE));
+      card.append(versions);
       if (editing === dimension.dimensionId) card.append(form(dimension));
       else card.append(actionButton(CUSTOM_DIMENSION_REVISE, 'quiet', 'revise', () => {
         editing = dimension.dimensionId;
