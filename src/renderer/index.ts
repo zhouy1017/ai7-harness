@@ -3052,18 +3052,11 @@ function renderBookOverview(
   content.dataset['manuscriptState'] = overview.manuscriptState.state;
   if (completion) content.dataset['importCommitId'] = completion.commitId;
   content.append(
-    element(
-      'p',
-      'section-label',
-      completion
-        ? `${completion.completionLabel} · 图书工作概览`
-        : emptyBookCreated ? '图书已创建 · 图书工作概览' : '图书工作概览',
-    ),
-    element('h2', undefined, overview.book.title),
+    element('h2', undefined, '工作概览'),
     element('p', 'lede', overview.manuscriptState.label),
   );
   if (sourceCompletion) {
-    content.append(element('p', 'success-note', '来源材料已导入；以下可精确查看图书拥有的来源版本与本次文件专属来源导入记录。'));
+    content.append(element('p', 'success-note', '来源材料已导入。'));
   } else if (completion) {
     content.append(element('p', 'success-note', '稿件已导入。'));
   }
@@ -3100,7 +3093,7 @@ function renderBookOverview(
     anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
     const anchorValues = element('dl');
     anchorValues.append(
-      element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel),
+      element('dt', undefined, '稿件'), element('dd', undefined, technicalWords(anchor.revisionLabel, '当前稿件')),
       element('dt', undefined, '上次位置'),
       element('dd', undefined, anchor.entry === null
         ? '尚未记录；打开稿件时从稿件开头开始'
@@ -3126,7 +3119,6 @@ function renderBookOverview(
   const identityValues = element('dl');
   identityValues.append(
     element('dt', undefined, '内部编号'), element('dd', undefined, overview.book.internalNumber ?? '未设置'),
-    element('dt', undefined, '稿件状态'), element('dd', undefined, overview.manuscriptState.label),
   );
   identity.append(element('h3', undefined, '图书'), identityValues, technicalDetails(
     undefined,

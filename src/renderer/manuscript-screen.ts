@@ -26,7 +26,6 @@ import {
   DOCUMENT_CHANGED_SINCE_VERSION,
   DOCUMENT_CURRENT_VERSION,
   DOCUMENT_STATUS_LINES,
-  DOCUMENT_SURFACE_LABEL,
   documentVersionSavedLine,
 } from './production-document-labels.js';
 import { documentStanding, renderDocumentLens, type ProductionDocumentContext } from './production-document-lens.js';
@@ -264,10 +263,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     return `${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${technicalLayerVisible ? (windowNow.position.proportion * 100).toFixed(3) : Math.round(windowNow.position.proportion * 100)}%`;
   };
   title.append(
-    element('p', 'section-label', isDocument ? `${bookTitle} · ${DOCUMENT_SURFACE_LABEL}` : `${bookTitle}${technicalWords(` · 主分支`)}`),
     element('h2', undefined, productionDocument !== undefined
       ? technicalLayerVisible ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.typeLabel
-      : `稿件修订版${technicalWords(` ${initialWindow.revisionLabel}`)}`),
+      : '稿件'),
   );
   const meta = element('div', 'editor-meta');
   const position = element('span', undefined, positionWords(initialWindow));
@@ -1692,12 +1690,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       element('p', 'field-note', `范围：${preview.scopeLabel} · 绑定修订版${technicalWords(` ${preview.revisionLabel}`)}${technicalWords(` · 修订日志序号 ${preview.journalSequence}`)}`),
       element('p', 'field-note', `匹配规则：${preview.matchingRule}`),
       element('p', 'field-note', `纳入 ${preview.includedMatches} 处 · 排除 ${preview.excludedMatches} 处 · ${preview.inclusionRule}`),
-      element('p', 'field-note', '精确纳入清单：本次有序搜索结果中，除下列匹配标识外的全部匹配。'),
       element('p', 'field-note inclusion-lock-truth', preview.state === 'frozen' ? '匹配集已冻结；纳入控件保持锁定。' : '当前预览的纳入控件已锁定；取消预览后可重新选择。'),
     );
     const exclusions = element('pre', 'replacement-exclusions', preview.excludedMatchIds.length > 0 ? preview.excludedMatchIds.join('\n') : '（无排除项）');
     exclusions.setAttribute('aria-label', '精确排除匹配标识清单');
-    replacementReview.append(exclusions, element('p', 'field-note', '以下仅显示已纳入匹配的代表性上下文。'));
+    if (technicalLayerVisible) replacementReview.append(exclusions);
     const contexts = element('ul');
     for (const match of preview.representativeContexts) contexts.append(element('li', undefined, `${match.headingLabel}：${match.context}`));
     replacementReview.append(contexts);
