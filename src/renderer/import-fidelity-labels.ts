@@ -49,12 +49,12 @@ export function wordIntakeRefusalLabel(code: WordIntakeRefusalCode): string { re
 /** ADR 0094 §5's two tracked-change import modes, by the names the import confirmation commits. */
 export const WORD_IMPORT_MODE_NAMES: Readonly<Record<WordTrackedChangesChoice['mode'], string>> = {
   suggestions: '转为 AI7 修订建议',
-  'accepted-baseline': '直接并入正文（作为定稿基线）',
+  'accepted-baseline': '直接并入正文 · 定稿基线',
 };
 
 /** The choice as offered before preparation: 转为 AI7 修订建议 is recommended and the default. */
 export function wordImportModeOption(mode: WordTrackedChangesChoice['mode']): string {
-  return mode === 'suggestions' ? `${WORD_IMPORT_MODE_NAMES.suggestions}（推荐）` : WORD_IMPORT_MODE_NAMES[mode];
+  return mode === 'suggestions' ? `${WORD_IMPORT_MODE_NAMES.suggestions} · 推荐` : WORD_IMPORT_MODE_NAMES[mode];
 }
 
 /** A status reads in text and in shape as well as in colour (V2-UX-IMP-003). */

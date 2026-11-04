@@ -55,9 +55,9 @@ describe('the import fidelity review words', () => {
     ]);
   });
   it('offers the two tracked-change modes by ADR 0094 §5 names, recommending the suggestions default', () => {
-    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修订建议', 'accepted-baseline': '直接并入正文（作为定稿基线）' });
+    expect(WORD_IMPORT_MODE_NAMES).toEqual({ suggestions: '转为 AI7 修订建议', 'accepted-baseline': '直接并入正文 · 定稿基线' });
     expect(['suggestions', 'accepted-baseline'].map((mode) => wordImportModeOption(mode as 'suggestions' | 'accepted-baseline')))
-      .toEqual(['转为 AI7 修订建议（推荐）', '直接并入正文（作为定稿基线）']);
+      .toEqual(['转为 AI7 修订建议 · 推荐', '直接并入正文 · 定稿基线']);
   });
   it('gives every status its own shape beside its text', () => {
     expect(['preserved', 'retained', 'degraded', 'unsupported'].map((status) => fidelityStatusShape(status as never)))

@@ -2124,8 +2124,8 @@ async function main() {
           details?.open === degraded && (details.querySelector('summary')?.textContent ?? '').startsWith('导出保真审阅')];
       });
       return JSON.stringify(boxes.map((box) => box.dataset.packageField + ':' + box.checked + ':' + box.closest('label')?.querySelector('strong')?.textContent)) ===
-          '["includeAnnotations:true:含批注","includeSuggestions:true:含修改建议（作为修订）"]' &&
-        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files))} &&
+          '["includeAnnotations:true:含批注，保留作者与回复","includeSuggestions:true:含修改建议，作为 Word 修订并保留作者"]' &&
+        JSON.stringify(files) === ${JSON.stringify(JSON.stringify(packageReview.files.map(([key, degraded, count, restoration, open]) => [key, degraded, count, typeof restoration === 'string' ? restoration.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线') : restoration, open])))} &&
         (panel.querySelector('.export-degraded-note') !== null) === ${packageReview.degraded === true};
     })()`, 'package-export-fidelity-and-switches');
     // Turning 含批注 off reviews the files again under it, focus staying on the switch; turning it on again restores the

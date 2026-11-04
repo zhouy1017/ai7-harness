@@ -140,10 +140,10 @@ export function createImportReview(options: ImportReviewOptions) {
       learning.checked = selected.learnFromEdits; learning.disabled = busy;
       const reading = projection.readings[selected.mode === 'suggestions' ? 'rejected' : 'accepted'];
       notice.textContent = !reading.usable ? reading.blockCount === 0
-        ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文（作为定稿基线）」。'
+        ? selected.mode === 'suggestions' ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
           : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
         : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
-        : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认「直接并入正文（作为定稿基线）」，再准备导入。'
+        : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'
           : '最终保真、导入方式及本机保留范围会在下一步复核。';
       for (const control of buttons) control.disabled = busy || !allowed();
     };
@@ -324,7 +324,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const structureView = renderStructureReview(staged.structure);
       const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
       const confirm = button('确认书名并复核', 'primary', async () => {
-        if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文（作为定稿基线）」时须单独确认。', 'error'); return; }
+        if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', 'error'); return; }
         if (relationshipSelection === 'first-manuscript' && !structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = relationshipSelection === 'first-manuscript' ? structureView.choice() : undefined;
         const trackedChanges = wordControls?.choice();
@@ -387,7 +387,7 @@ export function createImportReview(options: ImportReviewOptions) {
       content.append(...wordControls.elements, ...fidelityView.elements, ...structureView.elements);
       const actions = element('div', 'button-row');
       const confirm = button('复核导入到所选图书', 'primary', async () => {
-        if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文（作为定稿基线）」时须单独确认。', 'error'); return; }
+        if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', 'error'); return; }
         if (!structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = structureView.choice();
         const trackedChanges = wordControls.choice();
