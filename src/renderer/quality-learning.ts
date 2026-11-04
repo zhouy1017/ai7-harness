@@ -1,3 +1,6 @@
+import { filterChoices } from './components/controls.js';
+import { windowStep } from './components/controls.js';
+import { createButton } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import type {
   LearningEligibilityChoice,
@@ -61,6 +64,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -123,14 +127,14 @@ export function mountWordTrackedEditDetail(options: {
   };
   const paintNavigation = (): void => {
     navigation.replaceChildren();
-    const back = action('上一页修改详情', 'secondary', 'word-detail-previous', () => {
+    const back = windowStep(action('上一页修改详情', 'secondary', 'word-detail-previous', () => {
       const cursor = previous.at(-1); if (busy || previous.length === 0 || cursor === undefined) return;
       void read(cursor, 'previous');
-    });
+    }), 'before', "向前浏览修改详情");
     back.disabled = busy || previous.length === 0;
-    const next = action('下一页修改详情', 'secondary', 'word-detail-next', () => {
+    const next = windowStep(action('下一页修改详情', 'secondary', 'word-detail-next', () => {
       if (!busy && page?.nextCursor !== null && page?.nextCursor !== undefined) void read(page.nextCursor, 'next');
-    }); next.disabled = busy || page?.nextCursor == null;
+    }), 'after', "向后浏览修改详情"); next.disabled = busy || page?.nextCursor == null;
     const source = action('查看保留的原始来源版本', 'secondary', 'word-detail-source', () => {
       if (busy || page === null) return;
       void options.openSourceVersion(options.bookId, page.sourceVersionId).catch(() => { status.textContent = '无法打开原始来源版本。'; });
@@ -251,7 +255,7 @@ export function mountLearningMaterials(options: MountLearningMaterialsOptions): 
     item.dataset['materialKey'] = material.materialKey;
     item.dataset['learningState'] = material.state;
     const head = el('div', 'learning-material-head');
-    const pill = el('span', `status-pill learning-state learning-state-${material.state}`, material.kind === 'word-tracked-edit'
+    const pill = el('span', `state-term status-pill learning-state learning-state-${material.state}`, material.kind === 'word-tracked-edit'
       ? '原始修改对已保留' : LEARNING_STATE_LABELS[material.state]);
     head.append(el('span', 'learning-origin', learningOriginLine(material, localInstantLabel)), pill);
     item.append(head);
@@ -452,20 +456,24 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
   section.dataset['editQualitySignals'] = '';
   const heading = document.createElement('h3');
   heading.textContent = '编辑改动质量信号';
-  const select = document.createElement('select');
-  select.setAttribute('aria-label', '改动质量信号的图书');
-  const all = document.createElement('option');
-  all.value = ''; all.textContent = '本社全部图书'; select.append(all);
+  let chosenBook = '';
+  const bookChoices: Array<readonly [string, string]> = [['', '本社全部图书']];
+  const filters = document.createElement('div');
+  filters.dataset['qualitySignalsFilter'] = 'book';
+  const paintBooks = () => filters.replaceChildren(filterChoices({ label: '改动质量信号的图书', choices: bookChoices, value: chosenBook,
+    change: (value) => { chosenBook = value; void load().catch(() => { body.textContent = '无法读取质量信号。'; }); },
+  }));
   let cursor: import('../shared/protocol.js').BookSummaryCursor | null = null;
-  const more = document.createElement('button'); more.type = 'button'; more.textContent = '更多图书…';
+  const more = createButton(); more.type = 'button'; more.textContent = '更多图书…';
   const loadBooks = async () => {
     more.disabled = true;
     try {
       const page = await api.listBooks({ after: cursor });
       for (const book of page.items) {
-        const option = document.createElement('option'); option.value = book.bookId; option.textContent = book.title; select.append(option);
+        bookChoices.push([book.bookId, book.title]);
       }
       cursor = page.nextCursor; more.hidden = cursor === null;
+      paintBooks();
     } finally { more.disabled = false; }
   };
   more.addEventListener('click', () => void loadBooks().catch(() => { body.textContent = '无法读取更多图书。'; }));
@@ -480,7 +488,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     const current = ++generation;
     adoptionMore.disabled = true;
     if (reset) { adoptionAfter = null; adoptionRows = []; adoptionMore.hidden = true; }
-    const metric = await api.inspectEditQualitySignals({ bookId: select.value || null, preferenceAfter: adoptionAfter }).catch((error: unknown) => {
+    const metric = await api.inspectEditQualitySignals({ bookId: chosenBook || null, preferenceAfter: adoptionAfter }).catch((error: unknown) => {
       if (current === generation) adoptionMore.disabled = false;
       throw error;
     });
@@ -500,7 +508,7 @@ export async function mountEditQualitySignals(root: HTMLElement, api: Pick<impor
     adoption.append(el('p', 'field-note', '采纳数包含接受、修改后接受及已应用；分母包含尚未处理的发现。此比较不证明规则导致采纳。'));
   };
   adoptionMore.addEventListener('click', () => void load(false).catch(() => { adoptionMore.disabled = false; body.textContent = '无法读取更多规则采纳率。'; }));
-  select.addEventListener('change', () => void load().catch(() => { body.textContent = '无法读取编辑改动质量信号。'; }));
-  section.append(heading, select, more, body, adoption, adoptionMore); root.append(section);
+  paintBooks();
+  section.append(heading, filters, more, body, adoption, adoptionMore); root.append(section);
   await Promise.all([load(), loadBooks()]);
 }

@@ -22,7 +22,6 @@ import {
   exportRecordLine,
   exportSavedRevisionLine,
   exportShownRows,
-  exportStatusShape,
 } from '../../src/renderer/manuscript-export-labels.js';
 import { EXPORT_DISPOSITION_LABELS, EXPORT_FORMATS, EXPORT_OUTCOME_LABELS } from '../../src/service/manuscript-export.js';
 import { reportExportLabel } from '../../src/shared/report-wording.js';
@@ -106,8 +105,7 @@ describe('the words of 导出', () => {
 
   it('read each review row by its shape as well as its words, and summarize what is nowhere', () => {
     expect(EXPORT_FIDELITY_STATUS_LABELS).toEqual({ preserved: '完整保留', degraded: '降级导出', unavailable: '无法导出', excluded: '本次不含' });
-    expect((['preserved', 'degraded', 'unavailable', 'excluded'] as const).map(exportStatusShape)).toEqual(['✓', '△', '⊘', '○']);
-    expect(exportPillText(row({ status: 'degraded', statusLabel: '降级导出' }))).toBe('△ 降级导出');
+    expect(exportPillText(row({ status: 'degraded', statusLabel: '降级导出' }))).toBe('降级导出');
     expect(exportPositionsLine(row({ positions: [2, 5, 9] }))).toBe('涉及稿件第 2、5、9 段。');
     expect(exportPositionsLine(row({ positions: [2], positionsTruncated: true }))).toBe('涉及稿件第 2 段 等。');
     expect(exportPositionsLine(row({}))).toBeNull();

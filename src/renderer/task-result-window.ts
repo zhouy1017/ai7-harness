@@ -76,6 +76,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -110,7 +111,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   title.tabIndex = -1;
   section.setAttribute('aria-labelledby', title.id);
   const pillTone = GLOBAL_ATTENTION_STATE_PILLS[entry.item.state];
-  const pill = el('span', `status-pill review-pill review-pill-${pillTone.tone}`, globalAttentionStateLabel(entry.item));
+  const pill = el('span', `state-term status-pill review-pill review-pill-${pillTone.tone}`, globalAttentionStateLabel(entry.item));
   pill.dataset['pillTone'] = pillTone.tone;
   pill.dataset['pillShape'] = pillTone.shape;
   const close = el('button', 'quiet task-result-close', TASK_RESULT_CLOSE);

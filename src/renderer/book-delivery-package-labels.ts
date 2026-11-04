@@ -11,7 +11,7 @@ import type { BookDeliveryPackageVersionProjection } from '../shared/protocol.js
 export const PACKAGE_HEADING = '图书交付包';
 export const PACKAGE_CONDITIONS_HEADING = '内容情况';
 /** A condition's state in words and shape, never by colour alone. */
-export const PACKAGE_CONDITION_STATE = { met: '✓ 可用', unmet: '○ 未包含' } as const;
+export const PACKAGE_CONDITION_STATE = { met: '可用', unmet: '未包含' } as const;
 export const PACKAGE_PREVIEW_HEADING = '清单预览';
 export const PACKAGE_INCLUDED_HEADING = '包含';
 export const PACKAGE_EXCLUDED_HEADING = '不包含';

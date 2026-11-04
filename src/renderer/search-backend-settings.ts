@@ -44,6 +44,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 

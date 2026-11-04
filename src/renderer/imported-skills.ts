@@ -14,7 +14,7 @@ import {
 } from './imported-skill-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node;
+  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
 }
 interface Options {
   readonly root: HTMLElement;
@@ -42,7 +42,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   let booksAfter: BookSummaryCursor | null = null;
   let selectedBook = '';
   const button = (text: string, action: string, run: () => Promise<string | null | void>): HTMLButtonElement => {
-    const node = el('button', text); node.type = 'button'; node.className = 'quiet'; node.dataset['skillAction'] = action;
+    const node = el('button', text); node.type = 'button'; node.className = 'btn ' + ('quiet'); node.dataset['skillAction'] = action;
     node.disabled = busy; node.addEventListener('click', () => void act(run)); return node;
   };
   /** `run` answers the status line to show, or `null` when nothing changed (a cancelled picker, a page read). */

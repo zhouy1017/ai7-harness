@@ -99,6 +99,8 @@ describe('the 任务 panel as the right co-pilot', () => {
     const { root, drawer, find, settle, selectBook } = harness();
     drawer.openComposer({ bookId: BOOK, bookTitle: '春江', origin: 'composer-book', manuscript: null, ranges: [] }, () => null);
     await settle();
+    expect(find('.task-composer')?.tagName).toBe('SECTION');
+    expect(find('.task-composer')?.classList.contains('sheet')).toBe(false);
     find('[data-task-composer-field="goal"]')!.value = '核对人物称谓';
     find('[data-task-composer-field="goal"]')!.dispatchEvent({ type: 'input' });
     drawer.followScreen('global-agent', null);

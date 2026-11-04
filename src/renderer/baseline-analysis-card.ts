@@ -89,6 +89,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -1193,7 +1194,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
       element('h3', undefined, '基线稿件分析'),
-      element('span', `status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
+      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.

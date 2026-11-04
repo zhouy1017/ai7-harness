@@ -384,7 +384,7 @@ const MARK_HELPERS = `(() => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     },
-    status: () => document.querySelector('#persistence-status')?.textContent ?? '',
+    status: () => document.querySelector('[data-toast]')?.textContent ?? '',
   };
   return true;
 })()`;
@@ -535,7 +535,7 @@ async function editAndSave(renderer, suffix, name) {
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, `${name}-inserted`);
   await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, `${name}-dirty`);
   await click(renderer, '保存当前编辑', `${name}-save`);
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, `${name}-durable`, 120_000);
+  await waitFor(renderer, `document.querySelector('[data-toast]')?.dataset.tone==='success' && document.querySelector('[data-toast]')?.textContent.includes('修订日志')`, `${name}-durable`, 120_000);
   await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="editor"] .ProseMirror'); if(!(text instanceof HTMLElement))return false; text.focus(); return document.activeElement===text; })()`, `${name}-caret-back`);
 }
 

@@ -1,3 +1,4 @@
+import { createSheet, sheetContent } from './components/sheet.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
   DefaultExecutionRuleReference,
@@ -94,6 +95,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -322,7 +324,15 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     cancel.disabled = busy;
     row.append(start, plan, cancel);
     form.append(row);
-    return form;
+    const surface = createSheet('writing-task-sheet');
+    const title = el('h3', undefined, '写作任务');
+    title.id = uid('sheet-title');
+    surface.setAttribute('aria-labelledby', title.id);
+    sheetContent(surface, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== row), row, form);
+    surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
+    surface.addEventListener('close', () => { if (!busy) { sheet = null; paint('[data-writing-action="new"]'); } });
+    surface.open = true;
+    return surface;
   }
 
   /**

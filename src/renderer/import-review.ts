@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   type WordTrackedChangesChoice,
@@ -51,6 +52,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -543,14 +545,14 @@ export function createImportReview(options: ImportReviewOptions) {
         }
       };
       if (selectedChoice.reimportLineagePageAfter !== null) {
-        const previousLineage = button('上一页来源关系版本', 'quiet', () =>
-          void loadLineagePage(selectedChoice.reimportLineagePreviousCursor, previousLineage));
+        const previousLineage = windowStep(button('上一页来源关系版本', 'quiet', () =>
+          void loadLineagePage(selectedChoice.reimportLineagePreviousCursor, previousLineage)), 'before', "向前浏览来源关系版本");
         previousLineage.dataset['previousReimportLineage'] = selectedChoice.reimportLineagePreviousCursor ?? 'first';
         lineageChoices.append(previousLineage);
       }
       if (selectedChoice.reimportLineageNextCursor !== null) {
-        const moreLineage = button('下一页来源关系版本', 'quiet', () =>
-          void loadLineagePage(selectedChoice.reimportLineageNextCursor, moreLineage));
+        const moreLineage = windowStep(button('下一页来源关系版本', 'quiet', () =>
+          void loadLineagePage(selectedChoice.reimportLineageNextCursor, moreLineage)), 'after', "向后浏览来源关系版本");
         moreLineage.dataset['loadMoreReimportLineage'] = selectedChoice.reimportLineageNextCursor;
         lineageChoices.append(moreLineage);
       }
@@ -1080,14 +1082,14 @@ export function createImportReview(options: ImportReviewOptions) {
         }
         const navigation = element('div', 'button-row compact-actions');
         if (page.previousCursor !== null || mappingAfter !== null) {
-          const previous = button('上一页', 'quiet', () =>
-            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.previousCursor));
+          const previous = windowStep(button('上一页', 'quiet', () =>
+            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.previousCursor)), 'before', "向前浏览");
           previous.dataset['reimportPreviousPage'] = String(page.previousCursor ?? 0);
           navigation.append(previous);
         }
         if (page.nextCursor !== null) {
-          const next = button('下一页', 'quiet', () =>
-            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.nextCursor));
+          const next = windowStep(button('下一页', 'quiet', () =>
+            renderManuscriptReimportReview(review, recoveryNotice, recoveryReturn, page.nextCursor)), 'after', "向后浏览");
           next.dataset['reimportNextPage'] = String(page.nextCursor);
           navigation.append(next);
         }

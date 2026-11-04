@@ -6,6 +6,7 @@ import { mountWordTrackedEditDetail } from './quality-learning.js';
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -43,7 +44,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       .finally(() => { busy = false; if (section.isConnected) paint(); });
   };
   const action = (label: string, operation: () => void): HTMLButtonElement => {
-    const button = el('button', label); button.type = 'button'; button.className = 'secondary'; button.disabled = busy;
+    const button = el('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary'); button.disabled = busy;
     button.addEventListener('click', operation); return button;
   };
   const paint = (): void => {

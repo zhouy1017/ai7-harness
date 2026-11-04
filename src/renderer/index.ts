@@ -1,3 +1,5 @@
+import { icon } from './components/icon-sprite.js';
+import { createStatusSurface } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -211,6 +213,7 @@ function requiredElement(selector: string): HTMLElement {
 
 const screen = requiredElement('#screen');
 const persistenceStatus = requiredElement('#persistence-status');
+const updateStatusSurface = createStatusSurface(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
@@ -857,7 +860,7 @@ const shell = mountShell({
   link.dataset['navIcon'] = HELP_ENTRY.icon;
   link.dataset['navHelp'] = 'hub';
   link.title = HELP_ENTRY.label;
-  link.append(element('span', 'nav-label', HELP_ENTRY.label));
+  link.append(icon('i-kb'), element('span', 'nav-label', HELP_ENTRY.label));
   link.addEventListener('click', (event) => {
     event.preventDefault();
     if (authorityInterrupted || link.getAttribute('aria-disabled') === 'true') return;
@@ -914,6 +917,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -959,9 +963,7 @@ function instantValue(iso: string): HTMLElement {
 
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   statusRevision += 1;
-  persistenceStatus.textContent = message;
-  if (tone) persistenceStatus.dataset['tone'] = tone;
-  else delete persistenceStatus.dataset['tone'];
+  updateStatusSurface(message, tone);
 }
 
 /**
@@ -3514,7 +3516,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
     element('h3', undefined, TASK_DRAWER_TITLE),
     element(
       'span',
-      `status-pill task-authorization-status task-authorization-status-${projection.state}`,
+      `state-term status-pill task-authorization-status task-authorization-status-${projection.state}`,
       projection.state === 'available' ? '待准备' : projection.state === 'prepared' ? '计划就绪' : '已记录授权 · 未派发',
     ),
   );

@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
@@ -112,6 +113,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -280,7 +282,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const line = el('p', 'package-condition-line');
       line.append(
         el('strong', 'package-condition-label', condition.label),
-        el('span', `status-pill package-condition-state${condition.met ? ' is-met' : ' is-unmet'}`, condition.met ? PACKAGE_CONDITION_STATE.met : PACKAGE_CONDITION_STATE.unmet),
+        el('span', `state-term status-pill package-condition-state${condition.met ? ' is-met' : ' is-unmet'}`, condition.met ? PACKAGE_CONDITION_STATE.met : PACKAGE_CONDITION_STATE.unmet),
         el('span', 'package-condition-detail', condition.stateLabel),
       );
       item.append(line);
@@ -514,7 +516,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
           : '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
-          const button = el('button', 'quiet', name);
+          const button = windowStep(el('button', 'quiet', name), name === '上一页' ? 'before' : 'after', name === '上一页' ? '向前浏览文件' : '向后浏览文件');
           button.type = 'button';
           button.dataset['packageAction'] = name === '上一页' ? 'export-previous' : 'export-next';
           button.disabled = inFlight || offset === null;
@@ -617,7 +619,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     item.append(el('span', 'package-export-file-label', file.label), el('span', 'field-note package-export-file-name', packageExportFileName(file.fileName, file.format)));
     if ('outcome' in file) {
       item.dataset['packageExportOutcome'] = file.outcome;
-      item.append(el('span', `status-pill package-export-outcome is-${file.outcome}`, file.outcomeLabel));
+      item.append(el('span', `state-term status-pill package-export-outcome is-${file.outcome}`, file.outcomeLabel));
     }
     if (reviewed !== null) {
       // Each file's own Export Fidelity Review (EXP-007): open by itself when something in it is not written as it was.

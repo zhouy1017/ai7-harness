@@ -742,6 +742,7 @@ async function main() {
     // The live processing indicator (ADR 0096 §3, #1177) replaces the static 「本地处理 · 未联网」: this launch sends nothing.
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
+    await assertRenderer(primary, `(() => { const links=Array.from(document.querySelectorAll('.sidebar-link')); return links.length>0 && links.every((link)=>link.querySelector('svg[data-icon] use') && link.title) && !document.querySelector('button:not([class]), button[class=""]') && Array.from(document.querySelectorAll('button')).every((button)=>button.classList.contains('btn')); })()`, 'shared-svg-and-buttons');
     // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');

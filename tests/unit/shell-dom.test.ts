@@ -8,6 +8,7 @@ let restore: () => void;
 beforeEach(() => {
   restore = installMiniDom();
   vi.stubGlobal('document', {
+    ...miniDocument,
     createElement: miniDocument.createElement,
     addEventListener: (type: string, listener: (event: unknown) => void) => miniDocument.body.addEventListener(type, listener),
     get activeElement() { return miniDocument.activeElement; },

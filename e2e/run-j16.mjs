@@ -1138,12 +1138,12 @@ async function main() {
     await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'chip-use');
     await renderer.evaluate(`globalThis.__j16ReleaseFrames()`);
     try {
-      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
+      await waitFor(renderer, `${CHIP} === null && ${blockInView(chip.blockId)} && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'chip-returned', 60_000);
     } catch (error) {
       // Failure-only closed state: never emit manuscript text, identifiers or arbitrary status words.
       const state = await renderer.evaluate(`(() => { const chip = ${CHIP}; return {
         present: chip !== null, disabled: chip?.disabled === true, target: ${blockInView(chip.blockId)},
-        arrived: (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到'),
+        arrived: (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到'),
       }; })()`).catch(() => null);
       if (state === null) at('chip-return-state-unavailable');
       else if (state.present && state.disabled) at('chip-return-retained-busy');
@@ -1165,6 +1165,7 @@ async function main() {
     await clickSelector(renderer, '.rail-marker[data-rail-kind="annotation"]', 'mark-rail-storage-failure');
     await waitFor(renderer, `(document.querySelector('#persistence-status')?.textContent ?? '').startsWith('无法保存或读取返回位置')`, 'mark-rail-storage-refused');
     await assertRenderer(renderer, `${CHIP} === null && ${blockInView(chip.blockId)}`, 'mark-rail-storage-keeps-position');
+    await clickSelector(renderer, '#persistence-status .status-dismiss', 'mark-rail-storage-error-dismiss');
     await renderer.evaluate(`(() => { IDBDatabase.prototype.transaction = globalThis.__j16Transaction; delete globalThis.__j16Transaction; })()`);
     // Hold the real committed storage completion, replace the editor, then release the old click.
     await renderer.evaluate(`(() => {
@@ -1757,7 +1758,7 @@ async function main() {
     // jump from none (review P3-A).
     if (await renderer.evaluate(`${CHIP} !== null`)) {
       await clickSelector(renderer, '[data-screen="editor"] .return-chip-host [data-return-chip]', 'selection-task-gone-chip-use');
-      await waitFor(renderer, `${CHIP} === null && (document.querySelector('#persistence-status')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
+      await waitFor(renderer, `${CHIP} === null && (document.querySelector('[data-toast]')?.textContent ?? '').startsWith('已回到')`, 'selection-task-gone-chip-used', 60_000);
     }
     const composedInputs = resolve(runRoot, 'composed-inputs');
     await mkdir(composedInputs, { recursive: true });
@@ -1996,7 +1997,7 @@ async function main() {
     const discardBefore = { state: await workspaceState(), tasks: await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`),
       drafts: await renderer.evaluate(`window.ai7.inspectProposalWorkspace({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, resultId: null, offset: 0 }).then((workspace) => JSON.stringify(workspace.items.map((item) => [item.markId, item.draft, item.disposition])))`) };
     await clickSelector(renderer, '[data-screen="agent-workspace"] [data-agent-workspace-action="discard"]', 'workspace-discard-click');
-    await waitFor(renderer, `document.querySelector('.agent-workspace-proposal')?.hidden === true && (document.querySelector('#persistence-status')?.textContent ?? '') === '已放弃这组提议；没有新建修改建议，这轮提问的记录仍保留。'`, 'workspace-discarded', 30_000);
+    await waitFor(renderer, `document.querySelector('.agent-workspace-proposal')?.hidden === true && (document.querySelector('[data-toast]')?.textContent ?? '') === '已放弃这组提议；没有新建修改建议，这轮提问的记录仍保留。'`, 'workspace-discarded', 30_000);
     const discardAfter = { state: await workspaceState(), tasks: await renderer.evaluate(`window.ai7.inspectBookTasks().then((tasks) => JSON.stringify(tasks))`),
       drafts: await renderer.evaluate(`window.ai7.inspectProposalWorkspace({ manuscriptId: ${JSON.stringify(workspaceBinding.manuscriptId)}, branchId: ${JSON.stringify(workspaceBinding.branchId)}, resultId: null, offset: 0 }).then((workspace) => JSON.stringify(workspace.items.map((item) => [item.markId, item.draft, item.disposition])))`) };
     requireJourney(JSON.stringify(discardAfter) === JSON.stringify(discardBefore) && discardAfter.state.marks.length === applied.marks.length &&

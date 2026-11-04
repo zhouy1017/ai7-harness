@@ -49,13 +49,12 @@ describe('the sidebar', () => {
       expect(contextHeading(state!, active, null)).toEqual({ title: '设置', position, book: false });
     }
   });
-  it('lists the six global destinations in their fixed order, each with a one-character icon of its own name', () => {
+  it('lists the six global destinations in their fixed order, each with a fixed SVG symbol ID', () => {
     expect(SHELL_DESTINATIONS.map((entry) => [entry.key, entry.label])).toEqual([
       ['attention', '待我处理'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体（记忆与全局指导）'],
     ]);
     for (const entry of [...SHELL_DESTINATIONS, SHELL_SETTINGS]) {
-      expect([...entry.icon]).toHaveLength(1);
-      expect(entry.label).toContain(entry.icon);
+      expect(entry.icon).toMatch(/^i-[a-z]+$/u);
     }
   });
 
@@ -67,8 +66,7 @@ describe('the sidebar', () => {
     ]);
     expect(SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.key))).toEqual([...SHELL_BOOK_SECTIONS]);
     for (const section of SHELL_BOOK_GROUPS.flatMap((group) => group.sections)) {
-      expect([...section.icon]).toHaveLength(1);
-      expect(section.label).toContain(section.icon);
+      expect(section.icon).toMatch(/^i-[a-z]+$/u);
     }
   });
 
@@ -89,9 +87,10 @@ describe('the sidebar', () => {
     expect(SHELL_LABELS.unpin('样书')).toBe('取消置顶《样书》');
   });
 
-  it('keeps the stylesheet drawing each icon from data-nav-icon, so a row\'s text stays exactly its label', () => {
+  it('uses SVG symbols while collapsed navigation keeps accessible labels', () => {
     const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
-    expect(css).toContain('.sidebar-link::before { content: attr(data-nav-icon);');
+    expect(css).toContain('.icon { width: 18px; height: 18px;');
+    expect(css).toContain('stroke-width: 1.8;');
     expect(css).toMatch(/:root\[data-sidebar="icons"\] \.nav-label/u);
   });
 });

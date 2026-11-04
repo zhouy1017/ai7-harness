@@ -1,3 +1,4 @@
+import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
@@ -141,6 +142,7 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: stri
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -589,6 +591,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   tasksEntry.dataset['shortcutBase'] = '这本书的任务';
   tasksEntry.title = `这本书的任务（${shortcutHint('view.openTasks') ?? ''}）`;
   const edgeEntries = element('div', 'edge-entries');
+  for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task']] as const) {
+    const label = element('span', 'edge-label', entry.textContent ?? '');
+    entry.replaceChildren(icon(id), label);
+    entry.setAttribute('aria-label', label.textContent ?? '');
+  }
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
   railTrack.append(positionRail);

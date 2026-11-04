@@ -10,6 +10,7 @@ import {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -22,7 +23,7 @@ export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: (
   function action(label: string, run: () => Promise<void> | void): HTMLButtonElement {
     const button = el('button', label);
     button.type = 'button';
-    button.className = 'secondary';
+    button.className = 'btn ' + ('secondary');
     button.addEventListener('click', () => {
       button.disabled = true;
       void Promise.resolve().then(run).catch(() => { status.textContent = DIAGNOSTICS_ACTION_FAILED; })

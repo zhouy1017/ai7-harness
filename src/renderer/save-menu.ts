@@ -1,3 +1,4 @@
+import { createButton } from './components/controls.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 
 export interface SaveMenuPersistence { dirty: boolean; saving: boolean; retryRequired: boolean; interrupted: boolean }
@@ -34,7 +35,7 @@ export function createSaveMenu(form: HTMLElement, exportManuscript: () => void):
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-editing-protection'] });
   render();
   const body = document.createElement('div'); body.className = 'editor-save-menu-body';
-  const exportAction = document.createElement('button'); exportAction.type = 'button'; exportAction.textContent = SAVE_MENU_WORDS.exportManuscript;
+  const exportAction = createButton(); exportAction.type = 'button'; exportAction.textContent = SAVE_MENU_WORDS.exportManuscript;
   exportAction.addEventListener('click', () => { menu.open = false; exportManuscript(); });
   body.append(form, exportAction); menu.append(summary, body);
   menu.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); menu.open = false; summary.focus(); } });

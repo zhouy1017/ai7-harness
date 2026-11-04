@@ -118,6 +118,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -224,7 +225,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     open.addEventListener('click', () => void openItem(view.itemId, open));
     const title = el('h4', 'global-attention-object');
     title.append(open);
-    const pill = el('span', `status-pill review-pill review-pill-${view.pill.tone} global-attention-pill`, view.stateLabel);
+    const pill = el('span', `state-term status-pill review-pill review-pill-${view.pill.tone} global-attention-pill`, view.stateLabel);
     pill.id = stateId;
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;

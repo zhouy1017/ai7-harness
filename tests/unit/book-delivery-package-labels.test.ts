@@ -26,7 +26,7 @@ describe('the words of 图书交付包', () => {
   it('names the block, its conditions, its preview and its versions', () => {
     expect(labels.PACKAGE_HEADING).toBe('图书交付包');
     expect(labels.PACKAGE_CONDITIONS_HEADING).toBe('内容情况');
-    expect(labels.PACKAGE_CONDITION_STATE).toEqual({ met: '✓ 可用', unmet: '○ 未包含' });
+    expect(labels.PACKAGE_CONDITION_STATE).toEqual({ met: '可用', unmet: '未包含' });
     expect([labels.PACKAGE_PREVIEW_HEADING, labels.PACKAGE_INCLUDED_HEADING, labels.PACKAGE_EXCLUDED_HEADING, labels.PACKAGE_LIMITATIONS_HEADING])
       .toEqual(['清单预览', '包含', '不包含', '限制']);
     expect(labels.PACKAGE_INCLUDED_TRUNCATED).toBe('更早的审阅报告也在包中，这里只列出最近的。');

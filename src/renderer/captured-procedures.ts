@@ -92,6 +92,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -211,7 +212,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const heading = el('h4', undefined, `《${procedure.title}》`);
     heading.tabIndex = -1;
     const latest = el('p', 'captured-procedure-latest');
-    latest.append(el('span', `status-pill captured-procedure-state-${procedure.latestState}`, procedure.latestStateLabel),
+    latest.append(el('span', `state-term status-pill captured-procedure-state-${procedure.latestState}`, procedure.latestStateLabel),
       el('span', undefined, ` 最新为${technicalWords(`第 ${procedure.latestVersion} 版`, '版本')} · 共 ${procedure.versionCount} 版`));
     card.append(heading, latest);
     const actions = el('div', 'button-row captured-procedure-actions');
@@ -252,11 +253,11 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     item.dataset['version'] = String(version.version);
     item.dataset['versionState'] = version.state;
     item.dataset['latestEligible'] = String(latestEligible);
-    const pill = el('span', `status-pill captured-procedure-state-${version.state}`, version.stateLabel);
+    const pill = el('span', `state-term status-pill captured-procedure-state-${version.state}`, version.stateLabel);
     const line = el('p', 'captured-procedure-version-line');
     line.append(pill);
     // 最新可用 (Issue #66, S31; REUSE-043): the version a new use resolves to now.
-    if (latestEligible) line.append(' ', el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE));
+    if (latestEligible) line.append(' ', el('span', 'state-term status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE));
     line.append(el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
     item.append(line);
     // Its meaning as a visible field note under the line, read in order by a screen reader and seen by everyone else
