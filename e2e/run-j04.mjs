@@ -1491,7 +1491,7 @@ async function main() {
       if(!(entity instanceof HTMLElement) || !(entityExact instanceof HTMLDetailsElement)) return false;
       return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个段落`)}) &&
         !entity.textContent.includes('person') && entity.textContent.includes('（') &&
-        !entityList.textContent.includes('blk_') && !entityExact.open &&
+        !entityList.textContent.includes('blk_') && (!entityExact.open || entityExact.hidden) &&
         entityExact.querySelector('dl > dd.technical-identity')!==null &&
         entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) &&
         !card.querySelector('.analysis-conflict-list, [data-analysis-conflict-kind]');
@@ -1775,7 +1775,7 @@ async function main() {
       const opened=outcome?.querySelector(':scope > details.analysis-run-report');
       if(!(opened instanceof HTMLDetailsElement) || opened.open) return false;
       const exact=opened.querySelector(':scope > details.technical-details');
-      if(!(exact instanceof HTMLDetailsElement) || exact.open) return false;
+      if(!(exact instanceof HTMLDetailsElement) || (exact.open && !exact.hidden)) return false;
       const decision=opened.cloneNode(true);
       for(const details of decision.querySelectorAll('details')) details.remove();
       const stages=Array.from(opened.querySelectorAll('[data-run-report-stage]'));
