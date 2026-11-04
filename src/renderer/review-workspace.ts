@@ -2415,7 +2415,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     confirmation.addEventListener('change', () => { state.localOptions = { ...state.localOptions, numeralsConfirmed: confirmation.checked }; updateSheet(); });
     confirmationLabel.append(confirmation, el('span', undefined, '我明确选择本次数字依据及 N01、N02；编辑约定不表示国标适用'));
     localOptions.append(proseLabel, numeralLabel, publicationLabel, confirmationLabel,
-      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点及无附加条件的异形词可生成机械修正；其余生成批注。代码、网址、邮件等会排除。'));
+      el('p', 'field-note', '单省略号、缺零百分数、括号序号冗余标点及无附加条件的异形词可生成机械修正，其余生成批注；代码、网址和邮件等会排除。'));
     const tables = state.localOptions.tables!;
     for (const [key, label] of [['characters', '通用规范汉字表（2013）及字形对照参考'], ['variantWords', '第一批异形词整理表（GF 1001-2001；附录仅供复核）']] as const) {
       const row = el('label', 'review-field'); const input = el('input'); input.type = 'checkbox'; input.checked = tables[key]; input.dataset['localTable'] = key;
