@@ -24,7 +24,7 @@ describe('the finding card’s referenced-rule disclosure', () => {
     expect(details.querySelector('summary')?.textContent).toBe('已参考规则');
     expect(details.querySelector('summary')?.className).toBe('status-pill');
     // Native details makes only the summary visible until the reader opens it.
-    expect(details.querySelector('p')?.textContent).toBe('统一编辑用语。');
+    expect(details.querySelector('li')?.textContent).toBe('统一编辑用语。');
   });
 
   it('offers no chip for unreferenced or historical findings', () => {

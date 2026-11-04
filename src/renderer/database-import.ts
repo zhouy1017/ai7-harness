@@ -223,8 +223,12 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
     // A package of many Books lists its first ones and counts the rest (Issue #434 review).
     const more = databaseImportMoreBooksLine(file.books.length, file.bookCounts.new + file.bookCounts.present + file.bookCounts.sameTitle);
     if (more !== null) books.append(el('li', 'database-merge-books-more', more));
-    mergeDetails.append(el('p', 'attention-note', DATABASE_MERGE_CONSEQUENCE), books,
-      ...file.mergeNotices.map((notice) => el('p', 'field-note database-merge-notice', DATABASE_MERGE_NOTICE_LINES[notice])));
+    mergeDetails.append(el('p', 'attention-note', DATABASE_MERGE_CONSEQUENCE), books);
+    if (file.mergeNotices.length > 0) {
+      const notices = el('ul');
+      for (const notice of file.mergeNotices) notices.append(el('li', 'database-merge-notice', DATABASE_MERGE_NOTICE_LINES[notice]));
+      mergeDetails.append(notices);
+    }
     choices.append(
       el('legend', undefined, DATABASE_IMPORT_CHOICES_LEGEND),
       option('replace', DATABASE_IMPORT_CHOICES.replace, replaceDetails), replaceDetails,
