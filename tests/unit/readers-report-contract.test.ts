@@ -82,32 +82,21 @@ describe('Reader\'s Report Contract v1', () => {
     expect(readersReportContract(withItem({ comment: '细节纯熟。\n个别比喻俗套。' })).systemPrompt).toContain('细节纯熟。／个别比喻俗套。');
   });
 
-  it('admits a unit result of its own kinds within the unit, and refuses anything else whole', () => {
-    const unit = (passages: unknown, ordinal = 2) => JSON.stringify({ schema: READERS_REPORT_UNIT_RESULT_SCHEMA, unitOrdinal: ordinal, passages });
-    expect(parseReadersReportUnitResult(unit([{ kind: 'problem', note: '残句。', blockOrdinals: [3] }]), { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: true });
-    expect(parseReadersReportUnitResult('not json', { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: false, code: 'not-json' });
-    expect(parseReadersReportUnitResult(unit([], 3), { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: false, code: 'unit-mismatch' });
-    expect(parseReadersReportUnitResult(unit([{ kind: 'marketing', note: '卖点。', blockOrdinals: [1] }]), { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: false, code: 'kind-unknown' });
-    expect(parseReadersReportUnitResult(unit([{ kind: 'strength', note: '好。', blockOrdinals: [6] }]), { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: false, code: 'block-out-of-unit' });
-    expect(parseReadersReportUnitResult(unit([{ kind: 'strength', note: '好。', blockOrdinals: [1, 1] }]), { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseReadersReportUnitResult(unit([{ kind: 'strength', note: '好\n。', blockOrdinals: [1] }]), { unitOrdinal: 2, blockCount: 5 })).toMatchObject({ ok: false, code: 'schema-invalid' });
+  it('salvages known passage kinds and valid block ordinals independently', () => {
+    const good = { kind: 'strength', note: '好。', blockOrdinals: [1] };
+    const parsed = parseReadersReportUnitResult('说明```json\n' + JSON.stringify({ schema: 'other', unitOrdinal: 99, passages: [good,
+      { ...good, kind: 'unknown' }, { ...good, blockOrdinals: [6] }, { ...good, kind: '问题', note: '两\n行', blockOrdinals: ['2', 2] }] }) + '\n```', { unitOrdinal: 2, blockCount: 5 });
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 2, passages: [good, { kind: 'problem', note: '两 行', blockOrdinals: [2] }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, reason: 'kind-unknown' }), expect.objectContaining({ index: 2, reason: 'block-out-of-unit' })]));
+    const partial = parseReadersReportUnitResult('{"passages":[' + JSON.stringify(good) + ',{"kind":', { unitOrdinal: 2, blockCount: 5 });
+    expect(partial.ok && partial.result.passages).toEqual([good]);
   });
 
-  it('admits the five sections within their bounds, and nothing else', () => {
-    expect(parseReadersReportSynthesis(JSON.stringify(SECTIONS), '修改后再议')).toEqual({ ok: true, result: SECTIONS });
-    expect(parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, marketing: ['卖点'] }), '修改后再议')).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, strengths: [] }), '修改后再议')).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, suggestions: Array(7).fill('改。') }), '修改后再议')).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, overall: '长'.repeat(601) }), '修改后再议')).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, conclusion: '' }), '修改后再议')).toMatchObject({ ok: false, code: 'schema-invalid' });
-    // The 结论 carries the conclusion the editor chose, and a draft that says another is refused whole (Issue #662 review).
-    expect(parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, conclusion: '建议推荐出版。' }), '修改后再议'))
-      .toEqual({ ok: false, code: 'conclusion-mismatch', detail: '结论没有写出编辑选定的结论「修改后再议」。' });
-    expect(readersReportContract(INPUT).synthesisInstruction).toContain('并原样写出「修改后再议」');
-    // The kind's book-level step parses against the record's own conclusion, so such a synthesis settles as a gap.
-    const step = readersReportKindDefinition(INPUT).crossUnit!.step!;
-    expect(step.parse(JSON.stringify({ ...SECTIONS, conclusion: '建议推荐出版。' }), [])).toMatchObject({ ok: false, code: 'conclusion-mismatch' });
-    expect(step.parse(JSON.stringify(SECTIONS), [])).toMatchObject({ ok: true });
+  it('allows empty lists, drops bad list entries, and prefixes the chosen conclusion', () => {
+    const parsed = parseReadersReportSynthesis(JSON.stringify({ ...SECTIONS, strengths: [], problems: [null, '保留问题'], conclusion: '请复核。', extra: true }), '修改后再议');
+    expect(parsed).toMatchObject({ ok: true, result: { strengths: [], problems: ['保留问题'], conclusion: '结论：修改后再议。请复核。' } });
+    expect(parsed.ok && parsed.result.withheld).toHaveLength(1);
+    expect(parseReadersReportSynthesis('{}', '修改后再议').ok).toBe(false);
   });
 
   it('names its requests by headers no other contract reads, and keys the synthesis by the passages it reads', () => {
@@ -145,4 +134,9 @@ describe('the 审稿意见 Task lookup (Issue #795 item 6)', () => {
     } as unknown as ReadersReportStoreHost;
     expect(readersReportTaskOf(host, '00000000-0000-4000-8000-000000000000')).toBeNull();
   });
+});
+
+it('retains complete report fields from truncated JSON and prefixes the chosen conclusion', () => {
+  const parsed = parseReadersReportSynthesis('说明```JSON\n{"overall":"保留总评。","strengths":["优点",{"unfinished":', '修改后再议');
+  expect(parsed).toMatchObject({ ok: true, result: { overall: '保留总评。', strengths: ['优点'], conclusion: '结论：修改后再议。' } });
 });

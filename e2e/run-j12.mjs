@@ -1442,6 +1442,8 @@ async function main() {
     credentialMutationReached = true;
     await click(primary, '保存并获取模型', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
+    // #1304: development-ci never performs account discovery; saving succeeds while discovery reports its failure.
+    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-save-discovery-failure-visible');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
     // The one flow (Issue #1215) offers the saved channel's model to both roles, already the choice both hold: nothing to apply.
     await assertRenderer(primary, `(() => {
@@ -1457,7 +1459,9 @@ async function main() {
     })()`, 'model-service-flow-current-choice');
     // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
     await assertRenderer(primary, `(async () => {
-      await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
+      const refreshed=await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
+      if(refreshed.modelDiscovery?.status!=='failure'||refreshed.modelDiscovery.code!=='MODEL_SERVICE_UNREACHABLE'||
+        !refreshed.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.models.some(model=>model.modelId==='deepseek-flash'))return false;
       let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
       const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
       if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
@@ -1466,6 +1470,8 @@ async function main() {
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
     })()`, 'independent-role-models-without-test');
+    await assertRenderer(primary, `(() => { document.querySelector('[data-action="refresh-model-list"]').click(); return true; })()`, 'model-refresh-click');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
     at('model-service-search-backends');
     const searchSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends)`);
@@ -1502,8 +1508,15 @@ async function main() {
     // The DeepSeek direct-search candidate (Issue #1055 into W22-S10a #1181): disclosed as 未实测 beside the ranked backends, not
     // selectable, its one explicit 测试连接 refused under development-ci before any credential or transport; closed identifiers only.
     const candidateSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.candidates)`);
-    requireJourney(candidateSettings.length === 1 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
+    requireJourney(candidateSettings.length === 3 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
       candidateSettings[0].measurement === 'not-measured' && candidateSettings[0].selectable === false && candidateSettings[0].endpoint === 'https://api.deepseek.com/v1/tools/search', 'search-candidate-declared');
+    requireJourney(candidateSettings.every((candidate) => candidate.measurement === 'not-measured' && candidate.selectable === false), 'search-native-candidates-unmeasured');
+    await assertRenderer(primary, `['openai-native-search-v1','anthropic-native-search-v1'].every(id => {
+      const card=document.querySelector('[data-search-candidate="'+id+'"]');
+      return card?.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
+    })`, 'search-native-candidates-disclosed');
+    await assertRenderer(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false`, 'search-native-follow-default');
+    requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave',alwaysUseSelectedBackend:true}).then(settings=>settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-source-override-saved');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-search-candidate="deepseek-direct-search-v1"]');
       const labels=Array.from(card?.querySelectorAll('button')??[]).map((node)=>node.textContent);
       return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.textContent.includes('USD 0.75') &&
@@ -1608,7 +1621,7 @@ async function main() {
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'model-restart-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-restart-landing');
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-survives-restart');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave'&&settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-backend-selection-survives-restart');
     const restartedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial'))`);
     requireJourney(
       restartedConnection?.status === 'available' &&
@@ -1630,9 +1643,11 @@ async function main() {
     await click(primary, '模型服务', 'model-replace-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-replace-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-restart-no-redisplay');
+    const replacementCatalogue = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(','))`);
     await fill(primary, '#main-editorial-credential', secretTwo, 'model-credential-replacement');
     await click(primary, '保存并获取模型', 'model-credential-replace');
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存')`, 'model-replacement-ready');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]') && document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0'`, 'model-replacement-ready');
+    requireJourney(replacementCatalogue.split(',').includes('deepseek-flash') && await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(',')===${JSON.stringify(replacementCatalogue)})`), 'model-replacement-catalogue-retained');
     const replacedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(
       replacedConnection?.credentialReference === firstConnection.connection.credentialReference &&

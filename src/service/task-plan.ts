@@ -1,3 +1,4 @@
+import { analysisRunSummary } from '../shared/analysis-run-summary.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
@@ -951,6 +952,10 @@ export function baselineAnalysisPlan(input: {
     kind: 'baseline-analysis',
     ref: intent.taskIntentId,
     state: baselineState(projection, input.stopped),
+    ...(projection.taskOutcome?.report && (projection.taskOutcome.classification === 'failed' || projection.taskOutcome.classification === 'completed-with-gaps')
+      ? { runOutcome: { label: projection.taskOutcome.label, classification: projection.taskOutcome.classification,
+        reason: projection.taskOutcome.report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason
+          ?? analysisRunSummary(projection.taskOutcome.report).reason } } : {}),
     planVersion: version.ordinal,
     goal: {
       sentence: intent.redoOf === null ? BASELINE_GOAL_SENTENCES[intent.mode] ?? intent.modeLabel : redoGoalSentence(counts),
@@ -1485,7 +1490,7 @@ export const WRITING_NOT_DRAFTED_LABEL = '已结束 · 未写出草稿' as const
 function writingState(projection: WritingProjection): TaskPlanProjection['state'] {
   const state = baselineState(projection as unknown as BaselineAnalysisProjection);
   if (projection.state !== 'settled' || projection.taskOutcome === null || projection.taskOutcome.classification === 'completed') return state;
-  if (projection.resultSetRevision !== null && projection.resultSetRevision.writing.draft === null) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
+  if (projection.resultSetRevision !== null && (projection.resultSetRevision.writing.draft === null || projection.resultSetRevision.writing.draft.usable === false)) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
   return { ...state, label: projection.taskOutcome.label };
 }
 
@@ -2195,6 +2200,8 @@ function baselineRunControl(projection: BaselineAnalysisProjection, stopped?: Ba
   const update = counts === null ? null : { manuscriptUnits: projection.coverageManifest?.units.length ?? counts.recomputed + counts.reused, reusedUnits: counts.reused };
   return {
     runRecordId: run.runRecordId,
+    executionSpanCount: run.attempt?.spans.length ?? 0,
+    ...(stopped?.stopReason === undefined ? {} : { stopReason: stopped.stopReason, stopAt: stopped.stopAt }),
     cancelling,
     pausing,
     cancel: {
@@ -2343,6 +2350,8 @@ export interface BaselineStoppedRunFacts {
    * with it, or form what it kept into its partial revision when it is cancelled. Read by the service.
    */
   readonly bindingHolds: boolean;
+  readonly stopReason?: import('../shared/protocol.js').ResumableStopReason;
+  readonly stopAt?: string;
   /** The provider's account limit stopped the Run (Issue #51, S16b), in the provider's words; absent or `null` otherwise. */
   readonly accountLimit?: { readonly condition: string; readonly unitOrdinal: number | null } | null;
   /**

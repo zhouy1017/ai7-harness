@@ -242,3 +242,13 @@ describe('the Egress Gate admits exactly the rule-named tool set (#893 review)',
     expect(JSON.stringify(tripped)).not.toContain('联网核查未完成');
   });
 });
+
+
+it('drops only unmatched retrieval references from prose-wrapped observation entries (#1311 H2)', () => {
+  const text = '说明。```json\n' + JSON.stringify({ observations: [{ note: '合成观察', retrievalAnchor: 'a'.repeat(64) }, { note: '保留观察' }] }) + '\n```';
+  const validated = prepareRetrievalResult(text, null);
+  const result = JSON.parse(validated.text) as { observations: unknown[]; salvaged?: unknown[] };
+  markRetrievalResult(result, validated.rejected);
+  expect(result.observations).toEqual([{ note: '合成观察' }, { note: '保留观察' }]);
+  expect(result.salvaged).toEqual([{ section: 'observations.0', index: 0, reason: 'retrieval-reference-not-exact-fetched' }]);
+});

@@ -1,3 +1,4 @@
+import { majorityGapReason } from '../../src/shared/analysis-run-summary.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -22,6 +23,7 @@ import {
   globalAttentionNextStepLine,
   globalAttentionObjectLabel,
   globalAttentionReason,
+  globalAttentionStateLabel,
   globalAttentionTimeLine,
   globalAttentionTruncatedLine,
   globalAttentionView,
@@ -248,6 +250,7 @@ describe('each item', () => {
       'answer-clarification': '回答问题',
       'adjust-budget-redo': '调整预算并重做',
       'resolve-model-service': '处理模型服务',
+      'open-network-proxy': '去设置 › 模型服务 › 网络代理',
       // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
       'view-unconfirmed': '查看未确认的部分',
       reprepare: '重新准备',
@@ -454,7 +457,7 @@ describe('each item', () => {
       'analysis-cancelling': '你取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'analysis-pausing': '你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
       'analysis-paused': '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。',
-      'analysis-resumable': 'AI7 关闭时这项任务正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。',
+      'analysis-resumable': 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。',
       'review-running': '正在审阅「体例与格式」 · 正在跨范围比对',
       'review-continuable': '「体例与格式」尚未开始；继续审阅时从这一类接着审。',
       'analysis-completed': '已形成第 1 份基线分析。',
@@ -560,4 +563,40 @@ describe('a Clarification Request in 待我处理 (S76d)', () => {
       .toBe('该步骤等待说明 · 其他步骤仍在继续：它想知道要不要把一个阅读范围安全地再试一次。');
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-clarification']).toEqual({ tone: 'attention', shape: 'triangle' });
   });
+});
+
+describe('resumable stop reasons (Issue #1309)', () => {
+  it('projects each stop reason into the state label and one actionable explanation', () => {
+    const expected = {
+      'proxy-unreachable': ['任务已中断 · 代理不可达', '设置 › 模型服务 › 网络代理'],
+      'model-service-unreachable': ['任务已中断 · 模型服务不可达', '设置 › 模型服务 › 网络代理'],
+      'outcome-unknown': ['任务已中断 · 结果待确认', '查看未确认的部分'],
+      shutdown: ['任务已中断 · AI7 关闭时正在运行', '续行时从下一个接着读'],
+    } as const;
+    for (const [reason, [label, action]] of Object.entries(expected)) {
+      const entry = item('analysis-resumable', { facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: reason as keyof typeof expected } });
+      expect(globalAttentionStateLabel(entry), reason).toBe(label);
+      expect(globalAttentionReason(entry), reason).toContain(action);
+    }
+  });
+});
+
+it('warns with N/M unread units and their majority classified reason', () => {
+  const view = globalAttentionView(projection({ recent: [item('analysis-completed-with-gaps', {
+    facts: { progress: null, categories: [], revisionOrdinal: 1,
+      completion: { gaps: 7, total: 8, reason: '模型服务不可达：请检查网络或网络代理设置。' } },
+  })] }));
+  expect(view.flatMap((group) => group.items)[0]).toMatchObject({
+    stateLabel: '已完成 · 7/8 个单元未读成', pill: { tone: 'warn' },
+    reason: '模型服务不可达：请检查网络或网络代理设置。',
+  });
+});
+it('selects the most frequent existing gap wording without exposing its technical code', () => {
+  const unreachable = '模型服务不可达：请检查网络或网络代理设置。';
+  expect(majorityGapReason([
+    { code: 'out-of-scope', reason: '未纳入范围' },
+    { code: 'outcome-unknown', reason: '该单元结果未知' },
+    { code: 'adapter-failure', reason: `${unreachable}（MODEL_SERVICE_UNREACHABLE）` },
+    { code: 'adapter-failure', reason: `${unreachable}（MODEL_SERVICE_UNREACHABLE）` },
+  ])).toBe(unreachable);
 });

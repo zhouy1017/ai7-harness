@@ -1,3 +1,4 @@
+import { SAMPLE1_PUBLIC_SAMPLEBOOK } from '../../../src/shared/public-samplebooks.js';
 import { reviewFixtureContractVersion } from '../../../src/service/provider/model-fixture.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
@@ -154,7 +155,7 @@ export interface ReplayTally {
  */
 export function replayTransport(fixtures: ReadonlyArray<ResolvedModelFixture>, tally: ReplayTally): typeof fetch {
   const adapters = fixtures.flatMap((fixture) => [...new Set([...fixture.entries.values()].flatMap((entry) => entry.capture?.taskPromptContractDigest ?? []))]
-    .map((digest) => ({ digest, adapter: new Ai7LocalDeterministicAdapter(fixture, digest, REPLAY_CODES) })));
+    .map((digest) => ({ digest, adapter: new Ai7LocalDeterministicAdapter(fixture, digest, REPLAY_CODES, { sourceDigest: SAMPLE1_PUBLIC_SAMPLEBOOK.sha256 }) })));
   return (async (_url: string | URL | Request, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { model: string; messages: Array<{ role: string; content: string }> };
     const messages = body.messages.map((message) => ({ role: message.role, content: [{ type: 'text', text: message.content }] }));

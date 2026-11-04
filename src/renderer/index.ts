@@ -1113,6 +1113,7 @@ function renderGlobalAttention(bookId?: string | null): void {
     technicalDetails,
     setStatus,
     errorMessage: rendererErrorMessage,
+    openNetworkProxySettings: () => renderModelServiceSettings(),
     open: openGlobalAttentionItem,
   });
   const actions = element('div', 'button-row workbench-actions');
@@ -1131,6 +1132,10 @@ function renderGlobalAttention(bookId?: string | null): void {
  * nothing; a Recovery Attention State is claimed for this window only while no other window holds it.
  */
 async function openGlobalAttentionItem(item: GlobalAttentionItemProjection): Promise<void> {
+  if (item.nextStep === 'open-network-proxy') {
+    await renderModelServiceSettings();
+    return;
+  }
   await openGlobalAttentionTarget(item.target);
 }
 
@@ -2711,6 +2716,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     },
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
+    openSearchSettings: () => { void leaveThen(async () => { await renderModelServiceSettings(); document.querySelector('[data-search-backends]')?.scrollIntoView(); }); },
     planChanged: () => taskDrawer.refresh('review-run'),
     recorded: (reviewRunId) => { globalAttentionReader.refresh(); manuscriptOnScreen?.followReviewMarks(bookId, reviewRunId); },
     // 在来源与证据中查看 (Issue #901): the Evidence Workspace's deep link into the Book's retained sources.

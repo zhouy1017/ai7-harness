@@ -8,7 +8,7 @@ import {
   type ModelServiceSettingsProjection,
   type RendererApi,
 } from '../shared/protocol.js';
-import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
+import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestFeedback, modelConnectionTestLabel } from './model-service-roles.js';
 
 /** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
 export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
@@ -137,7 +137,15 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     const pending = options.api.saveModelServiceCredential({ route: option.route, connectionName: name.value.trim(), secret: secret.value });
     secret.value = '';
     options.setStatus('正在保存凭据并获取模型…', 'busy');
-    try { options.render(await pending); options.setStatus('凭据已保存；可选择账号模型或手动输入模型 ID。', 'success'); }
+    try {
+      const result = await pending;
+      options.render(result);
+      const discovery = result.modelDiscovery;
+      if (discovery?.status === 'failure') options.setStatus(`凭据已保存，但无法获取模型列表：${discovery.reason}`, 'error');
+      else options.setStatus(discovery?.status === 'success'
+        ? `凭据已保存；已获取 ${discovery.modelCount} 个模型。`
+        : '凭据已保存；可选择账号模型或手动输入模型 ID。', 'success');
+    }
     catch (error) { update(); options.setStatus(options.errorMessage(error, '无法保存模型服务凭据。'), 'error'); }
   })(); });
   const actions = el('div', 'button-row');
@@ -145,7 +153,14 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   const refresh = el('button', 'secondary', '刷新模型列表'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'refresh-model-list';
   refresh.addEventListener('click', () => void (async () => {
     refresh.disabled = true;
-    try { options.render(await options.api.refreshModelServiceModels({ route: option.route })); options.setStatus('模型列表已刷新；可用模型以账号返回为准。', 'success'); }
+    try {
+      const result = await options.api.refreshModelServiceModels({ route: option.route });
+      options.render(result);
+      const discovery = result.modelDiscovery;
+      if (discovery?.status === 'failure') options.setStatus(discovery.reason, 'error');
+      else if (discovery?.status === 'success') options.setStatus(`模型列表已刷新，共 ${discovery.modelCount} 个可用模型。`, 'success');
+      else options.setStatus('无法获取模型列表。', 'error');
+    }
     catch (error) { refresh.disabled = !ready; options.setStatus(options.errorMessage(error, '无法刷新模型列表。'), 'error'); }
   })());
   const remove = el('button', 'quiet', '移除凭据'); remove.type = 'button'; remove.disabled = !ready; remove.dataset['action'] = 'remove-model-service-credential';
@@ -173,6 +188,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const group = el('fieldset', 'model-service-flow-models');
   group.append(el('legend', undefined, '选择模型，再指定使用角色'));
   let checked: ModelServiceChannelModelProjection | null = null;
+  let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
   const test = el('button', 'secondary', '测试连接');
   test.type = 'button';
@@ -187,14 +203,16 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   customLabel.append(custom);
   const roleButtons: HTMLButtonElement[] = [];
   const paint = (): void => {
-    test.disabled = !ready || checked === null;
+    test.disabled = testing || !ready || checked === null;
     use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId);
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
+    const note = el('p', 'field-note', modelConnectionTestLabel(own, checked?.modelLabel));
+    if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [
       el('p', 'field-note', modelCapabilityLabel(checked)),
-      el('p', 'field-note', modelConnectionTestLabel(own, checked.modelLabel)), ...modelConnectionTestDisclosure(own),
+      note, ...modelConnectionTestDisclosure(own),
     ]));
   };
   for (const model of offered) {
@@ -237,10 +255,19 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     roleButtons.push(button);
   }
   test.addEventListener('click', () => void (async () => {
-    if (checked === null || channel.route === null) return;
+    if (testing || checked === null || channel.route === null) return;
+    const model = checked;
+    testing = true;
     test.disabled = true;
-    try { options.render(await options.api.testModelServiceConnection({ route: channel.route, modelId: checked.modelId })); }
-    catch (error) { test.disabled = false; options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
+    options.setStatus('正在测试连接…', 'busy');
+    try {
+      const next = await options.api.testModelServiceConnection({ route: channel.route, modelId: model.modelId });
+      const result = next.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest;
+      const status = modelConnectionTestFeedback(result?.modelId === model.modelId ? result : null, channel.channelLabel, model.modelLabel);
+      options.render(next);
+      options.setStatus(status.message, status.tone);
+    } catch (error) { options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
+    finally { testing = false; paint(); }
   })());
   use.addEventListener('click', () => void (async () => {
     if (checked === null || channel.route === null) return;

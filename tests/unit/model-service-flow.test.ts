@@ -37,8 +37,9 @@ function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & { getMod
 
 function flow(projection: ModelServiceSettingsProjection, calls = api()) {
   const render = vi.fn();
-  const node = modelServiceFlow(projection, { api: calls, render, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback, channel: null, chooseChannel: vi.fn() }) as unknown as MiniElement;
-  return { node, render, calls };
+  const setStatus = vi.fn();
+  const node = modelServiceFlow(projection, { api: calls, render, setStatus, errorMessage: (_error, fallback) => fallback, channel: null, chooseChannel: vi.fn() }) as unknown as MiniElement;
+  return { node, render, calls, setStatus };
 }
 
 const button = (root: MiniElement, action: string) => root.querySelector(`button[data-action="${action}"]`)!;
@@ -83,6 +84,34 @@ describe('the one model-service flow', () => {
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
 
+  it('shows refresh failure as an error with the discovery reason', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), {
+      modelDiscovery: { status: 'failure', code: 'AI7_PROXY_UNREACHABLE', reason: '代理不可达：请检查网络代理设置' },
+    });
+    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
+    button(node, 'refresh-model-list').click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('代理不可达：请检查网络代理设置', 'error'));
+  });
+
+  it('shows the model count after a successful refresh', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), { modelDiscovery: { status: 'success', modelCount: 7 } });
+    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
+    button(node, 'refresh-model-list').click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('模型列表已刷新，共 7 个可用模型。', 'success'));
+  });
+
+  it('shows saved credentials separately when discovery fails', async () => {
+    const responseProjection = Object.assign(settings(['anthropic-claude']), {
+      modelDiscovery: { status: 'failure', code: 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', reason: '模型服务拒绝了凭据' },
+    });
+    const { node, setStatus } = flow(settings([], null), api(responseProjection));
+    pickChannel(node, 'anthropic-claude');
+    const secret = node.querySelectorAll('input').find((input) => input.type === 'password')!;
+    secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
+    node.querySelector('form')!.dispatchEvent({ type: 'submit', preventDefault: () => undefined });
+    await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('凭据已保存，但无法获取模型列表：模型服务拒绝了凭据', 'error'));
+  });
+
   it.each([
     ['available', '代理可用', 'success'],
     ['https-rejected', '代理不接受 HTTPS 连接，请改用 http://host:port', 'error'],
@@ -94,6 +123,7 @@ describe('the one model-service flow', () => {
       proxy: { mode: 'proxy', protocol: 'http', hostPort: '127.0.0.1:7897' },
       lastProxyProbe: { status, checkedAt: '2026-11-04T12:00:00.000Z' }, searchBackends: { backends: [], candidates: [] },
       protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
+      modelDiscovery: { status: 'failure', code: 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', reason: '模型服务拒绝了凭据' },
       launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
         externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
     } as unknown as ModelServiceSettingsProjection;
@@ -120,6 +150,7 @@ describe('the one model-service flow', () => {
       const page = root as unknown as MiniElement;
       expect(page.querySelector('[aria-label="代理 URL"]')!.placeholder).toBe('http://127.0.0.1:端口');
       expect(page.textContent).toContain('只有代理本身提供 TLS 入口时才用 https://');
+      expect(page.querySelector('.model-service-technical [data-model-discovery-code]')!.textContent).toContain('MODEL_DISCOVERY_CREDENTIAL_REJECTED');
       pickChannel(page, 'anthropic-claude');
       page.querySelector('[data-model-service-proxy] form')!.dispatchEvent({ type: 'submit' });
       await vi.waitFor(() => expect(calls.saveModelServiceProxy).toHaveBeenCalledWith({ mode: 'proxy', protocol: 'http', hostPort: '127.0.0.1:7897', probeRoute: 'anthropic-claude' }));
@@ -196,6 +227,65 @@ describe('the one model-service flow', () => {
     button(node, 'test-flow-connection').click();
     await vi.waitFor(() => expect(render).toHaveBeenCalled());
     expect(calls.testModelServiceConnection).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash' });
+  });
+
+  it('shows busy immediately and keeps testing disabled through model changes until the request returns', async () => {
+    const pending = Promise.withResolvers<ModelServiceSettingsProjection>();
+    const calls = api();
+    calls.testModelServiceConnection = vi.fn(() => pending.promise);
+    const { node, render, setStatus } = flow(settings(['opencode-go']), calls);
+    const test = button(node, 'test-flow-connection');
+    test.click();
+    expect(setStatus).toHaveBeenCalledExactlyOnceWith('正在测试连接…', 'busy');
+    expect(test.disabled).toBe(true);
+    const custom = node.querySelector('[data-custom-model-id]')!;
+    custom.value = 'account/another-model'; custom.dispatchEvent({ type: 'input' });
+    expect(test.disabled).toBe(true);
+    test.dispatchEvent({ type: 'click' });
+    expect(calls.testModelServiceConnection).toHaveBeenCalledOnce();
+    pending.resolve(settings(['opencode-go']));
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    expect(test.disabled).toBe(false);
+    expect(setStatus).toHaveBeenLastCalledWith(expect.stringContaining('DeepSeek V4.1 Flash'), 'error');
+  });
+
+  it.each([
+    ['passed', null, '连接测试通过', 'success'],
+    ['failed', 'INVALID_CREDENTIAL', '凭据被拒绝，请检查 API key', 'error'],
+    ['failed', 'MODEL_SERVICE_UNREACHABLE', '模型服务不可达，请检查网络或网络代理', 'error'],
+    ['failed', 'AI7_PROXY_UNREACHABLE', '代理不可达，请检查网络或网络代理', 'error'],
+    ['failed', 'INVALID_RESPONSE', '请检查模型 ID 是否正确', 'error'],
+    ['outcome-unknown', 'AI7_OUTCOME_UNKNOWN', '结果待确认', 'error'],
+    ['cancelled', 'INTERRUPTED', '连接测试已取消', undefined],
+  ] as const)('announces %s / %s and keeps the exact code in technical details', async (outcome, code, message, tone) => {
+    const answer = settings(['opencode-go']);
+    const model = answer.channels.find((channel) => channel.channelId === 'opencode-go')!.models[0]!;
+    Object.assign(answer.routeChoice.routes[0]!.connection!, { connectionTest: {
+      modelId: model.modelId, outcome, code, testedAt: '2026-11-04T12:00:00.000Z',
+      credentialUpdatedAt: '2026-11-04T11:00:00.000Z', verified: 'buffered-text-only',
+    } });
+    const { node, calls, render, setStatus } = flow(settings(['opencode-go']), api(answer));
+    button(node, 'test-flow-connection').click();
+    await vi.waitFor(() => expect(render).toHaveBeenCalledWith(answer));
+    expect(calls.testModelServiceConnection).toHaveBeenCalledOnce();
+    expect(setStatus).toHaveBeenLastCalledWith(expect.stringContaining(message), tone);
+    const banner = setStatus.mock.lastCall![0] as string;
+    expect(banner).toContain(`OpenCode Go / ${model.modelLabel}`);
+    if (code !== null) expect(banner).not.toContain(code);
+    const painted = flow(answer).node;
+    expect(painted.querySelector(`[data-connection-test-outcome="${outcome}"]`)!.textContent).toContain(model.modelLabel);
+    expect(painted.querySelector('.model-service-flow-feedback .technical-details')!.textContent).toContain(code ?? '无');
+  });
+
+  it('restores the test button after an API rejection without retrying', async () => {
+    const calls = api();
+    calls.testModelServiceConnection = vi.fn(async () => { throw new Error('synthetic rejection'); });
+    const { node, setStatus } = flow(settings(['opencode-go']), calls);
+    const test = button(node, 'test-flow-connection');
+    test.click();
+    await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith('连接测试没有完成；不会自动重试。', 'error'));
+    expect(test.disabled).toBe(false);
+    expect(calls.testModelServiceConnection).toHaveBeenCalledOnce();
   });
 });
 

@@ -140,6 +140,12 @@ export type TaskPlanStateKey =
 export interface TaskPlanRunControlProjection {
   /** The one Run every control names (CTRL-009). */
   runRecordId: string;
+  /** Number of durable Harness Execution Spans currently recorded for this Run. */
+  executionSpanCount?: number;
+  /** The editor-facing reason this Run stopped and may be resumed. */
+  stopReason?: import('../protocol.js').ResumableStopReason;
+  /** When that stop was recorded, used by the continuation note. */
+  stopAt?: string;
   /** 正在取消: the editor's cancellation is recorded and the Run is stopping; nothing more is offered. */
   cancelling: boolean;
   /** 正在暂停: the editor's pause is recorded and the Run stops at the next unit boundary; nothing more is offered. */
@@ -337,6 +343,7 @@ export interface TaskPlanProjection {
   /** The Task Intent or the Review Run this plan belongs to. */
   ref: string;
   state: { key: TaskPlanStateKey; label: string };
+  runOutcome?: { label: string; reason: string | null; classification: 'failed' | 'completed-with-gaps' };
   /** The plan version shown; `null` for a kind that keeps no plan versions. */
   planVersion: number | null;
   goal: {

@@ -1,4 +1,4 @@
-import { type SalvagedModelResult, CONFIDENCE_LEVELS, stripModelJsonFence, boundedText, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
+import { type SalvagedModelResult, CONFIDENCE_LEVELS, ModelResultReader, NO_USABLE_MODEL_ENTRIES, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasKeys, isRecord, modelNumber, sha256Hex } from './canonical.js';
 import type {
   AnalysisConflictProjection,
   AnalysisEntityKind,
@@ -13,7 +13,7 @@ import type { ManifestBlockInput } from './coverage-manifest.js';
  * for manuscript-internal structure and coverage. One typed partial result per Analysis Unit —
  * structural synopsis, entities/aliases/terms, events and chronology, relationships, internal-setting
  * claims, exact source ranges, confidence, conflicts, unresolved items. AI7 validates every model
- * `contentCandidate` against this schema before persistence; an invalid unit is an exact gap.
+ * `contentCandidate` before persistence, salvaging independent entries and recording every exclusion.
  *
  * The prompt contract is frozen text. Its digest binds the Execution Binding and the deterministic
  * fixture key; changing one character of it changes every request digest, which is the intent.
@@ -82,119 +82,104 @@ export type UnitResultParse =
   | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: BaselineUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: UnitResultParseFailureCode; detail: string };
 
-function boundedStoredText(value: unknown, maximum: number, allowEmpty = false): value is string {
-  return typeof value === 'string' && value.length <= maximum && boundedText(value, maximum, allowEmpty);
+/** Drop unknown blocks, retaining their parent entry; invalid offsets fall back to the whole block. */
+export function salvageSourceRanges(reader: ModelResultReader, value: unknown, blockIds: ReadonlySet<string>, section: string,
+  maximum = MAX_ITEMS, blockLengths?: ReadonlyMap<string, number>): AnalysisSourceRangeProjection[] {
+  return reader.array(value, section, maximum).flatMap<AnalysisSourceRangeProjection>((range, index) => {
+    if (!hasKeys(range, ['blockId']) || typeof range.blockId !== 'string' || !BLOCK_ID_PATTERN.test(range.blockId) || !blockIds.has(range.blockId)) {
+      reader.drop(section, index, 'range-out-of-unit');
+      return [];
+    }
+    const from = range.fromGrapheme ?? null;
+    const to = range.toGrapheme ?? null;
+    const length = blockLengths?.get(range.blockId) ?? Infinity;
+    if (from === null && to === null) return [{ blockId: range.blockId, fromGrapheme: null, toGrapheme: null }];
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || (from as number) < 0 || (to as number) < (from as number) || (to as number) > length) {
+      reader.drop(section, index, 'range-offsets-whole-block');
+      return [{ blockId: range.blockId, fromGrapheme: null, toGrapheme: null }];
+    }
+    return [{ blockId: range.blockId, fromGrapheme: from as number, toGrapheme: to as number }];
+  });
 }
 
-function boundedList<T>(value: unknown, item: (candidate: unknown) => candidate is T): value is T[] {
-  return Array.isArray(value) && value.length <= MAX_ITEMS && value.every(item);
-}
-
-function validSourceRange(value: unknown, blockIds: ReadonlySet<string>): value is AnalysisSourceRangeProjection {
-  if (!isRecord(value) || !hasExactKeys(value, ['blockId', 'fromGrapheme', 'toGrapheme'])) return false;
-  if (typeof value.blockId !== 'string' || !BLOCK_ID_PATTERN.test(value.blockId) || !blockIds.has(value.blockId)) return false;
-  const from = value.fromGrapheme;
-  const to = value.toGrapheme;
-  if (from === null && to === null) return true;
-  return Number.isSafeInteger(from) && Number.isSafeInteger(to) && (from as number) >= 0 && (to as number) >= (from as number);
-}
-
-function validText(candidate: unknown): candidate is string {
-  return boundedStoredText(candidate, MAX_SHORT_TEXT);
-}
+export const CONFIDENCE_ALIASES: Readonly<Record<string, AnalysisConfidence>> = {
+  高: 'high', 高置信度: 'high', 中: 'medium', 中等: 'medium', 中置信度: 'medium', 低: 'low', 低置信度: 'low',
+};
+const ENTITY_ALIASES: Readonly<Record<string, AnalysisEntityKind>> = {
+  人物: 'person', 人: 'person', 地点: 'place', 地名: 'place', 机构: 'organization', 组织: 'organization',
+  物品: 'object', 器物: 'object', 术语: 'term', 其他: 'other',
+};
 
 export function parseUnitResult(
   text: string,
-  expected: { unitOrdinal: number; blockIds: ReadonlyArray<string> },
+  expected: { unitOrdinal: number; blockIds: ReadonlyArray<string>; blockLengths?: ReadonlyMap<string, number> },
 ): UnitResultParse {
-  const body = stripModelJsonFence(text);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): UnitResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, [
-    'schema', 'unitOrdinal', 'synopsis', 'entities', 'events', 'relationships', 'settingClaims', 'conflicts', 'unresolved', 'confidence',
-  ])) return invalid('单元结果键集合不符合契约 v1。');
-  if (parsed.schema !== BASELINE_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是契约 v1。');
-  if (!Number.isSafeInteger(parsed.unitOrdinal) || (parsed.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (parsed.unitOrdinal !== expected.unitOrdinal) {
-    return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(parsed.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
-  }
-  if (!boundedStoredText(parsed.synopsis, MAX_LONG_TEXT)) return invalid('结构概述缺失或超出边界。');
-  if (!CONFIDENCE_LEVELS.includes(parsed.confidence as AnalysisConfidence)) return invalid('置信度不在闭合集合内。');
+  const reader = ModelResultReader.read(text, BASELINE_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
+  if (reader === null) return ModelResultReader.failure(text);
+  const parsed = reader.value;
   const blockIds = new Set(expected.blockIds);
-  let rangeOutOfUnit = false;
-  const ranges = (candidate: unknown): candidate is AnalysisSourceRangeProjection[] => {
-    if (!Array.isArray(candidate) || candidate.length > MAX_ITEMS) return false;
-    for (const range of candidate) {
-      if (!isRecord(range) || !hasExactKeys(range, ['blockId', 'fromGrapheme', 'toGrapheme'])) return false;
-      if (typeof range.blockId === 'string' && BLOCK_ID_PATTERN.test(range.blockId) && !blockIds.has(range.blockId)) {
-        rangeOutOfUnit = true;
-        return false;
-      }
-      if (!validSourceRange(range, blockIds)) return false;
-    }
-    return true;
-  };
-  const validEntity = (candidate: unknown): candidate is UnitEntity =>
-    isRecord(candidate) && hasExactKeys(candidate, ['name', 'kind', 'aliases', 'note', 'sourceRanges']) &&
-    validText(candidate.name) && ENTITY_KINDS.includes(candidate.kind as AnalysisEntityKind) &&
-    boundedList(candidate.aliases, validText) && (candidate.note === null || boundedStoredText(candidate.note, MAX_LONG_TEXT)) &&
-    ranges(candidate.sourceRanges);
-  const validEvent = (candidate: unknown): candidate is UnitEvent =>
-    isRecord(candidate) && hasExactKeys(candidate, ['ordinal', 'summary', 'chronology', 'participants', 'sourceRanges']) &&
-    Number.isSafeInteger(candidate.ordinal) && (candidate.ordinal as number) >= 1 && boundedStoredText(candidate.summary, MAX_LONG_TEXT) &&
-    (candidate.chronology === null || boundedStoredText(candidate.chronology, MAX_SHORT_TEXT)) &&
-    boundedList(candidate.participants, validText) && ranges(candidate.sourceRanges);
-  const validRelationship = (candidate: unknown): candidate is UnitRelationship =>
-    isRecord(candidate) && hasExactKeys(candidate, ['subject', 'object', 'relation', 'sourceRanges']) &&
-    validText(candidate.subject) && validText(candidate.object) && validText(candidate.relation) && ranges(candidate.sourceRanges);
-  const validClaim = (candidate: unknown): candidate is UnitSettingClaim =>
-    isRecord(candidate) && hasExactKeys(candidate, ['subject', 'claim', 'sourceRanges']) &&
-    validText(candidate.subject) && boundedStoredText(candidate.claim, MAX_LONG_TEXT) && ranges(candidate.sourceRanges);
-  const validNote = (candidate: unknown): candidate is UnitNote =>
-    isRecord(candidate) && hasExactKeys(candidate, ['description', 'sourceRanges']) &&
-    boundedStoredText(candidate.description, MAX_LONG_TEXT) && ranges(candidate.sourceRanges);
-  const sections: Array<[string, (candidate: unknown) => boolean, string]> = [
-    ['entities', (value) => boundedList(value, validEntity), '实体/别名/术语'],
-    ['events', (value) => boundedList(value, validEvent), '事件与时序'],
-    ['relationships', (value) => boundedList(value, validRelationship), '关系'],
-    ['settingClaims', (value) => boundedList(value, validClaim), '内部设定声明'],
-    ['conflicts', (value) => boundedList(value, validNote), '冲突'],
-    ['unresolved', (value) => boundedList(value, validNote), '未解决事项'],
-  ];
-  for (const [key, valid, label] of sections) {
-    if (!valid(parsed[key])) {
-      if (rangeOutOfUnit) return { ok: false, code: 'range-out-of-unit', detail: `${label}引用了本单元范围之外的内容块。` };
-      return invalid(`${label}不符合契约 v1。`);
-    }
+  const prose = (value: unknown, limit: number, section: string, index: number, optional = false) => reader.text(value, limit, section, index, optional);
+  const ranges = (value: unknown, section: string) => salvageSourceRanges(reader, value, blockIds, section, MAX_ITEMS, expected.blockLengths);
+  const strings = (value: unknown, section: string) => reader.array(value, section, MAX_ITEMS).flatMap((item, index) => {
+    const text = prose(item, MAX_SHORT_TEXT, section, index);
+    if (text === null) { reader.drop(section, index, 'text-invalid'); return []; }
+    return [text];
+  });
+  const entries = <T>(section: string, parse: (value: Record<string, unknown>, index: number) => T | null): T[] =>
+    reader.array(parsed[section], section, MAX_ITEMS).flatMap((candidate, index) => {
+      const value = typeof candidate === 'string' && (section === 'conflicts' || section === 'unresolved')
+        ? (reader.drop(section, index, 'string-note-wrapped'), { description: candidate }) : candidate;
+      const result = isRecord(value) ? parse(value, index) : null;
+      if (result === null) { reader.drop(section, index, 'entry-invalid'); return []; }
+      return [result];
+    });
+  const entities = entries<UnitEntity>('entities', (value, index) => {
+    const name = prose(value.name, MAX_SHORT_TEXT, 'entities', index);
+    if (name === null) return null;
+    return { name, kind: reader.enum(value.kind, ENTITY_KINDS, ENTITY_ALIASES, 'other', 'entities', index),
+      aliases: strings(value.aliases, `entities.${index}.aliases`), note: prose(value.note, MAX_LONG_TEXT, 'entities', index, true) || null,
+      sourceRanges: ranges(value.sourceRanges, `entities.${index}.sourceRanges`) };
+  });
+  const events = entries<UnitEvent>('events', (value, index) => {
+    const summary = prose(value.summary, MAX_LONG_TEXT, 'events', index);
+    if (summary === null) return null;
+    if (!Number.isSafeInteger(value.ordinal) || (value.ordinal as number) < 1) reader.drop('events', index, 'ordinal-renumbered');
+    return { ordinal: Number.isSafeInteger(value.ordinal) && (value.ordinal as number) > 0 ? value.ordinal as number : index + 1,
+      summary, chronology: prose(value.chronology, MAX_SHORT_TEXT, 'events', index, true) || null,
+      participants: strings(value.participants, `events.${index}.participants`), sourceRanges: ranges(value.sourceRanges, `events.${index}.sourceRanges`) };
+  });
+  if (new Set(events.map((event) => event.ordinal)).size !== events.length || events.some((event, index) => event.ordinal !== index + 1)) {
+    events.forEach((event, index) => { if (event.ordinal !== index + 1) reader.drop('events', index, 'ordinal-renumbered'); });
+    events.forEach((event, index) => { events[index] = { ...event, ordinal: index + 1 }; });
   }
-  const events = parsed.events as UnitEvent[];
-  const ordinals = events.map((event) => event.ordinal);
-  if (new Set(ordinals).size !== ordinals.length) return invalid('事件序号重复。');
-  const result: BaselineUnitResult = {
-    schema: BASELINE_UNIT_RESULT_SCHEMA,
-    unitOrdinal: expected.unitOrdinal,
-    synopsis: parsed.synopsis as string,
-    entities: parsed.entities as UnitEntity[],
-    events,
-    relationships: parsed.relationships as UnitRelationship[],
-    settingClaims: parsed.settingClaims as UnitSettingClaim[],
-    conflicts: parsed.conflicts as UnitNote[],
-    unresolved: parsed.unresolved as UnitNote[],
-    confidence: parsed.confidence as AnalysisConfidence,
-  };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  const relationships = entries<UnitRelationship>('relationships', (value, index) => {
+    const subject = prose(value.subject, MAX_SHORT_TEXT, 'relationships', index);
+    const object = prose(value.object, MAX_SHORT_TEXT, 'relationships', index);
+    const relation = prose(value.relation, MAX_SHORT_TEXT, 'relationships', index);
+    return subject === null || object === null || relation === null ? null : { subject, object, relation, sourceRanges: ranges(value.sourceRanges, `relationships.${index}.sourceRanges`) };
+  });
+  const settingClaims = entries<UnitSettingClaim>('settingClaims', (value, index) => {
+    const subject = prose(value.subject, MAX_SHORT_TEXT, 'settingClaims', index);
+    const claim = prose(value.claim, MAX_LONG_TEXT, 'settingClaims', index);
+    return subject === null || claim === null ? null : { subject, claim, sourceRanges: ranges(value.sourceRanges, `settingClaims.${index}.sourceRanges`) };
+  });
+  const notes = (section: string) => entries<UnitNote>(section, (value, index) => {
+    const description = prose(value.description, MAX_LONG_TEXT, section, index);
+    return description === null ? null : { description, sourceRanges: ranges(value.sourceRanges, `${section}.${index}.sourceRanges`) };
+  });
+  const conflicts = notes('conflicts');
+  const unresolved = notes('unresolved');
+  const synopsis = prose(parsed.synopsis, MAX_LONG_TEXT, 'synopsis', -1, true) ?? '';
+  const count = entities.length + events.length + relationships.length + settingClaims.length + conflicts.length + unresolved.length;
+  if (synopsis === '' && count === 0) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
+  return reader.finish<BaselineUnitResult>({ schema: BASELINE_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, synopsis, entities, events, relationships,
+    settingClaims, conflicts, unresolved, confidence: reader.enum(parsed.confidence, CONFIDENCE_LEVELS, CONFIDENCE_ALIASES, 'low', 'confidence', -1) });
 }
 
 /**
  * Prompt contract /1, retained byte for byte as it was frozen before Issue #826 (digest `4ba25b2f…7eb5`). It describes the
  * `conflicts` and `unresolved` elements in prose alone, and a DeepSeek V4.1 Flash answer to it (S40/first-baseline/9) gave
- * them as bare strings, which {@link parseUnitResult} rightly refuses. It binds nothing new: only the J-04 replay of the
+ * them as bare strings, which {@link parseUnitResult} now wraps as typed notes. It binds nothing new: only the J-04 replay of the
  * recorded `sample1-recorded-v41-baseline` capture asks it again, so that historical Run asks what was asked then.
  */
 export const BASELINE_PROMPT_CONTRACT_V1 = {
@@ -307,8 +292,8 @@ export function parseUnitMessageHeader(text: string): UnitMessageHeader | null {
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const ordinal = Number(match[1]);
-  const total = Number(match[2]);
+  const ordinal = modelNumber(match[1]);
+  const total = modelNumber(match[2]);
   if (!Number.isSafeInteger(ordinal) || ordinal < 1 || !Number.isSafeInteger(total) || total < ordinal) return null;
   return { ordinal, total, unitDigest: match[3]! };
 }

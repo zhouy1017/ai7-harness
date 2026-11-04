@@ -1,3 +1,4 @@
+import { researchPlanLine } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
@@ -524,9 +525,9 @@ export function selectionOutsideLine(count: number): string {
   return `所选范围外另有 ${count} 处，未标记`;
 }
 
-/** A 当前选区 Run's unplaceable quotes carry no paragraph, so its line names the reading ranges they came from (P3-1). */
-export function selectionExcludedLine(count: number): string {
-  return `所读范围内另有 ${count} 条未能定位引文，列在排除附录中`;
+/** A 当前选区 Run names the reading ranges and actual reasons for its excluded findings. */
+export function selectionExcludedLine(count: number, reasonLabels: ReadonlyArray<string>): string {
+  return `所读范围内另有 ${count} 条发现未采用，列在排除附录中：${[...new Set(reasonLabels)].join('；')}`;
 }
 
 /**
@@ -846,6 +847,7 @@ interface BaselineReading {
 
 /** What one category of the configuration can do now, read once per projection or preparation. */
 interface CategoryReading {
+  readonly researchSourceLine?: string;
   readonly entry: ReviewCategoryConfigurationEntry;
   /** Why the category cannot run at all now; `null` when it can. */
   readonly unavailableReason: string | null;
@@ -2949,7 +2951,7 @@ export class ReviewRunStore {
     let outside = 0;
     if (category.executor === 'factual-review-kind') {
       const factual = revision as FactualReviewResultSetRevisionProjection;
-      findings = factual.findings.filter(read).map((finding) => ({
+      findings = factual.findings.filter((finding) => read(finding) && blocks.has(finding.sourceRange.blockId)).map((finding) => ({
         kindRef: finding.findingId,
         severity: FACTUAL_TIER_SEVERITY[finding.severity],
         blockId: finding.sourceRange.blockId,
@@ -2965,14 +2967,18 @@ export class ReviewRunStore {
         body: `【${finding.verdict}】${finding.question}`,
         basis: [{ label: `可核查依据 · ${finding.category}`, blockId: null, fromGrapheme: null, toGrapheme: null, quote: finding.basis }],
       }));
-      excludedCount = factual.excluded.filter((excluded) => recomputed.has(excluded.unitOrdinal)).length;
+      excluded = factual.findings.filter((finding) => read(finding) && !blocks.has(finding.sourceRange.blockId)).map((finding) => ({
+        categoryId: category.categoryId, categoryLabel: category.entry.label, unitOrdinal: finding.unitOrdinal,
+        text: JSON.stringify({ quote: finding.quote, note: finding.question }), reasonCode: 'quote-not-found', reasonLabel: '发现所在的段落已不在本次稿件中。',
+      }));
+      excludedCount = factual.excluded.filter((excluded) => recomputed.has(excluded.unitOrdinal)).length + excluded.length;
     } else {
       const review = revision as ReviewCategoryResultSetRevisionProjection;
       // #809: the live non-web route has no external evidence. The label follows the recorded
       // result into both its finding and its mark; model confidence cannot turn it into verification.
       const unverified = revision.policyPin.operationalScope === 'developer-live' || revision.policyPin.operationalScope === 'ordinary-production';
       const disclosure = unverified ? '【未联网核查】' : '';
-      findings = review.findings.filter(read).map((finding) => ({
+      findings = review.findings.filter((finding) => read(finding) && blocks.has(finding.sourceRange.blockId)).map((finding) => ({
         kindRef: finding.findingId,
         severity: finding.severity,
         blockId: finding.sourceRange.blockId,
@@ -2982,17 +2988,22 @@ export class ReviewRunStore {
         quote: finding.quote,
         note: `${disclosure}${finding.note}`,
         replacement: finding.replacement,
+        ...(finding.replacement === null ? { output: 'annotation' as const } : {}),
         clauseId: finding.clauseId,
         stateLine: unverified ? '未联网核查' : null,
         body: `${disclosure}${category.entry.riskPointsOnly ? RISK_POINT_PREFIX : ''}${finding.note}`,
         basis: this.#clauseBasis(category.entry, finding.clauseId),
         referencedRuleVersions: rulesOf(finding),
       }));
-      excluded = review.excluded.filter((finding) => recomputed.has(finding.unitOrdinal)).map((finding) => ({
+      excluded = review.excluded.filter((finding) => finding.unitOrdinal === 0 || recomputed.has(finding.unitOrdinal)).map((finding) => ({
         categoryId: category.categoryId, categoryLabel: category.entry.label, unitOrdinal: finding.unitOrdinal,
         text: finding.rawText ?? JSON.stringify({ quote: finding.quote, note: finding.note, replacement: finding.replacement }),
         reasonCode: finding.reason, reasonLabel: finding.reasonLabel,
       }));
+      for (const finding of review.findings.filter((finding) => read(finding) && !blocks.has(finding.sourceRange.blockId))) {
+        excluded.push({ categoryId: category.categoryId, categoryLabel: category.entry.label, unitOrdinal: finding.unitOrdinal,
+          text: JSON.stringify({ quote: finding.quote, note: finding.note }), reasonCode: 'quote-not-found', reasonLabel: '发现所在的段落已不在本次稿件中。' });
+      }
       excludedCount = excluded.length;
     }
     // 当前选区 (Issue #423 review, P1-1; V2-UX-TASK-003): the reading ranges are read whole, as context, and only what lies on the
@@ -3024,14 +3035,14 @@ export class ReviewRunStore {
     if (deliverable !== null) return [{ label: `交付物（只读） · ${deliverable.documentTitle} · ${deliverable.clauseId}`,
       quote: deliverable.text, blockId: null, fromGrapheme: null, toGrapheme: null }];
     for (const document of entry.guidelineDocuments) {
-      const clause = document.clauses.find((candidate) => candidate.clauseId === clauseId);
-      if (clause !== undefined) {
-        return [{ label: `条款 ${clause.clauseId} · ${document.title}（第 ${document.version} 版）`, blockId: null, fromGrapheme: null, toGrapheme: null, quote: clause.text }];
+      const clauses = document.clauses.filter((candidate) => candidate.clauseId === clauseId || clauseId !== null && candidate.clauseId.startsWith(`${clauseId}.`));
+      if (clauses.length > 0) {
+        return clauses.map((clause) => ({ label: `条款 ${clause.clauseId} · ${document.title}（第 ${document.version} 版）`, blockId: null, fromGrapheme: null, toGrapheme: null, quote: clause.text }));
       }
     }
-    return entry.guidelineDocuments.map((document) => ({
-      label: `依据 · ${document.issuer} · ${document.title}（第 ${document.version} 版）`, blockId: null, fromGrapheme: null, toGrapheme: null, quote: null,
-    }));
+    return entry.guidelineDocuments.flatMap((document) => document.clauses.map((clause) => ({
+      label: `条款 ${clause.clauseId} · ${document.title}（第 ${document.version} 版）`, blockId: null, fromGrapheme: null, toGrapheme: null, quote: clause.text,
+    })));
   }
 
   /**
@@ -3224,7 +3235,7 @@ export class ReviewRunStore {
           // A local candidate has no quotation to locate; its exclusions are listed with the local check, not in the appendix.
           ...(source.excludedCount > 0
             ? [source.local !== undefined ? `另有 ${source.excludedCount} 个本地候选未通过精确定位或超出结果界限，未生成批注，列在本次本地检查的排除记录中`
-              : source.selection ? selectionExcludedLine(source.excludedCount) : `另有 ${source.excludedCount} 条未能定位引文，列在排除附录中`]
+              : source.selection ? selectionExcludedLine(source.excludedCount, (source.excluded ?? []).map((finding) => finding.reasonLabel)) : `另有 ${source.excludedCount} 条发现未采用，列在排除附录中：${[...new Set((source.excluded ?? []).map((finding) => finding.reasonLabel))].join('；')}`]
             : []),
           ...(source.outsideSelection > 0 ? [selectionOutsideLine(source.outsideSelection)] : []),
         ].join('；') + '。';
@@ -4191,8 +4202,20 @@ export class ReviewRunStore {
       return { entry, unavailableReason: liveReviewUnavailableReason(entry, launch.policy), facts: none, projection: null };
     }
     let projection: AnalysisProjection;
+    let researchSourceLine: string | undefined;
+    let researchUnavailableReason: string | null = null;
     try {
-      projection = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId).inspect(bookId, progress);
+      const ledger = this.#ledgers.ledgerOf(entry, undefined, undefined, bookId);
+      projection = ledger.inspect(bookId, progress);
+      if (entry.searchEngine) {
+        try {
+          const source = ledger.currentResearchBackend();
+          if (source?.selectionSource === 'model-channel') researchSourceLine = researchPlanLine(source);
+        } catch (error) {
+          if (!(error instanceof AnalysisError)) throw error;
+          researchUnavailableReason = error.message;
+        }
+      }
     } catch (error) {
       if (error instanceof AnalysisError) return { entry, unavailableReason: error.message, facts: none, projection: null };
       throw error;
@@ -4232,9 +4255,10 @@ export class ReviewRunStore {
     };
     return {
       entry,
-      unavailableReason: entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null,
+      unavailableReason: researchUnavailableReason ?? (entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null),
       facts,
       projection,
+      ...(researchSourceLine === undefined ? {} : { researchSourceLine }),
       unread,
     };
   }
@@ -4262,7 +4286,8 @@ export class ReviewRunStore {
       searchEngine: entry.searchEngine,
       modelFree: entry.executor === 'baseline-leads' || entry.executor === 'local-text-check',
       materialReferencesAllowed: entry.executor === 'review-category-contract',
-      basisStatement: reviewCategoryBasisStatement(entry),
+      basisStatement: reading.researchSourceLine === undefined ? reviewCategoryBasisStatement(entry)
+        : reviewCategoryBasisStatement(entry).replace('使用用户所选的联网检索后端', reading.researchSourceLine),
       guidelineDocuments: entry.guidelineDocuments.map((document) => ({
         documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauseCount: document.clauses.length,
       })),
@@ -4747,8 +4772,8 @@ export class ReviewRunStore {
       const deliverable = entry === undefined ? null : this.#deliverableReference(entry, clauseId);
       if (deliverable !== null) return [deliverable];
       for (const document of entry?.guidelineDocuments ?? []) {
-        const clause = document.clauses.find((candidate) => candidate.clauseId === clauseId);
-        if (clause !== undefined) return [{ documentTitle: document.title, clauseId: clause.clauseId, text: clause.text }];
+        const clauses = document.clauses.filter((candidate) => candidate.clauseId === clauseId || clauseId !== null && candidate.clauseId.startsWith(`${clauseId}.`));
+        if (clauses.length > 0) return clauses.map((clause) => ({ documentTitle: document.title, clauseId: clause.clauseId, text: clause.text }));
       }
       return [];
     };

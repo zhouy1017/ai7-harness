@@ -1,3 +1,4 @@
+import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import {
@@ -34,6 +35,11 @@ import type { ReviewFocus } from './review-workspace.js';
 import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisTab } from './custom-analysis.js';
 import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
 import { taskPlanQuickStartFellBack, TASK_DRAWER_TITLE, taskPlanSummaryLine, TASK_PLAN_DRIFT_HEADING } from './task-drawer-labels.js';
+
+export const ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL = '查看任务抽屉';
+export function analysisUpdateBlockedDrawerAction(blockedReason: string | null): 'task-drawer' | null {
+  return blockedReason !== null && blockedReason.startsWith('有一项运行因') ? 'task-drawer' : null;
+}
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
 import {
   RUN_REPORT_CLASSIFICATION_LABELS,
@@ -272,7 +278,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.dataset['runReportDigest'] = report.reportDigest;
     disclosure.dataset['runReportRun'] = report.runRecordId;
     disclosure.dataset['runReportClassification'] = report.classification;
-    disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+    disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
     disclosure.append(element('p', 'research-status', researchStatusLine(report)));
     if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
     const stages = element('ul', 'analysis-list analysis-run-report-stages');
@@ -339,6 +345,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         element('dt', undefined, '运行报告'), element('dd', 'technical-identity', `${report.schema} · 摘要 ${report.reportDigest} · 账目摘要 ${report.accountingDigest}`),
         ...(report.ifRedone.state === 'closed' || report.ifRedone.parseFailure === undefined ? [] : [
           element('dt', undefined, '反思解析诊断'), element('dd', 'technical-identity', `${report.ifRedone.parseFailure.code} · ${report.ifRedone.parseFailure.detail}`),
+        ]),
+        ...(report.ifRedone.state !== 'closed' ? [] : report.ifRedone.salvaged ?? []).flatMap((entry) => [
+          element('dt', undefined, '反思解析取舍'), element('dd', 'technical-identity', `${entry.section}[${entry.index}] ${entry.reason}`),
         ]),
         element('dt', undefined, '绑定'), element('dd', 'technical-identity', `Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`),
         element('dt', undefined, '记录时刻'), element('dd', 'technical-identity', report.recordedAt),
@@ -536,6 +545,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
             element('dt', undefined, '解析诊断'), element('dd', 'technical-identity', `${unit.gap.parseFailure.code} · ${unit.gap.parseFailure.detail}`),
           ]),
           element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
+          ...(unit.state !== 'closed' || !unit.salvaged?.length ? [] : [
+            element('dt', undefined, '解析取舍'), element('dd', 'technical-identity',
+              `丢弃引用 ${unit.salvaged.filter((entry) => entry.reason === 'range-out-of-unit' || entry.reason === 'retrieval-reference-not-exact-fetched').length} 条 · ${unit.salvaged.map((entry) => `${entry.section}[${entry.index}] ${entry.reason}`).join('；')}`),
+          ]),
           ...(unit.state !== 'closed' ? [] : [
             element('dt', undefined, '单元内计数'),
             element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
@@ -614,6 +627,9 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       ]),
       ...(revision.assuranceSample.parseFailures ?? []).flatMap((failure) => [
         element('dt', undefined, `抽检单元 ${failure.unitOrdinal} 解析诊断`), element('dd', 'technical-identity', `${failure.code} · ${failure.detail}`),
+      ]),
+      ...[...(revision.crossUnitReduction.salvaged ?? []), ...(revision.assuranceSample.salvaged ?? [])].flatMap((entry) => [
+        element('dt', undefined, '解析取舍'), element('dd', 'technical-identity', `${entry.section}[${entry.index}] ${entry.reason}`),
       ]),
       element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
       element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
@@ -869,7 +885,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
-    if (controls.blockedReason !== null) section.append(element('p', 'attention-note', controls.blockedReason));
+    if (controls.blockedReason !== null) {
+      section.append(element('p', 'attention-note', controls.blockedReason));
+      if (analysisUpdateBlockedDrawerAction(controls.blockedReason) === 'task-drawer') {
+        const openDrawer = button(ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL, 'secondary', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent?.taskIntentId ?? null));
+        openDrawer.dataset['analysisUpdateBlockedLink'] = 'task-drawer';
+        section.append(openDrawer);
+      }
+    }
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
@@ -1174,6 +1197,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
     )));
     card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
+    if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
+      const report = projection.taskOutcome.report;
+      const reason = report.classification === 'failed'
+        ? report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason
+        : analysisRunSummary(report).reason;
+      card.append(element('p', 'attention-note', `${projection.taskOutcome.label}${reason === null ? '' : ` · ${reason}`}`));
+    }
 
     // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
     // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
@@ -1246,7 +1276,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
     if (projection.taskOutcome) {
-      const outcome = element('section', 'success-note analysis-outcome');
+      const outcome = element('section', projection.taskOutcome.classification === 'completed' ? 'success-note analysis-outcome' : 'attention-note analysis-outcome');
       outcome.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
       outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
       outcome.append(

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { ModelResultSalvage } from '../../shared/protocol/analysis.js';
 
 export class AnalysisError extends Error {
   constructor(readonly code: string, message: string) {
@@ -84,6 +85,12 @@ export function hasExactKeys(value: Record<string, unknown>, keys: readonly stri
 /** Model fields are an open set; optional names document the caller's contract, not a whitelist. */
 export function hasKeys(value: unknown, required: readonly string[], _optional: readonly string[] = []): value is Record<string, unknown> {
   return isRecord(value) && required.every((key) => Object.hasOwn(value, key));
+}
+
+/** Never invoke object coercion on model ordinals/references; callers enforce their own bounds. */
+export function modelNumber(value: unknown): number {
+  if (typeof value === 'number') return value;
+  return typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
 }
 
 export type { ModelResultSalvage, SalvagedModelResult } from '../../shared/protocol/analysis.js';
@@ -178,4 +185,70 @@ export function extractModelJson(text: string, { partial = false, arrayKey }: { 
     if (!balanced) return null;
   }
   return null;
+}
+
+export const NO_USABLE_MODEL_ENTRIES = '模型回答无法读出任何可用条目';
+
+/** Entry parsers share recovery bookkeeping; stored AI7 records still use their strict readers. */
+export class ModelResultReader {
+  readonly salvaged: ModelResultSalvage[] = [];
+  private constructor(readonly value: Record<string, unknown>, readonly partial: boolean, readonly schema: string) {}
+
+  static failure(text: string): { ok: false; code: 'not-json' | 'schema-invalid'; detail: string } {
+    let code: 'not-json' | 'schema-invalid' = 'not-json';
+    try { JSON.parse(stripModelJsonFence(text)); code = 'schema-invalid'; } catch { /* No readable JSON. */ }
+    return { ok: false, code, detail: NO_USABLE_MODEL_ENTRIES };
+  }
+
+  static read(text: string, schema: string, unitOrdinal?: number): ModelResultReader | null {
+    const complete = extractModelJson(text);
+    const value = complete ?? extractModelJson(text, { partial: true });
+    if (value === null) return null;
+    const reader = new ModelResultReader(value, complete === null, schema);
+    if (complete === null) reader.drop('response', -1, 'truncated-json');
+    if (value.schema !== schema) reader.drop('schema', -1, 'request-schema');
+    if (unitOrdinal !== undefined && value.unitOrdinal !== unitOrdinal) reader.drop('unitOrdinal', -1, 'request-unitOrdinal');
+    return reader;
+  }
+
+  drop(section: string, index: number, reason: string): void { this.salvaged.push({ section, index, reason }); }
+
+  array(value: unknown, section: string, maximum = Infinity): unknown[] {
+    if (!Array.isArray(value)) {
+      if (value !== undefined) this.drop(section, -1, 'array-invalid');
+      return [];
+    }
+    for (let index = maximum; index < value.length; index += 1) this.drop(section, index, 'item-limit');
+    return value.slice(0, maximum) as unknown[];
+  }
+
+  text(value: unknown, maximum: number, section: string, index: number, optional = false): string | null {
+    if (optional && (value === undefined || value === null)) return '';
+    if (typeof value !== 'string' || !value.isWellFormed() || (!optional && value.trim() === '')) {
+      if (optional) this.drop(section, index, 'text-invalid');
+      return null;
+    }
+    const normalized = normalizeLine(value, maximum);
+    if (normalized !== value) this.drop(section, index, 'text-normalized');
+    return normalized;
+  }
+
+  enum<T extends string>(value: unknown, choices: readonly T[], aliases: Readonly<Record<string, T>>, fallback: T, section: string, index: number): T {
+    const key = typeof value === 'string' ? value.normalize('NFKC').trim().toLowerCase().replace(/[\s_]+/gu, '-') : '';
+    const result = choices.find((choice) => choice.toLowerCase() === key) ?? (Object.hasOwn(aliases, key) ? aliases[key] : undefined) ?? fallback;
+    if (result !== value) this.drop(section, index, 'enum-normalized');
+    return result;
+  }
+
+  /** An intentional empty answer is usable; a section emptied by rejecting every entry is not. */
+  empty(section: string): boolean {
+    return !this.partial && (Array.isArray(this.value[section]) && this.value[section].length === 0 ||
+      this.value[section] === undefined && this.value.schema === this.schema);
+  }
+
+  finish<T extends object>(value: T) {
+    const result = { ...value, ...(this.salvaged.length === 0 ? {} : { salvaged: this.salvaged }) };
+    const json = canonicalJson(result);
+    return { ok: true as const, result, ...(this.salvaged.length === 0 ? {} : { salvaged: this.salvaged }), canonicalJson: json, digest: sha256Hex(json) };
+  }
 }

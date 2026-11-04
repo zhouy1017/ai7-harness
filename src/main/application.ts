@@ -3737,7 +3737,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 107, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 108, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });
@@ -4276,8 +4276,8 @@ export async function runApplication(): Promise<void> {
       } catch {
         throw new ServiceCallError('MODEL_SERVICE_STATE_UNCERTAIN', '凭据已受保护，但连接状态需要处理。');
       }
-      await service!.call('refreshModelServiceModels', { route });
-      return settingsProjection();
+      const modelDiscovery = await service!.call('refreshModelServiceModels', { route });
+      return { ...(await settingsProjection()), modelDiscovery };
     };
     /** Remove a route's credential — the DeepSeek 开放平台（官方） route's when none is named — keeping its connection 需设置. */
     const removeModelServiceCredential = async (input?: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection> => {
@@ -4311,13 +4311,15 @@ export async function runApplication(): Promise<void> {
       probeSearchBackend: (input) => service!.call('probeSearchBackend', input),
       async saveSearchBackendCredential(input) {
         const reuse = input !== null && typeof input === 'object' && Object.keys(input).sort().join(',') === 'backendId,reuseModelCredential' &&
-          input.backendId === 'search-deepseek' && 'reuseModelCredential' in input && input.reuseModelCredential === true;
+          typeof input.backendId === 'string' && 'reuseModelCredential' in input && input.reuseModelCredential === true;
         if (!reuse && (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'backendId,secret' || !('secret' in input) || typeof input.secret !== 'string' ||
             !input.secret.isWellFormed() || input.secret.trim().length < 1 || input.secret.length > 16_384)) throw new ServiceCallError('SEARCH_CREDENTIAL_INVALID', '联网检索凭据输入无效。');
         if (protectedSecretStore === undefined) throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
-        const source = reuse ? (await settingsProjection()).routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')?.connection : null;
-        if (reuse && source?.credentialOperationState !== 'ready') throw new ServiceCallError('SEARCH_CREDENTIAL_MISSING', '请先保存 DeepSeek 开放平台（官方）凭据。');
-        const pending = await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: null, credentialOperationState: 'needs-attention' });
+        const routeSettings = reuse ? await settingsProjection() : null;
+        const source = reuse ? routeSettings!.routeChoice.routes.find((route) => route.route.startsWith(input.backendId.slice('search-'.length) + '-') )?.connection : null;
+        if (reuse && source?.credentialOperationState !== 'ready') throw new ServiceCallError('SEARCH_CREDENTIAL_MISSING', '请先保存对应模型渠道的凭据。');
+        const existing = reuse ? (await service!.call('getSearchBackendSettings', {})).backends.find((backend) => backend.backendId === input.backendId)?.connection : null;
+        const pending = await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: existing?.credentialReference ?? null, credentialOperationState: 'needs-attention' });
         try {
           if (reuse) await protectedSecretStore.copy(source!.credentialReference, pending.credentialReference!);
           else if ('secret' in input) await protectedSecretStore.set(pending.credentialReference!, input.secret);
@@ -4359,7 +4361,10 @@ export async function runApplication(): Promise<void> {
       {
         selectMainRoleModel: async (input) => { await service!.call('selectMainRoleModel', input); return settingsProjection(); },
         selectBothRoleModels: async (input) => { await service!.call('selectBothRoleModels', input); return settingsProjection(); },
-        refreshModelServiceModels: async (input) => { await service!.call('refreshModelServiceModels', input); return settingsProjection(); },
+        refreshModelServiceModels: async (input) => {
+          const modelDiscovery = await service!.call('refreshModelServiceModels', input);
+          return { ...(await settingsProjection()), modelDiscovery };
+        },
         selectFastRoleModel: async (input) => { await service!.call('selectFastRoleModel', input); return settingsProjection(); },
         startConnectionTest: (input) => service!.call('testModelServiceConnection', input),
         connectionTestSettings: settingsProjection,

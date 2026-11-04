@@ -69,6 +69,7 @@ export const REVIEW_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as co
 export const REVIEW_ACTION_LABELS = {
   'new-review': '新建审阅',
   'new-local-check': '本地文字检查',
+  'open-search-settings': '设置联网检索',
   'rereview-changed': '只审改动过的章',
   'open-run': '查看这次审阅',
   // 开始审阅 (ADR 0096 §3): the sheet's one explicit action; 先看计划 opens the plan first.
@@ -129,7 +130,7 @@ export function reviewManuscriptLine(manuscript: ReviewWorkspaceProjection['manu
 // ---- state pills: text and shape, never colour alone (editor-surfaces §0.3) ----------------------------
 
 /** The four tones of §0.3's state pill — 好 / 注意 / 阻塞 / 进行中 — and a neutral one for what has not begun. */
-export type ReviewPillTone = 'good' | 'attention' | 'blocked' | 'progress' | 'neutral';
+export type ReviewPillTone = 'warn' | 'good' | 'attention' | 'blocked' | 'progress' | 'neutral';
 /** The shape each pill draws beside its words, so the pill still reads without colour and in forced colours. */
 export type ReviewPillShape = 'circle' | 'ring' | 'half' | 'triangle' | 'square' | 'diamond' | 'check' | 'dash';
 export interface ReviewPill {

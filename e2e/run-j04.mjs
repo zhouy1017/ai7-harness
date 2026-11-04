@@ -18,7 +18,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
 // and is reconfirmed as version 2.
 // Issue #387 adds a separate fresh Book replaying the reviewed 2026-10-12 V4.1 capture, including its
-// truthful schema-invalid unit 1 gap, under the retained prompt contract /1 it was asked under. Issue #826 then
+// seven recovered string notes in unit 1 under the retained prompt contract /1 it was asked under. Issue #826 then
 // relaunches that Book under the current contracts and replays the reviewed 2026-10-13 range recomputation of units
 // 1 and 2: eight units closed, six of them reused from the /1 revision. Existing authored/synthetic retry and
 // incremental scenarios remain intact.
@@ -360,6 +360,22 @@ async function readBaseline(renderer, revisionId = null) {
     projection.coverageManifest = { ...projection.coverageManifest, units };
     const { digest, ...body } = projection.coverageManifest;
     requireJourney(sha256Hex(canonicalJson(body)) === digest, 'coverage-manifest-page-digest');
+  }
+  for (const key of ['resultSetRevision', 'inspectedRevision']) {
+    const revision = projection[key];
+    if (revision?.overviewPage === undefined || revision.synthesis !== undefined) continue;
+    const chunks = [];
+    let cursor = 0;
+    do {
+      const page = await renderer.evaluate(`window.ai7.getAnalysisRevisionOverview(${JSON.stringify({ revisionId: revision.revisionId, afterIndex: cursor })})`);
+      requireJourney(page.revisionId === revision.revisionId && (page.next === null || page.next > cursor), 'analysis-overview-page');
+      chunks.push(page.text);
+      cursor = page.next;
+    } while (cursor !== null && chunks.length < revision.overviewPage.chunkCount);
+    const text = chunks.join('');
+    requireJourney(cursor === null && chunks.length === revision.overviewPage.chunkCount && [...text].length === revision.overviewPage.totalLength &&
+      sha256Hex(text) === revision.overviewPage.sha256, 'analysis-overview-digest');
+    projection[key] = { ...revision, ...JSON.parse(text) };
   }
   return projection;
 }
@@ -1354,7 +1370,7 @@ async function main() {
       settled.checkpoint?.revisionId === prepared.checkpoint.revisionId && settled.planEnvelope?.digest === prepared.planEnvelope.digest &&
       UUID_PATTERN.test(settled.authorization?.authorizationId) && settled.authorization?.origin === 'standard-direct' &&
       settled.authorization?.authority === 'standard-direct-dispatch' && settled.authorization?.planEnvelopeDigest === prepared.planEnvelope.digest &&
-      UUID_PATTERN.test(settled.run?.runRecordId) && settled.run?.state === 'completed-with-gaps' && settled.run?.stateLabel === '已完成 · 保留缺口' &&
+      UUID_PATTERN.test(settled.run?.runRecordId) && settled.run?.state === 'completed-with-gaps' && settled.run?.stateLabel === '已完成 · 1/8 个单元未读成' &&
       JSON.stringify(settled.run?.transitions?.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'completed-with-gaps']) &&
       settled.run?.blockedReasons === null && settled.actions?.canPrepare === false && settled.actions?.canAuthorize === false,
     'settled-run-record', { state: settled?.state, stateLabel: settled?.stateLabel, authorization: settled?.authorization, run: settled?.run, actions: settled?.actions });
@@ -1377,12 +1393,12 @@ async function main() {
     requireJourney(revision.freshness.state === 'current' && revision.freshness.currentRevisionId === prepared.checkpoint.revisionId &&
       revision.freshness.currentJournalSequence === 0 && revision.provenance.runRecordId === settled.run.runRecordId, 'revision-current');
     requireJourney(UUID_PATTERN.test(settled.taskOutcome?.outcomeId) && settled.taskOutcome?.classification === 'completed-with-gaps' &&
-      settled.taskOutcome?.label === '任务结果：已完成（保留缺口）' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
+      settled.taskOutcome?.label === '已完成 · 1/8 个单元未读成' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
       typeof settled.taskOutcome?.safeNextAction === 'string' && settled.taskOutcome.safeNextAction.length > 0, 'settled-task-outcome', settled.taskOutcome);
     // Synchronized delta with Issue #418: the drawer beside ②A followed the Task to its end, reading the
     // plan again as the Run moved, and now states the authorization and the Run it bound.
     const settledDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-settled');
-    requireJourney(settledDrawer?.pill === '已完成' && settledDrawer.version === '1' &&
+    requireJourney(settledDrawer?.pill === '已完成 · 1/8 个单元未读成' && settledDrawer.version === '1' &&
       settledDrawer.technical.authorization?.startsWith(`${settled.authorization.authorizationId} · standard-direct · standard-direct-dispatch · `) &&
       settledDrawer.technical['run-record']?.startsWith(`${settled.run.runRecordId} · completed-with-gaps · `) &&
       settledDrawer.technical['plan-versions'] === `版本 1 · bound · ${prepared.planEnvelope.digest}`, 'analysis-drawer-settled-plan', settledDrawer);
@@ -1402,7 +1418,7 @@ async function main() {
         card.querySelectorAll('[data-analysis-unit]').length===${SAMPLE1_UNITS} && card.querySelector('[data-analysis-unit="2"][data-analysis-unit-state="gap"]')!==null &&
         card.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===${SAMPLE1_UNITS - 1} &&
         card.textContent.includes(${JSON.stringify(ASSURANCE_STATEMENT)}) && card.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
-        card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('任务结果：已完成（保留缺口）') &&
+        card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('已完成 · 1/8 个单元未读成') &&
         buttons.length>0 && buttons.some((button)=>button.dataset.analysisAction==='return-to-range') && ${ONLY_ANALYSIS_ACTIONS} &&
         card.querySelector('[data-update-action="sync-current"][data-update-available="false"]')!==null &&
         card.querySelector('[data-update-action="reanalyze-book"][data-update-available="true"]')!==null &&
@@ -1781,7 +1797,7 @@ async function main() {
       const stages=Array.from(opened.querySelectorAll('[data-run-report-stage]'));
       return opened.dataset.runReportDigest===${JSON.stringify(reportDigest)} && opened.dataset.runReportRun===${JSON.stringify(report.runRecordId)} &&
         opened.dataset.runReportClassification==='completed-with-gaps' &&
-        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成，保留了没读成的部分 · ') &&
+        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成 · 1/8 个单元未读成 · ') &&
         JSON.stringify(stages.map((stage)=>[stage.dataset.runReportStage, stage.dataset.runReportStageState]))===${JSON.stringify(JSON.stringify(report.stages.map((stage) => [stage.stage, stage.state])))} &&
         stages[0].textContent.startsWith('逐个阅读范围分析：完成，有没读成的部分') && stages[1].textContent.startsWith('跨范围比对：完成') &&
         opened.querySelector('.analysis-run-report-units')?.textContent===${JSON.stringify(`共 ${report.units.submitted} 个阅读范围：沿用上一份 ${report.units.reused} 个，重新分析 ${report.units.recomputed} 个，其中 ${report.units.gaps} 个没有读成，${report.units.retried} 个安全重试过。`)} &&
@@ -3029,17 +3045,16 @@ async function main() {
     // every other finding of a model-read category became a mark on the manuscript (V2-UX-REV-008, MARK-010).
     requireJourney(reviewed?.run?.state === 'settled' &&
       reviewedCategories.map((category) => `${category.categoryId}:${category.state}`).join('|') === 'typos-and-usage:settled|style-and-format:settled|plot-consistency:settled' &&
-      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 3 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 1 &&
+      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 0 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 0 &&
       reviewed.run.findings.filter((finding) => finding.categoryId !== 'plot-consistency').every((finding) => finding.markId !== null && finding.status === 'pending') &&
-      reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null),
+      reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null || finding.output === 'annotation' && finding.replacement === null),
     'review-run-settled', { state: reviewed?.run?.state, categories: reviewedCategories.map((category) => [category.categoryId, category.state, category.findingsCount, category.excludedCount]) });
-    // #1084: this v2 fixture first returns an invalid envelope, then valid siblings and one invalid finding.
-    // The declared retry closes the unit; its rejected finding is readable and never becomes a mark.
-    requireJourney(reviewed.run.excluded.some((entry) => entry.reasonCode === 'contract-schema-invalid') &&
-      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现') &&
+    // H3: the retry still closes the unit; unknown severity and an unmatched quotation become a disclosed annotation.
+    requireJourney(reviewed.run.excluded.length === 0 &&
+      reviewed.run.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation' && entry.replacement === null && entry.note.includes('引文未逐字匹配')) &&
       reviewed.run.findings.some((entry) => entry.categoryId === 'typos-and-usage' && entry.blockPosition !== null && entry.blockPosition <= SAMPLE1_UNIT_RANGES[0][1]),
     'review-v2-rejected-sibling');
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent==='未列为发现的 4 条' && details.textContent.includes('contract-schema-invalid') && details.textContent.includes('合成的无效发现'); })()`, 'review-v2-visible-excluded');
+    await assertRenderer(renderer, `document.querySelector('details.review-excluded')===null && document.querySelectorAll('article.review-finding').length>0`, 'review-v2-visible-excluded');
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
@@ -3079,7 +3094,7 @@ async function main() {
     // 错别字与规范用语 in one confirmation: the strip states the exact write scope before 确认应用, and one
     // Effect writes every listed suggestion (V2-UX-REV-006, PDEC-012, EAPP-003).
     const beforeBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
-    const batchable = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.status === 'pending' && finding.markStatus === 'open' && finding.anchorState === 'exact');
+    const batchable = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.output === 'change-suggestion' && finding.status === 'pending' && finding.markStatus === 'open' && finding.anchorState === 'exact');
     requireJourney(batchable.length > 1, 'review-batch-candidates', { count: batchable.length });
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'review-batch-prepare');
     await waitFor(renderer, `document.querySelector('section.review-batch-strip[data-review-category="typos-and-usage"]')?.dataset.reviewBatchState==='ready'`, 'review-batch-ready');
@@ -3090,6 +3105,8 @@ async function main() {
     requireJourney(afterBatch?.manuscript?.journalSequence === beforeBatch.manuscript.journalSequence + 1 &&
       batchable.every((finding) => afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus === 'applied'),
     'review-batch-one-effect', { before: beforeBatch.manuscript.journalSequence, after: afterBatch?.manuscript?.journalSequence });
+    requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation').every((finding) =>
+      afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus !== 'applied'), 'review-batch-preserves-annotations');
 
     at('review-ignore-with-reason');
     // 忽略并说明 needs a reason, recorded as a Quality Signal, and the finding reads 已忽略 (V2-UX-REV-004).
@@ -3535,16 +3552,13 @@ async function main() {
     const recorded = await readBaseline(renderer);
     const realRevision = recorded?.resultSetRevision;
     const realReport = recorded?.taskOutcome?.report;
-    requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
-      realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
-      realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
-      realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
-      realRevision.gaps[0].parseFailure?.code === 'schema-invalid' &&
-      realRevision.gaps[0].reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && realRevision.coverage.state === 'partial' &&
-      realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
-    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
-      realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
-      realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
+    requireJourney(recorded?.run?.state === 'completed' && recorded.taskOutcome?.classification === 'completed' &&
+      realRevision?.ordinal === 1 && realRevision.units.every((unit) => unit.state === 'closed') && realRevision.gaps.length === 0 &&
+      realRevision.units[0].unresolved.length === 7 && realRevision.units[0].salvaged?.filter((entry) => entry.reason === 'string-note-wrapped').length === 7 &&
+      realRevision.coverage.state === 'complete' && realRevision.coverage.unitsClosed === 8 && realRevision.coverage.unitsTotal === 8, 'recorded-salvaged-unit-closure');
+    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 93 &&
+      realRevision.synthesis.events.length === 69 && realRevision.synthesis.relationships.length === 60 &&
+      realRevision.synthesis.settingClaims.length === 76 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
       realRevision.synthesis.relationships.some((relationship) => relationship.subject === '郑雄' && relationship.object === '曾本之') &&
       realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction?.state === 'closed' &&
       realRevision.assuranceSample?.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
@@ -3569,7 +3583,7 @@ async function main() {
       realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
       recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
     'recorded-zero-new-incurred-transmissions');
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed-with-gaps' && document.querySelector('[data-analysis-unit="1"][data-analysis-unit-state="gap"]') && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===7`, 'recorded-visible-gap');
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed' && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===8 && document.querySelector('[data-analysis-unit="1"]')?.textContent.includes('string-note-wrapped')`, 'recorded-visible-salvage');
     at('restart-immutable');
     await closeOwnedBrowser();
     await launchForCleanup();
@@ -3583,7 +3597,7 @@ async function main() {
       'recorded-restart-preserves-result-and-report');
 
     // #1161 rev6: a separate, unedited sample1 Book owns the genuine paused-/1 execution formerly simulated in L2.
-    // Keep the completed recorded Book above intact. This replay truthfully keeps unit1's schema gap and units2/3 closed.
+    // Keep the completed recorded Book above intact. This replay keeps all three units closed and unit 1's salvage metadata.
     at('recorded-retained-pause');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
@@ -3621,9 +3635,7 @@ async function main() {
         recordedPaused.run.attempt.executionBinding.fixtureSha256 === recordedFixtureDigest &&
         sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
         sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
-        kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
-        kept[0].closed.gap.parseFailure?.code === 'schema-invalid' &&
-        kept[0].closed.gap.reason.startsWith('模型回答的条目缺少必要内容或格式无法识别。') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        kept.every((unit) => unit.closed.state === 'closed') && kept[0].closed.result.salvaged?.length === 7 &&
         recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
       'recorded-paused-authentic-retained-checkpoints');
     } finally { await writeFile(unitHoldPath, 'release'); }
@@ -3631,7 +3643,7 @@ async function main() {
     // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
     // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
     // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
-    // repair, the three sampling /2 turns from the second — so unit 1, schema-invalid under /1, now closes. No recorded
+    // repair, the three sampling /2 turns from the second — so unit 1 closes under /2 with six typed notes. No recorded
     // reflection was ever asked with this replay's accounting (the real Run replayed its units from the development cache
     // and recorded no usage for them), so the reflection settles as the disclosed fixture mismatch it is.
     at('reanalyze-range-select');
@@ -3691,7 +3703,7 @@ async function main() {
     requireJourney(JSON.stringify(rangeBefore?.resultSetRevision) === JSON.stringify(realRevision) &&
       rangeBefore.updateControls?.target?.revisionId === realRevision.revisionId && recordedRangeOption?.unitOrdinal === 1 &&
       recordedRangeOption.startPosition === SAMPLE1_UNIT_RANGES[0][0] && recordedRangeOption.endPosition === SAMPLE1_UNIT_RANGES[0][1] &&
-      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'range-recorded-predecessor-readable');
+      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }), 'range-recorded-predecessor-readable');
     const recordedSelectedRange = { startPosition: recordedRangeOption.startPosition, endPosition: recordedRangeOption.endPosition };
     await assertRenderer(renderer, `(() => {
       const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
@@ -3715,7 +3727,7 @@ async function main() {
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
       rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
       JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
-      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }) &&
+      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }) &&
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
         JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&

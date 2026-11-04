@@ -1,0 +1,41 @@
+{
+  "schema": "ai7.model-fixture-replay-compat/1",
+  "entries": [
+    {
+      "mode": "replay-compat",
+      "fixtureIdentity": "sample1-recorded-v41-baseline",
+      "fixtureSha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391",
+      "stage": "reduction",
+      "contentKey": "551d154466a74ba1fd28816d9381ff8fb2edc2eb1dde10e24dee3d2833489c20",
+      "requestDigest": "ee7b301c80e4013dff3f5f2811eb7e2658fd734f138612a571c9ef14819a0e19",
+      "reason": "#1311 H2: per-entry salvage closes unit 1; replay the same recorded downstream stage for the unchanged admitted sample1 and task prompt, ignoring the changed dependency result/accounting digest."
+    },
+    {
+      "mode": "replay-compat",
+      "fixtureIdentity": "sample1-recorded-v41-baseline",
+      "fixtureSha256": "9650b60b4277cfcd2fa943653ef2b6fc816d674ba38707ae6ec05155238cf391",
+      "stage": "reflection",
+      "contentKey": "ef52ceee2581baa45c986a21c645f0cfb818ac1dd7fb78fab93cf2863261b195",
+      "requestDigest": "9f4775637a2c3d370db83dd2180d7814ad9a7ad9a9a68bee3f642bf085a90044",
+      "reason": "#1311 H2: per-entry salvage closes unit 1; replay the same recorded downstream stage for the unchanged admitted sample1 and task prompt, ignoring the changed dependency result/accounting digest."
+    },
+    {
+      "mode": "replay-compat",
+      "fixtureIdentity": "sample1-recorded-v41-writing-draft",
+      "fixtureSha256": "5f458dce0ea5fa110688737dc7d23138aeb34b7a08a8e8c3e7a902108d7949fb",
+      "stage": "writing-synthesis",
+      "contentKey": "26054ab48e3cb8267c7ed3dff128a4b8fb72c3c909ac1e16669187dc5935e5c2",
+      "requestDigest": "9680c9a6879c8b666cf1479c1e954e5efc27c2402c03745fd888e1a7c1d22490",
+      "reason": "#1311 H3: per-entry salvage closes writing unit 6; replay the same recorded synthesis for the unchanged admitted sample1 and task prompt, ignoring only the closed-unit-set dependency digest."
+    },
+    {
+      "mode": "replay-compat",
+      "fixtureIdentity": "sample1-recorded-v41-editorial-writing-draft",
+      "fixtureSha256": "20ab36fc2427dbb7fd942792e673d70d974f5a04b9e5e3438ce241e93767d00c",
+      "stage": "writing-synthesis",
+      "contentKey": "3294ef777dbbe062239e4fded1169afc511052a2f8f2b39b63de2dbc040220fe",
+      "requestDigest": "1ef8a7564d14f0327d5ce4fced80d1e3a7c6421a4d4f6cd47c03187802d7c3a2",
+      "reason": "#1311 H3: per-entry salvage closes writing unit 6; replay the same recorded synthesis for the unchanged admitted sample1 and task prompt, ignoring only the closed-unit-set dependency digest."
+    }
+  ]
+}

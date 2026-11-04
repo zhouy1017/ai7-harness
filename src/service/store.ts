@@ -4821,7 +4821,10 @@ export class EditorialStore {
       const unconfirmed = stopped ? ledger.unconfirmedRangesOf(run.runRecordId) : [];
       const outcomeUnknown = unconfirmed.length === 0 ? null
         : { units: unconfirmed, stopped: run.state === 'resumable' && ledger.outcomeUnknownOf(run.runRecordId) !== null };
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown };
+      return {
+        unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown,
+        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopReason: run.stopReason, stopAt: run.resumedAt }),
+      };
     });
   }
 
@@ -13347,8 +13350,8 @@ export class EditorialStore {
   }
 
   /** The default backend, or (#1226) with `role: 'fallback'` the one 备用来源 — `null` clears it; a new default never stays the fallback. */
-  selectSearchBackend(backendId: string | null, role?: 'fallback'): void {
-    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role);
+  selectSearchBackend(backendId: string | null, role?: 'fallback', alwaysUseSelectedBackend?: boolean): void {
+    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role, alwaysUseSelectedBackend);
   }
 
   saveSearchBackendCredential(backendId: string, reference: string | null, state: import('../shared/protocol.js').ModelCredentialOperationState): import('../shared/protocol.js').SearchBackendConnectionProjection {
