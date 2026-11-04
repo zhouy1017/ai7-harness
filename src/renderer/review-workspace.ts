@@ -789,7 +789,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const heading = el('div', 'review-workspace-heading');
     heading.append(el('h3', undefined, REVIEW_CARD_HEADING));
     if (run !== null) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
-    node.append(heading, el('p', 'field-note review-manuscript-line', reviewManuscriptLine(next.manuscript)));
+    heading.append(el('span', 'review-manuscript-line', reviewManuscriptLine(next.manuscript)));
+    node.append(heading);
     const newReviewReasonId = uid('new-review-reason');
     node.append(renderCoverage(next, newReviewReasonId), renderRuns(next), renderNewReview(next, newReviewReasonId));
     if (run !== null) node.append(renderRun(next, run));
@@ -901,9 +902,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (opened) item.setAttribute('aria-current', 'true');
       const created = el('span', 'review-run-created', reviewCreatedLine(localInstantLabel(summary.createdAt)));
       created.append(el('span', 'technical-identity', summary.createdAt));
-      const details = el('p', 'field-note review-run-details');
+      const details = el('span', 'review-run-details');
       details.append(el('span', 'review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`), ' · ', created);
-      item.append(el('span', 'review-run-line', reviewRunLine(summary)), details);
+      const line = el('p', 'review-run-line', reviewRunLine(summary));
+      line.append(' · ', details);
+      item.append(line);
       // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
       if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', summary.historicalMarker));
       const open = actionButton('open-run', 'quiet', () => openRun(summary.reviewRunId));
@@ -961,21 +964,22 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     title.tabIndex = -1;
     heading.append(title, pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
     appendProposalOffer(heading, run);
-    const meta = el('p', 'field-note review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
+    const meta = el('span', 'review-run-meta', `${reviewRunMetaLine(run.scope.label, run.manuscript.revisionLabel)} · ${reviewCreatedLine(localInstantLabel(run.createdAt))}`);
     meta.append(el('span', 'technical-identity', run.createdAt));
     if (run.authorization !== null) {
       const authorized = el('span', 'review-run-authorized', reviewAuthorizedLine(localInstantLabel(run.authorization.authorizedAt)));
       authorized.append(el('span', 'technical-identity', run.authorization.authorizedAt));
       meta.append(authorized);
     }
-    section.append(heading, meta);
+    heading.append(meta);
+    section.append(heading);
     if (run.localCheck !== undefined) {
       const local = el('section', 'review-local-check');
       local.dataset['localCheck'] = run.localCheck.state;
-      local.append(el('p', 'field-note', run.localCheck.options.tables === undefined
-        ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规。'
-        : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销。'));
-      local.append(el('p', 'field-note', `本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
+      const localBoundary = run.localCheck.options.tables === undefined
+        ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规'
+        : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销';
+      local.append(el('p', 'field-note', `${localBoundary}；本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
       if (technicalLayerVisible) for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
       for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}（${exclusion.candidateId}）。`));
       section.append(local);
@@ -1110,7 +1114,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** The Historically Affected Result Marker (SER-026): beside the Run, its report and its findings, never in place of them. */
   function historicalMarker(marker: NonNullable<ReviewRunProjection['historicalMarker']>, run: ReviewRunProjection): HTMLElement {
     const box = el('div', 'review-historical-marker');
-    box.append(el('p', 'review-historical-marker-label', marker.label), el('p', 'field-note', marker.detail));
+    box.append(el('p', 'review-historical-marker-label', `${marker.label} · ${marker.detail}`));
     // The marker links to the later remediation (Issue #912; LAUD-008): when, the material in 学习回溯, and the way on without it.
     const remediation = marker.remediation;
     if (remediation !== undefined) {
@@ -1266,8 +1270,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const finding of run.excluded ?? []) {
         const item = el('div', 'review-excluded-entry');
         item.setAttribute('style', 'overflow-wrap: anywhere');
-        item.append(el('p', 'field-note', `${finding.categoryLabel} · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`}`),
-          el('p', '', finding.text), el('p', 'field-note', `${finding.reasonLabel}（${finding.reasonCode}）`));
+        item.append(el('p', 'field-note', `${finding.categoryLabel} · 单元 ${finding.unitOrdinal}${finding.textPart === undefined ? '' : ` · 原文 ${finding.textPart.index}/${finding.textPart.total}`} · ${finding.reasonLabel}${technicalWords(` · ${finding.reasonCode}`)}`),
+          el('p', '', finding.text));
         details.append(item);
       }
       if (run.excludedTruncated) {
@@ -1295,7 +1299,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         refresh(true);
       });
       button.disabled = working;
-      more.append(button, el('span', 'field-note', reviewShownLine(run.findings.length, run.findingsTotal)));
+      button.append(` · ${reviewShownLine(run.findings.length, run.findingsTotal)}`);
+      more.append(button);
       section.append(more);
     }
     return section;
@@ -1444,7 +1449,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const group = el('section', 'review-group');
     group.dataset['reviewCategory'] = category.categoryId;
     const heading = el('div', 'review-group-heading');
-    heading.append(el('h6', undefined, category.label), el('span', 'field-note', reviewGroupCountLine(category.findingsCount)));
+    heading.append(el('h6', undefined, `${category.label} · ${reviewGroupCountLine(category.findingsCount)}`));
     // V2-UX-REV-006: the batch belongs to a category configured for it (错别字与规范用语); 文学性与表达改进's
     // suggestions are accepted one by one.
     if (category.batchApply && category.output === 'change-suggestion' && category.state === 'settled') {
@@ -1664,7 +1669,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       nothing.id = scopeId;
       node.append(nothing);
     } else {
-      const scope = el('p', 'review-batch-scope', reviewBatchScopeLine(strip.items.length));
+      const scope = el('p', 'review-batch-scope', `${reviewBatchScopeLine(strip.items.length).replace(/。$/u, '')}；${REVIEW_BATCH_ALL_OR_NONE}`);
       scope.id = scopeId;
       const items = el('ol', 'review-batch-items');
       for (const item of strip.items) {
@@ -1676,7 +1681,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       node.append(scope, items);
       if (strip.excluded > 0) node.append(el('p', 'field-note', reviewBatchExcludedLine(strip.excluded)));
       if (strip.capped) node.append(el('p', 'field-note', reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS)));
-      node.append(el('p', 'field-note', REVIEW_BATCH_ALL_OR_NONE));
       if (strip.unknown) {
         node.append(el('p', 'review-problem', '结果待确认；确认权威记录之前不能再次应用。'));
         row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
@@ -1818,9 +1822,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       block.dataset['reviewCategory'] = entry.categoryId;
       block.append(
         el('p', 'review-report-summary-title', `${entry.label} · ${entry.stateLine}`),
-        el('p', undefined, reviewCountsLine(entry.counts)),
-        el('p', 'field-note', recordedReviewBasisWords(entry, categories)),
-        el('p', 'field-note', reviewReportExcludedLine(entry.excludedCount)),
+        el('p', undefined, `${reviewCountsLine(entry.counts)} · ${recordedReviewBasisWords(entry, categories)} · ${reviewReportExcludedLine(entry.excludedCount)}`),
       );
       summaries.append(block);
     }
@@ -2836,8 +2838,9 @@ export function reviewMaterialsField(
 ): { field: HTMLElement; inputs: ReviewMaterialInput[]; items: ReadonlyArray<WritingTaskMaterialProjection> } {
   const field = el('fieldset', 'review-materials');
   field.append(el('legend', undefined, '允许参考 · 资料库'));
-  field.append(el('p', 'field-note', offers?.statement ?? '暂无可参考的资料库资料。'));
+  const statement = offers?.statement ?? '暂无可参考的资料库资料。';
   const items = offers?.items ?? [];
+  field.append(el('p', 'field-note', items.length === 0 ? statement : `${statement.replace(/。$/u, '')}；资料只供调用模型的审阅类别参考，事实核查与只读已有线索的类别不参考这些资料。`));
   const inputs = items.map((item) => {
     const label = el('label', 'review-category-option');
     const input = el('input');
@@ -2857,7 +2860,6 @@ export function reviewMaterialsField(
     return { item, input, reason };
   });
   if ((offers?.more ?? 0) > 0) field.append(el('p', 'field-note', `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
-  field.append(el('p', 'field-note', '资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。'));
   return { field, inputs, items };
 }
 

@@ -55,10 +55,9 @@ describe('the 允许参考 fieldset of 新建审阅', () => {
     expect(view.field.tag).toBe('fieldset');
     const texts = view.field.all().map((node) => node.textContent);
     expect(texts).toContain('允许参考 · 资料库');
-    expect(texts).toContain('可以勾选资料库里这本书允许参考的资料');
+    expect(texts).toContain('可以勾选资料库里这本书允许参考的资料；资料只供调用模型的审阅类别参考，事实核查与只读已有线索的类别不参考这些资料。');
     expect(texts).toContain('《资料a》 · 这本书 · 已提取 1,234 字');
     expect(texts).toContain('还有 3 份资料未列出；这里显示最近到来的 50 份。');
-    expect(texts).toContain('资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。');
     expect(view.field.all().filter((node) => node.type === 'checkbox')).toHaveLength(2);
   });
 
