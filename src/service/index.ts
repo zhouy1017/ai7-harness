@@ -1,3 +1,4 @@
+import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { refreshModelServiceModels } from './provider/model-discovery.js';
 import { PROVIDER_ROUTE_PROFILES, providerModelsEndpoint } from './provider/deepseek-adapter.js';
 import type { ProxyProbeResult } from '../shared/protocol.js';
@@ -200,7 +201,7 @@ async function dispatch(
     case 'getSearchBackendSettings':
       return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
     case 'selectSearchBackend':
-      store.selectSearchBackend(request.input.backendId, request.input.role);
+      store.selectSearchBackend(request.input.backendId, request.input.role, request.input.alwaysUseSelectedBackend);
       return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
     case 'saveSearchBackendCredential':
       return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, request.input.credentialReference, request.input.credentialOperationState) };
@@ -2149,11 +2150,16 @@ async function run(): Promise<void> {
       // The candidate connection test (Issue #1055): the selected policy's own purpose, refused by scope before anything is read.
       if (input.candidateId !== undefined) {
         return composeSearchCandidateProbe({ backendId: input.backendId, candidateId: input.candidateId, operationalScope: launchForm.trustedOperationalScope, launchPolicy,
+          modelConnection: (backendId) => {
+            const source = store!.getModelServiceConnections().find((entry) => entry.binding.providerId.startsWith(`${backendId.slice('search-'.length)}-`));
+            return source == null ? undefined : { ...source, modelId: source.binding.modelId, credentialSlot: source.binding.credentialSlot };
+          },
           connection: (backendId) => store!.getSearchBackendConnections().find((entry) => entry.backendId === backendId), broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost,
         }).catch((error: unknown) => { throw error instanceof SearchCandidateProbeRefusal ? new StoreError(error.code, error.message) : error; });
       }
       const id = input.backendId;
       const adapter = searchBackend(id);
+      if (!SEARCH_BACKENDS.some((entry) => entry.id === id && entry.shipped)) throw new StoreError('SEARCH_BACKEND_NOT_SHIPPED', '候选接口请使用测试连接。');
       if (launchForm.trustedOperationalScope === 'development-ci') {
         // Provider-free settings probe: the same adapter reads a synthetic public title and URL; no credential, host or native fetch.
         const hit = { title: 'World Book and Copyright Day', name: 'World Book and Copyright Day', url: 'https://www.unesco.org/en/days/world-book-and-copyright' };

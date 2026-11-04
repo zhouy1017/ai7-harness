@@ -82,6 +82,7 @@ export const SCHEMA_REVISION_CLASSES: ReadonlyArray<ClassifiedSchemaRevision> = 
   { revision: 105, class: 'additive' }, // #1282: independent role model and account catalogue columns.
   { revision: 106, class: 'additive' }, // #1284: deliverable draft target and origin checks.
   { revision: 107, class: 'additive' }, // #1290: immutable evidence summary successors after continuation.
+  { revision: 108, class: 'additive' }, // #1312: persisted search source override, off by default.
 ];
 
 /**

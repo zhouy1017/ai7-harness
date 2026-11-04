@@ -8,7 +8,7 @@ import {
   type ModelServiceSettingsProjection,
   type RendererApi,
 } from '../shared/protocol.js';
-import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestLabel } from './model-service-roles.js';
+import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestFeedback, modelConnectionTestLabel } from './model-service-roles.js';
 
 /** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
 export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
@@ -188,6 +188,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const group = el('fieldset', 'model-service-flow-models');
   group.append(el('legend', undefined, '选择模型，再指定使用角色'));
   let checked: ModelServiceChannelModelProjection | null = null;
+  let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
   const test = el('button', 'secondary', '测试连接');
   test.type = 'button';
@@ -202,14 +203,16 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   customLabel.append(custom);
   const roleButtons: HTMLButtonElement[] = [];
   const paint = (): void => {
-    test.disabled = !ready || checked === null;
+    test.disabled = testing || !ready || checked === null;
     use.disabled = !ready || checked === null || (current?.route === channel.route && current.modelId === checked.modelId);
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
+    const note = el('p', 'field-note', modelConnectionTestLabel(own, checked?.modelLabel));
+    if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [
       el('p', 'field-note', modelCapabilityLabel(checked)),
-      el('p', 'field-note', modelConnectionTestLabel(own, checked.modelLabel)), ...modelConnectionTestDisclosure(own),
+      note, ...modelConnectionTestDisclosure(own),
     ]));
   };
   for (const model of offered) {
@@ -252,10 +255,19 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     roleButtons.push(button);
   }
   test.addEventListener('click', () => void (async () => {
-    if (checked === null || channel.route === null) return;
+    if (testing || checked === null || channel.route === null) return;
+    const model = checked;
+    testing = true;
     test.disabled = true;
-    try { options.render(await options.api.testModelServiceConnection({ route: channel.route, modelId: checked.modelId })); }
-    catch (error) { test.disabled = false; options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
+    options.setStatus('正在测试连接…', 'busy');
+    try {
+      const next = await options.api.testModelServiceConnection({ route: channel.route, modelId: model.modelId });
+      const result = next.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest;
+      const status = modelConnectionTestFeedback(result?.modelId === model.modelId ? result : null, channel.channelLabel, model.modelLabel);
+      options.render(next);
+      options.setStatus(status.message, status.tone);
+    } catch (error) { options.setStatus(options.errorMessage(error, '连接测试没有完成；不会自动重试。'), 'error'); }
+    finally { testing = false; paint(); }
   })());
   use.addEventListener('click', () => void (async () => {
     if (checked === null || channel.route === null) return;

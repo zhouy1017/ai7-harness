@@ -30,16 +30,16 @@ export function resultsOf(list: unknown, titleField = 'title'): SearchResult[] |
 
 export function createBackend(
   id: string,
-  request: (declaration: SearchBackendDeclaration, query: string, count: number) => Omit<SearchBackendRequest, 'headers'> & { headers: Record<string, string> },
+  request: (declaration: SearchBackendDeclaration, query: string, count: number, model?: string) => Omit<SearchBackendRequest, 'headers'> & { headers: Record<string, string> },
   read: (json: Record<string, unknown>) => SearchResult[] | null,
 ): SearchBackend {
-  const declaration = SEARCH_BACKENDS.find((entry) => entry.id === id && entry.shipped);
+  const declaration = SEARCH_BACKENDS.find((entry) => entry.id === id);
   if (declaration === undefined || declaration.endpoint === null) throw new Error('SEARCH_BACKEND_NOT_SHIPPED');
   return Object.freeze({
     declaration,
-    request(query: string, options: { readonly credential: string; readonly count: number }): SearchBackendRequest {
+    request(query: string, options: { readonly credential: string; readonly count: number; readonly model?: string }): SearchBackendRequest {
       if (options.credential.length === 0) throw new Error('SEARCH_SERVICE_CREDENTIAL_REQUIRED');
-      const result = request(declaration, query, Math.min(10, Math.max(1, Math.floor(options.count))));
+      const result = request(declaration, query, Math.min(10, Math.max(1, Math.floor(options.count))), options.model);
       const auth = declaration.headerForm === 'authorization-bearer' ? { authorization: `Bearer ${options.credential}` }
         : declaration.headerForm === 'x-api-key' ? { 'x-api-key': options.credential } : { 'x-subscription-token': options.credential };
       return { ...result, headers: { ...result.headers, ...auth } };

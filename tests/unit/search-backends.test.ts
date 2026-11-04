@@ -71,8 +71,10 @@ function profile(backendId: string, overrides: Partial<{ verdict: MeasuredSearch
 }
 
 describe('the search backend registry (Issue #883)', () => {
-  it('declares the five backends from their documents, each on its own generated credential slot', () => {
-    expect(SEARCH_BACKEND_DECLARATIONS.map((entry) => entry.id)).toEqual(['search-bochaai', 'search-brave', 'search-deepseek', 'search-parallel', 'search-tinyfish']);
+  it('declares the five measured backends and two unmeasured provider candidates from their documents', () => {
+    expect(SEARCH_BACKEND_DECLARATIONS.map((entry) => entry.id)).toEqual(['search-bochaai', 'search-brave', 'search-deepseek', 'search-openai', 'search-anthropic', 'search-parallel', 'search-tinyfish']);
+    expect(SEARCH_BACKENDS.filter((entry) => entry.id === 'search-openai' || entry.id === 'search-anthropic').map((entry) => [entry.id, entry.shipped, entry.exclusion, entry.profile]))
+      .toEqual([['search-openai', false, 'not-measured', null], ['search-anthropic', false, 'not-measured', null]]);
     for (const declaration of SEARCH_BACKEND_DECLARATIONS) {
       const document = readJson(`config/providers/search-backends/${declaration.id}.json`);
       expect(declaration.endpoint).toBe(document.request.endpoint);
@@ -121,7 +123,7 @@ describe('the search backend registry (Issue #883)', () => {
 });
 
 describe("decision 24⁵'s exclusion and ranking rule", () => {
-  const declaration = (id: string, price: SearchBackendDeclaration['price']): SearchBackendDeclaration => ({
+  const declaration = (id: string, price: SearchBackendDeclaration['price'] = SEARCH_BACKEND_DECLARATIONS[0]!.price): SearchBackendDeclaration => ({
     ...SEARCH_BACKEND_DECLARATIONS[0]!, id: id as SearchBackendDeclaration['id'], credentialSlot: id as SearchBackendDeclaration['id'], price,
   });
 
@@ -164,15 +166,16 @@ describe("decision 24⁵'s exclusion and ranking rule", () => {
   });
 
   it('orders prices across currencies at the recorded rate, and a token-billed backend at its measured cost', () => {
-    expect(pricePerCallUsd(declaration('search-cny', { amount: 0.036, currency: 'CNY', per: 1, basis: 'x' }), null, 6.7313)).toBeCloseTo(0.036 / 6.7313, 10);
-    expect(pricePerCallUsd(declaration('search-usd', { amount: 5, currency: 'USD', per: 1000, basis: 'x' }), null, 6.7313)).toBeCloseTo(0.005, 10);
+    expect(pricePerCallUsd(declaration('search-cny', { amount: 0.036, currency: 'CNY', per: 1, basis: 'x' }), profile('search-cny'), 6.7313)).toBeCloseTo(0.036 / 6.7313, 10);
+    expect(pricePerCallUsd(declaration('search-usd', { amount: 5, currency: 'USD', per: 1000, basis: 'x' }), profile('search-usd'), 6.7313)).toBeCloseTo(0.005, 10);
     const tokens = declaration('search-tokens', { amount: null, currency: 'USD', per: 1, basis: 'tokens' });
-    expect(pricePerCallUsd(tokens, null, 6.7313)).toBeNull();
+    expect(pricePerCallUsd(tokens, profile('search-tokens'), 6.7313)).toBeNull();
     expect(pricePerCallUsd(tokens, profile('search-tokens', { cost: 0.002 }), 6.7313)).toBe(0.002);
   });
 
   it('derives the outcome over synthetic profiles: exclusions first, then the ranking, the first ranked the default', () => {
-    const [bochaai, brave, deepseek, parallel, tinyfish] = SEARCH_BACKEND_DECLARATIONS;
+    const bochaai = declaration('search-bochaai'); const brave = declaration('search-brave'); const deepseek = declaration('search-deepseek');
+    const parallel = declaration('search-parallel'); const tinyfish = declaration('search-tinyfish');
     const outcome = searchBackendOutcome(SEARCH_BACKEND_DECLARATIONS, [
       profile(bochaai!.id, { chinese: 14, international: 12 }),
       profile(brave!.id, { verdict: 'unreachable', chinese: 0, international: 0 }),
@@ -181,6 +184,8 @@ describe("decision 24⁵'s exclusion and ranking rule", () => {
     ], 6.7313);
     expect(outcome.excluded).toEqual([
       { backendId: 'search-brave', reason: 'unreachable' },
+      { backendId: 'search-openai', reason: 'not-measured' },
+      { backendId: 'search-anthropic', reason: 'not-measured' },
       { backendId: 'search-parallel', reason: 'zero-hits-both-halves' },
       { backendId: 'search-tinyfish', reason: 'not-measured' },
     ]);

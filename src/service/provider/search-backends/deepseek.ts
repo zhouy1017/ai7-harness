@@ -31,6 +31,7 @@ export function deepseekDirectSearchRequest(candidate: SearchBackendCandidate, a
 /** The direct Fetch API request (the Search & Fetch guide): exactly one cited public URL. */
 export function deepseekDirectFetchRequest(candidate: SearchBackendCandidate, url: string, credential: string): SearchBackendRequest {
   if (credential.length === 0) throw new Error('SEARCH_SERVICE_CREDENTIAL_REQUIRED');
+  if (candidate.fetch === null) throw new Error('SEARCH_CANDIDATE_UNKNOWN');
   return { url: candidate.fetch.endpoint, method: 'POST', body: canonicalJson({ url }),
     headers: { accept: 'application/json', 'content-type': 'application/json', authorization: `Bearer ${credential}` } };
 }
