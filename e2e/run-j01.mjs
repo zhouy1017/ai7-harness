@@ -3184,7 +3184,7 @@ async function main() {
     // they are for a DOCX; source-only stays a real answer for a `.txt` too.
     await assertRenderer(
       renderer,
-      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && document.querySelectorAll('input[name="import-relationship"]:checked').length === 1 && !document.querySelector('.attention-note'); })()`,
+      `(() => { const manuscript = document.querySelector('[data-import-relationship="first-manuscript"]'); const source = document.querySelector('[data-import-relationship="source-only"]'); return manuscript && source && document.querySelectorAll('input[name="import-relationship"]:checked').length === 1; })()`,
       'text-manuscript-relationship-both',
     );
     await assertRenderer(

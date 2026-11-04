@@ -114,6 +114,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
       const no = el('button', 'quiet', '继续保留'); no.addEventListener('click', () => { confirm.hidden = true; }); confirm.append(yes, no); confirm.hidden = false; yes.focus(); return;
     }
     void perform(async () => {
+      if (action === 'again' && options.beforeStart && !await options.beforeStart()) return;
       if ((action === 'up' || action === 'top') && item.runRecordId) await options.api.reorderQueuedRun({ runRecordId: item.runRecordId, position: action === 'top' ? 1 : Math.max(1, (item.queuePosition ?? 1) - 1) });
       else if (action === 'again' && item.target.kind === 'dialogue') await dialogueAction(item, 'regenerateDialogueAnswer');
       else if (action === 'again' && item.bookId && item.plan?.ref && item.plan.kind !== 'fixed-task') await options.api.startQuickTasks({ tasks: [{ bookId: item.bookId, procedureId: 'repeat', repeat: { kind: item.plan.kind, ref: item.plan.ref } }] });
