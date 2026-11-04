@@ -503,8 +503,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
     const latest = initial.latest;
+    if (latest === null) heading.append(' · ', el('span', 'evaluation-initial-none', EVALUATION_AI7_NONE));
     section.append(heading);
-    if (latest === null) section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
     const initialBlocked = page.materialReferences?.blocked.initial === true;
     section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
     if (page.market.series.length > 0 && initial.prepare.allowed) {
@@ -861,6 +861,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
     const parts: HTMLElement[] = [initialNode(workspace)];
+    const start = el('div', 'button-row evaluation-start');
     // The versions, newest first; each opens as it was recorded.
     if (workspace.records.length > 0) {
       const versions = el('section', 'evaluation-versions');
@@ -913,9 +914,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     } else {
       // No version reads: either none was begun, or every one is damaged — then say which, never 「no version yet」 (Issue #708).
       const unreadable = evaluationUnreadableLine(workspace.unreadableRecords, false);
-      parts.push(unreadable === null ? el('p', 'field-note evaluation-empty', EVALUATION_EMPTY) : el('p', 'field-note evaluation-unreadable', unreadable));
+      start.append(unreadable === null ? el('span', 'evaluation-empty', EVALUATION_EMPTY) : el('span', 'evaluation-unreadable', unreadable));
     }
-    const start = el('div', 'button-row evaluation-start');
     start.dataset['skipDamaged'] = String(workspace.start.allowed && workspace.start.skipDamaged !== null);
     if (workspace.start.allowed) {
       // 从 AI7 初评开始 leads once AI7's latest 初评 read the text as it stands (EVAL-001, EVAL-006); the editor may still begin alone.
