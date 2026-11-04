@@ -119,6 +119,8 @@ describe('launchPolicyIntegritySentence', () => {
     setTechnicalLayerVisible(false);
     expect(launchPolicyIntegritySentence('开发与持续集成：零次实时传输')).toBe('当前设置不允许向模型服务发送内容。');
     expect(launchPolicyIntegritySentence('开发者实时：实时传输受运行边界约束')).toBe('向模型服务发送内容受每次任务计划的范围约束。');
+    expect(launchPolicyIntegritySentence('本机生产：需先设置模型服务，当前不会传输')).toBe('尚未设置模型服务，当前不会发送内容。');
+    expect(launchPolicyIntegritySentence('本机生产：实时传输受运行边界约束')).toBe('向模型服务发送内容受每次任务计划的范围约束。');
     setTechnicalLayerVisible(true);
   });
   it('reproduces the development-ci bytes J-12 pins, from the label alone', () => {

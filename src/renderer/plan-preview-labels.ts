@@ -85,9 +85,11 @@ export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPo
  * label's closed union, and both of its members carry the `：` the halves are taken around.
  */
 export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['providerProcessing']['label']): string {
-  if (!technicalLayerVisible) return label.endsWith('零次实时传输')
-    ? '当前设置不允许向模型服务发送内容。'
-    : '向模型服务发送内容受每次任务计划的范围约束。';
+  if (!technicalLayerVisible) {
+    if (label.endsWith('零次实时传输')) return '当前设置不允许向模型服务发送内容。';
+    if (label.endsWith('当前不会传输')) return '尚未设置模型服务，当前不会发送内容。';
+    return '向模型服务发送内容受每次任务计划的范围约束。';
+  }
   const separator = label.indexOf('：');
   return `当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }
