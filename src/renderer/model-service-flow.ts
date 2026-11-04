@@ -174,10 +174,11 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   })());
   actions.append(save, refresh, remove);
   form.append(...(technicalLayerVisible ? [nameLabel] : []), secretLabel, actions);
-  const stored = el('p', 'field-note', ready ? '凭据已保存' : '需设置凭据');
+  const stored = el('span', undefined, ready ? '凭据已保存' : '需设置凭据');
   if (technicalLayerVisible) stored.append('；凭据只写入操作系统安全凭据库，保存后不再显示。');
   stored.dataset['credentialState'] = option.connection?.credentialOperationState ?? 'missing';
-  step.append(stored, form);
+  heading.append(' · ', stored);
+  step.append(form);
   return step;
 }
 
