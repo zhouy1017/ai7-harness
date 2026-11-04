@@ -1,3 +1,4 @@
+import { completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import {
   BASELINE_ANALYSIS_MODE_LABELS,
   GLOBAL_ATTENTION_COUNTED_GROUPS,
@@ -242,7 +243,7 @@ export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateK
   'review-running': { tone: 'progress', shape: 'half' },
   'review-continuable': { tone: 'attention', shape: 'ring' },
   'analysis-completed': { tone: 'good', shape: 'check' },
-  'analysis-completed-with-gaps': { tone: 'good', shape: 'circle' },
+  'analysis-completed-with-gaps': { tone: 'warn', shape: 'circle' },
   'review-completed': { tone: 'good', shape: 'check' },
   'analysis-prepared': { tone: 'neutral', shape: 'ring' },
   'review-prepared': { tone: 'neutral', shape: 'ring' },
@@ -499,6 +500,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'analysis-completed':
       return facts.revisionOrdinal === null ? '已形成结果集修订版。' : `已形成第 ${facts.revisionOrdinal} 份基线分析。`;
     case 'analysis-completed-with-gaps':
+      if (facts.completion?.reason) return facts.completion.reason;
       return facts.revisionOrdinal === null ? '已形成结果集修订版 · 有缺口单元。' : `已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`;
     case 'review-completed':
       return facts.categories.length === 0 ? '审阅发现已标到稿件上。' : `已审：${quoted(facts.categories.map((category) => category.label))}；发现已标到稿件上。`;
@@ -649,3 +651,12 @@ export const GLOBAL_ATTENTION_MATERIAL_GROUPS = [
 // ---- the technical layer --------------------------------------------------------------------------------
 
 export const GLOBAL_ATTENTION_TECHNICAL_ITEM = '记录';
+
+
+export function globalAttentionStateLabel(item: GlobalAttentionItemProjection): string {
+  if (item.state === 'analysis-outcome-unconfirmed' && item.object.kind === 'unconfirmed' && item.object.ranges > 0) return '该单元结果未知';
+  if (item.state === 'analysis-completed-with-gaps' && item.facts.completion !== undefined) {
+    return completedWithGapsLabel(item.facts.completion.gaps, item.facts.completion.total);
+  }
+  return GLOBAL_ATTENTION_STATE_LABELS[item.state];
+}

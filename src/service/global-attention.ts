@@ -212,6 +212,7 @@ export interface AnalysisOutcomeAttentionReading {
   readonly recordedAt: string;
   readonly revisionId: string | null;
   readonly revisionOrdinal: number | null;
+  completion?: { gaps: number; total: number; reason: string | null };
 }
 
 /** One Review Run as the Review Run ledger reads it: the Book's latest, or one that completed recently. */
@@ -423,6 +424,7 @@ function item(
       progress: fields.facts?.progress ?? null,
       categories: fields.facts?.categories ?? [],
       revisionOrdinal: fields.facts?.revisionOrdinal ?? null,
+      ...(fields.facts?.completion === undefined ? {} : { completion: fields.facts.completion }),
     },
     nextStep: fields.nextStep,
     target: fields.target,
@@ -656,7 +658,7 @@ function analysisOutcomeItem(reading: AnalysisOutcomeAttentionReading): GlobalAt
     at: reading.recordedAt,
     book: { bookId: reading.bookId, title: reading.bookTitle },
     object: { kind: 'analysis', mode: reading.mode },
-    facts: { revisionOrdinal: reading.revisionOrdinal },
+    facts: { revisionOrdinal: reading.revisionOrdinal, ...(reading.completion === undefined ? {} : { completion: reading.completion }) },
     nextStep: 'view-run',
     target: { kind: 'analysis', bookId: reading.bookId, taskIntentId: reading.taskIntentId },
     technical: [

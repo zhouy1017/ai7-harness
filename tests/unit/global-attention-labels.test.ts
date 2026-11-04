@@ -1,3 +1,4 @@
+import { majorityGapReason } from '../../src/shared/analysis-run-summary.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -578,4 +579,24 @@ describe('resumable stop reasons (Issue #1309)', () => {
       expect(globalAttentionReason(entry), reason).toContain(action);
     }
   });
+});
+
+it('warns with N/M unread units and their majority classified reason', () => {
+  const view = globalAttentionView(projection({ recent: [item('analysis-completed-with-gaps', {
+    facts: { progress: null, categories: [], revisionOrdinal: 1,
+      completion: { gaps: 7, total: 8, reason: '模型服务不可达：请检查网络或网络代理设置。' } },
+  })] }));
+  expect(view.flatMap((group) => group.items)[0]).toMatchObject({
+    stateLabel: '已完成 · 7/8 个单元未读成', pill: { tone: 'warn' },
+    reason: '模型服务不可达：请检查网络或网络代理设置。',
+  });
+});
+it('selects the most frequent existing gap wording without exposing its technical code', () => {
+  const unreachable = '模型服务不可达：请检查网络或网络代理设置。';
+  expect(majorityGapReason([
+    { code: 'out-of-scope', reason: '未纳入范围' },
+    { code: 'outcome-unknown', reason: '该单元结果未知' },
+    { code: 'adapter-failure', reason: `${unreachable}（MODEL_SERVICE_UNREACHABLE）` },
+    { code: 'adapter-failure', reason: `${unreachable}（MODEL_SERVICE_UNREACHABLE）` },
+  ])).toBe(unreachable);
 });

@@ -8,7 +8,7 @@ import type {
   RendererApi,
   ReviewRunProjection,
 } from '../shared/protocol.js';
-import { GLOBAL_ATTENTION_STATE_LABELS, GLOBAL_ATTENTION_STATE_PILLS, globalAttentionObjectLabel } from './global-attention-labels.js';
+import { globalAttentionStateLabel, GLOBAL_ATTENTION_STATE_PILLS, globalAttentionObjectLabel } from './global-attention-labels.js';
 import {
   ANALYSIS_RESULT_NOT_DONE,
   REVIEW_RESULT_NONE,
@@ -110,7 +110,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   title.tabIndex = -1;
   section.setAttribute('aria-labelledby', title.id);
   const pillTone = GLOBAL_ATTENTION_STATE_PILLS[entry.item.state];
-  const pill = el('span', `status-pill review-pill review-pill-${pillTone.tone}`, GLOBAL_ATTENTION_STATE_LABELS[entry.item.state]);
+  const pill = el('span', `status-pill review-pill review-pill-${pillTone.tone}`, globalAttentionStateLabel(entry.item));
   pill.dataset['pillTone'] = pillTone.tone;
   pill.dataset['pillShape'] = pillTone.shape;
   const close = el('button', 'quiet task-result-close', TASK_RESULT_CLOSE);

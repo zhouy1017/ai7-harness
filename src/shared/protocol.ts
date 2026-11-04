@@ -4531,6 +4531,7 @@ export interface GlobalAttentionFactsProjection {
   categories: ReadonlyArray<{ label: string; state: ReviewRunCategoryState; stateLabel: string; detail: string | null }>;
   /** The ordinal of the Result Set Revision a completed analysis formed. */
   revisionOrdinal: number | null;
+  completion?: { gaps: number; total: number; reason: string | null };
 }
 
 /** One Attention Projection Item (V2-UX-ATTN-007): a pointer to its record, never an authority of its own. */
