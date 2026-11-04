@@ -1,3 +1,5 @@
+import { technicalWords } from './technical-layer.js';
+
 export const ANALYSIS_MORE_RANGES = '显示更多阅读范围';
 export const ANALYSIS_READ_FAILED = '无法读取完整的分析结果，请重新打开分析。';
 export const ANALYSIS_READING = '正在读取分析结果…';
@@ -23,7 +25,7 @@ export const TASK_PAGE_NAMES: Readonly<Record<string, string>> = {
   'runControl.cancel.impact': '取消影响说明',
   clarifications: '问题与回答', 'scopeOptions.chapters.chapters': '章节',
 };
-export const taskPageMore = (name: string, shown: number, total: number): string => `继续读取${name}（已显示 ${shown} / ${total}）`;
+export const taskPageMore = (name: string, shown: number, total: number): string => `继续读取${name}${technicalWords(`（已显示 ${shown} / ${total}）`, ` · 已显示 ${shown} / ${total}`)}`;
 export const taskPageShown = (name: string, shown: number, total: number): string => `${name} · 已显示 ${shown} / ${total} 条`;
 export const taskResendSummary = (total: number): string => `共 ${total} 个阅读范围上一次的请求已发出、结果未知，可能已被模型服务处理并计费；这项任务会再发一次它们的请求，开始任务即重新授权这次发送。`;
 export const TASK_SELECTED_CHAPTER_NOT_LOADED = '已选章节 · 继续读取以查看';

@@ -50,9 +50,10 @@ export function atRiskLocation(structureLabel: string | null, firstBlockPosition
 export function retryLine(cause: ProtectionCause, retrying: boolean, attempts: number, secondsUntilNext: number | null): string {
   if (cause === 'service-stopped') return '自动重试：本地业务服务已停止，无法自动重试';
   if (cause === 'drift') return '自动重试：已停止——稿件在中断期间已变化，不能按原顺序写入';
-  if (retrying) return `自动重试：正在重试写入（已重试 ${attempts} 次）`;
-  if (secondsUntilNext !== null) return `自动重试：${secondsUntilNext} 秒后重试（已重试 ${attempts} 次）`;
-  return `自动重试：等待中（已重试 ${attempts} 次）`;
+  const count = technicalWords(`（已重试 ${attempts} 次）`, ` · 已重试 ${attempts} 次`);
+  if (retrying) return `自动重试：正在重试写入${count}`;
+  if (secondsUntilNext !== null) return `自动重试：${secondsUntilNext} 秒后重试${count}`;
+  return `自动重试：等待中${count}`;
 }
 
 export function readOnlyLine(reason: ProtectionReadOnlyReason): string {
