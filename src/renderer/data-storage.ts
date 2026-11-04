@@ -68,7 +68,7 @@ export function createDataStorage(options: DataStorageOptions) {
       credentials.append(
         element('h3', undefined, '凭据与产品数据分开'),
         element('p', undefined, projection.separationLabel),
-        element('p', 'field-note', `当前系统保护位置：${projection.protectedSecretStoreLabel}。复制产品数据不会复制模型服务凭据。`),
+        element('p', 'field-note', `当前系统保护位置：${projection.protectedSecretStoreLabel}；复制产品数据不会复制模型服务凭据。`),
       );
       const reveal = button('查看数据位置', 'secondary', async () => {
         reveal.disabled = true;
