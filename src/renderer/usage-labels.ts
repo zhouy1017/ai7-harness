@@ -18,7 +18,7 @@ import { UNBOUND_ROUTE_LABEL, type UsageCostEstimate } from '../shared/usage.js'
 
 export const USAGE_TITLE = '用量';
 export const USAGE_SECTION_LABEL = '设置 · 服务 · 用量';
-export const USAGE_LEDE = '按已经记录的运行，汇总模型服务用掉的词元（输入与输出分开）。这里不另行记账：数字来自各次运行自己的运行报告。';
+export const USAGE_LEDE = '汇总各次运行报告记录的输入和输出词元，不另行记账。';
 export const USAGE_EMPTY = USAGE_EMPTY_LABEL;
 export const USAGE_RANGE_HEADING = '时间范围';
 export const USAGE_GROUPING_HEADING = '汇总方式';
@@ -26,7 +26,7 @@ export const USAGE_RETURN = '返回';
 export const USAGE_EXPORT = '导出为 CSV…';
 export const USAGE_EXPORT_NOTE = 'CSV 只含数字和标识，不含书名或任何文字。';
 export const USAGE_PRICES_HEADING = '单价';
-export const USAGE_PRICES_LEDE = '单价由你自行录入，AI7 不会向模型服务商查询价格。估算费用 = 词元数 × 你录入的单价，只是估算，不是账单。';
+export const USAGE_PRICES_LEDE = '单价由你录入，AI7 不查询服务商；费用按词元数与单价估算，并非账单。';
 export const USAGE_UNPRICED = '未填写单价，无法估算';
 export const USAGE_UNRECORDED_NOTE = (count: number): string => `另有 ${count.toLocaleString('zh-CN')} 次运行在运行报告出现之前结束，没有用量记录，未计入。`;
 export const USAGE_MORE_RUNS = '显示更多运行';

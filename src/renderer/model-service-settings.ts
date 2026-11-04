@@ -84,7 +84,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     });
     form.append(mode, input, save);
     section.append(element('p', 'field-note', '绝大多数本机代理（Clash、v2rayN、ProxyBridge 等）用 http://127.0.0.1:端口；只有代理本身提供 TLS 入口时才用 https://。'));
-    section.append(form, element('p', 'field-note', '仅用于获准的模型服务请求；代理设置不随数据库迁移，代理认证将在后续版本提供。'));
+    section.append(form, element('p', 'field-note', '仅用于获准的模型服务请求；代理设置不随数据库导入、导出或备份迁移，代理认证将在后续版本提供。'));
     if (projection.lastProxyProbe) {
       const probe = projection.lastProxyProbe;
       const line = element('p', probe.status === 'available' ? 'success-note' : 'attention-note',
