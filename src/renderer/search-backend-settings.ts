@@ -1,4 +1,5 @@
 import type { ModelServiceSettingsProjection, RendererApi, SearchBackendCandidateProjection, SearchBackendProbeProjection, SearchCandidateProbeOutcome } from '../shared/protocol.js';
+import { metadataWords, technicalLayerVisible } from './technical-layer.js';
 
 /**
  * 设置 › 模型服务 › 联网检索 (Issue #883): the shipped backends in rank order with 选择后端 and 测试检索, and (Issue #1055) the
@@ -42,7 +43,7 @@ export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjec
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = metadataWords(text);
   return node;
 }
 
@@ -70,6 +71,7 @@ export function candidateProbeLines(result: SearchBackendProbeProjection): strin
   const candidate = result.candidate;
   if (candidate === undefined) return [];
   const outcome = SEARCH_CANDIDATE_OUTCOME_LABELS[candidate.outcome] + (candidate.outcome === 'http-rejected' && candidate.httpStatus !== null ? `（HTTP ${candidate.httpStatus}）` : '');
+  if (!technicalLayerVisible) return [outcome];
   if (candidate.protocol !== 'deepseek-direct-search') return [`${outcome} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}`];
   return [`${outcome} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}`,
     `只说明这一次请求：${candidate.endpoint} · ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest.slice(0, 12)}`];
@@ -79,8 +81,8 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   const card = element('article', 'model-role-card');
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
-  card.append(element('h4', undefined, `${candidate.name} · 未实测`), element('p', 'field-note', candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`));
-  for (const line of candidate.disclosure) card.append(element('p', 'field-note', line));
+  card.append(element('h4', undefined, `${candidate.name} · 未实测`), element('p', 'field-note', technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`));
+  for (const line of candidate.disclosure) card.append(element('p', 'field-note', technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
   const probe = button(SEARCH_CANDIDATE_PROBE_LABEL, 'quiet', async () => {
