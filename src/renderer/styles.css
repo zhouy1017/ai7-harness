@@ -2470,8 +2470,8 @@ body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:ca
 .command-palette-entry { text-align: start; justify-content: start; }
 .export-menu { position: relative; white-space: nowrap; }
 .export-menu > summary { cursor: pointer; list-style: none; padding: .4rem .65rem; }
-.export-menu[open] { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
-.export-menu-body { position: absolute; top: 100%; right: 0; z-index: 60; min-width: 13rem; padding: .5rem; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px #0002; }
+.export-menu[open] { background: var(--surface); border: 1px solid var(--boundary); border-radius: 8px; }
+.export-menu-body { position: absolute; top: 100%; right: 0; z-index: 60; min-width: 13rem; padding: .5rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px var(--shadow); }
 .export-menu-body > :is(button, details) { display: block; margin: .25rem; }
 .export-menu-options .export-option { display: flex; gap: .4rem; padding: .25rem; }
 .global-attention-item[data-read="true"] .global-attention-object { font-weight: 400; }

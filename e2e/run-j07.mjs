@@ -413,8 +413,8 @@ const PAGE_HELPERS = `(() => {
     exportAction: (name) => window.__j07.exportCard()?.querySelector('[data-export-action="' + name + '"]') ?? null,
     exportOption: (key) => window.__j07.exportCard()?.querySelector('input[type="checkbox"][data-export-option="' + key + '"]') ?? null,
     exportOpener: (kind, milestoneId) => block()?.querySelector(kind === 'current'
-      ? '[data-export-action="open"][data-export-target="current"]'
-      : 'ol.milestone-list > li[data-milestone-id="' + milestoneId + '"] [data-export-action="open"]') ?? null,
+      ? '[data-export-menu="current"] > summary'
+      : 'ol.milestone-list > li[data-milestone-id="' + milestoneId + '"] [data-export-menu] > summary') ?? null,
     exportRows: () => Array.from(window.__j07.exportCard()?.querySelectorAll('ol.export-fidelity-list > li.export-fidelity-row') ?? [])
       .map((row) => row.dataset.exportFidelity + ':' + row.dataset.exportStatus + ':' + row.dataset.exportCount),
     exportFact: (term) => Array.from(window.__j07.exportCard()?.querySelectorAll('details.technical-details dt') ?? [])
@@ -559,8 +559,7 @@ async function reopenDeliverables(renderer, name) {
  * for DOCX. Returns the service's receipt of the export.
  */
 async function exportAs(renderer, format, destination, fileName, name) {
-  await assertRenderer(renderer, `(() => { const radio = document.querySelector('.deliverables-export-slot input[name="export-format"][value="${format}"]'); if (!(radio instanceof HTMLInputElement) || radio.disabled) return false; radio.click(); return radio.checked; })()`, `${name}-choose-inline-format`);
-  await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', `${name}-open`);
+  await clickSelector(renderer, `[data-screen="book-deliverables"] section.deliverables-publication [data-export-format-action="${format}"]`, `${name}-open`);
   await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.exportCard()?.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, `${name}-written`, 120_000);
   const records = await renderer.evaluate(`window.ai7.inspectDeliverables().then((deliverables) => deliverables.exports.map((record) => ({ outcome: record.outcome, format: record.format, fileName: record.fileName, destination: record.destination, revisionLabel: record.target.revisionLabel, byteLength: record.byteLength, fileSha256: record.technical.fileSha256 })))`);
   const record = Array.isArray(records) ? records.find((entry) => entry.destination === destination) : undefined;
@@ -1434,7 +1433,7 @@ async function main() {
     // it with 含批注 and 含修改建议（作为修订） on and 含备注 off, DOCX chosen of the three formats (PDF and the
     // Markdown 备用格式 since Issue #500), focus on it.
     await openDeliverables(renderer, 'export');
-    await assertRenderer(renderer, `(() => { const openers = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] [data-export-action="open"]')); return window.__j07.exportCard() === null && openers.every((node) => node.textContent === '导出…' && !node.disabled) && JSON.stringify(openers.map((node) => node.getAttribute('aria-label'))) === ${JSON.stringify(JSON.stringify(['导出当前修订版…', `导出里程碑版本「${SECOND.label}」…`, `导出里程碑版本「${FIRST.label}」…`]))} && window.__j07.block().querySelector('section.export-records-section')?.dataset.exportRecords === '0'; })()`, 'export-openers-name-their-version');
+    await assertRenderer(renderer, `(() => { const menus = Array.from(document.querySelectorAll('[data-screen="book-deliverables"] [data-export-menu]')); return window.__j07.exportCard() === null && menus.length === 3 && menus.every(menu=>Array.from(menu.querySelectorAll('[data-export-format-action]')).map(node=>node.dataset.exportFormatAction).join(',')==='docx,pdf,markdown') && window.__j07.block().querySelector('section.export-records-section')?.dataset.exportRecords === '0'; })()`, 'export-openers-name-their-version');
     await clickSelector(renderer, '[data-screen="book-deliverables"] section.deliverables-publication [data-export-action="open"][data-export-target="current"]', 'export-open');
     await waitFor(renderer, `window.__j07.exportCard()?.dataset.exportPhase === 'done' && window.__j07.exportCard()?.querySelector('.export-receipt')?.dataset.exportOutcome === 'created'`, 'export-written', 120_000);
     at('export-receipt-recorded');

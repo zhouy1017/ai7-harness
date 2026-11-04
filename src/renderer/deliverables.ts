@@ -299,8 +299,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     openerOf: (target) => target.kind === 'report' ? null : target.kind === 'document'
       ? documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-revision-id="${CSS.escape(target.revisionId)}"] [data-export-action="open"]`) ?? null
       : block?.querySelector<HTMLElement>(target.kind === 'current'
-        ? '[data-export-action="open"][data-export-target="current"]'
-        : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
+        ? '[data-export-menu="current"] > summary'
+        : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-menu] > summary`) ?? null,
   });
 
   const writing = mountWritingTask({
