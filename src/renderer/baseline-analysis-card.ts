@@ -857,7 +857,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
-    if (controls.blockedReason !== null) section.append(element('p', 'attention-note', controls.blockedReason));
+    if (controls.blockedReason !== null) {
+      section.append(element('p', 'attention-note', controls.blockedReason));
+      if (controls.blockedReason.startsWith('有一项运行因')) {
+        const openDrawer = button('查看任务抽屉', 'secondary', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent?.taskIntentId ?? null));
+        openDrawer.dataset['analysisUpdateBlockedLink'] = 'task-drawer';
+        section.append(openDrawer);
+      }
+    }
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];

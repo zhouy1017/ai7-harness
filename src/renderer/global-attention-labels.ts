@@ -12,7 +12,7 @@ import {
 import { RUN_LIVENESS_STAGE_LABELS, localInstantLabel } from './plan-preview-labels.js';
 import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
-import { TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
+import { RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
@@ -194,6 +194,14 @@ export const GLOBAL_ATTENTION_STATE_LABELS: Readonly<Record<GlobalAttentionState
   // A Task Intent Draft (Issue #423, slice 7a; TASK-004 to 006): nothing is prepared, sent or started until 准备计划.
   'draft-unfinished': TASK_INTENT_DRAFT_STATE_LABEL,
 };
+
+export function globalAttentionStateLabel(item: Pick<GlobalAttentionItemProjection, 'state' | 'facts' | 'object'>): string {
+  if (item.state === 'analysis-resumable' && item.facts.stopReason !== undefined) {
+    return `任务已中断 · ${RESUMABLE_STOP_REASON_LABELS[item.facts.stopReason]}`;
+  }
+  return item.state === 'analysis-outcome-unconfirmed' && item.object.kind === 'unconfirmed' && item.object.ranges > 0
+    ? '该单元结果未知' : GLOBAL_ATTENTION_STATE_LABELS[item.state];
+}
 
 /** The state pill's tone and shape: words and a shape, never colour alone. */
 export const GLOBAL_ATTENTION_STATE_PILLS: Readonly<Record<GlobalAttentionStateKey, ReviewPill>> = {
@@ -470,8 +478,13 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       return `你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · ${runningReason(facts.progress)}`;
     case 'analysis-paused':
       return '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。';
-    case 'analysis-resumable':
-      return 'AI7 关闭时这项任务正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+    case 'analysis-resumable': {
+      const reason = facts.stopReason;
+      if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后续行。';
+      if (reason === 'model-service-unreachable') return '模型服务不可达：去 设置 › 模型服务 › 网络代理 检查网络或代理后续行。';
+      if (reason === 'outcome-unknown') return '结果待确认：这次运行不能续行，请先查看未确认的部分。';
+      return 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+    }
     case 'review-running': {
       const current = facts.categories[0];
       if (current === undefined) return '正在审阅';
@@ -604,8 +617,7 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
         state: entry.state,
         book,
         object,
-        stateLabel: entry.state === 'analysis-outcome-unconfirmed' && entry.object.kind === 'unconfirmed' && entry.object.ranges > 0
-          ? '该单元结果未知' : GLOBAL_ATTENTION_STATE_LABELS[entry.state],
+        stateLabel: globalAttentionStateLabel(entry),
         pill: GLOBAL_ATTENTION_STATE_PILLS[entry.state],
         reason: globalAttentionReason(entry),
         nextStep: globalAttentionNextStepLine(entry.nextStep),

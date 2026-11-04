@@ -4304,6 +4304,9 @@ export interface SetEvaluationPreferencesInput {
  */
 export type GlobalAttentionGroupKey = 'exceptions' | 'decisions' | 'active' | 'recent';
 
+/** Why a resumable Run stopped, as shown to editors (Issue #1309). */
+export type ResumableStopReason = 'proxy-unreachable' | 'model-service-unreachable' | 'outcome-unknown' | 'shutdown';
+
 export const GLOBAL_ATTENTION_GROUP_KEYS: readonly GlobalAttentionGroupKey[] = ['exceptions', 'decisions', 'active', 'recent'];
 
 /** Only these two count toward the entry's number (V2-UX-ATTN-006); the other two stay visible without an alert. */
@@ -4513,6 +4516,7 @@ export type GlobalAttentionObjectProjection =
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
   clarificationOrigin?: 'model';
+  stopReason?: ResumableStopReason;
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
   progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
   /**

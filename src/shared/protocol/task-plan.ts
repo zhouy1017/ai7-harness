@@ -140,6 +140,10 @@ export type TaskPlanStateKey =
 export interface TaskPlanRunControlProjection {
   /** The one Run every control names (CTRL-009). */
   runRecordId: string;
+  /** The editor-facing reason this Run stopped and may be resumed. */
+  stopReason?: import('../protocol.js').ResumableStopReason;
+  /** When that stop was recorded, used by the continuation note. */
+  stopAt?: string;
   /** 正在取消: the editor's cancellation is recorded and the Run is stopping; nothing more is offered. */
   cancelling: boolean;
   /** 正在暂停: the editor's pause is recorded and the Run stops at the next unit boundary; nothing more is offered. */

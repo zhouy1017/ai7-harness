@@ -22,6 +22,7 @@ import {
   type GlobalAttentionProjection,
   type GlobalAttentionStateKey,
   type GlobalAttentionTarget,
+  type ResumableStopReason,
   type LibraryMaterialKind,
   type MaintenanceClassification,
   type MaintenanceNextStep,
@@ -143,6 +144,7 @@ export interface AnalysisTaskAttentionReading {
     readonly accountLimited?: boolean;
     /** A resumable Run stopped on sent requests whose results cannot be known (Issue #51, S16c): 结果待确认. */
     readonly outcomeUnknown?: boolean;
+    readonly stopReason?: ResumableStopReason;
     /** A waiting Run blocked because its plan moved before it could start (Issue #536): 需要重新确认计划. */
     readonly planMoved?: boolean;
   };
@@ -417,6 +419,7 @@ function item(
     object: fields.object,
     facts: {
       ...(fields.facts?.clarificationOrigin === undefined ? {} : { clarificationOrigin: fields.facts.clarificationOrigin }),
+      ...(fields.facts?.stopReason === undefined ? {} : { stopReason: fields.facts.stopReason }),
       progress: fields.facts?.progress ?? null,
       categories: fields.facts?.categories ?? [],
       revisionOrdinal: fields.facts?.revisionOrdinal ?? null,
@@ -605,14 +608,15 @@ function analysisTaskItem(reading: AnalysisTaskAttentionReading, waitingFor: Wai
       }
       if (run.outcomeUnknown === true) {
         return item('exceptions', 'analysis-outcome-unknown', {
-          itemId, blocked: true, at: run.stateAt, book, object, nextStep: 'view-unconfirmed',
+          itemId, blocked: true, at: run.stateAt, book, object, facts: { stopReason: 'outcome-unknown' }, nextStep: 'view-unconfirmed',
           target: { kind: 'analysis-plan', bookId: reading.bookId, taskIntentId: reading.taskIntentId }, technical,
         });
       }
       // 运行中与已暂停 (Issue #422, S76b): a paused Run, and one AI7 stopped under, wait for the editor's 续行 or 取消任务; one
       // answered waits its turn in the slot to go on (S76d).
       const state = run.idleYield === true ? 'analysis-yielded' : run.state === 'paused' ? 'analysis-paused' : run.state === 'resumable' ? 'analysis-resumable' : 'analysis-queued';
-      return item('active', state, { itemId, blocked: false, at: run.stateAt, book, object, nextStep: 'view-run', target, technical });
+      return item('active', state, { itemId, blocked: false, at: run.stateAt, book, object,
+        ...(run.stopReason === undefined ? {} : { facts: { stopReason: run.stopReason } }), nextStep: 'view-run', target, technical });
     }
     default:
       return null;

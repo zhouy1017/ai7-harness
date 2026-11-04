@@ -631,6 +631,21 @@ describe('the authorization bar (S74a)', () => {
     expect(taskBarContinuationNote(null, 8)).toBe('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始');
   });
 
+  it('shows the reason and time of the previous continuation, with network settings for reachability stops (Issue #1309)', () => {
+    const stopped = {
+      runRecordId: 'run', cancelling: false, pausing: false,
+      stopReason: 'proxy-unreachable' as const, stopAt: '2026-09-23T04:05:06.000Z',
+      cancel: { reason: null, impact: [] }, pause: { reason: '不能暂停' }, resume: { reason: null }, redo: { reason: null },
+      activity: null, executingSince: null, continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
+      accountLimit: null, outcomeUnknown: null,
+    };
+    const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'resumable', label: '任务已中断 · 代理不可达' }, runControl: stopped }));
+    expect(view.note).toContain('上次续行于');
+    expect(view.note).toContain('因 代理不可达 停下');
+    expect(view.actions[0]).toMatchObject({ name: 'connect', label: '去设置 › 模型服务 › 网络代理' });
+    expect(view.actions[1]).toMatchObject({ name: 'resume', label: '续行' });
+  });
+
   it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {
     const cancelled = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled', label: '已取消' } }));
     expect(cancelled).toMatchObject({ statement: null, note: null, status: '已取消 · 未发送任何内容' });

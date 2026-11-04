@@ -74,6 +74,7 @@ import {
   type BaselineAnalysisResultSetRevisionProjection,
   type BaselineAnalysisRevisionUpdateProjection,
   type BaselineAnalysisRunState,
+  type ResumableStopReason,
   type BaselineAnalysisSelectedRange,
   type BaselineAnalysisUnitProjection,
   type BaselineAnalysisUpdateControlsProjection,
@@ -96,6 +97,12 @@ import {
   type SafeRetryRepetition,
   MODEL_SERVICE_SETUP_REQUIRED_REASON,
 } from '../../shared/protocol.js';
+
+function resumableStopReasonOf(value: unknown): ResumableStopReason | undefined {
+  if (!isRecord(value)) return undefined;
+  return value.stopReason === 'proxy-unreachable' || value.stopReason === 'model-service-unreachable' || value.stopReason === 'outcome-unknown' || value.stopReason === 'shutdown'
+    ? value.stopReason : undefined;
+}
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
@@ -1006,7 +1013,7 @@ export class BaselineAnalysisStore {
       resultSetRevision: revision,
       taskOutcome: outcome === undefined ? null : this.#outcomeProjection(outcome),
       update,
-      updateControls: this.#updateControlsFor(bookId, revision, runIsActive(run?.state ?? null) ? run!.state : null),
+      updateControls: this.#updateControlsFor(bookId, revision, runIsActive(run?.state ?? null) ? run! : null),
       history,
       inspectedRevision,
       actions: {
@@ -1154,6 +1161,7 @@ export class BaselineAnalysisStore {
       `SELECT t.*, b.title book_title, r.run_record_id, r.recorded_at run_recorded_at,
               ${lastState} last_state,
               (SELECT s.recorded_at FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state_at,
+              (SELECT s.canonical_json FROM analysis_run_states s WHERE s.run_record_id = r.run_record_id ORDER BY s.sequence DESC LIMIT 1) last_state_json,
               (SELECT 1 FROM analysis_run_authorizations a WHERE a.task_intent_id = t.task_intent_id) has_authorization
        FROM analysis_task_intents t
        JOIN books b ON b.book_id = t.book_id
@@ -1199,6 +1207,8 @@ export class BaselineAnalysisStore {
             // 结果待确认 (Issue #51, S16c): a resumable Run stopped on a sent request whose result cannot be known.
             // It holds them while paused, account-limited, waiting for an answer or left 可续行 too, and is listed so (P2-1).
             outcomeUnknown: (state === 'paused' || state === 'resumable' || state === 'awaiting-clarification') && this.unconfirmedRangesOf(runRecordId).length > 0,
+            ...(state === 'resumable' && row.last_state_json !== null
+              ? (() => { const stopReason = resumableStopReasonOf(parseCanonicalJson(asString(row.last_state_json))); return stopReason === undefined ? {} : { stopReason }; })() : {}),
             // 需要重新确认计划 (Issue #536; OFF-008): a waiting Run blocked because its plan moved.
             planMoved: state === 'blocked-before-dispatch' && this.blockedByOf(runRecordId) === 'plan-moved',
           },
@@ -2165,6 +2175,7 @@ export class BaselineAnalysisStore {
     // exactly as a Result Set Revision keeps its own policy pin. Only a record written before those
     // reasons were durable falls back to the bound launch.
     const currentRecord = parseCanonicalJson(asString(states[states.length - 1]!.canonical_json)) as Record<string, unknown>;
+    const stopReason = current.state === 'resumable' ? resumableStopReasonOf(currentRecord) : undefined;
     const recordedReasons = Array.isArray(currentRecord.reasons) && currentRecord.reasons.every((reason) => typeof reason === 'string')
       ? currentRecord.reasons as ReadonlyArray<string>
       : null;
@@ -2213,6 +2224,7 @@ export class BaselineAnalysisStore {
       runRecordId,
       procedure: (parseCanonicalJson(asString(runRecord.canonical_json)) as { procedure?: ProcedureDefinitionPin }).procedure ?? null,
       state: current.state,
+      ...(stopReason === undefined ? {} : { stopReason }),
       stateLabel: currentRecord.idleYield === true ? RUN_IDLE_YIELD_LABEL : current.state === 'cancelled' && runBegan(transitions) ? RUN_CANCELLED_AFTER_START_LABEL
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
@@ -2874,7 +2886,7 @@ export class BaselineAnalysisStore {
   #updateControlsFor(
     bookId: string,
     revision: BaselineAnalysisResultSetRevisionProjection | null,
-    activeRun: BaselineAnalysisRunState | null,
+    activeRun: BaselineAnalysisProjection['run'] | null,
   ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection | null {
     if (revision === null || this.#definition.updateModes.length === 0) return null;
     return this.#updateControls(bookId, revision, activeRun);
@@ -2919,10 +2931,10 @@ export class BaselineAnalysisStore {
   #updateControls(
     bookId: string,
     latest: BaselineAnalysisResultSetRevisionProjection,
-    activeRun: BaselineAnalysisRunState | null,
+    activeRun: BaselineAnalysisProjection['run'] | null,
   ): BaselineAnalysisUpdateControlsProjection | ReviewCategoryUpdateControlsProjection {
     const blockedByActiveRun = activeRun !== null;
-    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun, this.#definition.kind) : null;
+    const blockedReason = blockedByActiveRun ? activeRunReason(activeRun.state, this.#definition.kind, activeRun.stopReason) : null;
     const head = this.#workingHead(latest.manuscriptPin.manuscriptId, bookId);
     const blocks = this.readWorkingBlocks(head.branchId);
     const preview = deriveCoverageManifest({
@@ -4150,14 +4162,14 @@ export class BaselineAnalysisStore {
         this.recordRunState(runRecordId, 'paused', { detail: RECONCILED_YIELDED_DETAIL, reconciled: true });
         settled += 1;
       } else if (state === 'admitted' || state === 'executing') {
-        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
+        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, stopReason: 'shutdown', reconciled: true });
         settled += 1;
       } else if (state === 'cancelling') {
         cancelling.push(runRecordId);
       } else if (state === 'awaiting-clarification' && this.clarificationsOf(runRecordId).every((entry) => entry.answer !== null)) {
         // The editor answered while another Run held the slot, and AI7 closed before it went on (Issue #767; ADR 0034): the answer
         // stays recorded, and the Run waits for the editor's 续行 like every Run a restart left, so nothing is sent by itself.
-        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, reconciled: true });
+        this.recordRunState(runRecordId, 'resumable', { detail: RECONCILED_RESUMABLE_DETAIL, stopReason: 'shutdown', reconciled: true });
         settled += 1;
       } else if (state === 'authorized' && options.leaveAuthorized?.(runRecordId) !== true) {
         // A start the governor had not admitted yet (Issue #49, S14) — or one a service stopped on between its

@@ -15,6 +15,7 @@ import type {
   TaskPlanKind,
   TaskPlanProjection,
   TaskPlanRunControlProjection,
+  ResumableStopReason,
 } from '../shared/protocol.js';
 import type { PreferencesRendererApi } from '../shared/preferences.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
@@ -60,6 +61,7 @@ import {
   TASK_PLAN_ACTIVITY_TITLE,
   TASK_PLAN_ACTIVITY_UNREPORTED,
   taskBarContinuationNote,
+  resumableStopReasonLabel,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
   TASK_BAR_QUEUED_STATUS,
@@ -2208,16 +2210,19 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * 确认取消任务 (Issue #422; CTRL-004, CTRL-005): the Run the summary named is cancelled. The service records
    * 正在取消 at once and the Run stops at the next unit boundary; the drawer follows it to 已取消.
    */
-  async function controlRun(current: TaskPlanProjection, action: 'pause' | 'resume' | 'cancel'): Promise<boolean> {
+  type ControlRunResult = { cancelling: boolean; runRecordId: string | null; stopReason?: ResumableStopReason };
+  async function controlRun(current: TaskPlanProjection, action: 'pause' | 'resume' | 'cancel'): Promise<ControlRunResult> {
     if (current.kind === 'baseline-analysis') {
       const result = action === 'pause' ? await api.pauseBaselineAnalysisRun({ taskIntentId: current.ref })
         : action === 'resume' ? await api.resumeBaselineAnalysisRun({ taskIntentId: current.ref })
           : await api.cancelBaselineAnalysisRun({ taskIntentId: current.ref });
-      return result.run?.state === 'cancelling';
+      return { cancelling: result.run?.state === 'cancelling', runRecordId: result.run?.runRecordId ?? null,
+        ...(result.run?.stopReason === undefined ? {} : { stopReason: result.run.stopReason }) };
     }
-    if (!isStartWhenOnlineTaskKind(current.kind)) return false;
+    if (!isStartWhenOnlineTaskKind(current.kind)) return { cancelling: false, runRecordId: null };
     const result = await api.controlTaskRun({ kind: current.kind, ref: current.ref, action });
-    return result.runControl?.cancelling === true;
+    return { cancelling: result.runControl?.cancelling === true, runRecordId: result.runControl?.runRecordId ?? null,
+      ...(result.runControl?.stopReason === undefined ? {} : { stopReason: result.runControl.stopReason }) };
   }
 
   async function cancelRun(): Promise<void> {
@@ -2226,7 +2231,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (current === null || current.runControl === null || !beginWork()) return;
     options.setStatus('正在取消任务…', 'busy');
     try {
-      const cancelling = await controlRun(current, 'cancel');
+      const cancelling = (await controlRun(current, 'cancel')).cancelling;
       cancelConfirmShown = false;
       // A Run under way stops at its next boundary; one nothing was running settled at once.
       options.setStatus(cancelling ? TASK_BAR_CANCELLING_NOTE : TASK_BAR_CANCELLED_NOTE, 'success');
@@ -2266,8 +2271,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     if (current === null || current.runControl === null || !beginWork()) return;
     options.setStatus('正在续行…', 'busy');
     try {
-      await controlRun(current, 'resume');
-      options.setStatus('已续行，从已保存的进度接着读。', 'success');
+      const result = await controlRun(current, 'resume');
+      const stopReason = current.runControl.stopReason;
+      const repeated = stopReason !== undefined
+        && result.runRecordId === current.runControl.runRecordId
+        && result.stopReason === stopReason;
+      options.setStatus(repeated
+        ? `续行后仍然 ${resumableStopReasonLabel(stopReason!)}；没有发送任何书稿内容`
+        : '已续行，从已保存的进度接着读。', repeated ? 'error' : 'success');
       focusBar = true;
       options.onRecorded(current.kind, current.bookId, current.ref);
     } catch (error) {
