@@ -1810,7 +1810,7 @@ async function main() {
       titlesReplaced.every((title) => titlesBeforeReplace.includes(title)), 'database-replaced-titles', titlesReplaced);
     await openDataAndStorage('database-replaced');
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)}`, 'database-replaced-recorded');
-    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}) && document.querySelector('.database-import-roll-back p')?.textContent === ${JSON.stringify(`上次用「AI7 数据库.ai7db」替换了本机全部数据；替换前的数据在「${replaceBackup}」里。`)}; })()`, 'database-replaced-words');
+    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}); })()`, 'database-replaced-words');
     await close();
 
     at('database-import-merge');

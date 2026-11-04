@@ -130,7 +130,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       rollBack.replaceChildren();
     } else {
       rollBack.hidden = false;
-      const [offer, consequence] = databaseRollBackLines(target);
+      const [, consequence] = databaseRollBackLines(target);
       const open = action(DATABASE_IMPORT_ACTIONS.rollBack, 'secondary', 'roll-back', () => {
         const confirmation = el('div', 'database-import-roll-back-confirm');
         const confirm = action(DATABASE_IMPORT_ACTIONS.confirmRollBack, 'primary', 'confirm-roll-back', () => void rollBackTo(target.replacementId));
@@ -146,7 +146,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
         rollBack.append(confirmation);
         keep.focus();
       });
-      rollBack.replaceChildren(el('p', 'field-note', offer), open);
+      rollBack.replaceChildren(open);
     }
 
     const list = el('ol');
