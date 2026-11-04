@@ -375,7 +375,7 @@ async function readDrawer(renderer) {
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
       columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'),
-      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
+      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.closest('.task-plan-unavailable')?(node.getAttribute('aria-label')??node.textContent):node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
       footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       bar:(() => {
         const bar=drawer.querySelector('.task-drawer-bar');
@@ -387,7 +387,7 @@ async function readDrawer(renderer) {
           status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
           actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
             const described=node.getAttribute('aria-describedby');
-            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+            return { name:node.dataset.taskDrawerControl, text:node.getAttribute('aria-label')??node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
           }),
         };
       })(),

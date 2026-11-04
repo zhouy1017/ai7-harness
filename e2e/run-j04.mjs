@@ -533,7 +533,7 @@ async function readDrawer(renderer) {
           status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
           actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
             const described=node.getAttribute('aria-describedby');
-            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+            return { name:node.dataset.taskDrawerControl, text:node.getAttribute('aria-label')??node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
           }),
         };
       })(),

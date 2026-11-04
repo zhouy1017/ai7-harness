@@ -586,7 +586,7 @@ const READ_BAR = `(() => {
     pill: text(drawer.querySelector('.task-drawer-pill')),
     status: text(drawer.querySelector('.task-bar-status')),
     note: text(drawer.querySelector('.task-bar-note')),
-    actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => [button.dataset.taskDrawerControl, button.textContent, button.disabled ? 'disabled' : 'enabled']),
+    actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => [button.dataset.taskDrawerControl, button.getAttribute('aria-label') ?? button.textContent, button.disabled ? 'disabled' : 'enabled']),
   });
 })()`;
 async function waitForBar(renderer, expected, name, timeout = 60_000) {
