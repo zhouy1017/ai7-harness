@@ -1,3 +1,4 @@
+import { technicalWords, identityWords } from './technical-layer.js';
 import type {
   BaselineAnalysisUpdateRequest,
   CustomAnalysisDimensionProjection,
@@ -52,7 +53,7 @@ type Status = (message: string, tone?: 'busy' | 'success' | 'error') => void;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 
@@ -372,7 +373,7 @@ export function mountCustomAnalysisDimensions(options: MountCustomAnalysisDimens
       card.append(options.technicalDetails('custom-dimension-facts',
         el('dt', undefined, '维度'), el('dd', 'technical-identity', `${dimension.dimensionId} · ${dimension.kind}`),
         ...dimension.versions.flatMap((version) => [
-          el('dt', undefined, `第 ${version.version} 版`),
+          el('dt', undefined, `${technicalWords(`第 ${version.version} 版`, '版本')}`),
           el('dd', 'technical-identity', `${version.versionId} · ${version.documentDigest} · ${options.localInstantLabel(version.createdAt)}`),
         ])));
       section.append(card);

@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisCoverageAxis,
@@ -39,6 +40,7 @@ export const ANALYSIS_EDITORIAL_NOT_DO = ['不会直接修改稿件', '不读这
  * a dispatch decision no plan has frozen.
  */
 export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null): string {
+  if (!technicalLayerVisible) return '开始后按本次选择执行。';
   const flow = '本流程只冻结并记录本次标准直接授权';
   if (pin === null) return `${flow}。`;
   return pin.decision === 'deny'
@@ -54,6 +56,7 @@ export function taskAuthorizationDispatchNote(pin: ProviderProcessingPin | null)
  * hold in every state — the kind and that a Revision does not modify the manuscript — still read.
  */
 export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPolicyPin | null): string {
+  if (!technicalLayerVisible) return '分析结果供编辑参考，不修改稿件。';
   const kind = '一个精确版本化的覆盖式分析种类';
   const revision = '结果集修订版不修改稿件';
   if (policy === null) return `${kind}；${revision}。`;
@@ -71,6 +74,7 @@ export function analysisKindSubtitle(policy: ProviderProcessingPin | ResultSetPo
  * label's closed union, and both of its members carry the `：` the halves are taken around.
  */
 export function launchPolicyIntegritySentence(label: LaunchPolicyProjection['providerProcessing']['label']): string {
+  if (!technicalLayerVisible) return '连接设置用于之后开始的任务。';
   const separator = label.indexOf('：');
   return `当前${label.slice(0, separator)}范围保持${label.slice(separator + 1)}。`;
 }

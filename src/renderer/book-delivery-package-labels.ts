@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type { BookDeliveryPackageVersionProjection } from '../shared/protocol.js';
 
 /**
@@ -44,7 +45,7 @@ export function packageChangedLine(label: string): string {
 
 /** `v2 · 图书交付包已准备 · 暂无导出记录` (DPKG-011): the prepared state beside its derived export history. */
 export function packageVersionLine(version: Pick<BookDeliveryPackageVersionProjection, 'label' | 'exportHistoryLabel'>): string {
-  return `${version.label} · ${PACKAGE_PREPARED} · ${version.exportHistoryLabel}`;
+  return `${technicalWords(`${version.label} · `)}${PACKAGE_PREPARED} · ${version.exportHistoryLabel}`;
 }
 
 /** `用途：交出版社存档 · 9月24日 12:30`. */

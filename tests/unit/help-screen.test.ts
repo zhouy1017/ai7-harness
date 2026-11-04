@@ -1,5 +1,7 @@
+import { initializeTechnicalLayer, resetTechnicalLayer, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mountHelp, type ThirdPartyLicense } from '../../src/renderer/help.js';
+import { mountHelp, THIRD_PARTY_LICENSES, type ThirdPartyLicense } from '../../src/renderer/help.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { SERVICE_PROTOCOL_VERSION } from '../../src/shared/protocol.js';
 import { HELP_ABOUT_FAILED } from '../../src/renderer/help-labels.js';
@@ -105,4 +107,51 @@ describe('the mounted 帮助 screen', () => {
     buttons.find((node) => node.textContent === '返回')!.click();
     expect(back).toHaveBeenCalledTimes(1);
   });
+});
+
+it('scans Help in ordinary mode (#1315)', async () => {
+  setTechnicalLayerVisible(false);
+  try { const view = mounted(); await Promise.resolve(); expectNoTechnicalText(view.root); }
+  finally { setTechnicalLayerVisible(true); }
+});
+
+it('applies developer mode immediately and persists the choice (#1315)', () => {
+  const storage = { setItem: vi.fn() };
+  vi.stubGlobal('window', { localStorage: storage, location: { reload: vi.fn() } });
+  const view = mounted();
+  const toggle = view.find('.help-developer-mode input');
+  toggle.checked = false; toggle.dispatchEvent({ type: 'change' });
+  try {
+    expect(storage.setItem).toHaveBeenCalledWith('ai7.technicalLayerVisible', 'false');
+    expect(view.root.querySelector('.help-about') === null).toBe(true);
+    expect(view.root.querySelector<HTMLInputElement>('.help-developer-mode input')?.checked).toBe(false);
+  } finally { setTechnicalLayerVisible(true); }
+});
+
+it('keeps early Help closed and its switch unavailable until initialization succeeds', () => {
+  resetTechnicalLayer();
+  try {
+    const early = mounted();
+    expect(early.find('.help-developer-mode input').disabled).toBe(true);
+    expect(early.root.querySelector('.help-about')).toBeNull();
+    expect(() => initializeTechnicalLayer('source-checkout', { getItem: () => { throw new Error('read failed'); } })).toThrow('read failed');
+    const failed = mounted();
+    expect(failed.find('.help-developer-mode input').disabled).toBe(true);
+    expect(failed.root.querySelector('.help-about')).toBeNull();
+  } finally { initializeTechnicalLayer('source-checkout', { getItem: () => null }); }
+});
+
+it('scans the shipped Help and licence catalogue in ordinary mode (#1315)', () => {
+  setTechnicalLayerVisible(false);
+  try {
+    const root = document.createElement('section');
+    mountHelp({ root, loadVersions: async () => ({ softwareVersion: '0.9.9', dataVersion: 1, frozen: true }), back: vi.fn() });
+    const entries = Array.from(root.querySelectorAll('.help-license'));
+    expect(entries).toHaveLength(THIRD_PARTY_LICENSES.length);
+    for (const [index, license] of THIRD_PARTY_LICENSES.entries()) {
+      expect(entries[index]!.querySelector('.help-license-name')!.textContent).toBe(license.name);
+      expect(entries[index]!.querySelector('.help-license-text')!.textContent).toBe(license.licenseText);
+    }
+    expectNoTechnicalText(root, [root.querySelector('.help-license-list')!]);
+  } finally { setTechnicalLayerVisible(true); }
 });

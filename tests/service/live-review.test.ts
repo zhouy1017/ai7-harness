@@ -227,7 +227,7 @@ describe('reference-free review on the Go execution path', () => {
     await driver.drive(prepared.reviewRunId);
     const completed = store.inspectReviewWorkspace(book.bookId, prepared.reviewRunId).run!;
     expect(completed.state).toBe('settled');
-    expect(completed.categories[0]!.basisStatement).toContain(`允许参考 · 书系《${J13_SERIES_TITLE}》的知识条目`);
+    expect(completed.categories[0]!.basis.seriesScopes).toEqual([{ title: J13_SERIES_TITLE }]);
     expect(requests.some((request) => request.system.includes(J13_SERIES_TITLE))).toBe(true);
     // The opt-in wrapper is admitted only as its owner derived it: a copy, or a changed contract, fails closed.
     const task = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'), { readOnly: true });

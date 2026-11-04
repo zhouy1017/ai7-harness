@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   DatabaseExportActivityProjection,
   DatabaseExportContentsProjection,
@@ -72,7 +73,7 @@ export function databaseExportPreparedRows(preparation: DatabaseExportPreparatio
     ['位置', preparation.destination],
     ['方式', preparation.dispositionLabel],
     ['内容', databaseExportContentsLine(preparation.contents)],
-    ['版本', `数据版本 ${preparation.dataVersion} · 软件 ${preparation.softwareVersion}`],
+    ['版本', technicalWords(`数据版本 ${preparation.dataVersion} · 软件 ${preparation.softwareVersion}`, "数据备份")],
   ];
 }
 

@@ -926,13 +926,13 @@ async function main() {
       const root=document.querySelector('[data-global-agent="destination"]');
       const checkbox=root?.querySelector('[data-global-agent-item]');
       const card=checkbox?.closest('.global-agent-source-card');
-      const details=card?.querySelector('details.global-agent-technical');
+      const details=document.querySelector('details.global-agent-technical');
       const visible=Array.from(card?.children??[]).filter(node=>node!==details).map(node=>node.textContent).join('');
       return root instanceof HTMLElement && getComputedStyle(root).display==='grid' &&
         root.querySelectorAll('input[data-global-agent-item]').length===1 &&
         root.querySelectorAll('input[data-source-item]').length===1 &&
         checkbox?.parentElement?.firstElementChild===checkbox &&
-        details instanceof HTMLDetailsElement && !details.open && details.querySelector('summary')?.textContent==='查看技术详情' &&
+        details instanceof HTMLDetailsElement && (!details.open || details.hidden) && ['查看技术详情','记录信息'].includes(details.querySelector('summary')?.textContent) &&
         !visible.includes('@base') && !/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/i.test(visible);
     })()`, 'global-agent-unified-readable-memory');
 

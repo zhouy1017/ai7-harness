@@ -78,7 +78,7 @@ describe('a review Run freezes its search backend', () => {
       await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
       const category = store.inspectReviewWorkspace(book.bookId, null).categories.find((entry) => entry.categoryId === 'factual-review')!;
       expect(category.available).toBe(true);
-      expect(category.basisStatement).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
+      expect(category.basis.modelChannelSearchLabel).toBe('DeepSeek 开放平台（官方）');
       const connections = store.getSearchBackendConnections();
       const prepare = () => {
         let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);

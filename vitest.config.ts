@@ -6,6 +6,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['tests/support/development-renderer.ts'],
     isolate: true,
     reporters: ['default'],
     watch: false,

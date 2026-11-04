@@ -1,3 +1,4 @@
+import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import type { ModelConnectionTestStatus } from '../shared/protocol.js';
 
 /** Editor-facing guidance; exact codes remain in the existing technical disclosure. */
@@ -34,7 +35,7 @@ export function modelConnectionTestLabel(test: ModelConnectionTestStatus | null 
 
 /** The test's exact facts behind 查看技术详情, or nothing before a test. */
 export function modelConnectionTestDisclosure(test: ModelConnectionTestStatus | null | undefined): HTMLElement[] {
-  if (test == null) return [];
+  if (test == null || !technicalLayerVisible) return [];
   const details = document.createElement('details');
   details.className = 'technical-details';
   const summary = document.createElement('summary');
@@ -46,7 +47,7 @@ export function modelConnectionTestDisclosure(test: ModelConnectionTestStatus | 
     list.append(dt, dd);
   }
   details.append(summary, list);
-  return [details];
+  return [technicalDisclosure(details)];
 }
 
 export const MODEL_CONNECTION_TEST_NOTE = '测试只发送固定公开合成消息，不含图书文字；仅核验缓冲文本，不核验工具或流式。';

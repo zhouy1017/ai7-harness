@@ -1,3 +1,4 @@
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   type WordTrackedChangesChoice,
   type StagedImportProjection,
@@ -49,7 +50,7 @@ const REIMPORT_VERB_NOTES: Readonly<Record<ReimportGroupProjection['verbs'][numb
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 
@@ -569,7 +570,7 @@ export function createImportReview(options: ImportReviewOptions) {
         sourceRadio.value = exactSourceVersionId;
         sourceRadio.dataset['reuseSourceVersionId'] = exactSourceVersionId;
         sourceRadio.checked = reuseSourceVersionId === exactSourceVersionId;
-        sourceRadio.setAttribute('aria-label', `复用来源版本 ${exactSourceVersionId}`);
+        sourceRadio.setAttribute('aria-label', `复用来源版本${technicalWords(` ${exactSourceVersionId}`)}`);
       } else {
         sourceRadio.value = 'create-new';
         sourceRadio.dataset['createSourceVersion'] = 'true';
@@ -750,7 +751,7 @@ export function createImportReview(options: ImportReviewOptions) {
     // Each pinned value now carries its own attribute rather than being found by position in the `<dl>`,
     // because the three digests move into the disclosure and a positional lookup would silently follow
     // the wrong row.
-    const retainedBytes = element('dd', undefined, String(review.retainedBoundary.sourceBytes));
+    const retainedBytes = element('dd', undefined, technicalLayerVisible ? String(review.retainedBoundary.sourceBytes) : '');
     retainedBytes.setAttribute('data-source-bytes', '');
     const retainedDigest = element('dd', 'technical-identity', review.retainedBoundary.sourceSha256);
     retainedDigest.setAttribute('data-source-sha256', '');
@@ -758,7 +759,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
       element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
       element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
-      element('dt', undefined, '来源字节数'), retainedBytes,
+      element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''), retainedBytes,
     );
     // A retained original the product never parsed has no content or structure identity, so those two
     // rows are absent rather than empty: the surface claims only what was actually derived.
@@ -897,7 +898,7 @@ export function createImportReview(options: ImportReviewOptions) {
     values.append(
       element('dt', undefined, '目标图书'), element('dd', undefined, review.target.label),
       element('dt', undefined, '导入关系'), element('dd', undefined, review.target.relationshipLabel),
-      element('dt', undefined, '已保存的修订版'), element('dd', undefined, `${review.checkpoint.revisionLabel} · 修订日志 ${review.checkpoint.journalSequence}`),
+      element('dt', undefined, '已保存的修订版'), element('dd', undefined, `${technicalWords(review.checkpoint.revisionLabel, '修订版')}${technicalWords(` · 修订日志 ${review.checkpoint.journalSequence}`)}`),
       element('dt', undefined, '保存状态'), element('dd', undefined,
         review.checkpoint.createdForDirtyJournal ? '已将当前编辑保存为修订版' : '当前稿件已保存'),
       element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
@@ -906,11 +907,11 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '来源版本结果'), element('dd', undefined, review.sourceVersionResult.label),
       element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
       element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
-      element('dt', undefined, '暂存来源字节数'), element('dd', undefined, String(review.source.sourceBytes)),
+      element('dt', undefined, technicalLayerVisible ? '暂存来源字节数' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
       element('dt', undefined, '暂存来源范围'), element('dd', undefined, review.source.provenanceLabel),
     );
     target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
-    target.dataset['reimportSourceBytes'] = String(review.source.sourceBytes);
+    target.dataset['reimportSourceBytes'] = technicalLayerVisible ? String(review.source.sourceBytes) : '';
     target.append(element('h3', undefined, '目标、固定点与来源关系'), values, technicalDetails(
       undefined,
       element('dt', undefined, '主稿件 ID'), element('dd', 'technical-identity', review.target.manuscriptId),
@@ -1215,7 +1216,7 @@ export function createImportReview(options: ImportReviewOptions) {
       ? `${review.target.label} · ${review.target.confirmedTitle}`
       : `${review.target.label} · ${review.target.relationshipLabel}`));
     const identityDetails = element('dl');
-    const sourceBytes = element('dd', undefined, String(review.source.sourceBytes));
+    const sourceBytes = element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : '');
     sourceBytes.setAttribute('data-source-bytes', '');
     const sourceDigest = element('dd', 'technical-identity', review.source.sourceSha256);
     sourceDigest.setAttribute('data-source-sha256', '');
@@ -1247,7 +1248,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dd', undefined, review.source.displayName),
       element('dt', undefined, '来源边界'),
       element('dd', undefined, review.source.provenanceLabel),
-      element('dt', undefined, '来源字节数'),
+      element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
       sourceBytes,
       element('dt', undefined, '最终动作'),
       element('dd', undefined, finalActionLabel),

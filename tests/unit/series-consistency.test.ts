@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { graphemeCount } from '../../src/service/analysis/factual-review-contract.js';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
-  reviewCategoryBasisStatement,
+  reviewCategoryBasis,
   reviewCategoryContractInput,
   type ReviewCategoryConfigurationEntry,
 } from '../../src/service/review/category-configuration.js';
@@ -85,8 +85,7 @@ describe('one Book\'s 书系一致性', () => {
     expect(entry.seriesKnowledge!.series.map((series) => series.title)).toEqual(['A书系', 'B书系']);
     expect(entry.seriesKnowledge!.revisions.map((revision) => revision.itemId)).toEqual(['a-item-1', 'a-item-0', 'b-item-0']);
     // REV-013: the basis names each Series and the exact revision of each item it gave.
-    expect(reviewCategoryBasisStatement(entry))
-      .toBe('依据：书系「A书系」的书系知识：人物「吴」第 1 版、人物「王」第 1 版；书系「B书系」的书系知识：人物「周」第 1 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎');
+    expect(reviewCategoryBasis(entry)).toMatchObject({ searchEngine: false, seriesKnowledge: true, guidelineDocuments: entry.guidelineDocuments.map(({ documentId, title, issuer, version }) => ({ documentId, title, issuer, version })) });
   });
 
   it('says why it cannot be chosen: no Series, no knowledge taken in for it, or more clauses than one review carries', () => {

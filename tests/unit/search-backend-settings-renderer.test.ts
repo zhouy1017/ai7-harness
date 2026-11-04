@@ -3,12 +3,14 @@ import { searchBackendSettingsProjection } from '../../src/service/provider/sear
 import { SEARCH_CANDIDATE_PROBE_LABEL, candidateProbeLines, effectiveSearchSourceLine, renderSearchBackendSettings, type SearchBackendSettingsApi } from '../../src/renderer/search-backend-settings.js';
 import type { ModelServiceSettingsProjection, SearchBackendProbeProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
 // 设置 › 模型服务 › 联网检索 (Issue #1055 into W22-S10a #1181) over the real registry's projection and stubbed API calls: the
 // candidate is shown 未实测 with one 测试连接 that names only the closed identifiers, and its result lives only in the DOM.
 let restore: () => void;
 beforeEach(() => { restore = installMiniDom(); });
-afterEach(() => restore());
+afterEach(() => { setTechnicalLayerVisible(true); restore(); });
 
 const SHIPPED = ['search-tinyfish', 'search-deepseek', 'search-brave', 'search-parallel', 'search-bochaai'];
 const projection = (): ModelServiceSettingsProjection => ({
@@ -32,6 +34,17 @@ function section(probe: SearchBackendSettingsApi['probeSearchBackend']) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the direct-search candidate in 联网检索', () => {
+  it('keeps candidate decisions and test outcomes without technical identifiers in ordinary mode', async () => {
+    setTechnicalLayerVisible(false);
+    const { node, api } = section(async () => SUCCESS);
+    expect(node.textContent).toContain('不能用于任务');
+    expectNoTechnicalText(node);
+    node.querySelector('button[data-action="probe-search-candidate"]')!.click();
+    await settle();
+    expect(node.querySelector('[data-search-candidate-probe]')!.textContent).toContain('连接成功');
+    expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1' });
+    expectNoTechnicalText(node);
+  });
   it('shows the effective source and why it is selected', () => {
     const settings = projection();
     expect(effectiveSearchSourceLine(settings)).toContain('兜底 · TinyFish');

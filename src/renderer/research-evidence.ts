@@ -1,3 +1,4 @@
+import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { SOURCE_TRANSLATION_LABEL, type RendererApi, type ResearchEvidenceBookProjection, type ResearchEvidenceProjection, type ReviewEvidenceSource } from '../shared/protocol.js';
 import { FINDING_EVIDENCE_HEADING } from '../shared/report-wording.js';
 import { localInstantLabel } from './plan-preview-labels.js';
@@ -36,7 +37,7 @@ export interface MountResearchEvidenceOptions {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   return node;
 }
 
@@ -98,7 +99,7 @@ export function mountResearchEvidence(options: MountResearchEvidenceOptions): { 
     row('页面摘要', record.pageSha256 ?? '—');
     row('研究快照', record.snapshotDigest ?? '—');
     facts.append(list);
-    article.append(facts);
+    article.append(technicalDisclosure(facts));
     return article;
   };
 

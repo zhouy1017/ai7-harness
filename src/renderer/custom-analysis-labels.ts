@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type { CustomAnalysisRowProjection } from '../shared/protocol.js';
 
 /**
@@ -16,7 +17,7 @@ export const CUSTOM_TAB_PREPARING = '正在为自定义分析准备任务计划�
 export const CUSTOM_TAB_PREPARED = '自定义分析的任务计划已准备：在右侧的任务计划里看过之后再开始任务。';
 
 export function customTabVersionLine(version: number, revisionLabel: string, ordinal: number): string {
-  return `第 ${ordinal} 份结果 · 按维度第 ${version} 版 · 读的是 ${revisionLabel}`;
+  return `第 ${ordinal} 份结果 · 按维度${technicalWords(`第 ${version} 版`, '版本')} · 读的是 ${technicalWords(revisionLabel)}`;
 }
 
 export function customTabCountsLine(counts: { units: number; rows: number; located: number; unlocated: number }): string {

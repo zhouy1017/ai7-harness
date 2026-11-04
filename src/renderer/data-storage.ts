@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 import { DATA_VERSION_DATA, DATA_VERSION_HEADING, DATA_VERSION_MARKER, DATA_VERSION_MEANING, DATA_VERSION_PROMISE, DATA_VERSION_SOFTWARE, DATA_VERSION_UNAVAILABLE, DATA_VERSION_UPDATE, DATA_VERSION_UPGRADE, dataVersionRecordsLabel, dataVersionRollbackSteps, dataVersionStateLine, dataVersionUpdateLine, dataVersionUpgradeBackupLine, dataVersionUpgradeLine, dataVersionMarkerLine, storeVersionLine } from './data-version-labels.js';
 import { mountDatabaseExport } from './database-export.js';
@@ -99,7 +100,7 @@ export function createDataStorage(options: DataStorageOptions) {
       const databaseImport = element('section', 'source-card');
       // 定期自动备份 (Issue #434, S86b; DSTO-018): the switch, off by default, and the backups kept beside the data.
       const scheduledBackup = element('section', 'source-card');
-      content.append(summary, credentials, versions, databaseExport, databaseImport, scheduledBackup, actions);
+      content.append(summary, credentials, ...(technicalLayerVisible ? [versions] : []), databaseExport, databaseImport, scheduledBackup, actions);
       mountDatabaseExport({ root: databaseExport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountDatabaseImport({ root: databaseImport, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
       mountScheduledBackup({ root: scheduledBackup, api: window.ai7, setStatus, errorMessage: rendererErrorMessage, instant: localInstantLabel });
