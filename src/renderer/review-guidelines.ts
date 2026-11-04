@@ -98,7 +98,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     }
     // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
     const fixed = guidelineFixedStatement(document);
-    if (fixed !== null) node.append(el('p', 'field-note guideline-fixed', fixed));
+    if (fixed !== null) heading.append(el('span', 'guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
     clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauseCount)));
@@ -220,7 +220,8 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     confirm.disabled = busy;
     cancel.disabled = busy;
     actions.append(confirm, cancel);
-    section.append(heading, el('p', 'field-note guideline-preview-changes', guidelinePreviewChanges(shown)), list, actions);
+    heading.append(' · ', el('span', 'guideline-preview-changes', guidelinePreviewChanges(shown)));
+    section.append(heading, list, actions);
     if (shown.clausePages > 1) section.insertBefore(clauseControls(shown, true), actions);
     return section;
   };

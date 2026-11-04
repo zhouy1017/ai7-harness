@@ -230,7 +230,7 @@ const READ_KNOWLEDGE = `(() => {
       older: card.querySelector('.guideline-older')?.textContent ?? null,
       fixed: card.querySelector('.guideline-fixed')?.textContent ?? null,
       importable: card.querySelector('[data-guideline-action="import"]') instanceof HTMLButtonElement,
-      preview: card.querySelector('.guideline-preview h4')?.textContent ?? null,
+      preview: card.querySelector('.guideline-preview h4')?.firstChild?.textContent ?? null,
       changes: card.querySelector('.guideline-preview-changes')?.textContent ?? null,
       previewClauses: card.querySelectorAll('.guideline-preview li').length,
       refusal: card.querySelector('.guideline-refusal')?.textContent ?? null,
@@ -266,7 +266,7 @@ const READ_LIBRARY = `(() => {
     empty: root.querySelector('.library-empty')?.textContent ?? null,
     refusal: root.querySelector('.library-refusal')?.textContent ?? null,
     preview: preview === null ? null : {
-      heading: preview.querySelector('h3')?.textContent ?? null,
+      heading: preview.querySelector('h3')?.firstChild?.textContent ?? null,
       facts: preview.querySelector('.library-preview-facts')?.textContent ?? null,
       title: preview.querySelector('[data-library-field="title"]')?.value ?? null,
       kinds: Array.from(preview.querySelectorAll('[data-library-choice]'), (input) => [input.value, input.checked]),

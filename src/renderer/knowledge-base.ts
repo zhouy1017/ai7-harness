@@ -162,11 +162,13 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         heading.tabIndex = -1;
         first ??= heading;
         const context = element('p', 'field-note');
-        context.append(element('span', 'exemplar-attribution', exemplarAttribution(book).replace(/。$/u, '')), '；',
-          element('span', 'exemplar-designation', exemplarDesignation(book, localInstantLabel)));
-        card.append(heading, context);
         const skipped = book.skipped ?? [];
-        if (book.exemplars.length === 0 && skipped.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+        const hasExtra = book.exemplars.length === 0 || skipped.length > 0;
+        context.append(element('span', 'exemplar-attribution', exemplarAttribution(book).replace(/。$/u, '')), '；',
+          element('span', 'exemplar-designation', hasExtra ? exemplarDesignation(book, localInstantLabel).replace(/。$/u, '') : exemplarDesignation(book, localInstantLabel)));
+        if (book.exemplars.length === 0 && skipped.length === 0) context.append(`；${EXEMPLARS_NONE_DELIVERED}`);
+        if (skipped.length > 0) context.append('；', element('span', 'exemplars-skipped', exemplarSkippedNote(skipped)));
+        card.append(heading, context);
         const items = element('ul', 'exemplar-items');
         for (const exemplar of book.exemplars) {
           const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
@@ -178,7 +180,6 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         }
         if (book.exemplars.length > 0) card.append(items);
         // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
-        if (skipped.length > 0) card.append(element('p', 'field-note exemplars-skipped', exemplarSkippedNote(skipped)));
         card.append(readersReportExemplars(book));
         if (book.imported) card.append(exemplarImportButton(surface, book));
         list.append(card);
@@ -488,10 +489,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         if (custom.isConnected) custom.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取自定义分析维度。')));
       });
     }
-    panelNode.append(element('p', 'field-note', projection.statement));
-    if (projection.rules.length === 0) {
-      panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则，可在分析或写作任务计划中设置。'));
-    }
+    const ruleContext = element('p', 'field-note', projection.rules.length === 0 ? projection.statement.replace(/。$/u, '') : projection.statement);
+    if (projection.rules.length === 0) ruleContext.append('；', element('span', 'default-rule-empty', '还没有默认执行规则，可在分析或写作任务计划中设置。'));
+    panelNode.append(ruleContext);
     const list = element('div', 'default-rule-list');
     for (const rule of projection.rules) {
       const card = element('article', 'default-rule-card');
@@ -517,7 +517,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
         element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
-      card.append(heading, element('p', undefined, rule.does), element('p', 'field-note', set), view);
+      heading.append(element('span', undefined, set));
+      card.append(heading, element('p', undefined, rule.does), view);
       if (rule.state === 'active') {
         const off = button('停用', 'secondary', async () => {
           off.disabled = true;

@@ -701,11 +701,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       first.disabled = busy;
       fieldset.append(first);
     }
-    fieldset.append(
-      choice(name, 'series', LIBRARY_SERIES, false, true, chosen),
-      el('p', 'field-note library-choice-note', LIBRARY_SERIES_UNAVAILABLE),
-      choice(name, 'house', LIBRARY_HOUSE, state.choice === 'house', busy, chosen),
-    );
+    const series = choice(name, 'series', LIBRARY_SERIES, false, true, chosen);
+    series.append(' · ', el('span', 'library-choice-note', LIBRARY_SERIES_UNAVAILABLE));
+    fieldset.append(series, choice(name, 'house', LIBRARY_HOUSE, state.choice === 'house', busy, chosen));
     section.append(fieldset);
     confirm = chooserActions(section, material, LIBRARY_ATTRIBUTE_CONFIRM, 'confirm-attribution', () => {
       const value = state.choice;
@@ -741,8 +739,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (bookTitle !== null) {
       const own = choice(name, 'book', eligibilityChoiceLabel('book', bookTitle), state.choice === 'book', busy, chosen);
       own.append(el('span', 'status-pill library-recommended', LIBRARY_RECOMMENDED));
-      fieldset.append(own, choice(name, 'series', LIBRARY_SERIES_ELIGIBILITY, false, true, chosen),
-        el('p', 'field-note library-choice-note', LIBRARY_SERIES_ELIGIBILITY_UNAVAILABLE));
+      const series = choice(name, 'series', LIBRARY_SERIES_ELIGIBILITY, false, true, chosen);
+      series.append(' · ', el('span', 'library-choice-note', LIBRARY_SERIES_ELIGIBILITY_UNAVAILABLE));
+      fieldset.append(own, series);
     }
     fieldset.append(
       choice(name, 'house', eligibilityChoiceLabel('house', null), state.choice === 'house', busy, chosen),
