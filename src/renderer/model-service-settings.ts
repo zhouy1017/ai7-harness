@@ -13,6 +13,13 @@ const proxyProbeMessages = {
   unreachable: '代理不可达：请检查网络代理设置。',
 };
 
+function policyDenial(reason: string | null): string {
+  if (reason === 'launch-scope-not-selectable') return '当前启动方式不允许使用模型服务。';
+  if (reason === 'binding-not-allowed') return '当前模型连接不在允许范围内。';
+  if (reason === 'launch-policy-integrity-denied') return '无法验证当前设置，模型服务不可用。';
+  return '模型服务暂不可用，请检查设置后重试。';
+}
+
 /** The shell's helpers and routes used by 模型服务. */
 export interface ModelServiceSettingsOptions {
   readonly element: <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) => HTMLElementTagNameMap[K];
@@ -141,16 +148,17 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       projection.launchPolicy.integrityState === 'verified' ? 'success-note' : 'attention-note',
       projection.launchPolicy.integrityState === 'verified'
         ? launchPolicyIntegritySentence(projection.launchPolicy.providerProcessing.label)
-        : '模型服务暂不可用，请检查设置后重试。',
+        : policyDenial(projection.launchPolicy.denialReason),
     );
     policyIntegrity.dataset['policyIntegrityState'] = projection.launchPolicy.integrityState;
+    const authority = element('p', 'attention-note', projection.authorityStatement);
     policy.append(
       element('h3', undefined, '当前策略边界'),
-      policyIntegrity,
+      ...(technicalLayerVisible ? [policyIntegrity] : []),
       element('p', undefined, projection.launchPolicy.providerProcessing.label),
       element('p', undefined, projection.launchPolicy.externalExport.label),
       element('p', undefined, projection.launchPolicy.publicReleasePermission.label),
-      element('p', 'attention-note', projection.authorityStatement),
+      ...(technicalLayerVisible ? [authority] : []),
     );
     const protectedStore = element(
       'p',
@@ -170,7 +178,9 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     }
     const actions = element('div', 'button-row');
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
-    content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }), renderModelServiceProxyBlock(projection), technicalDisclosure(technical), actions);
+    content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }), renderModelServiceProxyBlock(projection),
+      ...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]),
+      technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
   }
 

@@ -162,9 +162,20 @@ describe('the one model-service flow', () => {
       expect(page.textContent).toContain(new Date(projection.lastProxyProbe!.checkedAt).toLocaleString());
       expect(page.querySelector('[data-model-service-flow]')!.dataset['flowChannel']).toBe('opencode-go');
       expect(setStatus).toHaveBeenLastCalledWith('模型服务设置已打开');
+      setTechnicalLayerVisible(false);
+      calls.getModelServiceSettings.mockResolvedValue({ ...projection, launchPolicy: { ...projection.launchPolicy,
+        providerProcessing: { ...projection.launchPolicy.providerProcessing, label: '本机生产：需先设置模型服务，当前不会传输' } } });
+      await screen.renderModelServiceSettings();
+      expect(page.querySelector('[data-policy-integrity-state]')?.textContent).toBe('尚未设置模型服务，当前不会发送内容。');
+      expect(page.textContent).toContain('合成设置');
+      calls.getModelServiceSettings.mockResolvedValue({ ...projection, launchPolicy: { ...projection.launchPolicy,
+        integrityState: 'denied', denialReason: 'binding-not-allowed' } });
+      await screen.renderModelServiceSettings();
+      expect(page.querySelector('[data-policy-integrity-state]')?.textContent).toBe('当前模型连接不在允许范围内。');
+      setTechnicalLayerVisible(true);
       page.querySelectorAll('button').find((node) => node.textContent === '返回')!.click();
       expect(initializeStartup).toHaveBeenCalledOnce();
-    } finally { vi.unstubAllGlobals(); }
+    } finally { setTechnicalLayerVisible(true); vi.unstubAllGlobals(); }
   });
 
   it('lists the six channels and offers the in-use channel\'s model to both roles only once its credential is ready', () => {
