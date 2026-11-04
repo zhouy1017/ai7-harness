@@ -168,8 +168,8 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     if (projection.proceduresTruncated) procedures.append(el('p', 'field-note', '只列出最近的可复用工序。'));
     const proposals = el('section', 'knowledge-developer-proposals');
     proposals.dataset['proposalCount'] = String(projection.proposals.length);
-    proposals.append(el('h3', undefined, PROPOSALS_SECTION_HEADING), el('p', 'field-note', PROPOSALS_SECTION_NOTE));
-    if (projection.proposals.length === 0) proposals.append(el('p', 'field-note developer-proposals-empty', PROPOSALS_EMPTY));
+    proposals.append(el('h3', undefined, PROPOSALS_SECTION_HEADING),
+      el('p', `field-note${projection.proposals.length === 0 ? ' developer-proposals-empty' : ''}`, projection.proposals.length === 0 ? PROPOSALS_EMPTY : PROPOSALS_SECTION_NOTE));
     for (const proposal of projection.proposals) proposals.append(proposalCard(proposal, proposalVersions.get(proposal.proposalId) ?? null));
     if (projection.proposalsTruncated) proposals.append(el('p', 'field-note', '只列出最近的开发建议。'));
     host.replaceChildren(procedures, proposals);
@@ -257,10 +257,13 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const steps = el('ol', 'captured-procedure-steps');
     for (const step of version.steps) steps.append(el('li', undefined, captureStepLine(step)));
     // What a Book must have for this version to run there (Issue #66, S31b; REUSE-048): the 新建审阅 sheet says how it fits each Book.
-    const requirement = el('p', 'field-note captured-procedure-requirement', procedureRequirementLine(version.steps));
-    item.append(steps, requirement, el('p', 'field-note captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`));
-    const runs = el('p', 'field-note captured-procedure-runs', procedureRunsLine(version));
-    item.append(runs);
+    const context = el('p', 'field-note');
+    context.append(el('span', 'captured-procedure-requirement', procedureRequirementLine(version.steps).replace(/。$/u, '')), '；',
+      el('span', 'captured-procedure-source', `${procedureSourceLine(version)} · 保存于 ${options.localInstantLabel(version.createdAt)}`), '；',
+      el('span', 'captured-procedure-runs', procedureRunsLine(version)));
+    if (version.packageCount > 0) context.append('；', el('span', 'captured-procedure-packages', procedurePackagesLine(version.packages.length, version.packageCount)));
+    context.append('。');
+    item.append(steps, context);
     // 关联工作 (Issue #66, S31; REUSE-031): each Run an exact link to that Run in its Book's 审阅, never a copy of what it found.
     if (version.runs.length > 0) {
       const list = el('ul', 'captured-procedure-run-links');
@@ -279,7 +282,6 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     // 关联交付 (Issue #66, S31b; REUSE-031): each 图书交付包 version holding a report of a Run under this version, an exact link
     // to its Book's 交付物 — never a copy of what it holds.
     if (version.packageCount > 0) {
-      item.append(el('p', 'field-note captured-procedure-packages', procedurePackagesLine(version.packages.length, version.packageCount)));
       const list = el('ul', 'captured-procedure-package-links');
       for (const link of version.packages) {
         const entry = el('li');
@@ -294,7 +296,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
       item.append(list);
     }
     for (const problem of version.validationProblems) item.append(el('p', 'attention-note captured-procedure-problem', problem));
-    if (version.state === 'stopped') item.append(el('p', 'field-note', `已停用：编辑确认停用；${version.stateRecordedAt === null ? '' : `${options.localInstantLabel(version.stateRecordedAt)}；`}不会再被选用；按它运行过的审阅仍然记着它。`));
+    if (version.state === 'stopped') line.append(` · ${version.stateRecordedAt === null ? '' : `${options.localInstantLabel(version.stateRecordedAt)} · `}不会再被选用，已有审阅仍会保留记录`);
     const actions = el('div', 'button-row captured-procedure-version-actions');
     if (version.state === 'pending-validation') {
       actions.append(button(PROCEDURE_ACTIONS.validate, 'primary', 'validate', () => act('正在验证…', '无法验证这一版。', async () => {
@@ -372,8 +374,10 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     if (preview.versionCount > preview.versions.length) {
       versions.append(el('li', 'field-note captured-procedure-stop-more', procedureStopMoreVersionsLine(preview.versions.length, preview.versionCount)));
     }
-    panel.append(versions, el('p', 'field-note captured-procedure-stop-after', procedureStopAfterLine(preview.afterVersion)),
-      el('p', 'field-note captured-procedure-stop-kept', PROCEDURE_STOP_KEPT));
+    const consequence = el('p', 'field-note');
+    consequence.append(el('span', 'captured-procedure-stop-after', procedureStopAfterLine(preview.afterVersion).replace(/。$/u, '')), '；',
+      el('span', 'captured-procedure-stop-kept', PROCEDURE_STOP_KEPT));
+    panel.append(versions, consequence);
     const card = `[data-procedure-id="${preview.procedureId}"]`;
     const back = preview.versionId === null ? `${card} [data-procedure-action="stop-all"]` : `[data-version-id="${preview.versionId}"] [data-procedure-action="stop"]`;
     const actions = el('div', 'button-row');
@@ -447,8 +451,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     card.dataset['proposalVersions'] = String(proposal.versionCount);
     const heading = el('h4', undefined, `《${proposal.title}》`);
     heading.tabIndex = -1;
-    card.append(heading, el('p', 'field-note developer-proposal-latest',
-      `最新为${technicalWords(`第 ${proposal.latestVersion} 版`, '版本')} · 记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`));
+    heading.append(' · ', el('span', 'developer-proposal-latest',
+      `最新${technicalWords(`第 ${proposal.latestVersion} 版`, '版本')} · 记录于 ${options.localInstantLabel(proposal.latestCreatedAt)}`));
+    card.append(heading);
     const actions = el('div', 'button-row developer-proposal-actions');
     const toggle = button(page === null ? `查看各版本（${proposal.versionCount}）` : '收起各版本', 'quiet', 'proposal-versions', async () => {
       if (proposalPages.has(proposal.proposalId)) proposalPages.delete(proposal.proposalId);
@@ -481,16 +486,17 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     item.dataset['proposalVersionId'] = version.proposalVersionId;
     item.dataset['proposalVersion'] = String(version.version);
     item.dataset['proposalFiles'] = String(version.fileCount);
-    item.append(el('p', 'developer-proposal-version-line', proposalVersionLine(version, options.localInstantLabel(version.createdAt))));
+    const line = el('p', 'developer-proposal-version-line', proposalVersionLine(version, options.localInstantLabel(version.createdAt)));
+    item.append(line);
     if (latest) {
       const fields = el('dl', 'developer-proposal-fields');
       for (const [key, label] of [['missingCapability', PROPOSAL_FIELDS.missingCapability], ['affectedProcedure', PROPOSAL_FIELDS.affectedProcedure],
         ['direction', PROPOSAL_FIELDS.direction], ['pluginCandidate', PROPOSAL_FIELDS.pluginCandidate]] as const) {
-        fields.append(el('dt', undefined, label.replace('（必填）', '')), el('dd', undefined, version[key].trim().length === 0 ? '（未填写）' : version[key]));
+        fields.append(el('dt', undefined, label.replace('（必填）', '')), el('dd', undefined, version[key].trim().length === 0 ? '未填写' : version[key]));
       }
       item.append(fields);
     }
-    for (const file of version.files.slice(0, 3)) item.append(el('p', 'field-note developer-proposal-file', `已导出为「${file.fileName}」 · ${options.localInstantLabel(file.writtenAt)}`));
+    for (const file of version.files.slice(0, 3)) line.append(' · ', el('span', 'developer-proposal-file', `已导出为「${file.fileName}」 · ${options.localInstantLabel(file.writtenAt)}`));
     const save = button(PROCEDURE_ACTIONS.proposalFile, 'secondary', 'proposal-file', () => act('正在打开保存对话框…', '无法导出这条开发建议。', async () => {
       const result = await api.saveDeveloperProposalFile({ proposalVersionId: version.proposalVersionId });
       options.setStatus(result.outcome === 'saved' ? proposalFileSavedLine(result.fileName) : '已取消导出；什么都没有写入。', result.outcome === 'saved' ? 'success' : undefined);
