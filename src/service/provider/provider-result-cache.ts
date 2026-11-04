@@ -907,7 +907,7 @@ async function readEntryFile(path: string): Promise<ProviderEntryRead> {
   }
   try {
     const entry = JSON.parse(raw) as ProviderCacheEntry;
-    if (entry === null || typeof entry !== 'object' || typeof entry.requestBody !== 'string' || entry.status !== 200 ||
+    if (entry === null || typeof entry !== 'object' || typeof entry.requestBody !== 'string' || (entry.status < 200 || entry.status >= 300) ||
       typeof entry.model !== 'string' || entry.requestDigest !== providerRequestDigest(entry.requestBody) ||
       typeof entry.transmittedAt !== 'string' || !Number.isFinite(Date.parse(entry.transmittedAt)) ||
       !Object.hasOwn(entry, 'response') || (entry.usage !== null && (!validUsage(entry.usage))) ||

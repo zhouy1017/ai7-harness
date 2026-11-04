@@ -817,8 +817,7 @@ export class DialogueLedger {
     requireDialogue(last !== undefined, 'DIALOGUE_NOT_FOUND', '这段对话不存在。');
     requireDialogue(last.outcome !== null, 'DIALOGUE_ANSWERING', '这个问题还在回答中；停止回答后才能继续或重新回答。');
     if (kind === 'continue' && !followUp) {
-      requireDialogue(last.outcome.outcome === 'stopped' || last.outcome.outcome === 'interrupted', 'DIALOGUE_NOT_INCOMPLETE',
-        '只有停止或中断、内容不完整的回答才能继续回答。');
+      requireDialogue(last.outcome.outcome !== 'completed', 'DIALOGUE_NOT_INCOMPLETE', '完整回答请继续追问。');
       requireDialogue(keptFragments(last) > 0, 'DIALOGUE_NOTHING_KEPT', '这次回答没有留下完整的内容可以接着回答；请重新回答。');
     }
     return this.#insertAttempt(dialogueId, last.ordinal + 1, kind, last.attemptId, now, qualification);

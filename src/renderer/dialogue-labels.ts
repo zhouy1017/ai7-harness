@@ -90,7 +90,7 @@ export function dialogueIncompleteLine(attempt: Pick<DialogueAttemptProjection, 
         ? `AI7 关闭时回答被中断；${kept}`
         : `回答被中断；${kept}`;
     case 'failed':
-      return `回答没有完成（${attempt.causeCode ?? '原因未知'}）；${kept}`;
+      return attempt.fragmentTotal > 0 ? '回答未完成；已收到的文字已保留，可以继续回答。' : '回答未完成；没有收到可保留的文字。';
     default:
       return null;
   }
