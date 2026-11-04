@@ -1646,11 +1646,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       cancel.disabled = true;
     }
     const row = el('div', 'button-row');
-    row.append(confirm, cancel);
+    const consequence = el('span', 'review-convert-consequence', REVIEW_CONVERT_NOTE);
+    consequence.id = uid('convert-consequence');
+    confirm.setAttribute('aria-describedby', consequence.id);
+    row.append(consequence, confirm, cancel);
     wrap.append(
       field(REVIEW_CONVERT_TO, form.proposedText, 'convert-to', REVIEW_CONVERT_TO_HINT, (text) => { form.proposedText = text; }),
       field(REVIEW_CONVERT_RATIONALE, form.rationale, 'convert-rationale', null, (text) => { form.rationale = text; }),
-      el('p', 'field-note', REVIEW_CONVERT_NOTE),
       problem,
       row,
     );
