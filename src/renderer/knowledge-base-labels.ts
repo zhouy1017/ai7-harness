@@ -612,7 +612,7 @@ export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported'
 
 export const CUSTOM_DIMENSIONS_HEADING = '自定义分析维度';
 export const CUSTOM_DIMENSIONS_NOTE =
-  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文。名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
+  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文；名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
 export const CUSTOM_DIMENSIONS_EMPTY = '还没有自定义分析维度。';
 export const CUSTOM_DIMENSION_NEW = '新建维度…';
 export const CUSTOM_DIMENSION_REVISE = '修改为新版本…';
