@@ -2348,6 +2348,9 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 .model-service-flow-choice { min-width: 0; overflow-wrap: anywhere; }
 .model-service-flow-step { min-width: 0; margin-top: 1rem; }
 .model-service-flow-step h4 { margin: 0 0 .4rem; }
+.model-service-flow-feedback [data-connection-test-outcome="passed"] { color: var(--status-good); }
+.model-service-flow-feedback [data-connection-test-outcome="failed"],
+.model-service-flow-feedback [data-connection-test-outcome="outcome-unknown"] { color: var(--status-blocked); }
 .model-route-option { display: grid; gap: .7rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; }
 .model-route-option .model-credential-form { margin: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); align-items: end; }
 .model-credential-form label { display: grid; gap: .4rem; min-width: 0; }
