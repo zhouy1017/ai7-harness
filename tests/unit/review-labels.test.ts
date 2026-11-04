@@ -104,6 +104,7 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_ACTION_LABELS).toEqual({
       'new-review': '新建审阅',
       'new-local-check': '本地文字检查',
+      'open-search-settings': '设置联网检索',
       'rereview-changed': '只审改动过的章',
       'open-run': '查看这次审阅',
       start: '开始审阅',

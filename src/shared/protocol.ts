@@ -3519,6 +3519,9 @@ export interface FrozenWebToolsBackend {
   host: string;
   configurationDigest: string;
   selectedAt: string;
+  /** The Main channel's own provider search, when a measured native adapter is selected. */
+  selectionSource?: 'model-channel' | 'configured-backend';
+  sourceLabel?: string;
 }
 
 /** What the renderer sends to save or choose a route (Issue #811); the value of `secret` never comes back. */
@@ -6680,7 +6683,7 @@ export type PickerReselectResult =
 export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
-  saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: 'search-deepseek'; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
+  saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: string; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
   removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';
   getStartup(): Promise<StartupProjection>;

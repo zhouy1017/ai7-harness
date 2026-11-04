@@ -153,3 +153,40 @@ describe('the candidate connection test outside ordinary-production', () => {
     });
   });
 });
+
+// #1312: official native candidates use their own model channel's saved credential; no search credential is configured.
+describe('native search candidate connection tests', () => {
+  const candidates = [
+    { backendId: 'search-openai', candidateId: 'openai-native-search-v1', route: 'openai-platform', body: { output: [{ type: 'web_search_call', action: { sources: [{ title: 'UNESCO', url: 'https://www.unesco.org/' }] } }] } },
+    { backendId: 'search-anthropic', candidateId: 'anthropic-native-search-v1', route: 'anthropic-claude', body: { content: [{ type: 'web_search_tool_result', content: [{ type: 'web_search_result', title: 'UNESCO', url: 'https://www.unesco.org/' }] }] } },
+  ] as const;
+  it.each(candidates)('refuses $backendId when the selected policy admits only the DeepSeek connection test', async (candidate) => {
+    await withStore(async (store, codeRoot) => {
+      store.saveModelServiceConnection('合成官方渠道', '11111111-1111-4111-8111-111111111111', 'ready', candidate.route);
+      const connection = store.getModelServiceRouteConnection(candidate.route)!;
+      const h = harness({ status: 200, body: JSON.stringify(candidate.body) });
+      const policy = await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production');
+      expect(policy.providerProcessing.searchConnectionTest?.backendId).toBe('search-deepseek');
+      await expect(composeSearchCandidateProbe({ ...candidate, operationalScope: 'ordinary-production', launchPolicy: policy,
+        connection: () => { throw new Error('native probe must not read search credentials'); },
+        modelConnection: () => ({ ...connection, modelId: connection.binding.modelId, credentialSlot: connection.binding.credentialSlot }),
+        broker: h.broker, fetch: h.fetch, admitHost: h.admitHost })).rejects.toMatchObject({
+        code: 'SEARCH_CANDIDATE_PROBE_POLICY_MISMATCH', message: '当前策略未授权此后端的连接测试；候选接口仍未实测，未发送任何内容。' });
+      expect(h.sent).toEqual([]);
+      expect(h.counts).toEqual({ secretReads: 0, sends: 0, hosts: 0, released: 0 });
+      expect(store.getSearchBackendSettings().candidates.find((entry) => entry.backendId === candidate.backendId)).toMatchObject({ measurement: 'not-measured', selectable: false });
+      expect(store.getSearchBackendConnections().every((row) => row.credentialOperationState === 'missing')).toBe(true);
+    });
+  });
+  it.each(candidates)('keeps $backendId nonselectable and refuses CI before credentials', async (candidate) => {
+    await withStore(async (store, codeRoot) => {
+      const h = harness({ status: 200, body: '{}' });
+      await expect(composeSearchCandidateProbe({ ...candidate, operationalScope: 'development-ci', launchPolicy: await resolveSourceCheckoutLaunchPolicy(codeRoot, 'ordinary-production'),
+        connection: () => { throw new Error('must not read'); }, modelConnection: () => { throw new Error('must not read'); },
+        broker: h.broker, fetch: h.fetch, admitHost: h.admitHost })).rejects.toMatchObject({ code: 'SEARCH_CANDIDATE_PROBE_SCOPE_REFUSED' });
+      expect(() => store.selectSearchBackend(candidate.backendId)).toThrow(/未提供/u);
+      expect(() => store.selectSearchBackend(candidate.backendId, 'fallback')).toThrow(/未提供/u);
+      expect(h.counts.secretReads + h.counts.sends).toBe(0);
+    });
+  });
+});
