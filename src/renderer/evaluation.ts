@@ -570,7 +570,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        row.append(el('p', 'field-note evaluation-initial-reason', initial.prepare.reason));
+        heading.append(' · ', el('span', 'evaluation-initial-reason', initial.prepare.reason));
       }
       if (task !== null) {
         const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
@@ -745,7 +745,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        row.append(el('p', 'field-note evaluation-rewrite-reason', rewrite.prepare.reason));
+        heading.append(' · ', el('span', 'evaluation-rewrite-reason', rewrite.prepare.reason));
       }
       if (task !== null) {
         const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
