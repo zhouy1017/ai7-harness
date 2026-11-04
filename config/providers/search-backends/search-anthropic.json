@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "backendId": "search-anthropic",
+  "service": "anthropic",
+  "displayName": "Claude 官方搜索",
+  "support": "supported",
+  "supportEvidence": "anthropic-web-search",
+  "request": {
+    "endpoint": "https://api.anthropic.com/v1/messages",
+    "method": "POST",
+    "protocol": "anthropic-messages-web-search",
+    "evidence": "anthropic-web-search"
+  },
+  "credential": {
+    "slot": "search-anthropic",
+    "developmentCredentialReference": "e48163ca-581c-41bf-b984-85c9de57733c",
+    "headerForm": "x-api-key",
+    "anthropicVersion": "2023-06-01",
+    "keyRequired": true,
+    "evidence": "anthropic-web-search"
+  },
+  "price": {
+    "amount": 10,
+    "currency": "USD",
+    "per": 1000,
+    "basis": "USD 10 per 1,000 web searches.",
+    "evidence": "anthropic-web-search"
+  },
+  "reachability": {
+    "note": "Official Anthropic API endpoint; account reachability has not been measured.",
+    "evidence": "anthropic-web-search"
+  },
+  "evidence": {
+    "anthropic-web-search": {
+      "kind": "vendor-documentation",
+      "source": "Anthropic Messages API web search tool documentation (Issue #1312).",
+      "readOn": "2026-11-04",
+      "note": "Messages API tool web_search_20250305 accepts name web_search and max_uses 1 and returns web_search_tool_result blocks. Price is USD 10 / 1,000 searches. This backend is not live measured."
+    }
+  },
+  "openQuestions": [
+    "Candidate interface only: live latency and Chinese/international hit rate have not been measured."
+  ],
+  "notes": ["候选接口 · 未实测。"]
+}

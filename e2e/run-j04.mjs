@@ -1354,7 +1354,7 @@ async function main() {
       settled.checkpoint?.revisionId === prepared.checkpoint.revisionId && settled.planEnvelope?.digest === prepared.planEnvelope.digest &&
       UUID_PATTERN.test(settled.authorization?.authorizationId) && settled.authorization?.origin === 'standard-direct' &&
       settled.authorization?.authority === 'standard-direct-dispatch' && settled.authorization?.planEnvelopeDigest === prepared.planEnvelope.digest &&
-      UUID_PATTERN.test(settled.run?.runRecordId) && settled.run?.state === 'completed-with-gaps' && settled.run?.stateLabel === '已完成 · 保留缺口' &&
+      UUID_PATTERN.test(settled.run?.runRecordId) && settled.run?.state === 'completed-with-gaps' && settled.run?.stateLabel === '已完成 · 1/8 个单元未读成' &&
       JSON.stringify(settled.run?.transitions?.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'completed-with-gaps']) &&
       settled.run?.blockedReasons === null && settled.actions?.canPrepare === false && settled.actions?.canAuthorize === false,
     'settled-run-record', { state: settled?.state, stateLabel: settled?.stateLabel, authorization: settled?.authorization, run: settled?.run, actions: settled?.actions });
@@ -1377,12 +1377,12 @@ async function main() {
     requireJourney(revision.freshness.state === 'current' && revision.freshness.currentRevisionId === prepared.checkpoint.revisionId &&
       revision.freshness.currentJournalSequence === 0 && revision.provenance.runRecordId === settled.run.runRecordId, 'revision-current');
     requireJourney(UUID_PATTERN.test(settled.taskOutcome?.outcomeId) && settled.taskOutcome?.classification === 'completed-with-gaps' &&
-      settled.taskOutcome?.label === '任务结果：已完成（保留缺口）' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
+      settled.taskOutcome?.label === '已完成 · 1/8 个单元未读成' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
       typeof settled.taskOutcome?.safeNextAction === 'string' && settled.taskOutcome.safeNextAction.length > 0, 'settled-task-outcome', settled.taskOutcome);
     // Synchronized delta with Issue #418: the drawer beside ②A followed the Task to its end, reading the
     // plan again as the Run moved, and now states the authorization and the Run it bound.
     const settledDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-settled');
-    requireJourney(settledDrawer?.pill === '已完成' && settledDrawer.version === '1' &&
+    requireJourney(settledDrawer?.pill === '已完成 · 1/8 个单元未读成' && settledDrawer.version === '1' &&
       settledDrawer.technical.authorization?.startsWith(`${settled.authorization.authorizationId} · standard-direct · standard-direct-dispatch · `) &&
       settledDrawer.technical['run-record']?.startsWith(`${settled.run.runRecordId} · completed-with-gaps · `) &&
       settledDrawer.technical['plan-versions'] === `版本 1 · bound · ${prepared.planEnvelope.digest}`, 'analysis-drawer-settled-plan', settledDrawer);
@@ -1402,7 +1402,7 @@ async function main() {
         card.querySelectorAll('[data-analysis-unit]').length===${SAMPLE1_UNITS} && card.querySelector('[data-analysis-unit="2"][data-analysis-unit-state="gap"]')!==null &&
         card.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===${SAMPLE1_UNITS - 1} &&
         card.textContent.includes(${JSON.stringify(ASSURANCE_STATEMENT)}) && card.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
-        card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('任务结果：已完成（保留缺口）') &&
+        card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('已完成 · 1/8 个单元未读成') &&
         buttons.length>0 && buttons.some((button)=>button.dataset.analysisAction==='return-to-range') && ${ONLY_ANALYSIS_ACTIONS} &&
         card.querySelector('[data-update-action="sync-current"][data-update-available="false"]')!==null &&
         card.querySelector('[data-update-action="reanalyze-book"][data-update-available="true"]')!==null &&
@@ -1781,7 +1781,7 @@ async function main() {
       const stages=Array.from(opened.querySelectorAll('[data-run-report-stage]'));
       return opened.dataset.runReportDigest===${JSON.stringify(reportDigest)} && opened.dataset.runReportRun===${JSON.stringify(report.runRecordId)} &&
         opened.dataset.runReportClassification==='completed-with-gaps' &&
-        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成，保留了没读成的部分 · ') &&
+        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成 · 1/8 个单元未读成 · ') &&
         JSON.stringify(stages.map((stage)=>[stage.dataset.runReportStage, stage.dataset.runReportStageState]))===${JSON.stringify(JSON.stringify(report.stages.map((stage) => [stage.stage, stage.state])))} &&
         stages[0].textContent.startsWith('逐个阅读范围分析：完成，有没读成的部分') && stages[1].textContent.startsWith('跨范围比对：完成') &&
         opened.querySelector('.analysis-run-report-units')?.textContent===${JSON.stringify(`共 ${report.units.submitted} 个阅读范围：沿用上一份 ${report.units.reused} 个，重新分析 ${report.units.recomputed} 个，其中 ${report.units.gaps} 个没有读成，${report.units.retried} 个安全重试过。`)} &&

@@ -1,3 +1,4 @@
+import { analysisRunSummary } from '../shared/analysis-run-summary.js';
 import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
@@ -951,6 +952,10 @@ export function baselineAnalysisPlan(input: {
     kind: 'baseline-analysis',
     ref: intent.taskIntentId,
     state: baselineState(projection, input.stopped),
+    ...(projection.taskOutcome?.report && (projection.taskOutcome.classification === 'failed' || projection.taskOutcome.classification === 'completed-with-gaps')
+      ? { runOutcome: { label: projection.taskOutcome.label, classification: projection.taskOutcome.classification,
+        reason: projection.taskOutcome.report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason
+          ?? analysisRunSummary(projection.taskOutcome.report).reason } } : {}),
     planVersion: version.ordinal,
     goal: {
       sentence: intent.redoOf === null ? BASELINE_GOAL_SENTENCES[intent.mode] ?? intent.modeLabel : redoGoalSentence(counts),

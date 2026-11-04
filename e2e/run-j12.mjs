@@ -1502,8 +1502,15 @@ async function main() {
     // The DeepSeek direct-search candidate (Issue #1055 into W22-S10a #1181): disclosed as 未实测 beside the ranked backends, not
     // selectable, its one explicit 测试连接 refused under development-ci before any credential or transport; closed identifiers only.
     const candidateSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.candidates)`);
-    requireJourney(candidateSettings.length === 1 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
+    requireJourney(candidateSettings.length === 3 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
       candidateSettings[0].measurement === 'not-measured' && candidateSettings[0].selectable === false && candidateSettings[0].endpoint === 'https://api.deepseek.com/v1/tools/search', 'search-candidate-declared');
+    requireJourney(candidateSettings.every((candidate) => candidate.measurement === 'not-measured' && candidate.selectable === false), 'search-native-candidates-unmeasured');
+    await assertRenderer(primary, `['openai-native-search-v1','anthropic-native-search-v1'].every(id => {
+      const card=document.querySelector('[data-search-candidate="'+id+'"]');
+      return card?.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
+    })`, 'search-native-candidates-disclosed');
+    await assertRenderer(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false`, 'search-native-follow-default');
+    requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave',alwaysUseSelectedBackend:true}).then(settings=>settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-source-override-saved');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-search-candidate="deepseek-direct-search-v1"]');
       const labels=Array.from(card?.querySelectorAll('button')??[]).map((node)=>node.textContent);
       return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.textContent.includes('USD 0.75') &&
@@ -1608,7 +1615,7 @@ async function main() {
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'model-restart-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-restart-landing');
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-survives-restart');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave'&&settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-backend-selection-survives-restart');
     const restartedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial'))`);
     requireJourney(
       restartedConnection?.status === 'available' &&

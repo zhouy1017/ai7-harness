@@ -748,16 +748,17 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     root.dataset['taskPlanStart'] = next.start.readiness;
     if (next.planVersion === null) delete root.dataset['taskPlanVersion'];
     else root.dataset['taskPlanVersion'] = String(next.planVersion);
-    const tone = TASK_PLAN_STATE_PILLS[next.state.key];
+    const tone = next.runOutcome?.classification === 'completed-with-gaps' ? { tone: 'warn', shape: 'triangle' } : TASK_PLAN_STATE_PILLS[next.state.key];
     pill.hidden = false;
     pill.className = `status-pill review-pill task-drawer-pill review-pill-${tone.tone}`;
     pill.dataset['pillTone'] = tone.tone;
     pill.dataset['pillShape'] = tone.shape;
-    pill.textContent = next.state.label;
+    pill.textContent = next.runOutcome?.label ?? next.state.label;
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
     paintQuestions(next);
     replaceBody(
+      ...(next.runOutcome?.reason ? [el('p', 'attention-note', next.runOutcome.reason)] : []),
       ...(next.runControl === null ? [] : [activityBlock(next.runControl)]),
       ...(next.clarifications.some((card) => card.state !== 'open') ? [clarificationRecord(next)] : []),
       goalBlock(next),

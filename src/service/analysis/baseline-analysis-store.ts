@@ -1,3 +1,4 @@
+import { analysisRunSummary, completedWithGapsLabel } from '../../shared/analysis-run-summary.js';
 import * as requestAdmissionOperations from './request-admission-operations.js';
 import * as clarificationOperations from './clarification-operations.js';
 import * as runCheckpointOperations from './run-checkpoint-operations.js';
@@ -48,6 +49,7 @@ import {
   FACTUAL_REVIEW_KIND,
   MODEL_SERVICE_CONNECTION_IDS,
   modelServiceChannelOf,
+  MODEL_SERVICE_ROUTE_BINDINGS,
   type EvidenceAssuranceLevel,
   type ProcedureDefinitionPin,
   type FrozenWebToolsBackend,
@@ -99,8 +101,9 @@ import {
 import { factualReviewUnitResultOfRecordV2 } from './factual-review-contract-v2.js';
 import { platformToolsFromProjection } from '../provider/search-service.js';
 import { searchBackend, searchBackendConfigurationDigest } from '../provider/search-backends/index.js';
+import { SEARCH_BACKENDS } from '../provider/search-backends.js';
 import { CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES } from '../../shared/provider-configuration.generated.js';
-import { freezeSearchFallback } from '../provider/search-backend-settings.js';
+import { freezeSearchFallback, readSearchOverride } from '../provider/search-backend-settings.js';
 import {
   STOCK_TYPOS_LEAF_FIXTURE,
   STOCK_TYPOS_LEAF_FIXTURE_SHA256,
@@ -724,6 +727,11 @@ export class BaselineAnalysisStore {
     return this.#launch;
   }
 
+  /** The source a new research Task would freeze, also used by the new-review sheet. */
+  currentResearchBackend(): FrozenWebToolsBackend | undefined {
+    return this.#currentSearchPlan(this.#definition, null).webToolsBackend;
+  }
+
   /** Whether a preparation is in flight, which only this instance holds; the store keeps such a ledger (Issue #649). */
   get preparing(): boolean {
     return this.#work.size > 0;
@@ -1211,7 +1219,7 @@ export class BaselineAnalysisStore {
     }
     const outcomes = (this.#db.prepare(
       `SELECT o.outcome_id, o.task_intent_id, o.run_record_id, o.classification, o.recorded_at, o.result_set_revision_id,
-              t.book_id, t.mode, b.title book_title, r.ordinal revision_ordinal
+              o.canonical_json, t.book_id, t.mode, b.title book_title, r.ordinal revision_ordinal
        FROM analysis_task_outcomes o
        JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
        JOIN books b ON b.book_id = t.book_id
@@ -1219,18 +1227,22 @@ export class BaselineAnalysisStore {
        WHERE t.kind = ? AND o.classification IN ('completed', 'completed-with-gaps'${scope?.cancelled === true ? ", 'cancelled'" : ''}) AND o.recorded_at >= ?
          AND (? IS NULL OR t.book_id = ?)
        ORDER BY o.recorded_at DESC, o.outcome_id LIMIT ?`,
-    ).all(kind, since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => ({
-      bookId: asString(row.book_id),
-      bookTitle: asString(row.book_title),
-      taskIntentId: asString(row.task_intent_id),
-      mode: asString(row.mode) as BaselineAnalysisTaskMode,
-      outcomeId: asString(row.outcome_id),
-      runRecordId: asString(row.run_record_id),
-      classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
-      recordedAt: asString(row.recorded_at),
-      revisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
-      revisionOrdinal: row.revision_ordinal === null ? null : asNumber(row.revision_ordinal),
-    }));
+    ).all(kind, since, scope?.bookId ?? null, scope?.bookId ?? null, limit) as SqlRow[]).map((row): AnalysisOutcomeAttentionReading => {
+      const report = this.#outcomeProjection(row).report;
+      return {
+        bookId: asString(row.book_id),
+        bookTitle: asString(row.book_title),
+        taskIntentId: asString(row.task_intent_id),
+        mode: asString(row.mode) as BaselineAnalysisTaskMode,
+        outcomeId: asString(row.outcome_id),
+        runRecordId: asString(row.run_record_id),
+        classification: asString(row.classification) as 'completed' | 'completed-with-gaps' | 'cancelled',
+        recordedAt: asString(row.recorded_at),
+        revisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
+        revisionOrdinal: row.revision_ordinal === null ? null : asNumber(row.revision_ordinal),
+        ...(report === null ? {} : { completion: analysisRunSummary(report) }),
+      };
+    });
     return { tasks, outcomes };
   }
 
@@ -1280,10 +1292,13 @@ export class BaselineAnalysisStore {
     }
     // A stop is named only on an interrupted outcome recorded since S16a (Issue #51); every earlier one reads as it was.
     const stop = classification === 'interrupted' ? runStopOf(record.stop) : null;
+    const completion = report === null ? null : analysisRunSummary(runReportProjection(report));
     return {
       outcomeId: asString(row.outcome_id),
       classification,
-      label: stop === null ? OUTCOME_LABELS[classification] : BUDGET_REACHED_OUTCOME_LABEL,
+      label: classification === 'completed-with-gaps' && completion !== null
+        ? completedWithGapsLabel(completion.gaps, completion.total)
+        : stop === null ? OUTCOME_LABELS[classification] : BUDGET_REACHED_OUTCOME_LABEL,
       recordedAt: asString(row.recorded_at),
       resultSetRevisionId: row.result_set_revision_id === null ? null : asString(row.result_set_revision_id),
       safeNextAction: asString(record.safeNextAction),
@@ -2217,7 +2232,9 @@ export class BaselineAnalysisStore {
         : current.state === 'interrupted' && this.#runStop(runRecordId) !== null ? BUDGET_REACHED_RUN_LABEL
           : current.state === 'resumable' && this.accountLimitOf(runRecordId) !== null ? ACCOUNT_LIMIT_RUN_LABEL
             : current.state === 'resumable' && this.outcomeUnknownOf(runRecordId) !== null ? OUTCOME_UNKNOWN_RUN_LABEL
-            : blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL : RUN_STATE_LABELS[current.state],
+            : blockedBy === 'plan-moved' ? PLAN_MOVED_LABEL
+              : current.state === 'completed-with-gaps' ? completedWithGapsLabel(Number(currentRecord.gapCount ?? 0), Number(currentRecord.unitsTotal ?? 0))
+                : RUN_STATE_LABELS[current.state],
       recordedAt: asString(runRecord.recorded_at),
       transitions,
       adaptations,
@@ -2274,8 +2291,7 @@ export class BaselineAnalysisStore {
    * them would send again — the background dispatcher never starts one over them (CTRL-007, CONT-011).
    */
   latestUnconfirmedRangesOf(bookId: string): number[] {
-    const latest = this.#revisionRows(bookId).at(-1);
-    return latest === undefined ? [] : this.#unknownGapOrdinals(latest);
+    return this.unconfirmedOutcomesOf(bookId).ranges.flatMap((range) => range.unitOrdinal === null ? [] : [range.unitOrdinal]);
   }
 
   /**
@@ -2303,8 +2319,6 @@ export class BaselineAnalysisStore {
    * its Run has begun, as `resendUnitsByContentOf` is: the history then holds the Task's own revision, which never counts against it.
    */
   resendUnitsOf(projection: BaselineAnalysisProjection): number[] {
-    const plan = projection.update?.reusePlan ?? null;
-    if (plan === null) return [];
     return this.resendUnitsByContentOf(projection);
   }
 
@@ -2320,20 +2334,47 @@ export class BaselineAnalysisStore {
    * written. `kind` reads another kind's revisions through this ledger, whose readings here are kind-generic.
    */
   unconfirmedOutcomesOf(bookId: string, kind: string = this.#definition.kind, includeEarlierText = false): { ranges: UnconfirmedOutcomeRecord[]; steps: UnconfirmedOutcomeRecord[] } {
-    // A kind none of whose revisions ever held such a gap has no range to walk for: the drawer reads this on every poll.
+    // Revision gaps and revisionless outcomes both contribute ranges to the same content-key walk.
     const held = this.#db.prepare(
       `SELECT 1 FROM analysis_result_set_revisions r JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
        WHERE s.book_id = ? AND s.kind = ? AND instr(r.canonical_json, '"outcome-unknown"') > 0 LIMIT 1`,
     ).get(bookId, kind) !== undefined;
-    const rows = !held ? [] : this.#db.prepare(
-      `SELECT r.* FROM analysis_result_set_revisions r
-       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
-       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
-    ).all(bookId, kind) as SqlRow[];
     const outcomeOf = this.#db.prepare('SELECT classification, recorded_at FROM analysis_task_outcomes WHERE run_record_id = ?');
     const checkpointOf = this.#db.prepare('SELECT revision_id FROM analysis_task_input_checkpoints WHERE task_intent_id = ?');
     const outstanding = new Map<string, UnconfirmedOutcomeRecord>();
     let latestKeys: Set<string> | null = null;
+    let latestKeysAt = '';
+    // Zero-closure failures have no revision, but their sent requests remain unconfirmed (#1307).
+    const failed = this.#db.prepare(
+      `SELECT o.* FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
+       WHERE t.book_id = ? AND t.kind = ? AND o.classification = 'failed' AND o.result_set_revision_id IS NULL
+       ORDER BY o.recorded_at, o.rowid`,
+    ).all(bookId, kind) as SqlRow[];
+    for (const row of failed) {
+      const report = this.#outcomeProjection(row).report;
+      const unknown = report?.unitRows.filter((unit) => unit.gapCode === 'outcome-unknown') ?? [];
+      if (unknown.length === 0) continue;
+      const runRecordId = asString(row.run_record_id);
+      const facts = this.loadExecutionPlan(runRecordId);
+      const keys = unitContentKeys(facts.manifest);
+      const recordedAt = asString(row.recorded_at);
+      latestKeys = new Set(keys);
+      latestKeysAt = recordedAt;
+      const heldAt = checkpointOf.get(asString(row.task_intent_id)) as SqlRow;
+      for (const unit of unknown) {
+        const contentKey = keys[unit.unitOrdinal - 1]!;
+        outstanding.set(contentKey, {
+          key: unconfirmedOutcomeKey(kind, runRecordId, { contentKey }), kind, runRecordId,
+          taskIntentId: asString(row.task_intent_id), classification: 'failed', recordedAt,
+          unitOrdinal: unit.unitOrdinal, heldAtRevisionId: asString(heldAt.revision_id), contentKey, stage: null,
+        });
+      }
+    }
+    const rows = !held && outstanding.size === 0 ? [] : this.#db.prepare(
+      `SELECT r.* FROM analysis_result_set_revisions r
+       JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal`,
+    ).all(bookId, kind) as SqlRow[];
     for (const row of rows) {
       const record = parseCanonicalJson(asString(row.canonical_json));
       const unknown = isRecord(record) && Array.isArray(record.gaps)
@@ -2348,11 +2389,14 @@ export class BaselineAnalysisStore {
         continue;
       }
       const keys = unitContentKeys(facts.manifest);
-      latestKeys = new Set(keys);
+      if (asString(row.created_at) >= latestKeysAt) {
+        latestKeys = new Set(keys);
+        latestKeysAt = asString(row.created_at);
+      }
       const keyOf = new Map(facts.manifest.units.map((unit, index) => [unit.ordinal, keys[index]!] as const));
       for (const unit of facts.unitStates) {
         const key = keyOf.get(unit.unitOrdinal);
-        if (key === undefined) continue;
+        if (key === undefined || (outstanding.get(key)?.recordedAt ?? '') > asString(row.created_at)) continue;
         if (unit.state === 'closed') outstanding.delete(key);
         else if (isRecord(record) && Array.isArray(record.gaps) && record.gaps.some((gap: unknown) =>
           isRecord(gap) && gap.unitOrdinal === unit.unitOrdinal && gap.code === 'contract-invalid')) {
@@ -2368,6 +2412,7 @@ export class BaselineAnalysisStore {
         const contentKey = keyOf.get(gap.unitOrdinal);
         if (contentKey === undefined) continue;
         const earlier = outstanding.get(contentKey);
+        if (earlier !== undefined && earlier.recordedAt > asString(row.created_at)) continue;
         // Carried forward: the same request, still unconfirmed, now at this revision's ordinal.
         if (gap.carried && earlier !== undefined) {
           outstanding.set(contentKey, { ...earlier, unitOrdinal: gap.unitOrdinal, heldAtRevisionId });
@@ -3308,15 +3353,31 @@ export class BaselineAnalysisStore {
   } {
     const admitted = definition.kind === BASELINE_ANALYSIS_KIND || enrollmentVersionId !== null ? null : liveKindRule(this.#launch.policy, definition.kind);
     if (this.#launch.live === null || admitted === null || !kindResearchDeclaration(this.#launch.policy, definition.kind, definition.researchDeclaration).webSearch) return {};
-    const row = this.#db.prepare('SELECT * FROM search_backend_connections WHERE selected = 1').get() as SqlRow | undefined;
-    requireAnalysis(row !== undefined, 'SEARCH_BACKEND_NOT_SHIPPED', '请在 设置 › 模型服务 › 联网检索 选择后端。');
-    const adapter = searchBackend(asString(row.backend_id));
     const production = this.#launch.live.scope === 'ordinary-production';
-    if (production) requireAnalysis(row.credential_operation_state === 'ready' && typeof row.credential_reference === 'string',
-      'SEARCH_CREDENTIAL_MISSING', `${adapter.declaration.displayName} 需要密钥；请在 设置 › 模型服务 › 联网检索 保存。`);
-    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id), selectedAt: asString(row.selected_at) };
-    const searchCredentialReference = production ? asString(row.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
-    const webToolsFallback = production ? freezeSearchFallback(this.#db, searchFallbackTermsOf(policy), adapter.declaration.id) : undefined;
+    const rows = this.#db.prepare('SELECT * FROM search_backend_connections').all() as SqlRow[];
+    const selected = rows.find((entry) => entry.selected === 1);
+    const channel = modelServiceChannelOf(this.#launch.live.route);
+    const native = SEARCH_BACKENDS.find((entry) => channel?.startsWith(`${entry.service}-`));
+    const modelConnection = production ? this.#db.prepare("SELECT credential_updated_at FROM model_service_connections WHERE credential_reference = ? AND credential_operation_state = 'ready'").get(this.#launch.live.credentialReference) : undefined;
+    const usingNative = !readSearchOverride(this.#db) && native?.shipped === true && modelConnection !== undefined;
+    const selectedRow = selected !== undefined && (!production || (selected.credential_operation_state === 'ready' && typeof selected.credential_reference === 'string')) ? selected : undefined;
+    const configuredRows = rows.filter((entry) => !production || (entry.credential_operation_state === 'ready' && typeof entry.credential_reference === 'string'));
+    const row = selectedRow ?? configuredRows[0];
+    const adapterId = usingNative ? native.id : asString(row?.backend_id ?? '');
+    const nativeAdmitted = native?.shipped === true && platformToolsFromProjection(admitted) !== null &&
+      admitted.platformTools?.websearch.backends.some((backend) => backend.id === native.id) === true;
+    requireAnalysis(adapterId.length > 0, 'SEARCH_CREDENTIAL_MISSING', native === undefined
+      ? '当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
+      : nativeAdmitted ? '当前模型渠道自带联网搜索，可一键启用；请前往 设置 › 联网检索。'
+      : '当前模型渠道的原生搜索为候选接口 · 未实测；请前往 设置 › 联网检索 的后端列表，保存一个可用后端的密钥。');
+    const adapter = searchBackend(adapterId);
+    const webToolsBackend = { backendId: adapter.declaration.id, host: adapter.declaration.host!, configurationDigest: searchBackendConfigurationDigest(adapter.declaration.id),
+      selectedAt: usingNative ? asString(modelConnection!.credential_updated_at) : asString(row!.selected_at),
+      selectionSource: usingNative ? 'model-channel' as const : 'configured-backend' as const,
+      ...(usingNative ? { sourceLabel: channel === null ? native.displayName : MODEL_SERVICE_ROUTE_BINDINGS[channel].providerLabel } : {}) };
+    const searchCredentialReference = usingNative ? this.#launch.live.credentialReference
+      : production ? asString(row!.credential_reference) : CONFIGURED_DEVELOPMENT_CREDENTIAL_REFERENCES[adapter.declaration.credentialSlot];
+    const webToolsFallback = production && !usingNative ? freezeSearchFallback(this.#db, searchFallbackTermsOf(policy), adapter.declaration.id) : undefined;
     return { webToolsBackend, searchCredentialReference, ...(webToolsFallback === undefined ? {} : { webToolsFallback }) };
   }
 

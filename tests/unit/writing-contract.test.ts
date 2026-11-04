@@ -395,7 +395,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_ZH, '这部作品讲述了一位乡村教师的半生经历。书中人物形象鲜明，情节跌宕起伏，语言质朴而有力量。');
     expect(exemplarCopied(copying, one(CHINESE))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['punctuation'] });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(CHINESE));
-    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这一段没有采用。`);
   });
 
   it('refuses a clause copied whole within its punctuation: twelve characters', () => {
@@ -415,7 +415,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_EN, 'This novel follows one family over many years and asks what we owe to the land that raised us.');
     expect(exemplarCopied(copying, one(ENGLISH, 'Distant Hills'))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(ENGLISH, 'Distant Hills'));
-    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《Distant Hills》版本 1 有连续 ${EXEMPLAR_COPY_WORDS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《Distant Hills》版本 1 有连续 ${EXEMPLAR_COPY_WORDS} 个外文词以上相同；范例只参照，不复制，这一段没有采用。`);
     // Inside a Chinese draft, too.
     expect(exemplarCopied(draft(`这本书追问：what we owe to the land that raised us。`), one(ENGLISH))).toMatchObject({ kind: 'verbatim', unit: 'word' });
   });
@@ -424,7 +424,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_EN, 'Told in alternating voices, it follows the family through drought, war and peace.');
     expect(exemplarCopied(copying, one(ENGLISH))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS, breaks: ['punctuation'] });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(ENGLISH));
-    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这一段没有采用。`);
   });
 
   it('reads a hyphenated word as one word, and a curly apostrophe as a straight one', () => {

@@ -28,7 +28,7 @@ describe('the closed DeepSeek direct-search candidate namespace', () => {
     delete withoutCandidate['candidate'];
     expect(legacyConfigurationDigestOf(withoutCandidate, profileOf('search-deepseek'))).toBe(LEGACY_DIGEST_AT_BASE);
     expect(searchBackendDeclarationOf(withoutCandidate)).toEqual(SEARCH_BACKEND_DECLARATIONS.find((entry) => entry.id === 'search-deepseek'));
-    expect(SEARCH_BACKENDS.map((entry) => [entry.id, entry.rank])).toEqual([['search-tinyfish', 1], ['search-deepseek', 2], ['search-brave', 3], ['search-parallel', 4], ['search-bochaai', 5]]);
+    expect(SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => [entry.id, entry.rank])).toEqual([['search-tinyfish', 1], ['search-deepseek', 2], ['search-brave', 3], ['search-parallel', 4], ['search-bochaai', 5]]);
     expect(defaultSearchBackend()!.id).toBe('search-tinyfish');
     const request = deepseekBackend.request('q', { credential: 'placeholder', count: 10 });
     expect([request.url, JSON.parse(request.body!).model, JSON.parse(request.body!).tools]).toEqual(['https://api.deepseek.com/anthropic/v1/messages', 'deepseek-flash',
@@ -54,7 +54,7 @@ describe('the closed DeepSeek direct-search candidate namespace', () => {
     const outcome = searchBackendOutcome(declarations, SEARCH_BACKEND_EVALUATION.profiles, SEARCH_BACKEND_EVALUATION.cnyPerUsd);
     expect(outcome.excluded).toContainEqual({ backendId: 'search-deepseek', reason: 'not-measured' });
     const candidate = searchBackendCandidateOf(document())!;
-    expect([candidate.measurement, candidate.search.endpoint, candidate.fetch.endpoint, candidate.price.amount, candidate.price.per])
+    expect([candidate.measurement, candidate.search.endpoint, candidate.fetch!.endpoint, candidate.price.amount, candidate.price.per])
       .toEqual(['not-measured', 'https://api.deepseek.com/v1/tools/search', 'https://api.deepseek.com/v1/tools/fetch', 0.75, 1000]);
     expect(() => searchBackendCandidate('search-brave', candidate.candidateId)).toThrow('SEARCH_CANDIDATE_UNKNOWN');
     expect(() => searchBackendCandidate('search-deepseek', 'deepseek-direct-search-v2')).toThrow('SEARCH_CANDIDATE_UNKNOWN');
