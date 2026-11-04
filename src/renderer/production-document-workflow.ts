@@ -257,9 +257,8 @@ export function renderDocumentWorkflow(
     const summary = el('p', 'document-workflow-summary', workflow.summary);
     const nextHeading = el('h3', undefined, DOCUMENT_WORKFLOW_NEXT_HEADING);
     nextHeading.id = uid('document-workflow-next');
-    const next = workflow.next.length === 0
-      ? el('p', 'field-note document-workflow-next-empty', DOCUMENT_WORKFLOW_NEXT_EMPTY)
-      : el('ol', 'document-workflow-next');
+    const next = el('ol', 'document-workflow-next');
+    if (workflow.next.length === 0) nextHeading.append(' · ', el('span', 'document-workflow-next-empty', DOCUMENT_WORKFLOW_NEXT_EMPTY));
     if (workflow.next.length > 0) {
       next.setAttribute('aria-labelledby', nextHeading.id);
       for (const entry of workflow.next) {
@@ -273,7 +272,7 @@ export function renderDocumentWorkflow(
     const phases = el('ol', 'document-phases');
     phases.setAttribute('aria-labelledby', phasesHeading.id);
     for (const phase of workflow.phases) phases.append(phaseRow(phase));
-    section.replaceChildren(profile, summary, nextHeading, next, phasesHeading, phases);
+    section.replaceChildren(profile, summary, nextHeading, ...(workflow.next.length > 0 ? [next] : []), phasesHeading, phases);
     const target = focusNext;
     focusNext = null;
     if (target === null) return;
