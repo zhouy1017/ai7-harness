@@ -489,7 +489,7 @@ async function main() {
       window.__j05FastSelected=role.binding.providerId==='deepseek-open-platform' && role.connection.fastSelected===true;
     })`);
     requireJourney(await renderer.evaluate(`Boolean(window.__j05FastSelected)`), 'selected-fast-exact-recorded-choice');
-    await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent===${JSON.stringify(EXCERPT.title)} && document.querySelector('#processing-indicator')?.textContent==='本地处理' && Array.from(document.querySelectorAll('#context-header input,#context-header select')).length===0`, 'book-header-title-and-processing');
+    await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent===${JSON.stringify(EXCERPT.title)} && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型') && !document.querySelector('#context-header').textContent.includes('deepseek-flash')`, 'book-header-title-and-processing');
     requireJourney(await renderer.evaluate(`window.ai7.listPriorWork().then(async (work)=>{
       const book=work.find((item)=>item.bookTitle===${JSON.stringify(EXCERPT.title)});
       const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});

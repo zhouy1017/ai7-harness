@@ -761,7 +761,7 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
-    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体（记忆与全局指导）' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && Array.from(document.querySelectorAll('#context-header input,#context-header select')).length===0`, 'agent-header-title-and-processing');
+    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体（记忆与全局指导）' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });
