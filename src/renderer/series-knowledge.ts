@@ -240,8 +240,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     node.dataset['revision'] = String(current.ordinal);
     const title = el('p', 'knowledge-item-title', knowledgeItemLine(item));
     title.tabIndex = -1;
-    node.append(title, el('p', 'knowledge-item-content', current.content),
-      el('p', 'field-note knowledge-item-provenance', knowledgeProvenanceLine(current.provenance)), el('p', 'field-note knowledge-item-reuse', knowledgeReuseLine(current)));
+    const context = el('p', 'field-note');
+    context.append(el('span', 'knowledge-item-provenance', knowledgeProvenanceLine(current.provenance).replace(/。$/u, '')), '；',
+      el('span', 'knowledge-item-reuse', knowledgeReuseLine(current)));
+    node.append(title, el('p', 'knowledge-item-content', current.content), context);
     const kept = knowledgeKeptConflictsLine(current.conflictCount);
     if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept), conflictButton(item.itemId, current));
     const forItem = action(KNOWLEDGE_PROPOSE_FOR_ITEM, 'quiet', 'propose-item', () => {
@@ -447,8 +449,9 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const node = el('li', 'knowledge-candidate');
     node.dataset['candidateId'] = candidate.candidateId;
     node.dataset['authoring'] = candidate.authoring;
-    node.append(el('p', 'knowledge-candidate-target', knowledgeTargetLine(candidate)), el('p', 'knowledge-candidate-content', candidate.content),
-      el('p', 'field-note knowledge-candidate-provenance', knowledgeProvenanceLine(candidate.provenance)));
+    const target = el('p', 'knowledge-candidate-target', knowledgeTargetLine(candidate));
+    target.append(' · ', el('span', 'knowledge-candidate-provenance', knowledgeProvenanceLine(candidate.provenance)));
+    node.append(target, el('p', 'knowledge-candidate-content', candidate.content));
     if (candidate.conflicts > 0) node.append(el('p', 'attention-note knowledge-candidate-conflict', '存在书系知识冲突 · 需要处理'));
     const open = action(KNOWLEDGE_REVIEW_OPEN, 'quiet', 'review', () => void openReview(candidate.candidateId));
     open.disabled = busy || reviewing !== null;
@@ -582,8 +585,9 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     box.append(heading);
     if (review !== null) {
       box.dataset['version'] = String(review.candidate.version);
-      box.append(el('p', 'knowledge-review-identity', knowledgeReviewIdentity(review)), el('p', 'knowledge-review-content', review.candidate.content),
-        el('p', 'field-note knowledge-review-provenance', knowledgeProvenanceLine(review.candidate.provenance)));
+      const identity = el('p', 'knowledge-review-identity', knowledgeReviewIdentity(review));
+      identity.append(' · ', el('span', 'knowledge-review-provenance', knowledgeProvenanceLine(review.candidate.provenance)));
+      box.append(identity, el('p', 'knowledge-review-content', review.candidate.content));
       if (review.current !== null) box.append(el('p', 'field-note knowledge-review-superseded', knowledgeSupersededLine(review.current)));
       if (review.conflictLabel !== null) {
         const conflicts = el('div', 'knowledge-review-conflicts');

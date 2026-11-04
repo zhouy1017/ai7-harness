@@ -128,7 +128,9 @@ function renderChange(change: SeriesMembershipChangeProjection, line: string): H
   item.dataset['seriesId'] = change.seriesId;
   const details = el('details', 'series-change-impact');
   details.append(el('summary', undefined, SERIES_HISTORY_IMPACT), ...change.impact.map((group) => renderImpactGroup(group, 'h5')));
-  item.append(el('p', 'series-change-line', line), el('p', 'field-note series-change-byline', seriesChangeByline(change, localInstantLabel)), details);
+  const description = el('p', 'series-change-line', line);
+  description.append(' · ', el('span', 'series-change-byline', seriesChangeByline(change, localInstantLabel)));
+  item.append(description, details);
   return item;
 }
 
@@ -434,7 +436,9 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     if ((projection.tasks?.length ?? 0) > 0) {
       const tasks = el('section', 'series-tasks');
       tasks.append(el('h3', undefined, '书系范围任务'));
-      for (const task of projection.tasks ?? []) tasks.append(el('p', 'field-note', `《${task.bookTitle}》 · ${task.title} · ${task.runRecordId === null ? '待授权' : '已授权'}`));
+      const list = el('ul');
+      for (const task of projection.tasks ?? []) list.append(el('li', undefined, `《${task.bookTitle}》 · ${task.title} · ${task.runRecordId === null ? '待授权' : '已授权'}`));
+      tasks.append(list);
       membersBox.append(tasks);
     }
     historyBox.replaceChildren(history);
