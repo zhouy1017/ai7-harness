@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   FidelityCategoryProjection,
   ImportFidelityOutcome,
@@ -23,8 +24,8 @@ export const ROUND_TRIP_KEY = 'round-trip-export';
 /** Current manuscript presentation, alongside immutable historical parser/fidelity records. */
 export function fidelitySurfaceDetail(category: FidelityCategoryProjection): string {
   if (category.count > 0 && category.status === 'retained') {
-    if (category.key === 'tables') return '表格单元格在稿件中只读显示；表格结构随来源版本保留，导出 DOCX 时从原文件完整恢复。';
-    if (category.key === 'images-captions') return '图片在稿件中只读预览，图注保留为文字；原图与关系随来源版本保留，导出 DOCX 时完整恢复。';
+    if (category.key === 'tables') return technicalWords('表格单元格在稿件中只读显示；表格结构随来源版本保留，导出 DOCX 时从原文件完整恢复。', '表格在稿件中只读，导出 DOCX 时恢复原表格。');
+    if (category.key === 'images-captions') return technicalWords('图片在稿件中只读预览，图注保留为文字；原图与关系随来源版本保留，导出 DOCX 时完整恢复。', '图片只读预览，导出 DOCX 时恢复原图。');
   }
   return fidelityDetailText(category.detail);
 }
@@ -149,8 +150,8 @@ export const TEXT_BOX_CHOICE_LEGEND = '文本框怎样进来';
 export const TEXT_BOX_CHOICE_OPTIONS: ReadonlyArray<{ disposition: TextBoxDisposition; label: string; hint: string }> = [
   {
     disposition: 'retain',
-    label: '保留为文本框（默认）',
-    hint: '随来源版本保留，不显示在稿件中，导出时恢复。',
+    label: '保留为文本框',
+    hint: '稿件中不显示，导出时恢复。',
   },
   {
     disposition: 'merge',
@@ -185,6 +186,6 @@ export function commitNote(acceptedDegradation: boolean): string {
 /** How a committed import's fidelity outcome reads on its record. */
 export function fidelityOutcomeLabel(outcome: ImportFidelityOutcome): string {
   return outcome === 'degraded-import-no-round-trip'
-    ? '含已接受的降级 · 原文件随来源版本保留'
-    : '完整保留 · 原文件随来源版本保留';
+    ? technicalWords('含已接受的降级 · 原文件随来源版本保留', '含已接受的格式变化，原文件已保留')
+    : technicalWords('完整保留 · 原文件随来源版本保留', '原文件完整保留');
 }

@@ -123,7 +123,7 @@ describe('the import fidelity review words', () => {
   it('offers the text-box choice, 保留为文本框 first and preselected, only for a natively read file with a box', () => {
     expect(TEXT_BOX_CHOICE_LEGEND).toBe('文本框怎样进来');
     expect(TEXT_BOX_CHOICE_OPTIONS.map((option) => [option.disposition, option.label])).toEqual([
-      ['retain', '保留为文本框（默认）'],
+      ['retain', '保留为文本框'],
       ['merge', '并入正文'],
     ]);
     expect(offersTextBoxChoice(WITH_BOX, null)).toBe(true);

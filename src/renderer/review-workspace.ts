@@ -2400,7 +2400,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     proseLabel.append(prose, el('span', undefined, '我确认所选范围为中文正文，启用 P01–P03 标点检查'));
     const numeralLabel = el('label', 'review-field');
     const numerals = el('select'); numerals.dataset['localCheckNumerals'] = '';
-    for (const [value, label] of [['off', '数字检查关闭（默认）'], ['national-standard', '按国标有限条款检查 N01、N02'], ['editor-convention', '按编辑约定检查 N01、N02']]) numerals.append(new Option(label, value));
+    for (const [value, label] of [['off', '数字检查关闭'], ['national-standard', '按国标有限条款检查 N01、N02'], ['editor-convention', '按编辑约定检查 N01、N02']]) numerals.append(new Option(label, value));
     numerals.value = state.localOptions.numerals;
     numerals.addEventListener('change', () => {
       const value = numerals.value as typeof state.localOptions.numerals;
