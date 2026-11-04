@@ -2003,7 +2003,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="book-create-review"]')`, 'empty-book-review');
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="book-create-review"]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && screen.textContent.includes('拟用稳定标识') && screen.textContent.includes('图书编辑维度集 · 8 项') && screen.textContent.includes('不创建稿件、来源、修订版、工作流实例或导入记录'); })()`,
+    `(() => { const screen = document.querySelector('[data-screen="book-create-review"]'); return screen?.textContent.includes(${JSON.stringify(title)}) && screen.textContent.includes(${JSON.stringify(internalNumber)}) && screen.textContent.includes('拟用稳定标识') && !screen.querySelector('.dimension-list') && screen.textContent.includes('不创建稿件、来源、修订版、工作流实例或导入记录'); })()`,
     'empty-book-review-contract',
   );
   await clickExactButton(renderer, '新建图书', 'empty-book-commit');

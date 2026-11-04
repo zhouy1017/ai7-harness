@@ -3090,7 +3090,7 @@ function renderBookOverview(
         () => window.ai7.inspectBaselineAnalysis().then((analysis) => analysis.resultSetRevision !== null));
       if (!guidance.isConnected || !visible) return;
       guidance.dataset['onboardingGuidance'] = 'sample-book';
-      guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title), element('p', 'field-note', SAMPLE_GUIDANCE_LABELS.note));
+      guidance.append(element('h3', undefined, SAMPLE_GUIDANCE_LABELS.title));
       const links = element('div', 'button-row');
       const book = { bookId: overview.book.bookId, title: overview.book.title };
       for (const { label, section } of SAMPLE_GUIDANCE_LABELS.steps) {
@@ -3658,22 +3658,9 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
     element('dt', undefined, '拟用图书 ID'), element('dd', 'technical-identity', review.proposed.bookId),
     element('dt', undefined, '拟用稳定标识'), element('dd', 'technical-identity', review.proposed.stableIdentity),
   ));
-  content.append(
-    identity,
-    listSection('将创建的记录', review.recordsToCreate),
-    listSection('不会做', review.nonEffects),
-  );
-  const dimensions = element('section', 'review-section');
-  dimensions.append(
-    element('h3', undefined, '图书编辑维度集 · 8 项'),
-    element('p', 'field-note', `${review.editorialDimensionSet.name} · ${review.editorialDimensionSet.weightSemantics}`),
-  );
-  const list = element('ul', 'dimension-list');
-  for (const item of review.editorialDimensionSet.dimensions) {
-    list.append(element('li', undefined, `${item.label} · 中性起始权重 ${item.weight}`));
-  }
-  dimensions.append(list);
-  content.append(dimensions);
+  content.append(identity);
+  if (technicalLayerVisible) content.append(listSection('将创建的记录', review.recordsToCreate));
+  content.append(listSection('不会做', review.nonEffects));
   const actions = element('div', 'button-row');
   const commit = button('新建图书', 'primary', async () => {
     commit.disabled = true;
