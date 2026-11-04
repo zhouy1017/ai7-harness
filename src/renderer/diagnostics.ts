@@ -51,7 +51,7 @@ export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: (
     for (const record of [...records].reverse()) {
       const item = el('section', '');
       item.className = 'source-card';
-      item.append(el('p', `${record.instant} · ${CRASH_KIND_LABELS[record.kind] ?? CRASH_KIND_FALLBACK}${technicalLayerVisible ? ` · ${record.reason}` : ''}`));
+      item.append(el('p', `${technicalLayerVisible ? record.instant : record.instant.slice(0, 10)} · ${CRASH_KIND_LABELS[record.kind] ?? CRASH_KIND_FALLBACK}${technicalLayerVisible ? ` · ${record.reason}` : ''}`));
       const details = el('details', '');
       details.append(el('summary', CRASH_RECORD_VIEW), el('pre', JSON.stringify(record, null, 2)));
       item.append(technicalDisclosure(details));

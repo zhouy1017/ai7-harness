@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import { metadataWords } from './technical-layer.js';
 import {
   MODEL_SERVICE_ROUTE_EFFECT_LABEL,
@@ -215,7 +216,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     label.append(radio, metadataWords(` ${model.modelLabel}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`));
     group.append(label);
   }
-  if (offered.length === 0) group.append(el('p', 'field-note', '尚未获取模型列表；保存凭据后刷新，或手动输入模型 ID。'));
+  if (offered.length === 0) group.append(el('p', 'field-note', technicalLayerVisible ? '尚未获取模型列表；保存凭据后刷新，或手动输入模型 ID。' : '保存凭据后获取可用模型。'));
   const chooseCustom = (): void => {
     const modelId = custom.value.trim();
     checked = modelId.length === 0 ? null : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
@@ -267,7 +268,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   paint();
   const actions = el('div', 'button-row');
   actions.append(test, ...roleButtons, use);
-  step.append(group, customLabel, feedback, el('p', 'field-note', MODEL_CONNECTION_TEST_NOTE), actions);
+  step.append(group, ...(technicalLayerVisible ? [customLabel] : []), feedback, el('p', 'field-note', MODEL_CONNECTION_TEST_NOTE), actions);
   const others = channel.models.filter((model) => !bothEligible(model));
   if (others.length > 0) {
     const details = el('details', 'model-service-flow-ineligible');
