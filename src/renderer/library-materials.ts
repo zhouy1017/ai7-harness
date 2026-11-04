@@ -725,7 +725,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   const eligibilityChooser = (material: LibraryMaterialProjection, state: Extract<Chooser, { kind: 'eligibility' }>): HTMLElement => {
     const section = el('section', 'library-chooser library-eligibility-chooser');
     const fieldset = el('fieldset');
-    fieldset.append(el('legend', undefined, `${LIBRARY_ELIGIBILITY_TERM}：「${material.title}」`));
+    const legend = el('legend', undefined, `${LIBRARY_ELIGIBILITY_TERM}：「${material.title}」`);
+    legend.append(' · ', el('span', 'library-eligibility-boundary', LIBRARY_ELIGIBILITY_BOUNDARY));
+    fieldset.append(legend);
     const name = `library-eligibility-${material.materialId}`;
     const bookTitle = material.attribution?.scope === 'book' ? material.attribution.bookTitle : null;
     const consequence = el('p', 'attention-note library-house-consequence', LIBRARY_HOUSE_CONSEQUENCE);
@@ -758,7 +760,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       state.reason = text.value;
     });
     reason.append(el('span', undefined, LIBRARY_REASON_LABEL), text);
-    section.append(fieldset, reason, el('p', 'field-note library-eligibility-boundary', LIBRARY_ELIGIBILITY_BOUNDARY));
+    section.append(fieldset, reason);
     confirm = chooserActions(section, material, LIBRARY_ELIGIBILITY_CONFIRM, 'confirm-eligibility', () => {
       const value = state.choice;
       if (value === null) return;

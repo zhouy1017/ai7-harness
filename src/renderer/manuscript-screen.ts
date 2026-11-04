@@ -456,9 +456,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   note.id = 'milestone-note';
   note.maxLength = 500;
   const milestoneButton = button(MILESTONE_FORM_WORDS.save, 'secondary', () => void saveMilestone());
-  const milestoneReason = element('small', 'field-note milestone-save-reason');
+  const milestoneReason = element('span', 'milestone-save-reason');
   milestoneReason.id = 'milestone-save-reason';
+  milestoneButton.setAttribute('aria-label', milestoneButton.textContent ?? '');
   milestoneButton.setAttribute('aria-describedby', milestoneReason.id);
+  const milestoneReasonLabel = element('span');
+  milestoneReasonLabel.append(' · ', milestoneReason);
+  milestoneButton.append(milestoneReasonLabel);
   const chosenPurpose = (): MilestonePurposeKind | null => {
     const checked = purposeRadios.find((radio) => radio.checked);
     return checked === undefined ? null : checked.value as MilestonePurposeKind;
@@ -473,6 +477,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const reason = milestoneSaveReason(milestoneBlockers());
     milestoneReason.textContent = reason ?? '';
     milestoneReason.hidden = reason === null;
+    milestoneReasonLabel.hidden = reason === null;
     milestoneButton.disabled = busy || reason !== null;
   };
   // Each milestone starts again from an unselected purpose (interaction spec › Milestone rules).
@@ -494,7 +499,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     noteLabel,
     note,
     milestoneButton,
-    milestoneReason,
   );
   navigator.append(outlineSection, searchSection);
   const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());

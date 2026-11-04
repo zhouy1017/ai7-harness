@@ -384,21 +384,26 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     ceilingInput.autocomplete = 'off';
     ceilingInput.dataset['backgroundCeiling'] = 'true';
     ceilingInput.setAttribute('aria-required', 'true');
-    const preview = el('p', 'field-note background-analysis-share');
+    const preview = el('span', 'background-analysis-share');
     preview.id = 'background-analysis-share';
     preview.setAttribute('aria-live', 'polite');
     ceilingInput.setAttribute('aria-describedby', preview.id);
-    ceilingLabel.append(el('span', undefined, `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`), ceilingInput);
+    ceilingInput.setAttribute('aria-label', `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`);
+    ceilingLabel.append(el('span', undefined, `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`), ceilingInput, preview);
     const notGranted = el('ul', 'analysis-list background-analysis-not-granted');
     for (const entry of offer.notGranted) notGranted.append(el('li', undefined, entry));
     const fieldset = el('fieldset', 'background-analysis-starting-points');
     fieldset.append(el('legend', undefined, BACKGROUND_STARTING_POINT_LEGEND));
     let chosen: BackgroundAnalysisStartingPoint | null = null;
-    const hint = el('p', 'field-note background-analysis-choose', BACKGROUND_CHOOSE_FIRST);
+    const hint = el('span', 'background-analysis-choose', BACKGROUND_CHOOSE_FIRST);
     hint.id = 'background-analysis-choose';
     const confirm = action(BACKGROUND_CONFIRM, 'primary', 'enroll-confirm', () => void submit());
     confirm.disabled = true;
+    confirm.setAttribute('aria-label', BACKGROUND_CONFIRM);
     confirm.setAttribute('aria-describedby', hint.id);
+    const hintLabel = el('span');
+    hintLabel.append(' · ', hint);
+    confirm.append(hintLabel);
     const ceilingNow = (): number | null => backgroundCeilingOf(ceilingInput.value, scope.books.length, BACKGROUND_ANALYSIS_CEILING_MAX);
     // 登记 is offered once a starting point is chosen and the ceiling is set; the hint names the first thing still missing.
     const refresh = (): void => {
@@ -407,6 +412,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       const missing = chosen === null ? BACKGROUND_CHOOSE_FIRST : ceiling === null ? BACKGROUND_CEILING_FIRST : null;
       confirm.disabled = missing !== null;
       hint.hidden = missing === null;
+      hintLabel.hidden = missing === null;
       if (missing === null) {
         confirm.removeAttribute('aria-describedby');
       } else {
@@ -453,7 +459,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     buttons.append(confirm, action(BACKGROUND_CANCEL, 'quiet', 'enroll-cancel', cancel));
     const section = el('section', 'background-analysis-disclosure');
     section.setAttribute('aria-labelledby', title.id);
-    section.append(title, what, scopes, ceilingLabel, preview, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, hint, buttons);
+    section.append(title, what, scopes, ceilingLabel, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, buttons);
     return [section];
   };
 

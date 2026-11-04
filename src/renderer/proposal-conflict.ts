@@ -165,6 +165,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
   let draftTextNode: HTMLElement | undefined;
   let saveButton: HTMLButtonElement | undefined;
   let saveReason: HTMLElement | undefined;
+  let saveReasonLabel: HTMLElement | undefined;
 
   const button = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement => {
     const control = el('button', tone, label);
@@ -355,6 +356,7 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     if (saveReason !== undefined) {
       saveReason.textContent = reason ?? '';
       saveReason.hidden = reason === null;
+      if (saveReasonLabel !== undefined) saveReasonLabel.hidden = reason === null;
     }
     paintSaveState();
   }
@@ -666,12 +668,16 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     draftStatus.dataset['conflictDraftStatus'] = 'true';
     const saveRow = el('div', 'button-row');
     saveButton = button('save-version', CONFLICT_QUICK_ACTIONS.saveVersion, 'primary', () => void saveVersion());
-    saveReason = el('small', 'field-note proposal-conflict-save-reason');
+    saveReason = el('span', 'proposal-conflict-save-reason');
     saveReason.id = uid('save-reason');
     saveReason.dataset['conflictSaveReason'] = 'true';
+    saveButton.setAttribute('aria-label', saveButton.textContent ?? '');
     saveButton.setAttribute('aria-describedby', saveReason.id);
+    saveReasonLabel = el('span');
+    saveReasonLabel.append(el('span', undefined, ' · '), saveReason);
+    saveButton.append(saveReasonLabel);
     saveRow.append(saveButton);
-    section.append(whole, draftStatus, saveRow, saveReason);
+    section.append(whole, draftStatus, saveRow);
 
     if (draftHost.isConnected) draftHost.replaceWith(section);
     else pathDetail?.replaceChildren(section);
