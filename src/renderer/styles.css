@@ -2434,7 +2434,7 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 .memory-create-form > button[type="submit"], .memory-candidate-form > button[type="submit"] { min-height: 42px; background: var(--action-primary); color: var(--action-primary-text); border: 1px solid var(--action-primary); border-radius: 8px; padding: .5rem 1rem; cursor: pointer; }
 .fact-lens-row > .review-finding { margin: 0; border: 0; padding: 0; }
 /* A4 shared controls — #1318 / Owner #1314 (additive integration boundary). */
-:root { --motion-fast: 140ms; --motion-normal: 220ms; --motion-slow: 360ms; --motion-ease: cubic-bezier(.2,.7,.2,1); }
+:root { --motion-fast: 120ms; --motion-base: 180ms; --motion-slow: 240ms; --motion-ease: cubic-bezier(.2,.8,.2,1); --motion-exit: ease-in; }
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .sidebar-link::before, .sidebar-book-title::before, :root[data-sidebar="icons"] .sidebar-book-switcher-toggle::before { display: none; content: none; }
@@ -2477,7 +2477,7 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 .toast .btn { color: inherit; }
 .toast[hidden], .status-history { display: none; }
 @media (max-width: 760px) { .edge-entries .edge-label { display: none; } .sheet { width: calc(100vw - 1rem); } }
-@media (prefers-reduced-motion: reduce) { :root { --motion-fast: 0ms; --motion-normal: 0ms; --motion-slow: 0ms; } }
+@media (prefers-reduced-motion: reduce) { :root { --motion-fast: 0ms; --motion-base: 0ms; --motion-slow: 0ms; } }
 .window-step[data-window-step="after"] .icon { transform: rotate(180deg); }
 .sidebar-link > .icon { order: -1; }
 button.btn { min-height: 32px; }
