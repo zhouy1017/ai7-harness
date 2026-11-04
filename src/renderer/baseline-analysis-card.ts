@@ -1,3 +1,4 @@
+import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import {
@@ -272,7 +273,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.dataset['runReportDigest'] = report.reportDigest;
     disclosure.dataset['runReportRun'] = report.runRecordId;
     disclosure.dataset['runReportClassification'] = report.classification;
-    disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+    disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
     disclosure.append(element('p', 'research-status', researchStatusLine(report)));
     if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
     const stages = element('ul', 'analysis-list analysis-run-report-stages');
@@ -1174,6 +1175,13 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
     )));
     card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
+    if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
+      const report = projection.taskOutcome.report;
+      const reason = report.classification === 'failed'
+        ? report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason
+        : analysisRunSummary(report).reason;
+      card.append(element('p', 'attention-note', `${projection.taskOutcome.label}${reason === null ? '' : ` · ${reason}`}`));
+    }
 
     // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
     // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
@@ -1246,7 +1254,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
     if (projection.taskOutcome) {
-      const outcome = element('section', 'success-note analysis-outcome');
+      const outcome = element('section', projection.taskOutcome.classification === 'completed' ? 'success-note analysis-outcome' : 'attention-note analysis-outcome');
       outcome.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
       outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
       outcome.append(
