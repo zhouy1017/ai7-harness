@@ -191,7 +191,7 @@ export function guidelineImported(title: string, ordinal: number): string {
 
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
 
-export const EXEMPLARS_EMPTY = '还没有范例；本社图书发稿并交付的文档自动归入，既有出版物可手动导入。';
+export const EXEMPLARS_EMPTY = '暂无范例，已发稿并交付的本社文档会自动加入。';
 export const EXEMPLARS_NONE_DELIVERED = '还没有交付过的文档；交付后自动归入。';
 /** Reads the next page of published Books (Issue #427 review). */
 export const EXEMPLARS_MORE = '更多已出版的书…';

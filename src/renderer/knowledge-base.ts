@@ -147,8 +147,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         renderExemplars(root, next);
       },
     };
-    root.append(exemplarImportButton(surface));
-    if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
+    const importRow = element('div', 'button-row');
+    if (projection.books.length === 0) importRow.append(element('span', 'exemplars-empty', EXEMPLARS_EMPTY));
+    importRow.append(exemplarImportButton(surface));
+    root.append(importRow);
     const list = element('div', 'exemplar-list');
     const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
       list.replaceChildren();
