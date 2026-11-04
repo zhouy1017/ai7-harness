@@ -245,7 +245,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       el('span', 'knowledge-item-reuse', knowledgeReuseLine(current)));
     node.append(title, el('p', 'knowledge-item-content', current.content), context);
     const kept = knowledgeKeptConflictsLine(current.conflictCount);
-    if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept), conflictButton(item.itemId, current));
+    if (kept !== null) { context.append(' · ', el('span', 'knowledge-item-conflicts', kept)); node.append(conflictButton(item.itemId, current)); }
     const forItem = action(KNOWLEDGE_PROPOSE_FOR_ITEM, 'quiet', 'propose-item', () => {
       if (busy) return;
       propose = { target: item.itemId, targetLabel: `「${item.subject}」（${item.classLabel}）`, subject: '', knowledgeClass: '', content: '' };
@@ -588,7 +588,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       const identity = el('p', 'knowledge-review-identity', knowledgeReviewIdentity(review));
       identity.append(' · ', el('span', 'knowledge-review-provenance', knowledgeProvenanceLine(review.candidate.provenance)));
       box.append(identity, el('p', 'knowledge-review-content', review.candidate.content));
-      if (review.current !== null) box.append(el('p', 'field-note knowledge-review-superseded', knowledgeSupersededLine(review.current)));
+      if (review.current !== null) identity.append(' · ', el('span', 'knowledge-review-superseded', knowledgeSupersededLine(review.current)));
       if (review.conflictLabel !== null) {
         const conflicts = el('div', 'knowledge-review-conflicts');
         conflicts.append(el('p', 'attention-note knowledge-conflict-label', review.conflictLabel));

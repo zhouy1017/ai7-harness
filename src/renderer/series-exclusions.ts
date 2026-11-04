@@ -82,17 +82,15 @@ function impactGroup(group: SeriesExclusionImpactGroupProjection, heading: 'h5' 
   box.dataset['impactGroup'] = group.key;
   box.append(el(heading, undefined, group.title));
   const changes = el('div', 'series-impact-changes');
-  changes.append(el('p', 'series-impact-label', SERIES_CHANGES_LABEL));
-  if (group.changes.length === 0) changes.append(el('p', 'field-note', SERIES_NO_CHANGE));
-  else {
+  changes.append(el('p', 'series-impact-label', group.changes.length === 0 ? `${SERIES_CHANGES_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_CHANGES_LABEL));
+  if (group.changes.length > 0) {
     const list = el('ul');
     for (const line of group.changes) list.append(el('li', undefined, line));
     changes.append(list);
   }
   const unchanged = el('div', 'series-impact-unchanged');
-  unchanged.append(el('p', 'series-impact-label', SERIES_UNCHANGED_LABEL));
-  if (group.unchanged.length === 0) unchanged.append(el('p', 'field-note', SERIES_NO_CHANGE));
-  else {
+  unchanged.append(el('p', 'series-impact-label', group.unchanged.length === 0 ? `${SERIES_UNCHANGED_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_UNCHANGED_LABEL));
+  if (group.unchanged.length > 0) {
     const list = el('ul');
     for (const line of group.unchanged) list.append(el('li', undefined, line));
     unchanged.append(list);
@@ -140,9 +138,11 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     root.dataset['exclusionsEffective'] = String(exclusions.effective.length);
     const heading = el('h3', 'exclusions-heading', EXCLUSIONS_HEADING);
     heading.tabIndex = -1;
-    const nodes: HTMLElement[] = [heading, el('p', 'field-note exclusions-note', EXCLUSIONS_NOTE)];
-    if (exclusions.effective.length === 0) nodes.push(el('p', 'field-note exclusions-empty', EXCLUSIONS_EMPTY));
-    else {
+    const note = el('p', 'field-note');
+    note.append(el('span', 'exclusions-note', exclusions.effective.length === 0 ? EXCLUSIONS_NOTE.replace(/。$/u, '') : EXCLUSIONS_NOTE));
+    if (exclusions.effective.length === 0) note.append('；', el('span', 'exclusions-empty', EXCLUSIONS_EMPTY));
+    const nodes: HTMLElement[] = [heading, note];
+    if (exclusions.effective.length > 0) {
       const list = el('ul', 'series-exclusion-list');
       for (const exclusion of exclusions.effective) {
         const item = el('li', 'series-exclusion');

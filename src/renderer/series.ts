@@ -104,9 +104,8 @@ export function renderImpactGroup(group: SeriesImpactGroupProjection, heading: '
   box.dataset['impactGroup'] = group.key;
   box.append(el(heading, undefined, group.title));
   const changes = el('div', 'series-impact-changes');
-  changes.append(el('p', 'series-impact-label', SERIES_CHANGES_LABEL));
-  if (group.changes.length === 0) changes.append(el('p', 'field-note', SERIES_NO_CHANGE));
-  else {
+  changes.append(el('p', 'series-impact-label', group.changes.length === 0 ? `${SERIES_CHANGES_LABEL} · ${SERIES_NO_CHANGE}` : SERIES_CHANGES_LABEL));
+  if (group.changes.length > 0) {
     const list = el('ul');
     for (const line of group.changes) list.append(el('li', undefined, line));
     changes.append(list);
@@ -177,8 +176,8 @@ export function mountSeriesList(options: MountSeriesListOptions): { load(): Prom
         item.dataset['seriesId'] = entry.seriesId;
         const open = action(seriesListLine(entry), 'secondary', 'open', () => options.openSeries(entry.seriesId));
         open.disabled = busy;
+        if (entry.note.length > 0) open.append(' · ', el('span', 'series-item-note', entry.note));
         item.append(open);
-        if (entry.note.length > 0) item.append(el('p', 'field-note series-item-note', entry.note));
         list.append(item);
       }
       nodes.push(list);
@@ -378,9 +377,11 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     root.dataset['seriesId'] = projection.seriesId;
     root.dataset['memberCount'] = String(projection.members.length);
     const members = el('section', 'series-members');
-    members.append(el('h3', undefined, SERIES_MEMBERS_HEADING), el('p', 'field-note series-scope-note', SERIES_SCOPE_NOTE));
-    if (projection.members.length === 0) members.append(el('p', 'field-note series-members-empty', SERIES_MEMBERS_EMPTY));
-    else members.append(memberTable(projection));
+    const scope = el('p', 'field-note');
+    scope.append(el('span', 'series-scope-note', projection.members.length === 0 ? SERIES_SCOPE_NOTE.replace(/。$/u, '') : SERIES_SCOPE_NOTE));
+    if (projection.members.length === 0) scope.append('；', el('span', 'series-members-empty', SERIES_MEMBERS_EMPTY));
+    members.append(el('h3', undefined, SERIES_MEMBERS_HEADING), scope);
+    if (projection.members.length > 0) members.append(memberTable(projection));
     if (projection.membersNext !== null) {
       const row = el('div', 'button-row series-more');
       const more = action(SERIES_MEMBERS_MORE, 'secondary', 'members-more', () => void loadMembers());
@@ -405,7 +406,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     addOpen.disabled = busy || nothingToAdd || chooser !== null || preview !== null;
     addRow.append(addOpen);
     // A house with no Book yet says so, rather than that every Book is already in (Issue #63 review).
-    if (nothingToAdd) addRow.append(el('p', 'field-note series-add-none', projection.bookCount === 0 ? SERIES_ADD_NO_BOOKS : SERIES_ADD_NONE));
+    if (nothingToAdd) addOpen.append(' · ', el('span', 'series-add-none', projection.bookCount === 0 ? SERIES_ADD_NO_BOOKS : SERIES_ADD_NONE));
     members.append(addRow);
     if (chooser !== null) members.append(chooserNode());
     if (preview !== null || (refusal !== null && asked !== null)) members.append(previewNode());

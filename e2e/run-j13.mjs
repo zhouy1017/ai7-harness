@@ -287,7 +287,7 @@ const READ_SERIES_LIST = `(() => {
   return {
     lede: screen.querySelector('.series-lede')?.textContent ?? null,
     empty: root.querySelector('.series-empty')?.textContent ?? null,
-    items: Array.from(root.querySelectorAll('li.series-item'), (item) => [item.dataset.seriesId ?? null, item.querySelector('[data-series-action="open"]')?.textContent ?? null, item.querySelector('.series-item-note')?.textContent ?? null]),
+    items: Array.from(root.querySelectorAll('li.series-item'), (item) => [item.dataset.seriesId ?? null, item.querySelector('[data-series-action="open"]')?.firstChild?.textContent ?? null, item.querySelector('.series-item-note')?.textContent ?? null]),
     form: root.querySelector('form.series-create-form') !== null,
     createDisabled: create instanceof HTMLButtonElement ? create.disabled : null,
     refusal: root.querySelector('.series-refusal')?.textContent ?? null,
@@ -505,7 +505,7 @@ const READ_KNOWLEDGE = `(() => {
     items: Array.from(root.querySelectorAll('li.knowledge-item'), (item) => [item.dataset.itemId ?? null, text(item.querySelector('.knowledge-item-title')), text(item.querySelector('.knowledge-item-content')),
       text(item.querySelector('.knowledge-item-provenance')), text(item.querySelector('.knowledge-item-reuse')), text(item.querySelector('.knowledge-item-conflicts')), text(item.querySelector('details.knowledge-item-history > summary'))]),
     itemsEmpty: text(root.querySelector('.knowledge-items-empty')),
-    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, text(item.querySelector('.knowledge-candidate-target')),
+    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, item.querySelector('.knowledge-candidate-target')?.firstChild?.textContent ?? null,
       text(item.querySelector('.knowledge-candidate-provenance')), item.querySelector('.knowledge-candidate-conflict') !== null]),
     candidatesEmpty: text(root.querySelector('.knowledge-candidates-empty')),
     form: form === null ? null : {
@@ -514,7 +514,7 @@ const READ_KNOWLEDGE = `(() => {
     },
     review: review === null ? null : {
       candidateId: review.dataset.candidateId ?? null,
-      identity: text(review.querySelector('.knowledge-review-identity')),
+      identity: review.querySelector('.knowledge-review-identity')?.firstChild?.textContent ?? null,
       provenance: text(review.querySelector('.knowledge-review-provenance')),
       superseded: text(review.querySelector('.knowledge-review-superseded')),
       conflictLabel: text(review.querySelector('.knowledge-conflict-label')),
@@ -884,7 +884,7 @@ async function main() {
     // 成员与共享范围: what membership means, no member yet, 加入书系… and no change recorded.
     await clickSelector(renderer, `[data-series-id="${seriesId}"] [data-series-action="open"]`, 'series-open-entry');
     const page = await readSeries(renderer, (read) => read.seriesId === seriesId, 'series-page');
-    requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE && page.membersEmpty === '书系里还没有图书。' &&
+    requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE.replace(/。$/u, '') && page.membersEmpty === '书系里还没有图书。' &&
       page.members.length === 0 && page.addOpen === true && page.historyEmpty === '还没有成员变更。' && page.history.length === 0 && page.preview === null, 'series-page-words', page);
 
     at('membership-add-preview');
