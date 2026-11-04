@@ -145,6 +145,8 @@ export function parseReviewCrossChapterResult(text: string, input: ReviewCrossCh
   const findings: ReviewCrossChapterResult['findings'][number][] = [];
   const rejected: ReviewCrossChapterResult['rejected'][number][] = [];
   const salvaged: ModelResultSalvage[] = [];
+  if (value.schema !== REVIEW_CROSS_CHAPTER_RESULT_SCHEMA) salvaged.push({ section: 'schema', index: -1, reason: 'request-envelope' });
+  try { JSON.parse(text); } catch { salvaged.push({ section: 'envelope', index: -1, reason: 'json-extracted-or-partial' }); }
   if (!('findings' in value) && !('schema' in value)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
   if (value.findings !== undefined && !Array.isArray(value.findings)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
   const candidates = Array.isArray(value.findings) ? value.findings : [];

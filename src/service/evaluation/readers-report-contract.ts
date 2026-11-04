@@ -398,6 +398,7 @@ export function parseReadersReportSynthesis(text: string, conclusion: string): R
   const value = extractModelJson(text, { partial: true });
   if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
   const salvaged: ModelResultSalvage[] = [];
+  try { JSON.parse(text); } catch { salvaged.push({ section: 'envelope', index: -1, reason: 'json-extracted-or-partial' }); }
   const withheld: string[] = [];
   const clean = (raw: unknown, section: string, index: number, maximum: number): string => {
     const result = typeof raw === 'string' && raw.isWellFormed() ? normalizeLine(raw, maximum) : '';
