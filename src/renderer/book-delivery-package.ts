@@ -21,8 +21,6 @@ import {
   PACKAGE_ARCHIVE_DESTINATION_UNCHOSEN,
   PACKAGE_ARCHIVE_FILES_LABEL,
   PACKAGE_ARCHIVE_FILES_TRUNCATED,
-  PACKAGE_ARCHIVE_NOTE,
-  PACKAGE_ARCHIVE_PAGES_NOTE,
   PACKAGE_ARCHIVE_REVEAL,
   PACKAGE_ARCHIVE_STATUS_LINES,
   PACKAGE_CONDITION_STATE,
@@ -488,9 +486,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       label.append(radio, document.createTextNode(title)); routes.append(label);
     }
     panel.append(routes);
-    if (current.route === 'archive') panel.append(el('p', 'field-note', PACKAGE_ARCHIVE_NOTE));
     const shown = current.result ?? current.prepared;
-    if (current.review !== null) panel.append(el('p', 'export-local-line', current.review.statement));
+    if (current.review !== null) panel.append(el('p', 'export-local-line', current.route === 'archive'
+      ? '压缩包汇集全部内容，不发稿、交付、更改记录或发送文件。' : current.review.statement));
     panel.append(renderExportOptions(current));
     if (current.review !== null) {
       const review = current.review;
@@ -504,9 +502,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       }
       panel.append(label, list);
       if (shown === null) {
-        panel.append(el('p', 'field-note', current.route === 'archive'
-          ? PACKAGE_ARCHIVE_PAGES_NOTE
-          : '勾选本次要导出的文件，每次最多选择本页的 40 个。翻页会清除选择；其他文件不会一并导出。'));
+        if (current.route !== 'archive') panel.append(el('p', 'field-note', '勾选本页要导出的文件，翻页会清除选择。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
           const button = el('button', 'quiet', name);
