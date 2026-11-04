@@ -738,6 +738,7 @@ const commandPalette = createCommandPalette({
   openBook: (bookId) => leaveThen(() => requestBookWorkbenchRoute({ kind: 'book', bookId })),
   openResult: (item) => void openOverviewResult(item),
   openStart: () => { void leaveThen(async () => { renderTaskOverview(); taskOverviewSurface?.showStart(); }); },
+  beforeStart: settleScreen,
   status: setStatus,
 });
 
@@ -1211,7 +1212,7 @@ async function openOverviewResult(item: TaskOverviewItemProjection): Promise<voi
 function renderTaskOverview(focusItemId?: string): void {
   taskDrawer.close(false);
   const content = panel(); content.classList.add('task-overview');
-  const surface = mountTaskOverview({ root: content, api: window.ai7, setStatus,
+  const surface = mountTaskOverview({ root: content, api: window.ai7, setStatus, beforeStart: settleScreen,
     onChanged: () => globalAttentionReader.refresh(),
     onProjection: (projection) => { const count = projection.runningCount + projection.queuedCount + projection.actionableCount; taskNavigationBadge.textContent = String(count); taskNavigationBadge.hidden = count === 0; },
     openTarget: openOverviewTask,

@@ -10,6 +10,7 @@ export function createCommandPalette(options: {
   openBook(bookId: string): Promise<void>;
   openResult(item: TaskOverviewItemProjection): void;
   openStart(): void;
+  beforeStart(): Promise<boolean>;
   status(message: string, tone?: 'busy' | 'success' | 'error'): void;
 }) {
   const sheet = createSheet('command-palette'); document.body.append(sheet);
@@ -57,6 +58,7 @@ export function createCommandPalette(options: {
         if (booksOnly || book.manuscriptState !== 'populated') continue;
         const procedures = new Map([['baseline-analysis', '基线分析'], ['initial-evaluation', '评估'], ...(tasks.quickStarts ?? []).filter((rule) => rule.bookId === book.bookId).map((rule) => [rule.procedureId, rule.label] as [string, string])]);
         for (const [procedureId, label] of procedures) entries.push({ label: `发起任务 · ${book.title} · ${label}`, run: async () => {
+          if (!await options.beforeStart()) return;
           await options.api.startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId }] }); options.status('已加入队列。', 'success');
         } });
       }

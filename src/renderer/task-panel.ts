@@ -83,6 +83,7 @@ import {
  * plan or its own surface. The panel reads; it grants nothing.
  */
 export interface TaskPanelOptions {
+  settle?(): Promise<boolean>;
   readonly api: Pick<RendererApi, 'inspectBookTasks' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun' | 'controlTaskRun' | 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
@@ -393,7 +394,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       compose.replaceChildren();
       groups.replaceChildren();
       overview?.destroy();
-      overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus,
+      overview = mountTaskOverview({ root: groups, api, bookId: next, setStatus: options.setStatus, ...(options.settle ? { beforeStart: options.settle } : {}),
         onChanged: () => { options.onRecorded(next); read(true); },
         openTarget: (item, view) => { if (item.plan?.ref) options.openPlan(item.plan.kind, item.plan.ref, false, view === 'redo'); else if (item.target.kind === 'task-intent-draft') options.openDraft(item.target.draftId); else options.openTarget(item.target); },
         jumpToSelection: (item) => { if (item.selection) options.jumpToSelection({ item: item.attention, result: item.result, selection: item.selection }); },

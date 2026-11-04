@@ -508,6 +508,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
 
   const panel = mountTaskPanel({
     api,
+    settle: options.settle,
     setStatus: options.setStatus,
     errorMessage: options.errorMessage,
     openPlan: (kind, ref, cancel, redo) => {

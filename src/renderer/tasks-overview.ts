@@ -44,6 +44,7 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   node.addEventListener('click', () => act(item, 'open')); return node;
 }
 export interface TaskOverviewOptions {
+  readonly beforeStart?: () => Promise<boolean>;
   readonly onChanged?: () => void; readonly onProjection?: (projection: TaskOverviewProjection) => void;
   readonly root: HTMLElement; readonly api: Pick<RendererApi, 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>; readonly bookId?: string;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
@@ -82,7 +83,8 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const add = el('button', 'primary', '加入队列'); add.dataset['taskOverviewEnqueue'] = '';
     add.addEventListener('click', () => { const tasks = [...list.querySelectorAll<HTMLInputElement>('input:checked')].map((input) => ({ bookId: input.value, procedureId: type.value })); if (!tasks.length) { options.setStatus('请先选择图书。', 'error'); return; }
       add.disabled = true; void rememberActionDefaults({ taskBooks: tasks.map((task) => task.bookId), taskProcedure: type.value }).catch(() => options.setStatus('未能记住任务设置。', 'error'));
-      void options.api.startQuickTasks({ tasks }).then((result) => { count += result.results.length; added.textContent = `已加入 ${count} 项`; options.onChanged?.(); refresh(); }, (error: unknown) => { added.textContent = '未能全部加入，请查看任务列表后继续。'; options.setStatus(error instanceof Error ? error.message : '任务未能加入。', 'error'); refresh(); }).finally(() => { add.disabled = false; }); });
+      const enqueue = async () => { if (options.beforeStart && !await options.beforeStart()) return null; return options.api.startQuickTasks({ tasks }); };
+      void enqueue().then((result) => { if (result === null) return; count += result.results.length; added.textContent = `已加入 ${count} 项`; options.onChanged?.(); refresh(); }, (error: unknown) => { added.textContent = '未能全部加入，请查看任务列表后继续。'; options.setStatus(error instanceof Error ? error.message : '任务未能加入。', 'error'); refresh(); }).finally(() => { add.disabled = false; }); });
     const close = el('button', 'quiet', '关闭'); close.addEventListener('click', () => sheet.close());
     const foot = el('div'); foot.append(added, add, close);
     const config = el('div', 'button-row'); for (const [label, kind] of [['自定义审阅…', 'review'], ['写作任务说明…', 'writing']] as const) { const link = el('button', 'quiet', label); link.addEventListener('click', () => { const book = list.querySelector<HTMLInputElement>('input:checked')?.value; if (book) { sheet.close(); options.configure?.(book, kind); } }); config.append(link); }

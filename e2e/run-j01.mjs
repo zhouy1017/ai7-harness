@@ -1535,7 +1535,7 @@ async function runJourney(
         '不修改所选原文件',
         '符合当前范围的导入不创建导入降级决定',
       ];
-  const initialScreen = start === 'accepted-review' ? 'review' : start;
+  const initialScreen = start === 'accepted-review' ? 'review' : start === 'target' ? 'title' : start;
   await waitFor(
     renderer,
     `document.documentElement.dataset.ai7ProductReady === 'true' && document.querySelector('[data-screen=${JSON.stringify(initialScreen)}]')`,
