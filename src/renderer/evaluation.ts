@@ -1117,7 +1117,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       score.dataset['evaluationField'] = 'score';
       const band = el('span', 'status-pill evaluation-band', content.score === null ? '' : evaluationBandLabel(profile, content.score, item.fullMarks));
       band.hidden = content.score === null;
-      const invalid = el('p', 'field-note evaluation-score-invalid', evaluationScoreInvalidLine(item.fullMarks));
+      const invalid = el('span', 'evaluation-score-invalid', evaluationScoreInvalidLine(item.fullMarks));
       invalid.id = `evaluation-score-invalid-${record.recordId}-${item.itemId}`;
       invalid.hidden = true;
       const notRated = el('input');
@@ -1133,7 +1133,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const scoreRow = el('div', 'evaluation-score-row');
       const notRatedLabel = el('label', 'evaluation-choice');
       notRatedLabel.append(notRated, el('span', undefined, EVALUATION_NOT_RATED));
-      scoreRow.append(field(`${EVALUATION_SCORE}（0 – ${item.fullMarks}）`, score), band, notRatedLabel);
+      const scoreField = field(`${EVALUATION_SCORE} · 0–${item.fullMarks}`, score);
+      scoreField.append(invalid);
+      scoreRow.append(scoreField, band, notRatedLabel);
       const reasonField = field(EVALUATION_NOT_RATED_REASON, reason);
       reasonField.hidden = content.notRated === null;
       // AI7's score beside the editor's (EVAL-006): the record keeps the editor's, and where they differ the editor may say why.
@@ -1166,7 +1168,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         }
         beside.push(adjustmentNode(record, item.itemId, content.adjustment ?? null, readOnly));
       }
-      set.append(scoreRow, invalid, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
+      set.append(scoreRow, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
       set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="comment"]')!.disabled = readOnly;
       // Only a score the scale admits reaches a band; any other says why and counts for nothing until it is corrected,
       // while the form keeps it as typed for the service's own refusal (Issue #638).
@@ -1253,16 +1255,17 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const conclusionLegend = el('legend', undefined, EVALUATION_CONCLUSION_LEGEND);
     if (initial !== null && initial.suggestedConclusion === null) conclusionLegend.append(' · ', el('span', 'evaluation-ai7-conclusion', evaluationAi7ConclusionLine(record.profile, null)));
     conclusion.append(conclusionLegend);
+    const blocked = el('span', 'evaluation-recommend-blocked', EVALUATION_RECOMMEND_BLOCKED);
+    blocked.id = `evaluation-blocked-${record.recordId}`;
+    blocked.hidden = true;
     for (const option of record.profile.conclusions) {
       const choice = radio(`evaluation-conclusion-${record.recordId}`, option.conclusion, option.label, record.content.conclusion === option.conclusion, readOnly);
       choice.dataset['conclusion'] = option.conclusion;
       // AI7's suggestion is marked as AI7's and never chosen for the editor (EVAL-007).
       if (initial?.suggestedConclusion === option.conclusion) choice.append(el('span', 'status-pill evaluation-ai7-suggested', EVALUATION_AI7_SUGGESTED));
+      if (option.conclusion === 'recommend') choice.append(blocked);
       conclusion.append(choice);
     }
-    const blocked = el('p', 'field-note evaluation-recommend-blocked', EVALUATION_RECOMMEND_BLOCKED);
-    blocked.id = `evaluation-blocked-${record.recordId}`;
-    conclusion.append(blocked);
     node.append(conclusion);
     if (record.state !== 'finalized') {
       const row = el('div', 'button-row evaluation-actions');
@@ -1270,11 +1273,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const finalize = action(EVALUATION_FINALIZE, 'primary', 'finalize', () => void save(record, true));
       saveButton.disabled = busy;
       finalize.disabled = busy;
-      const needsScore = el('p', 'field-note evaluation-finalize-blocked', EVALUATION_FINALIZE_NEEDS_SCORE);
+      const needsScore = el('span', 'evaluation-finalize-blocked', EVALUATION_FINALIZE_NEEDS_SCORE);
       needsScore.id = `evaluation-finalize-blocked-${record.recordId}`;
       needsScore.hidden = true;
-      row.append(saveButton, finalize);
-      node.append(row, needsScore);
+      row.append(saveButton, finalize, needsScore);
+      node.append(row);
     }
     node.append(technicalDetails('evaluation-facts',
       el('dt', undefined, '评估版本'), el('dd', 'technical-identity', record.recordId),
