@@ -161,8 +161,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const heading = el('h3', undefined, WRITING_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', WRITING_LEDE));
-    if (page.unavailable !== null) section.append(el('p', 'field-note writing-unavailable', page.unavailable));
+    section.append(heading, el('p', `field-note${page.unavailable === null ? '' : ' writing-unavailable'}`, page.unavailable ?? WRITING_LEDE));
     const task = page.task;
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
