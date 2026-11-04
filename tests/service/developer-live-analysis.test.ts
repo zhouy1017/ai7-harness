@@ -835,13 +835,17 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
     const secondCalls: StubCall[] = [];
     const refused = await runLive(store, reimported.bookId, progress.projection!, owner(store, stubTransport({ calls: secondCalls, responses, named })));
     expect(secondCalls).toHaveLength(0);
-    const unitGaps = refused.resultSetRevision!.gaps.filter((gap) => gap.unitOrdinal !== null);
+    // Every unit attempt was refused: #1307 keeps its gaps without a result revision.
+    expect(refused.run?.state).toBe('failed');
+    expect(refused.taskOutcome?.classification).toBe('failed');
+    expect(refused.resultSetRevision).toBeNull();
+    const unitGaps = store.baselineAnalysisLedger.unitCheckpoints(refused.run!.runRecordId)
+      .flatMap(({ unit }) => unit.closed.state === 'gap' ? [unit.closed.gap] : []);
     expect(unitGaps.map((gap) => gap.unitOrdinal)).toEqual(Array.from({ length: SAMPLE1_UNITS }, (_unused, index) => index + 1));
     const lines = await ledgerLines(cacheRoot);
     expect(lines.slice(0, FULL_CHAIN_TURNS).every((line) => (line.validation as { decision: string }).decision === 'first-capture')).toBe(true);
     // Every later line is a refusal that sent nothing, incurred nothing, and names the capture it rests on: each unit — and its
-    // safe retry — is the first import's question asked again; this Run's reflection reflects on other accounting (every
-    // range a gap), so it is the same step with a different input, which only a declared input delta could send.
+    // safe retry — is the first import's question asked again. A failed Run does not dispatch a reflection.
     const refusals = lines.slice(FULL_CHAIN_TURNS);
     for (const line of refusals) {
       expect(line).toMatchObject({ outcome: 'refused', status: null, usage: null, incurredUsage: { inputTokens: 0, outputTokens: 0 } });
@@ -852,7 +856,6 @@ describe('the developer-live scope over exact sample1 with a stub transport', { 
         [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
         [`first-baseline/unit-${index + 1}`, 'PROVIDER_VALIDATION_EVIDENCE_EXISTS', [`S40/first-baseline/${index + 1}`]],
       ]).flat(),
-      ['first-baseline/reflection', 'PROVIDER_VALIDATION_SIMILAR_EVIDENCE', [`S40/first-baseline/${FULL_CHAIN_TURNS}`]],
     ]);
     await store.close();
   });

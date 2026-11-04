@@ -249,7 +249,8 @@ function prepareReview(store: EditorialStore, bookId: string): ReviewRunProjecti
 describe('联网后开始任务 of a 写作任务 (Issue #760, S74c)', () => {
   it('waits for the network, keeps a new Task from being prepared over it, and starts once online with nothing moved', async () => {
     await withSession(WRITING_FIXTURE_IDENTITY, async (session) => {
-      const bookId = await sample1Book(session.store, '写作联网后开始');
+      // Writing requests bind the title; use the title the authored fixture answers.
+      const bookId = await sample1Book(session.store, WRITING_BOOK_TITLE);
       const taskIntentId = prepareWriting(session.store, bookId);
       expect(session.store.waitingTaskRuns(null)).toEqual([]);
       await waitThenStart(session, bookId, 'writing', taskIntentId);
