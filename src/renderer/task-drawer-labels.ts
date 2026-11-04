@@ -478,16 +478,17 @@ export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rang
   const what = unconfirmedWhat(rangesTotal, [...new Set(listed.steps.map((step) => step.stage))]);
   // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
   return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为${rangesTotal > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。` +
+    `${rangesTotal > 0 ? '后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。' : ''}` +
     `保留为缺口只记下你的确认：不发送任何内容，不改变结果${rangesTotal === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
 }
 /**
  * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
  * text the Book has moved on from says so: 「第 N 个阅读范围（当时的文字）」.
  */
-export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
+export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; rereadFailed?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
   const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage]
     : `第 ${entry.unitOrdinal} 个阅读范围${entry.earlierText === true ? '（当时的文字）' : ''}`;
-  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
+  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回${entry.rereadFailed ? ' · 上次重读未成功' : ''}`;
 }
 
 /**

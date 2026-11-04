@@ -94,6 +94,7 @@ export interface UnconfirmedOutcomeRecord {
   /** The manuscript revision the latest revision holding the range read — whose text `unitOrdinal` counts in; `null` for a step. */
   readonly heldAtRevisionId: string | null;
   readonly contentKey: string | null;
+  readonly rereadFailed?: boolean;
   readonly stage: UnconfirmedStage | null;
 }
 
