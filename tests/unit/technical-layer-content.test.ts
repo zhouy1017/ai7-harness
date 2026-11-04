@@ -14,7 +14,7 @@ it('keeps retry, paging and incomplete-answer facts without parenthetical asides
   setTechnicalLayerVisible(false);
   expect(retryLine('journal-unavailable', true, 2, null)).toBe('自动重试：正在重试写入 · 已重试 2 次');
   expect(taskPageMore('计划变化', 1, 3)).toBe('继续读取计划变化 · 已显示 1 / 3');
-  expect(dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答没有完成 · 原因未知；没有留下完整的句子。');
+  expect(dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答未完成；没有收到可保留的文字。');
 });
 
 it('starts closed before channel and preference initialization', async () => {
