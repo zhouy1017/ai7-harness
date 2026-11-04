@@ -516,7 +516,15 @@ async function waitForBar(renderer, expected, name, timeout = 60_000) {
       JSON.stringify(actual.actions) === JSON.stringify(expected.actions)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  requireJourney(false, name, last);
+  const actual = last === null ? null : JSON.parse(last);
+  const checks = {
+    state: actual?.state === expected.state,
+    pill: actual?.pill === expected.pill,
+    status: actual?.status === expected.status,
+    note: expected.notePrefix === undefined ? actual?.note === expected.note : typeof actual?.note === 'string' && actual.note.startsWith(expected.notePrefix),
+    actions: JSON.stringify(actual?.actions) === JSON.stringify(expected.actions),
+  };
+  for (const [field, matches] of Object.entries(checks)) requireJourney(matches, `${name}-${field}`);
 }
 /**
  * The redo Task open in the drawer (Issue #422, S76c): a Task other than the one it redoes, not yet started, in its
