@@ -230,7 +230,12 @@ export function evaluationMaterialsField(
   const items = page.materials?.items ?? [];
   const guidance = items.length === 0 ? page.materials?.statement ?? '暂无可参考的资料库资料。'
     : `最多参考 ${MAX_WRITING_MATERIALS} 份，每份不超过 ${MAX_WRITING_MATERIAL_GRAPHEMES.toLocaleString('zh-CN')} 字、合计不超过 ${MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES.toLocaleString('zh-CN')} 字；只参照、不照抄，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
-  fieldset.append(el('p', 'field-note', guidance));
+  if (items.length === 0) legend.append(el('span', undefined, ' · '), el('span', undefined, guidance));
+  else {
+    const rules = el('details');
+    rules.append(el('summary', undefined, '参考规则'), el('p', undefined, guidance));
+    fieldset.append(rules);
+  }
   // A choice the page no longer offers, or no longer lets be ticked, leaves the selection with its reason (Issue #759).
   const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
   selected.clear();
