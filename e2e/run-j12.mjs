@@ -818,6 +818,9 @@ async function main() {
     // Nothing has been remembered for 甲 yet, so the one transient notice says the manuscript opened at
     // its start instead of claiming a return. It floats rather than taking a row from the manuscript,
     // and both readings are taken in one pass because the notice is on its way out while they are read.
+    await assertRenderer(primary, `document.querySelector('[data-toast]') !== null`, 'entry-toast-exists');
+    await assertRenderer(primary, `document.querySelector('[data-toast]')?.hidden === false`, 'entry-toast-visible');
+    await assertRenderer(primary, `getComputedStyle(document.querySelector('[data-toast]')).position === 'fixed'`, 'entry-toast-fixed');
     await assertRenderer(primary, `(() => {
       const toast=document.querySelector('[data-toast]');
       const notice=toast?.querySelector('span');
