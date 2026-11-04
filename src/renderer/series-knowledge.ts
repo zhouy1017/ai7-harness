@@ -279,8 +279,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (state.later) details.append(moreRow('回到最新版本', 'revisions-reset', () => void loadRevisions(item.itemId, true)));
     }
     if (state.failed) {
-      details.append(el('p', 'field-note', '历次版本未能读取，可以重试；已有页面保留。'));
-      details.append(moreRow('重试读取版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.retryFresh)));
+      details.append(moreRow('读取失败 · 重试版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.retryFresh)));
     }
     details.addEventListener('toggle', () => {
       if (!details.isConnected) return;
@@ -317,8 +316,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     for (const entry of reader.page.conflicts) list.append(el('li', undefined, entry.line));
     section.append(title, list);
     if (reader.failed) {
-      section.append(el('p', 'field-note', '冲突未能读取，已有页面保留，可以重试。'));
-      section.append(moreRow('重试读取冲突', 'conflicts-retry', () => void loadConflicts(reader.requestedAfter)));
+      section.append(moreRow('读取失败 · 重试冲突', 'conflicts-retry', () => void loadConflicts(reader.requestedAfter)));
     }
     if (reader.page.nextAfter !== null) section.append(moreRow('下一批冲突', 'conflicts-more', () => void loadConflicts(reader.page.nextAfter!)));
     if (reader.after > 0) section.append(moreRow('回到首批冲突', 'conflicts-reset', () => void loadConflicts(0)));
