@@ -188,7 +188,7 @@ describe('the Context-bound Task Composer', () => {
     // The manuscript as it stands now: edits no revision holds yet, so the words just pinned read 待保存修订版 (TASK-002).
     expect(root.querySelector('.task-composer-revision')!.textContent).toBe(taskComposerRevisionLine('r2', 9, true));
     const items = root.querySelectorAll('li.task-composer-range');
-    expect(items.map((item) => [item.querySelector('blockquote')!.textContent, item.dataset['rangeState'], item.querySelector('[data-range-state-label]')?.textContent ?? null]))
+    expect(items.map((item) => [item.querySelector('.task-composer-range-quote')!.textContent, item.dataset['rangeState'], item.querySelector('[data-range-state-label]')?.textContent ?? null]))
       .toEqual([['所选的字', 'pending-save', '待保存修订版']]);
     expect(field('target-ranges')!.checked).toBe(true);
     expect(field('target-book')!.checked).toBe(false);
@@ -257,7 +257,7 @@ describe('the Context-bound Task Composer', () => {
     expect(action('add-range')!.textContent).toBe(TASK_COMPOSER_ADD_RANGE);
     action('add-range')!.click();
     await settle();
-    expect(root.querySelectorAll('li.task-composer-range').map((item) => item.querySelector('blockquote')!.textContent)).toEqual(['再加一段']);
+    expect(root.querySelectorAll('li.task-composer-range').map((item) => item.querySelector('.task-composer-range-quote')!.textContent)).toEqual(['再加一段']);
     // Adding words is the editor's explicit choice of the ranges as the target (TASK-003).
     expect(field('target-ranges')!.checked).toBe(true);
     action('add-range')!.click();

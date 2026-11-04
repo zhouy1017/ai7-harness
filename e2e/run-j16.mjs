@@ -635,7 +635,7 @@ const READ_COMPOSER = `(() => {
     title: text(composer.querySelector('h3')),
     book: text(composer.querySelector('.task-composer-book')),
     revision: text(composer.querySelector('.task-composer-revision')),
-    ranges: Array.from(composer.querySelectorAll('li.task-composer-range'), (item) => [text(item.querySelector('blockquote')), item.dataset.rangeState ?? null]),
+    ranges: Array.from(composer.querySelectorAll('li.task-composer-range'), (item) => [text(item.querySelector('.task-composer-range-quote')), item.dataset.rangeState ?? null]),
     target: Array.from(composer.querySelectorAll('[data-task-composer-field^="target-"]')).find((input) => input.checked)?.value ?? null,
     goalLabel: text(composer.querySelector('.task-composer-goal span')),
     prepare: disabled('prepare'),

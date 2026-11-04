@@ -787,8 +787,8 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       const item = el('li', 'task-composer-range');
       item.dataset['taskComposerRange'] = range.key;
       item.dataset['rangeState'] = range.state;
-      const words = el('blockquote', 'editorial-mark-quote task-composer-range-text', range.text);
-      words.append(el('footer', undefined, taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1)));
+      const words = el('blockquote', 'editorial-mark-quote task-composer-range-text');
+      words.append(el('span', 'task-composer-range-quote', range.text), el('footer', undefined, taskComposerRangeLine(range.position, [...range.text].length, range.revisionLabel, range.span?.span?.length ?? range.paragraphs ?? 1)));
       item.append(words);
       if (range.stateLabel !== null) {
         const label = el('span', `status-pill review-pill task-composer-range-state task-composer-range-${range.state}`, range.stateLabel);
@@ -921,14 +921,15 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     if (kind === 'draft' && current.resolution !== null) parts.push(resolutionBlock(current, current.resolution));
     if (kind === 'promoted') parts.push(el('p', 'attention-note task-composer-promoted', TASK_COMPOSER_PROMOTED));
 
-    parts.push(el('p', 'field-note task-composer-note', TASK_COMPOSER_NOTE));
+    const contextNote = el('p', 'field-note');
+    const basis = el('span', 'task-composer-note', TASK_COMPOSER_NOTE);
+    const unsaved = el('span', 'task-composer-unsaved', `；${TASK_COMPOSER_UNSAVED}`);
+    contextNote.append(basis, unsaved);
+    parts.push(contextNote);
     const problemLine = el('p', 'attention-note task-composer-problem');
     problemLine.setAttribute('role', 'alert');
     problemLine.hidden = true;
     parts.push(problemLine);
-    const unsaved = el('p', 'field-note task-composer-unsaved', TASK_COMPOSER_UNSAVED);
-    unsaved.hidden = !(kind === 'draft' && current.dirty);
-    parts.push(unsaved);
     parts.push(actionRow(kind));
     element.replaceChildren(...parts);
     if (active !== null) {
@@ -1056,7 +1057,11 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
         (action === 'promote' && (empty || (!current.dirty && current.resolution?.state === 'unsupported')));
     }
     const unsaved = element.querySelector<HTMLElement>('.task-composer-unsaved');
-    if (unsaved !== null) unsaved.hidden = !(mode() === 'draft' && current.dirty);
+    if (unsaved !== null) {
+      unsaved.hidden = !(mode() === 'draft' && current.dirty);
+      const basis = element.querySelector<HTMLElement>('.task-composer-note');
+      if (basis !== null) basis.textContent = unsaved.hidden ? TASK_COMPOSER_NOTE : TASK_COMPOSER_NOTE.replace(/。$/u, '');
+    }
   }
 
   function finish(): void {

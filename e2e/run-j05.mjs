@@ -1001,7 +1001,7 @@ async function main() {
     );
     await chooseMenuItem(renderer, 'task-on-selection', 'span-task-choose');
     const composerOf = `document.querySelector('#task-drawer:not([hidden]) .task-composer')`;
-    await waitFor(renderer, `(() => { const composer = ${composerOf}; const quotes = Array.from(composer?.querySelectorAll('li.task-composer-range blockquote') ?? [], (node) => node.textContent); return composer?.dataset.taskComposer === 'new' && quotes.length === 1 && quotes[0] === window.__j05Span.words; })()`, 'span-composer-quotes-span', 30_000);
+    await waitFor(renderer, `(() => { const composer = ${composerOf}; const quotes = Array.from(composer?.querySelectorAll('li.task-composer-range .task-composer-range-quote') ?? [], (node) => node.textContent); return composer?.dataset.taskComposer === 'new' && quotes.length === 1 && quotes[0] === window.__j05Span.words; })()`, 'span-composer-quotes-span', 30_000);
     await assertRenderer(renderer, `(() => { const composer = ${composerOf}; const goal = composer.querySelector('[data-task-composer-field="goal"]'); const outcome = composer.querySelector('[data-task-composer-field="outcome-review"]'); if (!(goal instanceof HTMLTextAreaElement) || !(outcome instanceof HTMLInputElement)) return false; goal.focus(); goal.value = '核对这三段的称谓是否前后一致'; goal.dispatchEvent(new Event('input', { bubbles: true })); outcome.click(); return outcome.checked; })()`, 'span-goal-and-outcome');
     await waitFor(renderer, `${composerOf}?.querySelector('[data-task-composer-action="prepare"]')?.disabled === false`, 'span-prepare-ready', 10_000);
     await assertRenderer(renderer, `(() => { ${composerOf}.querySelector('[data-task-composer-action="save-draft"]').click(); return true; })()`, 'span-prepare');
