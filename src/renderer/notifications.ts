@@ -1,9 +1,7 @@
-import { showToast, TOAST_MS } from './components/toast.js';
+import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
-
-export const QUIET_NOTICE_MS = TOAST_MS;
 
 /** Observe the existing attention projection; history and its count remain owned by that projection. */
 export function createNotificationObserver(options: {

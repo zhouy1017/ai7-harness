@@ -175,15 +175,9 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     if (focus) buttons.get(tab)?.focus();
   };
 
-  HELP_TABS.forEach((entry, index) => {
+  HELP_TABS.forEach((entry) => {
     const node = tabButton({ label: entry.label, id: `help-tab-${entry.tab}`, panel: `help-panel-${entry.tab}`, selected: entry.tab === 'usage', activate: () => select(entry.tab, true) });
-    node.type = 'button';
-    node.id = `help-tab-${entry.tab}`;
     node.dataset['helpTab'] = entry.tab;
-    node.setAttribute('role', 'tab');
-    node.setAttribute('aria-selected', String(entry.tab === 'usage'));
-    node.setAttribute('aria-controls', `help-panel-${entry.tab}`);
-    node.tabIndex = entry.tab === 'usage' ? 0 : -1;
     buttons.set(entry.tab, node);
     tabs.append(node);
   });
