@@ -14,7 +14,7 @@ import type {
   RendererApi,
   ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
-import { READERS_REPORT_TEMPLATE_LABELS } from '../shared/protocol.js';
+import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, READERS_REPORT_TEMPLATE_LABELS } from '../shared/protocol.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import { documentExportLabel } from './production-document-labels.js';
 import {
@@ -229,7 +229,7 @@ export function evaluationMaterialsField(
   fieldset.append(el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`));
   const items = page.materials?.items ?? [];
   const guidance = items.length === 0 ? page.materials?.statement ?? '暂无可参考的资料库资料。'
-    : `最多参考 4 份，每份不超过 3,000 字、合计不超过 6,000 字；只参照，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
+    : `最多参考 ${MAX_WRITING_MATERIALS} 份，每份不超过 ${MAX_WRITING_MATERIAL_GRAPHEMES.toLocaleString('zh-CN')} 字、合计不超过 ${MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES.toLocaleString('zh-CN')} 字；只参照、不照抄，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
   fieldset.append(el('p', 'field-note', guidance));
   // A choice the page no longer offers, or no longer lets be ticked, leaves the selection with its reason (Issue #759).
   const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
