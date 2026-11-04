@@ -116,9 +116,9 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
   let timer: number | null = null;
   // Kept across every redraw (#713 re-review, P3-4): the live line is announced when its words change, never because it was
   // made again, and the dispatcher's look is patched in place.
-  const nextNode = el('p', 'background-analysis-next');
+  const nextNode = el('span', 'background-analysis-next');
   nextNode.setAttribute('aria-live', 'polite');
-  const lookNode = el('p', 'field-note background-analysis-look');
+  const lookNode = el('span', 'background-analysis-look');
 
   const follow = (): void => {
     if (timer !== null) window.clearTimeout(timer);
@@ -207,7 +207,10 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       kindChoice.append(option);
     }
     kindChoice.addEventListener('change', () => { selectedKind = kindChoice.value; lastJson = ''; void load(); });
-    const nodes: HTMLElement[] = [heading, kindChoice, el('p', 'field-note background-analysis-statement', BACKGROUND_SUMMARY)];
+    const guidance = el('details');
+    guidance.dataset['backgroundDetails'] = 'guidance';
+    guidance.append(el('summary', undefined, '后台处理如何运行'), el('p', 'background-analysis-statement', BACKGROUND_SUMMARY));
+    const nodes: HTMLElement[] = [heading, kindChoice, guidance];
     if (projection.enrollment !== null) {
       const line = el('p', 'background-analysis-enrollment', backgroundEnrollmentLine(projection.enrollment, localInstantLabel));
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
@@ -236,15 +239,18 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       }
       nodes.push(status);
     }
+    const currentStatus = el('p', 'background-analysis-current-status');
     if (projection.state !== 'none') {
       const words = backgroundNextLine(projection.next);
       if (nextNode.textContent !== words) nextNode.textContent = words;
-      nodes.push(nextNode);
+      currentStatus.append(nextNode);
     }
     if (projection.lastLook !== null) {
       patchLook(projection.lastLook);
-      nodes.push(lookNode);
+      if (projection.state !== 'none') currentStatus.append(' · ');
+      currentStatus.append(lookNode);
     }
+    if (projection.state !== 'none' || projection.lastLook !== null) nodes.push(currentStatus);
     if (projection.startedRuns.length > 0) {
       const list = el('ol', 'background-analysis-started');
       for (const run of projection.startedRuns) {
