@@ -252,9 +252,11 @@ export function renderDocumentWorkflow(
 
   function draw(): void {
     section.dataset['workflowTransitions'] = String(workflow.transitions);
-    const profile = el('p', 'field-note document-workflow-profile',
+    const profile = el('span', 'document-workflow-profile',
       workflowProfileLine(workflow.profile.name, workflow.profile.version, localInstantLabel(workflow.profile.activatedAt)));
-    const summary = el('p', 'document-workflow-summary', workflow.summary);
+    const summary = el('span', 'document-workflow-summary', workflow.summary);
+    const context = el('p', 'document-workflow-context');
+    context.append(profile, ' · ', summary);
     const nextHeading = el('h3', undefined, DOCUMENT_WORKFLOW_NEXT_HEADING);
     nextHeading.id = uid('document-workflow-next');
     const next = el('ol', 'document-workflow-next');
@@ -272,7 +274,7 @@ export function renderDocumentWorkflow(
     const phases = el('ol', 'document-phases');
     phases.setAttribute('aria-labelledby', phasesHeading.id);
     for (const phase of workflow.phases) phases.append(phaseRow(phase));
-    section.replaceChildren(profile, summary, nextHeading, ...(workflow.next.length > 0 ? [next] : []), phasesHeading, phases);
+    section.replaceChildren(context, nextHeading, ...(workflow.next.length > 0 ? [next] : []), phasesHeading, phases);
     const target = focusNext;
     focusNext = null;
     if (target === null) return;
