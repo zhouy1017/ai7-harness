@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, boundedText, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import {
   CUSTOM_ANALYSIS_CONTRACT_VERSION,
   CUSTOM_ANALYSIS_DIMENSION_SCHEMA,
@@ -11,7 +12,6 @@ import {
   isCustomAnalysisDimensionId,
   type CustomAnalysisDimensionDocument,
 } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import { graphemeCount } from './factual-review-contract.js';
 
 /**
@@ -188,29 +188,24 @@ export interface CustomAnalysisUnitRow {
   readonly confidenceNote: string;
 }
 
-export interface CustomAnalysisUnitResult {
+export interface CustomAnalysisUnitResult extends SalvagedModelResult {
   readonly schema: typeof CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly rows: ReadonlyArray<CustomAnalysisUnitRow>;
 }
 
 export type CustomAnalysisUnitResultParse =
-  | { ok: true; result: CustomAnalysisUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: CustomAnalysisUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'quote-not-in-block'; detail: string };
-
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
-}
 
 /**
  * One unit's answer under the contract, or why it is not one. An unknown key, a row beyond the bound or a score anywhere is a
  * refused unit result rather than a dropped row: a model that answered another shape has not answered this contract.
  */
 export function parseCustomAnalysisUnitResult(text: string, expected: { unitOrdinal: number; blockCount: number }): CustomAnalysisUnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fenced?.[1] ?? text) as unknown;
+    parsed = JSON.parse(stripModelJsonFence(text)) as unknown;
   } catch {
     return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
   }

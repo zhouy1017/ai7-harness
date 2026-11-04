@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import {
   EVALUATION_CONCLUSIONS,
   INITIAL_EVALUATION_CONTRACT_VERSION,
@@ -7,7 +8,6 @@ import {
   type InitialEvaluationPredictionProjection,
 } from '../../shared/protocol.js';
 import { validEvaluationScore } from '../../shared/evaluation-scoring.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 import { claimsQuantity } from './claim-guards.js';
@@ -86,13 +86,13 @@ export interface InitialEvaluationObservation {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface InitialEvaluationUnitResult {
+export interface InitialEvaluationUnitResult extends SalvagedModelResult {
   readonly schema: typeof INITIAL_EVALUATION_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly observations: ReadonlyArray<InitialEvaluationObservation>;
 }
 
-export interface InitialEvaluationSynthesisResult {
+export interface InitialEvaluationSynthesisResult extends SalvagedModelResult {
   readonly schema: typeof INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA;
   /** Every scored item of the profile, once each, in the profile's order once read. */
   readonly items: ReadonlyArray<{ readonly itemId: string; readonly score: number; readonly comment: string }>;
@@ -116,10 +116,10 @@ export type InitialEvaluationUnitParseFailureCode = 'not-json' | 'schema-invalid
 export type InitialEvaluationSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'item-unknown' | 'items-incomplete' | 'score-invalid';
 
 export type InitialEvaluationUnitParse =
-  | { ok: true; result: InitialEvaluationUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: InitialEvaluationUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: InitialEvaluationUnitParseFailureCode; detail: string };
 export type InitialEvaluationSynthesisParse =
-  | { ok: true; result: InitialEvaluationSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: InitialEvaluationSynthesisResult }
   | { ok: false; code: InitialEvaluationSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '评估单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -234,9 +234,8 @@ export function initialEvaluationContractDigest(contract: InitialEvaluationPromp
 }
 
 function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
   try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? text) as unknown };
+    return { ok: true, value: JSON.parse(stripModelJsonFence(text)) as unknown };
   } catch {
     return { ok: false };
   }

@@ -218,8 +218,9 @@ export function writingKindDefinition(input: WritingContractInput, rules: Writin
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ passages: (result as WritingUnitResult).passages }),
+    unitRecord: (result) => ({ passages: (result as WritingUnitResult).passages, ...((result as WritingUnitResult).salvaged === undefined ? {} : { salvaged: (result as WritingUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): WritingUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<WritingUnitResult['salvaged']> }),
       schema: WRITING_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       passages: record.passages as WritingUnitResult['passages'],

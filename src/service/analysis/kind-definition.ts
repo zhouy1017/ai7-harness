@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
   BASELINE_ANALYSIS_KIND,
@@ -38,7 +39,6 @@ import {
   type AssuranceSamplingCandidate,
   type AssuranceSamplingPromptContract,
 } from './assurance-sampling-contract.js';
-import { canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_PROMPT_CONTRACT,
   BASELINE_PROMPT_CONTRACT_DIGEST,
@@ -166,7 +166,7 @@ export interface AnalysisReductionInput {
 }
 
 export type UnitResultParseOutcome =
-  | { readonly ok: true; readonly result: unknown; readonly canonicalJson: string; readonly digest: string }
+  | { readonly ok: true; readonly salvaged?: SalvagedModelResult['salvaged']; readonly result: unknown; readonly canonicalJson: string; readonly digest: string }
   | { readonly ok: false; readonly code: string; readonly detail: string };
 
 /** The cross-unit suboperation of a kind that declares one (ADR 0066); `null` for a kind that does not. */
@@ -582,6 +582,7 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
       return rest;
     },
     unitResultOfRecord: (record, unitOrdinal): BaselineUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<BaselineUnitResult['salvaged']> }),
       schema: BASELINE_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       synopsis: record.synopsis as string,
@@ -736,8 +737,9 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ assertions: (result as FactualReviewUnitResult).assertions }),
+    unitRecord: (result) => ({ assertions: (result as FactualReviewUnitResult).assertions, ...((result as FactualReviewUnitResult).salvaged === undefined ? {} : { salvaged: (result as FactualReviewUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): FactualReviewUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<FactualReviewUnitResult['salvaged']> }),
       schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       assertions: record.assertions as FactualReviewUnitResult['assertions'],
