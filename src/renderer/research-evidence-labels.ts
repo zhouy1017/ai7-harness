@@ -31,7 +31,7 @@ export const SOURCES_STATUS = {
 } as const;
 export const SOURCES_MORE = '更多来源';
 export const SOURCE_SAVE_ACTION = '保存为来源材料';
-export const SOURCE_SAVE_NOTE = '只在本机资料库里保存一份副本；不发布、不导出、不发送，也不授予任何任务读取它。';
+export const SOURCE_SAVE_NOTE = '仅在本机资料库保存；不发布、导出、发送或授予任务读取。';
 export const SOURCE_ORIGINAL_LABEL = '原文';
 export const SOURCE_TRANSLATION_MACHINE = '机器翻译，仅供理解；以原文为准。';
 export const SOURCE_UNITS_HEADING = '各阅读范围的联网核查';

@@ -8,19 +8,16 @@ import {
 } from '../shared/protocol.js';
 import {
   CAPTURE_CLASSIFICATION_LEGEND,
-  CAPTURE_CLOSE_NOTE,
   CAPTURE_EXTRACT_HEADING,
   CAPTURE_NEW_PROCEDURE,
   CAPTURE_NOT_SAVED,
   CAPTURE_NOT_SAVED_HEADING,
-  CAPTURE_ORDER_NOTE,
   CAPTURE_PICK_STEP,
   CAPTURE_PICK_TITLE,
   CAPTURE_RESULT_CONSEQUENCES,
   CAPTURE_RESULT_LABELS,
   CAPTURE_SAVE,
   CAPTURE_SCOPE_LEGEND,
-  CAPTURE_SCOPE_NOTE,
   CAPTURE_SOURCE_LEGEND,
   CAPTURE_TARGET_LABEL,
   CAPTURE_TITLE,
@@ -104,7 +101,7 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
   const heading = el('h3', undefined, CAPTURE_TITLE);
   heading.id = titleId;
   heading.tabIndex = -1;
-  form.append(heading, el('p', 'field-note', `${captureSourceLine(capture.runLabel, capture.sourceScopeLabel)}${CAPTURE_CLOSE_NOTE}`));
+  form.append(heading, el('p', 'field-note', captureSourceLine(capture.runLabel, capture.sourceScopeLabel)));
 
   const state = {
     kept: new Set(capture.steps.filter((step) => step.eligible).map((step) => step.categoryId)),
@@ -115,7 +112,7 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
 
   // The source set (REUSE-011, REUSE-012, REUSE-019): remove, never reorder or add.
   const source = el('fieldset', 'procedure-capture-source');
-  source.append(el('legend', undefined, CAPTURE_SOURCE_LEGEND), el('p', 'field-note', CAPTURE_ORDER_NOTE));
+  source.append(el('legend', undefined, `${CAPTURE_SOURCE_LEGEND} · 按此顺序运行`));
   for (const step of capture.steps) {
     const label = el('label', 'procedure-capture-step');
     label.dataset['captureStep'] = step.categoryId;
@@ -158,10 +155,9 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
       state.scope = slot;
       update();
     });
-    label.append(radio, el('span', undefined, CAPTURED_PROCEDURE_SCOPE_LABELS[slot]));
+    label.append(radio, el('span', undefined, slot === 'chapters' ? '选定章节 · 每次运行时选择' : CAPTURED_PROCEDURE_SCOPE_LABELS[slot]));
     scopes.append(label);
   }
-  scopes.append(el('p', 'field-note', CAPTURE_SCOPE_NOTE));
 
   // The Classification Preview (REUSE-002 to REUSE-009): one recommendation, why, and the other types with why not.
   const classification = el('fieldset', 'procedure-capture-classification');
