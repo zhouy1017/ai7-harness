@@ -322,7 +322,11 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     // An item no longer offered, or no longer one that may be ticked, leaves the selection with its reason (Issue #759).
     const reconciled = reconcileTaskMaterialSelection(state, offer.items, new Set(state.materialIds));
     state.materialIds = reconciled.kept;
-    for (const note of reconciled.removals) node.append(el('p', 'field-note writing-material-removed', note));
+    if (reconciled.removals.length > 0) {
+      const removed = el('ul');
+      for (const note of reconciled.removals) removed.append(el('li', 'writing-material-removed', note));
+      node.append(removed);
+    }
     const selectedCharacters = offer.items.filter((item) => state.materialIds.includes(item.materialId))
       .reduce((total, item) => total + item.characters, 0);
     if (offer.items.length > 0) {

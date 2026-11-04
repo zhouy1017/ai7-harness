@@ -235,7 +235,11 @@ export function evaluationMaterialsField(
   const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
   selected.clear();
   for (const id of retained) selected.add(id);
-  for (const note of removals) fieldset.append(el('p', 'field-note evaluation-material-removed', note));
+  if (removals.length > 0) {
+    const removed = el('ul');
+    for (const note of removals) removed.append(el('li', 'evaluation-material-removed', note));
+    fieldset.append(removed);
+  }
   for (const item of items) {
     const label = el('label', 'evaluation-choice');
     const input = el('input');

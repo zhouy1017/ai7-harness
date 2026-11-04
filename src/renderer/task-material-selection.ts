@@ -42,9 +42,9 @@ export function reconcileTaskMaterialSelection(owner: object, items: ReadonlyArr
     const item = items.find((entry) => entry.materialId === id);
     const name = item?.title ?? memory.titles.get(id);
     const label = name === undefined ? '已选的一份资料' : `《${name}》`;
-    memory.removals.set(id, item === undefined ? `${label}已不在可参考的清单中，已从所选中去掉。`
-      : !item.selectable ? `${label}已从所选中去掉：${item.reason ?? '现在不能选'}`
-        : `${label}已从所选中去掉：最多参考 4 份资料，合计不超过 6,000 字。`);
+    memory.removals.set(id, item === undefined ? `${label}已不在清单，已移除。`
+      : !item.selectable ? `${label}已移除：${item.reason ?? '现在不能选'}`
+        : `${label}已移除：最多参考 4 份资料，合计不超过 6,000 字。`);
   }
   for (const id of keptIds) memory.removals.delete(id);
   for (const item of items) memory.titles.set(item.materialId, item.title);

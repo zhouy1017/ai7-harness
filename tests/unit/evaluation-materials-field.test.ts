@@ -134,8 +134,8 @@ describe('a choice that leaves the selection says so (Issue #759)', () => {
   it('names a ticked item that is no longer offered, and one now offered as damaged, and lists the damaged one without a size', () => {
     const view = mount([item('a'), damaged], { selected: ['a', 'gone', 'd'] });
     expect([...view.selected]).toEqual(['a']);
-    expect(view.texts()).toContain('已选的一份资料已不在可参考的清单中，已从所选中去掉。');
-    expect(view.texts()).toContain('《资料d》已从所选中去掉：索引记录已损坏 · 不可选');
+    expect(view.texts()).toContain('已选的一份资料已不在清单，已移除。');
+    expect(view.texts()).toContain('《资料d》已移除：索引记录已损坏 · 不可选');
     expect(view.texts()).toContain('《资料d》 · 字数未知');
     expect(view.texts()).toContain('索引记录已损坏 · 不可选');
     expect(view.box('d').disabled).toBe(true);
@@ -143,13 +143,13 @@ describe('a choice that leaves the selection says so (Issue #759)', () => {
   });
   it('stops repeating the removal once the editor changes a tick', () => {
     const view = mount([item('a'), item('b')], { selected: ['a', 'gone'] });
-    expect(view.texts()).toContain('已选的一份资料已不在可参考的清单中，已从所选中去掉。');
+    expect(view.texts()).toContain('已选的一份资料已不在清单，已移除。');
     const b = view.box('b');
     b.checked = true;
     b.listeners.get('change')!();
     globals.document = { createElement: (tag: string) => new Node(tag) };
     const again = evaluationMaterialsField({ materials: OFFERS([item('a'), item('b')]), materialReferences: REFERENCES }, 'initial', view.selected, true, false, () => undefined) as unknown as Node;
-    expect(again.all().map((node) => node.textContent)).not.toContain('已选的一份资料已不在可参考的清单中，已从所选中去掉。');
+    expect(again.all().map((node) => node.textContent)).not.toContain('已选的一份资料已不在清单，已移除。');
   });
 });
 
