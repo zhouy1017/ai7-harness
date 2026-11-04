@@ -12,7 +12,7 @@ import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
 import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, type QualityLearningTab } from './quality-learning-labels.js';
-import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_LATER, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
 import { mountImportedSkills } from './imported-skills.js';
@@ -161,11 +161,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const heading = element('h3', undefined, `《${book.bookTitle}》`);
         heading.tabIndex = -1;
         first ??= heading;
-        card.append(
-          heading,
-          element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
-          element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
-        );
+        const context = element('p', 'field-note');
+        context.append(element('span', 'exemplar-attribution', exemplarAttribution(book).replace(/。$/u, '')), '；',
+          element('span', 'exemplar-designation', exemplarDesignation(book, localInstantLabel)));
+        card.append(heading, context);
         const skipped = book.skipped ?? [];
         if (book.exemplars.length === 0 && skipped.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
         const items = element('ul', 'exemplar-items');
@@ -226,7 +225,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     };
     more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
     firstPage.addEventListener('click', () => void turn(null));
-    root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
+    root.append(list, moreRow);
   }
 
   /**

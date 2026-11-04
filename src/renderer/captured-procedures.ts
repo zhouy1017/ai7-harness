@@ -17,15 +17,10 @@ import {
 import {
   PROCEDURES_EMPTY,
   PROCEDURES_SECTION_HEADING,
-  PROCEDURES_SECTION_NOTE,
   PROCEDURE_ACTIONS,
-  PROCEDURE_LATEST_ELIGIBLE,
-  PROCEDURE_LATEST_ELIGIBLE_NOTE,
   PROCEDURE_RUN_BOOK_LABEL,
-  PROCEDURE_RUN_NOTE,
   PROCEDURE_STOP_ACTIVE_HEADING,
   PROCEDURE_STOP_KEPT,
-  PROCEDURE_STOP_NOTE,
   PROCEDURE_STOP_PREPARED_HEADING,
   PROCEDURE_STOP_STALE,
   PROCEDURE_UNAVAILABLE_LINES,
@@ -166,7 +161,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
   ): void {
     const procedures = el('section', 'knowledge-captured-procedures');
     procedures.dataset['procedureCount'] = String(projection.procedures.length);
-    if (!options.embeddedCatalog) procedures.append(el('h3', undefined, PROCEDURES_SECTION_HEADING), el('p', 'field-note', PROCEDURES_SECTION_NOTE));
+    if (!options.embeddedCatalog) procedures.append(el('h3', undefined, PROCEDURES_SECTION_HEADING));
     else if (projection.procedures.length > 0) procedures.append(el('h4', undefined, '从运行保存的审阅工序'));
     if (projection.procedures.length === 0 && !options.embeddedCatalog) procedures.append(el('p', 'field-note captured-procedures-empty', PROCEDURES_EMPTY));
     for (const procedure of projection.procedures) procedures.append(procedureCard(procedure, procedureVersions.get(procedure.procedureId) ?? null));
@@ -256,12 +251,9 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const line = el('p', 'captured-procedure-version-line');
     line.append(pill);
     // 最新可用 (Issue #66, S31; REUSE-043): the version a new use resolves to now.
-    if (latestEligible) line.append(' ', el('span', 'status-pill captured-procedure-latest-eligible', PROCEDURE_LATEST_ELIGIBLE));
+    if (latestEligible) line.append(' ', el('span', 'status-pill captured-procedure-latest-eligible', '新建审阅默认使用'));
     line.append(el('span', undefined, ` 《${version.title}》${procedureVersionLine(version).replace(` · ${version.stateLabel}`, '')}`));
     item.append(line);
-    // Its meaning as a visible field note under the line, read in order by a screen reader and seen by everyone else
-    // (S31 review P3-6, Issue #684): never only a tooltip, and never hidden from sighted users.
-    if (latestEligible) item.append(el('p', 'field-note captured-procedure-latest-eligible-note', PROCEDURE_LATEST_ELIGIBLE_NOTE));
     const steps = el('ol', 'captured-procedure-steps');
     for (const step of version.steps) steps.append(el('li', undefined, captureStepLine(step)));
     // What a Book must have for this version to run there (Issue #66, S31b; REUSE-048): the 新建审阅 sheet says how it fits each Book.
@@ -315,10 +307,7 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     if (version.state !== 'stopped') {
       const stop = button(PROCEDURE_ACTIONS.stop, 'quiet', 'stop', () => openStop(procedure.procedureId, version.versionId,
         `[data-version-id="${version.versionId}"] .captured-procedure-stop h5`));
-      const why = el('small', 'field-note', PROCEDURE_STOP_NOTE);
-      why.id = `procedure-stop-${version.versionId}`;
-      stop.setAttribute('aria-describedby', why.id);
-      actions.append(stop, why);
+      actions.append(stop);
     }
     if (actions.childElementCount > 0) item.append(actions);
     if (open.stop !== null && open.stop.versionId === version.versionId) item.append(stopPanel(open.stop));
@@ -425,14 +414,16 @@ export function mountCapturedProcedures(options: MountCapturedProceduresOptions)
     const reviewable = (books ?? []).filter((book) => book.manuscriptState === 'populated');
     for (const book of reviewable) select.append(new Option(`《${book.title}》`, book.bookId));
     label.append(el('span', undefined, PROCEDURE_RUN_BOOK_LABEL), select);
-    const go = button(PROCEDURE_ACTIONS.open, 'primary', 'open-run', async () => {
+    const go = button('打开新建审阅', 'primary', 'open-run', async () => {
       const book = reviewable.find((candidate) => candidate.bookId === select.value);
       if (book === undefined) return;
       open.runFor = null;
       await options.openRun({ bookId: book.bookId, title: book.title }, procedure.procedureId);
     });
     go.disabled = reviewable.length === 0;
-    panel.append(label, el('p', 'field-note', reviewable.length === 0 ? '还没有导入了稿件的图书。' : PROCEDURE_RUN_NOTE), go);
+    panel.append(label);
+    if (reviewable.length === 0) panel.append(el('p', 'field-note', '还没有导入了稿件的图书。'));
+    panel.append(go);
     return panel;
   }
 
