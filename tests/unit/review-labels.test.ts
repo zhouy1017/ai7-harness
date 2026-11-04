@@ -259,7 +259,7 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('holds 忽略并说明 to a reason the service will take', () => {
-    expect(REVIEW_IGNORE_LABEL).toBe('忽略的原因（必填，最多 500 字）');
+    expect(REVIEW_IGNORE_LABEL).toBe('忽略原因 · 必填，最多 500 字');
     expect(reviewIgnoreReasonProblem('')).toBe(REVIEW_IGNORE_REQUIRED);
     expect(reviewIgnoreReasonProblem('   ')).toBe('忽略一条发现需要说明原因。');
     expect(reviewIgnoreReasonProblem(`  ${'字'.repeat(500)}  `)).toBeNull();

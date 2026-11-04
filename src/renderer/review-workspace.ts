@@ -116,7 +116,6 @@ import {
   REVIEW_CONSEQUENCE_TERMS,
   REVIEW_CONTINUE_NOTE,
   REVIEW_INFLUENCE_HEADING,
-  REVIEW_INFLUENCE_NOTE,
   REVIEW_INFLUENCE_STOP_NOTE,
   REVIEW_SCOPE_CANCEL_NOTE,
   REVIEW_SCOPE_STOP_NOTE,
@@ -136,7 +135,6 @@ import {
   REVIEW_FILTER_ALL,
   REVIEW_FILTER_LABELS,
   REVIEW_IGNORE_LABEL,
-  REVIEW_IGNORE_NOTE,
   REVIEW_LEDE,
   REVIEW_NOT_DO,
   REVIEW_NO_FILTERED_FINDINGS,
@@ -149,8 +147,6 @@ import {
   REVIEW_PREPARING_ESCAPE,
   REVIEW_PROGRESS_HEADING,
   REVIEW_REPORT_HEADING,
-  REVIEW_REPORT_NONE,
-  REVIEW_REPORT_NOTE,
   REVIEW_REPORT_NO_MUST_ITEMS,
   REVIEW_REPORT_OVERVIEW_COLUMNS,
   REVIEW_REPORT_STATISTICS_CHAPTER,
@@ -186,7 +182,6 @@ import {
   reviewFindingLocation,
   reviewGenerateReportLabel,
   reviewGroupCountLine,
-  reviewIgnoreReasonCount,
   reviewIgnoreReasonLine,
   reviewIgnoreReasonProblem,
   reviewLiveLine,
@@ -866,7 +861,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (row.state === 'needs-review') {
         const changed = category?.scopes.changed;
         if (changed !== undefined && !changed.available) {
-          act.append(el('span', 'field-note', changed.unavailableReason ?? ''));
+          act.append(document.createTextNode(changed.unavailableReason ?? ''));
         } else {
           const rereview = actionButton('rereview-changed', 'secondary', () => void openSheet({ categories: [row.categoryId], scope: 'changed', from: null, to: null }, rereview));
           rereview.dataset['reviewCategory'] = row.categoryId;
@@ -877,10 +872,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           act.append(rereview);
         }
       } else if (row.state === 'unavailable' && row.unavailableReason !== null) {
-        act.append(el('span', 'field-note', row.unavailableReason));
+        act.append(document.createTextNode(row.unavailableReason));
       }
       // A reviewed category whose earlier records could not all be checked says so (Issue #709).
-      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(el('span', 'field-note', row.unavailableReason));
+      if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(document.createTextNode(row.unavailableReason));
       tr.append(name, state, last, changes, act);
       body.append(tr);
     }
@@ -1138,7 +1133,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   /** 为什么会影响这个结果 (Issue #912; LAUD-004): each category's 本社审阅偏好 version and the materials behind it, closed until asked. */
   function renderInfluence(run: ReviewRunProjection): HTMLElement {
     const details = el('details', 'review-influence');
-    details.append(el('summary', undefined, REVIEW_INFLUENCE_HEADING), el('p', 'field-note', REVIEW_INFLUENCE_NOTE));
+    details.append(el('summary', undefined, `${REVIEW_INFLUENCE_HEADING} · 本社审阅偏好仅供参考`));
     for (const entry of run.influence) {
       const group = el('div', 'review-influence-category');
       group.dataset['categoryId'] = entry.categoryId;
@@ -1574,21 +1569,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     reason.value = form.reason;
     reason.required = true;
     reason.dataset['reviewField'] = 'ignore-reason';
-    const count = el('small', 'field-note review-reason-count', reviewIgnoreReasonCount(form.reason));
-    count.id = uid('ignore-count');
     const problem = el('p', 'review-problem');
     problem.setAttribute('role', 'alert');
     problem.id = uid('ignore-problem');
     problem.hidden = form.problem === null;
     problem.textContent = form.problem ?? '';
-    reason.setAttribute('aria-describedby', `${count.id} ${problem.id}`);
+    reason.setAttribute('aria-describedby', problem.id);
     reason.setAttribute('aria-invalid', form.problem === null ? 'false' : 'true');
     reason.addEventListener('input', () => {
       form.reason = reason.value;
-      count.textContent = reviewIgnoreReasonCount(reason.value);
     });
-    field.append(reason, count);
-    const confirm = actionButton('ignore-confirm', 'primary', () => void confirmIgnore(run, finding, form, reason, problem));
+    field.append(reason);
+    const confirm = actionButton('ignore-confirm', 'primary', () => void confirmIgnore(run, finding, form, reason, problem), '忽略并记录原因');
     const cancel = actionButton('ignore-cancel', 'quiet', () => closeInline('ignore', finding.findingId));
     if (working) {
       confirm.disabled = true;
@@ -1596,7 +1588,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     const row = el('div', 'button-row');
     row.append(confirm, cancel);
-    wrap.append(field, el('p', 'field-note', REVIEW_IGNORE_NOTE), problem, row);
+    wrap.append(field, problem, row);
     wrap.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -1616,7 +1608,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.dataset['reviewField'] = name;
       input.addEventListener('input', () => update(input.value));
       node.append(input);
-      if (hint !== null) node.append(el('small', 'field-note', hint));
+      if (hint !== null) input.placeholder = hint;
       return node;
     };
     const problem = el('p', 'review-problem');
@@ -1719,7 +1711,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   function renderReport(run: ReviewRunProjection): HTMLElement {
     const section = el('section', 'review-report');
     section.dataset['reportVersion'] = run.report === null ? '' : String(run.report.version);
-    section.append(el('h5', undefined, REVIEW_REPORT_HEADING), el('p', 'field-note', REVIEW_REPORT_NOTE));
+    section.append(el('h5', undefined, `${REVIEW_REPORT_HEADING} · 旧版保留`));
     // The report is never rewritten: the marker stands beside it (Issue #64, S29b; SER-026).
     if (run.historicalMarker !== null) section.append(el('p', 'review-historical-marker-label review-report-marker', run.historicalMarker.label));
     if (run.reportVersions.length > 0) {
@@ -1748,8 +1740,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     if (working) for (const button of actions.querySelectorAll('button')) button.disabled = true;
     section.append(actions);
     if (report !== null) section.append(exportSlot);
-    if (run.report === null) section.append(el('p', 'field-note', REVIEW_REPORT_NONE));
-    else section.append(renderReportRecord(run.report, run.categories));
+    if (run.report !== null) section.append(renderReportRecord(run.report, run.categories));
     return section;
   }
 
@@ -2553,7 +2544,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       for (const series of state.seriesChoices) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
       select.value = state.seriesId ?? '';
       select.addEventListener('change', () => { state.seriesId = select.value || null; state.problem = null; updateSheet(); });
-      row.append(select, el('small', 'field-note', '仅供任务明确选用；只有当前策略开放书系知识时才能开始。'));
+      row.append(select);
       materialField.append(row);
     }
     materialField.append(similarMaterialsField(api, workspace.bookId, materialItems, state.materialIds, (materialId) => {

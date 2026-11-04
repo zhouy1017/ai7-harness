@@ -419,7 +419,7 @@ export function reviewIgnoreReasonLine(reason: string): string {
 
 // ---- a finding's own actions ------------------------------------------------------------------------
 
-export const REVIEW_IGNORE_LABEL = `忽略的原因（必填，最多 ${MAX_REVIEW_FINDING_REASON_CHARACTERS} 字）`;
+export const REVIEW_IGNORE_LABEL = `忽略原因 · 必填，最多 ${MAX_REVIEW_FINDING_REASON_CHARACTERS} 字`;
 export const REVIEW_IGNORE_NOTE = '忽略后，这条发现在稿件上的标记会移开；原因会记下来，用于改进审阅。';
 export const REVIEW_IGNORE_REQUIRED = '忽略一条发现需要说明原因。';
 export const REVIEW_CONVERT_TO = '改为';

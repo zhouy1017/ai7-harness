@@ -225,7 +225,7 @@ export const DOCUMENT_PHASE_CONFIRM_LABELS: Readonly<Record<'skip' | 'reopen', s
   skip: '确认跳过',
   reopen: '确认重新打开',
 };
-export const DOCUMENT_PHASE_REASON_TEXT_LABEL = '说明（选「自行输入」时必填）';
+export const DOCUMENT_PHASE_REASON_TEXT_LABEL = '说明 · 选择自行输入时必填';
 export const DOCUMENT_PHASE_CANCEL = '取消';
 export const DOCUMENT_PHASE_REASON_NEEDED = '请先选一个原因。';
 export const DOCUMENT_PHASE_CUSTOM_NEEDED = '选了「自行输入」，请写下原因。';

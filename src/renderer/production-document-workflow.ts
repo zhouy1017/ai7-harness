@@ -8,7 +8,6 @@ import {
   type ProductionDocumentProjection,
   type ProductionDocumentWorkflowProjection,
 } from '../shared/protocol.js';
-import { publicationCountLine } from './deliverables-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
   DOCUMENT_PHASE_ACTION_LABELS,
@@ -196,10 +195,7 @@ export function renderDocumentWorkflow(
     words.value = state.text;
     words.disabled = working;
     words.dataset['phaseReasonText'] = 'true';
-    // Counted as the service counts it, and refused here with its reason rather than by the frame (Issue #626), as the 发稿
-    // and 交付 forms do.
-    const count = el('small', 'field-note document-phase-reason-count', publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS));
-    count.id = uid('document-phase-reason-count');
+    words.setAttribute('aria-description', `最多 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS} 字`);
     // Its own class, as the 发稿 fields' problems have theirs: the form's one `field-error` stays the form's own ask.
     const textProblem = el('p', 'document-phase-reason-problem');
     textProblem.id = uid('document-phase-reason-problem');
@@ -209,14 +205,13 @@ export function renderDocumentWorkflow(
       textProblem.hidden = problem === null;
       words.setAttribute('aria-invalid', problem === null ? 'false' : 'true');
     };
-    words.setAttribute('aria-describedby', `${count.id} ${textProblem.id}`);
+    words.setAttribute('aria-describedby', textProblem.id);
     words.addEventListener('input', () => {
       state.text = words.value;
-      count.textContent = publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS);
       showTextProblem();
     });
     showTextProblem();
-    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words, count, textProblem);
+    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words, textProblem);
     node.append(choices, textLabel);
     if (state.problem !== null) {
       const problem = el('p', 'field-error', state.problem);
