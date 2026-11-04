@@ -51,8 +51,8 @@ describe('the words of 就这段提问…', () => {
     expect(labels.dialogueIncompleteLine({ state: 'interrupted', causeCode: 'AI7_CLOSED', fragmentTotal: 2 })).toBe('AI7 关闭时回答被中断；只保留了完整的句子。');
     expect(labels.dialogueIncompleteLine({ state: 'interrupted', causeCode: 'SERVICE_STOPPED', fragmentTotal: 2 })).toBe('AI7 关闭时回答被中断；只保留了完整的句子。');
     expect(labels.dialogueIncompleteLine({ state: 'interrupted', causeCode: 'ABORTED', fragmentTotal: 2 })).toBe('回答被中断；只保留了完整的句子。');
-    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: 'AI7_FIXTURE_MISMATCH', fragmentTotal: 0 })).toBe('回答没有完成（AI7_FIXTURE_MISMATCH）；没有留下完整的句子。');
-    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答没有完成（原因未知）；没有留下完整的句子。');
+    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: 'AI7_FIXTURE_MISMATCH', fragmentTotal: 0 })).toBe('回答未完成；没有收到可保留的文字。');
+    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答未完成；没有收到可保留的文字。');
     expect(labels.dialogueIncompleteLine({ state: 'completed', causeCode: null, fragmentTotal: 3 })).toBeNull();
     expect(labels.dialogueIncompleteLine({ state: 'answering', causeCode: null, fragmentTotal: 3 })).toBeNull();
     expect(labels.dialogueConvertedLine(1)).toBe('已从这次回答新建 1 条修改建议。');
@@ -171,7 +171,7 @@ describe('a dialogue’s attempts and what each allows', () => {
     expect(project([attempt(1, 'ask', 'stopped')], { 1: '一句。半' }).actions).toEqual({ stop: false, continue: true, regenerate: true, convert: false });
     expect(project([attempt(1, 'ask', 'stopped')], { 1: '半句' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
     expect(project([attempt(1, 'ask', 'interrupted')], { 1: '一句。' }).actions).toEqual({ stop: false, continue: true, regenerate: true, convert: false });
-    expect(project([attempt(1, 'ask', 'failed')], { 1: '一句。' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
+    expect(project([attempt(1, 'ask', 'failed')], { 1: '一句。' }).actions).toEqual({ stop: false, continue: true, regenerate: true, convert: false });
     expect(project([attempt(1, 'ask', 'completed')], { 1: '一句。尾' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: true });
     expect(project([attempt(1, 'ask', 'completed')], { 1: '' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
     // A 继续回答 carries what the answer it went on from kept, then its own; the whole is what it converts.
@@ -186,6 +186,15 @@ describe('a dialogue’s attempts and what each allows', () => {
     const damaged = dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped')], { turn: () => 'damaged' }, () => null), 0);
     expect(damaged.attempts[0]).toMatchObject({ source: 'damaged', fragmentTotal: 0 });
     expect(damaged.actions).toEqual({ stop: false, continue: false, regenerate: false, convert: false });
+  });
+
+  it('keeps a failed tail incomplete and permits conversion with an unverified citation warning (#1311)', () => {
+    const failed = project([attempt(1, 'ask', 'failed')], { 1: '未完的尾句' });
+    expect(failed.attempts[0]!.fragments).toEqual([{ text: '未完的尾句', breakAfter: false, incomplete: true }]);
+    expect(failed.actions.continue).toBe(true);
+    const completed = project([attempt(1, 'ask', 'completed')], { 1: '建议文字。[retrieval:missing]' });
+    expect(completed.actions.convert).toBe(true);
+    expect(completed.retrievalWarning).toBe('未经精确取文');
   });
 
   it('gives a reader the latest answer from the fragment it has shown, and every earlier one whole', () => {

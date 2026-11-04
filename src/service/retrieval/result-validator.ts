@@ -65,6 +65,6 @@ export function markRetrievalResult(result: unknown, rejected: readonly Rejected
 export function notExactFetched(item: unknown): boolean { return isRecord(item) && item.retrievalValidation === 'not-exact-fetched'; }
 
 export function dialogueRetrievalCitations(text: string, exact: ReadonlyMap<string, RetrievalCandidate>): { anchors: RetrievalCandidate[]; unverified: boolean } {
-  const ids = [...text.matchAll(RETRIEVAL_CITATION_PATTERN)].map((match) => match[1]!);
+  const ids = [...text.matchAll(/\[retrieval:([^\]\r\n]+)\]/gu)].map((match) => match[1]!);
   return { anchors: [...new Set(ids)].flatMap((id) => exact.has(id) ? [exact.get(id)!] : []), unverified: ids.some((id) => !exact.has(id)) };
 }

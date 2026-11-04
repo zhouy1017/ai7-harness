@@ -170,7 +170,7 @@ describe('the 设置 hub', () => {
     expect(SETTINGS_HUB_GROUPS.map((group) => [group.label, group.rows.map((row) => [row.route, row.label])])).toEqual([
       ['服务', [['model-service', '模型服务'], ['usage', '用量']]],
       ['编辑工作', [['evaluation-calibration', '评估校准与预测']]],
-      ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断']]],
+      ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断'], ['help', '帮助']]],
     ]);
   });
 });

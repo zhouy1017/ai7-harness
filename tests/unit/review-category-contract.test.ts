@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BUILTIN_REVIEW_CATEGORY_CONFIGURATION,
-  reviewCategoryBasisStatement,
+  reviewCategoryBasis,
   reviewCategoryConfigurationDigest,
   reviewCategoryContractInput,
   reviewCategoryEntry,
@@ -91,13 +91,13 @@ describe('the built-in review categories', () => {
   });
 
   it('state their basis once, search-engine use included (V2-UX-REV-010, REV-012)', () => {
-    expect(reviewCategoryBasisStatement(entry('typos-and-usage')))
-      .toBe('依据：AI7 内置默认 · 文字规范条款（第 1 版） · 工序：错别字与规范用语审阅工序（第 1 版） · 不使用搜索引擎 · 未联网核查');
-    expect(reviewCategoryBasisStatement(entry('academic-integrity')))
-      .toBe('依据：AI7 内置默认 · 引用与学术规范条款（第 1 版） · 工序：引用风险点标注（第 1 版） · 使用用户所选的联网检索后端；是否完成以本次运行的核查状态为准');
-    expect(reviewCategoryBasisStatement(entry('plot-consistency')))
-      .toContain('第 2 版');
-    expect(reviewCategoryBasisStatement(entry('series-consistency'))).toBe('依据：书系知识 · 工序：书系一致性检查（第 1 版）');
+    expect(reviewCategoryBasis(entry('typos-and-usage'))).toMatchObject({
+      guidelineDocuments: [{ title: '文字规范条款', issuer: 'AI7 内置默认', version: '1' }],
+      procedure: { title: '错别字与规范用语审阅工序', version: '1' }, searchEngine: false,
+    });
+    expect(reviewCategoryBasis(entry('academic-integrity')).searchEngine).toBe(true);
+    expect(reviewCategoryBasis(entry('plot-consistency')).procedure.version).toBe('2');
+    expect(reviewCategoryBasis(entry('series-consistency'))).toMatchObject({ executor: 'series-knowledge', guidelineDocuments: [], procedure: { title: '书系一致性检查', version: '1' } });
   });
 
   it('are digested whole, so a Review Run that snapshots the digest names the exact configuration it used', () => {
@@ -167,26 +167,39 @@ describe('a review unit result', () => {
     expect(parseReviewCategoryUnitResult(`\`\`\`json\n${body([])}\n\`\`\``, suggestion).ok).toBe(true);
   });
 
-  it('refuses a result that does not answer the category’s contract, with the reason why', () => {
-    const code = (text: string, expected: typeof suggestion | typeof annotation): string | null => {
-      const parsed = parseReviewCategoryUnitResult(text, expected);
-      return parsed.ok ? null : parsed.code;
-    };
-    expect(code('不是 JSON', suggestion)).toBe('not-json');
-    expect(code(body([], { extra: true }), suggestion)).toBe('schema-invalid');
-    expect(code(JSON.stringify({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: 4, findings: [] }), suggestion)).toBe('unit-mismatch');
-    expect(code(body([finding]), suggestion)).toBe('replacement-required');
-    expect(code(body([{ ...finding, replacement: '合成的改文' }]), annotation)).toBe('replacement-refused');
-    expect(code(body([{ ...finding, replacement: '合成的改文', clauseId: 'typos-and-usage/9' }]), suggestion)).toBe('clause-unknown');
-    expect(code(body([{ ...finding, blockOrdinal: 5, replacement: '合成的改文' }]), suggestion)).toBe('quote-not-in-block');
-    expect(code(body([{ ...finding, severity: 'critical', replacement: '合成的改文' }]), suggestion)).toBe('schema-invalid');
-    expect(code(body([{ ...finding, replacement: finding.quote }]), suggestion)).toBe('schema-invalid');
-    expect(code(body([{ ...finding, verdict: '合规' }]), annotation)).toBe('schema-invalid');
+  it('uses the per-finding path for v1 and keeps strict ordinal and quote bounds', () => {
+    const good = { ...finding, replacement: '改文' };
+    const parsed = parseReviewCategoryUnitResult('说明```JSON\n' + body([good,
+      { ...good, blockOrdinal: 5 }, { ...good, quote: '字'.repeat(81) },
+      { ...good, blockOrdinal: '2', severity: 'critical', replacement: finding.quote, clauseId: 'unknown', extra: true }], { schema: 'other', unitOrdinal: 99 }) + '\n```结束', suggestion);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.findings).toEqual([good, { ...finding, clauseId: null }]);
+    expect(parsed.result.unitOrdinal).toBe(3);
+    expect(parsed.result.rejected!.map((entry) => entry.index)).toEqual([1, 2]);
+    expect(parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ index: 3, reason: 'replacement-annotation' })]));
+    const partial = parseReviewCategoryUnitResult(body([good]).slice(0, -2) + ',{"note":', suggestion);
+    expect(partial.ok && partial.result.findings).toEqual([good]);
+    expect(parseReviewCategoryUnitResult('not json', annotation).ok).toBe(false);
   });
 });
 
 
 describe('review contract v2 tolerance', () => {
+  it.each([1, 2] as const)('closes v%i with every parsed finding visibly rejected', (version) => {
+    const findings = [null, { quote: '合成引文', blockOrdinal: 99, severity: 'should', note: '合成说明' }];
+    const parsed = parseReviewCategoryUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings }),
+      { version, unitOrdinal: 1, blockCount: 2, output: 'annotation', clauseIds: [] });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.findings).toEqual([]);
+    expect(parsed.result.acceptedIndexes).toEqual([]);
+    expect(parsed.result.rejected).toEqual([
+      { index: 0, reasonCode: 'schema-invalid', text: JSON.stringify(findings[0]) },
+      { index: 1, reasonCode: 'quote-not-in-block', text: JSON.stringify(findings[1]) },
+    ]);
+  });
+
   it('preserves valid siblings and the complete rejected JSON with original indexes', () => {
     const finding = { quote: '合成引文', blockOrdinal: 1, severity: 'should', note: '合成说明', replacement: '合成改文' };
     const bad = { ...finding, replacement: finding.quote };
@@ -195,10 +208,10 @@ describe('review contract v2 tolerance', () => {
       { unitOrdinal: 1, blockCount: 2, output: 'change-suggestion', clauseIds: [] });
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
-    expect(parsed.accepted).toEqual([finding, finding]);
-    expect(parsed.result.acceptedIndexes).toEqual([0, 4]);
-    expect(parsed.rejected!.map((entry) => [entry.index, entry.reasonCode])).toEqual([[1, 'schema-invalid'], [2, 'schema-invalid'], [3, 'quote-not-in-block']]);
-    expect(JSON.parse(parsed.rejected![0]!.text)).toEqual(bad);
+    expect(parsed.accepted).toEqual([finding, { quote: finding.quote, blockOrdinal: 1, severity: 'should', note: finding.note }, finding]);
+    expect(parsed.result.acceptedIndexes).toEqual([0, 1, 4]);
+    expect(parsed.rejected!.map((entry) => [entry.index, entry.reasonCode])).toEqual([[2, 'schema-invalid'], [3, 'quote-not-in-block']]);
+    expect(JSON.parse(parsed.rejected![0]!.text)).toBeNull();
   });
   it('numbers overlap and own blocks continuously while keeping v1 bytes available', () => {
     const definition = reviewCategoryKindDefinition(TYPOS);

@@ -164,13 +164,14 @@ function quickOf(store: EditorialStore, bookId: string, typeId = 'promotion-arti
   return store.inspectWritingTask(bookId).types.find((type) => type.typeId === typeId)!.quickStart;
 }
 
-/** A Book whose first 宣传文章 was drafted from its plan, and the 宣传文章 rule set from that settled plan. */
+/** A Book whose first 宣传文章 was drafted from its plan; the fixture binds WRITING_BOOK_TITLE as well as the task. */
 async function ruledBook(session: Session, title: string) {
   const { store } = session;
   const bookId = await sample1Book(store, title);
   const first = prepare(store, bookId);
   const { settled, ledger } = await runFromBar(session, bookId, first);
   expect(settled.state).toBe('settled');
+  expect(settled.resultSetRevision?.coverage.unitsClosed).toBeGreaterThan(0);
   const rule = store.setDefaultExecutionRule(bookId, first.taskIntent!.taskIntentId, first.planEnvelope!.digest);
   return { bookId, first, rule, ledger, reference: { ruleId: rule.ruleId, ruleVersionId: rule.ruleVersionId, ordinal: rule.ordinal, name: rule.name } };
 }
@@ -367,7 +368,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('never starts another house type under a type\'s rule: it stops at that plan with why, recording nothing (TASK-026)', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, rule } = await ruledBook(session, '写作别的类型');
+      const { bookId, rule } = await ruledBook(session, WRITING_BOOK_TITLE);
       // The 新闻稿 has no rule of its own: its sheet offers none, whatever the 宣传文章's.
       expect(quickOf(store, bookId, 'news-release')).toEqual({ available: false, reason: quickStartNoRuleReason('writing:news-release'), rule: null });
       // Asked anyway, with the 宣传文章's rule version and other words, the 新闻稿 stops at its plan.
@@ -391,7 +392,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('stops at the plan, recording nothing, when offline, when the slot is busy, or when the rule changed or was turned off', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, rule, reference } = await ruledBook(session, '写作快速开始退回');
+      const { bookId, rule, reference } = await ruledBook(session, WRITING_BOOK_TITLE);
       const plan = prepare(store, bookId);
       const taskIntentId = plan.taskIntent!.taskIntentId;
       const digest = plan.planEnvelope!.digest;
@@ -433,7 +434,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('stops at a plan whose key content changed after it froze, with that reason rather than an error', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, rule } = await ruledBook(session, '写作计划已变');
+      const { bookId, rule } = await ruledBook(session, WRITING_BOOK_TITLE);
       const plan = prepare(store, bookId);
       // The connection is bound to another credential reference after the plan froze: the plan is revised and stays at its bar.
       withDatabase(false, (database) => database.prepare('UPDATE model_service_connections SET credential_reference = ?').run(randomUUID()));
@@ -447,7 +448,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('stops when what the rule binds differs from the Book now, naming what differs, on the sheet and at the start', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, first } = await ruledBook(session, '写作规则已变');
+      const { bookId, first } = await ruledBook(session, WRITING_BOOK_TITLE);
       // The rule's next version binds another credential reference, as a rule set under another connection would.
       const other = withDatabase(false, (database) => {
         const ledger = new DefaultExecutionRuleLedger(database);
@@ -472,7 +473,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('reads a writing Task\'s authorization that names a rule of another kind as damaged', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, first, ledger } = await ruledBook(session, '写作授权指错规则');
+      const { bookId, first, ledger } = await ruledBook(session, WRITING_BOOK_TITLE);
       // A baseline rule of this Book, and a writing Task whose authorization names it: not one any quick start could record.
       const baseline = withDatabase(false, (database) => new DefaultExecutionRuleLedger(database).set({
         bookId, pattern: 'sync-current', sourceTaskIntentId: first.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'c'.repeat(64),
@@ -489,7 +490,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('reads a writing Task\'s authorization that names another house type\'s rule as damaged (#701 re-review P3-4)', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, first, ledger, rule } = await ruledBook(session, '写作授权指错类型');
+      const { bookId, first, ledger, rule } = await ruledBook(session, WRITING_BOOK_TITLE);
       // A 新闻稿 rule of this Book, and a 宣传文章 Task whose authorization names it: not one any quick start could record.
       const news = withDatabase(false, (database) => new DefaultExecutionRuleLedger(database).set({
         bookId, pattern: writingRulePattern('news-release'), sourceTaskIntentId: first.taskIntent!.taskIntentId, sourcePlanEnvelopeDigest: 'b'.repeat(64),
@@ -506,7 +507,7 @@ describe('快速开始 of a writing Task (S84b; TASK-017, TASK-020, TASK-026, TA
   it('never uses or sets a default rule when developer-live lacks the writing rule', async () => {
     await withSession(async (session) => {
       const { store } = session;
-      const { bookId, rule, reference } = await ruledBook(session, '写作开发者实时');
+      const { bookId, rule, reference } = await ruledBook(session, WRITING_BOOK_TITLE);
       const plan = prepare(store, bookId);
       const free = store.baselineAnalysisLedger.launch;
       const runtime = store.localFixtureRuntime();

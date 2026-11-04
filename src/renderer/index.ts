@@ -1,5 +1,6 @@
 import { icon } from './components/icon-sprite.js';
 import { showToast } from './components/toast.js';
+import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
 import { createModelServiceSettings } from './model-service-settings.js';
@@ -158,7 +159,7 @@ import {
 import { ViewPreferences, mountRegionSeparator, renderViewSettings } from './layout.js';
 import { createGlobalAttentionReader, mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionSurface } from './global-attention.js';
 import { mountProcessingIndicator } from './processing-indicator.js';
-import { bookIdentityRows } from './technical-layer-labels.js';
+import { bookIdentityRows, recoveryIdentityRows } from './technical-layer-labels.js';
 import { GLOBAL_ATTENTION_ACTIONS, GLOBAL_ATTENTION_STATUS_LINES } from './global-attention-labels.js';
 import { analysisRefusalView } from './overview-refusal-labels.js';
 import {
@@ -812,7 +813,6 @@ const shell = mountShell({
   listBooks: (input) => window.ai7.listBooks(input),
   setStatus,
   errorMessage: rendererErrorMessage,
-  modelSelector: { api: window.ai7, openModelService: () => void leaveThen(() => renderModelServiceSettings()) },
   openDestination: (destination) => {
     if (authorityInterrupted) return;
     if (destination === 'library') void leaveThen(() => returnToLibrary());
@@ -915,7 +915,7 @@ function rendererErrorMessage(error: unknown, fallback: string): string {
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
@@ -941,7 +941,7 @@ function technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<
   const values = element('dl', gridClass);
   values.append(...rows);
   disclosure.append(element('summary', undefined, '查看技术详情'), values);
-  return disclosure;
+  return technicalDisclosure(disclosure);
 }
 /** A 书库 card's identities, one disclosure away (ADR 0096 §3). */
 function bookIdentityDisclosure(book: { bookId: string; stableIdentity: string }): HTMLElement {
@@ -1474,7 +1474,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
   const heading = element('h3', undefined, staged.source.displayName);
   card.append(heading);
   const details = element('dl');
-  const sourceBytes = element('dd', undefined, String(staged.source.sourceBytes));
+  const sourceBytes = element('dd', undefined, technicalLayerVisible ? String(staged.source.sourceBytes) : '');
   sourceBytes.setAttribute('data-source-bytes', '');
   const sourceDigest = element('dd', 'technical-identity', staged.source.sourceSha256);
   sourceDigest.setAttribute('data-source-sha256', '');
@@ -1485,7 +1485,7 @@ function sourceCard(staged: StagedImportProjection): HTMLElement {
     sourceFormat,
     element('dt', undefined, '来源'),
     element('dd', undefined, staged.source.provenanceLabel),
-    element('dt', undefined, '来源字节数'),
+    element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
     sourceBytes,
     // A file the product did not parse detected no blocks, so it says what it retained instead of
     // reporting a count of nothing.
@@ -1712,7 +1712,7 @@ function recoveryCandidateCard(
   revisionDigest.dataset['candidateRevisionDigest'] = candidate.revisionDigest;
   details.append(
     element('dt', undefined, '修订版'), element('dd', undefined, candidate.revisionLabel),
-    element('dt', undefined, '持久边界'), element('dd', undefined, `修订日志序号 ${candidate.journalSequence} · ${localInstantLabel(candidate.durableAt)}`),
+    element('dt', undefined, '持久边界'), element('dd', undefined, `${technicalWords(`修订日志序号 ${candidate.journalSequence} · `)}${localInstantLabel(candidate.durableAt)}`),
     element('dt', undefined, '覆盖范围'), element('dd', undefined, candidate.coveredChangeExtent),
     element('dt', undefined, '校验'), element('dd', undefined, candidate.verification),
     element('dt', undefined, '限制'), element('dd', undefined, candidate.limitation),
@@ -1766,11 +1766,9 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
   // front of the screen's primary decision — the choice a recovery screen exists to present. The
   // candidates' own disclosures sit after their radio and cost the reader nothing.
   const durableBoundary = instantValue(recovery.lastDurableEditBoundary.durableAt);
-  durableBoundary.prepend(`修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · `);
+  if (technicalLayerVisible) durableBoundary.prepend(`修订日志序号 ${recovery.lastDurableEditBoundary.journalSequence} · `);
   identityDetails.append(
-    element('dt', undefined, '图书'), element('dd', undefined, `${recovery.bookTitle} · ${recovery.bookId}`),
-    element('dt', undefined, '稿件'), element('dd', 'technical-identity', recovery.manuscriptId),
-    element('dt', undefined, '分支'), element('dd', undefined, `${recovery.branchName} · ${recovery.branchId}`),
+    ...recoveryIdentityRows(recovery).flatMap(([term, value]) => [element('dt', undefined, term), element('dd', technicalLayerVisible && term === '稿件' ? 'technical-identity' : undefined, value)]),
     element('dt', undefined, '最后持久写入边界'), durableBoundary,
     element('dt', undefined, '覆盖范围'), element('dd', undefined, recovery.lastDurableEditBoundary.coveredChangeExtent),
   );
@@ -1818,7 +1816,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
     let unopened: unknown;
     try {
       await openEditorWindow(restored.window, recovery.bookTitle);
-      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${restored.descendantRevisionLabel}`, 'success');
+      setStatus(onDocument ? DOCUMENT_STATUS_LINES.recovered : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}`, 'success');
       return;
     } catch (error) {
       unopened = error;
@@ -1832,7 +1830,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
         return;
       }
       await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: recovery.bookId, bookTitle: recovery.bookTitle });
-      setStatus(`已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`, 'error');
+      setStatus(`已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但稿件没能打开：${rendererErrorMessage(unopened, '请从图书再打开它。')}`, 'error');
     };
     try {
       await openBook();
@@ -1854,14 +1852,14 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
           reopen.disabled = false;
           setStatus(onDocument
             ? `${DOCUMENT_STATUS_LINES.recoveredRetryFailed}${rendererErrorMessage(again, DELIVERABLES_STATUS_LINES.openFailed)}`
-            : `已恢复为新版本 ${restored.descendantRevisionLabel}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
+            : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但图书还是没能打开：${rendererErrorMessage(again, '无法打开图书。')}`, 'error');
         }
       });
       actions.replaceChildren(reopen);
       reopen.focus();
       setStatus(onDocument
         ? DOCUMENT_STATUS_LINES.recoveredNothingOpened
-        : `已恢复为新版本 ${restored.descendantRevisionLabel}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
+        : `已恢复为新版本 ${technicalWords(restored.descendantRevisionLabel, '修订版')}，但稿件和图书都没能打开：${rendererErrorMessage(error, '可以再打开图书。')}`, 'error');
     }
   });
   const selected = (
@@ -1870,7 +1868,7 @@ function renderManuscriptRecovery(recovery: RecoveryComparisonProjection): void 
       Extract<RecoveryComparisonProjection['snapshot'], { state: 'eligible' }>['candidate'],
   ): void => {
     selection = next;
-    consequence.textContent = `将以“${candidate.title}”形成当前分支的新后代修订版；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`;
+    consequence.textContent = `将以“${candidate.title}”形成当前分支的新后代修订版${technicalWords(`；来源修订身份 ${candidate.revisionId}，摘要 ${candidate.revisionDigest}`)}。既有历史与稿件固定点保持原位，且不会自动创建里程碑。`;
     consequence.dataset['selectedCandidate'] = candidate.kind;
     consequence.hidden = false;
     view.disabled = false;
@@ -1954,7 +1952,7 @@ function renderRecoveryViewer(recovery: RecoveryComparisonProjection, projection
   content.append(
     element('p', 'section-label', '仅查看 · 永久只读'),
     element('h2', undefined, projection.title),
-    element('p', 'lede', `${projection.revisionLabel} · 此窗口不装载编辑器，也不提供任何写入操作。`),
+    element('p', 'lede', `${technicalWords(projection.revisionLabel, '修订版')} · 此窗口不装载编辑器，也不提供任何写入操作。`),
   );
   const blocks = element('article', 'recovery-readonly-blocks');
   blocks.setAttribute('aria-label', '恢复证据只读内容窗口');
@@ -1988,7 +1986,7 @@ function renderHistoricalRevision(projection: HistoricalRevisionProjection): voi
   content.dataset['blockCount'] = String(projection.blocks.length);
   content.append(
     element('p', 'section-label', `${projection.bookTitle} · 历史修订版 · 永久只读`),
-    element('h2', undefined, `稿件修订版 ${projection.revisionLabel}`),
+    element('h2', undefined, `稿件修订版${technicalWords(` ${projection.revisionLabel}`)}`),
     element('p', 'lede', `${projection.position.label}。此窗口不装载编辑器，也不提供写入、修订日志、替换、撤销/重做或里程碑操作。`),
   );
   const identity = element('section', 'source-card');
@@ -3218,7 +3216,7 @@ function renderBookOverview(
           element('h3', undefined, '分析'),
           element('p', undefined, projection.resultSetRevision === null
             ? `基线分析 · ${projection.stateLabel}`
-            : `基线分析 · ${projection.stateLabel} · 读的是 ${projection.resultSetRevision.manuscriptPin.revisionLabel} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`),
+            : `基线分析 · ${projection.stateLabel} · 读的是 ${technicalWords(projection.resultSetRevision.manuscriptPin.revisionLabel, '修订版')} · ${projection.resultSetRevision.freshness.state === 'current' ? '稿件此后没有改动' : '稿件此后有改动'}`),
           open,
         );
       },
@@ -3492,7 +3490,7 @@ function renderForegroundExecutionBoundary(
   lineage.append(
     element('dt', undefined, '任务运行权限'), element('dd', undefined, projection.runAuthority),
     element('dt', undefined, '当前可信策略'),
-    element('dd', undefined, `${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`),
+    element('dd', undefined, technicalWords(`${projection.launchPolicy.operationalScope} · Provider Processing ${projection.launchPolicy.providerProcessing.version} · ${projection.launchPolicy.providerProcessing.authorizedLiveTransmissionCount} 次实时传输`)),
   );
   const reasons = element('ul', 'task-authorization-non-effects');
   for (const reason of projection.reasons) reasons.append(element('li', undefined, reason));
@@ -3603,7 +3601,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       projection.actions.canAuthorize);
     open.dataset['taskAuthorizationAction'] = 'view-plan';
     summary.append(
-      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', `任务输入修订版 ${checkpoint.revisionLabel}`, '不发送任何内容'])),
+      element('p', 'task-plan-summary-line', taskPlanSummaryLine(['固定任务', '全书', `任务输入修订版${technicalWords(` ${checkpoint.revisionLabel}`)}`, '不发送任何内容'])),
       open,
     );
     card.append(summary);
@@ -3991,6 +3989,7 @@ function renderSettingsHub(): void {
     'data-storage': () => void renderDataAndStorage(),
     appearance: renderAppearance,
     diagnostics: renderDiagnostics,
+    help: renderHelp,
     usage: renderUsage,
     keyboard: renderKeyboardSettings,
     notifications: () => void renderNotificationSettings(),
@@ -4508,7 +4507,7 @@ function renderLanding(
         element(
           'p',
           'field-note',
-          `${item.totalCharacters.toLocaleString('zh-CN')} 字符 · 修订日志 ${item.journalSequence}${
+          `${item.totalCharacters.toLocaleString('zh-CN')} 字符${technicalWords(` · 修订日志 ${item.journalSequence}`)}${
             item.latestMilestone ? ` · 最近里程碑 ${item.latestMilestone.label}` : ''
           }`,
         ),
@@ -4573,7 +4572,7 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
   section.append(
     element('h3', undefined, result.completionLabel),
     element('p', undefined, result.resultKind === 'changed'
-      ? `已形成修订版 ${result.window.revisionLabel}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
+      ? `已形成修订版${technicalWords(` ${result.window.revisionLabel}`)}：${record.groups.count} 处变化按你选的动词对应，${record.markOutcomes.followed} 条标记已跟随到新文件中它们的文字。`
       : '新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。'),
   );
   if (record.markOutcomes.unfollowed > 0) {
@@ -4742,8 +4741,12 @@ const { renderModelServiceSettings } = createModelServiceSettings({
 });
 
 async function initializeRenderer(): Promise<void> {
+  resetTechnicalLayer();
   await appearance.ready;
   try {
+    const location = await window.ai7.getProductDataLocation();
+    const scope = location.channel === 'source-checkout' ? (await window.ai7.getModelServiceSettings()).launchPolicy.operationalScope : null;
+    initializeTechnicalLayer(location.channel, window.localStorage, scope);
     const route = await window.ai7.getBookWorkbenchRoute();
     if (route) {
       await renderResolvedBookWorkbenchRoute(route);
@@ -4778,6 +4781,7 @@ new MutationObserver(() => {
   ],
 });
 
+new MutationObserver(() => collectTechnicalDisclosures(document.body)).observe(document.body, { childList: true, subtree: true });
 setCloseRisk(false);
 void initializeRenderer();
 if (document.documentElement.dataset['ai7ServiceState'] === 'interrupted') applyAuthorityInterruption();

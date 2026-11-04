@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { dialogueReplacementText } from '../../src/renderer/dialogue-answer.js';
 
+it('removes unverified retrieval anchors when preparing a suggestion (#1311)', () => {
+  expect(dialogueReplacementText('建议改为：新的文字。[retrieval:missing]')).toBe('新的文字。');
+});
+
 describe('answer to suggestion text', () => {
   it.each([
     ['建议改为：“天色渐明。”\n理由：更简洁。', '天色渐明。'],

@@ -91,10 +91,9 @@ describe('dialogue-only SSE transport (Issue #833)', () => {
     expect(events).toEqual([{ kind: 'text', text: '第一句。' }, { kind: 'text', text: '第二句。' }, { kind: 'complete', response: { model: model.model, choices: [{ message: { content: '第一句。第二句。' }, finish_reason: 'stop' }], usage: { prompt_tokens: 8, completion_tokens: 4 } } }]);
     expect(JSON.stringify(events)).not.toContain('内部推理');
   });
-  it('requires both finish and DONE; malformed, wrong-model, and truncated responses are unknown', async () => {
-    for (const wire of [delta('前缀。'), delta('前缀。') + done, delta('前缀。') + finish, 'data: {broken}\n\n', event({ model: 'wrong-model', choices: [] }) + finish + done]) {
-      await expect(read(wire)).rejects.toThrow('AI7_OUTCOME_UNKNOWN');
-    }
+  it('accepts DONE, model aliases and redundant frames while EOF without completion stays unknown', async () => {
+    for (const wire of [delta('前缀。') + done, event({ model: 'wrong-model', choices: [] }) + finish + done, 'data: {broken}\n\n' + delta('前缀。') + done]) expect((await read(wire)).at(-1)).toMatchObject({ kind: 'complete' });
+    for (const wire of [delta('前缀。'), delta('前缀。') + finish]) await expect(read(wire)).rejects.toThrow('AI7_OUTCOME_UNKNOWN');
   });
   it('delivers a fragment before the remaining network data arrives and cancels the reader on interruption', async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;

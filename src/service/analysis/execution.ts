@@ -4,6 +4,7 @@ import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factual-claim-ledger.js';
 import { parseFactualClaimVerification } from './factual-claim-contract.js';
+import { withProviderResponseSalvage } from '../provider/response-normalization.js';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './factual-recheck.js';
 import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
 import { learningCurationRule } from './live-kind-admission.js';
@@ -646,6 +647,7 @@ export class BaselineAnalysisExecutionOwner {
     const owner = ledger.factualVerification;
     let run: FactualRecheckRun | null = null, harness: PrimaryAgentHarnessHandle | null = null, producer: ModelRequestProducer | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, usage: UsageFacts | null = null;
+    const canonicalResult = () => adapter?.lastCanonicalResult ?? null;
     try {
       const admitted = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
       const profile = productionModelProfile(candidate.binding.route, candidate.binding.model);
@@ -728,7 +730,7 @@ export class BaselineAnalysisExecutionOwner {
       usage = usageSignal?.kind === 'usage' ? usageSignal.usage : null;
       const claim = candidate.ledger.claims.find((entry) => entry.claimId === frozen.selection.claimId)!;
       const content = turn.signals.find((entry) => entry.kind === 'contentCandidate');
-      const parsed = turn.terminal === 'completed' && content?.kind === 'contentCandidate' ? parseFactualClaimVerification(content.text, { claimId: claim.claimId, assertion: claim.producers[0]!.assertion }) : null;
+      const parsed = turn.terminal === 'completed' && content?.kind === 'contentCandidate' ? withProviderResponseSalvage(parseFactualClaimVerification(content.text, { claimId: claim.claimId, assertion: claim.producers[0]!.assertion }), canonicalResult()) : null;
       const result = parsed?.ok === true ? parsed.result : null;
       const captures = platform.unitCaptures;
       const pages = new Map(captures.fetches.flatMap((snapshot) => { const page = retainedPageOf(snapshot); return page === null ? [] : [[page.url, page] as const]; }));
@@ -1619,7 +1621,7 @@ export class BaselineAnalysisExecutionOwner {
     if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
       context.acceptedOutputDigests.add(candidate.digest);
       if (canonical?.kind === 'empty-answer') return gap(runReportReflectionEmptyAnswerGapReason(canonical.reasoningPresent));
-      const parsed = parseRunReportReflectionResult(candidate.text);
+      const parsed = withProviderResponseSalvage(parseRunReportReflectionResult(candidate.text), canonical);
       if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
       return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null, ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }, usage };
     }
@@ -2615,7 +2617,7 @@ export class BaselineAnalysisExecutionOwner {
             return 'waiting';
           }
           const validated = prepareRetrievalResult(candidate.text, retrieval);
-          const parsed = definition.parseUnitResult(validated.text, unit, blocksById);
+          const parsed = withProviderResponseSalvage(definition.parseUnitResult(validated.text, unit, blocksById), s.attempt.canonical);
           if (parsed.ok) {
             if (parsed.salvaged !== undefined && isRecord(parsed.result)) {
               parsed.result.salvaged = parsed.salvaged;
@@ -3051,6 +3053,7 @@ export class BaselineAnalysisExecutionOwner {
             !priorAdaptations.some((entry) => entry.unitOrdinal === unit.ordinal && entry.adaptationClass === 'contract-retry') &&
             attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate' &&
             contractCandidate.text.trim().length > 0 && attempt.canonical?.kind !== 'empty-answer' &&
+            !(attempt.canonical?.kind === 'answer' && attempt.canonical.truncated === true) &&
             parseModelClarification(contractCandidate.text) === null && contractParsed?.ok === false &&
             contractParsed.code === 'not-json' &&
             !active.cancelRequested && !active.pauseRequested && !active.interrupted && liveInterruption === null && !scopeChanged() && ceilingState() !== 'reached') {
@@ -3361,7 +3364,7 @@ export class BaselineAnalysisExecutionOwner {
               active.progress.completedAttempts += 1;
               const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
               const parsed = turn.terminal === 'completed' && candidate?.kind === 'contentCandidate'
-                ? parseFactualClaimVerification(candidate.text, { claimId: claim.claimId, assertion: producer.assertion }) : null;
+                ? withProviderResponseSalvage(parseFactualClaimVerification(candidate.text, { claimId: claim.claimId, assertion: producer.assertion }), isolated.liveAdapter.instance?.lastCanonicalResult ?? null) : null;
               if (candidate?.kind === 'contentCandidate') isolated.acceptedOutputDigests.add(candidate.digest);
               const result = parsed?.ok === true ? parsed.result : null;
               const captures = isolated.platformSession!.unitCaptures;
@@ -3496,18 +3499,18 @@ export class BaselineAnalysisExecutionOwner {
               crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
             } else if (step !== null) {
               const validated = prepareRetrievalResult(candidate.text, retrieval);
-              const parsed = validated.rejected.length > 0 ? { ok: false as const, code: 'not-exact-fetched', detail: '未经精确取文' }
-                : step.parse(validated.text, closedOutcomes, crossUnitContext);
+              const parsed = withProviderResponseSalvage(step.parse(validated.text, closedOutcomes, crossUnitContext), canonical);
+              if (parsed.ok) markRetrievalResult(parsed.result, validated.rejected);
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
                 : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)), { code: parsed.code, detail: parsed.detail });
             } else {
-              const parsed = parseCrossUnitResult(candidate.text, {
+              const parsed = withProviderResponseSalvage(parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
                 citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
                 blockLengths: new Map(blocks.map((block) => [block.blockId, block.graphemes])),
-              });
+              }), canonical);
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage,
                     ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }
@@ -3556,13 +3559,19 @@ export class BaselineAnalysisExecutionOwner {
       // the four stage totals partition the Run's own work.
       clock.open('reduction');
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
+      const synthesisUnavailable = ['evaluation', 'evaluation-rewrite', 'readers-report'].includes(definition.kind) &&
+        definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed'
+        ? `未完成：没有形成可用的综合结果 · ${majorityGapReason([{ code: 'synthesis-unavailable', reason: crossUnit.reason }]) ?? '没有收到可用的模型回答。'}` : null;
+
       // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
       // range review that closed everything it was asked to read completed, without qualification.
       if (terminalClassification === 'completed' && reduced.gaps.some((gapEntry) => gapEntry.code !== 'out-of-scope')) {
         terminalClassification = reduced.coverage.unitsClosed === 0 ? 'failed' : 'completed-with-gaps';
       }
       // A kind whose book-level step is its result (Issue #432 review): no closed step, no complete Run.
-      if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
+      if ((terminalClassification === 'completed' || terminalClassification === 'completed-with-gaps') && synthesisUnavailable !== null) {
+        terminalClassification = 'failed';
+      } else if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
         terminalClassification = 'completed-with-gaps';
       }
       clock.close();
@@ -3625,7 +3634,8 @@ export class BaselineAnalysisExecutionOwner {
         usage.outputTokens += context.platformSession.usage.outputTokens;
       }
       const noClosedReason = terminalClassification === 'failed'
-        ? `未完成：没有单元读成 · ${majorityGapReason(reduction.gaps) ?? '没有收到可用的模型回答。'}` : null;
+        ? synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? synthesisUnavailable
+          : `未完成：没有单元读成 · ${majorityGapReason(reduction.gaps) ?? '没有收到可用的模型回答。'}` : null;
       const revision = noClosedReason !== null ? null : ledger.persistRevision({
         facts,
         attemptId,
@@ -3699,7 +3709,7 @@ export class BaselineAnalysisExecutionOwner {
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },
         sample,
         findingCounts: definition.findingCounts(reduction),
-        terminalFailure: noClosedReason === null ? null : { code: 'NO_CLOSED_UNITS', reason: noClosedReason },
+        terminalFailure: noClosedReason === null ? null : { code: synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? 'SYNTHESIS_UNAVAILABLE' : 'NO_CLOSED_UNITS', reason: noClosedReason },
       };
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
@@ -3884,7 +3894,7 @@ export class BaselineAnalysisExecutionOwner {
             gap(assuranceSamplingEmptyAnswerGapReason(canonical.reasoningPresent));
             continue;
           }
-          const parsed = parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) });
+          const parsed = withProviderResponseSalvage(parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) }), canonical);
           if (!parsed.ok) {
             parseFailures.push({ unitOrdinal: turn.unitOrdinal, code: parsed.code, detail: parsed.detail });
             gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));

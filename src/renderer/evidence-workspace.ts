@@ -1,3 +1,4 @@
+import { technicalWords, identityWords } from './technical-layer.js';
 import {
   EVIDENCE_MATRIX_MAX_PINNED,
   type CorrectionProposalDraftProjection,
@@ -110,7 +111,7 @@ interface CorrectionForm {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
@@ -381,7 +382,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     const list = el('ol');
     for (const entry of current.history) {
       list.append(el('li', entry.resultId === current.result.resultId ? 'evidence-history-current' : undefined,
-        `第 ${entry.version} 版 · ${entry.outcome} · ${options.instant(entry.recordedAt)}`));
+        `${technicalWords(`第 ${entry.version} 版`, '版本')} · ${entry.outcome} · ${options.instant(entry.recordedAt)}`));
     }
     section.append(list);
     return section;

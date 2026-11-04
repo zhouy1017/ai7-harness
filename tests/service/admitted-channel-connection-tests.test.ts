@@ -30,6 +30,27 @@ function fixtureTransport(family: string, name: string, answer?: string): Return
 }
 
 describe('the connection test on the admitted channels', () => {
+  it('retains a passing answer without splitting a Unicode code point at the storage limit (#1311)', async () => {
+    const target = await saved('google-gemini');
+    const nativeFetch = fixtureTransport('google-generate-content', 'text', 'a'.repeat(3999) + '😀');
+    const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
+      { route: 'google-gemini', modelId: 'account-new-model' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
+    expect(status.outcome).toBe('passed');
+    const kept = target.getModelServiceRouteConnection('google-gemini')?.connectionTest;
+    expect(kept?.outcome).toBe('passed');
+    expect(kept?.responseText).toBe('a'.repeat(3999));
+    expect(kept?.responseText?.isWellFormed()).toBe(true);
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+  });
+  it.each(['`AI7_OK`。', '"ai7-ok"!', '模型连接成功。'])('accepts and retains a nonempty probe answer: %s (#1311)', async (answer) => {
+    const target = await saved('google-gemini');
+    const nativeFetch = fixtureTransport('google-generate-content', 'text', answer.replaceAll('"', '\\"'));
+    const status = await testModelServiceConnection(target, roots.codeRoot, { scope: 'ordinary-production', nativeFetch: nativeFetch as unknown as typeof fetch },
+      { route: 'google-gemini', modelId: 'account-new-model' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
+    expect(status).toMatchObject({ outcome: 'passed', code: null, responseText: answer });
+    expect(target.getModelServiceRouteConnection('google-gemini')?.connectionTest?.responseText).toBe(answer);
+    expect(nativeFetch).toHaveBeenCalledTimes(1);
+  });
   it.each(['MODEL_SERVICE_UNREACHABLE', 'AI7_PROXY_UNREACHABLE'])('records %s as a failed connection test, preserving no-send proof (#1305)', async (code) => {
     const target = await saved('google-gemini');
     const nativeFetch = code === 'MODEL_SERVICE_UNREACHABLE'

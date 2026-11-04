@@ -80,15 +80,17 @@ function responsesErrorStatus(code: unknown): number {
 /**
  * Read the Responses SSE wire. Text arrives as `response.output_text.delta`; the whole response — output items and usage,
  * exactly the buffered body — arrives in `response.completed` (or `response.incomplete`), which alone proves a whole
- * response, and whose text must equal the deltas streamed before it. `response.failed` and `error` are the service's
+ * response. Its final text supersedes streamed deltas, with a mismatch recorded. `response.failed` and `error` are the service's
  * refusal after acceptance, read as an error with the status its code stands for. Reasoning deltas are never read.
  */
 export async function* responsesSseEvents(response: DeepSeekTransportResponse): AsyncIterable<DialogueStreamEvent> {
   let streamed = '';
   try {
-    for await (const { data } of sseFrames(response)) {
-      const value: unknown = JSON.parse(data);
-      if (!isRecord(value) || typeof value.type !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+    for await (const { event, data } of sseFrames(response)) {
+      if (event === 'ai7-buffered-response') { yield { kind: 'complete', response: JSON.parse(data) }; return; }
+      let value: unknown;
+      try { value = JSON.parse(data); } catch { continue; }
+      if (!isRecord(value) || typeof value.type !== 'string') continue;
       if (value.type === 'response.output_text.delta') {
         if (typeof value.delta !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
         if (value.delta.length === 0) continue;
@@ -106,13 +108,14 @@ export async function* responsesSseEvents(response: DeepSeekTransportResponse): 
         return;
       }
       if (value.type === 'response.completed' || value.type === 'response.incomplete') {
-        if (!isRecord(value.response) || !Array.isArray(value.response.output)) throw new Error('AI7_OUTCOME_UNKNOWN');
-        const text = value.response.output
-          .filter((item): item is Record<string, unknown> => isRecord(item) && item.type === 'message' && Array.isArray(item.content))
-          .flatMap((item) => item.content as unknown[])
-          .filter((part): part is Record<string, unknown> => isRecord(part) && part.type === 'output_text' && typeof part.text === 'string')
-          .map((part) => part.text as string).join('');
-        if (text !== streamed) throw new Error('AI7_OUTCOME_UNKNOWN');
+        if (!isRecord(value.response)) continue;
+        if (!Array.isArray(value.response.output) && typeof value.response.output_text !== 'string') value.response = { ...value.response, output_text: streamed };
+        const final = value.response as Record<string, unknown>;
+        const finalText = typeof final.output_text === 'string' ? final.output_text : (final.output as unknown[]).filter(isRecord)
+          .flatMap((item) => Array.isArray(item.content) ? item.content : []).filter(isRecord)
+          .filter((part) => part.type === 'output_text' && typeof part.text === 'string').map((part) => part.text).join('');
+        if (finalText !== streamed) value.response = { ...final, ai7StreamTextMismatch: true };
+        // The completed body is authoritative, even when a gateway revises its deltas.
         yield { kind: 'complete', response: value.response };
         return;
       }

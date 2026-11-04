@@ -173,7 +173,7 @@ describe('书系一致性 over a Book\'s Series Knowledge', () => {
       expect(category(store, bookId)).toMatchObject({
         available: true,
         unavailableReason: null,
-        basisStatement: `依据：书系「${J13_SERIES_TITLE}」的书系知识：地点「${J13_PLACE}」第 1 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`,
+        basis: expect.objectContaining({ searchEngine: false, seriesKnowledge: true }),
         guidelineDocuments: [expect.objectContaining({ title: `地点「${J13_PLACE}」`, issuer: `书系「${J13_SERIES_TITLE}」`, version: '1', clauseCount: 1 })],
         scopes: { whole: { available: true, unavailableReason: null } },
       });
@@ -295,7 +295,7 @@ describe('书系一致性 over a Book\'s Series Knowledge', () => {
 
       // J-13's words taken in as the item's second revision: the prepared plan now reads knowledge that is no longer the item's.
       takeInRevision(store, seriesId, itemId, J13_EDITOR_WORDS, 'series-tasks');
-      expect(category(store, bookId).basisStatement).toContain(`地点「${J13_PLACE}」第 2 版`);
+      expect(category(store, bookId).basis.guidelineDocuments).toContainEqual(expect.objectContaining({ title: `地点「${J13_PLACE}」`, version: '2' }));
       const stale = store.inspectTaskPlan({ bookId, kind: 'review-run', ref: first.reviewRunId });
       expect(stale.start.readiness).toBe('changed');
       expect(refusal(() => approve(store, bookId, first))).toBe(`REVIEW_PLAN_CHANGED:${MOVED}`);
@@ -330,7 +330,7 @@ describe('书系一致性 over a Book\'s Series Knowledge', () => {
       expect(frozenCategory(second.reviewRunId)).toEqual(pinned);
       expect((pinned.entry as { seriesKnowledge: { revisions: Array<{ ordinal: number }> } }).seriesKnowledge.revisions.map((revision) => revision.ordinal)).toEqual([2]);
       expect(store.inspectReviewWorkspace(bookId, second.reviewRunId).run!.findings.map((finding) => finding.findingId)).toEqual(findings.map((finding) => finding.findingId));
-      expect(category(store, bookId).basisStatement).toContain(`地点「${J13_PLACE}」第 3 版`);
+      expect(category(store, bookId).basis.guidelineDocuments).toContainEqual(expect.objectContaining({ title: `地点「${J13_PLACE}」`, version: '3' }));
       expect(store.inspectReviewWorkspace(bookId, null).coverage.find((row) => row.categoryId === 'series-consistency')!.state).toBe('current');
     });
   }, 300_000);

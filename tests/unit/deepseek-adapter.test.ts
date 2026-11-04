@@ -592,7 +592,7 @@ describe('normalizeModelResponse', () => {
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: 'not-an-array' })).toEqual({ kind: 'malformed', reason: 'response-not-a-record' });
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [] })).toEqual({ kind: 'malformed', reason: 'choice-absent' });
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: {} }] })).toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
-    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: [{ type: 'text' }] } }] }))
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: 3 } }] }))
       .toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
   });
 
@@ -600,6 +600,14 @@ describe('normalizeModelResponse', () => {
     // What makes replaying a past response possible at all: one function, one profile, one body.
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: '' } }] }))
       .toEqual({ kind: 'empty-answer', reasoningPresent: false, usage: null });
+  });
+
+  it('reads null and text-part arrays and returns partial usage on an incomplete 2xx reply (#1311)', () => {
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: null } }] })).toMatchObject({ kind: 'empty-answer' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: [{ type: 'text', text: 'a', extra: true }, null, { type: 'text', text: 'b' }] } }] }))
+      .toMatchObject({ kind: 'answer', text: 'ab' });
+    expect(parseProviderResponse(201, { choices: [{ message: { content: 'partial' }, finish_reason: 'length' }], usage: { prompt_tokens: 5, completion_tokens: 3 } }, codes, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE))
+      .toMatchObject({ kind: 'partial', text: 'partial', usage: { inputTokens: 5, outputTokens: 3 } });
   });
 });
 

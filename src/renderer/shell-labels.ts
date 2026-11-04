@@ -133,7 +133,7 @@ export function shellDestinationLabel(destination: ShellDestination): string {
   return SHELL_DESTINATIONS.find((entry) => entry.key === destination)!.label;
 }
 
-export type SettingsRoute = 'model-service' | 'usage' | 'evaluation-calibration' | 'data-storage' | 'appearance' | 'keyboard' | 'notifications' | 'diagnostics';
+export type SettingsRoute = 'model-service' | 'usage' | 'evaluation-calibration' | 'data-storage' | 'appearance' | 'keyboard' | 'notifications' | 'diagnostics' | 'help';
 
 /**
  * 设置 (editor-surfaces §8.6; MSET, DSTO, VIEW, KEY, NOTIF): 服务 · 编辑工作 · 本机. A row whose page another slice of wave 11
@@ -157,6 +157,7 @@ export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
     { route: 'keyboard', label: '键盘与无障碍', note: '快捷键与键盘操作。' },
     { route: 'notifications', label: '通知', note: '窗口不在前台时的系统通知。' },
     { route: 'diagnostics', label: '诊断', note: '崩溃记录与诊断包。' },
+    { route: 'help', label: '帮助', note: '使用说明、隐私与开发者模式。' },
   ] },
 ]);
 

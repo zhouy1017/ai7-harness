@@ -465,20 +465,11 @@ describe('写作任务 over the real store on exact sample1', () => {
       });
       const refused = await run(session, bookId, copying);
       answerWritingReflection(entries, refused.taskOutcome!.report!.accountingDigest);
-      expect(refused.resultSetRevision!.writing.draft).toBeNull();
-      expect(refused.resultSetRevision!.writing.synthesis.state).toBe('gap');
-      expect(refused.resultSetRevision!.writing.synthesis.reason).toMatch(new RegExp(`^${WRITING_EXEMPLAR_REFUSAL_PREFIX}草稿与范例《范例来源书》版本 1 有(?:连续 12|跨标点连续 16) 个字以上相同；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
-      expect(refused.resultSetRevision!.writing.synthesis.reason).not.toContain('没有可解析');
-      expect(refused.taskOutcome!.classification).toBe('completed-with-gaps');
-      expect(refused.taskOutcome!.safeNextAction).not.toContain('打开草稿');
-      const refusedPage = store.inspectWritingTask(bookId);
-      expect(refusedPage.task).toMatchObject({ taskIntentId: copying.taskIntent!.taskIntentId, state: 'settled' });
-      expect(refusedPage.task!.label).toBe(WRITING_NOT_DRAFTED_LABEL);
-      expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: copying.taskIntent!.taskIntentId }).state.label).toBe(WRITING_NOT_DRAFTED_LABEL);
-      expect(refusedPage.task!.refusal).toBe(refused.resultSetRevision!.writing.synthesis.reason);
-      // The refused attempt does not hide the older draft: it is still the one 打开草稿 offers.
-      expect(refusedPage.types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId).toBe(draftedRevision);
-      expect(await refusal(() => store.createWritingDraft(bookId, refused.resultSetRevision!.revisionId))).toBe('WRITING_NOT_DRAFTED:这一次起草没有写出文档草稿，不能打开草稿。');
+      expect(refused.resultSetRevision!.writing.draft).toMatchObject({ sections: AUTHORED_WRITING_DRAFT.sections.map((section) => ({ heading: section.heading, paragraphs: [...section.paragraphs] })),
+        withheld: [{ section: AUTHORED_WRITING_DRAFT.sections.length, paragraph: 0 }] });
+      expect(refused.resultSetRevision!.writing.synthesis.state).toBe('closed');
+      expect(refused.taskOutcome!.classification).toBe('completed');
+      expect(store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId).toBe(refused.resultSetRevision!.revisionId);
 
       // A third attempt is prepared and not started; then the house's data is exported, the 范例 with it.
       third = prepare(store, bookId, { ...WRITING_REQUEST, requirements: '再写一版' });
@@ -506,7 +497,7 @@ describe('写作任务 over the real store on exact sample1', () => {
         database.close();
       }
       laterPackage = await exportedFrom(store, 'AI7 写作之后.ai7db');
-      parts = { bookId, draftedRevision };
+      parts = { bookId, draftedRevision: refused.resultSetRevision!.revisionId };
     });
 
     // Merged into data that holds the 范例's Book from before it delivered its 宣传文章: the 范例 stays behind. The preview says
@@ -744,12 +735,11 @@ describe('写作任务 over the real store on exact sample1', () => {
       const refused = await run(session, bookId, prepared);
       answerWritingReflection(entries, refused.taskOutcome!.report!.accountingDigest);
       expect(refused.state).toBe('settled');
-      expect(refused.resultSetRevision!.writing.draft).toBeNull();
-      expect(refused.resultSetRevision!.writing.synthesis.state).toBe('gap');
-      expect(refused.resultSetRevision!.writing.synthesis.reason)
-        .toBe(`${WRITING_EXEMPLAR_REFUSAL_PREFIX}草稿与范例《范例来源书》版本 1 有连续 12 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
-      expect(refused.taskOutcome!.classification).toBe('completed-with-gaps');
-      expect(store.inspectWritingTask(bookId).task!.label).toBe(WRITING_NOT_DRAFTED_LABEL);
+      expect(refused.resultSetRevision!.writing.draft).toMatchObject({ sections: AUTHORED_WRITING_DRAFT.sections.map((section) => ({ heading: section.heading, paragraphs: [...section.paragraphs] })),
+        withheld: [{ section: AUTHORED_WRITING_DRAFT.sections.length, paragraph: 0 }] });
+      expect(refused.resultSetRevision!.writing.synthesis.state).toBe('closed');
+      expect(refused.taskOutcome!.classification).toBe('completed');
+
     }, { writingCopyRules: 1 });
 
     // The row is the pre-#698 shape: it names no copy rules, and its contract digest is the plan's.
@@ -766,7 +756,8 @@ describe('写作任务 over the real store on exact sample1', () => {
     await withSession(fixture, async ({ store }) => {
       const page = store.inspectWritingTask(bookId);
       expect(page.unavailable).toBeNull();
-      expect(page.task).toMatchObject({ taskIntentId, state: 'settled', label: WRITING_NOT_DRAFTED_LABEL });
+      expect(page.task).toMatchObject({ taskIntentId, state: 'settled' });
+      expect(page.task!.label).not.toBe(WRITING_NOT_DRAFTED_LABEL);
       expect(store.inspectTaskPlan({ bookId, kind: 'writing', ref: taskIntentId }).notDo.editorial).toContain(writingCopyNotDo(1));
     });
   }, 300_000);

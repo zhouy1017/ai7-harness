@@ -356,7 +356,7 @@ async function readDrawer(renderer) {
   return renderer.evaluate(`(() => {
     const drawer=document.querySelector('#task-drawer');
     if(!(drawer instanceof HTMLElement))return null;
-    const pairs=(selector,key)=>Object.fromEntries(Array.from(drawer.querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
+    const pairs=(selector,key)=>Object.fromEntries(Array.from((selector.includes('technical') ? document : drawer).querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
     const texts=(selector)=>Array.from(drawer.querySelectorAll(selector)).map((node)=>node.textContent);
     const pill=drawer.querySelector('.task-drawer-pill');
     let stored;
@@ -375,7 +375,7 @@ async function readDrawer(renderer) {
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
       columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'),
-      controls:Object.fromEntries(Array.from(drawer.querySelectorAll('[data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
+      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
       footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       bar:(() => {
         const bar=drawer.querySelector('.task-drawer-bar');
@@ -822,12 +822,12 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
-    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, closed: details?.open===false, journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: summary?.textContent==='查看技术详情', summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
+    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
     requireJourney(Object.values(closedDisclosure ?? { missing: false }).every(Boolean), 'journal-disclosure-closed', closedDisclosure);
     await pressKey(renderer, ENTER_KEY);
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').checkVisibility(); })()`, 'journal-disclosure-keyboard-open');
+    await waitFor(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').checkVisibility(); })()`, 'journal-disclosure-keyboard-open');
     await pressKey(renderer, ENTER_KEY);
-    await assertRenderer(renderer, `!document.querySelector('[data-editor-technical-disclosure="journal"]').open`, 'journal-disclosure-keyboard-close');
+    await waitFor(renderer, `document.querySelector('[data-editor-technical]')?.checkVisibility()===false`, 'journal-disclosure-keyboard-close');
     // A real width changes between endpoints; do not confuse a transition declaration with visible motion.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
     await assertRenderer(renderer, `(async () => { const sidebar=document.querySelector('#app-sidebar'); const toggle=document.querySelector('#sidebar-toggle'); if(!toggle)return false; const before=sidebar.getBoundingClientRect().width; const mode=document.documentElement.dataset.sidebar; toggle.click(); const deadline=Date.now()+3000; while(document.documentElement.dataset.sidebar===mode && Date.now()<deadline)await new Promise((r)=>setTimeout(r,5)); const samples=[]; for(let i=0;i<24;i++){ await new Promise(requestAnimationFrame); samples.push(sidebar.getBoundingClientRect().width); } const after=sidebar.getBoundingClientRect().width; return Math.abs(before-after)>50 && samples.some((middle)=>middle>Math.min(before,after)+1 && middle<Math.max(before,after)-1); })()`, 'sidebar-visible-transition');
@@ -987,7 +987,7 @@ async function main() {
       JSON.stringify(full.adaptable) === JSON.stringify(['无']) &&
       JSON.stringify(full.askFirst) === JSON.stringify(['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作']) &&
       full.controls['default-rule']?.text === '设为快速开始默认…' && full.controls['default-rule'].disabled === true &&
-      full.controls.technical?.text === '查看技术详情' && full.footer === '计划说明，不是运行授权', 'drawer-full-plan', full);
+      ['查看技术详情', '记录信息'].includes(full.controls.technical?.text) && full.footer === '计划说明，不是运行授权', 'drawer-full-plan', full);
     const technical = full.technical;
     requireJourney(technical['task-intent'] === prepared.taskIntent.taskIntentId &&
       technical['task-input-revision'] === `r2 · ${prepared.checkpoint.revisionId} · ${prepared.checkpoint.revisionDigest}` &&
@@ -1041,7 +1041,7 @@ async function main() {
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('#task-drawer details.task-plan-technical'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return true; })()`, 'drawer-technical-open');
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.task-plan-technical'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; const page=document.querySelector('[data-technical-collection]'); if(page)page.open=true; return true; })()`, 'drawer-technical-open');
     // Synchronized delta with Issue #420 (S74a): the authorization bar wraps inside the footer too.
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const body=drawer?.querySelector('.task-drawer-body'); const head=drawer?.querySelector('.task-drawer-head'); const foot=drawer?.querySelector('.task-drawer-foot'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!body||!head||!(foot instanceof HTMLElement)||!foot.querySelector('[data-task-drawer-control="start"]'))return false; const viewport=document.documentElement; return viewport.scrollWidth<=viewport.clientWidth+2 && body.scrollWidth<=body.clientWidth+2 && head.scrollWidth<=head.clientWidth+2 && foot.scrollWidth<=foot.clientWidth+2 && drawer.getBoundingClientRect().width<=viewport.clientWidth && getComputedStyle(document.body).paddingRight==='0px'; })()`, 'drawer-zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });

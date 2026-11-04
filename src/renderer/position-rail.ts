@@ -1,3 +1,4 @@
+import { technicalLayerVisible } from './technical-layer.js';
 import type { ManuscriptRailProjection, RendererApi } from '../shared/protocol.js';
 
 /**
@@ -43,7 +44,7 @@ function el(tag: 'div' | 'button', className: string): HTMLElement {
 }
 
 function percent(proportion: number): string {
-  return `${(Math.min(1, Math.max(0, proportion)) * 100).toFixed(3)}%`;
+  return `${(Math.min(1, Math.max(0, proportion)) * 100).toFixed(technicalLayerVisible ? 3 : 0)}%`;
 }
 
 /**

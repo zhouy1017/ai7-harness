@@ -80,11 +80,11 @@ describe('declared local-tool turns', () => {
     expect(canonicalToolArguments('baseline_facts', {})).toBeNull();
     expect(canonicalToolArguments('baseline_facts', { query: ' 合成名 ' })).toEqual({ tool: 'baseline_facts', query: '合成名' });
     expect(canonicalToolArguments('baseline_facts', { query: '合'.repeat(200) })).toEqual({ tool: 'baseline_facts', query: '合'.repeat(200) });
-    expect(canonicalToolArguments('baseline_facts', { query: '合'.repeat(201) })).toBeNull();
+    expect(canonicalToolArguments('baseline_facts', { query: '合'.repeat(201) })).toEqual({ tool: 'baseline_facts', query: '合'.repeat(200) });
     expect(canonicalToolArguments('baseline_facts', { query: '   ' })).toBeNull();
     expect(canonicalToolArguments('term_table', {})).toEqual({ tool: 'term_table' });
     expect(canonicalToolArguments('term_table', { query: '' })).toBeNull();
-    expect(canonicalToolArguments('term_table', { query: '合成', other: true })).toBeNull();
+    expect(canonicalToolArguments('term_table', { query: '合成', other: true })).toEqual({ tool: 'term_table', query: '合成' });
   });
 
   it('answers sample1-sized baseline facts and term rows under the byte cap, and an unmatched query with an empty answer', async () => {

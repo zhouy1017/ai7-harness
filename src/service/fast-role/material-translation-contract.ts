@@ -1,4 +1,4 @@
-import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { extractModelJson, type SalvagedModelResult, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { MATERIAL_TRANSLATION_LABEL } from '../../shared/protocol.js';
 import { FastRoleError } from './fast-role-error.js';
 import { MATERIAL_TRANSLATION_KIND } from '../launch-policy.js';
@@ -8,8 +8,8 @@ import type { FastRoleExecutionOwner, FastRoleProvenance } from './fast-role-exe
  * Material Translation Contract v1 (Issue #892; editor-surfaces §8.4, V2-UX-KB-009): the frozen text 生成来源译文 carries. One
  * request sends a bounded batch of one 资料库 item's paragraphs — at most {@link MATERIAL_TRANSLATION_BATCH_PARAGRAPHS}, at
  * most {@link MATERIAL_TRANSLATION_BATCH_CODE_UNITS} characters together — numbered, and nothing else of the item, of a Book
- * or of the house. The answer is one Chinese translation per paragraph, numbered the same way; an answer that does not align
- * one for one is not recorded at all. A translation is the machine's 来源译文: labelled, attributed to the paragraph it
+ * or of the house. The answer is aligned by paragraph number; readable translations are retained while unmatched
+ * paragraphs remain untranslated. A translation is the machine's 来源译文: labelled, attributed to the paragraph it
  * translates, never in its place, never a quotation source.
  *
  * It is a Fast Interaction Role kind (`material-translation`): one bounded request per batch, no Run, through the Egress Gate
@@ -69,34 +69,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function sameKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
-  const own = Object.keys(value);
-  return own.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
-}
-
 /**
- * A translation answer read against the paragraphs it was asked for: exactly one JSON object holding `schema` and
- * `translations`, one entry per paragraph numbered 1 to n in order, each a non-empty well-formed text within the bound.
- * Anything else is `null`, and nothing of it is recorded.
+ * Read complete translations by request paragraph number. Null slots preserve missing paragraphs without guessing;
+ * salvage metadata describes rejected entries. No usable translation returns null.
  */
-export function readMaterialTranslationAnswer(text: string, count: number): string[] | null {
-  let parsed: unknown;
-  try {
-    const trimmed = text.trim();
-    const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/iu.exec(trimmed);
-    parsed = JSON.parse(fenced?.[1] ?? trimmed);
-  } catch {
-    return null;
+export function readMaterialTranslationAnswer(text: string, count: number): (Array<string | null> & SalvagedModelResult) | null {
+  const parsed = extractModelJson(text, { partial: true, arrayKey: 'translations' });
+  if (!Array.isArray(parsed?.translations)) return null;
+  const texts: Array<string | null> & SalvagedModelResult = Array.from({ length: count }, () => null);
+  const salvaged: Array<{ section: string; index: number; reason: string }> = [];
+  const seen = new Set<number>();
+  for (const [index, entry] of parsed.translations.entries()) {
+    const n = isRecord(entry) ? entry.n : null;
+    const validN = typeof n === 'number' && Number.isSafeInteger(n) && n >= 1 && n <= count;
+    const translation = isRecord(entry) && typeof entry.text === 'string' ? entry.text.trim() : '';
+    if (!validN || seen.has(n) || translation.length === 0 || !translation.isWellFormed()) {
+      salvaged.push({ section: 'translations', index, reason: 'paragraph-not-aligned' });
+      continue;
+    }
+    seen.add(n);
+    const clipped = translation.slice(0, MAX_MATERIAL_TRANSLATION_CODE_UNITS);
+    texts[n - 1] = clipped.isWellFormed() ? clipped : clipped.slice(0, -1);
+    if (translation.length > MAX_MATERIAL_TRANSLATION_CODE_UNITS) salvaged.push({ section: 'translations', index, reason: 'text-clipped' });
   }
-  if (!isRecord(parsed) || !sameKeys(parsed, ['schema', 'translations']) || parsed['schema'] !== MATERIAL_TRANSLATION_RESULT_SCHEMA ||
-      !Array.isArray(parsed['translations']) || parsed['translations'].length !== count) return null;
-  const texts: string[] = [];
-  for (const [index, entry] of (parsed['translations'] as unknown[]).entries()) {
-    if (!isRecord(entry) || !sameKeys(entry, ['n', 'text']) || entry['n'] !== index + 1 || typeof entry['text'] !== 'string') return null;
-    const translation = entry['text'].trim();
-    if (translation.length === 0 || translation.length > MAX_MATERIAL_TRANSLATION_CODE_UNITS || !translation.isWellFormed()) return null;
-    texts.push(translation);
-  }
+  for (const [index, translation] of texts.entries()) if (translation === null) salvaged.push({ section: 'paragraphs', index, reason: 'paragraph-missing' });
+  if (texts.every((entry) => entry === null)) return null;
+  if (salvaged.length > 0) Object.defineProperty(texts, 'salvaged', { value: salvaged, enumerable: false });
   return texts;
 }
 
@@ -123,7 +121,7 @@ export interface MaterialTranslator {
   /** Why 生成来源译文 cannot be asked for the item whose original has this SHA-256; `null` when it can. */
   refusal(originalSha256: string): string | null;
   translate(originalSha256: string, paragraphs: readonly string[], step: string): Promise<
-    | { readonly kind: 'translated'; readonly texts: readonly string[]; readonly made: MaterialTranslationMade }
+    | { readonly kind: 'translated'; readonly texts: ReadonlyArray<string | null>; readonly salvaged?: SalvagedModelResult['salvaged']; readonly made: MaterialTranslationMade }
     | { readonly kind: 'failed'; readonly message: string; readonly provenance?: FastRoleProvenance }
   >;
 }
@@ -165,6 +163,7 @@ export function materialTranslator(
       return {
         kind: 'translated',
         texts,
+        ...(texts.salvaged === undefined ? {} : { salvaged: texts.salvaged }),
         made: {
           model: answer.binding.model,
           route: answer.binding.route,

@@ -285,7 +285,7 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     expect(copied).toMatchObject({ exemplar: 0, kind: 'near' });
     expect(copied?.kind === 'near' ? copied.share : 0).toBeGreaterThanOrEqual(EXEMPLAR_SHINGLE_SHARE);
     const detail = parse(synthesis([edited(source, 11)]), exemplar);
-    expect(detail.ok ? '' : detail.detail).toMatch(new RegExp(`^草稿与范例《范例书》版本 3 的 ${EXEMPLAR_SHINGLE} 字片段重合达 \\d+%（不少于 25% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    expect(detail.ok ? detail.result.withheld?.[0]?.reason ?? '' : detail.detail).toMatch(new RegExp(`^草稿与范例《范例书》版本 3 的 ${EXEMPLAR_SHINGLE} 字片段重合达 \\d+%（不少于 25% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
     // The known limit: an edit every five characters or fewer leaves no shingle in common.
     expect(exemplarCopied(draft(edited(source, 5)), exemplar)).toBeNull();
   });
@@ -300,7 +300,7 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     expect(copied).toMatchObject({ exemplar: 0, kind: 'span' });
     expect(copied?.kind === 'span' ? copied.share : 0).toBeGreaterThanOrEqual(EXEMPLAR_SPAN_SHARE);
     const detail = parse(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '标题', sections: [{ heading: '一', paragraphs: [long.slice(0, 500), edited(source.slice(0, 590), 12), long.slice(500, 1000)] }] }), exemplar);
-    expect(detail.ok ? '' : detail.detail).toMatch(new RegExp(`^草稿与范例《范例书》版本 3 在草稿的一段 ${EXEMPLAR_SPAN} 字中，${EXEMPLAR_SHINGLE} 字片段重合达 \\d+%（不少于 30% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    expect(detail.ok && detail.result.withheld?.[0]).toMatchObject({ section: 0, paragraph: 1 });
     // Edits every nine characters are still caught inside a long draft; every eight pass there (a known limit).
     const within = (period: number) => ({ title: '标题', sections: [{ heading: '一', paragraphs: [long.slice(0, 900), edited(source.slice(0, 600), period), long.slice(900)] }] });
     expect(exemplarCopied(within(9), exemplar)).toMatchObject({ exemplar: 0, kind: 'span' });
@@ -362,11 +362,11 @@ describe('Writing Contract v1 — the reference bound (KB-004)', () => {
     expect(exemplarCopied(draft(EXEMPLAR), input({ exemplars: [] }))).toBeNull();
   });
 
-  it('is part of the parse: a copying synthesis is refused whole, never trimmed', () => {
-    const parsed = parse(synthesis([EXEMPLAR]), input());
-    expect(parsed).toMatchObject({ ok: false, code: 'exemplar-copied' });
-    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《范例书》版本 2 有连续 ${EXEMPLAR_COPY_WINDOW} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
-    expect(parse(synthesis(['全新的文字，与范例无关。']), input())).toMatchObject({ ok: true });
+  it('drops a copied passage while preserving independent paragraphs', () => {
+    const parsed = parse(synthesis(['全新的文字，与范例无关。', EXEMPLAR]), input());
+    expect(parsed).toMatchObject({ ok: true, result: { sections: [{ paragraphs: ['全新的文字，与范例无关。'] }], withheld: [{ section: 0, paragraph: 1 }] } });
+    expect(parsed.ok && parsed.result.salvaged).toContainEqual({ section: 'sections.0.paragraphs', index: 1, reason: 'reference-copied' });
+    expect(parse(synthesis([EXEMPLAR]), input()).ok).toBe(false);
   });
 });
 
@@ -395,7 +395,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_ZH, '这部作品讲述了一位乡村教师的半生经历。书中人物形象鲜明，情节跌宕起伏，语言质朴而有力量。');
     expect(exemplarCopied(copying, one(CHINESE))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'character', run: EXEMPLAR_COPY_WINDOW_ACROSS, breaks: ['punctuation'] });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(CHINESE));
-    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WINDOW_ACROSS} 个字以上相同；范例只参照，不复制，这一段没有采用。`);
   });
 
   it('refuses a clause copied whole within its punctuation: twelve characters', () => {
@@ -415,7 +415,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_EN, 'This novel follows one family over many years and asks what we owe to the land that raised us.');
     expect(exemplarCopied(copying, one(ENGLISH, 'Distant Hills'))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(ENGLISH, 'Distant Hills'));
-    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《Distant Hills》版本 1 有连续 ${EXEMPLAR_COPY_WORDS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《Distant Hills》版本 1 有连续 ${EXEMPLAR_COPY_WORDS} 个外文词以上相同；范例只参照，不复制，这一段没有采用。`);
     // Inside a Chinese draft, too.
     expect(exemplarCopied(draft(`这本书追问：what we owe to the land that raised us。`), one(ENGLISH))).toMatchObject({ kind: 'verbatim', unit: 'word' });
   });
@@ -424,7 +424,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     const copying = draft(OWN_EN, 'Told in alternating voices, it follows the family through drought, war and peace.');
     expect(exemplarCopied(copying, one(ENGLISH))).toEqual({ exemplar: 0, kind: 'verbatim', unit: 'word', run: EXEMPLAR_COPY_WORDS_ACROSS, breaks: ['punctuation'] });
     const parsed = parse(synthesis(copying.sections[0]!.paragraphs), one(ENGLISH));
-    expect(parsed.ok ? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这份草稿不予采用。`);
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toBe(`草稿与范例《远山》版本 1 有跨标点连续 ${EXEMPLAR_COPY_WORDS_ACROSS} 个外文词以上相同；范例只参照，不复制，这一段没有采用。`);
   });
 
   it('reads a hyphenated word as one word, and a curly apostrophe as a straight one', () => {
@@ -507,7 +507,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     expect(copied).toMatchObject({ exemplar: 0, kind: 'near', unit: 'word' });
     expect(copied?.kind === 'near' ? copied.share : 0).toBeGreaterThanOrEqual(EXEMPLAR_SHINGLE_SHARE);
     const parsed = parse(synthesis(paragraphs(editedWords(source, 6).slice(0, 100))), exemplar);
-    expect(parsed.ok ? '' : parsed.detail).toMatch(new RegExp(`^草稿与范例《远山》版本 1 的 ${EXEMPLAR_WORD_SHINGLE} 词片段重合达 \\d+%（不少于 25% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    expect(parsed.ok ? parsed.result.withheld?.[0]?.reason ?? '' : parsed.detail).toMatch(new RegExp(`^草稿与范例《远山》版本 1 的 ${EXEMPLAR_WORD_SHINGLE} 词片段重合达 \\d+%（不少于 25% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
     // An edit every four words or fewer leaves no shingle in common.
     expect(exemplarCopied(draft(editedWords(source, 4).join(' ')), exemplar)).toBeNull();
   });
@@ -521,7 +521,7 @@ describe('Writing Contract v1 — the reference bound on realistic prose (#698)'
     expect(copied).toMatchObject({ exemplar: 0, kind: 'span', unit: 'word' });
     const sections = [long.slice(0, 90), editedWords(source.slice(0, 95), 7), long.slice(90, 180)].map((words, index) => ({ heading: `Part ${index + 1}`, paragraphs: paragraphs(words) }));
     const parsed = parse(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '标题', sections }), exemplar);
-    expect(parsed.ok ? '' : parsed.detail).toMatch(new RegExp(`^草稿与范例《远山》版本 1 在草稿的一段 ${EXEMPLAR_WORD_SPAN} 个外文词中，${EXEMPLAR_WORD_SHINGLE} 词片段重合达 \\d+%（不少于 30% 即算照抄）；范例只参照，不复制，这份草稿不予采用。$`, 'u'));
+    expect(parsed.ok && parsed.result.withheld?.length).toBeGreaterThan(0);
     // A word span never spans Chinese text (#704 P2-1): under Chinese headings the copied section's 95 words hold no 130-word span.
     const chinese = sections.map((section, index) => ({ ...section, heading: `第${index + 1}部分` }));
     expect(exemplarCopied({ title: '标题', sections: chinese }, exemplar)).toBeNull();
@@ -566,40 +566,20 @@ describe('Writing Contract v1 — the span rule\'s floor inside a long draft (#6
 });
 
 describe('Writing Contract v1 — the parsers', () => {
-  it('admits a synthesis of the closed shape within its bounds and nothing else', () => {
-    const ok = parse(synthesis(['一段。']), input({ exemplars: [] }));
-    expect(ok).toEqual({ ok: true, result: { schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '合成标题', sections: [{ heading: '一', paragraphs: ['一段。'] }] } });
-    const refusedCode = (text: string) => { const parsed = parse(text, input({ exemplars: [] })); return parsed.ok ? 'ok' : parsed.code; };
-    expect(refusedCode('not json')).toBe('not-json');
-    expect(refusedCode(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '题', sections: [{ heading: '一', paragraphs: ['段'] }], extra: 1 }))).toBe('schema-invalid');
-    expect(refusedCode(synthesis(['段'], '题'.repeat(61)))).toBe('schema-invalid');
-    expect(refusedCode(synthesis(['段'], ' 题'))).toBe('schema-invalid');
-    expect(refusedCode(synthesis([]))).toBe('schema-invalid');
-    expect(refusedCode(synthesis(['段'.repeat(601)]))).toBe('schema-invalid');
-    expect(refusedCode(synthesis(['一行\n两行']))).toBe('schema-invalid');
-    expect(refusedCode(synthesis(Array.from({ length: 7 }, () => '段')))).toBe('schema-invalid');
-    expect(refusedCode(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '题', sections: [] }))).toBe('schema-invalid');
-    expect(refusedCode(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '题', sections: Array.from({ length: 9 }, () => ({ heading: '一', paragraphs: ['段'] })) }))).toBe('schema-invalid');
-    expect(refusedCode(JSON.stringify({ schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: '题', sections: [{ heading: '标'.repeat(31), paragraphs: ['段'] }] }))).toBe('schema-invalid');
-    expect(refusedCode(JSON.stringify({ schema: 'ai7.writing.synthesis-result/2', title: '题', sections: [{ heading: '一', paragraphs: ['段'] }] }))).toBe('schema-invalid');
-    expect(refusedCode(`\`\`\`json\n${synthesis(['段'])}\n\`\`\``)).toBe('ok');
+  it('salvages sections independently and splits multiline paragraphs', () => {
+    const parsed = parse('说明```json\n' + JSON.stringify({ schema: 'other', title: ' 标题 ', sections: [null,
+      { heading: '部分', paragraphs: [null, '一行\n两行', '段'.repeat(601)] }], extra: true }) + '\n```', input({ exemplars: [] }));
+    expect(parsed).toMatchObject({ ok: true, result: { title: '标题', sections: [{ heading: '部分', paragraphs: ['一行', '两行', '段'.repeat(600)] }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ section: 'sections', index: 0, reason: 'section-invalid' })]));
+    expect(parse('{}', input({ exemplars: [] })).ok).toBe(false);
   });
 
-  it('admits a unit result of known kinds within the unit, and refuses the rest', () => {
-    const unit = (passages: unknown, unitOrdinal = 2) => JSON.stringify({ schema: WRITING_UNIT_RESULT_SCHEMA, unitOrdinal, passages });
-    const passage = { kind: 'highlight', note: '看点', blockOrdinals: [1, 3] };
-    expect(parseWritingUnitResult(unit([passage]), { unitOrdinal: 2, blockCount: 3 })).toMatchObject({ ok: true, result: { unitOrdinal: 2, passages: [passage] } });
-    const failure = (text: string, blockCount = 3) => { const parsed = parseWritingUnitResult(text, { unitOrdinal: 2, blockCount }); return parsed.ok ? 'ok' : parsed.code; };
-    expect(failure('{')).toBe('not-json');
-    expect(failure(unit([passage], 3))).toBe('unit-mismatch');
-    expect(failure(unit([{ ...passage, kind: 'quote' }]))).toBe('kind-unknown');
-    expect(failure(unit([{ ...passage, blockOrdinals: [4] }]))).toBe('block-out-of-unit');
-    expect(failure(unit([{ ...passage, blockOrdinals: [] }]))).toBe('schema-invalid');
-    expect(failure(unit([{ ...passage, blockOrdinals: [1, 1] }]))).toBe('schema-invalid');
-    expect(failure(unit([{ ...passage, note: '注'.repeat(201) }]))).toBe('schema-invalid');
-    expect(failure(unit(Array.from({ length: 13 }, () => passage)))).toBe('schema-invalid');
-    expect(failure(unit([{ ...passage, extra: true }]))).toBe('schema-invalid');
-    expect(failure(unit([]))).toBe('ok');
+  it('salvages passage kinds and blocks with complete partial entries', () => {
+    const good = { kind: 'highlight', note: '看点', blockOrdinals: [1] };
+    const parsed = parseWritingUnitResult('{"passages":[' + JSON.stringify(good) + ',' + JSON.stringify({ ...good, kind: 'unknown' }) + ',' + JSON.stringify({ ...good, kind: '人物', blockOrdinals: ['2', 2, 99] }) + ',{"note":', { unitOrdinal: 2, blockCount: 3 });
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 2, passages: [good, { kind: 'character', note: '看点', blockOrdinals: [2] }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, reason: 'kind-unknown' }), expect.objectContaining({ index: 2, reason: 'block-out-of-unit' })]));
+    expect(parseWritingUnitResult('not json', { unitOrdinal: 2, blockCount: 3 }).ok).toBe(false);
   });
 
   it('tells its own headers apart from every other kind\'s', () => {
@@ -740,7 +720,7 @@ describe('资料库 under 允许参考 — `ai7.writing.prompt-contract/3` (Issu
     for (const [given, exemplar, material] of cases) {
       const byExemplar = exemplarCopied(given, exemplar);
       const byMaterial = referenceCopied(given, material);
-      expect(byMaterial === null ? null : { ...byMaterial, source: undefined }).toEqual(byExemplar === null ? null : { ...byExemplar, source: undefined });
+      expect(byMaterial === null ? null : { ...byMaterial, source: undefined, position: undefined }).toEqual(byExemplar === null ? null : { ...byExemplar, source: undefined, position: undefined });
       if (byMaterial !== null) expect(byMaterial.source).toBe('material');
     }
     expect(cases.filter(([given, , material]) => referenceCopied(given, material) !== null)).toHaveLength(5);
@@ -758,7 +738,7 @@ describe('资料库 under 允许参考 — `ai7.writing.prompt-contract/3` (Issu
     // The second item is named as the second.
     const second = withMaterials([{ title: '无关资料', paragraphs: [synthetic(40, 0x8000)] }, MATERIAL]);
     const named = referenceCopied(draft(`${FRESH}在战火中保存青铜器的经过`), second)!;
-    expect(named).toMatchObject({ exemplar: 1, source: 'material' });
+    expect(named).toMatchObject({ exemplar: 1, source: 'material', position: { section: 0, paragraph: 0 } });
     expect(exemplarCopyDetail(named, second)).toContain('《参考资料甲》');
     // A run the Book's own reference words hold is the Book's, for an item as for a 范例.
     const own = withMaterials([{ title: '甲', paragraphs: ['一位学者收到一封古怪的信，信里只有四个字。'] }], { exemplars: [] });
@@ -873,4 +853,9 @@ describe('the draft and the page\'s words', () => {
     expect(WRITING_STATUS.quickNoPlan).toBe('这份计划还没有冻结，没有按规则开始；请看过计划后再开始。');
     expect(WRITING_QUICK_PICK_TYPE).toBe('选好类型后显示：快速开始按这一类文档的默认执行规则开始。');
   });
+});
+
+it('retains a complete section when the following section is truncated', () => {
+  const parsed = parseWritingSynthesis('说明```JSON\n{"sections":[{"heading":"保留","paragraphs":["独立段落。"]},{"heading":', writingContract(input({ exemplars: [] })));
+  expect(parsed).toMatchObject({ ok: true, result: { title: '', sections: [{ heading: '保留', paragraphs: ['独立段落。'] }] } });
 });

@@ -653,7 +653,7 @@ const READ_PAGE = `(() => {
         reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
         time: item.querySelector('.global-attention-time')?.textContent ?? null,
-        technical: item.querySelector('details.technical-details')?.open ?? null,
+        technical: (() => { const layer=item.querySelector('details.technical-details'); return layer === null ? null : layer.hidden ? false : layer.open; })(),
       })),
     })),
   };

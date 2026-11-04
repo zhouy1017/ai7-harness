@@ -71,7 +71,10 @@ describe('provider-free local ReviewRun', () => {
     const options: LocalCheckOptions = { ...OPTIONS, punctuation: 'off', tables: { characters: false, variantWords: true, houseWordList: house.pin,
       bookTerms: [{ kind: 'person', preferred: '合成正名', variants: ['合成异称'] }] } };
     const fetchTrap = vi.fn(() => { throw new Error('network'); }); vi.stubGlobal('fetch', fetchTrap);
-    const prepared = prepare(book, policy, options); authorize(book, prepared);
+    const prepared = prepare(book, policy, options);
+    expect(prepared.run.categories[0]!.basis.localChecks).toEqual({ punctuationEnabled: false, numerals: 'disabled' });
+    expect(prepared.plan.scope.reference).toContainEqual(expect.stringContaining('；标点：未启用；数字：未启用'));
+    authorize(book, prepared);
     // Editing the current House catalog cannot change this Run's already frozen snapshot.
     const current = store.inspectHouseWordList({ versionId: null, entryOffset: 0, historyOffset: 0 });
     store.saveHouseWordList({ expectedCurrent: { versionId: house.pin.versionId, digest: house.pin.digest }, sourceKind: 'editor-entry', entries: current.entries.map((entry) => ({ ...entry, enabled: false })) });

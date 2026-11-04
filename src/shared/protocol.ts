@@ -2640,8 +2640,9 @@ export interface ModelServiceConnectionProjection {
   connectionTest?: ModelConnectionTestStatus | null;
 }
 
-/** Sanitized exact-binding text-probe result. No response, error body or credential value. */
+/** Exact-binding public text-probe result; only its bounded reply and provenance are retained. */
 export interface ModelConnectionTestStatus {
+  responseText?: string;
   modelId: string;
   credentialUpdatedAt: string;
   testedAt: string;
@@ -4665,6 +4666,7 @@ export type DialogueAnswerState = 'answering' | 'completed' | 'stopped' | 'inter
 /** One complete semantic fragment of an answer (DIALOG-006): a whole sentence, list item or row, never a broken tail. */
 export interface DialogueFragmentProjection {
   readonly text: string;
+  readonly incomplete?: boolean;
   /** A line break follows it: the next fragment starts a new paragraph, item or row. */
   readonly breakAfter: boolean;
 }

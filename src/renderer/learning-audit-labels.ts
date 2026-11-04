@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import {
   LEARNING_INFLUENCE_RESULT_MARKER,
   LEARNING_INFLUENCE_WITHDRAWN_LABEL,
@@ -131,7 +132,7 @@ export const LEARNING_LINEAGE_TASK_USE: Readonly<Record<LearningLineageTaskProje
 
 /** One 使用过的任务 (Issue #912): the 审阅 category, the version it read, where it stands, and its marker. */
 export function learningLineageTaskLine(task: Pick<LearningLineageTaskProjection, 'label' | 'versionOrdinal' | 'use' | 'marked'>): string {
-  return `${task.label} · 参考 v${task.versionOrdinal} · ${LEARNING_LINEAGE_TASK_USE[task.use]}${task.marked ? ` · 已标上「${LEARNING_INFLUENCE_RESULT_MARKER}」` : ''}`;
+  return `${task.label} · 参考 ${technicalWords(`v${task.versionOrdinal}`)} · ${LEARNING_LINEAGE_TASK_USE[task.use]}${task.marked ? ` · 已标上「${LEARNING_INFLUENCE_RESULT_MARKER}」` : ''}`;
 }
 
 export function learningLineageEarlierTasks(count: number): string {

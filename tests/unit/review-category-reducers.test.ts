@@ -84,6 +84,14 @@ describe('bounded review cross-chapter synthesis', () => {
     expect(reduced.reducerClosure.state).toBe('closed-with-gaps');
   });
 
+  it('drops unknown evidence only, adds its anchor and accepts an optional clause', () => {
+    const { payload } = synthesisFixture();
+    const parsed = parseReviewCrossChapterResult('说明```JSON\n{"schema":"other","extra":true,"findings":[' +
+      JSON.stringify({ anchorRef: 'e1', evidenceRefs: ['unknown'], severity: '严重', note: '保留。' }) + ',{"anchorRef":', payload, []);
+    expect(parsed).toMatchObject({ ok: true, result: { findings: [{ anchor: payload.evidence[0], evidence: [payload.evidence[0]], severity: 'must', clauseId: null }] } });
+    expect(parsed.ok && parsed.result.salvaged).toContainEqual({ section: 'findings', index: 0, reason: 'evidence-normalized' });
+  });
+
   it('withholds stale and out-of-scope baseline words from the model input', () => {
     const { input, baseline } = synthesisFixture();
     const stale = reviewCrossChapterInput(input, { ...baseline, manuscriptPin: { ...baseline.manuscriptPin, revisionDigest: 'b'.repeat(64) } }, 'c'.repeat(64));
@@ -168,6 +176,7 @@ describe('a review category reduction', () => {
     { name: 'never searches outside the unit', texts: ['没有', '仍然没有'], ordinal: 1, outside: true, state: 'quote-not-found' },
     { name: 'rejects an identical resolved replacement', texts: ['没有', '目标'], ordinal: 1, replacement: '目标', state: 'replacement-identical' },
     { name: 'preserves Exact Fetch exclusion after recovery', texts: ['没有', '目标'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
+    { name: 'preserves Exact Fetch exclusion before whole-block fallback', texts: ['没有', '仍然没有'], ordinal: 1, notFetched: true, state: 'not-exact-fetched' },
   ])('$name (#1022)', ({ texts, ordinal, missing, repeatedId, outside, replacement, notFetched, state }) => {
     const inputs = texts.map((text, index) => block(index + 1, 'paragraph', text));
     const unit = { ...manifest.units[0]!, blockIds: inputs.map((entry) => entry.blockId), overlapBlockIds: repeatedId ? [inputs[1]!.blockId] : [] };
@@ -176,9 +185,16 @@ describe('a review category reduction', () => {
     const result = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings: [{ quote: '目标', blockOrdinal: ordinal, severity: 'should' as const, note: '合成边界回归', replacement: replacement ?? '替换' }] };
     if (notFetched) markRetrievalResult(result, [{ collection: 'findings', ordinal: 0 }]);
     const reduction = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest: { ...manifest, units: [unit] }, blocks: records, outcomes: [{ unitOrdinal: 1, state: 'closed', result }] });
-    if (state === 'verified') {
+    if (state !== 'not-exact-fetched') {
       expect(reduction.excluded).toEqual([]);
       expect(reduction.findings).toHaveLength(1);
+      const finding = reduction.findings[0]!;
+      if (state === 'quote-ambiguous') {
+        expect(finding.note).toContain('锚点不唯一');
+        expect(finding.replacement).toBeNull();
+      }
+      if (state === 'replacement-identical') expect(finding.replacement).toBeNull();
+      if (outside) expect(finding.blockId).not.toBe(block(99, 'paragraph', '目标').blockId);
     } else {
       expect(reduction.findings).toEqual([]);
       expect(reduction.excluded.map((entry) => entry.reason)).toEqual([state]);
@@ -200,11 +216,11 @@ describe('a review category reduction', () => {
     expect(validated.rejected.map((entry) => [entry.collection, entry.ordinal])).toEqual([['findings', 1]]);
     const parsed = parseReviewCategoryUnitResult(validated.text, { unitOrdinal: 1, blockCount: 5, output: 'change-suggestion', clauseIds: ['typos-and-usage/1'] });
     if (!parsed.ok) throw new Error(parsed.code);
-    expect(parsed.result.acceptedIndexes).toEqual([1, 2]);
+    expect(parsed.result.acceptedIndexes).toEqual([0, 1, 2]);
     markRetrievalResult(parsed.result, validated.rejected);
     const reduction = reduceReviewCategory({ categoryId: 'typos-and-usage', manifest, blocks: byId, outcomes: [{ unitOrdinal: 1, state: 'closed', result: parsed.result }] });
-    expect(reduction.findings.map((finding) => finding.quote)).toEqual(['秤杆']);
-    expect(reduction.excluded.map((entry) => [entry.reason, entry.findingIndex ?? entry.quote])).toEqual([['contract-schema-invalid', 0], ['not-exact-fetched', located.quote]]);
+    expect(reduction.findings.map((finding) => finding.quote)).toEqual([located.quote, '秤杆']);
+    expect(reduction.excluded.map((entry) => [entry.reason, entry.findingIndex ?? entry.quote])).toEqual([['not-exact-fetched', located.quote]]);
   });
   it('reads two units over the two synthetic sections', () => {
     expect(manifest.units).toHaveLength(2);
@@ -212,27 +228,15 @@ describe('a review category reduction', () => {
     expect(manifest.units[0]!.blockIds).toEqual(blocks.slice(0, 5).map((entry) => entry.blockId));
   });
 
-  it('anchors every finding exactly or excludes it with its reason, and merges duplicates', () => {
+  it('preserves anchored and disclosed annotations while merging duplicates', () => {
     const reduction = reduce();
-    expect(reduction.findings.map((finding) => [finding.quote, finding.replacement, finding.mergedFrom.length])).toEqual([
-      ['人来人往', '熙熙攘攘', 1],
-      ['人来人往', '摩肩接踵', 0],
-    ]);
-    const first = reduction.findings[0]!;
-    expect(first.sourceRange).toEqual({ blockId: blocks[1]!.blockId, fromGrapheme: 6, toGrapheme: 10 });
-    expect(Array.from(blocks[1]!.text).slice(first.sourceRange.fromGrapheme!, first.sourceRange.toGrapheme!).join('')).toBe('人来人往');
-    expect(first.mergedFrom).toEqual([{ unitOrdinal: 1, blockOrdinal: 2, findingOrdinal: 4 }]);
-    expect(reduction.excluded.map((excluded) => excluded.reason)).toEqual(['quote-ambiguous', 'quote-not-found', 'replacement-identical']);
-    expect(reduction.findingCounts).toEqual({
-      listed: 6,
-      bySeverity: [{ severity: 'must', count: 2 }, { severity: 'should', count: 2 }, { severity: 'note', count: 2 }],
-      located: 4,
-      excluded: 3,
-      merged: 1,
-    });
-    // An excluded finding holds no source range, and the assurance axis says some findings failed to anchor.
-    expect(reduction.assurance.state).toBe('limited');
-    expect(reduction.assurance.unresolvedItemCount).toBe(2);
+    expect(reduction.findings).toHaveLength(5);
+    expect(reduction.findings[0]!.sourceRange).toEqual({ blockId: blocks[1]!.blockId, fromGrapheme: 6, toGrapheme: 10 });
+    expect(reduction.findings[0]!.mergedFrom).toEqual([{ unitOrdinal: 1, blockOrdinal: 2, findingOrdinal: 4 }]);
+    expect(reduction.findings.some((finding) => finding.note.includes('锚点不唯一'))).toBe(true);
+    expect(reduction.findings.some((finding) => finding.note.includes('引文未逐字匹配') && finding.replacement === null)).toBe(true);
+    expect(reduction.excluded).toEqual([]);
+    expect(reduction.findingCounts).toMatchObject({ listed: 6, located: 6, excluded: 0, merged: 1 });
   });
 
   it('mints the same identities for the same findings, and never shares one across categories', () => {

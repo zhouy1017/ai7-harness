@@ -1,4 +1,5 @@
 import { filterChoices as renderFilterChoices } from './components/controls.js';
+import { identityWords } from './technical-layer.js';
 import type {
   LearningAuditBookProjection,
   LearningAuditChoicesProjection,
@@ -109,7 +110,7 @@ export interface MountLearningAuditOptions {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }

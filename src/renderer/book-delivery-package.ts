@@ -1,4 +1,5 @@
 import { windowStep } from './components/controls.js';
+import { identityWords } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
   MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED,
@@ -111,7 +112,7 @@ export interface BookDeliveryPackageSurface {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }

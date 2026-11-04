@@ -1,4 +1,5 @@
 import { windowStep } from './components/controls.js';
+import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -1319,7 +1320,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       identities.append(el('dt', undefined, term), el('dd', undefined, value));
     }
     technical.append(identities);
-    panel.append(technical);
+    panel.append(technicalDisclosure(technical));
 
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);

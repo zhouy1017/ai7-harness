@@ -335,6 +335,15 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  /** Transport-only composed fragments: source/editor text is always a string, metadata is explicitly marked. */
+  wording?: {
+    goal?: ReadonlyArray<string | { technical: string }>;
+    procedure?: ReadonlyArray<string | { technical: string }>;
+    reference?: ReadonlyArray<ReadonlyArray<string | { technical: string }>>;
+    scopeSend?: ReadonlyArray<string | { technical: string }>;
+    serviceSend?: ReadonlyArray<string | { technical: string }>;
+    outcomes?: ReadonlyArray<ReadonlyArray<string | { technical: string }>>;
+  };
   /** Transport-only pages; derivation and authority records remain complete. String cursors count Unicode code points. */
   listPages?: Readonly<Record<string, { shown: number; total: number; nextOrdinal: number | null; digest: string }>>;
   readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;

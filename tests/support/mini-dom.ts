@@ -118,6 +118,12 @@ export class MiniElement {
       }
     }
   }
+  prepend(...nodes: Array<MiniElement | string>): void {
+    const added = new MiniElement('fragment'); added.append(...nodes);
+    const incoming = [...added.children];
+    for (const node of incoming) { node.remove(); node.parentElement = this; }
+    this.children.unshift(...incoming);
+  }
   replaceChildren(...nodes: Array<MiniElement | string>): void {
     for (const child of this.children) child.parentElement = null;
     this.children.length = 0;

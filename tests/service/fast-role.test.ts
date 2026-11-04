@@ -193,7 +193,7 @@ describe('润色这段 on the authored fixture', () => {
     const digest = polishRequestDigestOf(store, book);
     const cases: Array<[ResolvedModelFixture, Partial<EditorialPolishProjection>]> = [
       [inMemoryFixture('polish-prose', digest, unitResult('这段可以这样改：……')),
-        { state: 'withheld', label: '模型的回答不是约定格式的建议列表；没有新建修改建议。', markIds: [] }],
+        { state: 'withheld', label: '模型回答无法读出任何可用条目；没有新建修改建议。', markIds: [] }],
       [inMemoryFixture('polish-none', digest, unitResult(JSON.stringify({ schema: 'ai7.editorial-polish.result/1', suggestions: [] }))),
         { state: 'nothing-to-suggest', label: '这段文字没有需要润色的地方；没有新建修改建议。', markIds: [] }],
       [inMemoryFixture('polish-unknown', digest, { kind: 'outcome-unknown', message: '回答没有完整传回。' }),
@@ -257,12 +257,12 @@ describe('基于当前稿件重新生成建议 on the authored fixture', () => {
     }
     const fast = requests(inMemoryFixture('regenerate-prose', digest, unitResult('可以改成另一种说法。')));
     expect(await settledRegeneration(fast, fast.requests.regenerate(binding))).toMatchObject({
-      outcome: 'withheld', label: '模型的回答不是约定格式的建议文字；没有改动解决草稿。',
+      outcome: 'drafted',
     });
     const unknown = requests(inMemoryFixture('regenerate-unknown', digest, { kind: 'outcome-unknown', message: '回答没有完整传回。' }));
     expect(await settledRegeneration(unknown, unknown.requests.regenerate(binding))).toMatchObject({ outcome: 'failed', outcomeUnknown: true });
-    // None of them saved a draft.
-    expect(conflictOf(store, book, markId).draft).toBeNull();
+    // A later unknown reply retains the already received draft.
+    expect(conflictOf(store, book, markId).draft!.resolutions[unitIndex]).toEqual({ resolution: 'edited', text: '可以改成另一种说法。' });
   });
 
   it('refuses a unit that is not a conflict, a stale basis, and a draft whose paragraph moved while the request was in flight', async () => {

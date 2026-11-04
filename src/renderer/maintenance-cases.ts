@@ -1,3 +1,4 @@
+import { technicalWords, identityWords } from './technical-layer.js';
 import {
   MAINTENANCE_CLASSIFICATIONS,
   MAX_MAINTENANCE_ERRATA_CHARACTERS,
@@ -118,7 +119,7 @@ interface OpenCase {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
   if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
@@ -434,7 +435,7 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     if (current.inspection?.beforeRevision !== undefined) panel.append(inspectionButton(current, '返回最新记录', 'beforeRevision', null));
     if (projection.inspectedErrata !== null) {
       const inspected = el('section', 'maintenance-inspected-errata');
-      inspected.append(el('h6', undefined, `查看勘误 · 版本 ${projection.inspectedErrata.version}`),
+      inspected.append(el('h6', undefined, `查看勘误${technicalWords(` · 版本 ${projection.inspectedErrata.version}`)}`),
         el('p', 'maintenance-inspected-errata-body', projection.inspectedErrata.body),
         inspectionButton(current, '关闭勘误版本', 'errataVersionId', null));
       panel.append(inspected);

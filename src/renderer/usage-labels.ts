@@ -1,3 +1,4 @@
+import { modelLabelWords } from './technical-layer.js';
 import {
   MODEL_SERVICE_ROUTE_BINDINGS,
   MODEL_SERVICE_ROUTES,
@@ -95,7 +96,7 @@ export function usageRouteLabel(route: string | null): string {
   if (route === 'openai-platform') return 'OpenAI 官方';
   if ((MODEL_SERVICE_ROUTES as readonly string[]).includes(route)) {
     const binding = MODEL_SERVICE_ROUTE_BINDINGS[route as ModelServiceRouteId];
-    return `${binding.providerLabel} · ${binding.modelLabel}`;
+    return `${binding.providerLabel} · ${modelLabelWords(binding)}`;
   }
   if (route === 'ai7-local-deterministic') return '本地确定性路线（开发与测试）';
   return route;

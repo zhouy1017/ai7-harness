@@ -35,10 +35,11 @@ function frameOf(raw: string): SseFrame | null {
  */
 export async function* sseFrames(response: DeepSeekTransportResponse): AsyncGenerator<SseFrame> {
   if (response.body == null || !response.headers?.get('content-type')?.toLowerCase().startsWith('text/event-stream')) {
-    throw new Error('AI7_OUTCOME_UNKNOWN');
+    yield { event: 'ai7-buffered-response', data: JSON.stringify(await response.json()) };
+    return;
   }
   const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const decoder = new TextDecoder('utf-8', { fatal: false });
   let pending = '';
   try {
     for (;;) {
@@ -52,7 +53,8 @@ export async function* sseFrames(response: DeepSeekTransportResponse): AsyncGene
         if (frame !== null) yield frame;
       }
       if (chunk.done) {
-        if (pending.trim().length > 0) throw new Error('AI7_OUTCOME_UNKNOWN');
+        const last = frameOf(pending);
+        if (last !== null) yield last;
         return;
       }
     }

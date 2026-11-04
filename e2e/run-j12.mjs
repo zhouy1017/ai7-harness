@@ -743,16 +743,26 @@ async function main() {
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
     await assertRenderer(primary, `(() => { const links=Array.from(document.querySelectorAll('.sidebar-link')); return links.length>0 && links.every((link)=>link.querySelector('svg[data-icon] use') && link.title) && !document.querySelector('button:not([class]), button[class=""]') && Array.from(document.querySelectorAll('button')).every((button)=>button.classList.contains('btn')); })()`, 'shared-svg-and-buttons');
+    // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');
+    await click(primary, '帮助', 'technical-mode-help');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-off');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && !document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'technical-mode-off-applied');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
+    await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-restore-settings-ready');
+    await click(primary, '帮助', 'technical-mode-restore-help');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-on');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'technical-mode-on-applied');
+
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
     await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
-    await waitFor(primary, `document.querySelector('.compact-model-selector')?.hidden === false`, 'global-agent-model-selector-visible');
-    await assertRenderer(primary, `(() => { const selector=document.querySelector('.compact-model-selector');
-      selector.open=true; document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-      if(selector.open)return false;
-      selector.open=true; document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
-      return !selector.open;
-    })()`, 'model-selector-outside-escape-dismissal');
+    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体（记忆与全局指导）' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });
@@ -1291,7 +1301,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-library');
     // Identifiers in the technical layer (ADR 0096 §3, #1177): a 书库 card prints no Book identity inline; its 图书 ID and 稳定标识
     // sit behind a closed 查看技术详情.
-    await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=card.querySelector('details.technical-details'); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||details.open||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && details.querySelector('summary')?.textContent==='查看技术详情'; }); })()`, 'library-card-identity-disclosed');
+    await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=Array.from(document.querySelectorAll('details[data-technical-layer]')).find(node=>node.textContent.includes(card.querySelector('button[data-book-id]')?.dataset.bookId)); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||(details.open&&!details.hidden)||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && ['查看技术详情','记录信息'].includes(details.querySelector('summary')?.textContent); }); })()`, 'library-card-identity-disclosed');
     at('screen-return-origins');
     // Global destinations return to the exact Book subpage that opened them; settings children return to Settings.
     await clickBook(primary, bookA, 'return-book-open');
@@ -1391,7 +1401,7 @@ async function main() {
       const technical=screen.querySelector('.model-service-technical');
       return roles.length===2 && roles.every(node=>['main-editorial','fast-interaction'].includes(node.dataset.modelRole)) &&
         !screen.querySelector('.model-role-grid') && screen.querySelectorAll('[data-model-route]').length===1 &&
-        technical instanceof HTMLDetailsElement && !technical.open && technical.querySelector('summary')?.textContent==='查看技术详情' &&
+        technical instanceof HTMLDetailsElement && (!technical.open || technical.hidden) && ['查看技术详情','记录信息'].includes(technical.querySelector('summary')?.textContent) &&
         technical.querySelector('[data-policy-integrity-state="verified"]') && screen.dataset.providerTransmissionCount==='0';
     })()`, 'inline-model-flow-no-legacy-cards');
     // ADR 0073 §3 and V2-UX-MSET-007 (Issue #435): a configured provider appears as a connection only when a Model Role

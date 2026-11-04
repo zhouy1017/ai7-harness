@@ -721,11 +721,11 @@
       },
       "findings": {
         "listed": 9,
-        "located": 8,
-        "excluded": 1,
+        "located": 9,
+        "excluded": 0,
         "useful": 6,
         "precise": 6,
-        "unclassified": 1,
+        "unclassified": 2,
         "falsePositives": 1
       },
       "concerns": {
@@ -754,7 +754,7 @@
         "adopted": 5,
         "edited": 1,
         "rejected": 1,
-        "left": 1,
+        "left": 2,
         "applied": 6,
         "appliedCorrect": 6,
         "reversed": 6,
@@ -763,7 +763,7 @@
       "delivery": null,
       "result": {
         "issue": 879,
-        "quoteNotFound": 1,
+        "quoteNotFound": 0,
         "verbatimInBook": 0,
         "ownBlockOrdinalMatches": 0
       },
@@ -784,12 +784,10 @@
     "writing-draft-sample1": {
       "outcome": {
         "state": "settled",
-        "classification": "completed-with-gaps",
-        "unitsClosed": 7,
+        "classification": "completed",
+        "unitsClosed": 8,
         "unitsTotal": 8,
-        "gaps": [
-          "6:contract-invalid"
-        ],
+        "gaps": [],
         "synthesis": "closed",
         "clarificationsAnswered": 0
       },
@@ -817,7 +815,7 @@
         "recorded": true
       },
       "result": {
-        "passages": 60,
+        "passages": 71,
         "draftGraphemes": 592,
         "draftSections": 6,
         "synthesisReason": null

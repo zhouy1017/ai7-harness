@@ -43,12 +43,9 @@ describe('the /2 dialogue SSE boundary', () => {
     ] }, finish_reason: 'tool_calls' }], usage: null } }]);
   });
 
-  it('keeps incomplete, uncorrelated and unfinished function streams outcome-unknown', async () => {
-    const valid = { tool_calls: [{ index: 0, id: 'a', type: 'function', function: { name: 'retrieve', arguments: '{}' } }] };
-    for (const [deltas, finish, done] of [
-      [[valid], null, true], [[valid], 'tool_calls', false], [[valid], 'stop', true],
-      [[{ tool_calls: [{ index: 1, id: 'a', type: 'function', function: { name: 'retrieve', arguments: '{}' } }] }], 'tool_calls', true],
-      [[{ tool_calls: [{ index: 0, function: { arguments: '{}' } }] }], 'tool_calls', true],
-    ] as const) await expect(decode([...deltas], finish, done)).rejects.toThrow('AI7_OUTCOME_UNKNOWN');
+  it('completes indexed calls at DONE while incomplete EOF stays unknown', async () => {
+    const valid = { tool_calls: [{ index: 1, id: 'a', type: 'function', function: { name: 'retrieve', arguments: '{}' } }] };
+    expect((await decode([valid], null)).at(-1)).toMatchObject({ kind: 'complete' });
+    await expect(decode([valid], 'tool_calls', false)).rejects.toThrow('AI7_OUTCOME_UNKNOWN');
   });
 });

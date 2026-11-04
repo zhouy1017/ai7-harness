@@ -9,6 +9,8 @@ import {
   IMPORTED_SKILL_RULE_CREATE_LABEL, IMPORTED_SKILL_UPDATE_CHECK_LABEL, IMPORTED_SKILL_UPDATE_DISPOSITION_LABELS, importedSkillHistoryLine,
 } from '../../src/renderer/imported-skill-labels.js';
 import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import { collectTechnicalDisclosures, setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
 // Unit (L1) suite for the foreign Skill update card (Issue #89; ADR 0090 §3) on a minimal DOM: what 检查更新 discloses before keeping,
 // the candidate's three-way report and per-file 以上游为准 choices, an adoption of a candidate that is not clean waiting for the
@@ -80,6 +82,17 @@ async function mount(page: Partial<ImportedSkillsProjection>, api: Record<string
 }
 
 describe('the foreign Skill card: history and the way back (REUSE-035)', () => {
+  it('scans the ordinary retained Skill and file metadata', async () => {
+    setTechnicalLayerVisible(false);
+    try {
+      await mount({});
+      collectTechnicalDisclosures(root as unknown as HTMLElement);
+      expect(root.textContent).toContain('SKILL.md');
+      expect(root.textContent).not.toContain('SHA-256');
+      expect(root.textContent).not.toContain('字节');
+      expectNoTechnicalText(root);
+    } finally { setTechnicalLayerVisible(true); }
+  });
   it('marks the current revision, offers 回到此版本 on every other one, and says what it does not restore', async () => {
     const { calls } = await mount({});
     expect(root.querySelector('[data-skill-detail]')?.dataset['skillCurrent']).toBe('true');

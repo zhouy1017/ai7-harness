@@ -1,4 +1,5 @@
 import { filterChoices } from './components/controls.js';
+import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { MAX_BATCH_APPLY_SUGGESTIONS } from '../shared/protocol.js';
 import type { RendererApi, ProposalWorkspaceInput, ProposalWorkspaceProjection, ProposalNavigatorItem, ProposalReviewReturnPosition, ProposalDraftDisposition, ProposalDraftBatchProjection, EditorialMarkCardProjection, ManuscriptWindowProjection, ApplyReceiptProjection, BatchProposalDecisionDraftInput } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
@@ -11,7 +12,7 @@ import { proposalIdentityRows, proposalPreparationLine } from './technical-layer
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
 const exclusionLabels = { conflict: '未解决冲突', 'unclassified-stale': '旧基准尚未分类', unloaded: '未加载', 'other-version': '其他版本', 'atomic-group': '原子组需单独处理', applied: '已经应用' } as const;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
+  const node = document.createElement(tag); if (text !== undefined) node.textContent = identityWords(text, className); if (className) node.className = className; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
 }
 function button(label: string, action: string, run: () => void): HTMLButtonElement {
   const node = el('button', label, 'secondary'); node.type = 'button'; node.dataset['proposalAction'] = action; node.addEventListener('click', run); return node;
@@ -20,7 +21,7 @@ function button(label: string, action: string, run: () => void): HTMLButtonEleme
 function technical(rows: ReadonlyArray<readonly [string, string]>): HTMLElement {
   const details = el('details', undefined, 'technical-details'); const list = el('dl');
   for (const [term, value] of rows) list.append(el('dt', term), el('dd', value, 'technical-identity'));
-  details.append(el('summary', '查看技术详情'), list); return details;
+  details.append(el('summary', '查看技术详情'), list); return technicalDisclosure(details);
 }
 function region(title: string, ...nodes: HTMLElement[]): HTMLElement { const section = el('section', undefined, 'proposal-region'); section.append(el('h4', title), ...nodes); return section; }
 

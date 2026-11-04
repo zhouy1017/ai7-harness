@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   BaselineAnalysisGoal,
   BaselineAnalysisWireProjection as BaselineAnalysisProjection,
@@ -34,7 +35,7 @@ export function selectionTaskContextLine(context: {
   readonly graphemes: number;
   readonly position: number;
 }): string {
-  return `《${context.bookTitle}》 · 修订版 ${context.revisionLabel} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 段`;
+  return `《${context.bookTitle}》 · 修订版${technicalWords(` ${context.revisionLabel}`)} · 修订日志序号 ${context.journalSequence} · 已选 ${context.graphemes} 字 · 第 ${context.position} 段`;
 }
 
 export const SELECTION_TASK_REANALYZE = '重新分析这段';
@@ -54,7 +55,7 @@ export function selectionProcedureLabel(title: string): string {
 }
 export function selectionProcedureHint(version: number, steps: number, chosenApart: ReadonlyArray<string>): string {
   const apart = chosenApart.length === 0 ? '' : ` · ${chosenApart.map((label) => `「${label}」`).join('、')}另行勾选`;
-  return `可复用工序 · 第 ${version} 版 · ${steps} 步${apart}`;
+  return `可复用工序 · ${technicalWords(`第 ${version} 版`, '版本')} · ${steps} 步${apart}`;
 }
 export const SELECTION_PROCEDURE_NO_VERSION = '现在没有可以运行的版本';
 export function selectionProcedureStepReason(label: string, reason: string): string {

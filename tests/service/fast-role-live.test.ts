@@ -159,6 +159,19 @@ describe('the fast-role routes under developer-live', () => {
 });
 
 describe('润色这段 on the live route (provider-free)', () => {
+  it('salvages complete suggestions from a length-limited reply and retains usage (#1311)', async () => {
+    const transport = (async () => ({ status: 201, json: async () => ({
+      choices: [{ message: { content: AUTHORED_POLISH_ANSWER.slice(0, -2) + ',{"original":' }, finish_reason: 'length' }],
+      usage: { prompt_tokens: 260, completion_tokens: 70 },
+    }) })) as unknown as typeof fetch;
+    const owner = new FastRoleExecutionOwner({ requestGovernor, fixture: null, live: live(transport) });
+    const fast = new FastRoleRequests(owner, store);
+    try {
+      const result = await settled(fast, fast.polish(book.bookId, { selection: polishSelectionOf(store, book) }).taskId);
+      expect(result.kind === 'editorial-polish' && result.polish).toMatchObject({ state: 'suggested' });
+      expect((await ledgerLines())[0]).toMatchObject({ outcome: 'transmitted', status: 201, usage: { inputTokens: 260, outputTokens: 70 } });
+    } finally { await owner.dispose(); }
+  });
   it('sends the one bounded message under its rule once, files it as S30, and places the anchored suggestions', async () => {
     const calls: StubCall[] = [];
     const fast = requests(live(stubTransport(calls, () => AUTHORED_POLISH_ANSWER)));

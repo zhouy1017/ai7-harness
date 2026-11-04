@@ -193,7 +193,9 @@ export function taskPlanOutbound(value: unknown): unknown {
 
 export function seriesScopePlan(plan: TaskPlanProjection, scopes?: ReadonlyArray<FrozenSeriesScope>): TaskPlanProjection {
   if (scopes === undefined || scopes.length === 0) return plan;
-  return { ...plan, seriesScopes: scopes, scope: { ...plan.scope,
+  return { ...plan, seriesScopes: scopes, wording: { ...plan.wording,
+    reference: [...(plan.wording?.reference ?? plan.scope.reference.map((line) => [line])), ...scopes.map((scope) => [`允许参考 · 书系《${scope.title}》的知识条目`])],
+  }, scope: { ...plan.scope,
     reference: [...plan.scope.reference, ...scopes.map((scope) => `允许参考 · 书系《${scope.title}》的知识条目`)],
     notRead: plan.scope.notRead.replace('不读这本书以外的内容', '不读允许参考范围以外的内容'),
   }, technical: [...plan.technical, ...scopes.map((scope) => ({ key: `series-scope:${scope.seriesId}`, label: '书系参考范围',
@@ -951,6 +953,8 @@ export function baselineAnalysisPlan(input: {
     bookId: projection.bookId,
     kind: 'baseline-analysis',
     ref: intent.taskIntentId,
+    wording: { reference: update === null || update.predecessor === null ? []
+      : [['上一份基线分析', { technical: `（第 ${update.predecessor.ordinal} 份，读的是 ${update.predecessor.manuscriptPin.revisionLabel}）` }]] },
     state: baselineState(projection, input.stopped),
     ...(projection.taskOutcome?.report && (projection.taskOutcome.classification === 'failed' || projection.taskOutcome.classification === 'completed-with-gaps')
       ? { runOutcome: { label: projection.taskOutcome.label, classification: projection.taskOutcome.classification,
@@ -1167,6 +1171,7 @@ export function evaluationMaterialPlan(plan: TaskPlanProjection, materials: Read
     : '资料库资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。';
   return {
     ...plan,
+    wording: { ...plan.wording, reference: [...(plan.wording?.reference ?? plan.scope.reference.map((line) => [line])), ...materials.map((material) => [taskMaterialReferenceLine(material)]), [background]] },
     state: refusal === null ? plan.state : { key: 'changed', label: refusal.code === 'MATERIAL_REFERENCE_UNAVAILABLE' ? '参考资料已撤回允许参考' : refusal.code === 'MATERIAL_INDEX_RECORD_INVALID' ? '参考资料的索引记录已损坏' : '参考资料已不在本机' },
     scope: { ...plan.scope, reference: [...plan.scope.reference, ...materials.map(taskMaterialReferenceLine), background], send: sending },
     notDo: { ...plan.notDo, editorial: plan.notDo.editorial.map((line) => line === '不读这本书以外的内容' ? '不读允许参考以外的资料' : line) },
@@ -1220,6 +1225,8 @@ export function initialEvaluationPlan(input: {
     bookId: projection.bookId,
     kind: 'initial-evaluation',
     ref: intent.taskIntentId,
+    wording: { procedure: [profile.title, { technical: ` 第 ${profile.version} 版` }],
+      reference: [[profile.title, { technical: `（第 ${profile.version} 版）` }, `：${items}`]] },
     state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
     planVersion: version.ordinal,
     goal: {
@@ -1372,6 +1379,9 @@ export function readersReportPlan(input: {
     bookId: projection.bookId,
     kind: 'readers-report',
     ref: intent.taskIntentId,
+    wording: { goal: ['从定稿', { technical: `（第 ${task.recordOrdinal} 版）` }, `的评估起草审稿意见「${templateLabel}」：总体评价、主要优点、主要问题、修改建议与结论`],
+      procedure: [task.profile.title, { technical: ` 第 ${task.profile.version} 版` }, ' · 定稿', { technical: `（第 ${task.recordOrdinal} 版）` }],
+      reference: [['评估记录定稿', { technical: `（第 ${task.recordOrdinal} 版）` }, `（${task.profile.title}`, { technical: ` 第 ${task.profile.version} 版` }, '）：各项得分与评语、主要优点与问题、风险与结论'], [task.exemplars]] },
     state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
     planVersion: version.ordinal,
     goal: {
@@ -1490,7 +1500,7 @@ export const WRITING_NOT_DRAFTED_LABEL = '已结束 · 未写出草稿' as const
 function writingState(projection: WritingProjection): TaskPlanProjection['state'] {
   const state = baselineState(projection as unknown as BaselineAnalysisProjection);
   if (projection.state !== 'settled' || projection.taskOutcome === null || projection.taskOutcome.classification === 'completed') return state;
-  if (projection.resultSetRevision !== null && projection.resultSetRevision.writing.draft === null) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
+  if (projection.resultSetRevision !== null && (projection.resultSetRevision.writing.draft === null || projection.resultSetRevision.writing.draft.usable === false)) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
   return { ...state, label: projection.taskOutcome.label };
 }
 
@@ -1827,6 +1837,9 @@ export function evaluationRewritePlan(input: {
     bookId: projection.bookId,
     kind: 'evaluation-rewrite',
     ref: intent.taskIntentId,
+    wording: { goal: ['按你在评估', { technical: `（第 ${task.recordOrdinal} 版，第 ${task.entryOrdinal} 次保存）` }, '中的评分重写各项评语与总评，分数不变；重写后由你决定采用还是放弃'],
+      procedure: [task.profile.title, { technical: ` 第 ${task.profile.version} 版` }, ' · 评估', { technical: `（第 ${task.recordOrdinal} 版，第 ${task.entryOrdinal} 次保存）` }],
+      reference: [['评估', { technical: `（第 ${task.recordOrdinal} 版，第 ${task.entryOrdinal} 次保存）` }, `：你的评分（${scored}）、调分原因、现在的评语与总评，以及 AI7 初评的分数与评语`]] },
     state: revision !== null && projection.authorization === null ? { key: 'changed', label: '计划已变化' } : state,
     planVersion: version.ordinal,
     goal: {
@@ -2529,6 +2542,22 @@ export function reviewRunPlan(input: {
     bookId: input.bookId,
     kind: 'review-run',
     ref: facts.reviewRunId,
+    wording: {
+      ...(composite === undefined ? {} : { goal: [`按工序《${composite.title}》`, { technical: `第 ${composite.procedure.version} 版` }, `依次审阅${scopeWords}：${categories.map((category) => category.label).join(' → ')}`],
+        procedure: [composite.title, { technical: ` 第 ${composite.procedure.version} 版` }] }),
+      reference: [...categories.map((category) => [category.label, '：',
+        ...category.guidelineDocuments.flatMap((document) => [document.title, { technical: `（第 ${document.version} 版）` }, ' · ']),
+        category.procedure.title, { technical: `（第 ${category.procedure.version} 版）` }]),
+        ...materials.map((material) => [taskMaterialReferenceLine(material)]),
+        ...(facts.housePreferences === undefined ? [] : preferences.length === 0 ? [[HOUSE_PREFERENCE_CLOSED]] : preferences.map(({ categoryLabel }) => [`${categoryLabel}：参考本社审阅偏好`])),
+        ...(materials.length === 0 ? [] : [['资料库资料只供调用模型的审阅类别参考；事实核查与只读已有线索的类别不参考这些资料。']])],
+      ...(preferences.length === 0 ? {} : {
+        scopeSend: [facts.materialsRefusedLive === true && materials.length > 0 ? '不发送任何内容；这份计划列了资料库资料，当前运行范围不能把它们发送给模型，这份计划不能开始'
+          : tasks.length === 0 || !live ? materials.length === 0 ? '不发送任何内容' : '不发送任何内容；上面列出的资料库资料也只在本机读取'
+            : `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款${materials.length === 0 ? '' : '，以及上面列出的资料库资料原文'}，以及本社审阅偏好的摘录`],
+        serviceSend: [localOnly ? '本机读取冻结的所选正文，不发送任何内容' : route === null ? '只读基线分析的线索，不发送任何内容' : live ? `所读范围内的稿件正文（${spans ?? scopeWords}）和所选类别的规范条款，以及本社审阅偏好的摘录，发往为审阅配置的模型服务` : NOTHING_SENT],
+      }),
+    },
     state: reviewState(facts),
     planVersion: null,
     goal: {

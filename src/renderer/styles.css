@@ -2372,13 +2372,8 @@ body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right 
 .model-service-flow-ineligible { margin-top: .8rem; }
 .model-service-flow-ineligible summary { cursor: pointer; }
 .model-service-flow-ineligible li { overflow-wrap: anywhere; }
-.compact-model-selector { position: relative; min-width: 0; max-width: min(30rem, 100%); }
-.compact-model-selector > summary { cursor: pointer; overflow-wrap: anywhere; }
-.compact-model-selector-body { position: absolute; right: 0; top: 100%; z-index: 40; display: grid; gap: .6rem; width: min(26rem, 85vw); max-height: 75vh; overflow-y: auto; padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; background: var(--surface); box-shadow: 0 12px 28px var(--shadow); }
-.compact-model-selector-body fieldset { display: grid; gap: .35rem; min-width: 0; margin: 0; padding: 0; border: 0; }
-.compact-model-selector-body label { overflow-wrap: anywhere; }
 @media (forced-colors: active) {
-  .model-service-flow fieldset, .compact-model-selector-body { border-color: CanvasText; box-shadow: none; }
+  .model-service-flow fieldset { border-color: CanvasText; box-shadow: none; }
 }
 
 /* #1287: reflow supporting regions below the text before its readable width is lost. */
@@ -2506,3 +2501,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .state-term[data-pill-tone="neutral"]::before { background: transparent; }
 .state-term[data-pill-tone="progress"], .state-term.review-pill-progress { color: var(--status-progress); background: var(--status-progress-surface); }
 /* End A4 shared controls. */
+
+/* #1315: one development disclosure control; disabled technical content has no DOM payload. */
+[data-technical-layer][hidden], [data-technical-layer] > summary[hidden] { display: none !important; }
+.technical-layer-control { position: fixed; right: 1rem; bottom: 3rem; z-index: 90; padding: .6rem .8rem; background: var(--surface); border: 1px solid var(--boundary); border-radius: .4rem; }

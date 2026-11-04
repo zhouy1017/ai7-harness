@@ -83,8 +83,8 @@ function chatCompletionsConversation(payload: AssembledModelPayload): Array<Reco
 }
 
 /**
- * Read the chat-completions SSE wire without exposing reasoning. Only [DONE] after a finish marker proves a whole
- * response; EOF, malformed data and an aborted reader remain outcome-unknown (Issue #833).
+ * Read the first choice without exposing reasoning. DONE completes the response; redundant frames and model aliases
+ * do not change its meaning. EOF without DONE remains outcome-unknown, preserving text at the adapter.
  */
 export async function* dialogueSseEvents(response: DeepSeekTransportResponse, model: string): AsyncIterable<DialogueStreamEvent> {
   let content = '';
@@ -93,50 +93,59 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
   const calls = new Map<number, { id: string; type: string; name: string; arguments: string }>();
   let callBytes = 0;
   try {
-    for await (const { data } of sseFrames(response)) {
+    for await (const { event, data } of sseFrames(response)) {
+      if (event === 'ai7-buffered-response') { yield { kind: 'complete', response: JSON.parse(data) }; return; }
       if (data === '[DONE]') {
-        if (finish === null) throw new Error('AI7_OUTCOME_UNKNOWN');
-        const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([index, call], ordinal) => {
-          if (index !== ordinal || call.id.length === 0 || call.type !== 'function' || call.name.length === 0) throw new Error('AI7_OUTCOME_UNKNOWN');
+        finish ??= calls.size > 0 ? 'tool_calls' : 'stop';
+        const toolCalls = [...calls.entries()].sort(([a], [b]) => a - b).map(([, call]) => {
+          // Malformed calls are rejected individually at normalization.
           return { id: call.id, type: call.type, function: { name: call.name, arguments: call.arguments } };
         });
-        if ((toolCalls.length > 0) !== (finish === 'tool_calls') || new Set(toolCalls.map((call) => call.id)).size !== toolCalls.length) throw new Error('AI7_OUTCOME_UNKNOWN');
         yield { kind: 'complete', response: { model, choices: [{ message: { content, ...(toolCalls.length === 0 ? {} : { tool_calls: toolCalls }) }, finish_reason: finish }], usage } };
         return;
       }
-      const value: unknown = JSON.parse(data);
-      if (!isRecord(value) || (value.model !== undefined && value.model !== model) || !Array.isArray(value.choices)) {
-        throw new Error('AI7_OUTCOME_UNKNOWN');
+      let value: unknown;
+      try { value = JSON.parse(data); } catch { continue; }
+      if (isRecord(value) && isRecord(value.error)) {
+        const code = String(value.error.code ?? value.error.type ?? '');
+        const status = Number.isSafeInteger(value.error.status) ? value.error.status as number
+          : /rate|quota|balance/iu.test(code) ? 429 : /auth/iu.test(code) ? 401 : /context|invalid_request/iu.test(code) ? 400 : 500;
+        yield { kind: 'error', status, body: { error: value.error } };
+        return;
+      }
+      if (!isRecord(value) || !Array.isArray(value.choices)) {
+        continue;
       }
       if (value.usage !== undefined && value.usage !== null) usage = value.usage;
       if (value.choices.length === 0) continue;
-      if (value.choices.length !== 1 || !isRecord(value.choices[0])) throw new Error('AI7_OUTCOME_UNKNOWN');
+      if (!isRecord(value.choices[0])) continue;
       const choice = value.choices[0];
-      if (choice.index !== undefined && choice.index !== 0) throw new Error('AI7_OUTCOME_UNKNOWN');
-      const alreadyFinished = finish !== null;
+      if (finish !== null) continue;
       if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
         if (typeof choice.finish_reason !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
         finish = choice.finish_reason;
       }
-      if (!isRecord(choice.delta)) throw new Error('AI7_OUTCOME_UNKNOWN');
+      if (!isRecord(choice.delta)) continue;
       if (choice.delta.tool_calls !== undefined) {
-        if (alreadyFinished || !Array.isArray(choice.delta.tool_calls)) throw new Error('AI7_OUTCOME_UNKNOWN');
+        if (!Array.isArray(choice.delta.tool_calls)) continue;
         for (const delta of choice.delta.tool_calls) {
-          if (!isRecord(delta) || typeof delta.index !== 'number' || !Number.isSafeInteger(delta.index) || delta.index < 0 || delta.index >= 128) throw new Error('AI7_OUTCOME_UNKNOWN');
+          if (!isRecord(delta) || typeof delta.index !== 'number' || !Number.isSafeInteger(delta.index) || delta.index < 0 || delta.index >= 128) continue;
           const index = delta.index;
           const call = calls.get(index) ?? { id: '', type: '', name: '', arguments: '' };
           for (const key of ['id', 'type'] as const) {
             if (delta[key] === undefined) continue;
-            if (typeof delta[key] !== 'string' || call[key].length > 0) throw new Error('AI7_OUTCOME_UNKNOWN');
+            if (typeof delta[key] !== 'string') continue;
+            if (call[key] === delta[key]) continue;
+            if (call[key].length > 0) { call.type = 'invalid'; continue; }
             call[key] = delta[key];
             callBytes += delta[key].length;
           }
           if (delta.function !== undefined) {
-            if (!isRecord(delta.function)) throw new Error('AI7_OUTCOME_UNKNOWN');
+            if (!isRecord(delta.function)) { call.type = 'invalid'; calls.set(index, call); continue; }
             for (const key of ['name', 'arguments'] as const) {
               const fragment = delta.function[key];
               if (fragment === undefined) continue;
-              if (typeof fragment !== 'string') throw new Error('AI7_OUTCOME_UNKNOWN');
+              if (typeof fragment !== 'string') { call.type = 'invalid'; continue; }
               call[key] += fragment;
               callBytes += fragment.length;
             }
@@ -147,7 +156,7 @@ export async function* dialogueSseEvents(response: DeepSeekTransportResponse, mo
       }
       const text = choice.delta.content;
       if (text === undefined || text === null || text === '') continue;
-      if (typeof text !== 'string' || alreadyFinished) throw new Error('AI7_OUTCOME_UNKNOWN');
+      if (typeof text !== 'string') continue;
       content += text;
       yield { kind: 'text', text };
     }
