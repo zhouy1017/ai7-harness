@@ -84,7 +84,7 @@ import { mountDeliverables, type DeliverablesSurface } from './deliverables.js';
 import { mountBookPeople } from './book-people.js';
 import { mountEvaluation } from './evaluation.js';
 import { mountResearchEvidence } from './research-evidence.js';
-import { SOURCES_LEDE, SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
+import { SOURCES_STATUS, SOURCES_TITLE } from './research-evidence-labels.js';
 import type { AnalysisFeedbackDimension } from '../shared/analysis-feedback.js';
 import type { LearningMaterialTarget } from '../shared/protocol.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
@@ -2854,7 +2854,6 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
   content.dataset['bookId'] = bookId;
   const host = element('div', 'evaluation-host');
   content.append(
-    element('p', 'section-label', `${EVALUATION_TITLE} · 《${bookTitle}》`),
     element('h2', undefined, EVALUATION_TITLE),
     element('p', 'field-note', EVALUATION_LEDE),
     host,
@@ -2935,9 +2934,7 @@ function renderBookSources(bookId: string, bookTitle: string, focusEvidenceId?: 
   content.dataset['bookId'] = bookId;
   const host = element('div', 'research-evidence-host');
   content.append(
-    element('p', 'section-label', `资料与记录 · ${SOURCES_TITLE} · 《${bookTitle}》`),
     element('h2', undefined, SOURCES_TITLE),
-    element('p', 'field-note', SOURCES_LEDE),
     host,
   );
   const surface = mountResearchEvidence({ root: host, bookId, api: window.ai7, setStatus, errorMessage: rendererErrorMessage,
