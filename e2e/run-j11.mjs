@@ -63,7 +63,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const FIRST = Object.freeze({ title: '人员旅程甲' });
 const SECOND = Object.freeze({ title: '人员旅程乙' });
 const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', relatedRole: 'proofreader', relatedName: '王四' });
-const PEOPLE_NOTE = '作者与责编用于标注和查找这本书，也是之后反馈与学习记录的归属；它们不是账号，也不决定谁能做什么。';
+const PEOPLE_NOTE = '作者与责编用于标注、查找及反馈与学习归属，不决定操作权限。';
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
 /**
@@ -79,7 +79,7 @@ const MARKET_LISTS = [
   ['sellingPoints', '差异化卖点 AI7 · 据书稿题材推断', ['以一封甲骨文来信开篇设下悬念，学术悬疑贯穿始终。', '学者之间的对白各具声口，写出学界中人的性情与分寸。']],
   ['channels', '渠道与策略 AI7 · 据书稿题材推断', ['可从书中的考古与青铜器话题切入，面向文史爱好者推介。', '以学术与名利的冲突为话题，组织书评与读书会讨论。']],
 ];
-const MARKET_OFFLINE = '市场部分是否检索外网，以产生这一版的运行报告为准；没有检索记录时为「未联网核查」。市场判断仍需人工核对。';
+const MARKET_OFFLINE = '联网情况以运行报告为准，无检索记录即未联网核查；市场判断仍需人工核对。';
 const MARKET_AWARDS = '有参评文学奖的潜力，但确定性低。（依据：所读部分叙述凝练、意象运用纯熟，并触及学术与权力的主题；没有对比任何获奖作品。）';
 const PRICING_WAITING = '不预测。本社已录入定价与首印的已发稿图书 0 / 30 本；满 30 本后，可在「设置 › 评估校准与预测」里打开预测。';
 /** AI7's 评语 of each item as the authored 初评 writes them, and the words 按我的评分重写评语 writes for 第 15 版 (S81b2). */
@@ -1429,7 +1429,7 @@ async function main() {
     at('evaluation-open');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-open');
     const opened = await readEvaluation(renderer, (page) => page.state === 'ready', 'evaluation-ready');
-    requireJourney(opened.empty === '这本书还没有评估。开始评估后，按本社评估方案逐项打分，定稿后留作记录。' && opened.start === '开始评估' &&
+    requireJourney(opened.empty === '这本书还没有评估。' && opened.start === '开始评估' &&
       opened.versions.length === 0 && opened.record === null, 'evaluation-empty', opened);
 
     at('evaluation-start');
@@ -2829,7 +2829,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'learning-audit-quality');
     await clickSelector(renderer, '#quality-tab-audit', 'learning-audit-tab');
     const auditAll = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 40, 'learning-audit-all');
-    requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么。停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
+    requireJourney(auditAll.note === '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么；停止今后使用不会删除任何历史，这里也不授予任何权限。' &&
       auditAll.later === AUDIT_LATER && auditAll.books.length === 1 && auditAll.books[0].startsWith(`《${THIRD.title}》 · `) &&
       auditAll.rows.every(([, , , use]) => use === '尚未被任何任务使用') &&
       auditAll.rows.every(([, standing, , , selectable]) => selectable === (standing === 'book' || standing === 'house')) &&
