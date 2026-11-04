@@ -103,77 +103,34 @@ describe('the frozen version', () => {
 });
 
 describe('the unit result and the synthesis', () => {
-  it('admits observations of scored items within the unit, and refuses the rest whole', () => {
-    const expected = { unitOrdinal: 2, blockCount: 4, itemIds: ['literary-quality', 'structure-and-coherence'] };
-    const ok = parseEvaluationRewriteUnitResult(unitText([{ itemId: 'structure-and-coherence', note: '中段照应不足。', blockOrdinals: [2, 4] }]), expected);
-    expect(ok.ok && ok.result.observations).toEqual([{ itemId: 'structure-and-coherence', note: '中段照应不足。', blockOrdinals: [2, 4] }]);
-    const code = (text: string): string => { const parsed = parseEvaluationRewriteUnitResult(text, expected); return parsed.ok ? 'ok' : parsed.code; };
-    expect(code(unitText([{ itemId: 'readers-and-market', note: '无。', blockOrdinals: [1] }]))).toBe('item-unknown');
-    expect(code(unitText([{ itemId: 'literary-quality', note: '无。', blockOrdinals: [5] }]))).toBe('block-out-of-unit');
-    expect(code(unitText([], 3))).toBe('unit-mismatch');
-    expect(code(unitText([{ itemId: 'literary-quality', note: '无。', blockOrdinals: [1, 1] }]))).toBe('schema-invalid');
-    expect(code(unitText([{ itemId: 'literary-quality', note: '无。', blockOrdinals: [] }]))).toBe('schema-invalid');
-    expect(code(unitText([{ itemId: 'literary-quality', note: '字'.repeat(201), blockOrdinals: [1] }]))).toBe('schema-invalid');
-    expect(code(unitText([{ itemId: 'literary-quality', note: '无。', blockOrdinals: [1], score: 13 }]))).toBe('schema-invalid');
-    expect(code(unitText(Array.from({ length: 31 }, () => ({ itemId: 'literary-quality', note: '无。', blockOrdinals: [1] }))))).toBe('schema-invalid');
-    expect(code(JSON.stringify({ schema: 'ai7.evaluation.unit-result/1', unitOrdinal: 2, observations: [] }))).toBe('schema-invalid');
-    expect(code('否')).toBe('not-json');
-    expect(code(unitText([]))).toBe('ok');
+  it('salvages observations independently with request identity and strict block bounds', () => {
+    const expected = { unitOrdinal: 2, blockCount: 4, itemIds: ['literary-quality'] };
+    const good = { itemId: 'literary-quality', note: '说明。', blockOrdinals: [1] };
+    const text = unitText([good, { ...good, itemId: 'unknown' }, { ...good, blockOrdinals: [5] }, { ...good, note: '两\n行', blockOrdinals: ['2', 2, 9], extra: true }], 99);
+    const parsed = parseEvaluationRewriteUnitResult('说明\n```JSON\n' + text + '\n```尾文', expected);
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 2, observations: [good, { ...good, note: '两 行', blockOrdinals: [2] }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, reason: 'item-unknown' }), expect.objectContaining({ index: 2, reason: 'block-out-of-unit' })]));
+    const partial = parseEvaluationRewriteUnitResult(unitText([good]).slice(0, -2) + ',{"note":', expected);
+    expect(partial.ok && partial.result.observations).toEqual([good]);
+    expect(parseEvaluationRewriteUnitResult('not json', expected).ok).toBe(false);
   });
 
-  it('admits one 评语 per scored item and the 总评, in the version\'s order, and never a number', () => {
-    const ok = parseEvaluationRewriteSynthesis(synthesis(), INPUT);
-    expect(ok.ok && ok.result).toEqual({
-      schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA,
-      items: [
-        { itemId: 'literary-quality', comment: '细节生动，写景与写心相映。' },
-        { itemId: 'structure-and-coherence', comment: '悬念清楚，但中段照应不足。' },
-      ],
-      verdict: '总体较好，结构有待加强。',
-      withheld: [],
-    });
-    const code = (overrides: Record<string, unknown>): string => { const parsed = parseEvaluationRewriteSynthesis(synthesis(overrides), INPUT); return parsed.ok ? 'ok' : parsed.code; };
-    const items = (JSON.parse(synthesis()) as { items: Array<Record<string, unknown>> }).items;
-    expect(code({ items: [...items, { itemId: 'readers-and-market', comment: '不评。' }] })).toBe('item-unknown');
-    expect(code({ items: items.slice(1) })).toBe('items-incomplete');
-    expect(code({ items: [...items, items[0]] })).toBe('items-incomplete');
-    // A score handed back with a 评语, or beside the 总评, is no answer of this contract.
-    expect(code({ items: items.map((item) => ({ ...item, score: 13 })) })).toBe('schema-invalid');
-    expect(code({ scores: [] })).toBe('schema-invalid');
-    expect(code({ items: items.map((item) => ({ ...item, comment: '字'.repeat(301) })) })).toBe('schema-invalid');
-    expect(code({ items: items.map((item) => ({ ...item, comment: '两\n行' })) })).toBe('schema-invalid');
-    expect(code({ verdict: '' })).toBe('schema-invalid');
-    expect(code({ verdict: '字'.repeat(601) })).toBe('schema-invalid');
-    expect(code({ verdict: '字'.repeat(600) })).toBe('ok');
-    // Within its graphemes but past its bytes (Issue #696): one letter carrying a thousand combining marks, a 4-byte one at the bound.
-    expect(code({ verdict: `字${String.fromCodePoint(0x301).repeat(1_200)}` })).toBe('schema-invalid');
-    expect(code({ items: items.map((item) => ({ ...item, comment: `字${String.fromCodePoint(0x301).repeat(600)}` })) })).toBe('schema-invalid');
-    expect(code({ verdict: String.fromCodePoint(0x20000).repeat(600) })).toBe('ok');
-    expect(code({ schema: 'ai7.evaluation-rewrite.synthesis-result/2' })).toBe('schema-invalid');
-    expect(parseEvaluationRewriteSynthesis('否', INPUT)).toMatchObject({ ok: false, code: 'not-json' });
+  it('keeps usable comments with nullable verdict and missing or unknown items', () => {
+    const parsed = parseEvaluationRewriteSynthesis(synthesis({ verdict: null, items: [
+      { itemId: 'literary-quality', comment: '保留这句。建议给18分。还有这句。', extra: true },
+      { itemId: 'unknown', comment: '未知项' },
+    ] }), INPUT);
+    expect(parsed).toMatchObject({ ok: true, result: { verdict: null, items: [{ itemId: 'literary-quality', comment: '保留这句。还有这句。' }] } });
+    expect(parsed.ok && parsed.result.withheld).toEqual(expect.arrayContaining([expect.objectContaining({ itemId: null }), expect.objectContaining({ itemId: 'structure-and-coherence' })]));
+    expect(parseEvaluationRewriteSynthesis('{}', INPUT).ok).toBe(false);
   });
 
-  it('offers no 评语 or 总评 that states a score or names a conclusion, and keeps every other one (S81b2 review)', () => {
-    const items = (JSON.parse(synthesis()) as { items: Array<{ itemId: string; comment: string }> }).items;
-    const parse = (overrides: Record<string, unknown>) => {
-      const parsed = parseEvaluationRewriteSynthesis(synthesis(overrides), INPUT);
-      if (!parsed.ok) throw new Error(parsed.code);
-      return parsed.result;
-    };
-    // The instruction says so, with the profile's own conclusions.
-    expect(CONTRACT.synthesisInstruction).toContain('不选定结论，也不在评语或总评里写出「推荐出版」、「修改后再议」、「暂缓」、「不推荐」这些结论；写了分数或结论的那一段不会提供给编辑。');
-    // A score in one 评语: that one is set aside with why, the other and the 总评 stand.
-    const scored = parse({ items: [items[0], { ...items[1], comment: '本项可给 18 分，悬念清楚。' }] });
-    expect(scored.items).toEqual([items[0]]);
-    expect(scored.verdict).toBe('总体较好，结构有待加强。');
-    expect(scored.withheld).toEqual([{ itemId: 'literary-quality', reason: '「文学品质与作者声音」的重写评语写了分数，没有采用：分数只由你定。' }]);
-    // A conclusion in the 总评: the 总评 is set aside, every 评语 stands.
-    const concluded = parse({ verdict: '总体较好，建议推荐出版。' });
-    expect([concluded.items.length, concluded.verdict, concluded.withheld]).toEqual([2, null, [{ itemId: null, reason: '重写的总评写出了结论，没有采用：结论由你选。' }]]);
-    expect(parse({ verdict: '离满分尚远。' }).verdict).toBeNull();
-    expect(parse({ items: items.map((item) => ({ ...item, comment: '应给十三分。' })) }).items).toEqual([]);
-    // Words that only look like it stand: 十分, 部分, a share of the pages, a chapter.
-    expect(parse({ items: items.map((item) => ({ ...item, comment: '叙述十分凝练，部分章节约三分之一篇幅写考古，第3章最好。' })) }).withheld).toEqual([]);
+  it('removes only a sentence that asserts scores or conclusions', () => {
+    const parsed = parseEvaluationRewriteSynthesis(synthesis({ verdict: '总体较好。建议推荐出版。结构有待加强。' }), INPUT);
+    expect(parsed).toMatchObject({ ok: true, result: { verdict: '总体较好。结构有待加强。' } });
+    expect(parsed.ok && parsed.result.withheld).toEqual([expect.objectContaining({ itemId: null })]);
+    const innocent = parseEvaluationRewriteSynthesis(synthesis({ verdict: '叙述十分凝练，第3章最好。' }), INPUT);
+    expect(innocent.ok && innocent.result.withheld).toEqual([]);
   });
 
   it('builds its two messages under headers of its own, keyed by the frozen contract and what they read', () => {
@@ -302,4 +259,9 @@ describe('when a rewrite can be asked, what it reads, and what 采用 changes', 
     expect(contentWithRewrite(content, { items: [], verdict: null }).verdict).toBe(content.verdict);
     expect([taken.risks, taken.readiness, taken.strengths, taken.weaknesses, taken.conclusion]).toEqual([content.risks, content.readiness, content.strengths, content.weaknesses, content.conclusion]);
   });
+});
+
+it('retains complete comments from a truncated synthesis without guessing a verdict', () => {
+  const parsed = parseEvaluationRewriteSynthesis('说明```JSON\n{"items":[' + JSON.stringify({ itemId: 'literary-quality', comment: '保留。' }) + ',{"comment":', INPUT);
+  expect(parsed).toMatchObject({ ok: true, result: { items: [{ itemId: 'literary-quality', comment: '保留。' }], verdict: null } });
 });

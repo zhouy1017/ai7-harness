@@ -1,3 +1,4 @@
+import { majorityGapReason } from '../../shared/analysis-run-summary.js';
 import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
@@ -2614,12 +2615,6 @@ export class BaselineAnalysisExecutionOwner {
             return 'waiting';
           }
           const validated = prepareRetrievalResult(candidate.text, retrieval);
-          if (validated.rejected.some((entry) => entry.collection !== 'findings' && entry.collection !== 'assertions')) {
-            acceptedOutputDigests.add(candidate.digest);
-            gap('contract-invalid', '未经精确取文');
-            keepSettled(unit, s.wallMs);
-            return 'settled';
-          }
           const parsed = definition.parseUnitResult(validated.text, unit);
           if (parsed.ok) {
             if (parsed.salvaged !== undefined && isRecord(parsed.result)) {
@@ -3501,8 +3496,8 @@ export class BaselineAnalysisExecutionOwner {
               crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
             } else if (step !== null) {
               const validated = prepareRetrievalResult(candidate.text, retrieval);
-              const parsed = validated.rejected.length > 0 ? { ok: false as const, code: 'not-exact-fetched', detail: '未经精确取文' }
-                : step.parse(validated.text, closedOutcomes, crossUnitContext);
+              const parsed = step.parse(validated.text, closedOutcomes, crossUnitContext);
+              if (parsed.ok) markRetrievalResult(parsed.result, validated.rejected);
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
@@ -3560,13 +3555,19 @@ export class BaselineAnalysisExecutionOwner {
       // the four stage totals partition the Run's own work.
       clock.open('reduction');
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
+      const synthesisUnavailable = ['evaluation', 'evaluation-rewrite', 'readers-report'].includes(definition.kind) &&
+        definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed'
+        ? `未完成：没有形成可用的综合结果 · ${crossUnit.reason}` : null;
+
       // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
       // range review that closed everything it was asked to read completed, without qualification.
       if (terminalClassification === 'completed' && reduced.gaps.some((gapEntry) => gapEntry.code !== 'out-of-scope')) {
-        terminalClassification = 'completed-with-gaps';
+        terminalClassification = reduced.coverage.unitsClosed === 0 ? 'failed' : 'completed-with-gaps';
       }
       // A kind whose book-level step is its result (Issue #432 review): no closed step, no complete Run.
-      if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
+      if ((terminalClassification === 'completed' || terminalClassification === 'completed-with-gaps') && synthesisUnavailable !== null) {
+        terminalClassification = 'failed';
+      } else if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
         terminalClassification = 'completed-with-gaps';
       }
       clock.close();
@@ -3587,7 +3588,7 @@ export class BaselineAnalysisExecutionOwner {
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState: () => ceilingState('assurance-sampling'), live, policy,
         beginTurn: context.beginTurn, checkpoint: () => checkpointStage('assurance-sampling'),
         validationStep: (step) => { context.validationStep = step; },
-        stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
+        stopped: terminalClassification === 'failed' || terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
         stoppedReason: liveInterruption === 'run-budget-ceiling-reached' ? ASSURANCE_SAMPLING_BUDGET_REACHED : null,
         removedByEditor: !assuranceSamplingKept(facts.editorEdits),
         onCeilingReached: () => {
@@ -3628,7 +3629,10 @@ export class BaselineAnalysisExecutionOwner {
         usage.inputTokens += context.platformSession.usage.inputTokens;
         usage.outputTokens += context.platformSession.usage.outputTokens;
       }
-      const revision = ledger.persistRevision({
+      const noClosedReason = terminalClassification === 'failed'
+        ? synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? synthesisUnavailable
+          : `未完成：没有单元读成 · ${majorityGapReason(reduction.gaps) ?? '没有收到可用的模型回答。'}` : null;
+      const revision = noClosedReason !== null ? null : ledger.persistRevision({
         facts,
         attemptId,
         bindingDigest,
@@ -3653,15 +3657,15 @@ export class BaselineAnalysisExecutionOwner {
             safeNextAction: materialInterruptionNextAction(materialStop.code) ?? LIVE_INTERRUPTIONS[interruptionKey].safeNextAction }
         : LIVE_INTERRUPTIONS[interruptionKey];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
-        detail: terminalClassification === 'cancelled'
-          ? `运行终态：cancelled；按你的取消在阅读范围之间停止，已完成的结果与缺口均已保留，没有读到的阅读范围记为未尝试；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
+        detail: noClosedReason ?? (terminalClassification === 'cancelled'
+          ? `运行终态：cancelled；按你的取消在阅读范围之间停止，已完成的结果与缺口均已保留，没有读到的阅读范围记为未尝试；结果集修订版 ${revision?.revisionId ?? null}（Revision ${revision?.ordinal ?? null}）。`
           : interruptionKey === 'material-reference-changed' && materialStop !== null
             ? materialInterruptionMessage(materialStop)
           : interruption === null
-            ? `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
-            : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
-        resultSetRevisionId: revision.revisionId,
-        resultSetRevisionOrdinal: revision.ordinal,
+            ? `运行终态：${terminalClassification}；结果集修订版 ${revision?.revisionId ?? null}（Revision ${revision?.ordinal ?? null}）。`
+            : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision?.revisionId ?? null}（Revision ${revision?.ordinal ?? null}）。`),
+        resultSetRevisionId: revision?.revisionId ?? null,
+        resultSetRevisionOrdinal: revision?.ordinal ?? null,
         unitsClosed: reduction.coverage.unitsClosed,
         unitsReused: reduction.coverage.unitsReused,
         unitsTotal: reduction.coverage.unitsTotal,
@@ -3675,7 +3679,7 @@ export class BaselineAnalysisExecutionOwner {
         runRecordId: facts.runRecordId,
         taskIntentId: facts.taskIntentId,
         attemptId,
-        resultSetRevisionId: revision.revisionId,
+        resultSetRevisionId: revision?.revisionId ?? null,
         classification: terminalClassification,
         recordedAt: new Date().toISOString(),
         spans: clock.spans(),
@@ -3701,18 +3705,18 @@ export class BaselineAnalysisExecutionOwner {
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },
         sample,
         findingCounts: definition.findingCounts(reduction),
-        terminalFailure: null,
+        terminalFailure: noClosedReason === null ? null : { code: synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? 'SYNTHESIS_UNAVAILABLE' : 'NO_CLOSED_UNITS', reason: noClosedReason },
       };
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
         runRecordId: facts.runRecordId,
         classification: terminalClassification,
-        resultSetRevisionId: revision.revisionId,
-        summary: terminalClassification === 'cancelled'
+        resultSetRevisionId: revision?.revisionId ?? null,
+        summary: noClosedReason ?? (terminalClassification === 'cancelled'
           ? `已按你的要求取消：${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
           : interruption === null
             ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
-            : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
+            : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`),
         safeNextAction: interruption === null
           ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification]
           : liveInterruption === 'run-budget-ceiling-reached' && (live === null || production !== null) ? BUDGET_REACHED_NEXT_ACTION : interruption.safeNextAction,
@@ -3734,7 +3738,7 @@ export class BaselineAnalysisExecutionOwner {
           beginTurn: context.beginTurn,
           validationStep: (step) => { context.validationStep = step; },
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
-          stopped: definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
+          stopped: terminalClassification === 'failed' || definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && (this.#deps.seriesScopeGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });

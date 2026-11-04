@@ -121,6 +121,8 @@ export function reduceWriting(input: WritingReductionInput): WritingReduction {
       passages,
       draft: synthesis === null ? null : {
         title: synthesis.title,
+        ...(synthesis.usable === undefined ? {} : { usable: synthesis.usable }),
+        ...(synthesis.withheld === undefined ? {} : { withheld: synthesis.withheld }),
         sections: synthesis.sections.map((section) => ({ heading: section.heading, paragraphs: [...section.paragraphs] })),
       },
       synthesis: synthesisState,

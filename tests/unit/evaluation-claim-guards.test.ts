@@ -177,7 +177,7 @@ describe('what AI7\'s evaluation words may not claim (Issue #429, S81b2)', () =>
     for (const text of ['建议推荐出版。', '可以修改后再议。', '建议暂缓。', '目前暂缓出版为宜。', '不推荐。', '编辑部不推荐这部书稿。', '总体不推荐出版。']) {
       expect(claimsConclusion(text, CONCLUSIONS), text).toBe(true);
     }
-    for (const text of ['值得推荐给文史读者。', '推荐语可以写得更具体。', '可以先缓一缓再改第3章。', '出版前还要修改。']) {
+    for (const text of ['值得推荐给文史读者。', '推荐语可以写得更具体。', '可以先缓一缓再改第3章。', '出版前还要修改。', '人物暂缓了行动。', '不推荐删改作者声音。', '保留「推荐出版」字样供编辑判断。']) {
       expect(claimsConclusion(text, CONCLUSIONS), text).toBe(false);
     }
     expect(claimsConclusion('任何话', [''])).toBe(false);

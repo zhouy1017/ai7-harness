@@ -204,6 +204,7 @@ export interface ReadersReportPassageProjection {
 
 /** The five sections as the book-level synthesis wrote them: two paragraphs and three lists. */
 export interface ReadersReportSectionsProjection {
+  readonly withheld?: ReadonlyArray<string>;
   overall: string;
   strengths: ReadonlyArray<string>;
   problems: ReadonlyArray<string>;

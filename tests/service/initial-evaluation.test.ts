@@ -321,19 +321,12 @@ describe('AI7 初评 over the real store on exact sample1', () => {
       } finally {
         await owner.dispose();
       }
-      const revision = book.store.inspectInitialEvaluation(book.bookId).resultSetRevision!;
-      expect(revision.coverage).toMatchObject({ unitsClosed: 1, gapCount: 7 });
-      expect(revision.evaluation.synthesis.state).toBe('gap');
-      expect(revision.evaluation.synthesis.reason).toContain('AI7_FIXTURE_MISMATCH');
-      expect(revision.evaluation.items.every((item) => item.score === null)).toBe(true);
-      expect(revision.reducerClosure.label).toBe('归约/综合闭合：已闭合 · 全书综合未给出分数');
-      const workspace = book.store.inspectEvaluation(book.bookId, null);
-      expect(workspace.initial.latest).toMatchObject({ complete: false, current: true, total: { score: 0, fullMarks: 100, unscored: 5 } });
-      // The ranges it never read are named.
-      expect(workspace.initial.latest).toMatchObject({ unitsTotal: 8, unreadUnits: [2, 3, 4, 5, 6, 7, 8] });
-      expect(workspace.start).toEqual({ allowed: true, kind: 'first', fromInitial: null, skipDamaged: null });
-      expect(await refusal(() => book.store.startEvaluation(book.bookId, true)))
-        .toBe('EVALUATION_INITIAL_UNAVAILABLE:最近一次 AI7 初评没有给出全部评分项的分数；请重新初评。');
+      const settled = book.store.inspectInitialEvaluation(book.bookId);
+      expect(settled.taskOutcome?.classification).toBe('failed');
+      expect(settled.taskOutcome?.report?.failures).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'SYNTHESIS_UNAVAILABLE' })]));
+      expect(settled.resultSetRevision).toBeNull();
+      expect(book.store.inspectEvaluation(book.bookId, null).initial.latest).toBeNull();
+
     });
   }, 300_000);
 

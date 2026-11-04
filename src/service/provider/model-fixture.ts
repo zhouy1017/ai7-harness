@@ -385,6 +385,28 @@ export interface ResolvedModelFixture {
   readonly entries: ReadonlyMap<string, ModelFixtureEntry>;
   /** Digest over the lineage digests; the binding pins it. */
   readonly sha256: string;
+  /** Explicit test-transport aliases; the original fixture and request bytes remain immutable. */
+  readonly replayCompatibility?: ReadonlyArray<ModelFixtureReplayCompatibility>;
+}
+
+export interface ModelFixtureReplayCompatibility {
+  readonly mode: 'replay-compat';
+  readonly stage: string;
+  readonly contentKey: string;
+  readonly requestDigest: string;
+  readonly reason: string;
+}
+
+/** Stable admitted source/task content, excluding dependency result-set digests that salvage changes. */
+export function fixtureReplayContentKey(sourceDigest: string, promptContractDigest: string, content: Readonly<Record<string, string | number>> = {}): string {
+  return sha256Hex(canonicalJson({ sourceDigest, promptContractDigest, content }));
+}
+
+/** Call only after an exact downstream lookup misses; never used for unit requests or remote providers. */
+export function resolveReplayCompatibleFixtureEntry(fixture: ResolvedModelFixture, stage: string, contentKey: string, attempt = 1): ModelFixtureEntry | undefined {
+  const matches = fixture.replayCompatibility?.filter((entry) => entry.stage === stage && entry.contentKey === contentKey) ?? [];
+  if (matches.length !== 1) return undefined;
+  return resolveFixtureEntry(fixture.entries, 0, matches[0]!.requestDigest, attempt);
 }
 
 /**
@@ -680,12 +702,27 @@ export async function loadModelFixture(fixturesRoot: string, identity: string): 
     for (const entry of link.fixture.entries) entries.set(fixtureEntryKey(entry.unitOrdinal, entry.requestDigest, entry.attempt), entry);
   }
   const lineage = chain.map((link) => ({ identity: link.fixture.identity, sha256: link.sha256 }));
+  let replayCompatibility: ModelFixtureReplayCompatibility[] = [];
+  try {
+    const index: unknown = JSON.parse(await readFile(resolve(fixturesRoot, '..', 'model-replay-compat.json'), 'utf8'));
+    requireFixture(isRecord(index) && index.schema === 'ai7.model-fixture-replay-compat/1' && Array.isArray(index.entries), '回放兼容索引无效。');
+    replayCompatibility = index.entries.filter((entry: unknown) => isRecord(entry) && entry.fixtureIdentity === identity && entry.fixtureSha256 === chain[0]!.sha256)
+      .map((entry: unknown) => {
+        requireFixture(isRecord(entry) && entry.mode === 'replay-compat' && typeof entry.stage === 'string' && typeof entry.reason === 'string' && entry.reason.length > 0 &&
+          typeof entry.contentKey === 'string' && DIGEST_PATTERN.test(entry.contentKey) && typeof entry.requestDigest === 'string' && DIGEST_PATTERN.test(entry.requestDigest) &&
+          entries.has(fixtureEntryKey(0, entry.requestDigest)), '回放兼容索引条目无效。');
+        return { mode: 'replay-compat', stage: entry.stage, contentKey: entry.contentKey, requestDigest: entry.requestDigest, reason: entry.reason };
+      });
+  } catch (error) {
+    if (!(isRecord(error) && error.code === 'ENOENT')) throw error;
+  }
   return {
     identity,
     description: chain[0]!.fixture.description,
     provenance: chain[0]!.fixture.provenance,
     lineage,
     entries,
+    ...(replayCompatibility.length === 0 ? {} : { replayCompatibility }),
     sha256: sha256Hex(lineage.map((link) => `${link.identity}:${link.sha256}`).join('\n')),
   };
 }

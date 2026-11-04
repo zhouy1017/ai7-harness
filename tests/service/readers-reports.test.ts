@@ -723,6 +723,21 @@ describe('审稿意见 over the real store on exact sample1', () => {
     });
   }, 300_000);
 
+  it('fails when reading closes but the report synthesis has no usable result', async () => {
+    fixture = { ...fixture, entries: new Map([...fixture.entries].map(([key, entry]) => [key,
+      entry.response.kind === 'unit-result' && entry.response.text.includes('ai7.readers-report.synthesis-result/')
+        ? { ...entry, response: { ...entry.response, text: '{}' } } : entry])) };
+    await withBook(async (book) => {
+      await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);
+      finalizeAsJ11(book.store, book.bookId);
+      await draftReport(book, 'author');
+      const settled = book.store.inspectReadersReport(book.bookId)!;
+      expect(settled.taskOutcome?.classification).toBe('failed');
+      expect(settled.taskOutcome?.report?.failures).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'SYNTHESIS_UNAVAILABLE' })]));
+      expect(settled.resultSetRevision).toBeNull();
+    });
+  }, 300_000);
+
   it('writes no draft from a Run whose synthesis did not close, and offers none to open', async () => {
     await withBook(async (book) => {
       await runInitialEvaluationToEnd(book.store, book.owner, book.bookId, launchPolicy);

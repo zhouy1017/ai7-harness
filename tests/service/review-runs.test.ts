@@ -736,7 +736,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     const before = revision84ReviewStore();
     const session = await open('review-overlap-authored');
     try {
-      expect(workspace(session, book).runs[0]!.state).toBe('settled');
+      expect(workspace(session, book).runs[0]!.state).toBe('failed');
       withDatabase((after) => {
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -773,31 +773,19 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('pages oversized rejected text without loss (#1084)', async () => {
+  it('clips oversized notes and retains the finding as a disclosed whole-block annotation', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const entries = session.responseEntries!;
       if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
-      const longNote = '合成说明'.repeat(20_000);
-      for (const [key, entry] of [...session.responseEntries!]) {
+      for (const [key, entry] of [...entries]) {
         if (entry.unitOrdinal !== 1 || entry.attempt !== 2 || entry.response.kind !== 'unit-result') continue;
         const body = JSON.parse(entry.response.text) as { findings: Array<Record<string, unknown>> };
-        body.findings.at(-1)!.note = longNote;
+        body.findings.at(-1)!.note = '合成说明'.repeat(20_000);
         entries.set(key, { ...entry, response: { ...entry.response, text: JSON.stringify(body) } });
       }
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-      const chunks: string[] = [];
-      let page = workspace(session, book, run.reviewRunId).run!;
-      let pages = 0;
-      for (;;) {
-        expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThan(512 * 1024);
-        chunks.push(...page.excluded!.filter((entry) => entry.reasonCode === 'contract-schema-invalid').map((entry) => entry.text));
-        if (page.excludedNextOrdinal == null) break;
-        if (++pages > 100) throw new Error('Excluded paging failed to advance');
-        page = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined,
-          { findingsAfterOrdinal: null, categoryId: null, severity: null, status: null, chapterBlockId: null, excludedAfterOrdinal: page.excludedNextOrdinal }).run!;
-      }
-      expect((JSON.parse(chunks.join('')) as { note: string }).note === longNote).toBe(true);
-      expect(pages).toBeGreaterThan(0);
+      expect(run.excludedTotal).toBe(0);
+      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'))).toBe(true);
     });
   }, 300_000);
 
@@ -819,8 +807,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       // J-04's own suffixes, in its order (run-j04.mjs saveEditorSuffix): its Review Run reads unit 1 with all three in place.
       for (const suffix of [J04_EDIT_SUFFIX, '，J-04 计划版本形成后的确认编辑', '，J-04 快速开始前的确认编辑']) appendToBlockAt(session, book, 1, suffix);
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-      expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 3 });
-      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 0 });
+      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.unitOrdinal])).toEqual([['contract-retry', 1]]);
       expect(projection.resultSetRevision!.gaps).toEqual([]);
@@ -837,7 +825,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       runId = settled.reviewRunId;
       expect(settled.categories[0]!.state).toBe('settled');
       expect(settled.findings.length).toBeGreaterThan(0);
-      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
       const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       const projection = ledger.inspect(book.bookId);
       expect(projection.run!.adaptations).toHaveLength(1);
@@ -850,10 +838,10 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(frozen.contractIdentity).toMatchObject({ contractId: 'ai7.editorial-review', version: 2 });
       expect(projection.planEnvelope!.procedure?.version).toBe(2);
       expect(settled.excluded).toHaveLength(settled.excludedTotal!);
-      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(false);
+      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(true);
     } finally { await close(session); }
     const reopened = await open('sample1-review-contract-v2-controls');
-    try { expect(workspace(reopened, book, runId).run!.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid')).toBe(true); }
+    try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true); }
     finally { await close(reopened); }
   }, 300_000);
 
@@ -1008,9 +996,9 @@ describe('a Review Run over the real store on exact sample1', () => {
         const category = settled.categories.find((candidate) => candidate.categoryId === input.categoryId)!;
         expect(category.findingsCount).toBe(revision.findings.length);
         expect(category.excludedCount).toBe(revision.excluded.length);
-        expect(category.excludedCount).toBeGreaterThan(0);
+        expect(category.excludedCount).toBe(0);
       }
-      expect(settled.categories[0]!.excludedCount).toBe(2);
+      expect(settled.categories[0]!.excludedCount).toBe(0);
       expect(settled.categories.find((category) => category.categoryId === PLOT)!.findingsCount).toBe(4);
       expect(settled.findings.length).toBe(settled.categories.reduce((sum, category) => sum + category.findingsCount, 0));
       expect(settled.findings.every((finding) => finding.markId !== null && finding.anchorState === 'exact' && finding.status === 'pending')).toBe(true);
@@ -1282,7 +1270,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const recomputed = revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => revision.coverageManifest!.units[unit.unitOrdinal - 1]!);
       expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
       expect(empty.findings).toEqual([]);
-      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 2 处，未标记。');
+      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 4 处，未标记。');
       expect(selectionExcludedLine(2)).toBe('所读范围内另有 2 条未能定位引文，列在排除附录中');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
@@ -1290,7 +1278,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(reviewMarkCount(session, book)).toBe(0);
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], on(twentyOne.blockId, twentyOne.blockId)));
       expect(second.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyOne.blockId, 21, true]]);
-      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 1 处，未标记。');
+      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所选范围外另有 3 处，未标记。');
       expect(reviewMarkCount(session, book)).toBe(1);
     });
   }, 300_000);
@@ -1340,14 +1328,16 @@ describe('a Review Run over the real store on exact sample1', () => {
       // with every typo on the manuscript, each once.
       const whole = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(whole.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
-        .toEqual([[10, true], [15, true], [21, true], [56, true], [64, true]]);
+        .toEqual(expect.arrayContaining([[10, true], [15, true], [21, true], [56, true], [64, true]]));
+      expect(whole.findings).toHaveLength(7);
+      expect(whole.findings.filter((finding) => finding.output === 'annotation')).toHaveLength(1);
       const firstMarks = new Map(chosen.findings.map((finding) => [finding.quote, finding.markId] as const));
       expect(whole.findings.filter((finding) => firstMarks.has(finding.quote)).every((finding) => finding.markId === firstMarks.get(finding.quote))).toBe(true);
       appendToFirstBlock(session, book);
       const synced = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
       expect(synced.state).toBe('settled');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 4 });
-      expect(reviewMarkCount(session, book)).toBe(5);
+      expect(reviewMarkCount(session, book)).toBe(7);
     });
   }, 300_000);
 
@@ -1476,8 +1466,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       // unread — and none of them changed. The matrix reads 当前, and 只审改动过的章 is not offered.
       const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, 44));
       expect(chosen.categories[0]!.plan).toMatchObject({ reused: 0, unreviewed: 6 });
-      await authorizeAndDrive(session, book, chosen);
-      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
+      const failed = await authorizeAndDrive(session, book, chosen);
+      expect(failed.categories[0]!.state).toBe('failed');
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
       expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
     });
   }, 300_000);
