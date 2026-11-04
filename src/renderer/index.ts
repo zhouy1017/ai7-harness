@@ -2434,7 +2434,8 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       rows.append(row);
     }
     detail.append(element('h4', undefined, `章节对应 · ${record.groups.count} 处`), rows);
-    detail.append(element('p', 'field-note', `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随。`));
+    const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;
+    detail.append(element('p', 'field-note', `标记：${record.markOutcomes.followed} 条已跟随，${record.markOutcomes.unfollowed} 条未能跟随${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
     // Each mark that could not follow, as the landing notice listed it: set aside for good, so the record is where it is read later.
     if (record.markOutcomes.items.length > 0) {
       const unfollowed = element('ul', 'degradation-list reimport-record-unfollowed');
@@ -2444,9 +2445,6 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
         unfollowed.append(entry);
       }
       detail.append(unfollowed);
-    }
-    if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
-      detail.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条未列出。`));
     }
   }
   if (record.kind === 'import-record' || record.kind === 'manuscript-reimport-record') {
@@ -4566,8 +4564,9 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
       : '新文件与当前稿件逐段一致：已记录这次重新导入，没有创建新的修订版。'),
   );
   if (record.markOutcomes.unfollowed > 0) {
+    const unlisted = record.markOutcomes.unfollowed - record.markOutcomes.items.length;
     section.append(element('p', 'attention-note',
-      `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留。`));
+      `${record.markOutcomes.unfollowed} 条标记未能跟随新文件：它们的文字已删去、改写或不止一处，已从正文移开并保留${unlisted > 0 ? `；另有 ${unlisted} 条未列出` : ''}。`));
     const list = element('ul', 'reimport-unfollowed');
     for (const item of record.markOutcomes.items) {
       const entry = element('li', undefined, reimportUnfollowedLine(item));
@@ -4575,10 +4574,6 @@ function reimportLandingSection(result: ManuscriptReimportCommitProjection): HTM
       list.append(entry);
     }
     section.append(list);
-    // The record lists the same marks, bounded alike: what neither lists is counted, never pointed elsewhere.
-    if (record.markOutcomes.unfollowed > record.markOutcomes.items.length) {
-      section.append(element('p', 'field-note', `另有 ${record.markOutcomes.unfollowed - record.markOutcomes.items.length} 条未列出。`));
-    }
   }
   const detail = element('div', 'reimport-landing-record');
   const actions = element('div', 'button-row compact-actions');
