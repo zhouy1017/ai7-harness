@@ -888,7 +888,7 @@ const READ_HISTORY = `(() => {
     grouping: root.dataset.feedbackGrouping ?? null,
     groups: Array.from(root.querySelectorAll('.feedback-group'), (group) => [group.querySelector('h3')?.textContent ?? null, group.querySelectorAll('li.feedback-entry').length]),
     entryBooks: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-book')?.textContent ?? null),
-    entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-line')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
+    entries: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => [item.dataset.feedbackOrigin ?? null, item.querySelector('.feedback-entry-description')?.textContent ?? null, item.querySelector('.feedback-entry-reason')?.textContent ?? null]),
     people: Array.from(root.querySelectorAll('li.feedback-entry'), (item) => item.querySelector('.feedback-entry-people')?.textContent ?? null),
     loading: root.querySelector('select[data-feedback-filter]')?.disabled ?? false,
     filters: Object.fromEntries(Array.from(root.querySelectorAll('select[data-feedback-filter]'), (select) => [select.dataset.feedbackFilter, [select.value, Array.from(select.options, (option) => option.textContent)]])),

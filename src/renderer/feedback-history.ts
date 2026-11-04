@@ -221,10 +221,10 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
         item.dataset['feedbackOrigin'] = entry.origin;
         item.dataset['reasonState'] = entry.reasonState;
         item.dataset['peopleVersion'] = String(entry.peopleVersion);
-        const line = el('p', 'feedback-entry-line', feedbackEntryLine(entry));
-        line.append(' · ', el('span', 'feedback-entry-time', `记录于 ${localInstantLabel(entry.recordedAt)}`));
+        const line = el('p', 'feedback-entry-line');
+        line.append(el('span', 'feedback-entry-description', feedbackEntryLine(entry)), ' · ', el('span', 'feedback-entry-time', `记录于 ${localInstantLabel(entry.recordedAt)}`));
         const people = peopleOf(entry);
-        if (groupBy !== 'book') line.prepend(el('span', 'feedback-entry-book', `《${book.title}》 · ${learningPeopleLine(people ?? book)} · `));
+        if (groupBy !== 'book') line.prepend(el('span', 'feedback-entry-book', `《${book.title}》 · ${learningPeopleLine(people ?? book)}`), ' · ');
         if (people !== null && learningPeopleLine(people) !== now) line.append(' · ', el('span', 'feedback-entry-people', feedbackAttributionLine(people)));
         item.append(line, el('p', 'feedback-entry-reason', feedbackReasonLine(entry)));
         if (entry.target.kind === 'mark' && entry.target.detached) {

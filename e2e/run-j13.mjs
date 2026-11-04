@@ -326,7 +326,7 @@ const READ_SERIES = `(() => {
     },
     refusal: root.querySelector('.series-refusal')?.textContent ?? null,
     historyEmpty: root.querySelector('.series-history-empty')?.textContent ?? null,
-    history: Array.from(root.querySelectorAll('ol.series-history > li'), (item) => [item.dataset.changeKind ?? null, item.dataset.bookId ?? null, item.querySelector('.series-change-line')?.textContent ?? null, item.querySelectorAll('.series-impact-group').length]),
+    history: Array.from(root.querySelectorAll('ol.series-history > li'), (item) => [item.dataset.changeKind ?? null, item.dataset.bookId ?? null, item.querySelector('.series-change-line')?.firstChild?.textContent ?? null, item.querySelectorAll('.series-impact-group').length]),
     focus: root.contains(document.activeElement) ? ${FOCUS} : null,
   };
 })()`;
@@ -340,7 +340,7 @@ const READ_BOOK_SERIES = `(() => {
     none: section.querySelector('.book-series-none')?.textContent ?? null,
     memberships: Array.from(section.querySelectorAll('.book-series-membership'), (line) => [line.dataset.seriesId ?? null, line.textContent ?? '']),
     summary: section.querySelector('details.book-series-history > summary')?.textContent ?? null,
-    history: Array.from(section.querySelectorAll('details.book-series-history li.series-change'), (item) => [item.dataset.changeKind ?? null, item.querySelector('.series-change-line')?.textContent ?? null]),
+    history: Array.from(section.querySelectorAll('details.book-series-history li.series-change'), (item) => [item.dataset.changeKind ?? null, item.querySelector('.series-change-line')?.firstChild?.textContent ?? null]),
   };
 })()`;
 
