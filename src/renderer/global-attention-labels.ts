@@ -321,10 +321,8 @@ export const REVIEW_ON_SELECTION = '所选段落';
 export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
 export const GLOBAL_ATTENTION_CLARIFICATION_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
 /** The prefix the product already puts before a record's safe next action. */
-export const GLOBAL_ATTENTION_NEXT_STEP_PREFIX = '';
-
 export function globalAttentionNextStepLine(step: GlobalAttentionNextStep): string {
-  return `${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}${GLOBAL_ATTENTION_NEXT_STEP_LABELS[step]}`;
+  return GLOBAL_ATTENTION_NEXT_STEP_LABELS[step];
 }
 
 /** The Book an item belongs to; an import that names none yet says so. */

@@ -2418,7 +2418,7 @@ async function main() {
       const heading = document.querySelector(${JSON.stringify(`${designationItem(1)} li[data-case-id="${supersessionCase.caseId}"] section.maintenance-case .maintenance-case-heading`)});
       return listed.length === 6 && listed[5] === ${JSON.stringify(supersessionCase.caseId)} && heading instanceof HTMLElement && document.activeElement === heading &&
         heading.textContent === '第 3 项维护事项 · 替代' &&
-        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older .field-note`)})?.textContent === '还有 1 项更早的维护事项';
+        document.querySelector(${JSON.stringify(`${designationItem(1)} .maintenance-older [data-maintenance-action="older"]`)})?.textContent === '还有 1 项更早的维护事项 · 查看';
     })()`, 'maintenance-attention-older-opened', 60_000);
     // 归档 of that designation: its maintenance is closed, and the 替代 leaves 待我处理 without being concluded.
     await clickSelector(renderer, maintenanceAction(1, 'record'), 'maintenance-archive-open');

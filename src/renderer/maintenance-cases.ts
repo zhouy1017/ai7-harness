@@ -223,9 +223,9 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     const remaining = maintenance.total - shown.length - (pinned === null ? 0 : 1);
     if (olderPage === undefined ? remaining > 0 : olderHasMore) {
       const more = el('div', 'maintenance-older');
-      more.append(el('p', 'field-note', olderPage === undefined ? maintenanceOlderLine(remaining) : '还有更早的维护事项。'));
       const read = actionButton('older', 'quiet', () => void loadOlder(designation.publicationVersionId, shown));
       read.disabled = working;
+      read.textContent = olderPage === undefined ? `${maintenanceOlderLine(remaining)} · 查看` : '查看更早的维护事项';
       more.append(read);
       section.append(more);
     }
@@ -345,13 +345,11 @@ export function mountMaintenance(options: MountMaintenanceOptions): MaintenanceS
     evidence.value = current.evidence;
     evidence.rows = 2;
     evidence.disabled = working;
-    const hint = el('small', 'field-note', MAINTENANCE_EVIDENCE_HINT);
-    hint.id = uid('evidence-hint');
-    evidence.setAttribute('aria-describedby', hint.id);
+    evidence.placeholder = MAINTENANCE_EVIDENCE_HINT;
     const reasonLabel = el('label', 'maintenance-field');
     reasonLabel.append(el('span', undefined, MAINTENANCE_REASON_LABEL), reason);
     const evidenceLabel = el('label', 'maintenance-field');
-    evidenceLabel.append(el('span', undefined, MAINTENANCE_EVIDENCE_LABEL), evidence, hint);
+    evidenceLabel.append(el('span', undefined, MAINTENANCE_EVIDENCE_LABEL), evidence);
     form.append(reasonLabel, evidenceLabel);
     if (current.problem !== null) {
       const alert = el('p', 'export-problem', current.problem);

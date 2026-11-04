@@ -11,7 +11,6 @@ import {
   GLOBAL_ATTENTION_LEDE,
   GLOBAL_ATTENTION_MATERIAL_GROUPS,
   GLOBAL_ATTENTION_NEXT_STEP_LABELS,
-  GLOBAL_ATTENTION_NEXT_STEP_PREFIX,
   GLOBAL_ATTENTION_NO_BOOK,
   GLOBAL_ATTENTION_STATE_LABELS,
   GLOBAL_ATTENTION_STATE_PILLS,
@@ -55,7 +54,6 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 // The Manuscript screen owns its toolbar, so the recovery return's button is read there (Issue #1127).
 const MANUSCRIPT_SCREEN = readFileSync(fileURLToPath(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url)), 'utf8');
 // ②A's baseline-analysis card owns its Task outcome's next step (Issue #1172).
-const BASELINE_ANALYSIS_CARD = readFileSync(fileURLToPath(new URL('../../src/renderer/baseline-analysis-card.ts', import.meta.url)), 'utf8');
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
