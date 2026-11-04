@@ -113,7 +113,7 @@ export function createImportReview(options: ImportReviewOptions) {
       { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false };
     wordIntakeFormChoices.set(key, { ...selected });
     while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
-    group.append(element('p', 'field-note', `当前暂存预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}。这只是预览，尚未选择稿件基线。`));
+    group.append(element('p', 'field-note', `当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未选择稿件基线。`));
     const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
@@ -126,7 +126,7 @@ export function createImportReview(options: ImportReviewOptions) {
     confirmation.dataset['wordAcceptedBaselineConfirmation'] = '';
     confirmationLabel.append(confirmation, element('span', undefined, '我确认以接受修订后的文字建立稿件基线，原始修订留在原文件中。'));
     const learningLabel = element('label', 'choice'); const learning = element('input'); learning.type = 'checkbox'; learning.dataset['wordLearnFromEdits'] = '';
-    learningLabel.append(learning, element('span', undefined, '允许在本机按当前学习设置保留原始修改对（默认开启，可取消）'));
+    learningLabel.append(learning, element('span', undefined, '允许按当前学习设置在本机保留原始修改对'));
     const notice = element('p', 'field-note'); notice.dataset['wordReadingAvailability'] = '';
     group.append(confirmationLabel, learningLabel,
       element('p', 'field-note', '全局关闭、本书排除和材料排除优先；本次导入不会创建编辑记忆、更新审阅偏好或调用模型。'), notice);

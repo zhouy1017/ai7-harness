@@ -17,7 +17,6 @@ import {
   needsDegradationDecision,
   offersTextBoxChoice,
   roundTripCard,
-  textBoxChoiceStatement,
 } from './import-fidelity-labels.js';
 
 /**
@@ -79,7 +78,6 @@ function textBoxChoice(
     label.append(radio, copy);
     fieldset.append(label);
   }
-  if (mode === 'stated') fieldset.append(el('p', 'field-note', textBoxChoiceStatement(current)));
   return fieldset;
 }
 

@@ -455,7 +455,8 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
         paint();
       });
       const words = el('span', 'task-panel-mode-words');
-      words.append(el('strong', undefined, choice.label), el('small', 'field-note', choice.available ? choice.meaning : choice.reason ?? choice.meaning));
+      words.append(el('strong', undefined, choice.label));
+      if (!choice.available && choice.reason !== null) words.append(el('small', 'field-note', choice.reason));
       label.append(input, words);
       fieldset.append(label);
     }
