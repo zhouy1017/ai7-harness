@@ -157,11 +157,19 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       : active instanceof HTMLInputElement && active.name === 'writing-type' ? `input[name="writing-type"][value="${CSS.escape(active.value)}"]`
       : active.dataset['writingMaterial'] !== undefined ? `[data-writing-material="${CSS.escape(active.dataset['writingMaterial'])}"]`
       : null);
+    const guidanceOpen = section.querySelector<HTMLDetailsElement>('details.writing-guidance')?.open ?? false;
     section.replaceChildren();
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const heading = el('h3', undefined, WRITING_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', `field-note${page.unavailable === null ? '' : ' writing-unavailable'}`, page.unavailable ?? WRITING_LEDE));
+    section.append(heading);
+    if (page.unavailable !== null) heading.append(' · ', el('span', 'writing-unavailable', page.unavailable));
+    else {
+      const guidance = el('details', 'writing-guidance');
+      guidance.open = guidanceOpen;
+      guidance.append(el('summary', undefined, '起草如何参考资料'), el('p', undefined, WRITING_LEDE));
+      section.append(guidance);
+    }
     const task = page.task;
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
