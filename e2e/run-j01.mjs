@@ -1883,9 +1883,9 @@ async function runNativeWordImport(renderer, scenario, restart, recoverCommitted
       prepare.disabled === ${Boolean(allInserted)} && !document.querySelector('[data-word-reviewed-mode]');
   })()`, 'word-preview-never-selects-accepted-baseline');
   // The two modes by their ADR 0094 names, the tagged preview, and why an unusable reading cannot be prepared.
-  const previewLabel = `当前预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}；尚未选择稿件基线。`;
+  const previewLabel = `当前预览：${allInserted ? '接受修订后的阅读' : '撤销修订后的阅读'}；尚未建立稿件基线。`;
   const readingReason = allInserted ? '撤销修订后没有可编辑的非空稿件，不能按「转为 AI7 修订建议」准备；仍可明确选择并确认「直接并入正文 · 定稿基线」。'
-    : '最终保真、导入方式及本机保留范围会在下一步复核。';
+    : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
   await assertRenderer(renderer, `(() => {
     const controls = document.querySelector('[data-word-import-controls="ready"]');
     const option = (mode) => controls.querySelector('[data-word-import-mode="' + mode + '"]').closest('label').textContent;
