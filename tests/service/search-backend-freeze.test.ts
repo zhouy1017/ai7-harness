@@ -55,7 +55,36 @@ describe('a review Run freezes its search backend', () => {
       expect(() => {
         let work = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
         while (!work.done) work = store.advanceReviewRunPreparationWork(work.workId!);
-      }).toThrow(/TinyFish.*设置/u);
+      }).toThrow(/当前模型渠道不自带联网搜索.*联网检索.*保存一个后端密钥/u);
+    } finally { store.close(); await roots.dispose(); }
+  });
+
+  it('uses the ready native Main channel backend despite the selected search backend and omits cross-source fallback', async () => {
+    const roots = await createServiceTestRoots();
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const configured = { ...ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route.includes('deepseek'))!, credentialReference: randomUUID() };
+      store.saveModelServiceConnection('合成 DeepSeek 连接', configured.credentialReference, 'ready', 'deepseek-open-platform');
+      const policy = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production', configured);
+      const launch = { operationalScope: 'ordinary-production' as const, policy, live: { ...configured, scope: 'ordinary-production' as const, runBudgetCeiling: 'unset' as const } };
+      store.baselineAnalysisLedger.bindLaunch(launch); store.factualReviewLedger.bindLaunch(launch);
+      const book = await importSample1Book(store, roots.codeRoot, '随模型渠道搜索');
+      await pinEditorialWorkspaceProfileRevision2(store, book.bookId);
+      const connections = store.getSearchBackendConnections();
+      const nativeReference = store.saveSearchBackendCredential('search-deepseek', connections.find((row) => row.backendId === 'search-deepseek')!.credentialReference, 'ready').credentialReference!;
+      const selectedReference = connections.find((row) => row.backendId === 'search-tinyfish')!.credentialReference;
+      const fallbackReference = connections.find((row) => row.backendId === 'search-brave')!.credentialReference;
+      store.saveSearchBackendCredential('search-tinyfish', selectedReference, 'ready');
+      store.saveSearchBackendCredential('search-brave', fallbackReference, 'ready');
+      store.selectSearchBackend('search-tinyfish');
+      store.selectSearchBackend('search-brave', 'fallback');
+      const work = (() => { let value = store.createReviewRunPreparationWork(book.bookId, ['factual-review'], { kind: 'whole', fromChapterBlockId: null, toChapterBlockId: null }, policy);
+        while (!value.done) value = store.advanceReviewRunPreparationWork(value.workId!); return value; })();
+      expect(work.projection!.run!.categories[0]?.taskIntentId).toBeDefined();
+      const frozen = store.factualReviewLedger.inspect(book.bookId).providerResolutionPlan!;
+      expect(frozen.webToolsBackend?.backendId).toBe('search-deepseek');
+      expect(frozen.searchCredentialReference).toBe(nativeReference);
+      expect(frozen.webToolsFallback).toBeUndefined();
     } finally { store.close(); await roots.dispose(); }
   });
 

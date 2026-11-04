@@ -4243,6 +4243,17 @@ export async function runApplication(): Promise<void> {
         throw new ServiceCallError('MODEL_SERVICE_STATE_UNCERTAIN', '凭据已受保护，但连接状态需要处理。');
       }
       await service!.call('refreshModelServiceModels', { route });
+      const searchBackendId = `search-${route.startsWith('deepseek-') ? 'deepseek' : route.startsWith('openai-') ? 'openai' : route.startsWith('anthropic-') ? 'anthropic' : ''}`;
+      if (searchBackendId !== 'search-') {
+        const search = await service!.call('getSearchBackendSettings', {});
+        if (search.backends.some((backend) => backend.backendId === searchBackendId)) {
+          const existing = search.backends.find((backend) => backend.backendId === searchBackendId)!.connection;
+          const pendingSearch = await service!.call('saveSearchBackendCredential', { backendId: searchBackendId, credentialReference: existing.credentialReference, credentialOperationState: 'needs-attention' });
+          try { await protectedSecretStore.copy(pending.credentialReference, pendingSearch.credentialReference!); }
+          catch { throw new ServiceCallError('PROTECTED_SECRET_WRITE_FAILED', '模型渠道凭据未能同步到联网检索。'); }
+          await service!.call('saveSearchBackendCredential', { backendId: searchBackendId, credentialReference: pendingSearch.credentialReference, credentialOperationState: 'ready' });
+        }
+      }
       return settingsProjection();
     };
     /** Remove a route's credential — the DeepSeek 开放平台（官方） route's when none is named — keeping its connection 需设置. */
@@ -4277,13 +4288,15 @@ export async function runApplication(): Promise<void> {
       probeSearchBackend: (input) => service!.call('probeSearchBackend', input),
       async saveSearchBackendCredential(input) {
         const reuse = input !== null && typeof input === 'object' && Object.keys(input).sort().join(',') === 'backendId,reuseModelCredential' &&
-          input.backendId === 'search-deepseek' && 'reuseModelCredential' in input && input.reuseModelCredential === true;
+          typeof input.backendId === 'string' && 'reuseModelCredential' in input && input.reuseModelCredential === true;
         if (!reuse && (input === null || typeof input !== 'object' || Object.keys(input).sort().join(',') !== 'backendId,secret' || !('secret' in input) || typeof input.secret !== 'string' ||
             !input.secret.isWellFormed() || input.secret.trim().length < 1 || input.secret.length > 16_384)) throw new ServiceCallError('SEARCH_CREDENTIAL_INVALID', '联网检索凭据输入无效。');
         if (protectedSecretStore === undefined) throw new ServiceCallError('PROTECTED_SECRET_STORE_UNAVAILABLE', '操作系统安全凭据库当前不可用。');
-        const source = reuse ? (await settingsProjection()).routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')?.connection : null;
-        if (reuse && source?.credentialOperationState !== 'ready') throw new ServiceCallError('SEARCH_CREDENTIAL_MISSING', '请先保存 DeepSeek 开放平台（官方）凭据。');
-        const pending = await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: null, credentialOperationState: 'needs-attention' });
+        const routeSettings = reuse ? await settingsProjection() : null;
+        const source = reuse ? routeSettings!.routeChoice.routes.find((route) => route.route.startsWith(input.backendId.slice('search-'.length) + '-') )?.connection : null;
+        if (reuse && source?.credentialOperationState !== 'ready') throw new ServiceCallError('SEARCH_CREDENTIAL_MISSING', '请先保存对应模型渠道的凭据。');
+        const existing = reuse ? (await service!.call('getSearchBackendSettings', {})).backends.find((backend) => backend.backendId === input.backendId)?.connection : null;
+        const pending = await service!.call('saveSearchBackendCredential', { backendId: input.backendId, credentialReference: existing?.credentialReference ?? null, credentialOperationState: 'needs-attention' });
         try {
           if (reuse) await protectedSecretStore.copy(source!.credentialReference, pending.credentialReference!);
           else if ('secret' in input) await protectedSecretStore.set(pending.credentialReference!, input.secret);

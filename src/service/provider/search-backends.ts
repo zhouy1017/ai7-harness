@@ -1,6 +1,8 @@
 import bochaai from '../../../config/providers/search-backends/search-bochaai.json' with { type: 'json' };
 import brave from '../../../config/providers/search-backends/search-brave.json' with { type: 'json' };
 import deepseek from '../../../config/providers/search-backends/search-deepseek.json' with { type: 'json' };
+import openai from '../../../config/providers/search-backends/search-openai.json' with { type: 'json' };
+import anthropic from '../../../config/providers/search-backends/search-anthropic.json' with { type: 'json' };
 import parallel from '../../../config/providers/search-backends/search-parallel.json' with { type: 'json' };
 import tinyfish from '../../../config/providers/search-backends/search-tinyfish.json' with { type: 'json' };
 import measured from '../../../config/providers/recorded-evidence/search-backend-profiles.json' with { type: 'json' };
@@ -21,7 +23,7 @@ import type { ConfiguredCredentialSlot } from '../../shared/provider-configurati
 
 /** A search backend's id: its document's file name and its credential slot. */
 export type SearchBackendId = Extract<ConfiguredCredentialSlot, `search-${string}`>;
-export type SearchBackendProtocol = 'bocha-web-search' | 'brave-web-search' | 'tinyfish-search' | 'parallel-search' | 'anthropic-messages-web-search';
+export type SearchBackendProtocol = 'bocha-web-search' | 'brave-web-search' | 'tinyfish-search' | 'parallel-search' | 'anthropic-messages-web-search' | 'openai-responses-web-search';
 export type SearchBackendHeaderForm = 'authorization-bearer' | 'x-api-key' | 'x-subscription-token';
 /** Why a backend is not offered (decision 24⁵: only the clearly unusable are excluded). */
 export type SearchBackendExclusion = 'not-supported' | 'unreachable' | 'no-authenticated-response' | 'zero-hits-both-halves' | 'not-measured';
@@ -133,7 +135,7 @@ export interface SearchBackendRequest {
  */
 export interface SearchBackend {
   readonly declaration: SearchBackendDeclaration;
-  request(query: string, options: { readonly credential: string; readonly count: number }): SearchBackendRequest;
+  request(query: string, options: { readonly credential: string; readonly count: number; readonly model?: string }): SearchBackendRequest;
   /** The results in rank order, or null when the answer carries none AI7 can read. */
   readResults(status: number, contentType: string | null, body: string): ReadonlyArray<SearchBackendHit> | null;
 }
@@ -141,7 +143,7 @@ export interface SearchBackend {
 /** Decision 24⁵: a backend whose overall hit rate is within this many points of the best is in the top tier. */
 export const SEARCH_RANKING_TIER_WIDTH = 0.1;
 
-const PROTOCOLS: ReadonlySet<string> = new Set<SearchBackendProtocol>(['bocha-web-search', 'brave-web-search', 'tinyfish-search', 'parallel-search', 'anthropic-messages-web-search']);
+const PROTOCOLS: ReadonlySet<string> = new Set<SearchBackendProtocol>(['bocha-web-search', 'brave-web-search', 'tinyfish-search', 'parallel-search', 'anthropic-messages-web-search', 'openai-responses-web-search']);
 const HEADER_FORMS: ReadonlySet<string> = new Set<SearchBackendHeaderForm>(['authorization-bearer', 'x-api-key', 'x-subscription-token']);
 
 class SearchBackendConfigurationError extends Error {
@@ -248,12 +250,12 @@ export function searchBackendCandidateOf(document: unknown): SearchBackendCandid
 
 /** Every declared backend, in document file-name order. */
 export const SEARCH_BACKEND_DECLARATIONS: ReadonlyArray<SearchBackendDeclaration> = Object.freeze(
-  [bochaai, brave, deepseek, parallel, tinyfish].map((document: unknown) => searchBackendDeclarationOf(document)),
+  [bochaai, brave, deepseek, openai, anthropic, parallel, tinyfish].map((document: unknown) => searchBackendDeclarationOf(document)),
 );
 
 /** Every declared candidate, in document file-name order. */
 export const SEARCH_BACKEND_CANDIDATES: ReadonlyArray<SearchBackendCandidate> = Object.freeze(
-  [bochaai, brave, deepseek, parallel, tinyfish].map((document: unknown) => searchBackendCandidateOf(document)).filter((entry): entry is SearchBackendCandidate => entry !== null),
+  [bochaai, brave, deepseek, openai, anthropic, parallel, tinyfish].map((document: unknown) => searchBackendCandidateOf(document)).filter((entry): entry is SearchBackendCandidate => entry !== null),
 );
 
 /** The exact closed candidate a backend declares; an unknown or mismatched backend/candidate pair is refused. */

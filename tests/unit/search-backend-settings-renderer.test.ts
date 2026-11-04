@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { searchBackendSettingsProjection } from '../../src/service/provider/search-backend-settings.js';
-import { SEARCH_CANDIDATE_PROBE_LABEL, candidateProbeLines, renderSearchBackendSettings, type SearchBackendSettingsApi } from '../../src/renderer/search-backend-settings.js';
+import { SEARCH_CANDIDATE_PROBE_LABEL, candidateProbeLines, effectiveSearchSourceLine, renderSearchBackendSettings, type SearchBackendSettingsApi } from '../../src/renderer/search-backend-settings.js';
 import type { ModelServiceSettingsProjection, SearchBackendProbeProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 
@@ -14,6 +14,7 @@ const SHIPPED = ['search-tinyfish', 'search-deepseek', 'search-brave', 'search-p
 const projection = (): ModelServiceSettingsProjection => ({
   searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId, credentialReference: '11111111-1111-4111-8111-111111111111', credentialOperationState: 'ready',
     selected: backendId === 'search-tinyfish', selectedAt: '2026-10-29T00:00:00.000Z' }))),
+  routeChoice: { routes: [], unsupportedProviders: [], effectLabel: '' },
   launchPolicy: { operationalScope: 'development-ci' },
 } as unknown as ModelServiceSettingsProjection);
 
@@ -31,6 +32,12 @@ function section(probe: SearchBackendSettingsApi['probeSearchBackend']) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the direct-search candidate in 联网检索', () => {
+  it('shows the effective source and why it is selected', () => {
+    const settings = projection();
+    expect(effectiveSearchSourceLine(settings)).toContain('兜底 · TinyFish');
+    Object.assign(settings, { routeChoice: { routes: [{ route: 'deepseek-open-platform', inUse: true, binding: { providerLabel: 'DeepSeek 开放平台（官方）' } }] } });
+    expect(effectiveSearchSourceLine(settings)).toContain('随模型渠道 · DeepSeek 开放平台（官方） 自带搜索');
+  });
   it('keeps keyless backends unselected, distinguishes measured references, and disables empty credential actions', () => {
     const settings = projection();
     Object.assign(settings, { launchPolicy: { operationalScope: 'ordinary-production' }, routeChoice: { routes: [] } });
@@ -56,9 +63,9 @@ describe('the direct-search candidate in 联网检索', () => {
     const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(async () => settings), removeSearchBackendCredential: vi.fn() };
     const setStatus = vi.fn();
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus, errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
-    node.querySelector('[data-action="reuse-deepseek-credential"]')!.click(); await settle();
+    node.querySelector('[data-action="reuse-model-credential"]')!.click(); await settle();
     expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-deepseek', reuseModelCredential: true });
-    expect(setStatus).toHaveBeenCalledWith('DeepSeek 凭据已同步到联网检索。', 'success');
+    expect(setStatus).toHaveBeenCalledWith('模型渠道凭据已同步到联网检索。', 'success');
   });
   it('lists it after the five ranked backends, 未实测, with 测试连接 as its only action', () => {
     const { node } = section(async () => SUCCESS);

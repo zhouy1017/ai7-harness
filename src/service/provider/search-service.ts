@@ -179,7 +179,7 @@ export async function forwardSearchCall(input: {
 
 /** Send one authorized search call, exactly once; an object `authorizeSearchCall` did not return sends nothing. */
 export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: PlatformToolFetch, signal?: AbortSignal,
-  credentialed?: { readonly broker: CredentialBroker; readonly admitHost: TicketHostAdmission; readonly modelRole: 'Main Editorial Role' | 'Fast Interaction Role' },
+  credentialed?: { readonly broker: CredentialBroker; readonly admitHost: TicketHostAdmission; readonly modelRole: 'Main Editorial Role' | 'Fast Interaction Role'; readonly model?: string },
 ): Promise<SearchCallOutcome> {
   if (!authorizedSearchCalls.delete(authorized)) throw ticketRefused();
   if (authorized.ticket !== undefined) {
@@ -189,7 +189,7 @@ export async function sendSearchCall(authorized: AuthorizedSearchCall, fetch: Pl
     return credentialed.broker.releaseTo({ bindingDigest: ticket.bindingDigest, modelRole: credentialed.modelRole,
       slot: backend.credentialSlot, credentialReference: backend.credentialReference }, ticket, async (credential) => {
       const adapter = searchBackend(backend.backendId);
-      const request = adapter.request(query, { credential, count: 10 });
+      const request = adapter.request(query, { credential, count: 10, ...(credentialed.model === undefined ? {} : { model: credentialed.model }) });
       if (new URL(request.url).hostname !== ticket.host) throw ticketRefused();
       const deadline = deadlineSignal(SEARCH_SERVICE_TIMEOUT_MS, signal);
       let release: (() => void) | undefined;
@@ -285,7 +285,7 @@ export async function probeSearchBackend(input: {
     const decision = evaluateSearchServiceCall({ arguments: args }, input.binding, scope, book);
     if (decision.decision !== 'call-search-service') throw new SearchServiceError('SEARCH_PROBE_NOT_ADMITTED', decision.detail);
     const authorized = authorizeSearchCall({ ticket: decision.ticket, book, arguments: args });
-    const outcome = await sendSearchCall(authorized, input.fetch, undefined, { broker: input.broker, admitHost: input.admitHost, modelRole: 'Main Editorial Role' });
+    const outcome = await sendSearchCall(authorized, input.fetch, undefined, { broker: input.broker, admitHost: input.admitHost, modelRole: 'Main Editorial Role', model: input.binding.model });
     const hits = searchBackend(backendId).readResults(outcome.status, outcome.contentType, new TextDecoder().decode(outcome.bytes));
     return { backendId, reachable: outcome.status === 200 && hits !== null, latencyMs: Date.now() - started, resultCount: hits?.length ?? 0,
       results: (hits ?? []).slice(0, 3).map((hit) => ({ title: capCharacters(hit.title.replace(/[\r\n]/gu, ' '), 120), url: hit.url.length <= 2048 ? hit.url : '' })).filter((hit) => hit.url !== ''),

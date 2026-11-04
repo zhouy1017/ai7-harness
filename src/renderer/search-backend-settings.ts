@@ -26,6 +26,17 @@ export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidatePro
   'transport-unknown': '传输结果未知',
 });
 
+/** Explain the resolver's current source using the selected Main route and only a saved, measured native backend. */
+export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjection): string {
+  const ready = projection.searchBackends.backends.filter((backend) => backend.connection.credentialOperationState === 'ready');
+  const mainRoute = projection.routeChoice?.routes.find((route) => route.inUse);
+  const native = mainRoute === undefined ? undefined : ready.find((backend) => mainRoute.route.startsWith(`${backend.backendId.slice('search-'.length)}-`));
+  if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索`;
+  const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
+  return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
+    : `当前生效来源：兜底 · ${selected.name}（模型渠道没有可用的原生搜索）`;
+}
+
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -91,6 +102,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
   section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务使用所选后端；已开始的运行继续使用计划里冻结的后端。'),
+    element('p', 'field-note', effectiveSearchSourceLine(projection)),
     element('p', 'field-note', `备用来源：${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const saveFallback = (backendId: string | null, done: string): void => void (async () => {
@@ -152,14 +164,15 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       secret.addEventListener('input', () => { save.disabled = secret.value.trim().length === 0; });
       card.append(element('p', 'field-note', backend.connection.credentialOperationState === 'ready' ? '密钥已保存' : '密钥需设置'), secret);
       actions.append(save, remove);
-      if (backend.backendId === 'search-deepseek') {
-        const source = projection.routeChoice.routes.find((route) => route.route === 'deepseek-open-platform')?.connection;
-        const reuse = button('复用 DeepSeek 模型凭据', 'secondary', async () => {
+      const service = backend.backendId.slice('search-'.length);
+      const source = projection.routeChoice.routes.find((route) => route.route.startsWith(`${service}-`))?.connection;
+      if (source != null) {
+        const reuse = button(`复用${source.connectionName}模型凭据`, 'secondary', async () => {
           reuse.disabled = true;
-          try { render(await api.saveSearchBackendCredential({ backendId: 'search-deepseek', reuseModelCredential: true })); setStatus('DeepSeek 凭据已同步到联网检索。', 'success'); }
-          catch (error) { reuse.disabled = source?.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步 DeepSeek 凭据。'), 'error'); }
+          try { render(await api.saveSearchBackendCredential({ backendId: backend.backendId, reuseModelCredential: true })); setStatus('模型渠道凭据已同步到联网检索。', 'success'); }
+          catch (error) { reuse.disabled = source.credentialOperationState !== 'ready'; setStatus(errorMessage(error, '无法同步模型渠道凭据。'), 'error'); }
         });
-        reuse.dataset['action'] = 'reuse-deepseek-credential'; reuse.disabled = source?.credentialOperationState !== 'ready';
+        reuse.dataset['action'] = 'reuse-model-credential'; reuse.disabled = source.credentialOperationState !== 'ready';
         actions.append(reuse);
       }
     }
