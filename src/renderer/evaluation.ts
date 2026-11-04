@@ -224,7 +224,9 @@ export function evaluationMaterialsField(
 ): HTMLElement {
   const fieldset = el('fieldset', 'evaluation-materials');
   fieldset.dataset['evaluationMaterials'] = kind;
-  fieldset.append(el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`));
+  const legend = el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`);
+  if ((page.materials?.more ?? 0) > 0) legend.append(el('span', undefined, ' · '), el('span', undefined, `另有 ${page.materials!.more} 份资料未列出。`));
+  fieldset.append(legend);
   const items = page.materials?.items ?? [];
   const guidance = items.length === 0 ? page.materials?.statement ?? '暂无可参考的资料库资料。'
     : `最多参考 ${MAX_WRITING_MATERIALS} 份，每份不超过 ${MAX_WRITING_MATERIAL_GRAPHEMES.toLocaleString('zh-CN')} 字、合计不超过 ${MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES.toLocaleString('zh-CN')} 字；只参照、不照抄，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
@@ -253,7 +255,6 @@ export function evaluationMaterialsField(
     label.append(input, name);
     fieldset.append(label);
   }
-  if ((page.materials?.more ?? 0) > 0) fieldset.append(el('p', 'field-note', `另有 ${page.materials!.more} 份资料未列出。`));
   const sending = taskMaterialSendLine(items, selected);
   if (sending !== null) fieldset.append(el('p', 'field-note evaluation-material-send', sending));
   const frozen = page.materialReferences?.[kind] ?? [];
@@ -1141,7 +1142,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         line.dataset['sufficiency'] = ai7.sufficiency;
         if (calibrated !== null) line.dataset['calibrated'] = String(calibrated.adjusted);
         beside.push(line);
-        if (ai7.comment !== null) beside.push(el('p', 'field-note evaluation-item-ai7-comment', `AI7 评语：${ai7.comment}`));
+        if (ai7.comment !== null) {
+          const comment = el('figure', 'evaluation-item-ai7-comment');
+          comment.append(el('figcaption', undefined, 'AI7 评语'), el('blockquote', undefined, ai7.comment));
+          beside.push(comment);
+        }
         // What AI7's score rests on (EVAL-006): each note it made toward the item, with the range it read it in.
         if (ai7.evidence.length > 0) {
           const evidence = el('details', 'evaluation-item-ai7-evidence');
