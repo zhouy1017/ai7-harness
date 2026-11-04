@@ -80,10 +80,9 @@ export function sourceBlockDom(node: ProseMirrorNode): DOMOutputSpec {
       ['sup', { contenteditable: 'false', 'data-note-reference': link.blockId, role: 'link', tabindex: '0',
         'aria-label': `跳转到${link.part === 'footnote' ? '脚注' : '尾注'} ${link.ordinal}` }, String(link.ordinal)]),
     ...(table && !table.continuation ? [
-      ['div', { class: 'manuscript-source-label', contenteditable: 'false' }, `表格 · ${SOURCE_OBJECT_LABEL}`] as DOMOutputSpec,
+      ['div', { class: 'manuscript-source-label', contenteditable: 'false' }, `表格 · ${SOURCE_OBJECT_LABEL}${table.truncated ? ' · 部分预览' : ''}`] as DOMOutputSpec,
       ['table', { class: 'manuscript-source-table', contenteditable: 'false' }, ['tbody', {},
         ...table.rows.map((row): DOMOutputSpec => ['tr', {}, ...row.map((cell): DOMOutputSpec => ['td', {}, cell])])]] as DOMOutputSpec,
-      ...(table.truncated ? [['p', { class: 'field-note', contenteditable: 'false' }, '当前显示表格预览；完整结构和内容随 DOCX 导出保留。'] as DOMOutputSpec] : []),
     ] : []),
     ...display.images.filter((image) => !image.before).map(imageDom)];
 }
