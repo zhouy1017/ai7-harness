@@ -203,6 +203,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         const channel = next.channels.find((item) => item.channelId === modelServiceChannel) ?? next.channels.find((item) => item.route !== null && next.routeChoice.routes.some((route) => route.route === item.route && route.connection?.credentialOperationState === 'ready'));
         const result = discover && channel?.route ? await window.ai7.refreshModelServiceModels({ route: channel.route }) : next;
         if (content.isConnected && catalogueKey(result) !== signature && !(document.activeElement instanceof HTMLInputElement && content.contains(document.activeElement))) renderModelServiceSettingsProjection(result);
+        if (content.isConnected && result.modelDiscovery?.status === 'failure') setStatus(result.modelDiscovery.reason, 'error');
       } catch { /* Keep the visible fields; a failed discovery offers its own retry. */ }
       finally { reading = false; }
     };
