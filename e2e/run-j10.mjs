@@ -1140,7 +1140,7 @@ async function main() {
     at('third-book-import');
     // A third Book, reached from the library by way of 工作概览.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'third-overview');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='返回图书列表'&&!button.disabled)`, 'third-overview-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('[data-nav-destination="library"]')?.getAttribute('aria-disabled')!=='true'`, 'third-overview-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-library');
     const thirdBookId = await importSample1(renderer, THIRD_BOOK.title, true, 'third-import');
     requireJourney(thirdBookId !== bookId && thirdBookId !== secondBookId, 'three-books');
