@@ -498,8 +498,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   /** V2-UX-MILE-008: label, purpose, exact version, author and time, note, and whether the manuscript changed since. */
   function renderMilestones(next: DeliverablesProjection): HTMLElement {
     const section = el('section', 'milestone-list-section');
-    section.append(el('h4', undefined, MILESTONE_LIST_HEADING));
     const milestones = next.publication.milestones;
+    section.append(el('h4', undefined, `${MILESTONE_LIST_HEADING}${next.publication.milestonesTruncated ? ` · ${milestonesTruncatedLine(milestones.length)}` : ''}`));
     if (milestones.length === 0) {
       section.append(el('p', 'field-note milestone-list-empty', MILESTONE_LIST_EMPTY));
       return section;
@@ -507,7 +507,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const list = el('ol', 'milestone-list');
     for (const milestone of milestones) list.append(renderMilestone(milestone));
     section.append(list);
-    if (next.publication.milestonesTruncated) section.append(el('p', 'field-note', milestonesTruncatedLine(milestones.length)));
     return section;
   }
 
@@ -541,8 +540,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   /** Every designation newest first (PUB-003, PUB-007): append-only, the newest current, the older ones as they were. */
   function renderHistory(next: DeliverablesProjection): HTMLElement {
     const section = el('section', 'publication-versions-section');
-    section.append(el('h4', undefined, PUBLICATION_HISTORY_HEADING));
     const designations = next.publication.designations;
+    section.append(el('h4', undefined, `${PUBLICATION_HISTORY_HEADING}${next.publication.designationsTruncated ? ` · ${publicationsTruncatedLine(designations.length)}` : ''}`));
     if (designations.length === 0) {
       section.append(el('p', 'field-note publication-versions-empty', PUBLICATION_HISTORY_EMPTY));
       return section;
@@ -550,7 +549,6 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const list = el('ol', 'publication-versions');
     for (const designation of designations) list.append(renderDesignation(designation));
     section.append(list);
-    if (next.publication.designationsTruncated) section.append(el('p', 'field-note', publicationsTruncatedLine(designations.length)));
     const outside = maintenance.renderOutsideHistory(designations);
     if (outside !== null) section.append(outside);
     return section;
@@ -842,10 +840,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const heading = el('h3', undefined, DOCUMENTS_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'field-note', DOCUMENTS_LEDE));
-    if (documents.unavailableReason !== null) {
-      section.append(el('p', 'attention-note documents-unavailable', documents.unavailableReason));
-    }
+    section.append(heading, el('p', documents.unavailableReason === null ? 'field-note' : 'attention-note documents-unavailable',
+      documents.unavailableReason ?? DOCUMENTS_LEDE));
     const list = el('ol', 'production-document-cards');
     for (const type of documents.types) list.append(renderDocumentCard(next, type));
     section.append(list);
