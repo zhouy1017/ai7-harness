@@ -514,9 +514,9 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       painted = '';
       working = false;
       element.dataset['taskPanel'] = 'loading';
-      scope.textContent = '';
+      scope.textContent = TASK_PANEL_STATUS_LINES.loading;
       compose.replaceChildren();
-      groups.replaceChildren(el('p', 'field-note task-panel-loading', TASK_PANEL_STATUS_LINES.loading));
+      groups.replaceChildren();
       read(true);
     },
     refresh() {
@@ -1272,6 +1272,14 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     render();
   }
 
+  const showComposerLoading = (title: string): void => {
+    element.dataset['taskComposer'] = 'loading';
+    const heading = el('h3', 'task-composer-title', `${title} · ${TASK_COMPOSER_STATUS.reading}`);
+    heading.id = uid('composer');
+    element.setAttribute('aria-labelledby', heading.id);
+    element.replaceChildren(heading);
+  };
+
   return {
     element,
     openNew(seed) {
@@ -1304,8 +1312,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       };
       const mine = ticket;
       const opened = state;
-      element.dataset['taskComposer'] = 'loading';
-      element.replaceChildren(el('p', 'field-note', TASK_COMPOSER_STATUS.reading));
+      showComposerLoading(seed.origin === 'composer-selection' ? TASK_COMPOSER_TITLES.selection : TASK_COMPOSER_TITLES.book);
       // The manuscript as it stands now (TASK-002): words pinned while the journal holds edits no revision holds are 待保存修订版.
       void api.inspectTaskIntentDrafts({ draftId: null }).then((read) => {
         if (mine !== ticket || state !== opened || read.manuscript === null) return;
@@ -1325,8 +1332,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
       composing = false;
       if (state?.draftId !== draftId) freshSlot();
       const manuscript = state?.bookId === bookId ? state.manuscript : null;
-      element.dataset['taskComposer'] = 'loading';
-      element.replaceChildren(el('p', 'field-note', TASK_COMPOSER_STATUS.reading));
+      showComposerLoading(TASK_COMPOSER_TITLES.draft);
       void api.inspectTaskIntentDrafts({ draftId }).then((read) => {
         if (mine !== ticket) return;
         const draft = read.drafts[0];
