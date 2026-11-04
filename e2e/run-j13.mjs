@@ -1797,11 +1797,12 @@ async function main() {
     at('capture-source-set');
     // 将以上工序保存为可复用工序: the source set — both categories, each kept — the classification it recommends and why, what
     // extraction keeps and what it never saves. Removing a step changes what it keeps; nothing can be added or reordered.
-    // H3: the authored fixture's unmatched quotation remains a disclosed annotation beside usable siblings.
-    requireJourney(sourceRun.excludedTotal === 0 && sourceRun.findings.some((entry) => entry.output === 'annotation' && entry.replacement === null && entry.note.includes('引文未逐字匹配')), 'capture-v2-salvaged-projection',
-      { excludedTotal: sourceRun.excludedTotal, exclusions: sourceRun.excluded.map((entry) => entry.reasonCode),
-        unmatched: sourceRun.findings.filter((entry) => entry.note.includes('引文未逐字匹配')).map((entry) => ({ output: entry.output, replacement: entry.replacement })) });
+    // #1311/H3 retains unmatched v2 quotes as disclosed whole-block annotations. The unchanged authored fixture must
+    // exercise that salvage behavior here; expecting the former quote-not-found exclusion would discard the usable finding.
+    const salvaged = sourceRun.findings.find((finding) => finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'));
+    requireJourney(sourceRun.excludedTotal === 0 && salvaged !== undefined && salvaged.markId !== null && salvaged.replacement === null, 'capture-v2-salvaged-projection');
     await assertRenderer(renderer, `document.querySelector('details.review-excluded')===null && document.querySelectorAll('article.review-finding').length>0`, 'capture-v2-visible-salvaged');
+    await assertRenderer(renderer, `(() => { const finding=document.querySelector('article[data-finding-id="${salvaged.findingId}"]'); return finding instanceof HTMLElement && finding.textContent.includes('引文未逐字匹配'); })()`, 'capture-v2-visible-salvage');
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'capture-open');
     const captureSheet = await readCapture(renderer, (read) => read.steps.length === 2 && read.focused, 'capture-sheet');
     requireJourney(JSON.stringify(captureSheet.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['style-and-format', 'true', true], ['literary-expression', 'true', true]]) &&

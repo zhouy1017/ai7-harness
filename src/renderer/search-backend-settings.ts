@@ -107,7 +107,9 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   const section = element('section', 'review-section');
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
-  section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', '新任务优先随主编辑模型渠道使用自带搜索；没有可用的自带搜索时使用已配置的检索后端。已开始的运行继续使用冻结的来源。'),
+  const heading = element('h3', undefined, '联网检索');
+  if (technicalLayerVisible) heading.dataset['developerOnly'] = 'true';
+  section.append(heading, element('p', 'field-note', '新任务优先随主编辑模型渠道使用自带搜索；没有可用的自带搜索时使用已配置的检索后端。已开始的运行继续使用冻结的来源。'),
     element('p', 'field-note', effectiveSearchSourceLine(projection)),
     element('p', 'field-note', `备用来源：${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;

@@ -113,13 +113,13 @@ function initialChannel(projection: ModelServiceSettingsProjection, chosen: Mode
 function credentialStep(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection, options: ModelServiceFlowOptions): HTMLElement {
   const step = el('div', 'model-service-flow-step model-route-option');
   step.dataset['flowStep'] = 'credential';
-  step.append(el('h4', undefined, '2. 填写凭据并获取模型'));
+  step.append(el('h4', undefined, technicalLayerVisible ? '2. 填写凭据并获取模型' : '2. 填写密钥'));
   const option = channel.route === null ? undefined : projection.routeChoice.routes.find((candidate) => candidate.route === channel.route);
   if (option === undefined) {
     step.append(el('p', 'field-note', '当前版本尚未接入此渠道。'));
     return step;
   }
-  step.append(el('p', undefined, option.connection === null ? `${channel.channelLabel}：${option.statusLabel}` : `${channel.channelLabel}：${option.statusLabel} · 连接名称：${option.connection.connectionName}`));
+  if (technicalLayerVisible) step.append(el('p', undefined, option.connection === null ? `${channel.channelLabel}：${option.statusLabel}` : `${channel.channelLabel}：${option.statusLabel} · 连接名称：${option.connection.connectionName}`));
   step.dataset['modelRoute'] = option.route;
   step.dataset['modelRouteStatus'] = option.status;
   const form = el('form', 'model-credential-form');
@@ -172,7 +172,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务凭据。'), 'error'); }
   })());
   actions.append(save, refresh, remove);
-  form.append(nameLabel, secretLabel, el('p', 'field-note', '凭据只写入操作系统安全凭据库，保存后不再显示。'), actions);
+  form.append(...(technicalLayerVisible ? [nameLabel] : []), secretLabel, ...(technicalLayerVisible ? [el('p', 'field-note', '凭据只写入操作系统安全凭据库，保存后不再显示。')] : []), actions);
   const stored = el('p', 'field-note', ready ? '凭据已保存' : '需设置凭据');
   stored.dataset['credentialState'] = option.connection?.credentialOperationState ?? 'missing';
   step.append(stored, form);
@@ -182,23 +182,24 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
 function modelStep(projection: ModelServiceSettingsProjection, channel: ModelServiceChannelProjection, options: ModelServiceFlowOptions): HTMLElement {
   const step = el('div', 'model-service-flow-step');
   step.dataset['flowStep'] = 'model';
-  step.append(el('h4', undefined, '3. 选择主编辑与快速交互模型'));
+  step.append(el('h4', undefined, technicalLayerVisible ? '3. 选择主编辑与快速交互模型' : '3. AI7 使用的模型'));
   const ready = credentialReady(projection, channel.route);
   const offered = channel.models.filter(bothEligible);
   const current = currentModelServiceChoice(projection);
   const preferred = options.modelId || (current?.route === channel.route ? current.modelId : null);
   const group = el('fieldset', 'model-service-flow-models');
-  group.append(el('legend', undefined, '选择模型，再指定使用角色'));
+  group.append(el('legend', undefined, technicalLayerVisible ? '选择模型，再指定使用角色' : '选择模型'));
   let checked: ModelServiceChannelModelProjection | null = null;
   let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
   const test = el('button', 'secondary', '测试连接');
   test.type = 'button';
   test.dataset['action'] = 'test-flow-connection';
-  const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
+  const use = el('button', 'primary', technicalLayerVisible ? USE_FOR_BOTH_ROLES_LABEL : '使用此模型');
   use.type = 'button';
   use.dataset['action'] = 'use-model-for-both-roles';
   const customLabel = el('label', undefined, '手动输入模型 ID');
+  customLabel.dataset['developerOnly'] = 'true';
   const custom = el('input');
   custom.type = 'text'; custom.maxLength = 128; custom.dataset['customModelId'] = 'true';
   custom.disabled = !ready;
@@ -213,10 +214,13 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const note = el('p', 'field-note', modelConnectionTestLabel(own, checked === null ? undefined : modelLabelWords(checked)));
     if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [
-      el('p', 'field-note', modelCapabilityLabel(checked)),
+      ...(technicalLayerVisible ? [el('p', 'field-note', modelCapabilityLabel(checked))] : []),
       note, ...modelConnectionTestDisclosure(own),
     ]));
   };
+  const modelSelect = el('select');
+  modelSelect.setAttribute('aria-label', 'AI7 使用的模型');
+  modelSelect.disabled = !ready || offered.length === 0;
   for (const model of offered) {
     const label = el('label', 'model-service-flow-choice');
     const radio = el('input');
@@ -229,7 +233,21 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; }
     radio.addEventListener('change', () => { checked = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
     label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
-    group.append(label);
+    if (technicalLayerVisible) group.append(label);
+    else {
+      const option = el('option', undefined, modelLabelWords(model));
+      option.value = model.modelId;
+      modelSelect.append(option);
+    }
+  }
+  if (!technicalLayerVisible) {
+    modelSelect.value = checked?.modelId ?? '';
+    modelSelect.addEventListener('change', () => {
+      checked = offered.find((model) => model.modelId === modelSelect.value) ?? null;
+      options.chooseModel?.(modelSelect.value);
+      paint();
+    });
+    group.append(modelSelect);
   }
   if (offered.length === 0) group.append(el('p', 'field-note', technicalLayerVisible ? '尚未获取模型列表；保存凭据后刷新，或手动输入模型 ID。' : '保存凭据后获取可用模型。'));
   const chooseCustom = (): void => {
@@ -248,6 +266,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
   ] as const) {
     const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
+    button.dataset['developerOnly'] = 'true';
     button.addEventListener('click', () => void (async () => {
       if (checked === null || channel.route === null) return;
       button.disabled = true;
@@ -274,7 +293,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   use.addEventListener('click', () => void (async () => {
     if (checked === null || channel.route === null) return;
     use.disabled = true;
-    options.setStatus('正在保存主编辑与快速交互的模型…', 'busy');
+    options.setStatus(technicalLayerVisible ? '正在保存主编辑与快速交互的模型…' : '正在保存模型…', 'busy');
     try {
       options.render(await useForBothRoles(options.api, { route: channel.route, modelId: checked.modelId }));
       options.setStatus(`之后开始的任务使用 ${channel.channelLabel} / ${modelLabelWords(checked)}；已在进行的任务不受影响`, 'success');
@@ -282,10 +301,14 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   })());
   paint();
   const actions = el('div', 'button-row');
-  actions.append(test, ...roleButtons, use);
-  step.append(group, ...(technicalLayerVisible ? [customLabel] : []), feedback, el('p', 'field-note', MODEL_CONNECTION_TEST_NOTE), actions);
+  actions.append(...(technicalLayerVisible ? [test, ...roleButtons, use] : [use]));
+  step.append(group, ...(technicalLayerVisible ? [customLabel] : []), actions);
+  const testStep = el('div', 'model-service-flow-test');
+  if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test);
+  testStep.append(feedback, el('p', 'field-note', technicalLayerVisible ? MODEL_CONNECTION_TEST_NOTE : '只发送一条测试消息，不含图书文字。'));
+  step.append(testStep);
   const others = channel.models.filter((model) => !bothEligible(model));
-  if (others.length > 0) {
+  if (technicalLayerVisible && others.length > 0) {
     const details = el('details', 'model-service-flow-ineligible');
     details.append(el('summary', undefined, `不可在此选择的模型（${others.length}）`));
     const list = el('ul');
@@ -304,8 +327,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
 export function modelServiceFlow(projection: ModelServiceSettingsProjection, options: ModelServiceFlowOptions): HTMLElement {
   const section = el('section', 'review-section model-service-flow');
   section.dataset['modelServiceFlow'] = 'true';
+  section.dataset['modelServiceMode'] = technicalLayerVisible ? 'developer' : 'ordinary';
   section.setAttribute('aria-label', '选择模型');
-  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型。${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
+  if (technicalLayerVisible) section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型。${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
   const channels = el('fieldset', 'model-service-flow-channels');
   channels.append(el('legend', undefined, '1. 渠道'));
   const steps = el('div');
@@ -317,10 +341,12 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
     const credential = credentialStep(projection, channel, options);
     const models = modelStep(projection, channel, options);
     const test = models.querySelector('[data-action="test-flow-connection"]');
-    if (test !== null) credential.querySelector('.button-row')?.append(test);
+    if (technicalLayerVisible && test !== null) credential.querySelector('.button-row')?.append(test);
     steps.replaceChildren(credential, models);
   };
   const order: readonly ModelServiceChannelId[] = ['opencode-go', 'deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen'];
+  const channelSelect = el('select');
+  channelSelect.setAttribute('aria-label', '渠道');
   for (const channel of [...projection.channels].sort((a, b) => order.indexOf(a.channelId) - order.indexOf(b.channelId))) {
     const label = el('label', 'model-service-flow-choice');
     label.dataset['modelChannel'] = channel.channelId;
@@ -330,10 +356,24 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
     radio.name = 'model-service-flow-channel';
     radio.value = channel.channelId;
     radio.checked = channel.channelId === channelId;
-    radio.addEventListener('change', () => { channelId = channel.channelId; options.chooseChannel(channelId); paint(); });
+    radio.addEventListener('change', () => selectChannel(channel.channelId));
     const offered = channel.models.filter(bothEligible).length;
     label.append(radio, ` ${channel.channelLabel} · ${offered === 0 ? '暂无可选模型' : channel.route !== null && credentialReady(projection, channel.route) ? '凭据已保存' : '需设置凭据'}`);
-    channels.append(label);
+    if (technicalLayerVisible) channels.append(label);
+    else {
+      const option = el('option', undefined, channel.channelLabel);
+      option.value = channel.channelId;
+      channelSelect.append(option);
+    }
+  }
+  if (!technicalLayerVisible) {
+    channelSelect.value = channelId;
+    channelSelect.addEventListener('change', () => selectChannel(channelSelect.value as ModelServiceChannelId));
+    channels.append(channelSelect);
+  }
+  function selectChannel(selected: ModelServiceChannelId): void {
+    channelId = selected;
+    paint(); // Records the channel before building any credential or model controls.
   }
   paint();
   section.append(channels, steps);

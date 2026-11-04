@@ -911,17 +911,18 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       }
       // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
       // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
-      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
+      block.append(element('h5', undefined, action.label));
+      if (technicalLayerVisible) block.append(element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
       const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
-      block.append(expected, technicalDetails('analysis-facts',
+      if (technicalLayerVisible) block.append(expected, technicalDetails('analysis-facts',
         element('dt', undefined, '预期单元血缘'), expectedExact,
         element('dt', undefined, '固定任务目标'), element('dd', 'technical-identity', action.goal)));
       if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
       let selectedRange: BaselineAnalysisSelectedRange | null = null;
       if (mode === 'reanalyze-range') {
         const fieldset = element('fieldset', 'analysis-range-options');
-        fieldset.append(element('legend', undefined, '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）'));
+        fieldset.append(element('legend', undefined, technicalLayerVisible ? '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）' : '选择要重新分析的范围'));
         const appendOptions = (options: typeof controls.actions['reanalyze-range']['options']): void => {
           for (const option of options) {
             const row = element('div', 'analysis-range-option');
@@ -1054,9 +1055,11 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
 
   /** The Analysis Result Revision History: every revision in ordinal order, each openable read-only. */
   function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
+    if (!technicalLayerVisible) return;
     const history = projection.history;
     if (history === null) return;
     const section = element('section', 'analysis-history');
+    section.dataset['developerOnly'] = 'true';
     section.dataset['historyLatestOrdinal'] = String(history.latestOrdinal);
     section.dataset['historyCount'] = String(projection.listPages['history.entries']?.total ?? history.entries.length);
     section.dataset['historyResultSetId'] = history.resultSetId;

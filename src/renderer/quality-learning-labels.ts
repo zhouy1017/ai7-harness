@@ -119,11 +119,14 @@ export function learningDecisionLine(material: Pick<LearningMaterialProjection, 
 
 /** 质量与学习's tabs: the passive history, the decisions waiting, and the audit of what was decided (Issue #62, S27a). */
 export type QualityLearningTab = 'feedback' | 'learning' | 'audit';
-export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearningTab; readonly label: string }> = [
+export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearningTab; readonly label: string; readonly developerOnly?: true }> = [
   { tab: 'feedback', label: '反馈历史' },
-  { tab: 'learning', label: '学习准入' },
-  { tab: 'audit', label: '学习回溯' },
+  { tab: 'learning', label: '学习准入', developerOnly: true },
+  { tab: 'audit', label: '学习回溯', developerOnly: true },
 ];
+export function visibleQualityLearningTabs(developerMode: boolean): ReadonlyArray<(typeof QUALITY_LEARNING_TABS)[number]> {
+  return developerMode ? QUALITY_LEARNING_TABS : QUALITY_LEARNING_TABS.filter((entry) => entry.developerOnly !== true);
+}
 export const QUALITY_LEARNING_TABS_LABEL = '质量与学习的内容';
 export const FEEDBACK_HISTORY_HEADING = '反馈历史';
 /** What the history is and is not (FDBK-007, FDBK-010), said once above it. */

@@ -1,5 +1,6 @@
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
+import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import { taskPlanWording } from './task-drawer-labels.js';
 import type {
   EvidenceAssuranceLevel,
@@ -325,6 +326,13 @@ const UNCONFIRMED_ID = 'task-drawer-unconfirmed';
 const REDO_SUMMARY_ID = 'task-drawer-redo-summary';
 /** How the editor left an editable item (Issue #419; S76d): kept, left out or withheld, or asked first. */
 type ItemEdit = 'kept' | 'removed' | 'ask-first';
+
+/** The service's provider line may also include a model and search backends. */
+export function ordinaryProviderName(provider: string): string {
+  const name = provider.split(' · ')[0]!;
+  if (name === 'AI7 本地确定性模型适配器' || name === 'ai7-local-deterministic') return '本机';
+  return (CONFIGURED_PROVIDER_LABELS as Readonly<Record<string, string>>)[name] ?? name;
+}
 /** The book co-pilot follows only screens of its own Book. Global destinations close it. */
 const COPILOT_SCREENS: ReadonlyArray<string> = [
   ...TASK_DRAWER_SCREENS, 'proposal-workspace', 'proposal-conflict', 'book-findings', 'book-deliverables', 'book-sources', 'agent-workspace',
@@ -1053,16 +1061,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       planSection(2, steps, ...stepsNote, ...assuranceBlock(next)),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
+        ...(!technicalLayerVisible ? [
+          [TASK_PLAN_SERVICE_TERMS[1], ordinaryProviderName(next.service.provider)] as const,
+          ['预计用时', next.service.duration] as const,
+        ] : [
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
-        ...(technicalLayerVisible ? [[TASK_PLAN_SERVICE_TERMS[1], next.service.provider] as const] : []),
-        ...(technicalLayerVisible ? [[TASK_PLAN_SERVICE_TERMS[2], next.service.decision] as const] : []),
+        [TASK_PLAN_SERVICE_TERMS[1], next.service.provider],
+        [TASK_PLAN_SERVICE_TERMS[2], next.service.decision],
         [TASK_PLAN_SERVICE_TERMS[3], next.service.send],
         [TASK_PLAN_SERVICE_TERMS[4], next.service.sendCategory],
         [TASK_PLAN_SERVICE_TERMS[5], usage],
         [TASK_PLAN_SERVICE_TERMS[6], next.service.duration],
         [TASK_PLAN_SERVICE_TERMS[7], next.service.budgetCeiling],
         [TASK_PLAN_SERVICE_TERMS[8], next.service.accountLimit],
-      ]), ...budgetBlock(next)),
+        ] as const),
+      ]), ...(technicalLayerVisible ? budgetBlock(next) : [])),
       planSection(5, facts([
         [TASK_PLAN_RESULT_TERMS[0], listOf(next.outcomes, 'task-plan-list')],
         [TASK_PLAN_RESULT_TERMS[1], listOf(next.notDo.editorial, 'task-plan-list task-plan-not-do')],

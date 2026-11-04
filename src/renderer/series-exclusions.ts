@@ -43,6 +43,7 @@ import {
   exclusionRevisionLine,
 } from './series-exclusion-labels.js';
 import { SERIES_CHANGES_LABEL, SERIES_NO_CHANGE, SERIES_UNCHANGED_LABEL } from './series-labels.js';
+import { technicalLayerVisible } from './technical-layer.js';
 
 /**
  * 书系检索排除 on a Series' page (Issue #64, plan slice S29b; V2-UX-SER-020 to SER-029; editor-surfaces §8.3): the exclusions in
@@ -140,6 +141,7 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
     if (exclusions === null) return;
     root.dataset['exclusionsEffective'] = String(exclusions.effective.length);
     const heading = el('h3', 'exclusions-heading', EXCLUSIONS_HEADING);
+    if (technicalLayerVisible) heading.dataset['developerOnly'] = 'true';
     heading.tabIndex = -1;
     const nodes: HTMLElement[] = [heading, el('p', 'field-note exclusions-note', EXCLUSIONS_NOTE)];
     if (exclusions.effective.length === 0) nodes.push(el('p', 'field-note exclusions-empty', EXCLUSIONS_EMPTY));

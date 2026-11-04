@@ -13,6 +13,7 @@ import type {
 import { localInstantLabel } from './plan-preview-labels.js';
 import { mountSeriesKnowledge } from './series-knowledge.js';
 import { mountSeriesExclusions } from './series-exclusions.js';
+import { technicalLayerVisible } from './technical-layer.js';
 import {
   BOOK_SERIES_HEADING,
   BOOK_SERIES_HISTORY,
@@ -439,7 +440,8 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       membersBox.append(tasks);
     }
     historyBox.replaceChildren(history);
-    if (membersBox.parentElement !== root) root.replaceChildren(membersBox, knowledgeHost, exclusionsHost, historyBox);
+    if (membersBox.parentElement !== root) root.replaceChildren(membersBox, knowledgeHost, ...(technicalLayerVisible ? [exclusionsHost] : []), historyBox);
+    exclusionsHost.hidden = !technicalLayerVisible;
     if (withKnowledge) {
       knowledge.update(projection.knowledge);
       exclusions.update(projection.exclusions);
