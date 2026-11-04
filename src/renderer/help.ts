@@ -133,9 +133,12 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   filter.id = 'help-license-filter';
   filter.type = 'search';
   filter.placeholder = HELP_LICENSE_FILTER_PLACEHOLDER;
-  const count = el('p', 'field-note help-license-count');
-  const empty = el('p', 'field-note help-license-empty', HELP_LICENSE_EMPTY);
+  const filterStatus = el('output', 'help-license-status');
+  filterStatus.setAttribute('aria-live', 'polite');
+  const count = el('span', 'help-license-count');
+  const empty = el('span', 'help-license-empty', ` · ${HELP_LICENSE_EMPTY}`);
   empty.hidden = true;
+  filterStatus.append(count, empty);
   const list = el('ul', 'help-license-list');
   const items = licenses.map((license) => {
     const item = el('li', 'help-license');
@@ -169,7 +172,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     empty.hidden = shown > 0;
   };
   filter.addEventListener('input', filterLicenses);
-  licensesPanel.append(filterLabel, filter, count, empty, list);
+  licensesPanel.append(filterLabel, filter, filterStatus, list);
 
   panels.set('usage', usagePanel);
   panels.set('privacy', privacyPanel);
