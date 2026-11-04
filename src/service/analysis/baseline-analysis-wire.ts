@@ -283,7 +283,7 @@ export function baselineAnalysisOutbound(value: unknown): unknown {
     return baselineAnalysisWire(value as BaselineAnalysisProjection);
   }
   const record = value as Record<string, unknown>;
-  const keys = ['result', 'projection', 'analysis'] as const;
+  const keys = ['result', 'projection', 'analysis', 'job'] as const;
   let mapped = record;
   for (const key of keys) if (key in record) mapped = { ...mapped, [key]: baselineAnalysisOutbound(record[key]) };
   return mapped;

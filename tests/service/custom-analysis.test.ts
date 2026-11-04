@@ -1,5 +1,7 @@
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -178,6 +180,21 @@ describe('the dimension ledger (schema revision 82)', () => {
 });
 
 describe('a custom analysis Run over the real store on exact sample1', () => {
+  it('repeats a completed custom dimension on its own ledger (#1328)', async () => {
+    await withBook(async (book) => {
+      const { dimensionId, versionId } = defineDimension(book);
+      const original = await run(book, dimensionId);
+      await startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId: 'repeat', repeat: { kind: 'baseline-analysis', ref: original } }] }, {
+        store: book.store, jobs: new CooperativeJobOwner(book.store), policy: launchPolicy, execution: book.owner, driveReview: () => {}, credentialReadiness: async () => null,
+        connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => book.owner.busy },
+      });
+      await book.owner.whenIdle();
+      const latest = custom(book.store.inspectCustomAnalysisDimensions(book.bookId), dimensionId).book!.latest!;
+      expect(latest.dimensionVersion.versionId).toBe(versionId);
+      expect(book.store.inspectAnalysisTask(book.bookId, original).taskIntent!.taskIntentId).not.toBe(original);
+      expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).toBeNull();
+    });
+  });
   it('finds a custom Connectivity Wait and reconnects on its exact version ledger', async () => {
     await withBook(async (book) => {
       const { dimensionId, versionId } = defineDimension(book);

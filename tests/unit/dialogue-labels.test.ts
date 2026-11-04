@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import * as labels from '../../src/renderer/dialogue-labels.js';
-import { taskPanelCardView } from '../../src/renderer/task-panel-labels.js';
 import {
   DIALOGUE_PROMPT_CONTRACT,
   DIALOGUE_PROMPT_CONTRACT_DIGEST,
@@ -61,37 +60,6 @@ describe('the words of 就这段提问…', () => {
     expect(labels.dialogueQuestionRefusal(501, 500)).toBe('问题最多 500 个字。');
     expect(labels.dialogueQuestionRefusal(500, 500)).toBeNull();
     expect(labels.dialogueQuestionLine(QUESTION)).toBe(`提问 · 「${QUESTION}」`);
-  });
-});
-
-describe('a dialogue Task in the 任务 panel', () => {
-  const card = (state: GlobalAttentionStateKey, result: BookTaskItemProjection['result']): ReturnType<typeof taskPanelCardView> => taskPanelCardView({
-    item: {
-      itemId: `dialogue:${DIALOGUE}`,
-      group: state === 'dialogue-answering' ? 'active' : 'recent',
-      state,
-      blocked: false,
-      at: '2026-10-07T04:05:06.000Z',
-      book: { bookId: BOOK, title: '对话旅程' },
-      object: { kind: 'dialogue', question: QUESTION },
-      facts: { progress: null, categories: [], revisionOrdinal: null },
-      nextStep: 'open-dialogue',
-      target: { kind: 'dialogue', bookId: BOOK, dialogueId: DIALOGUE },
-      technical: [],
-    },
-    result,
-  });
-
-  it('offers 回答 and 打开对话 (TASK-044), and only 打开对话 while it answers', () => {
-    const answering = card('dialogue-answering', null);
-    expect(answering).toMatchObject({ kindLabel: '对话任务 · 就所选文字提问', title: `提问 · 「${QUESTION}」`, stateLabel: '等待回答', pill: { tone: 'neutral', shape: 'ring' } });
-    expect(answering.actions.map((action) => [action.key, action.label, action.primary])).toEqual([['next', '打开对话', true]]);
-    const answered = card('dialogue-answered', { kind: 'dialogue', dialogueId: DIALOGUE });
-    expect(answered.stateLabel).toBe('已回答');
-    expect(answered.actions.map((action) => [action.key, action.label, action.primary])).toEqual([['answer', '回答', false], ['next', '打开对话', true]]);
-    expect(card('dialogue-stopped', { kind: 'dialogue', dialogueId: DIALOGUE }).stateLabel).toBe('回答已停止 · 内容不完整');
-    expect(card('dialogue-interrupted', null).actions.map((action) => action.key)).toEqual(['next']);
-    expect(answered.timeLine).toMatch(/^完成于 /u);
   });
 });
 

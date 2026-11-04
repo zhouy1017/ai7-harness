@@ -114,7 +114,6 @@ import {
   QUICK_START_OFFLINE,
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   QUICK_START_RESEND,
   SET_RULE_DEVELOPER_LIVE,
   defaultExecutionRuleBindingOf,
@@ -828,7 +827,6 @@ export async function quickStartWritingTask(host: WritingTaskOperationsHost, boo
     default:
       return fellBack(QUICK_START_NOT_READY);
   }
-  if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
   const authorized = host.analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
     { kind: 'default-execution-rule', ruleVersionId }));
   return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
