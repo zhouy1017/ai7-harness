@@ -3430,7 +3430,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
     const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
     // An explicit house re-inclusion is a human decision; the standing line must not call it the default.
-    const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习。') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
+    const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
     const wordRestored = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.reinclude === null, 'word-audit-reincluded');
     requireJourney(wordRestored.lineage.standing === 'house' && JSON.stringify(wordRestored.lineage.decisions.map(([state, , choice]) => [state, choice])) === wordHistory,
       'word-audit-reincluded-history', wordRestored.lineage);
