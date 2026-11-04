@@ -2267,6 +2267,7 @@ function renderImportRecovery(
 }
 
 function appendRecordField(values: HTMLElement, label: string, value: string | null, technical = false): void {
+  if (technical && !technicalLayerVisible) return;
   values.append(
     element('dt', undefined, label),
     element('dd', technical ? 'technical-identity' : undefined, value ?? '—'),
@@ -2282,10 +2283,24 @@ function appendRecordInstant(values: HTMLElement, label: string, iso: string): v
   values.append(element('dt', undefined, label), instantValue(iso));
 }
 
+function editorialRecordLabel(record: BookRecordPresentation): string {
+  if (technicalLayerVisible) return record.label;
+  switch (record.kind) {
+    case 'source': return '来源文件';
+    case 'import-record': return '稿件导入记录';
+    case 'source-import-record': return '资料导入记录';
+    case 'manuscript-reimport-record': return '重新导入记录';
+    case 'book': return '图书';
+    case 'manuscript': return '稿件';
+    case 'revision': return '稿件版本';
+    case 'workflow': return '工作进度';
+  }
+}
+
 function recordPresentation(record: BookRecordPresentation): HTMLElement {
   const detail = element('section', 'source-card record-detail');
   detail.dataset['recordKind'] = record.kind;
-  detail.append(element('h3', undefined, record.label));
+  detail.append(element('h3', undefined, editorialRecordLabel(record)));
   const values = element('dl');
   switch (record.kind) {
     case 'book':
@@ -2324,15 +2339,15 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       if (record.parserIdentity !== null) {
         appendRecordField(values, '内容摘要', record.contentDigest, true);
         appendRecordField(values, '结构摘要', record.structureDigest, true);
-        appendRecordField(values, '解析器', record.parserIdentity);
+        appendRecordField(values, '解析器', record.parserIdentity, true);
       }
       // An original the product read through a converted DOCX names that object and its converter,
       // beside — never instead of — the original's own identity above (ADR 0072 §2).
       if (record.converterIdentity !== null) {
         appendRecordField(values, '工作表示 SHA-256', record.workingObjectDigest, true);
-        appendRecordField(values, '转换器', record.converterIdentity);
+        appendRecordField(values, '转换器', record.converterIdentity, true);
       }
-      appendRecordField(values, '取得方式', '本机文件选择器');
+      appendRecordField(values, '取得方式', '本机文件选择器', true);
       appendRecordField(values, '处理边界', '本地 · 未调用 Provider');
       break;
     case 'workflow':
@@ -2372,14 +2387,14 @@ function recordPresentation(record: BookRecordPresentation): HTMLElement {
       appendRecordField(values, '目标类型', record.targetKind === 'new-book' ? '新建图书' : '现有图书');
       appendRecordField(
         values,
-        '来源版本结果',
-        record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本',
+        technicalWords('来源版本结果', '来源文件'),
+        technicalWords(record.sourceVersionDisposition === 'reused-same-book' ? '复用已明确选择的同图书来源版本' : '创建图书拥有的新来源版本', record.sourceVersionDisposition === 'reused-same-book' ? '使用已导入的文件' : '导入新文件'),
       );
       // The boundary claims a parse only where one happened, and says so when a converter did it (ADR 0072 §2; Issue #583).
       appendRecordField(values, '保留边界', record.retainedBoundary.label.replace(/^保留/, ''));
       appendRecordField(values, '保留文件名', record.retainedBoundary.displayName);
       appendRecordField(values, '保留格式', record.retainedBoundary.format);
-      appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes));
+      appendRecordField(values, '保留字节数', String(record.retainedBoundary.sourceBytes), true);
       appendRecordField(values, '保留文件 SHA-256', record.retainedBoundary.sourceSha256, true);
       if (record.retainedBoundary.contentDigest !== null && record.retainedBoundary.structureDigest !== null) {
         appendRecordField(values, '保留内容摘要', record.retainedBoundary.contentDigest, true);
@@ -3388,10 +3403,11 @@ function renderBookOverview(
   );
 
   const records = element('section', 'review-section record-navigation');
-  records.append(element('h3', undefined, '精确记录'));
+  records.append(element('h3', undefined, technicalWords('精确记录', '导入记录')));
   const recordButtons = element('div', 'button-row');
   for (const record of overview.records) {
-    const open = button(record.label, 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
+    if (!technicalLayerVisible && ['book', 'manuscript', 'revision', 'workflow'].includes(record.kind)) continue;
+    const open = button(editorialRecordLabel(record), 'secondary', () => detailHost.replaceChildren(recordPresentation(record)));
     open.dataset['recordKind'] = record.kind;
     if (record.kind === 'book') open.dataset['recordId'] = record.bookId;
     else if (record.kind === 'manuscript') open.dataset['recordId'] = record.manuscriptId;

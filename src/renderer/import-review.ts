@@ -1095,9 +1095,11 @@ export function createImportReview(options: ImportReviewOptions) {
       }
     });
 
-    const grid = element('div', 'review-grid');
-    grid.append(listSection('将创建的记录', review.recordsToCreate));
-    content.append(grid);
+    if (technicalLayerVisible) {
+      const grid = element('div', 'review-grid');
+      grid.append(listSection('将创建的记录', review.recordsToCreate));
+      content.append(grid);
+    }
     const actions = element('div', 'button-row compact-actions');
     const abandon = button('取消导入', 'quiet', () =>
       abandonAndContinue({ draftId: review.draftId, draftVersion: review.draftVersion }, recoveryReturn));

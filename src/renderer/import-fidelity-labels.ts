@@ -16,7 +16,10 @@ import type {
  */
 
 /** #1287: frozen import reports retain their exact bytes; the editor reads natural paragraph wording. */
-export function fidelityDetailText(detail: string): string { return detail.replaceAll('内容块', '段落'); }
+export function fidelityDetailText(detail: string): string {
+  const words = detail.replaceAll('内容块', '段落');
+  return technicalWords(words, words.replaceAll('来源版本', '原文件'));
+}
 
 /** The class that closes the review as a card rather than a row (ADR 0086 §1). */
 export const ROUND_TRIP_KEY = 'round-trip-export';
