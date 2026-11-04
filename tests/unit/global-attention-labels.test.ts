@@ -124,11 +124,11 @@ describe('the entry and the screen', () => {
       expect(entry.getAttribute('aria-label')).toContain('2 项需要你处理');
       expect(root.querySelector('[data-attention-item="learning"]')).toBeNull();
       expect(root.querySelector('[data-attention-item="plan"]')).not.toBeNull();
-      expect(root.querySelector('[data-attention-count]')!.dataset['attentionCount']).toBe('2');
+      expect(root.querySelector<HTMLElement>('[data-attention-count]')!.dataset['attentionCount']).toBe('2');
       setTechnicalLayerVisible(true); reader.refresh();
       expect(entry.dataset['attentionCount']).toBe('3');
       expect(root.querySelector('[data-attention-item="learning"]')).not.toBeNull();
-      expect(root.querySelector('[data-attention-count]')!.dataset['attentionCount']).toBe('3');
+      expect(root.querySelector<HTMLElement>('[data-attention-count]')!.dataset['attentionCount']).toBe('3');
       expect(data.actionableCount).toBe(3);
       surface.destroy();
     } finally { setTechnicalLayerVisible(true); restore(); }
