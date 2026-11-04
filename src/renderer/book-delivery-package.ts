@@ -490,6 +490,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       panel.dataset['packageExportDegraded'] = String(review.degraded);
       const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : shown === null ? `${PACKAGE_EXPORT_FILES_LABEL} · 勾选本页，翻页会清除选择` : PACKAGE_EXPORT_FILES_LABEL);
       label.id = uid('export-files');
+      if ((shown?.filesTruncated ?? review.filesTruncated) === true) label.append(' · ', current.route === 'archive'
+        ? PACKAGE_ARCHIVE_FILES_TRUNCATED : PACKAGE_EXPORT_FILES_TRUNCATED);
       const list = el('ol', 'package-export-files');
       list.setAttribute('aria-labelledby', label.id);
       for (const file of shown?.files ?? review.files) {
@@ -517,8 +519,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
         }
         panel.append(pages);
       }
-      if ((shown?.filesTruncated ?? review.filesTruncated) === true) panel.append(el('p', 'field-note', current.route === 'archive'
-        ? PACKAGE_ARCHIVE_FILES_TRUNCATED : PACKAGE_EXPORT_FILES_TRUNCATED));
       // EXP-008: what is degraded or cannot be written is said above; the approval accepts it for this export only.
       if (review.degraded) panel.append(el('p', 'export-degraded-note attention-note', EXPORT_DEGRADED_NOTE));
     }
