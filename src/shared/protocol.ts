@@ -7,6 +7,7 @@ import type {
   ModelServiceBindingProjection,
   ModelServiceChannelProjection,
   ModelServiceConnectionId,
+  ModelDiscoveryResult,
   ModelServiceRouteId,
   OrdinaryProductionRouteId,
 } from './protocol/model-service.js';
@@ -3494,6 +3495,8 @@ export interface ProxyProbeResult {
 export type SaveModelServiceProxyInput = ModelServiceProxySetting & { probeRoute?: ModelServiceRouteId };
 
 export interface ModelServiceSettingsProjection {
+  /** Present on a save-and-discover or explicit refresh response; discovery failures never invalidate stored models. */
+  modelDiscovery?: ModelDiscoveryResult;
   searchBackends: SearchBackendSettingsProjection;
   proxy: ModelServiceProxySetting;
   lastProxyProbe?: ProxyProbeResult | null;
@@ -6605,7 +6608,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
   selectBothRoleModels: { input: FastModelSelectionInput; output: void };
-  refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: void };
+  refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
     input: Record<string, never>;
