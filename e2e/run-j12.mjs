@@ -799,7 +799,7 @@ async function main() {
       const notice=document.querySelector('[data-entry-notice]');
       return notice instanceof HTMLElement &&
         notice.textContent==='从稿件开头打开；这本图书还没有记录上次位置。' &&
-        getComputedStyle(notice).position==='absolute';
+        getComputedStyle(notice.closest('.quiet-completion-notice')).position==='fixed';
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
     await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
@@ -1273,10 +1273,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(editSuffix)})`, 'restart-persisted-edit');
     await assertRenderer(primary, `(() => {
       const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
-      const place=/第 (\\d+) \\/ (\\d+) 个段落/.exec(notice);
-      return notice.startsWith('回到上次位置 · ') && place!==null &&
-        Number(place[1])===${JSON.stringify(pagedAwayPosition)} && Number(place[1])<=Number(place[2]) &&
-        !/blk_[0-9a-f]{24}/.test(notice);
+      return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('overview')), 'restart-back-overview');
     await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'restart-overview');

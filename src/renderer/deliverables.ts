@@ -690,19 +690,18 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       input.required = true;
       input.disabled = working;
       input.dataset['publicationField'] = name;
-      const note = el('small', 'field-note', hint);
-      note.id = uid(`${name}-hint`);
+      input.placeholder = hint;
       const count = el('small', 'field-note publication-field-count');
       count.id = uid(`${name}-count`);
       const problem = el('p', 'publication-field-problem');
       problem.id = uid(`${name}-problem`);
-      input.setAttribute('aria-describedby', `${note.id} ${count.id} ${problem.id}`);
+      input.setAttribute('aria-describedby', `${count.id} ${problem.id}`);
       input.addEventListener('input', () => {
         update(input.value);
         state.problem = null;
         sync();
       });
-      wrap.append(input, note, count, problem);
+      wrap.append(input, count, problem);
       return { wrap, input, count, problem };
     };
     const scope = field('scope', PUBLICATION_SCOPE_LABEL, PUBLICATION_SCOPE_HINT, state.scope, (text) => { state.scope = text; });

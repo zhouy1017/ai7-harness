@@ -4,6 +4,11 @@ import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notifi
 
 export const QUIET_NOTICE_MS = 2_500;
 
+let showMessage: (message: string) => void = () => {};
+
+/** Show a transient editor notice in the same capsule as completion notices. */
+export function showTransientNotice(message: string): void { showMessage(message); }
+
 /** Observe the existing attention projection; history and its count remain owned by that projection. */
 export function createNotificationObserver(options: {
   api: Pick<NotificationsRendererApi, 'notify'>;
@@ -49,12 +54,23 @@ export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => 
   document.body.append(host);
   let current: GlobalAttentionItemProjection | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const hide = (): void => { clearTimeout(timer); host.hidden = true; current = null; };
+  const hide = (): void => { clearTimeout(timer); host.hidden = true; current = null; delete status.dataset['entryNotice']; };
+  showMessage = (message) => {
+    clearTimeout(timer);
+    current = null;
+    view.hidden = true;
+    status.textContent = message;
+    status.dataset['entryNotice'] = 'visible';
+    host.hidden = false;
+    timer = setTimeout(hide, QUIET_NOTICE_MS);
+  };
   close.addEventListener('click', hide);
   view.addEventListener('click', () => { const item = current; hide(); if (item) open(item); });
   return (item) => {
     clearTimeout(timer);
     current = item;
+    view.hidden = false;
+    delete status.dataset['entryNotice'];
     status.textContent = completionLabel(item);
     host.dataset['noticeClass'] = item.state;
     host.hidden = false;

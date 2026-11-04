@@ -1,3 +1,4 @@
+import { showTransientNotice } from './notifications.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
@@ -173,8 +174,6 @@ async function copyPlainText(api: RendererApi, text: string): Promise<void> {
 }
 
 /** How long the entry notice stays before it removes itself (V2-UX-COPY-015). */
-const ENTRY_NOTICE_MS = 6_000;
-
 function panel(): HTMLElement { return element('section', 'panel'); }
 
 /** The Manuscript and Production Document screen owns all mutable editor coordination until destruction. */
@@ -185,23 +184,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     prepareSelectionTask, renderEditorWindow, renderBookAnalysis, renderBookReview, renderBookDeliverables,
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
-  const entryNoticeTimers = new Set<number>();
   let viewportObserver: ResizeObserver | undefined;
-  /**
-   * V2-UX-COPY-015's transient floating notice: it floats over the surface rather than taking a row in
-   * it, it disappears on its own without any editor action, and it settles nothing — removing it reads
-   * nothing and writes nothing, so an editor who never looks at it loses no decision. It is announced
-   * politely rather than asserted, so a screen reader hears it without being interrupted.
-   */
-  function showEntryNotice(host: HTMLElement, message: string): void {
-    if (destroyed) return;
-    const notice = element('p', 'entry-notice', message);
-    notice.setAttribute('role', 'status');
-    notice.dataset['entryNotice'] = 'visible';
-    host.append(notice);
-    const timer = window.setTimeout(() => { notice.remove(); entryNoticeTimers.delete(timer); }, ENTRY_NOTICE_MS);
-    entryNoticeTimers.add(timer);
-  }
 
   let destroyed = false;
   let editor: BoundedEditor | undefined;
@@ -721,7 +704,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       if (!destroyed) persistenceStatus.setAttribute('aria-expanded', String((saveMenu.element as HTMLDetailsElement).open));
     });
   }
-  if (entryNotice !== undefined) showEntryNotice(content, entryNotice);
+  if (entryNotice !== undefined) showTransientNotice(entryNotice);
 
   let currentWindow = initialWindow;
   if (!isDocument) {
@@ -740,7 +723,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       },
       lastViewed: () => preferences.current['analysis.lastViewedRevision'][initialWindow.bookId]?.ordinal ?? 0,
       viewed: (revision) => preferences.viewAnalysis(initialWindow.bookId, revision),
-      notice: () => showEntryNotice(content, PARAGRAPH_ANALYSIS_WORDS.hint),
+      notice: () => showTransientNotice(PARAGRAPH_ANALYSIS_WORDS.hint),
       beforeOpen: () => { setNavigationOpen(false); taskDrawer.close(false); },
       openItem: (item: ParagraphAnalysisProjection['items'][number], revisionId: string) => {
         void (async () => {
@@ -2132,8 +2115,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (destroyed) return;
     destroyed = true;
     reviewMarksFollower += 1;
-    for (const timer of entryNoticeTimers) window.clearTimeout(timer);
-    entryNoticeTimers.clear();
     if (reviewMarksTimer !== undefined) window.clearTimeout(reviewMarksTimer);
     viewportObserver?.disconnect();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);

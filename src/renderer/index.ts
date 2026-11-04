@@ -1365,7 +1365,7 @@ function manuscriptEntryNotice(anchor: BookManuscriptAnchorProjection): string {
   if (anchor.entry.state === 'nearest-anchor') {
     return `上次位置所在的段落已不在当前修订版，已回到最近的位置 · ${anchor.entry.label}`;
   }
-  return `回到上次位置 · ${anchor.entry.label}`;
+  return '回到上次位置。';
 }
 
 /**
