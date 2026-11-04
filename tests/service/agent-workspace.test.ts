@@ -191,6 +191,30 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
     expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, promoted.markIds[0]!).suggestion?.proposedText).toBe('新的表述二');
   });
 
+  it('keeps the round and discloses nothing placed when every anchor moved (#1311)', async () => {
+    const store = await openStore();
+    const book = await importSample1Book(store, roots.codeRoot, '全部锚点变动');
+    const selection = paragraphHolding(store, book, FIRST_ANCHOR);
+    const workspace = new AgentWorkspace(store, {
+      requireReady: () => undefined, stop: async () => undefined,
+      beginWorkspaceTurn: (turn) => turn.settled('completed', JSON.stringify({ items: [
+        { anchor: FIRST_ANCHOR, proposedText: '新的表述', rationale: '凝练。' },
+      ] })),
+    });
+    const proposal = (await workspace.propose(book.bookId, { selection, instruction: SET_INSTRUCTION })).proposal!;
+    const anchor = proposal.candidates[0]!.anchor;
+    typeInto(store, book, anchor.blockId, anchor.fromGrapheme, anchor.fromGrapheme + 1, '另');
+    const before = rowCounts();
+    await expect(workspace.promote(book.bookId, { proposalSetId: proposal.proposalSetId }))
+      .rejects.toMatchObject({ code: 'AGENT_WORKSPACE_NOTHING_TO_PROMOTE' });
+    expect(changedTables(before, rowCounts())).toEqual({});
+    const kept = (await workspace.inspect(book.bookId)).proposal!;
+    expect(kept.proposalSetId).toBe(proposal.proposalSetId);
+    expect(kept.candidates).toEqual(proposal.candidates);
+    expect(kept.label).toContain('没有新建修改建议');
+    expect(kept.label).toContain('1 项原文位置已变动');
+  });
+
   it('accepts a paragraph longer than the dialogue cap and maps independent edits across paragraphs', async () => {
     const store = await openStore();
     const book = await importSample1Book(store, roots.codeRoot, '跨段提议');

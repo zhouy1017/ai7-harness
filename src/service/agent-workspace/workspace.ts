@@ -220,8 +220,8 @@ export class AgentWorkspace {
 
   /**
    * 提交为修改建议: every candidate of the held round becomes a 修改建议 mark on the words it anchors, attributed to the round's
-   * workspace Task — together in one transaction, independently decidable on their cards. Words the manuscript no
-   * longer holds at an anchor refuse the whole set, and nothing is written. Nothing is decided or applied.
+   * workspace Task — together in one transaction, independently decidable on their cards. Moved anchors are disclosed
+   * and skipped; if none remain placeable the round stays available and promotion refuses. Nothing is decided or applied.
    */
   async promote(bookId: string, input: AgentWorkspaceProposalSetInput): Promise<AgentWorkspacePromotionProjection> {
     const round = this.#requireRound(bookId, input);
@@ -253,7 +253,12 @@ export class AgentWorkspace {
     let moved = 0;
     const markIds = this.#store.createProducedEditorialMarks(inputs, (placed) => {
       moved = placed.filter((markId) => markId === null).length;
-      return placed.filter((markId): markId is string => markId !== null);
+      const kept = placed.filter((markId): markId is string => markId !== null);
+      if (kept.length === 0) {
+        round.label = `${words.changed} ${moved} 项原文位置已变动，未放置。`;
+        require(false, 'AGENT_WORKSPACE_NOTHING_TO_PROMOTE', round.label);
+      }
+      return kept;
     });
     this.#rounds.delete(bookId);
     return {

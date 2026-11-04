@@ -164,11 +164,15 @@ export function readEditorialPolishAnswer(text: string, selection: string): Edit
     if (ordinal > MAX_EDITORIAL_POLISH_SUGGESTIONS) { refuse(`超过 ${MAX_EDITORIAL_POLISH_SUGGESTIONS} 条的建议不予提供`); continue; }
     if (!isRecord(item) || !hasKeys(item, ['original', 'replacement'])) { refuse('建议不是约定的格式'); continue; }
     let { original } = item;
-    const replacement = item.replacement;
+    let replacement = item.replacement;
     const reason = item.reason ?? '';
     if (typeof original === 'string') {
       const normalized = original.normalize('NFC');
       original = selection.includes(normalized) ? normalized : normalized.replace(/^[\s\p{P}\x60]+|[\s\p{P}\x60]+$/gu, '');
+    }
+    if (typeof replacement === 'string') {
+      const normalized = replacement.normalize('NFC');
+      replacement = selection.includes(normalized) ? normalized : normalized.replace(/^[\s\p{P}\x60]+|[\s\p{P}\x60]+$/gu, '');
     }
     if (typeof original !== 'string' || typeof replacement !== 'string' || typeof reason !== 'string' ||
         !original.isWellFormed() || !replacement.isWellFormed() || !reason.isWellFormed()) { refuse('建议不是约定的格式'); continue; }

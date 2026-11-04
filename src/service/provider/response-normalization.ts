@@ -235,6 +235,7 @@ export function normalizeModelResponse(profile: ProviderModelProfile, body: unkn
       ? { id: part.id, name: part.function.name, arguments: part.function.arguments } : null;
   }
   const { calls, salvaged } = readableCalls(entries, read, options, executable);
+  if (truncated) salvaged.push({ section: 'response', index: 0, reason: 'truncated' });
   if (body.ai7StreamTextMismatch === true) salvaged.push({ section: 'text', index: 0, reason: 'completed-text-differs-from-stream' });
   const metadata = salvaged.length === 0 ? {} : { salvaged };
   if (calls.length > 0) return { kind: 'tool-calls', text, calls, reasoningText: reasoning, usage, ...metadata };

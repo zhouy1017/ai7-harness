@@ -23,6 +23,15 @@ import {
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../../', import.meta.url)));
 
+it('rejects an unparseable supervision scope without broadening it to house (#1311)', () => {
+  const args = { categoryId: 'synthetic', effect: 'guide', text: '合成指导。' };
+  for (const scope of [undefined, null, {}, [], 42, '', 'unknown', 'not-a-book-scope']) {
+    expect(canonicalToolArguments('propose_learning_supervision', { ...args, scope })).toBeNull();
+  }
+  expect(canonicalToolArguments('propose_learning_supervision', { ...args, scope: ' HOUSE ' })).toMatchObject({ scope: 'house' });
+  expect(canonicalToolArguments('propose_learning_supervision', { ...args, scope: '图书' })).toMatchObject({ scope: 'book' });
+});
+
 async function rulesOf(version: string): Promise<unknown[]> {
   const document = JSON.parse(await readFile(resolve(REPO_ROOT, `docs/policies/provider-processing-policy.${version}.json`), 'utf8')) as {
     decision: { providerAllowRules?: unknown[] };

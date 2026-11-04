@@ -15,6 +15,8 @@ import { GENERATED_FAMILY_DISPOSITIONS, GENERATED_ROUTE_DISPOSITIONS } from '../
 import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE, type ConfiguredRouteId } from '../../src/shared/provider-configuration.generated.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
+import { readEditorialPolishAnswer } from '../../src/service/fast-role/polish-contract.js';
 
 /**
  * Capability dispositions and the named preflight refusal (Issue #1180), cancellation and the stream boundaries each family
@@ -196,6 +198,33 @@ describe('cancellation per family', () => {
 });
 
 describe('stream boundaries per family', () => {
+  const partial = '{"suggestions":[{"original":"合成","replacement":"合成改写"},{"original":"未完';
+  const frame = (body: unknown): string => `data: ${JSON.stringify(body)}\n\n`;
+  const truncatedStreams = [
+    { route: 'deepseek-open-platform', family: 'chat-completions', frames: [frame({ choices: [{ delta: { content: partial }, finish_reason: 'length' }] }), 'data: [DONE]\n\n'] },
+    { route: ROWS[0].route, family: 'responses', frames: [frame({ type: 'response.output_text.delta', delta: partial }), frame({ type: 'response.incomplete', response: { status: 'incomplete', output_text: partial } })] },
+    { route: ROWS[1].route, family: 'messages', frames: [frame({ type: 'message_start', message: {} }), frame({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: partial } }), frame({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }), frame({ type: 'message_stop' })] },
+    { route: ROWS[2].route, family: 'gemini', frames: [frame({ candidates: [{ content: { parts: [{ text: partial }] }, finishReason: 'MAX_TOKENS' }] })] },
+  ] as const;
+  it.each(truncatedStreams)('passes truncated $family text through the real harness to partial parsing (#1311)', async (row) => {
+    const model = modelProfileFor(row.route, 'account-new-model')!;
+    const { adapter, touched } = harness(model, async () => sse(row.frames), true);
+    const handle = await prepareExecution({ sessionId: crypto.randomUUID(), route: model.route, model: model.model,
+      systemPrompt: DIALOGUE_PROMPT_CONTRACT.systemPrompt, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      adapterFactory: () => adapter, gate: () => ({ decision: 'transmit-local', payloadDigest: 'b'.repeat(64) }), onTransmitTicket: () => undefined });
+    try {
+      handle.bindExecution({ harnessSessionId: handle.sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST });
+      const turn = await handle.submitUnit(buildDialogueMessage({ kind: 'ask', selection: '合成段落。', question: '合成问题？', kept: null }));
+      expect(turn.terminal, JSON.stringify(turn.signals)).toBe('completed');
+      const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
+      expect(candidate?.kind).toBe('contentCandidate');
+      if (candidate?.kind !== 'contentCandidate') throw new Error('No parser candidate');
+      expect(readEditorialPolishAnswer(candidate.text, '合成段落。')).toMatchObject({ kind: 'read', suggestions: [{ original: '合成', replacement: '合成改写' }] });
+      expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', truncated: true, salvaged: expect.arrayContaining([{ section: 'response', index: 0, reason: 'truncated' }]) });
+      expect(touched.transport).toBe(1);
+    } finally { await handle.finish(); }
+  });
+
   it('reads a stream without its terminal proof as outcome-unknown, for every family', async () => {
     const truncated: Record<(typeof ROWS)[number]['family'], ReadonlyArray<string>> = {
       'openai-responses': frames('openai-responses', 'text-stream').slice(0, -1),

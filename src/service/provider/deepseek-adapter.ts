@@ -750,7 +750,9 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       if (streamed.length === 0) yield { type: 'text-delta', index: 0, text: outcome.text };
       yield { type: 'block-end', index: 0, block: { type: 'text', text: outcome.text } };
       if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
-      if (outcome.code === 'MAX_TOKENS') yield { type: 'finish', reason: { kind: 'max-tokens' } };
+      // A complete transport with truncated content still enters the contract parser's partial salvage path.
+      // Real transport/provider failures retain their failure finish and billing classification.
+      if (outcome.code === 'MAX_TOKENS') yield { type: 'finish', reason: { kind: 'stop' } };
       else yield fail(outcome.code, outcome.message, outcome.status);
       return;
     }
@@ -795,6 +797,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
     if (streamed.length === 0) yield { type: 'text-delta', index: 0, text };
     yield { type: 'block-end', index: 0, block: { type: 'text', text } };
     if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
-    yield { type: 'finish', reason: { kind: outcome.kind === 'answer' && outcome.truncated === true ? 'max-tokens' : 'stop' } };
+    yield { type: 'finish', reason: { kind: 'stop' } };
   }
 }

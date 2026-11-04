@@ -126,6 +126,13 @@ describe('Editorial Polish Contract v1', () => {
     const many = readEditorialPolishAnswer(polish(Array.from({ length: MAX_EDITORIAL_POLISH_SUGGESTIONS + 1 }, () => valid)), SELECTION);
     expect(many.kind === 'read' && many.withheld.at(-1)?.ordinal).toBe(21);
   });
+
+  it('normalizes quoted replacements just like original text (#1311)', () => {
+    expect(readEditorialPolishAnswer(polish([{ original: '“慢慢的”', replacement: '“慢慢地”' }]), SELECTION))
+      .toMatchObject({ kind: 'read', suggestions: [{ original: '慢慢的', replacement: '慢慢地' }] });
+    expect(readEditorialPolishAnswer(polish([{ original: '“慢慢的”', replacement: '“慢慢的”' }]), SELECTION))
+      .toMatchObject({ kind: 'read', suggestions: [], withheld: [{ reason: '替换后的文字与原文相同' }] });
+  });
 });
 
 const REGION = { intent: '删去重复的「里面」。', base: '走进了房间里面，', current: '走进了屋子里面，', proposed: '走进了房间，', before: '他慢慢地', after: '看见一封信。' };

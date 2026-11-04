@@ -395,7 +395,8 @@ export function canonicalToolArguments(name: string, input: unknown): PlatformTo
   args.version = number(args.version, 1, Number.MAX_SAFE_INTEGER, 1);
   const token = (value: unknown): string => String(value ?? '').normalize('NFC').trim().toLowerCase();
   args.mode = /token|分词/u.test(token(args.mode)) ? 'tokenized' : 'exact';
-  args.scope = /book|图书/u.test(token(args.scope)) ? 'book' : /category|类别/u.test(token(args.scope)) ? 'category' : 'house';
+  const scopes: Readonly<Record<string, string>> = { house: 'house', '全局': 'house', '全社': 'house', book: 'book', '图书': 'book', category: 'category', '类别': 'category' };
+  args.scope = typeof args.scope === 'string' ? scopes[token(args.scope)] : undefined;
   args.effect = /freeze|冻结/u.test(token(args.effect)) ? 'freeze' : /correct|纠正/u.test(token(args.effect)) ? 'correct' : 'guide';
   if (Array.isArray(args.sourceKinds)) args.sourceKinds = [...new Set(args.sourceKinds.flatMap((kind) => {
     const value = token(kind);
