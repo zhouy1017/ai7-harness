@@ -3493,7 +3493,7 @@ async function main() {
         coverage:section?.dataset.coverage, freshness:section?.dataset.freshness,
         anchors:Array.from(card?.querySelectorAll('.custom-row') ?? [], (row)=>[row.dataset.unitOrdinal, row.dataset.anchorState]),
         links:card?.querySelectorAll('.custom-row [data-analysis-action="custom-jump"]').length ?? 0,
-        counts:section?.querySelector('.custom-counts')?.textContent ?? null,
+        counts:section?.querySelector('.custom-counts')?.firstChild?.textContent ?? null,
         feedback:section?.querySelector('.custom-feedback-note')?.textContent ?? null,
         judged:card?.querySelectorAll('[data-analysis-action="open-feedback"]').length ?? 0,
         state:card?.querySelector('.custom-task-state')?.dataset.taskState ?? null,

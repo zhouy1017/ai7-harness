@@ -123,7 +123,9 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     section.dataset['coverage'] = latest.coverage.state;
     const revision = el('p', 'custom-revision-line', customTabVersionLine(latest.dimensionVersion.version, latest.manuscriptRevisionLabel, latest.ordinal));
     revision.append(' · ', el('span', 'custom-axis', latest.coverage.label), ' · ', el('span', 'custom-axis', latest.freshness.label));
-    section.append(revision, el('p', 'custom-counts', customTabCountsLine(latest.rowCounts)));
+    const counts = el('p', 'custom-counts', customTabCountsLine(latest.rowCounts));
+    if (latest.rowsTruncated) counts.append(' · ', el('span', 'custom-more', customTabMoreRows(latest.rows.length)));
+    section.append(revision, counts);
     if (latest.gaps.length > 0) {
       const gaps = el('ul', 'custom-gaps');
       for (const gap of latest.gaps) {
@@ -157,7 +159,6 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       rows.append(item);
     }
     section.append(rows);
-    if (latest.rowsTruncated) section.append(el('p', 'field-note', customTabMoreRows(latest.rows.length)));
     section.append(el('p', 'field-note custom-feedback-note', CUSTOM_TAB_FEEDBACK_NOTE));
     return section;
   };

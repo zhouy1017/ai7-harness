@@ -889,7 +889,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
   function renderRuns(next: ReviewWorkspaceProjection): HTMLElement {
     const section = el('section', 'review-runs-section');
-    section.append(el('h4', undefined, REVIEW_RUNS_HEADING));
+    section.append(el('h4', undefined, `${REVIEW_RUNS_HEADING}${next.runsTruncated ? ` · ${reviewRunsTruncatedLine(next.runs.length)}` : ''}`));
     if (next.runs.length === 0) {
       section.append(el('p', 'field-note', REVIEW_NO_RUNS));
       return section;
@@ -917,7 +917,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       list.append(item);
     }
     section.append(list);
-    if (next.runsTruncated) section.append(el('p', 'field-note', reviewRunsTruncatedLine(next.runs.length)));
     return section;
   }
 
@@ -1157,7 +1156,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const group = el('div', 'review-influence-category');
       group.dataset['categoryId'] = entry.categoryId;
       group.dataset['versionOrdinal'] = String(entry.ordinal);
-      group.append(el('p', 'review-influence-line', reviewInfluenceLine(entry)));
+      const summary = el('p', 'review-influence-line', reviewInfluenceLine(entry));
+      if (entry.moreMaterials > 0) summary.append(' · ', reviewInfluenceMore(entry.moreMaterials));
+      group.append(summary);
       const list = el('ul', 'review-influence-materials');
       for (const material of entry.materials) {
         const item = el('li', undefined, reviewInfluenceMaterialLine(material, material.kind === null ? '学习材料' : LEARNING_AUDIT_KIND_LABELS[material.kind], localInstantLabel));
@@ -1169,7 +1170,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         list.append(item);
       }
       group.append(list);
-      if (entry.moreMaterials > 0) group.append(el('p', 'field-note', reviewInfluenceMore(entry.moreMaterials)));
       details.append(group);
     }
     return details;
@@ -2861,7 +2861,9 @@ export function reviewMaterialsField(
   updateSheet: () => void,
 ): { field: HTMLElement; inputs: ReviewMaterialInput[]; items: ReadonlyArray<WritingTaskMaterialProjection> } {
   const field = el('fieldset', 'review-materials');
-  field.append(el('legend', undefined, '允许参考 · 资料库'));
+  const legend = el('legend', undefined, '允许参考 · 资料库');
+  if ((offers?.more ?? 0) > 0) legend.append(el('span', undefined, ' · '), el('span', undefined, `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
+  field.append(legend);
   const statement = offers?.statement ?? '暂无可参考的资料库资料。';
   const items = offers?.items ?? [];
   field.append(el('p', 'field-note', items.length === 0 ? statement : `${statement.replace(/。$/u, '')}；资料只供调用模型的审阅类别参考，事实核查与只读已有线索的类别不参考这些资料。`));
@@ -2887,7 +2889,6 @@ export function reviewMaterialsField(
     field.append(label);
     return { item, input, reason, separator };
   });
-  if ((offers?.more ?? 0) > 0) field.append(el('p', 'field-note', `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
   return { field, inputs, items };
 }
 

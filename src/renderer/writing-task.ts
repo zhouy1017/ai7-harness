@@ -318,7 +318,9 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (!busy && api.searchReferableMaterials !== undefined) node.append(similarMaterialsField({ searchReferableMaterials: api.searchReferableMaterials }, page.bookId, offer.items, new Set(state.materialIds), (id) => {
       state.materialIds.push(id); state.problem = null; paint(null);
     }));
-    node.append(el('p', 'writing-materials-statement', offer.statement));
+    const statement = el('p', 'writing-materials-statement', offer.statement.replace(/。$/u, offer.more > 0 ? '' : '。'));
+    if (offer.more > 0) statement.append(el('span', 'writing-materials-more', `；${writingMaterialsMore(offer.more)}`));
+    node.append(statement);
     // An item no longer offered, or no longer one that may be ticked, leaves the selection with its reason (Issue #759).
     const reconciled = reconcileTaskMaterialSelection(state, offer.items, new Set(state.materialIds));
     state.materialIds = reconciled.kept;
@@ -366,7 +368,6 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
       }
       node.append(list);
     }
-    if (offer.more > 0) node.append(el('p', 'field-note writing-materials-more', writingMaterialsMore(offer.more)));
     return node;
   }
 

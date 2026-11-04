@@ -760,22 +760,21 @@ export function mountBookSeries(options: MountBookSeriesOptions): void {
     (projection: BookSeriesProjection) => {
       if (!root.isConnected) return;
       root.dataset['seriesCount'] = String(projection.memberships.length);
-      const nodes: HTMLElement[] = [el('h3', undefined, BOOK_SERIES_HEADING)];
+      const heading = el('h3', undefined, BOOK_SERIES_HEADING);
+      if (projection.membershipCount > projection.memberships.length) heading.append(' · ', el('span', 'book-series-more', bookSeriesMoreLine(projection.membershipCount - projection.memberships.length)));
+      const nodes: HTMLElement[] = [heading];
       if (projection.memberships.length === 0) nodes.push(el('p', 'book-series-none', BOOK_SERIES_NONE));
       for (const membership of projection.memberships) {
         const line = el('p', 'book-series-membership', bookSeriesMembershipLine(membership, localInstantLabel));
         line.dataset['seriesId'] = membership.seriesId;
         nodes.push(line);
       }
-      if (projection.membershipCount > projection.memberships.length) {
-        nodes.push(el('p', 'field-note book-series-more', bookSeriesMoreLine(projection.membershipCount - projection.memberships.length)));
-      }
       if (projection.historyCount > 0) {
         const details = el('details', 'book-series-history');
         const list = el('ol');
         for (const change of projection.history) list.append(renderChange(change, bookSeriesChangeLine(change)));
         // The summary counts every record; `更早的记录…` reads those past the first page (Issue #63 review).
-        details.append(el('summary', undefined, `${BOOK_SERIES_HISTORY}（${projection.historyCount}）`), list);
+        details.append(el('summary', undefined, `${BOOK_SERIES_HISTORY} · ${projection.historyCount}`), list);
         let next = projection.historyNext;
         let loading = false;
         const loadPage = async (fresh: boolean): Promise<void> => {
