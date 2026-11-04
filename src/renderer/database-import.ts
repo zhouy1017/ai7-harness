@@ -111,7 +111,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       pending.dataset['replacementId'] = waiting.replacementId;
       pending.dataset['kind'] = waiting.kind;
       const lines = databasePendingLines(waiting);
-      const first = el('p', 'database-import-pending-state', lines[0]);
+      const first = el('p', 'database-import-pending-state', `${lines[0].replace(/。$/u, '')}；${lines[1]}`);
       first.setAttribute('role', 'status');
       const buttons = el('div', 'button-row');
       buttons.append(
@@ -120,7 +120,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
           : DATABASE_IMPORT_ACTIONS.cancelReplacement, 'quiet', 'cancel-replacement',
           () => void cancelReplacement(waiting.replacementId)),
       );
-      pending.replaceChildren(first, el('p', 'field-note', lines[1]), el('p', 'attention-note', lines[2]), buttons);
+      pending.replaceChildren(first, el('p', 'attention-note', lines[2]), buttons);
     }
 
     const target = projection.rollBackOf === null ? undefined : projection.replacements.find((record) => record.replacementId === projection.rollBackOf);

@@ -171,8 +171,8 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务凭据。'), 'error'); }
   })());
   actions.append(save, refresh, remove);
-  form.append(nameLabel, secretLabel, el('p', 'field-note', '凭据只写入操作系统安全凭据库，保存后不再显示。'), actions);
-  const stored = el('p', 'field-note', ready ? '凭据已保存' : '需设置凭据');
+  form.append(nameLabel, secretLabel, actions);
+  const stored = el('p', 'field-note', `${ready ? '凭据已保存' : '需设置凭据'}；凭据只写入操作系统安全凭据库，保存后不再显示。`);
   stored.dataset['credentialState'] = option.connection?.credentialOperationState ?? 'missing';
   step.append(stored, form);
   return step;
@@ -209,12 +209,9 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
-    const note = el('p', 'field-note', modelConnectionTestLabel(own, checked === null ? undefined : modelLabelWords(checked)));
+    const note = el('p', 'field-note', checked === null ? '' : `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own, modelLabelWords(checked))}`);
     if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
-    feedback.replaceChildren(...(checked === null ? [] : [
-      el('p', 'field-note', modelCapabilityLabel(checked)),
-      note, ...modelConnectionTestDisclosure(own),
-    ]));
+    feedback.replaceChildren(...(checked === null ? [] : [note, ...modelConnectionTestDisclosure(own)]));
   };
   for (const model of offered) {
     const label = el('label', 'model-service-flow-choice');
@@ -304,7 +301,7 @@ export function modelServiceFlow(projection: ModelServiceSettingsProjection, opt
   const section = el('section', 'review-section model-service-flow');
   section.dataset['modelServiceFlow'] = 'true';
   section.setAttribute('aria-label', '选择模型');
-  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型。${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
+  section.append(el('h3', undefined, '选择模型'), el('p', 'field-note', `主编辑角色与快速交互角色可分别选择模型；${MODEL_SERVICE_ROUTE_EFFECT_LABEL}`));
   const channels = el('fieldset', 'model-service-flow-channels');
   channels.append(el('legend', undefined, '1. 渠道'));
   const steps = el('div');
