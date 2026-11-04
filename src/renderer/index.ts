@@ -4265,8 +4265,6 @@ function renderAppearance(): void {
     element('p', 'lede', APPEARANCE_LEDE));
   const choices = element('fieldset', 'appearance-choices');
   choices.append(element('legend', undefined, APPEARANCE_LEGEND));
-  const message = element('p', 'field-note');
-  message.setAttribute('role', 'status');
   const radios: HTMLInputElement[] = [];
   for (const choice of APPEARANCE_CHOICES) {
     const label = element('label', 'appearance-choice');
@@ -4277,9 +4275,9 @@ function renderAppearance(): void {
     // The radios stay enabled while saving: disabling the focused one would drop keyboard focus (KEY-013).
     input.addEventListener('change', () => {
       if (!input.checked) return;
-      void appearance.choose(choice.value).then(() => { message.textContent = APPEARANCE_SAVED; }, () => {
+      void appearance.choose(choice.value).then(() => { setStatus(APPEARANCE_SAVED, 'success'); }, () => {
         for (const radio of radios) radio.checked = radio.value === appearance.preference;
-        message.textContent = APPEARANCE_SAVE_FAILED;
+        setStatus(APPEARANCE_SAVE_FAILED, 'error');
       });
     });
     radios.push(input);
@@ -4295,7 +4293,7 @@ function renderAppearance(): void {
   const viewSettings = renderViewSettings(viewPreferences, setStatus);
   const viewObserver = new MutationObserver(() => { if (!content.isConnected) { viewSettings.destroy(); viewObserver.disconnect(); } });
   viewObserver.observe(screen, { childList: true });
-  content.append(choices, message, viewSettings.element, actions);
+  content.append(choices, viewSettings.element, actions);
   replaceScreen('appearance', content);
   setStatus(APPEARANCE_STATUS);
 }
