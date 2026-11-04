@@ -113,7 +113,8 @@ export function learningReasonAskCard(ask: LearningReasonAskProjection, api: Pic
     saving = true; save.disabled = true;
     void api.recordLearningReasonAsk({ action: 'answer', askId: ask.askId, choice, text: text.value.trim() || null }).then(() => {
       card.dataset['learningAskState'] = 'answered';
-      card.replaceChildren(el('p', 'field-note', '已记下你的原因。'));
+      status.textContent = '已记下你的原因。';
+      card.replaceChildren(status);
     }, () => { saving = false; update(); status.textContent = '原因未能记录，可以稍后再试。'; });
   });
   dismiss.addEventListener('click', () => {
