@@ -70,8 +70,6 @@ import {
 } from './book-delivery-package-labels.js';
 import {
   EXPORT_DEGRADED_NOTE,
-  EXPORT_OPTION_LABELS,
-  exportOptionNote,
   EXPORT_OPTIONS_LEGEND,
 } from './manuscript-export-labels.js';
 import { renderExportFidelity } from './manuscript-export.js';
@@ -574,12 +572,10 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       box.checked = current.options[key];
       box.disabled = current.result !== null || current.phase === 'choosing' || current.phase === 'writing';
       box.dataset['packageField'] = key;
-      const note = el('small', 'field-note', exportOptionNote(key, 'docx'));
-      note.id = uid(`export-${key}-note`);
-      box.setAttribute('aria-describedby', note.id);
       box.addEventListener('change', () => changeOption(current, key, box.checked));
       const words = el('span', 'export-option-text');
-      words.append(el('strong', undefined, EXPORT_OPTION_LABELS[key]), note);
+      words.append(el('strong', undefined, key === 'includeAnnotations'
+        ? '含批注，保留作者与回复' : '含修改建议，作为 Word 修订并保留作者'));
       option.append(box, words);
       fieldset.append(option);
     }

@@ -39,12 +39,12 @@ type ReimportLineageChoice = 'unconfirmed' | string;
 /** The same draft/version's visible form choice survives target/paging/error rerenders; restart reads the saved service choice. */
 const wordIntakeFormChoices = new Map<string, WordTrackedChangesChoice>();
 
-/** What each verb means for a row, beside its button (Issue #412, S63; V2-UX-IMP-057). */
-const REIMPORT_VERB_NOTES: Readonly<Record<ReimportGroupProjection['verbs'][number], string>> = {
-  split: '当前这一段在新文件中拆成了几段；标记跟随到它的文字所在的新段落。',
-  rewrite: '新文件在这里改写或新增了段落；当前段落按顺序延续，标记跟随到仍在的文字。',
-  delete: '新文件删去了这些段落；它们上面的标记不跟随，重新导入后会列出。',
-  merge: '当前这几段在新文件中并成了一段；标记跟随到它们的文字所在的新段落。',
+/** The action includes its consequence for existing marks. */
+const REIMPORT_VERB_ACTIONS: Readonly<Record<ReimportGroupProjection['verbs'][number], string>> = {
+  split: '拆分 · 标记跟随文字',
+  rewrite: '改写与新增 · 标记跟随保留的文字',
+  delete: '删除 · 标记不跟随',
+  merge: '并入 · 标记跟随文字',
 };
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -797,9 +797,9 @@ export function createImportReview(options: ImportReviewOptions) {
     sourceResult.dataset['sourceVersionDisposition'] = review.sourceVersionResult.disposition;
     const sourceResultValues = element('dl');
     sourceResultValues.append(
-      element('dt', undefined, '结果'), element('dd', undefined, review.sourceVersionResult.label),
+      element('dt', undefined, '结果'), element('dd', undefined, review.sourceVersionResult.disposition === 'created' ? '导入新文件' : '使用已导入的文件'),
     );
-    sourceResult.append(element('h3', undefined, '图书拥有的来源版本'), sourceResultValues, technicalDetails(
+    sourceResult.append(element('h3', undefined, '来源文件'), sourceResultValues, technicalDetails(
       undefined,
       element('dt', undefined, '来源版本 ID'),
       element('dd', 'technical-identity', review.sourceVersionResult.sourceVersionId ?? '提交时在所选图书内创建'),
@@ -898,7 +898,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '来源关系'), element('dd', undefined, review.lineage.label),
       element('dt', undefined, '比较方式'), element('dd', undefined,
         review.lineage.comparisonKind === 'three-way' ? '三方比较' : '两方比较'),
-      element('dt', undefined, '来源版本结果'), element('dd', undefined, review.sourceVersionResult.label),
+      element('dt', undefined, '文件'), element('dd', undefined, review.sourceVersionResult.disposition === 'created' ? '导入新文件' : '使用已导入的文件'),
       element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
       element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
       element('dt', undefined, technicalLayerVisible ? '暂存来源字节数' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
@@ -1055,16 +1055,13 @@ export function createImportReview(options: ImportReviewOptions) {
           if (group.verb === null) {
             const choices = element('div', 'button-row compact-actions reimport-verbs');
             for (const verb of group.verbs) {
-              const choice = button(REIMPORT_GROUP_VERB_LABELS[verb], 'secondary', async () => {
+              const choice = button(REIMPORT_VERB_ACTIONS[verb], 'secondary', async () => {
                 setStatus(`正在按「${REIMPORT_GROUP_VERB_LABELS[verb]}」确定第 ${group.ordinal} 处…`, 'busy');
                 await resolve(group, verb, choice);
               });
               choice.dataset['reimportVerbChoice'] = verb;
               choice.dataset['reimportGroupId'] = group.groupId;
-              choice.setAttribute('aria-describedby', `${group.groupId}-${verb}`);
-              const note = element('small', 'field-note', REIMPORT_VERB_NOTES[verb]);
-              note.id = `${group.groupId}-${verb}`;
-              choices.append(choice, note);
+              choices.append(choice);
             }
             row.append(choices);
           } else {
