@@ -1274,7 +1274,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='series-consistency'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId) && prepared.categories.length === 1 &&
-      prepared.categories[0].categoryId === 'series-consistency' && prepared.categories[0].basis.searchEngine === false && prepared.categories[0].basis.guidelineDocuments[0].version === '1' &&
+      prepared.categories[0].categoryId === 'series-consistency' && prepared.categories[0].basis.searchEngine === false && prepared.categories[0].basis.guidelineDocuments[0].version === '2' &&
       (prepared.categories[0].planEnvelopeDigest ?? '').length === 64, 'consistency-prepared-run', prepared?.categories);
 
     at('consistency-review-run');
@@ -1286,7 +1286,7 @@ async function main() {
     const reviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     const findings = reviewed?.findings ?? [];
     requireJourney(reviewed?.state === 'settled' && reviewed.categories.length === 1 && reviewed.categories[0].state === 'settled' &&
-      reviewed.categories[0].findingsCount === 3 && reviewed.categories[0].excludedCount === 0 && reviewed.categories[0].basis.searchEngine === false && reviewed.categories[0].basis.guidelineDocuments[0].version === '1' &&
+      reviewed.categories[0].findingsCount === 3 && reviewed.categories[0].excludedCount === 0 && reviewed.categories[0].basis.searchEngine === false && reviewed.categories[0].basis.guidelineDocuments[0].version === '2' &&
       findings.length === 3 && findings.every((finding) => finding.categoryId === 'series-consistency' && finding.output === 'annotation' &&
         finding.markId !== null && finding.status === 'pending' && finding.anchorState === 'exact' && finding.clauseRefs.length === 1 &&
         finding.clauseRefs[0].clauseId === 'series-knowledge/1' && finding.clauseRefs[0].documentTitle === `地点「${PLACE}」` &&
