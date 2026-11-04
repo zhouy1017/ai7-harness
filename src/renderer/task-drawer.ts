@@ -819,10 +819,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const wrap = el('span', 'task-plan-unavailable');
     const button = control(label, className, name);
     button.disabled = true;
-    const why = el('small', 'field-note', reason);
+    const why = el('span', undefined, reason);
     why.id = uid(name);
+    button.setAttribute('aria-label', label);
     button.setAttribute('aria-describedby', why.id);
-    wrap.append(button, why);
+    button.append(' · ', why);
+    wrap.append(button);
     return wrap;
   }
 
@@ -1672,7 +1674,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const shown = assuranceBuffers.get(key) ?? assurance.level;
     const block = el('fieldset', 'task-plan-assurance');
     block.dataset['taskPlanAssurance'] = shown;
-    block.append(el('legend', undefined, `${TASK_PLAN_ASSURANCE_HEADING} · ${TASK_PLAN_ASSURANCE_NOTE}`));
+    const legend = el('legend', undefined, `${TASK_PLAN_ASSURANCE_HEADING} · ${TASK_PLAN_ASSURANCE_NOTE}`);
+    if (!assurance.settable && assurance.reason !== null) legend.append(' · ', assurance.reason);
+    block.append(legend);
     const name = uid('assurance');
     for (const option of assurance.options) {
       const label = el('label', 'task-plan-assurance-option');
@@ -1702,7 +1706,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       const chosen = assurance.options.find((option) => option.level === pending);
       block.append(el('p', 'task-plan-assurance-edited', `${TASK_PLAN_EDIT_TAG} · ${taskPlanAssuranceEdited(chosen?.label ?? pending)}`));
     }
-    if (!assurance.settable && assurance.reason !== null) block.append(el('p', 'field-note', assurance.reason));
     return [block];
   }
 
@@ -1723,13 +1726,15 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     input.value = form.draft;
     const label = el('label', undefined, `${TASK_PLAN_BUDGET_INPUT} · ${TASK_PLAN_BUDGET_HINT}`);
     label.htmlFor = input.id;
+    input.setAttribute('aria-label', `${TASK_PLAN_BUDGET_INPUT} · ${TASK_PLAN_BUDGET_HINT}`);
     const described: string[] = [];
-    const error = form.error === null ? null : el('small', 'field-note task-plan-budget-error', form.error);
+    const error = form.error === null ? null : el('span', 'task-plan-budget-error', form.error);
     if (error !== null) {
       error.id = uid('budget-error');
       error.setAttribute('role', 'alert');
       described.push(error.id);
       input.setAttribute('aria-invalid', 'true');
+      label.append(' · ', error);
     }
     if (described.length > 0) input.setAttribute('aria-describedby', described.join(' '));
     input.addEventListener('input', () => {
@@ -1749,7 +1754,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     apply.addEventListener('click', () => applyBudgetForm(next, form));
     const cancel = control(TASK_PLAN_BUDGET_CANCEL, 'secondary', 'budget-cancel');
     cancel.addEventListener('click', () => closeBudgetForm());
-    group.append(label, input, ...(error === null ? [] : [error]), apply, cancel);
+    group.append(label, input, apply, cancel);
     return group;
   }
 
@@ -2452,8 +2457,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const choices = el('fieldset', 'task-plan-clarification-choices');
     choices.append(el('legend', 'task-plan-clarification-question', card.question));
     const submit = control(TASK_PLAN_CLARIFICATION_SUBMIT, 'primary', `clarification-submit:${id}`);
-    const submitWhy = el('small', 'field-note', TASK_PLAN_CLARIFICATION_SUBMIT_REASON);
+    const submitWhy = el('span', undefined, TASK_PLAN_CLARIFICATION_SUBMIT_REASON);
     submitWhy.id = uid('clarification-submit');
+    submit.setAttribute('aria-label', TASK_PLAN_CLARIFICATION_SUBMIT);
+    const submitReason = el('span');
+    submitReason.append(' · ', submitWhy);
+    submit.append(submitReason);
     // A drawer whose service stopped offers nothing; the card says why it cannot be answered only when the Run says so.
     const blocked = card.answerable.reason ?? (interrupted ? '' : null);
     const ready = (): void => {
@@ -2462,6 +2471,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       submit.disabled = draft.optionId === null || !validText || working || blocked !== null;
       submitWhy.textContent = blocked ?? TASK_PLAN_CLARIFICATION_SUBMIT_REASON;
       submitWhy.hidden = !submit.disabled;
+      submitReason.hidden = !submit.disabled;
       if (submit.disabled) submit.setAttribute('aria-describedby', submitWhy.id);
       else submit.removeAttribute('aria-describedby');
     };
@@ -2539,7 +2549,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     ready();
     const actions = el('div', 'button-row');
     actions.append(submit, defer);
-    parts.push(actions, submitWhy);
+    parts.push(actions);
     section.append(...parts);
     return section;
   }

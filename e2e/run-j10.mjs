@@ -432,7 +432,7 @@ const READ_QUESTIONS = `Array.from(document.querySelectorAll('#task-drawer .task
     option.dataset.clarificationOption, option.querySelector('.task-plan-choice-label')?.textContent ?? null,
     option.querySelector('.task-plan-choice-recommended')?.textContent ?? null, option.querySelector('input')?.checked === true,
   ]),
-  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.textContent, button.disabled]; })(),
+  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.getAttribute('aria-label') ?? button.textContent, button.disabled]; })(),
   defer: card.querySelector('[data-task-drawer-control^="clarification-defer:"]')?.textContent ?? null,
   line: card.dataset.clarificationState === 'deferred' ? card.textContent : null,
 }))`;
@@ -459,7 +459,7 @@ const READ_DRAWER = `(() => {
     note: text(drawer.querySelector('.task-bar-note')),
     actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => {
       const described = button.getAttribute('aria-describedby');
-      return [button.dataset.taskDrawerControl, button.textContent, button.disabled ? 'disabled' : 'enabled', described === null ? null : text(document.getElementById(described))];
+      return [button.dataset.taskDrawerControl, button.getAttribute('aria-label') ?? button.textContent, button.disabled ? 'disabled' : 'enabled', described === null ? null : text(document.getElementById(described))];
     }),
     activity: activity === null ? null : {
       state: activity.dataset.taskPlanActivity ?? null,
