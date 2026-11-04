@@ -2583,3 +2583,5 @@ body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:ca
 .task-overview-card-title > * { min-width:0; }
 .task-overview-book { max-width:38%; overflow:hidden; text-overflow:ellipsis; }
 .task-overview-card-title .state-term { flex-shrink:0; }
+.task-overview-items { min-width:0; grid-template-columns:minmax(0,1fr); }
+.task-overview-card { min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
