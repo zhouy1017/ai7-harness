@@ -17,7 +17,7 @@ export interface SearchBackendSettingsOptions {
 }
 
 export const SEARCH_CANDIDATE_PROBE_LABEL = '测试连接';
-export const SEARCH_FALLBACK_NOTE = '设置备用来源后，连接或服务出错、限流时最多重试一次再切换，博查明确返回余额或套餐额度不足时，直接切换一次，其他认证错误不会切换；只能选择一个已保存密钥且不同于默认来源的检索服务，未实测候选不能作为备用来源；使用模型自带搜索时不切换，选择始终使用选定后端时按此配置切换。';
+export const SEARCH_FALLBACK_NOTE = '设置备用来源后，连接或服务出错、限流时最多重试一次再切换；博查明确返回余额或套餐额度不足时，直接切换一次，其他认证错误不会切换；备用只能选一个，须已保存密钥且不同于默认来源，未实测候选不可选；模型自带搜索不切换，始终使用选定后端时按此规则切换。';
 export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidateProbeOutcome, string>> = Object.freeze({
   succeeded: '连接成功',
   'succeeded-empty': '连接成功 · 没有结果',
@@ -110,7 +110,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
   section.append(element('h3', undefined, '联网检索'), element('p', 'field-note', effectiveSearchSourceLine(projection)));
-  section.append(element('p', 'field-note', `新任务优先使用主编辑模型自带搜索，否则使用已配置的检索后端；已开始的运行继续使用原定来源；${SEARCH_FALLBACK_NOTE}`));
+  section.append(element('p', 'field-note', `新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
   override.dataset['action'] = 'always-use-selected-search-backend';
