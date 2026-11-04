@@ -337,12 +337,12 @@ export function mountAnalysisFeedback(options: MountAnalysisFeedbackOptions): { 
 
   return {
     async load(): Promise<void> {
-      metric.replaceChildren(el('p', 'field-note', ANALYSIS_FEEDBACK_STATUS.loading));
+      metric.replaceChildren(el('h5', undefined, `${ANALYSIS_FEEDBACK_HEADING} · ${ANALYSIS_FEEDBACK_STATUS.loading}`));
       try {
         projection = await api.inspectAnalysisFeedback({ revisionId });
         paint(null);
       } catch (error) {
-        const note = el('p', 'field-note analysis-feedback-unavailable', errorMessage(error, ANALYSIS_FEEDBACK_STATUS.unavailable));
+        const note = el('h5', 'analysis-feedback-unavailable', `${ANALYSIS_FEEDBACK_HEADING} · ${errorMessage(error, ANALYSIS_FEEDBACK_STATUS.unavailable)}`);
         note.setAttribute('role', 'status');
         metric.replaceChildren(note);
       }

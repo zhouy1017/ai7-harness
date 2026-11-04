@@ -247,10 +247,12 @@ export function mountAgentWorkspace(options: MountAgentWorkspaceOptions): { dest
     proposalHost.hidden = false;
     proposalHost.dataset['agentWorkspaceProposal'] = proposal.state;
     proposalHost.dataset['proposalSetId'] = proposal.proposalSetId;
-    const state = el('p', proposal.state === 'failed' ? 'attention-note' : 'field-note', proposal.label);
+    const state = el('span', proposal.state === 'failed' ? 'attention-note' : undefined, proposal.label);
     state.dataset['agentWorkspaceLabel'] = '';
     state.setAttribute('role', 'status');
-    proposalHost.append(el('h3', undefined, words.proposal), el('p', 'muted', `${words.instruction}：${proposal.instruction}`), state);
+    const heading = el('h3', undefined, words.proposal);
+    heading.append(' · ', state);
+    proposalHost.append(heading, el('p', 'muted', `${words.instruction}：${proposal.instruction}`));
     if (proposal.candidates.length > 0) {
       const list = el('ol', 'agent-workspace-candidates');
       for (const candidate of proposal.candidates) {

@@ -206,7 +206,8 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
         confirm.disabled = busy;
       });
       const label = el('label', 'database-import-choice');
-      label.append(radio, document.createTextNode(text));
+      label.append(radio, document.createTextNode(value === 'merge' && !mergeable && file.mergeRefusal === null
+        ? `${text} · ${DATABASE_MERGE_NOTHING}` : text));
       return label;
     };
     const replaceDetails = el('p', 'attention-note database-import-consequence', DATABASE_REPLACE_CONSEQUENCE);
@@ -235,7 +236,6 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       option('merge', DATABASE_IMPORT_CHOICES.merge, mergeDetails), mergeDetails,
     );
     if (file.mergeRefusal !== null) choices.append(el('p', 'attention-note database-merge-refusal', file.mergeRefusal));
-    else if (!mergeable) choices.append(el('p', 'field-note database-merge-nothing', DATABASE_MERGE_NOTHING));
     buttons.append(confirm, cancel);
     preview.replaceChildren(rows, choices, buttons);
     choices.querySelector<HTMLInputElement>('input[name="database-import-choice"]')?.focus();
