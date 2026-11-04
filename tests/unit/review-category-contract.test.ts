@@ -186,6 +186,20 @@ describe('a review unit result', () => {
 
 
 describe('review contract v2 tolerance', () => {
+  it.each([1, 2] as const)('closes v%i with every parsed finding visibly rejected', (version) => {
+    const findings = [null, { quote: '合成引文', blockOrdinal: 99, severity: 'should', note: '合成说明' }];
+    const parsed = parseReviewCategoryUnitResult(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: 1, findings }),
+      { version, unitOrdinal: 1, blockCount: 2, output: 'annotation', clauseIds: [] });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.findings).toEqual([]);
+    expect(parsed.result.acceptedIndexes).toEqual([]);
+    expect(parsed.result.rejected).toEqual([
+      { index: 0, reasonCode: 'schema-invalid', text: JSON.stringify(findings[0]) },
+      { index: 1, reasonCode: 'quote-not-in-block', text: JSON.stringify(findings[1]) },
+    ]);
+  });
+
   it('preserves valid siblings and the complete rejected JSON with original indexes', () => {
     const finding = { quote: '合成引文', blockOrdinal: 1, severity: 'should', note: '合成说明', replacement: '合成改文' };
     const bad = { ...finding, replacement: finding.quote };

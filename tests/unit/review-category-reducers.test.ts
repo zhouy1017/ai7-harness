@@ -189,7 +189,10 @@ describe('a review category reduction', () => {
       expect(reduction.excluded).toEqual([]);
       expect(reduction.findings).toHaveLength(1);
       const finding = reduction.findings[0]!;
-      if (state === 'quote-ambiguous') expect(finding.note).toContain('锚点不唯一');
+      if (state === 'quote-ambiguous') {
+        expect(finding.note).toContain('锚点不唯一');
+        expect(finding.replacement).toBeNull();
+      }
       if (state === 'replacement-identical') expect(finding.replacement).toBeNull();
       if (outside) expect(finding.blockId).not.toBe(block(99, 'paragraph', '目标').blockId);
     } else {

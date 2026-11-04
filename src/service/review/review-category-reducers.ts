@@ -141,9 +141,13 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
           occurrences += match.state === 'verified' ? 1 : match.occurrences;
           if (location.state === 'not-found') { block = candidate; blockId = id; location = match; }
         }
-        if (occurrences > 1 && location.state === 'verified') note = `【锚点不唯一】${note}`;
+        if (occurrences > 1 && location.state === 'verified') {
+          annotation = true;
+          note = `【锚点不唯一】${note}`;
+        }
       }
       if (location.state === 'ambiguous' && block !== undefined) {
+        annotation = true;
         // The shortest prefix with a verified match selects the first complete occurrence, preserving grapheme boundaries.
         for (let end = 1; end <= graphemeCount(block.text); end += 1) {
           const first = locateQuotation(sliceGraphemes(block.text, 0, end), finding.quote);

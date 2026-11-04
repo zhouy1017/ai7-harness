@@ -355,7 +355,7 @@ export function claimsConclusion(text: string, conclusions: ReadonlyArray<string
       // A character's action or discussion of a label exempts only this occurrence.
       if (/^[「」“”"']|^(?:一词|字样|标签|的说法)/u.test(after)) continue;
       if (before === '' && /^(?:[。！？.!?，,；;]|出版|这部书稿|$)/u.test(after) ||
-        /(?:建议|可以|可|应当|应|宜|结论(?:是|为|[:：])?|编辑部|总体|目前|本书|本稿|书稿|版本)$/u.test(before)) return true;
+        /(?:建议|可以|可|应当|应|宜|结论(?:是|为|[:：])?|编辑部|总体|目前|本书|本稿|书稿|这部作品|版本)$/u.test(before)) return true;
     }
     return false;
   });

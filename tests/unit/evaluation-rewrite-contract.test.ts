@@ -144,7 +144,7 @@ describe('the unit result and the synthesis', () => {
     } });
   });
 
-  it.each(['总评结论是推荐出版。', '保留「推荐出版」字样，总评结论是推荐出版。', '人物暂缓了行动，但本稿结论为暂缓。'])('withholds an explicit editorial verdict: %s', (verdict) => {
+  it.each(['总评结论是推荐出版。', '保留「推荐出版」字样，总评结论是推荐出版。', '人物暂缓了行动，但本稿结论为暂缓。', '这部作品不推荐出版。'])('withholds an explicit editorial verdict: %s', (verdict) => {
     const parsed = parseEvaluationRewriteSynthesis(synthesis({ verdict }), INPUT);
     expect(parsed).toMatchObject({ ok: true, result: { verdict: null, withheld: [expect.objectContaining({ itemId: null })] } });
   });

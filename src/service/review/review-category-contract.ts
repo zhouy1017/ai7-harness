@@ -407,7 +407,7 @@ export function parseReviewCategoryUnitResult(
     accepted.push({ quote: candidate.quote, blockOrdinal, severity, note, ...(replacement === undefined ? {} : { replacement }), ...(clauseId === undefined ? candidate.clauseId == null ? {} : { clauseId: null } : { clauseId }) });
     acceptedIndexes.push(index);
   });
-  if (candidates.length > 0 && accepted.length === 0) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  // Parsed rejections are a complete review outcome and remain visible in the excluded appendix.
   const result: ReviewCategoryUnitResult = { schema, unitOrdinal: expected.unitOrdinal, findings: accepted, rejected, acceptedIndexes, ...(salvaged.length ? { salvaged } : {}) };
   const canonical = canonicalJson(result);
   return { ok: true, result, accepted, rejected, ...(salvaged.length ? { salvaged } : {}), canonicalJson: canonical, digest: sha256Hex(canonical) };
