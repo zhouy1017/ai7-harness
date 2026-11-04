@@ -7,7 +7,7 @@ import type { WritingTaskMaterialProjection, WritingTaskProjection } from '../sh
  */
 export const WRITING_HEADING = '新建文档 · 写作任务';
 export const WRITING_LEDE = '选择文档类型，AI7 参考资料起草；范例只参照，不复制。';
-export const WRITING_TYPE_LEGEND = '文档类型（单选）';
+export const WRITING_TYPE_LEGEND = '文档类型';
 export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
 /**
  * The reference set's rows, in the order editor-surfaces §9 names them, with 资料库 — the items the editor ticks under 允许参考
@@ -31,7 +31,7 @@ export function writingMaterialsMore(count: number): string {
 export const WRITING_EXEMPLAR_PICK_TYPE = '选好类型后显示';
 import { MAX_WRITING_AUDIENCE_GRAPHEMES, MAX_WRITING_CHANNEL_GRAPHEMES, MAX_WRITING_REQUIREMENTS_GRAPHEMES } from '../shared/protocol.js';
 
-export const WRITING_FIELD_LABELS = { audience: '受众', channel: '渠道', requirements: '其他要求（可不填）' } as const;
+export const WRITING_FIELD_LABELS = { audience: '受众', channel: '渠道', requirements: '其他要求 · 可不填' } as const;
 export const WRITING_FIELD_HINTS = { audience: '这份文档写给谁看', channel: '会在哪里发布或使用', requirements: '篇幅、语气或必须写到的内容' } as const;
 /** How many characters each field takes, as the service bounds it (#688 review): the service's own words when one is longer. */
 export const WRITING_FIELD_MOST = { audience: MAX_WRITING_AUDIENCE_GRAPHEMES, channel: MAX_WRITING_CHANNEL_GRAPHEMES, requirements: MAX_WRITING_REQUIREMENTS_GRAPHEMES } as const;

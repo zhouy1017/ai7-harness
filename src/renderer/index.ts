@@ -3107,7 +3107,7 @@ function renderBookOverview(
       element('dd', undefined, anchor.entry === null
         ? '尚未记录；打开稿件时从稿件开头开始'
         : anchor.entry.state === 'nearest-anchor'
-          ? `${anchor.entry.label}（上次位置所在的段落已不在当前修订版，落到最近的位置）`
+          ? `${anchor.entry.label} · 原位置已不存在，将从最近的位置打开`
           : anchor.entry.label),
       element('dt', undefined, '保存状态'), element('dd', undefined, anchor.journalLabel),
     );
@@ -3612,7 +3612,7 @@ function renderTaskAuthorization(host: HTMLElement, projection: TaskAuthorizatio
       const actions = element('div', 'button-row task-authorization-actions');
       const boundaryHost = element('div');
       boundaryHost.setAttribute('aria-live', 'polite');
-      const inspectBoundary = button('核对前台执行边界（不派发）', 'secondary', async () => {
+      const inspectBoundary = button(technicalWords('核对前台执行边界（不派发）', '核对执行边界 · 不派发'), 'secondary', async () => {
         inspectBoundary.disabled = true;
         setStatus('正在核对前台执行边界…', 'busy');
         try {

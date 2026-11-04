@@ -58,7 +58,7 @@ export function documentSourceLine(source: ProductionDocumentSourceProjection, i
 }
 
 /** Where a document drafted by a writing Task (Issue #432, S84a) came from: AI7's draft, never a file of the Book's. */
-export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草（范例只参照，不复制）';
+export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草 · 范例只参照，不复制';
 
 /** The first line of a document's card: its latest version and the material it was made from. */
 export function documentCardLine(document: ProductionDocumentProjection): string {
@@ -91,8 +91,8 @@ export const DELIVERY_VERSION_LEGEND = '交付哪一版';
 export const DELIVERY_UNSAVED_NOTE = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
 export const DELIVERY_RECIPIENT_LEGEND = '交给谁';
 export const DELIVERY_CUSTOM_RECIPIENT = '自行输入';
-export const DELIVERY_CUSTOM_LABEL = '交给谁（自行输入）';
-export const DELIVERY_NOTE_LABEL = '备注（可不填）';
+export const DELIVERY_CUSTOM_LABEL = '交给谁 · 自行输入';
+export const DELIVERY_NOTE_LABEL = '备注 · 可不填';
 /** Stated beside `交付` before the editor confirms (DELIV-003): a delivery records and never sends. */
 export const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
 export const DELIVERY_BLOCKERS = {

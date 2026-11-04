@@ -133,7 +133,7 @@ export function createDataStorage(options: DataStorageOptions) {
             const rollback = dataVersionRollbackSteps(upgraded, { dataRoot: projection.canonicalRoot, backupLocation: version.backupLocation });
             const steps = element('ol', 'data-version-rollback');
             for (const step of rollback.steps) steps.append(element('li', 'field-note', step));
-            lines.append(element('p', 'field-note', rollback.lead), steps);
+            lines.append(element('p', 'field-note', rollback.lead.replace(/。(?=.)/gu, '；')), steps);
           }
           rows.append(element('dt', undefined, DATA_VERSION_UPGRADE), lines);
         }

@@ -142,8 +142,8 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.documentCurrentTextChoice(3)).toBe('现在的文字 · 交付时先保存为版本 3');
     expect(labels.DELIVERY_RECIPIENT_LEGEND).toBe('交给谁');
     expect(labels.DELIVERY_CUSTOM_RECIPIENT).toBe('自行输入');
-    expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁（自行输入）');
-    expect(labels.DELIVERY_NOTE_LABEL).toBe('备注（可不填）');
+    expect(labels.DELIVERY_CUSTOM_LABEL).toBe('交给谁 · 自行输入');
+    expect(labels.DELIVERY_NOTE_LABEL).toBe('备注 · 可不填');
     expect(labels.DELIVERY_STATEMENT).toBe('交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。');
     expect(labels.DELIVERY_BLOCKERS).toEqual({ version: '先选择要交付的版本', recipient: '先选择交给谁', custom: '请写明交给谁' });
     expect(labels.DOCUMENT_STATUS_LINES.delivering).toBe('正在记录交付…');
