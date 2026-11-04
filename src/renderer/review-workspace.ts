@@ -1879,13 +1879,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         list.append(item);
       }
       const omitted = reviewReportOmittedLine(record.findings.omitted);
-      derived.push(part('findings', record.findings.title, list, ...(omitted === null ? [] : [el('p', 'field-note', omitted)])));
+      const findings = part('findings', record.findings.title, list);
+      if (omitted !== null) findings.querySelector('h6')?.append(' · ', el('span', undefined, omitted));
+      derived.push(findings);
     }
     const appendix = el('ul', 'review-report-list');
     appendix.append(el('li', undefined, reviewReportConfigurationLine(record.appendix.configuration.version)));
     for (const category of record.appendix.categories) appendix.append(el('li', undefined, reviewReportAppendixLine(category)));
+    const overview = part('overview', record.overview.title, table);
+    if (record.totals !== undefined) overview.querySelector('h6')?.append(' · ', el('span', 'review-report-totals', reviewReportTotalsLine(record.totals)));
     body.append(
-      part('overview', record.overview.title, table, ...(record.totals === undefined ? [] : [el('p', 'field-note review-report-totals', reviewReportTotalsLine(record.totals))])),
+      overview,
       part('must-items', record.mustItems.title, must),
       ...derived,
       part('category-summaries', record.categorySummaries.title, summaries),
