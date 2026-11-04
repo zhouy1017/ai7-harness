@@ -30,9 +30,12 @@ describe('technical layer presentation (#1315)', () => {
     setTechnicalLayerVisible(false);
     expect(reviewBasisWords(basis)).toBe('依据：本社规范.txt · 文字审阅（不联网）');
     expect(reviewBasisWords({ ...basis, searchEngine: true })).toBe('依据：本社规范.txt · 文字审阅（联网）');
+    const nativeSearchBasis = { ...basis, searchEngine: true, modelChannelSearchLabel: '编辑选择的通道' };
+    expect(reviewBasisWords(nativeSearchBasis)).toBe('依据：本社规范.txt · 文字审阅（联网）');
     expect(basis.procedure.version).toBe('2');
     setTechnicalLayerVisible(true);
     expect(reviewBasisWords(basis)).toContain('文字审阅（第 2 版）');
+    expect(reviewBasisWords(nativeSearchBasis)).toContain('将使用 编辑选择的通道 自带的联网搜索');
   });
 
   it('omits the disclosure payload and formats only metadata in ordinary mode', () => {
