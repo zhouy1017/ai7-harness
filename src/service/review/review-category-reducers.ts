@@ -17,7 +17,7 @@ import {
   type ReviewBaselineSource,
   type ReviewSynthesisEvidence,
 } from '../../shared/protocol.js';
-import { canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { canonicalJson, sha256Hex, graphemeCount } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { locateQuotation, normalizedQuotation, sliceGraphemes } from '../analysis/factual-review-contract.js';
 import { coverageAxis, orderUnitOutcomes, unitGaps, type ClosedUnitOutcome, type GapUnitOutcome } from '../analysis/reducers.js';
@@ -27,14 +27,10 @@ import type { CrossUnitOutcome } from '../analysis/reducers.js';
 /**
  * Typed reducers over review-category unit results: Reference Integrity, then the finding set.
  *
- * The order is the factual kind's and for the same reason. The model lists findings and quotes the
- * manuscript for each; nothing it says about *where* a quotation sits is trusted. This reducer locates
- * every quotation itself in the committed block the finding named; only on not-found does it search
- * the complete authorized unit envelope for exactly one occurrence. A verified quotation gains a
- * source range — the range an Editorial Mark is later made
- * from, so it must be one the service proved rather than one the model offered. A quotation found
- * nowhere, or found twice, is kept with its reason in the excluded appendix, never as a mark, because
- * deleting it would hide what the model claimed.
+ * The model lists findings; this reducer supplies their anchors inside the authorized message. It prefers
+ * the named block, searches the other message blocks when necessary, discloses ambiguous matches, and
+ * retains an unmatched quotation as a whole-block annotation. Missing blocks, partial graphemes and
+ * citations without Exact Fetch remain excluded individually.
  *
  * No reducer here decides a finding. Severity is the model's reading under the category's clauses,
  * carried as listed; what becomes of each finding is the editor's (V2-UX-REV-003).
@@ -119,7 +115,6 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
     const unit = manifest.units[outcome.unitOrdinal - 1]!;
     const messageBlockIds = reviewCategoryMessageBlockIds(unit);
     const distinctBlockIds = [...new Set(messageBlockIds)];
-    const completeEnvelope = distinctBlockIds.every((id) => blocks.has(id));
     for (const entry of outcome.result.rejected ?? []) {
       listed += 1;
       const reason = `contract-${entry.reasonCode}` as ReviewFindingExclusionReason;
@@ -134,33 +129,49 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
       let blockId = messageBlockIds[finding.blockOrdinal - 1];
       let block = blockId === undefined ? undefined : blocks.get(blockId);
       let location: ReturnType<typeof locateQuotation> = block === undefined ? { state: 'not-found' } : locateQuotation(block.text, finding.quote);
-      if (location.state === 'not-found' && block !== undefined && completeEnvelope) {
+      let annotation = false;
+      let note = finding.note;
+      if (location.state === 'not-found') {
         let occurrences = 0;
-        let unique: { block: ManifestBlockInput; location: Extract<ReturnType<typeof locateQuotation>, { state: 'verified' }> } | undefined;
         for (const id of distinctBlockIds) {
-          const candidate = blocks.get(id)!;
+          const candidate = blocks.get(id);
+          if (candidate === undefined) continue;
           const match = locateQuotation(candidate.text, finding.quote);
-          if (match.state === 'verified') {
-            occurrences += 1;
-            unique = { block: candidate, location: match };
-          } else if (match.state === 'ambiguous') {
-            occurrences += match.occurrences;
-          }
+          if (match.state === 'not-found') continue;
+          occurrences += match.state === 'verified' ? 1 : match.occurrences;
+          if (location.state === 'not-found') { block = candidate; blockId = id; location = match; }
         }
-        if (occurrences === 1 && unique !== undefined) {
-          block = unique.block;
-          blockId = block.blockId;
-          location = unique.location;
-        } else if (occurrences > 1) {
-          location = { state: 'ambiguous', occurrences };
+        if (occurrences > 1 && location.state === 'verified') {
+          annotation = true;
+          note = `【锚点不唯一】${note}`;
         }
+      }
+      if (location.state === 'ambiguous' && block !== undefined) {
+        annotation = true;
+        // The shortest prefix with a verified match selects the first complete occurrence, preserving grapheme boundaries.
+        for (let end = 1; end <= graphemeCount(block.text); end += 1) {
+          const first = locateQuotation(sliceGraphemes(block.text, 0, end), finding.quote);
+          if (first.state === 'verified') { location = first; break; }
+        }
+        note = `【锚点不唯一】${note}`;
+      }
+      const partialGrapheme = location.state === 'not-found' && distinctBlockIds.some((id) => {
+        const text = blocks.get(id)?.text;
+        return text !== undefined && normalizedQuotation(text).includes(normalizedQuotation(finding.quote));
+      });
+      if (location.state === 'not-found' && block !== undefined && graphemeCount(block.text) > 0 && !partialGrapheme) {
+        location = { state: 'verified', fromGrapheme: 0, toGrapheme: graphemeCount(block.text) };
+        annotation = true;
+        note = `【引文未逐字匹配】${note}`;
       }
       // The contract parser already refused an out-of-range block ordinal, so a missing block here is
       // one the manifest named and the revision does not hold: not found, and never a silent drop.
+      const retainedFinding = { ...finding, note };
+      if (annotation) delete retainedFinding.replacement;
       located.push({
         unitOrdinal: outcome.unitOrdinal,
         findingOrdinal: (outcome.result.acceptedIndexes?.[index] ?? index) + 1,
-        finding,
+        finding: retainedFinding,
         blockId: blockId ?? '',
         blockText: block?.text ?? null,
         location,
@@ -179,7 +190,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
   for (const entry of located) {
     const { finding } = entry;
     const normalized = normalizedQuotation(finding.quote);
-    const replacement = finding.replacement ?? null;
+    let replacement = finding.replacement ?? null;
     const exclude = (reason: ReviewFindingExclusionReason): void => {
       excluded.push({
         findingId: findingId({ kind: 'excluded', categoryId, unitOrdinal: entry.unitOrdinal, findingOrdinal: entry.findingOrdinal, quote: normalized }),
@@ -205,8 +216,7 @@ export function reduceReviewCategory(input: ReviewCategoryReductionInput): Revie
     // standing in the block can still differ from that by width or spacing, and a replacement equal to
     // *it* would make a 修改建议 that changes nothing — which the mark owner refuses outright.
     if (replacement !== null && replacement === sliceGraphemes(entry.blockText!, entry.location.fromGrapheme, entry.location.toGrapheme)) {
-      exclude('replacement-identical');
-      continue;
+      replacement = null;
     }
     const coordinates = { blockId: entry.blockId, fromGrapheme: entry.location.fromGrapheme, toGrapheme: entry.location.toGrapheme };
     const reference = { unitOrdinal: entry.unitOrdinal, blockOrdinal: finding.blockOrdinal, findingOrdinal: entry.findingOrdinal,

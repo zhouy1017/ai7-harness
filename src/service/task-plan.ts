@@ -1500,7 +1500,7 @@ export const WRITING_NOT_DRAFTED_LABEL = '已结束 · 未写出草稿' as const
 function writingState(projection: WritingProjection): TaskPlanProjection['state'] {
   const state = baselineState(projection as unknown as BaselineAnalysisProjection);
   if (projection.state !== 'settled' || projection.taskOutcome === null || projection.taskOutcome.classification === 'completed') return state;
-  if (projection.resultSetRevision !== null && projection.resultSetRevision.writing.draft === null) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
+  if (projection.resultSetRevision !== null && (projection.resultSetRevision.writing.draft === null || projection.resultSetRevision.writing.draft.usable === false)) return { ...state, label: WRITING_NOT_DRAFTED_LABEL };
   return { ...state, label: projection.taskOutcome.label };
 }
 

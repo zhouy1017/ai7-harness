@@ -83,34 +83,19 @@ describe('the unit contract', () => {
     expect(CONTRACT.profile).not.toHaveProperty('profileSha256');
     const result = parseInitialEvaluationSynthesis(synthesis({ items: profile.items.map((item) => ({ itemId: item.itemId, score: 24.5, comment: '合成依据。' })) }), profile);
     expect(result.ok).toBe(true);
-    expect(parseInitialEvaluationSynthesis(synthesis(), profile).ok).toBe(false);
+    expect(parseInitialEvaluationSynthesis(synthesis(), profile).ok).toBe(true);
   });
 
-  it('admits observations of the profile\'s items that cite blocks of the unit, and refuses everything else whole', () => {
-    const expected = { unitOrdinal: 2, blockCount: 4, itemIds: ITEM_IDS };
-    const ok = parseInitialEvaluationUnitResult(unitResult([{ itemId: 'literary-quality', note: '写景与写心相互映照。', blockOrdinals: [1, 4] }]), expected);
-    expect(ok.ok && ok.result.observations).toEqual([{ itemId: 'literary-quality', note: '写景与写心相互映照。', blockOrdinals: [1, 4] }]);
-    expect(parseInitialEvaluationUnitResult(`\`\`\`json\n${unitResult([])}\n\`\`\``, expected).ok).toBe(true);
-    const code = (text: string): string => { const parsed = parseInitialEvaluationUnitResult(text, expected); return parsed.ok ? 'ok' : parsed.code; };
-    expect(code('不是 JSON')).toBe('not-json');
-    expect(code(unitResult([{ itemId: 'market-forecast', note: '说明。', blockOrdinals: [1] }]))).toBe('item-unknown');
-    expect(code(unitResult([{ itemId: 'literary-quality', note: '说明。', blockOrdinals: [5] }]))).toBe('block-out-of-unit');
-    expect(code(unitResult([], 3))).toBe('unit-mismatch');
-    for (const observation of [
-      { itemId: 'literary-quality', note: '说明。', blockOrdinals: [] },
-      { itemId: 'literary-quality', note: '说明。', blockOrdinals: [1, 1] },
-      { itemId: 'literary-quality', note: '说明。', blockOrdinals: [0] },
-      { itemId: 'literary-quality', note: '说明。', blockOrdinals: [1, 2, 3, 4, 1.5] },
-      { itemId: 'literary-quality', note: '', blockOrdinals: [1] },
-      { itemId: 'literary-quality', note: '一行\n两行', blockOrdinals: [1] },
-      { itemId: 'literary-quality', note: '字'.repeat(201), blockOrdinals: [1] },
-      { itemId: 'literary-quality', note: '说明。', blockOrdinals: [1], score: 18 },
-    ]) {
-      expect(code(unitResult([observation])), JSON.stringify(observation)).toBe('schema-invalid');
-    }
-    expect(code(unitText({ schema: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA, unitOrdinal: 2, observations: [], extra: 1 }))).toBe('schema-invalid');
-    expect(code(unitText({ schema: 'ai7.editorial-review.unit-result/1', unitOrdinal: 2, observations: [] }))).toBe('schema-invalid');
-    expect(code(unitResult(Array.from({ length: 41 }, () => ({ itemId: 'literary-quality', note: '说明。', blockOrdinals: [1] }))))).toBe('schema-invalid');
+  it('salvages observations independently with request identity and strict block bounds', () => {
+    const expected = { unitOrdinal: 2, blockCount: 4, itemIds: ['literary-quality'] };
+    const good = { itemId: 'literary-quality', note: '说明。', blockOrdinals: [1] };
+    const text = unitResult([good, { ...good, itemId: 'unknown' }, { ...good, blockOrdinals: [5] }, { ...good, note: '两\n行', blockOrdinals: ['2', 2, 9], extra: true }], 99);
+    const parsed = parseInitialEvaluationUnitResult('说明\n```JSON\n' + text + '\n```尾文', expected);
+    expect(parsed).toMatchObject({ ok: true, result: { unitOrdinal: 2, observations: [good, { ...good, note: '两 行', blockOrdinals: [2] }] } });
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ index: 1, reason: 'item-unknown' }), expect.objectContaining({ index: 2, reason: 'block-out-of-unit' })]));
+    const partial = parseInitialEvaluationUnitResult(unitResult([good]).slice(0, -2) + ',{"note":', expected);
+    expect(partial.ok && partial.result.observations).toEqual([good]);
+    expect(parseInitialEvaluationUnitResult('not json', expected).ok).toBe(false);
   });
 
   it('builds a message whose header names the unit and is no other contract\'s', () => {
@@ -128,31 +113,19 @@ describe('the unit contract', () => {
 });
 
 describe('the book-level synthesis', () => {
-  it('admits one score per item in whole or half points within its 满分, in the profile\'s order, and refuses the rest whole', () => {
-    const ok = parseInitialEvaluationSynthesis(synthesis(), PROFILE);
-    expect(ok.ok && ok.result.items.map((item) => [item.itemId, item.score])).toEqual([
-      ['literary-quality', 16.5], ['theme-and-context', 15], ['structure-and-coherence', 15.5], ['chinese-language', 14], ['readers-and-market', 12],
-    ]);
-    const code = (overrides: Record<string, unknown>): string => { const parsed = parseInitialEvaluationSynthesis(synthesis(overrides), PROFILE); return parsed.ok ? 'ok' : parsed.code; };
-    const items = (change: (items: Array<Record<string, unknown>>) => unknown[]): Record<string, unknown> =>
-      ({ items: change((JSON.parse(synthesis()) as { items: Array<Record<string, unknown>> }).items) });
-    expect(code(items((list) => [...list, { itemId: 'market-forecast', score: 3, comment: '无。' }]))).toBe('item-unknown');
-    expect(code(items((list) => list.slice(1)))).toBe('items-incomplete');
-    expect(code(items((list) => [...list, list[0]]))).toBe('items-incomplete');
-    for (const score of [20.5, -0.5, 7.25, '15', null, Number.NaN]) {
-      expect(code(items((list) => list.map((item, index) => (index === 1 ? { ...item, score } : item)))), String(score)).toBe(Number.isNaN(score) || score === null ? 'score-invalid' : 'score-invalid');
-    }
-    expect(code(items((list) => list.map((item, index) => (index === 1 ? { ...item, score: 20 } : item))))).toBe('ok');
-    expect(code(items((list) => list.map((item, index) => (index === 1 ? { ...item, score: 0 } : item))))).toBe('ok');
-    expect(code({ suggestedConclusion: 'publish' })).toBe('schema-invalid');
-    expect(code({ suggestedConclusion: null, nextStep: null })).toBe('ok');
-    expect(code({ strengths: ['一', '二', '三', '四', '五', '六'] })).toBe('schema-invalid');
-    expect(code({ weaknesses: ['字'.repeat(101)] })).toBe('schema-invalid');
-    // Within its graphemes but past its bytes (Issue #696); 4-byte graphemes at the bound are within both.
-    expect(code({ weaknesses: [`字${String.fromCodePoint(0x301).repeat(200)}`] })).toBe('schema-invalid');
-    expect(code({ weaknesses: [String.fromCodePoint(0x20000).repeat(100)] })).toBe('ok');
-    expect(code({ risks: [] })).toBe('schema-invalid');
-    expect(parseInitialEvaluationSynthesis('否', PROFILE)).toMatchObject({ ok: false, code: 'not-json' });
+  it('clamps and rounds individual scores and fills missing items with null', () => {
+    const parsed = parseInitialEvaluationSynthesis(synthesis({ schema: 'other', items: [
+      { itemId: ITEM_IDS[0], score: '99', comment: '两\n行' },
+      { itemId: ITEM_IDS[1], score: 7.25, comment: '说明' },
+      { itemId: 'unknown', score: 1, comment: '说明' },
+    ], suggestedConclusion: ' 修改 ', extra: true }), PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.result.items.map((item) => item.score)).toEqual([20, 7.5, null, null, null]);
+    expect(parsed.result.suggestedConclusion).toBe('revise');
+    expect(parsed.result.items[0]!.comment).toBe('两 行');
+    expect(parsed.result.salvaged).toEqual(expect.arrayContaining([expect.objectContaining({ section: 'items', index: 2, reason: 'item-unknown' })]));
+    expect(parseInitialEvaluationSynthesis('{}', PROFILE).ok).toBe(false);
   });
 
   it('admits the market section from the Book alone: three bounded lists and two predictions, each a statement with its basis or none (S81b2)', () => {
@@ -316,4 +289,9 @@ describe('the reducer and the shared rules', () => {
     ]);
     expect([definition.crossUnit?.step?.minimumClosedUnits, definition.assurance, definition.outOfScope]).toEqual([1, null, 'leave-unreviewed']);
   });
+});
+
+it('retains complete scored items from a truncated synthesis and clips the persisted byte bound', () => {
+  const parsed = parseInitialEvaluationSynthesis('说明```JSON\n{"items":[' + JSON.stringify({ itemId: ITEM_IDS[0], score: '16.25', comment: '字' + '\u0301'.repeat(2000) }) + ',{"itemId":', PROFILE);
+  expect(parsed).toMatchObject({ ok: true, result: { items: [{ itemId: ITEM_IDS[0], score: 16.5, comment: '' }, ...ITEM_IDS.slice(1).map((itemId) => ({ itemId, score: null, comment: '' }))] } });
 });

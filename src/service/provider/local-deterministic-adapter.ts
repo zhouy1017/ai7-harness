@@ -563,8 +563,8 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
     const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
-    const stage = crossUnit !== null ? 'reduction' : reflection !== null ? 'reflection' : null;
-    const stageContractDigest = crossUnit !== null ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+    const stage = crossUnit !== null ? 'reduction' : drafting !== null ? 'writing-synthesis' : reflection !== null ? 'reflection' : null;
+    const stageContractDigest = crossUnit !== null ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST : drafting !== null ? this.#promptContractDigest : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
     const compatible = exact === undefined && stage !== null && this.#sourceDigest !== null
       ? resolveReplayCompatibleFixtureEntry(this.#fixture, stage, fixtureReplayContentKey(this.#sourceDigest, this.#promptContractDigest, { stageContractDigest }), attempt)
       : undefined;

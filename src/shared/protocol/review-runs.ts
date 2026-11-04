@@ -129,7 +129,7 @@ export interface ReviewCrossChapterInput {
 export interface ReviewCrossChapterResult extends SalvagedModelResult {
   readonly schema: 'ai7.editorial-review.cross-chapter-result/1';
   readonly findings: ReadonlyArray<{ readonly anchor: ReviewSynthesisEvidence; readonly evidence: ReadonlyArray<ReviewSynthesisEvidence>;
-    readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string }>;
+    readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string | null }>;
   readonly rejected: ReadonlyArray<{ readonly index: number; readonly text: string; readonly reason: 'schema-invalid' | 'evidence-unknown' }>;
   readonly input: ReviewCrossChapterInput;
 }

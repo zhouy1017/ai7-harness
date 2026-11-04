@@ -6,7 +6,7 @@ import {
   reviewCategoryContractInput,
   type ReviewCategoryConfigurationEntry,
 } from '../../src/service/review/category-configuration.js';
-import { reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
+import { parseReviewCategoryUnitResult, reviewCategoryContract, reviewCategoryContractDigest } from '../../src/service/review/review-category-contract.js';
 import { houseGuidelineRefusal } from '../../src/service/review/review-runs.js';
 import {
   MAX_SERIES_KNOWLEDGE_CLAUSES,
@@ -142,5 +142,14 @@ describe('one Book\'s 书系一致性', () => {
     expect(houseGuidelineRefusal(entry, false)).toBeNull();
     expect(houseGuidelineRefusal(entry, true))
       .toBe('当前策略未开放书系知识');
+  });
+});
+
+describe('split series clauses in model findings', () => {
+  it('accepts the parent clause prefix without treating it as unknown', () => {
+    const parsed = parseReviewCategoryUnitResult(JSON.stringify({ findings: [{ quote: '原文', blockOrdinal: 1, severity: 'note', note: '核对。', clauseId: 'series-knowledge/3' }] }),
+      { unitOrdinal: 1, blockCount: 1, output: 'annotation', clauseIds: ['series-knowledge/3.1', 'series-knowledge/3.2'] });
+    expect(parsed).toMatchObject({ ok: true, result: { findings: [{ clauseId: 'series-knowledge/3' }] } });
+    expect(parsed.ok && parsed.result.salvaged?.some((entry) => entry.reason === 'clause-unknown')).toBe(false);
   });
 });

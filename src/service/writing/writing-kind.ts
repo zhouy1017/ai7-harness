@@ -182,7 +182,7 @@ export function writingKindDefinition(input: WritingContractInput, rules: Writin
         notEnoughReason: '没有读完的阅读范围，全书综合未发起，AI7 没有写出文档草稿。',
         buildMessage: (closed, totalUnits) => buildWritingSynthesisMessage(contract, closedUnits(closed), totalUnits),
         requestDigest: (closed) => writingSynthesisRequestDigest(promptContractDigest, writingPassageSetDigest(closedUnits(closed))),
-        // A draft that copies an exemplar is refused whole, a gap: AI7 then writes no draft (KB-004).
+        // Copy hits are withheld per passage; only an answer without usable draft paragraphs is refused.
         parse: (text) => parseWritingSynthesis(text, contract),
         refusalReason: (code, detail) => (code === 'exemplar-copied' ? `${WRITING_EXEMPLAR_REFUSAL_PREFIX}${detail}`
           : code === 'material-copied' ? `${WRITING_MATERIAL_REFUSAL_PREFIX}${detail}` : null),

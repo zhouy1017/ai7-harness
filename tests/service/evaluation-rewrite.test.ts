@@ -402,6 +402,20 @@ describe('the market section and 按我的评分重写评语 over the real store
     });
   }, 300_000);
 
+  it('fails when reading closes but the rewrite synthesis has no usable result', async () => {
+    fixture = { ...fixture, entries: new Map([...fixture.entries].map(([key, entry]) => [key,
+      entry.response.kind === 'unit-result' && entry.response.text.includes('ai7.evaluation-rewrite.synthesis-result/')
+        ? { ...entry, response: { ...entry.response, text: '{}' } } : entry])) };
+    await withAdjustedBook(async (book, record) => {
+      await rewrite(book, record.recordId);
+      const settled = book.store.inspectEvaluationRewrite(book.bookId)!;
+      expect(settled.taskOutcome?.classification).toBe('failed');
+      expect(settled.taskOutcome?.report?.failures).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'SYNTHESIS_UNAVAILABLE' })]));
+      expect(settled.resultSetRevision).toBeNull();
+      expect(book.store.inspectEvaluation(book.bookId, record.recordId).rewrite.proposal).toBeNull();
+    });
+  }, 300_000);
+
   it('settles a complete rewrite with qualified assurance and reconciled usage', async () => {
     await withProposal(async (book) => {
       const settled = book.store.inspectEvaluationRewrite(book.bookId)!;
@@ -679,7 +693,7 @@ describe('the market section and 按我的评分重写评语 over the real store
       const proposal = book.store.inspectEvaluation(book.bookId, record.recordId).rewrite.proposal!;
       expect(proposal.reading).toEqual({ unitsTotal: 8, unitsRead: 7 });
       expect(proposal.items.map((item) => item.after)).toEqual(AUTHORED_REWRITE_WORDS.items.map((item) => item.comment));
-      expect([proposal.verdict, proposal.withheld]).toEqual([null, ['重写的总评写出了结论，没有采用：结论由你选。']]);
+      expect([proposal.verdict, proposal.withheld]).toEqual([null, ['含分数或结论的句子没有采用：分数与结论由你定。']]);
     });
   }, 300_000);
 
