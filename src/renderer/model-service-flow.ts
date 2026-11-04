@@ -9,7 +9,7 @@ import {
   type ModelServiceSettingsProjection,
   type RendererApi,
 } from '../shared/protocol.js';
-import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestFeedback, modelConnectionTestLabel } from './model-service-roles.js';
+import { modelConnectionTestDisclosure, modelConnectionTestFeedback, modelConnectionTestLabel } from './model-service-roles.js';
 
 /** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
 export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
@@ -191,7 +191,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   let checked: ModelServiceChannelModelProjection | null = null;
   let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
-  const test = el('button', 'secondary', '测试连接');
+  const test = el('button', 'secondary', '用公开消息测试连接');
   test.type = 'button';
   test.dataset['action'] = 'test-flow-connection';
   const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
@@ -209,7 +209,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     for (const button of roleButtons) button.disabled = !ready || checked === null;
     const tested = projection.routeChoice.routes.find((option) => option.route === channel.route)?.connection?.connectionTest ?? null;
     const own = tested !== null && tested.modelId === checked?.modelId ? tested : null;
-    const note = el('p', 'field-note', checked === null ? '' : `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own, modelLabelWords(checked))}`);
+    const note = el('p', 'field-note', checked === null ? '' : `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own, modelLabelWords(checked)).replace(/。$/u, '')}${own === null ? '。' : '；测试仅核验缓冲文本，不核验工具或流式。'}`);
     if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [note, ...modelConnectionTestDisclosure(own)]));
   };
@@ -279,7 +279,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   paint();
   const actions = el('div', 'button-row');
   actions.append(test, ...roleButtons, use);
-  step.append(group, ...(technicalLayerVisible ? [customLabel] : []), feedback, el('p', 'field-note', MODEL_CONNECTION_TEST_NOTE), actions);
+  step.append(group, ...(technicalLayerVisible ? [customLabel] : []), feedback, actions);
   const others = channel.models.filter((model) => !bothEligible(model));
   if (others.length > 0) {
     const details = el('details', 'model-service-flow-ineligible');

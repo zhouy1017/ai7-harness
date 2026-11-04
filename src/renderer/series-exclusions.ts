@@ -151,9 +151,9 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
         item.dataset['targetId'] = exclusion.target.id;
         const context = el('p', 'field-note');
         context.append(el('span', 'series-exclusion-reason', exclusionReasonLine(exclusion.reason).replace(/。$/u, '')), '；',
-          el('span', 'series-exclusion-continuing', exclusion.target.continuing));
+          el('span', 'series-exclusion-continuing', exclusion.target.read ? exclusion.target.continuing : exclusion.target.continuing.replace(/。$/u, '')));
+        if (!exclusion.target.read) context.append('；', el('span', 'series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
         item.append(el('p', 'series-exclusion-line', exclusionLine(exclusion, localInstantLabel)), context);
-        if (!exclusion.target.read) item.append(el('p', 'field-note series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
         const buttons = el('div', 'button-row');
         const edit = action(EXCLUSIONS_CHANGE_OPEN, 'quiet', 'change-open', () => {
           if (busy) return;
@@ -320,8 +320,8 @@ export function mountSeriesExclusions(options: MountSeriesExclusionsOptions): { 
       heading.tabIndex = -1;
       const rows = el('dl', 'series-exclusion-preview-identity');
       for (const [term, value] of exclusionPreviewRows(preview)) rows.append(el('dt', undefined, term), el('dd', undefined, value));
+      if (!preview.target.read) rows.append(el('dt', undefined, '读取情况'), el('dd', 'series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
       box.append(heading, rows);
-      if (!preview.target.read) box.append(el('p', 'field-note series-exclusion-unread', EXCLUSIONS_UNREAD_NOTE));
       box.append(...preview.groups.map((group) => impactGroup(group, 'h5')));
     }
     if (refusal !== null) {
