@@ -1694,7 +1694,7 @@ async function main() {
     }
     await writeFile(holdPath, '1', 'utf8');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
-    await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')`, 'overview-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
     await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
     const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
     await selectOverviewBooks(overviewBooks.slice(0, 2));
@@ -1718,7 +1718,9 @@ async function main() {
     await writeFile(holdPath, '3', 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}))()`, 'overview-third-paused', 60000);
     await overviewAction(overviewIds[0], 'resume');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}))()`, 'overview-first-resumed');
     await overviewAction(overviewIds[2], 'resume');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1))()`, 'overview-third-requeued');
     await clickSelector(renderer, '[data-task-overview-start]', 'overview-fourth-sheet');
     await selectOverviewBooks([overviewBooks[3]]);
     await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-fourth');

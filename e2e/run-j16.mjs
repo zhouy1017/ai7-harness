@@ -1001,6 +1001,7 @@ async function main() {
     'panel-empty', opened);
     await assertRenderer(renderer, `document.querySelector('#manuscript-navigation-panel')?.hidden === true && document.body.dataset.taskDrawer === 'open'`, 'panel-one-slot');
     // Opt out through the shared sheet so the explicit result-window steps below own their focus.
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-task-overview-start]')?.disabled===false`, 'panel-sheet-ready');
     await clickSelector(renderer, '#task-drawer [data-task-overview-start]', 'panel-result-popup-preference');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('#task-drawer [data-task-overview-auto-result]'); if (!(input instanceof HTMLInputElement) || !input.checked) return false; input.click(); return !input.checked; })()`, 'panel-result-popup-off');
     await clickSelector(renderer, '#task-drawer .task-overview-sheet .sheet-foot button:last-child', 'panel-sheet-close');

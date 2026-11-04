@@ -57,7 +57,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   try { const saved = JSON.parse(localStorage.getItem(key) ?? '{}') as Record<string, string>; selectedBook = options.bookId ?? saved['book'] ?? 'all'; selectedType = saved['type'] ?? 'all'; selectedTime = saved['time'] ?? 'today'; } catch { /* A missing view preference uses its default. */ }
   const remember = (): void => { localStorage.setItem(key, JSON.stringify({ book: selectedBook, type: selectedType, time: selectedTime })); painted = ''; paint(); };
   const headingRow = el('div', 'task-overview-heading-row'); const heading = el(options.bookId ? 'h3' : 'h1', 'task-overview-title', '任务');
-  const start = el('button', 'primary', '发起任务 ▾'); start.dataset['taskOverviewStart'] = '';
+  const start = el('button', 'primary', '发起任务 ▾'); start.dataset['taskOverviewStart'] = ''; start.disabled = true;
   const all = el('button', 'quiet'); all.addEventListener('click', () => void perform(async () => { await options.api.controlAllTasks({ action: projection?.queueFrozen ? 'resume' : 'pause' }); }));
   headingRow.append(heading, start); if (!options.bookId) headingRow.append(all);
   const context = el('p', 'task-overview-context'); const filters = el('div', 'task-overview-filters'); const host = el('div', 'task-overview-groups'); const confirm = el('div', 'task-overview-confirm'); confirm.hidden = true; confirm.setAttribute('role', 'alert');
@@ -123,7 +123,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     else await call(item, item.plan.kind === 'baseline-analysis' ? 'cancelBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action: 'cancel' });
   }
   function paint(): void {
-    if (!projection) return; const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
+    if (!projection) return; start.disabled = false; const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
     const active = document.activeElement; const focusId = active instanceof HTMLElement && host.contains(active) ? active.closest<HTMLElement>('[data-task-item]')?.dataset['taskItem'] : null;
     const action = active instanceof HTMLElement ? active.dataset['taskAction'] : undefined;
     const count = (key: string): number => projection!.groups.find((group) => group.key === key)!.items.filter((item) => !options.bookId || item.bookId === options.bookId).length;
