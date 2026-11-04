@@ -1,5 +1,5 @@
+import { type SalvagedModelResult, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import { EVALUATION_REWRITE_CONTRACT_VERSION, type CoverageManifestUnitProjection } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 import { claimsConclusion, claimsScore, scoreDenominators } from './claim-guards.js';
@@ -80,13 +80,13 @@ export interface EvaluationRewriteObservation {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface EvaluationRewriteUnitResult {
+export interface EvaluationRewriteUnitResult extends SalvagedModelResult {
   readonly schema: typeof EVALUATION_REWRITE_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly observations: ReadonlyArray<EvaluationRewriteObservation>;
 }
 
-export interface EvaluationRewriteSynthesisResult {
+export interface EvaluationRewriteSynthesisResult extends SalvagedModelResult {
   readonly schema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
   /** Every item the editor scored whose 评语 may be offered, once each, in the profile's order once read. */
   readonly items: ReadonlyArray<{ readonly itemId: string; readonly comment: string }>;
@@ -105,10 +105,10 @@ export type EvaluationRewriteUnitParseFailureCode = 'not-json' | 'schema-invalid
 export type EvaluationRewriteSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'item-unknown' | 'items-incomplete';
 
 export type EvaluationRewriteUnitParse =
-  | { ok: true; result: EvaluationRewriteUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: EvaluationRewriteUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: EvaluationRewriteUnitParseFailureCode; detail: string };
 export type EvaluationRewriteSynthesisParse =
-  | { ok: true; result: EvaluationRewriteSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: EvaluationRewriteSynthesisResult }
   | { ok: false; code: EvaluationRewriteSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '评语重写单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -288,9 +288,8 @@ export function evaluationRewriteContractDigest(contract: EvaluationRewritePromp
 }
 
 function parseJson(value: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(value);
   try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? value) as unknown };
+    return { ok: true, value: JSON.parse(stripModelJsonFence(value)) as unknown };
   } catch {
     return { ok: false };
   }

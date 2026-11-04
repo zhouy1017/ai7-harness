@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, boundedText, stripModelJsonFence, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import {
   EVIDENCE_LINEAGE_CLASSES,
   EVIDENCE_RELATIONS,
@@ -14,8 +15,7 @@ import {
   type FactualAssertionClass,
   type FactualSeverityTier,
 } from '../../shared/protocol.js';
-import { canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
-import { graphemeCount, type FactualUnitAssertion, type FactualUnitResultParse } from './factual-review-contract.js';
+import { type FactualUnitAssertion, type FactualUnitResultParse } from './factual-review-contract.js';
 
 /**
  * Factual Review Contract v2 (Issue #901): the successor unit result of 事实核查 under 标准核查 and 严格核查. It is additive:
@@ -65,15 +65,11 @@ export interface FactualCorrectionEntry {
   readonly variants: ReadonlyArray<{ readonly text: string; readonly rationale: string }>;
 }
 
-export interface FactualReviewUnitResultV2 {
+export interface FactualReviewUnitResultV2 extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA;
   readonly unitOrdinal: number;
   readonly assertions: ReadonlyArray<FactualUnitAssertionV2>;
   readonly corrections: ReadonlyArray<FactualCorrectionEntry>;
-}
-
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
 }
 
 function parseRelation(value: unknown): FactualEvidenceRelation | null {
@@ -94,9 +90,8 @@ function parseRelation(value: unknown): FactualEvidenceRelation | null {
 export function parseFactualReviewUnitResultV2(
   text: string,
   expected: { unitOrdinal: number; blockCount: number },
-): FactualUnitResultParse | { ok: true; result: FactualReviewUnitResultV2; canonicalJson: string; digest: string } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+): FactualUnitResultParse | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: FactualReviewUnitResultV2; canonicalJson: string; digest: string } {
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;
@@ -225,7 +220,7 @@ export const FACTUAL_REVIEW_PROMPT_CONTRACT_V2_STRICT_DIGEST = sha256Hex(canonic
 
 /** A v2 unit record as the ledger keeps it: the assertions with their relations, and the corrections. */
 export function factualReviewUnitRecordV2(result: FactualReviewUnitResultV2): Record<string, unknown> {
-  return { assertions: result.assertions, corrections: result.corrections };
+  return { assertions: result.assertions, corrections: result.corrections, ...(result.salvaged === undefined ? {} : { salvaged: result.salvaged }) };
 }
 
 export function factualReviewUnitResultOfRecordV2(record: Readonly<Record<string, unknown>>, unitOrdinal: number): FactualReviewUnitResultV2 {
@@ -233,6 +228,7 @@ export function factualReviewUnitResultOfRecordV2(record: Readonly<Record<string
     schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA,
     unitOrdinal,
     assertions: record.assertions as FactualReviewUnitResultV2['assertions'],
+    ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<FactualReviewUnitResultV2['salvaged']> }),
     corrections: (record.corrections ?? []) as FactualReviewUnitResultV2['corrections'],
   };
 }

@@ -241,7 +241,7 @@ describe('Clarification Requests over the real store', () => {
       const edited = store.editBaselineAnalysisPlan({ bookId, taskIntentId, planEnvelopeDigest, ...ASK_FIRST });
       expect(edited.planVersion).toMatchObject({ ordinal: 2, edits: ASK_FIRST });
       expect(edited.planEnvelope!.boundary).toMatchObject({
-        adaptable: [],
+        adaptable: [{ adaptationClass: 'contract-retry' }],
         askFirst: [{ adaptationClass: 'safe-retry' }],
         participation: { expected: true, statement: ASK_FIRST_SAFE_RETRY_STATEMENT },
       });
@@ -259,7 +259,7 @@ describe('Clarification Requests over the real store', () => {
       });
       expect(restored.planVersion).toMatchObject({ ordinal: 3, edits: { removedSteps: [], disallowedAdaptations: [] } });
       expect(restored.planVersion!.edits).not.toHaveProperty('askFirstAdaptations');
-      expect(restored.planEnvelope!.boundary).toMatchObject({ adaptable: [{ adaptationClass: 'safe-retry' }], participation: { expected: false } });
+      expect(restored.planEnvelope!.boundary).toMatchObject({ adaptable: [{ adaptationClass: 'safe-retry' }, { adaptationClass: 'contract-retry' }], participation: { expected: false } });
       expect(restored.planEnvelope!.boundary).not.toHaveProperty('askFirst');
       store.markCleanShutdown();
     } finally {

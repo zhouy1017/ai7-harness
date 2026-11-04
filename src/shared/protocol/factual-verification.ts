@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import {
   FACTUAL_REVIEW_CONTRACT_VERSION,
   FACTUAL_REVIEW_EXPECTED_OUTCOME,
@@ -772,6 +773,7 @@ export interface FactualReviewResultSetRevisionProjection {
 
 export type FactualReviewUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;

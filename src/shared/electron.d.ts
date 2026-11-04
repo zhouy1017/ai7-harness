@@ -30,6 +30,7 @@ declare module 'electron' {
       paste(): void;
       pasteAndMatchStyle(): void;
       /** The PDF export's print of a staged page (Issue #500, S64b). */
+      executeJavaScript<T = unknown>(code: string): Promise<T>;
       printToPDF(options: { pageSize: 'A4'; printBackground: boolean; preferCSSPageSize: boolean }): Promise<Uint8Array>;
     };
     destroy(): void;

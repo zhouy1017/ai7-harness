@@ -35,10 +35,16 @@ describe('emptyAnswerGapReason', () => {
 });
 
 describe('unparsableAnswerGapReason', () => {
-  it('names the contract code, keeps the parse detail, and adds how much text came back', () => {
+  it('states unreadable output without exposing technical contract details', () => {
     expect(unparsableAnswerGapReason('not-json', '模型输出不是 JSON。', '合成输出')).toBe(
-      '单元结果不符合契约 v1（not-json）：模型输出不是 JSON。模型返回了 4 个字符，其中没有可解析的单元结果。重新分析本单元可能有帮助。',
+      '模型回答无法读出任何可用条目。模型返回了 4 个字符。重新分析本单元可能有帮助。',
     );
+  });
+
+  it('distinguishes a scope failure from unreadable output', () => {
+    const reason = unparsableAnswerGapReason('range-out-of-unit', 'sourceRange schema v1', '{}');
+    expect(reason).toContain('引用了本次阅读范围之外的内容');
+    expect(reason).not.toMatch(/无法读出|契约|schema|range-out-of-unit/u);
   });
 
   it('counts characters as code points, so one character counts once whichever plane it lives in', () => {

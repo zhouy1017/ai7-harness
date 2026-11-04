@@ -212,7 +212,10 @@
     }
   ],
   "outcome": {
-    "excluded": [],
+    "excluded": [
+      { "backendId": "search-openai", "reason": "not-measured" },
+      { "backendId": "search-anthropic", "reason": "not-measured" }
+    ],
     "ranking": [
       {
         "backendId": "search-tinyfish",

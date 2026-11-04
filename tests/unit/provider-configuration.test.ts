@@ -696,7 +696,7 @@ describe('search backend documents (Issue #883; ADR 0073 §4)', () => {
     return found.data;
   };
   const searchRefusalAfter = (mutate: (input: SearchInput) => void): string | null => refusalAfter((input) => mutate(input as SearchInput));
-  const SEARCH_SLOTS = ['search-bochaai', 'search-brave', 'search-deepseek', 'search-parallel', 'search-tinyfish'];
+  const SEARCH_SLOTS = ['search-anthropic', 'search-bochaai', 'search-brave', 'search-deepseek', 'search-openai', 'search-parallel', 'search-tinyfish'];
 
   it('contributes exactly one credential slot per backend and no route, label or profile', () => {
     const input = searchInput();

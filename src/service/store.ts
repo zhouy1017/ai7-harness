@@ -13350,8 +13350,8 @@ export class EditorialStore {
   }
 
   /** The default backend, or (#1226) with `role: 'fallback'` the one 备用来源 — `null` clears it; a new default never stays the fallback. */
-  selectSearchBackend(backendId: string | null, role?: 'fallback'): void {
-    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role);
+  selectSearchBackend(backendId: string | null, role?: 'fallback', alwaysUseSelectedBackend?: boolean): void {
+    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role, alwaysUseSelectedBackend);
   }
 
   saveSearchBackendCredential(backendId: string, reference: string | null, state: import('../shared/protocol.js').ModelCredentialOperationState): import('../shared/protocol.js').SearchBackendConnectionProjection {

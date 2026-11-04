@@ -1,5 +1,5 @@
+import { stripModelJsonFence, type SalvagedModelResult, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { EvidenceAssuranceLevel } from '../../shared/protocol.js';
-import { canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, parseFactualReviewUnitResult, type FactualUnitAssertion } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, parseFactualReviewUnitResultV2, type FactualEvidenceRelation, type FactualCorrectionEntry } from './factual-review-contract-v2.js';
 import { FACTUAL_CLAIM_EXTRACTION_CONTRACT, FACTUAL_CLAIM_VERIFICATION_CONTRACT } from './factual-claim-ledger.js';
@@ -36,15 +36,17 @@ export function factualClaimVerificationPrompt(level: Exclude<EvidenceAssuranceL
 
 function readObject(text: string): Record<string, unknown> | null {
   try {
-    const value: unknown = JSON.parse(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text);
+    const value: unknown = JSON.parse(stripModelJsonFence(text));
     return isRecord(value) ? value : null;
   } catch { return null; }
 }
 
 /** Reuse the established assertion limits and class/reference parser, without accepting an old contract response. */
 export function parseFactualClaimExtraction(text: string, expected: { unitOrdinal: number; blockCount: number }) {
-  const value = readObject(text);
-  if (value?.schema !== FACTUAL_CLAIM_EXTRACTION_CONTRACT) return { ok: false as const, code: 'schema-invalid' as const, detail: '结果不符合断言抽取契约。' };
+  let value: unknown;
+  try { value = JSON.parse(stripModelJsonFence(text)); }
+  catch { return { ok: false as const, code: 'not-json' as const, detail: '断言抽取结果不是有效 JSON。' }; }
+  if (!isRecord(value) || value.schema !== FACTUAL_CLAIM_EXTRACTION_CONTRACT) return { ok: false as const, code: 'schema-invalid' as const, detail: '结果不符合断言抽取契约。' };
   const parsed = parseFactualReviewUnitResult(canonicalJson({ ...value, schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA }), expected);
   if (!parsed.ok) return parsed;
   const result = { ...parsed.result, schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT };
@@ -52,7 +54,7 @@ export function parseFactualClaimExtraction(text: string, expected: { unitOrdina
   return { ok: true as const, result, canonicalJson: json, digest: sha256Hex(json) };
 }
 
-export interface FactualClaimVerificationResult {
+export interface FactualClaimVerificationResult extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA;
   readonly claimId: string;
   readonly evidenceRelations: readonly FactualEvidenceRelation[];
@@ -102,8 +104,12 @@ export function factualClaimKindDefinition(level: 'standard' | 'strict'): Analys
     executionSteps: ['逐单元抽取断言', '冻结精确断言及其出处', '逐断言联网取证', '归并已定位发现'],
     parseUnitResult: (text, unit) => parseFactualClaimExtraction(text, { unitOrdinal: unit.ordinal, blockCount: unit.overlapBlockIds.length + unit.blockIds.length }),
     requestDigest: (ordinal, digest) => sha256Hex(canonicalJson({ promptContractDigest, ordinal, digest })),
-    unitRecord: (result) => ({ assertions: (result as { assertions: readonly FactualUnitAssertion[] }).assertions }),
-    unitResultOfRecord: (record, unitOrdinal) => ({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal, assertions: record.assertions }),
+    unitRecord: (result) => {
+      const extraction = result as SalvagedModelResult & { assertions: readonly FactualUnitAssertion[] };
+      return { assertions: extraction.assertions, ...(extraction.salvaged === undefined ? {} : { salvaged: extraction.salvaged }) };
+    },
+    unitResultOfRecord: (record, unitOrdinal) => ({ schema: FACTUAL_CLAIM_EXTRACTION_CONTRACT, unitOrdinal, assertions: record.assertions,
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged }) }),
     reduce: (input) => {
       const reduction = reduceFactualReview({ ...input, outcomes: input.outcomes as readonly FactualUnitOutcome[],
         research: new FixtureReplayResearchCapability(), exactOccurrences: true });

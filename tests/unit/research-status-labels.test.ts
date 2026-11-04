@@ -23,6 +23,10 @@ describe('research status (#744)', () => {
     expect(researchPlanLine(undefined)).toBe('未联网核查');
     expect(researchPlanLine(backend)).toBe('未联网核查 · TinyFish · 已冻结后端，尚未执行');
   });
+  it('names a Main channel native search source in the review plan dialog', () => {
+    expect(researchPlanLine({ ...backend, selectionSource: 'model-channel', sourceLabel: 'DeepSeek 服务端搜索（官方）' }))
+      .toBe('将使用 DeepSeek 服务端搜索（官方） 自带的联网搜索');
+  });
   it('shows completion with the frozen backend without claiming verified facts', () => {
     expect(researchStatusLine(report)).toBe('联网核查已完成 · TinyFish · 检索 1 次 · 事实结论仍需核对来源');
     expect(researchDecisionLine('允许执行', report)).toContain('允许执行 · 联网核查已完成 · TinyFish');

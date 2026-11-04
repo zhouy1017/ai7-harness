@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import {
   READERS_REPORT_CONTRACT_VERSION,
   READERS_REPORT_NO_EXEMPLAR,
@@ -9,7 +10,6 @@ import {
   type ReadersReportPassageKind,
   type ReadersReportTemplate,
 } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 
@@ -105,13 +105,13 @@ export interface ReadersReportPassage {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface ReadersReportUnitResult {
+export interface ReadersReportUnitResult extends SalvagedModelResult {
   readonly schema: typeof READERS_REPORT_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly passages: ReadonlyArray<ReadersReportPassage>;
 }
 
-export interface ReadersReportSynthesisResult {
+export interface ReadersReportSynthesisResult extends SalvagedModelResult {
   readonly schema: typeof READERS_REPORT_SYNTHESIS_RESULT_SCHEMA;
   readonly overall: string;
   readonly strengths: ReadonlyArray<string>;
@@ -129,10 +129,10 @@ export type ReadersReportUnitParseFailureCode = 'not-json' | 'schema-invalid' | 
 export type ReadersReportSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'conclusion-mismatch';
 
 export type ReadersReportUnitParse =
-  | { ok: true; result: ReadersReportUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReadersReportUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: ReadersReportUnitParseFailureCode; detail: string };
 export type ReadersReportSynthesisParse =
-  | { ok: true; result: ReadersReportSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReadersReportSynthesisResult }
   | { ok: false; code: ReadersReportSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '审稿意见单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -357,9 +357,8 @@ export function readersReportContractDigest(contract: ReadersReportPromptContrac
 }
 
 function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
   try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? text) as unknown };
+    return { ok: true, value: JSON.parse(stripModelJsonFence(text)) as unknown };
   } catch {
     return { ok: false };
   }

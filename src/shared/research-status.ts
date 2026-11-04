@@ -6,6 +6,8 @@ const BACKEND_NAMES: Readonly<Record<string, string>> = {
   'search-brave': 'Brave',
   'search-parallel': 'Parallel',
   'search-bochaai': '博查',
+  'search-openai': 'OpenAI',
+  'search-anthropic': 'Claude',
 };
 
 export function researchUnavailableLine(code: string | null | undefined, reason: string): string {
@@ -19,7 +21,9 @@ export function researchBackendName(backend: FrozenWebToolsBackend): string {
 }
 
 export function researchPlanLine(backend: FrozenWebToolsBackend | undefined): string {
-  return backend === undefined ? '未联网核查' : `未联网核查 · ${researchBackendName(backend)} · 已冻结后端，尚未执行`;
+  if (backend === undefined) return '未联网核查';
+  if (backend.selectionSource === 'model-channel') return `将使用 ${backend.sourceLabel ?? researchBackendName(backend)} 自带的联网搜索`;
+  return `未联网核查 · ${researchBackendName(backend)} · 已冻结后端，尚未执行`;
 }
 
 export function researchDecisionLine(

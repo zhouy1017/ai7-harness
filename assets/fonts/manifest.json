@@ -1,0 +1,48 @@
+{
+  "license": "OFL-1.1",
+  "conversion": "Lossless WOFF2 encoding with fonttools 4.60.1 and brotli 1.2.0; complete upstream SC glyph coverage retained. Regular serves weights 100-500, Bold serves 600-900; these are static faces, not variable fonts.",
+  "sources": [
+    {
+      "family": "Noto Sans SC",
+      "version": "2.004",
+      "url": "https://github.com/notofonts/noto-cjk/releases/download/Sans2.004/18_NotoSansSC.zip",
+      "sha256": "4d107c09ada479d3e48b6e78c83835773cbd9214bf6e12cdb7b60f8e068292ec"
+    },
+    {
+      "family": "Noto Serif SC",
+      "version": "2.003",
+      "url": "https://github.com/notofonts/noto-cjk/releases/download/Serif2.003/14_NotoSerifSC.zip",
+      "sha256": "c58cd035ab2adb003510846db9ec80c35b1b97755d329486c3a1e88edfe6e98e"
+    }
+  ],
+  "files": [
+    {
+      "file": "NotoSansSC-Regular.woff2",
+      "sourceEntry": "NotoSansSC-Regular.otf",
+      "sourceSha256": "faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9",
+      "sha256": "43dde3174ee4d3498e601086580f6b97645257c3508c7e1a73d2204902bb2987",
+      "size": 6093288
+    },
+    {
+      "file": "NotoSansSC-Bold.woff2",
+      "sourceEntry": "NotoSansSC-Bold.otf",
+      "sourceSha256": "c6cb5a93abaa9edc8ee7463b7ebb7f42d618d40e6ed2f7a5371c97b0b64767c0",
+      "sha256": "fe10f5c655c977d4a85b707e3d494d5dc7a743b4c7f1f0b2d5d52d8ecb4e4d48",
+      "size": 6397712
+    },
+    {
+      "file": "NotoSerifSC-Regular.woff2",
+      "sourceEntry": "SubsetOTF/SC/NotoSerifSC-Regular.otf",
+      "sourceSha256": "e8f396decc1f0963a016a989c3d8852e863d1350996f573860a80767c83a1cd3",
+      "sha256": "88f0444cfbda19b995dc4b1708b134e7088ace1aea58e13a65cbcb0f26fe013b",
+      "size": 8438740
+    },
+    {
+      "file": "NotoSerifSC-Bold.woff2",
+      "sourceEntry": "SubsetOTF/SC/NotoSerifSC-Bold.otf",
+      "sourceSha256": "24693d48bdb9152f0a06b02af625638a1097abd6de4010ebba027f6e82710527",
+      "sha256": "cbc7b127baecfa892de54f282d2710b0f0f75b48a3198f03f80b65f2a9eb7603",
+      "size": 9015596
+    }
+  ]
+}

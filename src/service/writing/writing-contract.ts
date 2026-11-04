@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, stripModelJsonFence, AnalysisError, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 import {
   MAX_WRITING_MATERIALS,
   MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
@@ -8,7 +9,6 @@ import {
   type WritingDraftWordsProjection,
   type WritingPassageKind,
 } from '../../shared/protocol.js';
-import { AnalysisError, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 
@@ -209,13 +209,13 @@ export interface WritingPassage {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface WritingUnitResult {
+export interface WritingUnitResult extends SalvagedModelResult {
   readonly schema: typeof WRITING_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly passages: ReadonlyArray<WritingPassage>;
 }
 
-export interface WritingSynthesisResult extends WritingDraftWordsProjection {
+export interface WritingSynthesisResult extends WritingDraftWordsProjection, SalvagedModelResult {
   readonly schema: typeof WRITING_SYNTHESIS_RESULT_SCHEMA;
 }
 
@@ -228,10 +228,10 @@ export type WritingUnitParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-
 export type WritingSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'exemplar-copied' | 'material-copied';
 
 export type WritingUnitParse =
-  | { ok: true; result: WritingUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: WritingUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: WritingUnitParseFailureCode; detail: string };
 export type WritingSynthesisParse =
-  | { ok: true; result: WritingSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: WritingSynthesisResult }
   | { ok: false; code: WritingSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '写作单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -1231,9 +1231,8 @@ export function exemplarCopiedV1(draft: WritingDraftWordsProjection, input: Writ
 // ---- parsing ---------------------------------------------------------------------------------------------------------
 
 function parseJson(value: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(value);
   try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? value) as unknown };
+    return { ok: true, value: JSON.parse(stripModelJsonFence(value)) as unknown };
   } catch {
     return { ok: false };
   }
