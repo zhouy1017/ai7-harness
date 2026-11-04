@@ -62,7 +62,7 @@ import {
 import { AI7_FAILURE_CODES, type DshFailureCodes } from './classification.js';
 import { LOCAL_DETERMINISTIC_MODEL, LOCAL_DETERMINISTIC_ROUTE } from './egress-gate.js';
 import { lastUserMessageText, messageText, toolResultOf } from './payload.js';
-import { fixtureEntryKey, resolveFixtureEntry, type LocalFixtureExecutionContext, type LocalFixturePolicyCatalog,
+import { fixtureEntryKey, resolveFixtureEntry, fixtureReplayContentKey, resolveReplayCompatibleFixtureEntry, type LocalFixtureExecutionContext, type LocalFixturePolicyCatalog,
   type ModelFixtureEntry, type ResolvedModelFixture } from './model-fixture.js';
 
 /** Explicit authored fixture stimulus only; recorded fixtures and every remote route remain outside this stub. */
@@ -251,6 +251,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
   readonly #resolveBy: FixtureResolution;
   readonly #entries: ReadonlyMap<string, ModelFixtureEntry>;
   readonly #servedByKey = new Map<string, number>();
+  readonly #sourceDigest: string | null;
   readonly #attemptsBefore: ReadonlyMap<number, number>;
   readonly #answerHold: AnswerHold | null;
   #served = 0;
@@ -281,6 +282,7 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     } = {},
   ) {
     this.#fixture = fixture;
+    this.#sourceDigest = options.localFixture?.execution.sourceDigest ?? null;
     if (options.localFixture !== undefined && options.resolveBy === 'content-digest')
       throw new Error('LOCAL_FIXTURE_PROFILE_REQUIRES_EXACT_REQUEST_KEYS');
     this.#profileEntryKeys = options.localFixture?.catalog.entriesFor(options.localFixture.execution, fixture, promptContractDigest) ?? null;
@@ -559,7 +561,13 @@ export class Ai7LocalDeterministicAdapter implements LlmAdapter {
     const pairKey = fixtureEntryKey(ordinal, expectedDigest);
     const attempt = (this.#servedByKey.get(pairKey) ?? (ordinal > 0 ? this.#attemptsBefore.get(ordinal) ?? 0 : 0)) + 1;
     this.#servedByKey.set(pairKey, attempt);
-    const entry = this.#answering(resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt));
+    const exact = resolveFixtureEntry(this.#entries, ordinal, expectedDigest, attempt);
+    const stage = crossUnit !== null ? 'reduction' : reflection !== null ? 'reflection' : null;
+    const stageContractDigest = crossUnit !== null ? BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST : RUN_REPORT_REFLECTION_PROMPT_CONTRACT_DIGEST;
+    const compatible = exact === undefined && stage !== null && this.#sourceDigest !== null
+      ? resolveReplayCompatibleFixtureEntry(this.#fixture, stage, fixtureReplayContentKey(this.#sourceDigest, this.#promptContractDigest, { stageContractDigest }), attempt)
+      : undefined;
+    const entry = this.#answering(exact ?? compatible);
     if (entry === undefined) {
       const label =!named && this.#resolveBy === 'content-digest' ? '内容摘要' : '请求摘要';
       const subject = crossUnit !== null ? '跨单元归纳'
