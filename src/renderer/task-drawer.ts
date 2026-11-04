@@ -2500,7 +2500,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     });
     const explanation = el('p', 'field-note');
     explanation.append(el('span', 'task-plan-clarification-why', card.why.replace(/。$/u, '')), '；',
-      el('span', 'task-plan-clarification-detail', card.detail));
+      el('span', 'task-plan-clarification-detail', card.detail.replace(/。$/u, '')), '；',
+      el('span', 'task-plan-clarification-after', card.origin === 'model'
+        ? '回答会发给模型并继续处理，已完成部分保留。' : '回答后继续归纳和抽样。'));
     const parts: HTMLElement[] = [heading, scope, choices, explanation, noteToggle];
     if (draft.noteOpen) {
       // The note is IME-safe: Enter writes into it and nothing is submitted but by 提交回答.
@@ -2530,7 +2532,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     ready();
     const actions = el('div', 'button-row');
     actions.append(submit, defer);
-    parts.push(el('p', 'field-note task-plan-clarification-after', card.after), actions, submitWhy);
+    parts.push(actions, submitWhy);
     section.append(...parts);
     return section;
   }
