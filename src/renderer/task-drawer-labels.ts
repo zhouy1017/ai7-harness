@@ -215,8 +215,8 @@ export function taskPlanDefaultRuleSet(name: string): string {
 }
 /** The Book's rule for this plan's pattern, beside the action. */
 export function taskPlanDefaultRuleCurrent(current: NonNullable<TaskPlanProjection['defaultRule']['current']>): string {
-  if (current.state === 'deactivated') return `这本书的默认执行规则：${current.name}（已停用）`;
-  return `这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`;
+  if (current.state === 'deactivated') return technicalWords(`这本书的默认执行规则：${current.name}（已停用）`, `这本书的默认规则：${current.name} · 已停用`);
+  return technicalWords(`这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`, `这本书的默认规则：${current.name} · 使用中${current.fromThisPlan ? ' · 由这份计划设定' : ''}`);
 }
 /** 快速开始后 (S75 D5): the quiet notice on a Task quick start started, and the way to the rule. */
 export function taskPlanQuickStarted(name: string): string {

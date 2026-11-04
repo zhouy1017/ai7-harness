@@ -1126,14 +1126,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function defaultRuleBlock(next: TaskPlanProjection): HTMLElement {
     const rule = next.defaultRule;
     const section = el('section', 'task-plan-default-rule');
+    const row = el('div', 'button-row');
     section.dataset['taskPlanDefaultRule'] = rule.canSet ? 'offered' : 'unavailable';
     if (rule.current !== null) {
-      const line = el('p', 'field-note task-plan-default-rule-current', taskPlanDefaultRuleCurrent(rule.current));
+      const line = el('span', 'task-plan-default-rule-current', taskPlanDefaultRuleCurrent(rule.current));
       line.dataset['defaultRuleState'] = rule.current.state;
-      section.append(line);
+      row.append(line);
     }
     if (!rule.canSet || rule.planEnvelopeDigest === null) {
-      section.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      row.append(unavailable(TASK_PLAN_DEFAULT_RULE, 'default-rule', rule.reason ?? TASK_PLAN_DEFAULT_RULE_FAILED));
+      section.append(row);
       return section;
     }
     const open = control(TASK_PLAN_DEFAULT_RULE, 'secondary', 'default-rule');
@@ -1170,7 +1172,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     });
     yes.addEventListener('click', () => void setDefaultRule());
     if (working) for (const button of [open, yes, no]) button.disabled = true;
-    section.append(open, confirm);
+    row.append(open);
+    section.append(row, confirm);
     return section;
   }
 

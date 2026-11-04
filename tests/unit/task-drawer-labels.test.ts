@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
 import {
@@ -328,6 +329,9 @@ describe('精简 and 完整 (D6)', () => {
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中，由这份计划设定）');
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中）');
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'deactivated', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（已停用）');
+    setTechnicalLayerVisible(false);
+    expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认规则：开始同步 · 第 2 版 · 使用中 · 由这份计划设定');
+    setTechnicalLayerVisible(true);
     expect(taskPlanQuickStarted('开始同步 · 第 2 版')).toBe('已按默认执行规则「开始同步 · 第 2 版」快速开始');
     expect(TASK_PLAN_VIEW_RULES).toBe('查看规则');
     expect(taskPlanQuickStartFellBack(['离线：这台设备现在没有网络。'])).toBe('快速开始没有开始这项任务：离线：这台设备现在没有网络。');
