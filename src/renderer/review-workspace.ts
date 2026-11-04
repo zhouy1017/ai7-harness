@@ -981,7 +981,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销';
       local.append(el('p', 'field-note', `${localBoundary}；本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
       if (technicalLayerVisible) for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
-      for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}（${exclusion.candidateId}）。`));
+      for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}${technicalWords(` · ${exclusion.candidateId}`)}。`));
       section.append(local);
       if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {
         local.append(actionButton('scope-cancel', 'secondary', () => void cancelRun(run)));
@@ -1283,9 +1283,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       section.append(details);
     }
     const filtered = Object.values(query.filters).some((value) => value !== null);
-    if (filtered) section.append(el('p', 'field-note review-filtered', reviewFilteredLine(run.findingsTotal)));
-    if (run.findings.length === 0) {
-      section.append(el('p', 'field-note review-no-findings', filtered ? REVIEW_NO_FILTERED_FINDINGS : REVIEW_NO_FINDINGS));
+    if (filtered || run.findings.length === 0) {
+      const empty = run.findings.length === 0 ? (filtered ? REVIEW_NO_FILTERED_FINDINGS : REVIEW_NO_FINDINGS) : null;
+      const filter = filtered ? reviewFilteredLine(run.findingsTotal) : null;
+      const status = [filter, empty].filter((line): line is string => line !== null).map((line) => line.replace(/。$/u, '')).join('；');
+      section.append(el('p', `field-note${filtered ? ' review-filtered' : ''}${empty === null ? '' : ' review-no-findings'}`, `${status}。`));
     }
     for (const category of run.categories) {
       const findings = run.findings.filter((finding) => finding.categoryId === category.categoryId);
@@ -1325,7 +1327,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const heading = el('h6', undefined, FACT_LENS_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'field-note', FACT_LENS_NOTE), el('p', 'fact-lens-counts', factLensCountsLine(lens)));
+    section.append(heading, el('p', 'fact-lens-counts', `${factLensCountsLine(lens)} · ${FACT_LENS_NOTE}`));
     if (lens.run?.disclosure != null) section.append(el('p', 'fact-lens-disclosure', lens.run.disclosure));
     const filters = el('div', 'review-filters fact-lens-filters');
     filters.setAttribute('role', 'group');
@@ -1669,7 +1671,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       nothing.id = scopeId;
       node.append(nothing);
     } else {
-      const scope = el('p', 'review-batch-scope', `${reviewBatchScopeLine(strip.items.length).replace(/。$/u, '')}；${REVIEW_BATCH_ALL_OR_NONE}`);
+      const scopeParts = [reviewBatchScopeLine(strip.items.length), REVIEW_BATCH_ALL_OR_NONE];
+      if (strip.excluded > 0) scopeParts.push(reviewBatchExcludedLine(strip.excluded));
+      if (strip.capped) scopeParts.push(reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS));
+      const scope = el('p', 'review-batch-scope', `${scopeParts.map((line) => line.replace(/。$/u, '')).join('；')}。`);
       scope.id = scopeId;
       const items = el('ol', 'review-batch-items');
       for (const item of strip.items) {
@@ -1679,8 +1684,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         items.append(line);
       }
       node.append(scope, items);
-      if (strip.excluded > 0) node.append(el('p', 'field-note', reviewBatchExcludedLine(strip.excluded)));
-      if (strip.capped) node.append(el('p', 'field-note', reviewBatchCappedLine(MAX_BATCH_APPLY_SUGGESTIONS)));
       if (strip.unknown) {
         node.append(el('p', 'review-problem', '结果待确认；确认权威记录之前不能再次应用。'));
         row.append(actionButton('open-manuscript', 'secondary', () => void options.openManuscript()));
@@ -2464,14 +2467,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.value = kind;
       input.checked = state.scope === kind;
       input.disabled = !availability.available;
-      label.append(input, el('span', undefined, REVIEW_SCOPE_LABELS[kind]));
+      const name = el('span', undefined, REVIEW_SCOPE_LABELS[kind]);
+      label.append(input, name);
       if (!availability.available) {
         label.dataset['unavailableReason'] = availability.unavailableReason ?? '';
         input.dataset['unavailableReason'] = availability.unavailableReason ?? '';
-        const why = el('small', 'field-note', availability.unavailableReason ?? '');
+        const why = el('span', undefined, ` · ${availability.unavailableReason ?? ''}`);
         why.id = uid('scope-reason');
         input.setAttribute('aria-describedby', why.id);
-        label.append(why);
+        name.append(why);
       }
       if (kind === 'changed') {
         label.append(changedNote);
@@ -2828,7 +2832,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   };
 }
 
-type ReviewMaterialInput = { item: WritingTaskMaterialProjection; input: HTMLInputElement; reason: HTMLElement };
+type ReviewMaterialInput = { item: WritingTaskMaterialProjection; input: HTMLInputElement; reason: HTMLElement; separator: HTMLElement };
 
 /** 新建审阅's 允许参考 fieldset: one choice per offered 资料库 item, ticking one is the sheet's to refresh (Issue #428). */
 export function reviewMaterialsField(
@@ -2852,12 +2856,16 @@ export function reviewMaterialsField(
       state.problem = null;
       updateSheet();
     });
-    const reason = el('small', 'field-note');
+    const reason = el('span');
     reason.id = uid('material-reason');
     input.setAttribute('aria-describedby', reason.id);
-    label.append(input, el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · ${taskMaterialSizeText(item)}`), reason);
+    const name = el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · ${taskMaterialSizeText(item)}`);
+    const separator = el('span', undefined, ' · ');
+    separator.hidden = true;
+    name.append(separator, reason);
+    label.append(input, name);
     field.append(label);
-    return { item, input, reason };
+    return { item, input, reason, separator };
   });
   if ((offers?.more ?? 0) > 0) field.append(el('p', 'field-note', `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
   return { field, inputs, items };
@@ -2875,13 +2883,14 @@ export function syncReviewMaterials(
   state.materialIds.clear();
   for (const id of retained) state.materialIds.add(id);
   const acceptsMaterials = categories.some((entry) => state.categories.has(entry.categoryId) && entry.materialReferencesAllowed === true);
-  for (const { item, input, reason } of inputs) {
+  for (const { item, input, reason, separator } of inputs) {
     const offered = currentOffers.find((entry) => entry.materialId === item.materialId);
     const why = reviewMaterialChoiceReason(offered, currentOffers, state.materialIds, acceptsMaterials);
     input.checked = state.materialIds.has(item.materialId);
     input.disabled = busy || (why !== null && !input.checked);
     reason.textContent = why ?? '';
     reason.hidden = why === null;
+    separator.hidden = why === null;
   }
   return acceptsMaterials;
 }

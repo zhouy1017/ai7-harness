@@ -57,7 +57,7 @@ export const REVIEW_COVERAGE_HEADING = '审阅覆盖矩阵';
 export const REVIEW_COVERAGE_NOTE = '每一类对照当前稿件：稿件改动后需要复审的类别会标出来，可以只审改动过的章。';
 export const REVIEW_COVERAGE_COLUMNS = ['类别', '当前稿件', '上次审阅', '改动', '可以做什么'] as const;
 export const REVIEW_RUNS_HEADING = '审阅记录';
-export const REVIEW_NO_RUNS = '还没有审阅记录；每新建一次审阅，都会记在这里。';
+export const REVIEW_NO_RUNS = '还没有审阅记录。';
 export const REVIEW_WORKSPACE_UNAVAILABLE = '无法读取这本书的审阅记录。';
 
 /** The persistent actions of the destination, in the order it builds them (V2-UX-LAYER-005). */
@@ -366,7 +366,7 @@ export const REVIEW_RESULTS_HEADING = '发现';
 export const REVIEW_FILTER_LABELS = { category: '类别', severity: '严重度', status: '状态', chapter: '章' } as const;
 export const REVIEW_FILTER_ALL = '全部';
 export const REVIEW_FILTER_NOTE = '筛选只改变这里显示哪些发现，不改变发现本身。';
-export const REVIEW_NO_FINDINGS = '这次审阅还没有发现；每一类完成后，它的发现会立即出现在这里。';
+export const REVIEW_NO_FINDINGS = '这次审阅还没有发现。';
 export const REVIEW_NO_FILTERED_FINDINGS = '没有符合筛选的发现。';
 /** V2-UX-REV-003: categories 5 and 6 mark only this, never a compliance, plagiarism or policy verdict. */
 export const REVIEW_RISK_POINT = '需人工复核的风险点';
