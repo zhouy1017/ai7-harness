@@ -1,5 +1,5 @@
 import { icon } from './components/icon-sprite.js';
-import { showToast } from './components/toast.js';
+import { createStatusSurface } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
 import { ScreenReturnHistory } from './screen-return.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -213,6 +213,7 @@ function requiredElement(selector: string): HTMLElement {
 
 const screen = requiredElement('#screen');
 const persistenceStatus = requiredElement('#persistence-status');
+const updateStatusSurface = createStatusSurface(persistenceStatus);
 /** Incremented on every status update so a delayed completion cannot overwrite a newer message. */
 let statusRevision = 0;
 if (!window.ai7) throw new Error('AI7_RENDERER_BOOTSTRAP_INVALID');
@@ -962,10 +963,7 @@ function instantValue(iso: string): HTMLElement {
 
 function setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void {
   statusRevision += 1;
-  persistenceStatus.textContent = message;
-  showToast(message, tone === undefined ? {} : { tone });
-  if (tone) persistenceStatus.dataset['tone'] = tone;
-  else delete persistenceStatus.dataset['tone'];
+  updateStatusSurface(message, tone);
 }
 
 /**

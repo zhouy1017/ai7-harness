@@ -1109,7 +1109,7 @@ async function main() {
       (resumable.taskOutcome ?? null) === null,
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行', note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', notePrefix: `${RESUMABLE_NOTE}；上次续行于 `, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1385,8 +1385,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
-      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行',
-      note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
+      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
+      notePrefix: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分；上次续行于 ', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
     const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);

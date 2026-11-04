@@ -1,4 +1,3 @@
-import { createSheet, sheetContent } from './components/sheet.js';
 import { startPreparedTask } from './one-action-start.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
@@ -663,9 +662,7 @@ function keptRanges(draft: TaskIntentDraftProjection): ComposerRange[] {
  */
 export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSurface {
   const { api } = options;
-  const element = createSheet('task-composer');
-  element.addEventListener('close', () => finish());
-  element.addEventListener('cancel', (event) => { if (working) event.preventDefault(); });
+  const element = el('section', 'task-composer');
   element.dataset['taskComposer'] = 'closed';
   /** The recommendation slot (#423 rev 6): created once per composer and moved, never rebuilt, so 7c's children stay. */
   let slot = el('div', 'task-composer-recommendation');
@@ -944,8 +941,7 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     unsaved.hidden = !(kind === 'draft' && current.dirty);
     parts.push(unsaved);
     parts.push(actionRow(kind));
-    sheetContent(element, heading, parts.slice(1, -1), parts.at(-1)!);
-    element.open = true;
+    element.replaceChildren(...parts);
     if (active !== null) {
       const target = element.querySelector<HTMLElement>(`[data-task-composer-action="${CSS.escape(active)}"], [data-task-composer-field="${CSS.escape(active)}"]`);
       if (target !== null && !(target instanceof HTMLButtonElement && target.disabled)) target.focus();
@@ -1084,7 +1080,6 @@ export function mountTaskComposer(options: TaskComposerOptions): TaskComposerSur
     ticket += 1;
     state = null;
     element.dataset['taskComposer'] = 'closed';
-    element.open = false;
     element.replaceChildren();
     options.close();
   }

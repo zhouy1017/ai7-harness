@@ -1,7 +1,12 @@
-import { filterChoices, listPosition, stateTerm } from './components/controls.js';
+import { filterChoices, listPosition, stateTerm, type StateTone } from './components/controls.js';
 import { createButton } from './components/controls.js';
 import type { BookFindingProjection, BookFindingsProjection } from '../shared/protocol.js';
 import { FINDINGS_CENTER_WORDS } from './findings-center-labels.js';
+
+const STATUS_TONES: Readonly<Record<string, StateTone>> = {
+  '未覆盖': 'attention', '待复核': 'attention',
+  '待处理': 'progress', '已处理': 'good', '已忽略': 'neutral',
+};
 
 export function mountFindingsCenter(root: HTMLElement, read: (offset: number) => Promise<BookFindingsProjection>, open: (item: BookFindingProjection) => void): void {
   let offset = 0;
@@ -38,7 +43,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
           const heading = document.createElement('h3'); heading.textContent = group.label; section.append(heading);
           for (const item of page.items.filter((entry) => entry.category === group.category)) {
             const row = document.createElement('article'); row.dataset['findingId'] = item.id; row.dataset['findingKind'] = item.target.kind;
-            const words = document.createElement('p'); words.append(stateTerm(item.status, 'attention'), document.createTextNode(` ${item.severity} · ${item.summary}`));
+            const words = document.createElement('p'); words.append(stateTerm(item.status, STATUS_TONES[item.status] ?? 'neutral'), document.createTextNode(` ${item.severity} · ${item.summary}`));
             const link = createButton(); link.type = 'button'; link.textContent = FINDINGS_CENTER_WORDS.open; link.addEventListener('click', () => open(item));
             row.append(words, link); section.append(row);
           }

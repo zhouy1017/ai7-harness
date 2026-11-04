@@ -3,6 +3,41 @@ import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '.
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
+/** Persistent status and transient notices share the same renderer entry point. */
+export function createStatusSurface(surface: HTMLElement): (message: string, tone?: 'busy' | 'success' | 'error') => void {
+  let error: string | null = null;
+  let busy: string | null = null;
+  const paint = (): void => {
+    surface.textContent = [error, busy].filter((message) => message !== null).join(' · ');
+    surface.hidden = error === null && busy === null;
+    surface.dataset['tone'] = error !== null ? 'error' : 'busy';
+    if (error !== null) {
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'btn small quiet status-dismiss';
+      dismiss.setAttribute('aria-label', '关闭错误提示');
+      dismiss.title = '关闭错误提示';
+      dismiss.addEventListener('click', () => { error = null; paint(); });
+      surface.append(dismiss);
+    }
+  };
+  return (message, tone) => {
+    if (tone === 'error') { error = message; busy = null; }
+    else if (tone === 'busy') busy = message;
+    else {
+      busy = null;
+      showToast(message, tone === undefined ? {} : { tone });
+    }
+    paint();
+    // Keep the latest ordinary status available to existing status readers.
+    if (surface.hidden) {
+      surface.textContent = message;
+      if (tone) surface.dataset['tone'] = tone;
+      else delete surface.dataset['tone'];
+    }
+  };
+}
+
 /** Observe the existing attention projection; history and its count remain owned by that projection. */
 export function createNotificationObserver(options: {
   api: Pick<NotificationsRendererApi, 'notify'>;
