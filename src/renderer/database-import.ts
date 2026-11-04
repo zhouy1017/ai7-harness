@@ -73,7 +73,8 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
   const choose = action(DATABASE_IMPORT_ACTIONS.choose, 'secondary', 'choose', () => void chooseFile());
   const toolbar = el('div', 'button-row');
   toolbar.append(choose);
-  root.replaceChildren(el('h3', undefined, DATABASE_IMPORT_HEADING), el('p', 'field-note', DATABASE_IMPORT_LEDE), toolbar, preview, pending, rollBack, records);
+  const intro = el('p', 'field-note', DATABASE_IMPORT_LEDE);
+  root.replaceChildren(el('h3', undefined, DATABASE_IMPORT_HEADING), intro, toolbar, preview, pending, rollBack, records);
 
   const setBusy = (value: boolean): void => {
     busy = value;
@@ -152,10 +153,9 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
     for (const record of projection.replacements) {
       list.append(el('li', `database-replacement-record outcome-${record.outcome}`, databaseReplacementRecordLine(record, instant)));
     }
-    records.replaceChildren(
-      el('summary', undefined, databaseReplacementRecordsLabel(projection.replacements.length, projection.total)),
-      projection.total === 0 ? el('p', 'field-note', DATABASE_REPLACEMENT_NO_RECORDS) : list,
-    );
+    intro.textContent = projection.total === 0 ? `${DATABASE_IMPORT_LEDE.replace(/。$/u, '')}；${DATABASE_REPLACEMENT_NO_RECORDS}` : DATABASE_IMPORT_LEDE;
+    records.hidden = projection.total === 0;
+    records.replaceChildren(el('summary', undefined, databaseReplacementRecordsLabel(projection.replacements.length, projection.total)), ...(projection.total === 0 ? [] : [list]));
   };
 
   const showPreview = (file: DatabaseImportPreviewProjection): void => {
