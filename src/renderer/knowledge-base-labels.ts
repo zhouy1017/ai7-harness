@@ -303,7 +303,7 @@ export const LIBRARY_ATTRIBUTE = '定归属…';
 export const LIBRARY_ATTRIBUTE_CONFIRM = '确定归属';
 export const LIBRARY_ELIGIBILITY = '定学习准入…';
 export const LIBRARY_ELIGIBILITY_CONFIRM = '记录决定';
-export const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
+export const LIBRARY_EMPTY = '资料库暂无资料；放入后默认归属当前图书或本社，可供任务参考。';
 export const LIBRARY_TITLE_LABEL = '标题';
 export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '归属';
@@ -369,12 +369,12 @@ export function libraryPreviewHeading(preview: Pick<LibraryMaterialPreviewProjec
 }
 
 export function libraryPreviewFacts(preview: Pick<LibraryMaterialPreviewProjection, 'source'>): string {
-  return `${LIBRARY_FORMAT_LABELS[preview.source.format]} · ${libraryBytes(preview.source.bytes)} · 原件原样保存在本机，不会改动`;
+  return `${LIBRARY_FORMAT_LABELS[preview.source.format]}${technicalWords(` · ${libraryBytes(preview.source.bytes)}`)} · 原文件保持不变`;
 }
 
 /** What arrived, how big it is, and when. */
 export function librarySourceLine(material: Pick<LibraryMaterialProjection, 'source' | 'recordedAt'>, instant: (iso: string) => string): string {
-  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]} · ${libraryBytes(material.source.bytes)} · 放入于 ${instant(material.recordedAt)}`;
+  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]}${technicalWords(` · ${libraryBytes(material.source.bytes)}`)} · 放入于 ${instant(material.recordedAt)}`;
 }
 
 /** One Learning Eligibility choice as the chooser offers it and the card states it (LEARN-004 to LEARN-006). */
@@ -462,7 +462,7 @@ export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖�
 export const MATERIAL_VECTORS_BUILD = '构建相似索引';
 export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
 export const MATERIAL_VECTORS_SEARCH = '检索';
-export const MATERIAL_VECTORS_SEARCH_NOTE = '在本机按已建的相似索引找出与这段文字相近的段落；结果只是线索，原文以分段为准。';
+export const MATERIAL_VECTORS_SEARCH_NOTE = '本机相似搜索仅供参考，原文以分段为准。';
 export const MATERIAL_VECTORS_SEARCH_FAILED = '暂时无法检索，请重试。';
 export const MATERIAL_VECTORS_BUILD_FAILED = '暂时无法构建相似索引，请重试。';
 /** 生成来源译文 (Issue #892): a non-Chinese item's machine translation, asked for under the selected policy's rule. */
@@ -471,7 +471,7 @@ export const MATERIAL_TRANSLATION_FAILED = '暂时无法生成来源译文，请
 /** What a translation shown beside its paragraph is called: the machine's, never the original. */
 export const MATERIAL_TRANSLATION_TERM = '来源译文';
 /** What the index is and is not, said once on the card (KB-009). */
-export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立：它不授予任务读取范围；任务只读计划列进「允许参考」的资料，发送什么仍由任务计划决定。';
+export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立，任务的读取和发送范围以计划为准。';
 export const MATERIAL_SEGMENTS_OPEN = '查看分段';
 export const MATERIAL_SEGMENTS_CLOSE = '收起分段';
 export const MATERIAL_SEGMENTS_PREVIOUS = '上一页';

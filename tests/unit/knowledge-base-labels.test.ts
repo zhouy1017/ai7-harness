@@ -187,7 +187,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect([libraryBytes(512), libraryBytes(29_550), libraryBytes(5 * 1024 * 1024), libraryBytes(3 * 1024 * 1024 * 1024)])
       .toEqual(['512 字节', '28.9 KB', '5.0 MB', '3.00 GB']);
     expect(libraryPreviewHeading({ source })).toBe('放入资料库：sample1.docx');
-    expect(libraryPreviewFacts({ source })).toBe('Word · 28.9 KB · 原件原样保存在本机，不会改动');
+    expect(libraryPreviewFacts({ source })).toBe('Word · 28.9 KB · 原文件保持不变');
     const pending: LibraryMaterialProjection = {
       materialId: 'm', title: '样书一', kind: 'book', source, recordedAt: '2026-09-25T01:00:00.000Z', digest: 'b'.repeat(64),
       attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisionCount: 0, decisions: [],

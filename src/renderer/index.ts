@@ -1356,14 +1356,12 @@ function appendRecoveryReturnAction(content: HTMLElement, context: RecoveryRetur
 }
 
 /**
- * The one transient notice an entry shows (V2-UX-COPY-015). It names where the manuscript opened and
- * it is the only place a `nearest-anchor` resolution is spoken: a position whose block the current
- * Revision no longer holds is said to have moved, never presented as the position the editor left.
+ * The transient notice names a fallback when the saved position no longer exists (V2-UX-COPY-015).
  */
 function manuscriptEntryNotice(anchor: BookManuscriptAnchorProjection): string {
   if (anchor.entry === null) return '从稿件开头打开；这本图书还没有记录上次位置。';
   if (anchor.entry.state === 'nearest-anchor') {
-    return `上次位置所在的段落已不在当前修订版，已回到最近的位置 · ${anchor.entry.label}`;
+    return '上次位置所在的段落已不在稿件中，已回到最近的位置。';
   }
   return '回到上次位置。';
 }

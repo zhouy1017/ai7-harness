@@ -253,7 +253,7 @@ async function readKnowledge(renderer, predicate, name) {
 // book, handed to 放入资料… through the picker control of the relaunched window.
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const LIBRARY_TITLE = '样书一';
-const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
+const LIBRARY_EMPTY = '资料库暂无资料；放入后默认归属当前图书或本社，可供任务参考。';
 /** 资料库 as an editor reads it: the arrival form, and each item's words, decisions and open choice. */
 const READ_LIBRARY = `(() => {
   const root = document.querySelector('[data-screen="knowledge-base"] .library-materials');
@@ -740,7 +740,7 @@ async function main() {
     await clickSelector(renderer, '[data-library-action="add"]', 'library-add');
     const libraryPreview = await readLibrary(renderer, (page) => page.preview !== null, 'library-preview');
     requireJourney(libraryPreview.preview.heading === '放入资料库：sample1.docx' &&
-      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原件原样保存在本机，不会改动` && libraryPreview.preview.title === 'sample1' &&
+      libraryPreview.preview.facts === `Word · ${(sample1.length / 1024).toFixed(1)} KB · 原文件保持不变` && libraryPreview.preview.title === 'sample1' &&
       JSON.stringify(libraryPreview.preview.kinds) === JSON.stringify([['book', false], ['paper', false], ['document', false], ['web', false]]) &&
       libraryPreview.preview.confirmDisabled === true, 'library-preview-words', libraryPreview.preview);
     await waitFor(renderer, `document.activeElement === document.querySelector('.library-preview h3')`, 'library-preview-focused', 10_000);
