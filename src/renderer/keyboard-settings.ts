@@ -239,9 +239,8 @@ export function mountKeyboardSettings(options: MountKeyboardSettingsOptions): ()
       const label = el('kbd');
       label.dataset['shortcutCommand'] = command.id;
       label.dataset['shortcutText'] = 'true';
-      label.textContent = shortcutLabel(command.id) ?? '';
+      label.textContent = `${shortcutLabel(command.id) ?? ''}${isCustomized(command.id, bindings, platform) ? ` · ${KEYBOARD_CUSTOM_MARK}` : ''}`;
       chord.append(label);
-      if (isCustomized(command.id, bindings, platform)) chord.append(el('span', 'field-note keyboard-custom', ` ${KEYBOARD_CUSTOM_MARK}`));
       const actions = el('td');
       const change = el('button', 'secondary', KEYBOARD_CHANGE);
       change.type = 'button';

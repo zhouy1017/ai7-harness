@@ -114,8 +114,12 @@ export function renderDocumentLens(
       list.append(item);
     }
     versions.replaceChildren(versionsHeading, list);
-    if (shown.versionsTruncated) versions.append(el('p', 'field-note', DOCUMENT_VERSIONS_TRUNCATED));
-    if (standing.changedSinceVersion) versions.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+    if (shown.versionsTruncated || standing.changedSinceVersion) {
+      const status = el('p', 'field-note');
+      if (shown.versionsTruncated) status.append(standing.changedSinceVersion ? DOCUMENT_VERSIONS_TRUNCATED.replace(/。$/u, '') : DOCUMENT_VERSIONS_TRUNCATED);
+      if (standing.changedSinceVersion) status.append(...(shown.versionsTruncated ? ['；'] : []), el('span', 'document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+      versions.append(status);
+    }
     if (shown.deliveries.length > 0) {
       versions.append(el('h4', undefined, DOCUMENT_DELIVERIES_HEADING));
       const deliveries = el('ol', 'document-lens-deliveries');
