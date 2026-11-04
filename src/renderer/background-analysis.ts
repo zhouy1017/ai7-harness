@@ -252,17 +252,15 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
         item.dataset['taskIntentId'] = run.taskIntentId;
         list.append(item);
       }
-      nodes.push(el('h4', undefined, BACKGROUND_STARTED_HEADING), list);
-      if (projection.startedRunCount > projection.startedRuns.length) {
-        nodes.push(el('p', 'field-note', backgroundStartedMoreLine(projection.startedRunCount - projection.startedRuns.length)));
-      }
+      const older = projection.startedRunCount - projection.startedRuns.length;
+      nodes.push(el('h4', undefined, `${BACKGROUND_STARTED_HEADING}${older > 0 ? ` · ${backgroundStartedMoreLine(older)}` : ''}`), list);
     }
     if (projection.history.length > 0) {
       const details = el('details', 'background-analysis-history');
       details.dataset['backgroundDetails'] = 'history';
       const list = el('ol');
       for (const entry of projection.history) list.append(el('li', undefined, backgroundHistoryLine(entry, localInstantLabel)));
-      details.append(el('summary', undefined, `${BACKGROUND_HISTORY_SUMMARY}（${projection.historyCount}）`), list);
+      details.append(el('summary', undefined, `${BACKGROUND_HISTORY_SUMMARY} · ${projection.historyCount}`), list);
       nodes.push(details);
     }
     const actions = el('div', 'button-row background-analysis-actions');
