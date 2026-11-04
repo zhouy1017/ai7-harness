@@ -4287,7 +4287,7 @@ function renderAppearance(): void {
       });
     });
     radios.push(input);
-    label.append(input, element('strong', undefined, choice.label), element('span', 'field-note', choice.description));
+    label.append(input, element('strong', undefined, choice.label));
     choices.append(label);
   }
   const unsubscribe = appearance.subscribe(() => { for (const radio of radios) radio.checked = radio.value === appearance.preference; });

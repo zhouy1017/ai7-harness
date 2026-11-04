@@ -259,8 +259,9 @@ export function evaluationMaterialsField(
   if (sending !== null) fieldset.append(el('p', 'field-note evaluation-material-send', sending));
   const frozen = page.materialReferences?.[kind] ?? [];
   if (frozen.length > 0) {
-    fieldset.append(el('p', 'field-note', '这份计划允许参考：'));
-    for (const line of frozen) fieldset.append(el('p', 'field-note evaluation-material-pin', line));
+    const list = el('ul', 'evaluation-material-pins');
+    for (const line of frozen) list.append(el('li', 'evaluation-material-pin', line));
+    fieldset.append(el('strong', undefined, '这份计划允许参考：'), list);
   }
   return fieldset;
 }

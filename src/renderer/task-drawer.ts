@@ -2481,10 +2481,11 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       });
       const text = el('span', 'task-plan-choice-text');
       text.append(el('span', 'task-plan-choice-label', option.label));
-      if (option.recommended !== null) {
-        text.append(el('span', 'task-plan-choice-recommended', TASK_PLAN_CLARIFICATION_RECOMMENDED), el('small', 'field-note task-plan-choice-why', option.recommended));
-      }
-      text.append(el('small', 'field-note task-plan-choice-consequence', option.consequence));
+      if (option.recommended !== null) text.append(el('span', 'task-plan-choice-recommended', TASK_PLAN_CLARIFICATION_RECOMMENDED));
+      const explanation = el('small', 'field-note');
+      if (option.recommended !== null) explanation.append(el('span', 'task-plan-choice-why', option.recommended.replace(/。$/u, '')), '；');
+      explanation.append(el('span', 'task-plan-choice-consequence', option.consequence));
+      text.append(explanation);
       choice.append(input, text);
       choices.append(choice);
     }
@@ -2498,8 +2499,10 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       clarificationDrafts.set(id, draft);
       repaintQuestions(draft.noteOpen ? `clarification-note:${id}` : `clarification-note-toggle:${id}`);
     });
-    const parts: HTMLElement[] = [heading, scope, choices, el('p', 'field-note task-plan-clarification-why', card.why),
-      el('p', 'field-note task-plan-clarification-detail', card.detail), noteToggle];
+    const explanation = el('p', 'field-note');
+    explanation.append(el('span', 'task-plan-clarification-why', card.why.replace(/。$/u, '')), '；',
+      el('span', 'task-plan-clarification-detail', card.detail));
+    const parts: HTMLElement[] = [heading, scope, choices, explanation, noteToggle];
     if (draft.noteOpen) {
       // The note is IME-safe: Enter writes into it and nothing is submitted but by 提交回答.
       const note = document.createElement('textarea');
