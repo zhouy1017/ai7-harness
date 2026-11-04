@@ -302,7 +302,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const section = el('section', 'library-preview');
     const heading = el('h3', undefined, libraryPreviewHeading(shown));
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note library-preview-facts', libraryPreviewFacts(shown)));
+    heading.append(' · ', el('span', 'library-preview-facts', libraryPreviewFacts(shown)));
+    section.append(heading);
     const confirm = action(LIBRARY_ADD_CONFIRM, 'primary', 'confirm-add', () => void commit());
     const cancel = action(LIBRARY_CANCEL, 'quiet', 'cancel-add', () => {
       preview = null;
@@ -387,7 +388,8 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const title = el('h3', undefined, material.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
-    node.append(heading, el('p', 'field-note library-source', librarySourceLine(material, localInstantLabel)));
+    heading.append(el('span', 'library-source', ` · ${librarySourceLine(material, localInstantLabel)}`));
+    node.append(heading);
     const facts = el('dl', 'library-facts');
     facts.append(
       el('dt', undefined, LIBRARY_ATTRIBUTION_TERM), el('dd', 'library-attribution', libraryAttributionLine(material)),
@@ -410,12 +412,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       eligibility.disabled = busy || preview !== null || chooser !== null || material.attribution === null;
       row.append(attribute, eligibility);
       node.append(row);
-      if (material.attribution === null) {
-        const note = el('p', 'field-note library-needs-attribution', LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION);
-        note.id = `library-needs-${material.materialId}`;
-        eligibility.setAttribute('aria-describedby', note.id);
-        node.append(note);
-      }
+      if (material.attribution === null) eligibility.textContent = `${LIBRARY_ELIGIBILITY} · ${LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION}`;
     }
     // Every decision on record, oldest first, and the exact identities one step below.
     const history = el('details', 'library-decisions');

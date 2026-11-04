@@ -209,8 +209,9 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     for (const [key, { label, entries }] of orderedGroups) {
       const section = el('section', groupBy === 'book' ? 'feedback-group feedback-book' : 'feedback-group');
       if (groupBy === 'book') section.dataset['bookId'] = key;
-      section.append(el('h3', undefined, `${label} · ${entries.length} 条`));
-      if (groupBy === 'book') section.append(el('p', 'field-note feedback-people', learningPeopleLine(projection.books.find((book) => book.bookId === key)!)));
+      const heading = el('h3', undefined, `${label} · ${entries.length} 条`);
+      if (groupBy === 'book') heading.append(' · ', el('span', 'feedback-people', learningPeopleLine(projection.books.find((book) => book.bookId === key)!)));
+      section.append(heading);
       const list = el('ul', 'feedback-entries');
       for (const entry of entries) {
         const book = projection.books.find((candidate) => candidate.bookId === entry.bookId)!;
@@ -220,16 +221,14 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
         item.dataset['feedbackOrigin'] = entry.origin;
         item.dataset['reasonState'] = entry.reasonState;
         item.dataset['peopleVersion'] = String(entry.peopleVersion);
-        item.append(
-          el('p', 'feedback-entry-line', feedbackEntryLine(entry)),
-          el('p', 'feedback-entry-reason', feedbackReasonLine(entry)),
-          el('p', 'field-note feedback-entry-time', `记录于 ${localInstantLabel(entry.recordedAt)}`),
-        );
+        const line = el('p', 'feedback-entry-line', feedbackEntryLine(entry));
+        line.append(' · ', el('span', 'feedback-entry-time', `记录于 ${localInstantLabel(entry.recordedAt)}`));
         const people = peopleOf(entry);
-        if (groupBy !== 'book') item.prepend(el('p', 'field-note feedback-entry-book', `《${book.title}》 · ${learningPeopleLine(people ?? book)}`));
-        if (people !== null && learningPeopleLine(people) !== now) item.append(el('p', 'field-note feedback-entry-people', feedbackAttributionLine(people)));
+        if (groupBy !== 'book') line.prepend(el('span', 'feedback-entry-book', `《${book.title}》 · ${learningPeopleLine(people ?? book)} · `));
+        if (people !== null && learningPeopleLine(people) !== now) line.append(' · ', el('span', 'feedback-entry-people', feedbackAttributionLine(people)));
+        item.append(line, el('p', 'feedback-entry-reason', feedbackReasonLine(entry)));
         if (entry.target.kind === 'mark' && entry.target.detached) {
-          item.append(el('p', 'field-note feedback-entry-detached', FEEDBACK_HISTORY_DETACHED));
+          line.append(' · ', el('span', 'feedback-entry-detached', FEEDBACK_HISTORY_DETACHED));
         } else {
           const go = el('button', 'button quiet', FEEDBACK_HISTORY_OPEN);
           go.type = 'button';
