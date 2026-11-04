@@ -68,12 +68,12 @@ export function backgroundCeilingLine(enrollment: NonNullable<BackgroundAnalysis
   if (enrollment.ceilingTokens === null || enrollment.shareTokens === null) return `范围：${enrollment.scope.label} · 这份登记没有预算上限`;
   return enrollment.scope.kind === 'book'
     ? `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens`
-    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens（第 ${enrollment.scope.position} 本）`;
+    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens · 第 ${enrollment.scope.position} 本`;
 }
 
 /** The Books of a Series or all-Books scope the dispatcher's latest look skipped: `这次跳过：《甲》（…）；《丙》（…）`. */
 export function backgroundSkippedLine(skipped: BackgroundAnalysisEnrollmentProjection['skipped']): string {
-  return `这次跳过：${skipped.map((entry) => `《${entry.title}》（${entry.reason}）`).join('；')}`;
+  return `这次跳过：${skipped.map((entry) => `《${entry.title}》：${entry.reason.replace(/。$/u, '')}`).join('；')}。`;
 }
 
 /**
@@ -121,7 +121,7 @@ export function backgroundLookLine(look: NonNullable<BackgroundAnalysisEnrollmen
 
 /** Why the latest pass that began preparing did not start: the plan it may have left is the Enrollment's, never the editor's. */
 export function backgroundNotStartedLine(note: NonNullable<BackgroundAnalysisEnrollmentProjection['lastNotStarted']>, instant: (value: string) => string): string {
-  return `${note.reason}（${instant(note.at)}）`;
+  return `${note.reason.replace(/。$/u, '')} · ${instant(note.at)}`;
 }
 
 /** ②A's card beside a plan the Enrollment prepared and did not start (#713 review, P2-2). */

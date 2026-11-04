@@ -213,29 +213,33 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       line.dataset['enrollmentVersionId'] = projection.enrollment.enrollmentVersionId;
       nodes.push(line);
       // What it covers and the ceiling each Run is held to (Issue #864).
-      const ceiling = el('p', 'field-note background-analysis-ceiling', backgroundCeilingLine(projection.enrollment));
+      const ceiling = el('span', 'background-analysis-ceiling', backgroundCeilingLine(projection.enrollment));
       ceiling.dataset['ceilingTokens'] = String(projection.enrollment.ceilingTokens ?? '');
       ceiling.dataset['shareTokens'] = String(projection.enrollment.shareTokens ?? '');
       ceiling.dataset['scopeKind'] = projection.enrollment.scope.kind;
-      nodes.push(ceiling);
+      line.append(' · ', ceiling);
       const binds = el('details', 'background-analysis-binds');
       binds.dataset['backgroundDetails'] = 'binds';
       binds.append(el('summary', undefined, BACKGROUND_BINDS_SUMMARY), rows(projection.enrollment.binds));
       nodes.push(binds);
     }
-    if (projection.skipped.length > 0) {
-      const skipped = el('p', 'field-note background-analysis-skipped', backgroundSkippedLine(projection.skipped));
-      skipped.dataset['skippedBooks'] = projection.skipped.map((entry) => entry.bookId).join(',');
-      nodes.push(skipped);
+    if (projection.skipped.length > 0 || projection.lastNotStarted !== null) {
+      const status = el('p', 'field-note');
+      if (projection.skipped.length > 0) {
+        const skipped = el('span', 'background-analysis-skipped', projection.lastNotStarted === null ? backgroundSkippedLine(projection.skipped) : backgroundSkippedLine(projection.skipped).replace(/。$/u, ''));
+        skipped.dataset['skippedBooks'] = projection.skipped.map((entry) => entry.bookId).join(',');
+        status.append(skipped);
+      }
+      if (projection.lastNotStarted !== null) {
+        if (projection.skipped.length > 0) status.append(' · ');
+        status.append(el('span', 'background-analysis-not-started', backgroundNotStartedLine(projection.lastNotStarted, localInstantLabel)));
+      }
+      nodes.push(status);
     }
     if (projection.state !== 'none') {
       const words = backgroundNextLine(projection.next);
       if (nextNode.textContent !== words) nextNode.textContent = words;
       nodes.push(nextNode);
-    }
-    if (projection.lastNotStarted !== null) {
-      const notice = el('p', 'field-note background-analysis-not-started', backgroundNotStartedLine(projection.lastNotStarted, localInstantLabel));
-      nodes.push(notice);
     }
     if (projection.lastLook !== null) {
       patchLook(projection.lastLook);
@@ -295,10 +299,10 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
       open.disabled = !projection.offer.canEnroll;
       actions.append(open);
       if (!projection.offer.canEnroll && projection.offer.reason !== null) {
-        const reason = el('p', 'field-note background-analysis-unavailable', projection.offer.reason);
+        const reason = el('span', 'background-analysis-unavailable', projection.offer.reason);
         reason.id = 'background-analysis-unavailable';
         open.setAttribute('aria-describedby', reason.id);
-        actions.append(reason);
+        open.append(' · ', reason);
       }
     }
     onEscape(form, () => {
@@ -383,8 +387,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     preview.id = 'background-analysis-share';
     preview.setAttribute('aria-live', 'polite');
     ceilingInput.setAttribute('aria-describedby', preview.id);
-    ceilingLabel.append(el('span', undefined, BACKGROUND_CEILING_LABEL), ceilingInput);
-    const rule = el('p', 'field-note background-analysis-ceiling-rule', offer.ceilingRule);
+    ceilingLabel.append(el('span', undefined, `${BACKGROUND_CEILING_LABEL} · ${offer.ceilingRule}`), ceilingInput);
     const notGranted = el('ul', 'analysis-list background-analysis-not-granted');
     for (const entry of offer.notGranted) notGranted.append(el('li', undefined, entry));
     const fieldset = el('fieldset', 'background-analysis-starting-points');
@@ -449,7 +452,7 @@ export function mountBackgroundAnalysis(options: MountBackgroundAnalysisOptions)
     buttons.append(confirm, action(BACKGROUND_CANCEL, 'quiet', 'enroll-cancel', cancel));
     const section = el('section', 'background-analysis-disclosure');
     section.setAttribute('aria-labelledby', title.id);
-    section.append(title, what, scopes, ceilingLabel, rule, preview, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, hint, buttons);
+    section.append(title, what, scopes, ceilingLabel, preview, el('h5', undefined, BACKGROUND_NOT_GRANTED_LABEL), notGranted, fieldset, hint, buttons);
     return [section];
   };
 
