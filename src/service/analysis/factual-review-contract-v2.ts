@@ -105,7 +105,7 @@ export function parseFactualReviewUnitResultV2(
   expected: { unitOrdinal: number; blockCount: number },
 ): FactualUnitResultParse | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: FactualReviewUnitResultV2; canonicalJson: string; digest: string } {
   const reader = ModelResultReader.read(text, FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, expected.unitOrdinal);
-  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   const assertions: FactualUnitAssertionV2[] = [];
   const remap = new Map<number, number>();
   for (const [index, candidate] of reader.array(reader.value.assertions, 'assertions', MAX_ASSERTIONS).entries()) {

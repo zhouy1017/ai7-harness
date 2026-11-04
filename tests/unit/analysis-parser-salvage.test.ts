@@ -70,6 +70,7 @@ for (const entry of cases) describe(`${entry.name} per-entry salvage (#1311 H2)`
   it('fails only when nothing usable survives', () => {
     expect(read([entry.bad])).toMatchObject({ ok: false, detail: '模型回答无法读出任何可用条目' });
     expect(entry.parse('not json')).toMatchObject({ ok: false, code: 'not-json' });
+    expect(entry.parse('null')).toMatchObject({ ok: false, code: 'schema-invalid' });
   });
 });
 

@@ -281,7 +281,7 @@ export function parseAssuranceSamplingResult(
   expected: { readonly refs: ReadonlyArray<string> },
 ): AssuranceSamplingResultParse {
   const reader = ModelResultReader.read(text, ASSURANCE_SAMPLING_RESULT_SCHEMA);
-  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   const listed = new Set(expected.refs);
   const seen = new Set<string>();
   const dispositions: AssuranceSamplingDisposition[] = [];

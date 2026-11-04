@@ -115,7 +115,7 @@ export function parseUnitResult(
   expected: { unitOrdinal: number; blockIds: ReadonlyArray<string>; blockLengths?: ReadonlyMap<string, number> },
 ): UnitResultParse {
   const reader = ModelResultReader.read(text, BASELINE_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
-  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   const parsed = reader.value;
   const blockIds = new Set(expected.blockIds);
   const prose = (value: unknown, limit: number, section: string, index: number, optional = false) => reader.text(value, limit, section, index, optional);

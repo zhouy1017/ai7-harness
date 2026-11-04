@@ -201,7 +201,7 @@ export type CustomAnalysisUnitResultParse =
 /** Bad rows are excluded individually; exact quotations and real block ordinals remain required. */
 export function parseCustomAnalysisUnitResult(text: string, expected: { unitOrdinal: number; blockCount: number }): CustomAnalysisUnitResultParse {
   const reader = ModelResultReader.read(text, CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
-  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   const rows: CustomAnalysisUnitRow[] = [];
   for (const [index, candidate] of reader.array(reader.value.rows, 'rows', MAX_CUSTOM_ANALYSIS_ROWS_PER_UNIT).entries()) {
     if (!hasKeys(candidate, ['answer', 'blockOrdinal', 'quote']) || !boundedText(candidate.quote, MAX_CUSTOM_ANALYSIS_QUOTE_GRAPHEMES)) {

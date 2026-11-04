@@ -37,10 +37,7 @@ export function factualClaimVerificationPrompt(level: Exclude<EvidenceAssuranceL
 /** Validate each assertion before canonicalization; JSON.stringify safely transports untrusted surrogates. */
 export function parseFactualClaimExtraction(text: string, expected: { unitOrdinal: number; blockCount: number }) {
   const reader = ModelResultReader.read(text, FACTUAL_CLAIM_EXTRACTION_CONTRACT, expected.unitOrdinal);
-  if (reader === null) {
-    try { JSON.parse(text); return { ok: false as const, code: 'schema-invalid' as const, detail: NO_USABLE_MODEL_ENTRIES }; }
-    catch { return { ok: false as const, code: 'not-json' as const, detail: NO_USABLE_MODEL_ENTRIES }; }
-  }
+  if (reader === null) return ModelResultReader.failure(text);
   if (reader.value.assertions === undefined && !reader.empty('assertions')) {
     return { ok: false as const, code: 'schema-invalid' as const, detail: NO_USABLE_MODEL_ENTRIES };
   }
@@ -60,7 +57,7 @@ export interface FactualClaimVerificationResult extends SalvagedModelResult {
 /** Evidence keeps v2's bounds; identity and assertion text come solely from the frozen claim. */
 export function parseFactualClaimVerification(text: string, claim: { readonly claimId: string; readonly assertion: FactualUnitAssertion }) {
   const reader = ModelResultReader.read(text, FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA);
-  if (reader === null) return { ok: false as const, code: 'not-json' as const, detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   if (reader.value.claimId !== claim.claimId) reader.drop('claimId', -1, 'request-claimId');
   const evidenceRelations = parseFactualEvidenceRelations(reader.value.evidenceRelations, reader, 'evidenceRelations', true);
   const corrections = parseFactualCorrectionVariants(reader.value.corrections, reader, 'corrections');

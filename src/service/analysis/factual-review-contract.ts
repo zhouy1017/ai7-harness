@@ -140,7 +140,7 @@ export function parseFactualReviewUnitResult(
   expected: { unitOrdinal: number; blockCount: number },
 ): FactualUnitResultParse {
   const reader = ModelResultReader.read(text, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
-  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   const assertions = reader.array(reader.value.assertions, 'assertions', MAX_ASSERTIONS).flatMap((candidate, index) => {
     const assertion = parseFactualAssertion(candidate, expected, reader, index);
     return assertion === null ? [] : [assertion];

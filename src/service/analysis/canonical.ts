@@ -182,6 +182,12 @@ export class ModelResultReader {
   readonly salvaged: ModelResultSalvage[] = [];
   private constructor(readonly value: Record<string, unknown>, readonly partial: boolean, readonly schema: string) {}
 
+  static failure(text: string): { ok: false; code: 'not-json' | 'schema-invalid'; detail: string } {
+    let code: 'not-json' | 'schema-invalid' = 'not-json';
+    try { JSON.parse(stripModelJsonFence(text)); code = 'schema-invalid'; } catch { /* No readable JSON. */ }
+    return { ok: false, code, detail: NO_USABLE_MODEL_ENTRIES };
+  }
+
   static read(text: string, schema: string, unitOrdinal?: number): ModelResultReader | null {
     const complete = extractModelJson(text);
     const value = complete ?? extractModelJson(text, { partial: true });

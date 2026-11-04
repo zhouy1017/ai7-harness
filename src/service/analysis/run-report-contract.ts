@@ -128,7 +128,7 @@ export function runReportReflectionRequestDigest(promptContractDigest: string, a
  */
 export function parseRunReportReflectionResult(text: string): RunReportReflectionResultParse {
   const reader = ModelResultReader.read(text, RUN_REPORT_REFLECTION_RESULT_SCHEMA);
-  if (reader === null) return { ok: false, code: 'not-json', detail: NO_USABLE_MODEL_ENTRIES };
+  if (reader === null) return ModelResultReader.failure(text);
   const items: RunReportSuggestion[] = [];
   for (const [index, candidate] of reader.array(reader.value.items, 'items', MAX_RUN_REPORT_REFLECTION_ITEMS).entries()) {
     if (!hasKeys(candidate, ['suggestion'])) { reader.drop('items', index, 'entry-invalid'); continue; }
