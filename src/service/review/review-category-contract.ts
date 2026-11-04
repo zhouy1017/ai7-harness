@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, boundedText, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import {
   EDITORIAL_REVIEW_CONTRACT_VERSION,
   REVIEW_FINDING_SEVERITIES,
@@ -10,7 +11,6 @@ import {
   type ReviewCrossChapterResult,
 } from '../../shared/protocol.js';
 export type { ReviewCrossChapterResult } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 import type { ReviewDeliverableParticipant } from '../production-documents.js';
@@ -138,9 +138,9 @@ export function reviewUnitFixtureDigest(text: string): string | null {
 
 /** Invalid siblings remain visible; only service-authored evidence references can become anchors. */
 export function parseReviewCrossChapterResult(text: string, input: ReviewCrossChapterInput, clauseIds: readonly string[]):
-  { ok: true; result: ReviewCrossChapterResult } | { ok: false; code: string; detail: string } {
+  { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReviewCrossChapterResult } | { ok: false; code: string; detail: string } {
   let value: unknown;
-  try { value = JSON.parse(text.replace(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u, '$1')) as unknown; }
+  try { value = JSON.parse(stripModelJsonFence(text)) as unknown; }
   catch { return { ok: false, code: 'not-json', detail: '跨章结果不是 JSON。' }; }
   if (!isRecord(value) || !hasExactKeys(value, ['schema', 'findings']) || value.schema !== REVIEW_CROSS_CHAPTER_RESULT_SCHEMA || !Array.isArray(value.findings) || value.findings.length > 80) {
     return { ok: false, code: 'schema-invalid', detail: '跨章结果的结构或数量不符合契约。' };
@@ -174,7 +174,7 @@ export interface ReviewUnitFinding {
   readonly clauseId?: string;
 }
 
-export interface ReviewCategoryUnitResult {
+export interface ReviewCategoryUnitResult extends SalvagedModelResult {
   readonly schema: typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA | typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1;
   readonly unitOrdinal: number;
   readonly findings: ReadonlyArray<ReviewUnitFinding>;
@@ -207,7 +207,7 @@ export type ReviewCategoryUnitResultParseFailureCode =
   | 'clause-unknown';
 
 export type ReviewCategoryUnitResultParse =
-  | { ok: true; result: ReviewCategoryUnitResult; canonicalJson: string; digest: string; accepted?: ReadonlyArray<ReviewUnitFinding>; rejected?: ReadonlyArray<RejectedReviewFinding> }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReviewCategoryUnitResult; canonicalJson: string; digest: string; accepted?: ReadonlyArray<ReviewUnitFinding>; rejected?: ReadonlyArray<RejectedReviewFinding> }
   | { ok: false; code: ReviewCategoryUnitResultParseFailureCode; detail: string };
 
 function boundedLine(value: unknown, maximumGraphemes: number): value is string {
@@ -215,9 +215,6 @@ function boundedLine(value: unknown, maximumGraphemes: number): value is string 
     !CONTROL_CHARACTER.test(value) && graphemeCount(value) <= maximumGraphemes;
 }
 
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
-}
 
 /**
  * The category exactly as the contract freezes it: every key checked, nothing carried that is not
@@ -356,8 +353,7 @@ function parseReviewCategoryUnitResultV1(
   text: string,
   expected: { unitOrdinal: number; blockCount: number; output: ReviewCategoryOutputKind; clauseIds: ReadonlyArray<string>; deliverableRefs?: readonly string[] },
 ): ReviewCategoryUnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;
@@ -442,7 +438,7 @@ export function parseReviewCategoryUnitResult(
   expected: Parameters<typeof parseReviewCategoryUnitResultV1>[1] & { version?: 1 | 2 },
 ): ReviewCategoryUnitResultParse {
   if (expected.version === 1) return parseReviewCategoryUnitResultV1(text, expected);
-  const body = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try { parsed = JSON.parse(body) as unknown; } catch { return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' }; }
   if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'findings']) ||

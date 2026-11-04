@@ -271,9 +271,10 @@ function compileReviewCategory(input: ReviewCategoryContractInput, version: 1 | 
     },
     unitRecord: (result) => {
       const unit = result as ReviewCategoryUnitResult;
-      return { findings: unit.findings, ...(unit.rejected === undefined ? {} : { rejected: unit.rejected, acceptedIndexes: unit.acceptedIndexes }) };
+      return { ...(unit.salvaged === undefined ? {} : { salvaged: unit.salvaged }), findings: unit.findings, ...(unit.rejected === undefined ? {} : { rejected: unit.rejected, acceptedIndexes: unit.acceptedIndexes }) };
     },
     unitResultOfRecord: (record, unitOrdinal): ReviewCategoryUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<ReviewCategoryUnitResult['salvaged']> }),
       schema: contract.responseSchema,
       unitOrdinal,
       ...(record.rejected === undefined ? {} : { rejected: record.rejected as NonNullable<ReviewCategoryUnitResult['rejected']>, acceptedIndexes: record.acceptedIndexes as number[] }),

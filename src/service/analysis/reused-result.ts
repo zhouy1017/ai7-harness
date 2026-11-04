@@ -40,6 +40,7 @@ export function remapReusedResult(
     conflicts: result.conflicts.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
     unresolved: result.unresolved.map((note) => ({ ...note, sourceRanges: ranges(note.sourceRanges) })),
     confidence: result.confidence,
+    ...(result.salvaged === undefined ? {} : { salvaged: result.salvaged }),
   };
 }
 

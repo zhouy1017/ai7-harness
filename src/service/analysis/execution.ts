@@ -63,7 +63,7 @@ import {
   parseAssuranceSamplingResult,
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
-import { canonicalRecord, sha256Hex } from './canonical.js';
+import { canonicalRecord, isRecord, sha256Hex } from './canonical.js';
 import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type AnalysisRequestIdentity, type BaselineAnalysisStore, type CarriedStages, type StageContinuation, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
@@ -468,11 +468,26 @@ export function emptyAnswerGapReason(reasoningPresent: boolean): string {
  * The reading for an answer that came back and did not parse. `answerText` is taken only to be
  * measured: its length is the whole of what an editor learns about it, because the answer is model
  * output over manuscript content and no part of it may reach a gap reason, a log, or a report.
- * Characters are counted as code points — `src/service/analysis/` exports no grapheme counter, and
- * UTF-16 units would report a number no reader could recognize as a count of characters.
+ * Counts retain the existing code-point reading. Parser codes/details stay in technical results;
+ * the editor sees the reason in ordinary language, without a contract version or field names.
  */
-export function unparsableAnswerGapReason(code: string, detail: string, answerText: string): string {
-  return `单元结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的单元结果。重新分析本单元可能有帮助。`;
+function modelResultGapReason(code: string): string {
+  switch (code) {
+    case 'not-json': return '模型回答无法读出任何可用条目。';
+    case 'unit-mismatch': return '模型回答对应的阅读范围与本次请求不一致。';
+    case 'range-out-of-unit':
+    case 'block-out-of-unit':
+    case 'unit-out-of-set': return '模型回答引用了本次阅读范围之外的内容。';
+    case 'quote-not-in-block': return '模型回答的引文无法对应到指定原文。';
+    case 'ref-out-of-sample': return '模型回答判定了本次抽检之外的发现。';
+    case 'disposition-missing': return '模型回答遗漏了需要判定的发现。';
+    case 'schema-invalid': return '模型回答的条目缺少必要内容或格式无法识别。';
+    default: return '模型回答中的条目未能通过检查。';
+  }
+}
+
+export function unparsableAnswerGapReason(code: string, _detail: string, answerText: string): string {
+  return `${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。重新分析本单元可能有帮助。`;
 }
 
 /**
@@ -486,8 +501,8 @@ export function crossUnitEmptyAnswerGapReason(reasoningPresent: boolean): string
     : '跨单元归纳未闭合：模型的答案通道与推理通道都为空。各单元结果不受影响；如反复出现，请检查模型服务状态。';
 }
 
-export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode | string, detail: string, answerText: string): string {
-  return `跨单元归纳结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的跨单元结果。各单元结果不受影响。`;
+export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode | string, _detail: string, answerText: string): string {
+  return `跨单元归纳未完成：${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。各单元结果不受影响。`;
 }
 
 /**
@@ -506,8 +521,8 @@ export function assuranceSamplingEmptyAnswerGapReason(reasoningPresent: boolean)
     : '模型的答案通道与推理通道都为空。';
 }
 
-export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSamplingParseFailureCode, detail: string, answerText: string): string {
-  return `判定结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的判定结果。`;
+export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSamplingParseFailureCode, _detail: string, answerText: string): string {
+  return `抽检判定未完成：${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。`;
 }
 
 /**
@@ -2330,7 +2345,7 @@ export class BaselineAnalysisExecutionOwner {
       let spanOrdinal = stored?.spanCount ?? 0;
       let adaptationOrdinal = priorAdaptations.length;
       const contractRule = liveKindRule(policy, definition.kind, [], facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
-      const contractDeclared = definition.factualClaims === undefined && definition.contractIdentity?.version === 2 &&
+      const contractDeclared =
         (ledger.frozenPlan(facts.taskIntentId, facts.planEnvelopeDigest).components['plan-envelope'] as { boundary?: { adaptable?: ReadonlyArray<{ adaptationClass: string }> } })
           .boundary?.adaptable?.some((entry) => entry.adaptationClass === 'contract-retry') === true;
       const contractAllowed = live === null || contractRule?.plusDeclaredContractRetryAdaptations === true;
@@ -2605,6 +2620,9 @@ export class BaselineAnalysisExecutionOwner {
           }
           const parsed = definition.parseUnitResult(validated.text, unit);
           if (parsed.ok) {
+            if (parsed.salvaged !== undefined && isRecord(parsed.result)) {
+              parsed.result.salvaged = parsed.salvaged;
+            }
             markRetrievalResult(parsed.result, validated.rejected);
             // Factual Review Contract v2 (Issue #901): each in-Book relation's excerpt is sought by Exact Fetch now, while the
             // Run's retrieval index is open; one it does not find stays a candidate (EVID-004, EVID-005).
@@ -3037,7 +3055,7 @@ export class BaselineAnalysisExecutionOwner {
             attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate' &&
             contractCandidate.text.trim().length > 0 && attempt.canonical?.kind !== 'empty-answer' &&
             parseModelClarification(contractCandidate.text) === null && contractParsed?.ok === false &&
-            (contractParsed.code === 'not-json' || contractParsed.code === 'schema-invalid') &&
+            contractParsed.code === 'not-json' &&
             !active.cancelRequested && !active.pauseRequested && !active.interrupted && liveInterruption === null && !scopeChanged() && ceilingState() !== 'reached') {
           const message = unitMessages.get(unit.ordinal)!;
           if (attempt.unitMessageDigest !== sha256Hex(message)) throw new ExecutionAdmissionError('CONTRACT_RETRY_MESSAGE_DRIFT', '契约重试的单元消息与首次请求不同。');
@@ -3480,7 +3498,8 @@ export class BaselineAnalysisExecutionOwner {
                 citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
               });
               crossUnit = parsed.ok
-                ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage }
+                ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage,
+                    ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }
                 : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text));
             }
           } else if (turn.terminal === 'completed') {
@@ -4097,10 +4116,10 @@ export function runReportReflectionEmptyAnswerGapReason(reasoningPresent: boolea
 
 export function unparsableRunReportReflectionAnswerGapReason(
   code: RunReportReflectionParseFailureCode,
-  detail: string,
+  _detail: string,
   answerText: string,
 ): string {
-  return `运行反思结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的反思结果。本次运行的结果集修订版不受影响。`;
+  return `运行反思未完成：${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。本次运行的结果集修订版不受影响。`;
 }
 
 /** Exactly what the reflection suboperation may read or move; no finding and no block is among them. */

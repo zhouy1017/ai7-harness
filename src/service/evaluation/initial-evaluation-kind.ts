@@ -174,8 +174,9 @@ export function initialEvaluationKindDefinition(profile: InitialEvaluationProfil
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ observations: (result as InitialEvaluationUnitResult).observations }),
+    unitRecord: (result) => ({ observations: (result as InitialEvaluationUnitResult).observations, ...((result as InitialEvaluationUnitResult).salvaged === undefined ? {} : { salvaged: (result as InitialEvaluationUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): InitialEvaluationUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<InitialEvaluationUnitResult['salvaged']> }),
       schema: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       observations: record.observations as InitialEvaluationUnitResult['observations'],

@@ -80,3 +80,96 @@ export function hasExactKeys(value: Record<string, unknown>, keys: readonly stri
   const expected = [...keys].sort();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
+
+/** Model fields are an open set; optional names document the caller's contract, not a whitelist. */
+export function hasKeys(value: unknown, required: readonly string[], _optional: readonly string[] = []): value is Record<string, unknown> {
+  return isRecord(value) && required.every((key) => Object.hasOwn(value, key));
+}
+
+export type { ModelResultSalvage, SalvagedModelResult } from '../../shared/protocol/analysis.js';
+
+export const CONFIDENCE_LEVELS = ['high', 'medium', 'low'] as const;
+const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+
+export function graphemeCount(text: string): number {
+  let count = 0;
+  for (const _segment of GRAPHEMES.segment(text)) count += 1;
+  return count;
+}
+
+/** Validate without changing quotations or anchors. Normalized prose uses normalizeLine instead. */
+export function boundedText(value: unknown, maximumGraphemes: number, allowEmpty = false): value is string {
+  return typeof value === 'string' && value.isWellFormed() && (allowEmpty || value.trim().length > 0) &&
+    graphemeCount(value) <= maximumGraphemes;
+}
+
+/** NFC, folded whitespace and optional whole-grapheme clipping for descriptive model prose. */
+export function normalizeLine(text: string, maximumGraphemes = Infinity): string {
+  const normalized = text.normalize('NFC').replace(/\s+/gu, ' ').trim();
+  let result = '';
+  let count = 0;
+  for (const { segment } of GRAPHEMES.segment(normalized)) {
+    if (count >= maximumGraphemes) break;
+    result += segment;
+    count += 1;
+  }
+  return result.trimEnd();
+}
+
+/** Compatibility extraction for parsers not yet migrated to extractModelJson. */
+export function stripModelJsonFence(text: string): string {
+  return /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text;
+}
+
+/**
+ * Read the first JSON object among prose or fences, without interpreting braces inside strings.
+ * With partial enabled, retain only complete values from an unfinished object/array; never invent
+ * a string, number or missing field. Callers still validate every recovered entry against its scope.
+ */
+export function extractModelJson(text: string, { partial = false }: { partial?: boolean } = {}): Record<string, unknown> | null {
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    const stack: string[] = [];
+    const checkpoints: Array<{ end: number; suffix: string }> = [];
+    let quoted = false;
+    let escaped = false;
+    let balanced = false;
+    for (let at = start; at < text.length; at += 1) {
+      const char = text[at];
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') quoted = true;
+      else if (char === '{' || char === '[') {
+        stack.push(char === '{' ? '}' : ']');
+        // An empty array is useful even before its first item arrives.
+        if (char === '[' && stack.length === 2) checkpoints.push({ end: at + 1, suffix: [...stack].reverse().join('') });
+      } else if (char === '}' || char === ']') {
+        if (stack.pop() !== char) break;
+        if (stack.length === 0) {
+          balanced = true;
+          try {
+            const value: unknown = JSON.parse(text.slice(start, at + 1));
+            if (isRecord(value)) return value;
+          } catch { /* Explanatory braces are not a model object. */ }
+          start = at;
+          break;
+        }
+        if (stack.length === 1 || (stack.length === 2 && stack[1] === ']')) checkpoints.push({ end: at + 1, suffix: [...stack].reverse().join('') });
+      } else if (char === ',' && (stack.length === 1 || (stack.length === 2 && stack[1] === ']'))) checkpoints.push({ end: at, suffix: [...stack].reverse().join('') });
+    }
+    if (partial && !balanced) {
+      for (const checkpoint of checkpoints.reverse()) {
+        try {
+          const value: unknown = JSON.parse(text.slice(start, checkpoint.end) + checkpoint.suffix);
+          if (isRecord(value)) return value;
+        } catch { /* Discard an unfinished value, keeping the earlier complete entries. */ }
+      }
+    }
+    // Do not mistake a completed child of a truncated envelope for the envelope itself.
+    if (!balanced) return null;
+  }
+  return null;
+}

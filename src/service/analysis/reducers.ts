@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './canonical.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisAssuranceSampleDispositionProjection,
@@ -125,6 +126,7 @@ export type CrossUnitGapCode =
 /** What the reduction did, as the execution owner observed it. `not-run` is fewer than two closed units. */
 export type CrossUnitOutcome =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       readonly state: 'closed';
       readonly findings: ReadonlyArray<CrossUnitFinding>;
       readonly requestDigest: string;
@@ -554,6 +556,7 @@ export function reduceBaselineAnalysis(
     requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest,
     usage: crossUnit.state === 'closed' ? crossUnit.usage : null,
     findingCount: crossUnitFindings.length,
+    ...(crossUnit.state !== 'closed' || crossUnit.salvaged === undefined ? {} : { salvaged: crossUnit.salvaged }),
   };
   const stages: AnalysisReducerStageProjection[] = [
     stage('unit-validation', ordered.length, gaps.length),

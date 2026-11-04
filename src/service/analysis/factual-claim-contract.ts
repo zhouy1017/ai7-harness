@@ -1,5 +1,5 @@
+import { stripModelJsonFence, type SalvagedModelResult, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { EvidenceAssuranceLevel } from '../../shared/protocol.js';
-import { canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import { FACTUAL_REVIEW_PROMPT_CONTRACT, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, parseFactualReviewUnitResult, type FactualUnitAssertion } from './factual-review-contract.js';
 import { FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, parseFactualReviewUnitResultV2, type FactualEvidenceRelation, type FactualCorrectionEntry } from './factual-review-contract-v2.js';
 import { FACTUAL_CLAIM_EXTRACTION_CONTRACT, FACTUAL_CLAIM_VERIFICATION_CONTRACT } from './factual-claim-ledger.js';
@@ -36,7 +36,7 @@ export function factualClaimVerificationPrompt(level: Exclude<EvidenceAssuranceL
 
 function readObject(text: string): Record<string, unknown> | null {
   try {
-    const value: unknown = JSON.parse(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text);
+    const value: unknown = JSON.parse(stripModelJsonFence(text));
     return isRecord(value) ? value : null;
   } catch { return null; }
 }
@@ -52,7 +52,7 @@ export function parseFactualClaimExtraction(text: string, expected: { unitOrdina
   return { ok: true as const, result, canonicalJson: json, digest: sha256Hex(json) };
 }
 
-export interface FactualClaimVerificationResult {
+export interface FactualClaimVerificationResult extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_CLAIM_VERIFICATION_RESULT_SCHEMA;
   readonly claimId: string;
   readonly evidenceRelations: readonly FactualEvidenceRelation[];

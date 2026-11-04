@@ -1,4 +1,4 @@
-import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { type SalvagedModelResult, DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
 import { MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
 
@@ -128,7 +128,7 @@ export interface EditorialPolishWithheld {
 }
 
 export type EditorialPolishReading =
-  | { readonly kind: 'read'; readonly suggestions: ReadonlyArray<EditorialPolishSuggestion>; readonly withheld: ReadonlyArray<EditorialPolishWithheld> }
+  | { readonly kind: 'read'; readonly salvaged?: SalvagedModelResult['salvaged']; readonly suggestions: ReadonlyArray<EditorialPolishSuggestion>; readonly withheld: ReadonlyArray<EditorialPolishWithheld> }
   /** The answer as a whole is outside the contract: nothing of it is offered. */
   | { readonly kind: 'withheld'; readonly reason: string };
 

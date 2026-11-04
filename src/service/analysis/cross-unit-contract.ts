@@ -1,5 +1,5 @@
+import { type SalvagedModelResult, boundedText, CONFIDENCE_LEVELS, stripModelJsonFence, BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { AnalysisSourceRangeProjection } from '../../shared/protocol.js';
-import { BLOCK_ID_PATTERN, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import { BASELINE_ANALYSIS_CONTRACT_VERSION } from './identity.js';
 import type { AnalysisConfidence, BaselineUnitResult } from './contract.js';
 
@@ -28,12 +28,6 @@ export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_SCHEMA = 'ai7.baseline-manuscri
 export const CROSS_UNIT_FINDING_KINDS = ['contradiction', 'continuity-break', 'alias-identity-divergence', 'chronology-conflict'] as const;
 export type CrossUnitFindingKind = (typeof CROSS_UNIT_FINDING_KINDS)[number];
 
-/**
- * The unit contract's confidence set, restated against its exported type rather than re-exported from
- * it: `contract.ts` keeps its constant private, and typing this list as the same union makes a
- * divergence a compile error rather than a runtime one.
- */
-const CONFIDENCE_LEVELS: ReadonlyArray<AnalysisConfidence> = ['high', 'medium', 'low'];
 const MAX_FINDINGS = 200;
 const MAX_SIDES = 8;
 const MAX_SIDE_RANGES = 200;
@@ -58,7 +52,7 @@ export interface CrossUnitFinding {
   readonly confidence: AnalysisConfidence;
 }
 
-export interface BaselineCrossUnitResult {
+export interface BaselineCrossUnitResult extends SalvagedModelResult {
   readonly schema: typeof BASELINE_CROSS_UNIT_RESULT_SCHEMA;
   readonly findings: ReadonlyArray<CrossUnitFinding>;
   /** Observations the model could not raise to a typed finding; text only, no ranges, never a finding. */
@@ -68,7 +62,7 @@ export interface BaselineCrossUnitResult {
 export type CrossUnitResultParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-out-of-set' | 'range-out-of-unit';
 
 export type CrossUnitResultParse =
-  | { ok: true; result: BaselineCrossUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: BaselineCrossUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: CrossUnitResultParseFailureCode; detail: string };
 
 /** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
@@ -110,14 +104,6 @@ export const BASELINE_CROSS_UNIT_PROMPT_CONTRACT_DIGEST = sha256Hex(canonicalJso
 
 const HEADER_PATTERN = /^跨单元归纳 (\d+)\/(\d+) · 单元集摘要 ([0-9a-f]{64})$/u;
 const CITED_BLOCKS_LINE_PATTERN = /^单元 (\d+)：(.+)$/u;
-/** Graphemes, the unit every source range in this contract is already measured in. */
-const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
-
-function graphemeCount(text: string): number {
-  let count = 0;
-  for (const _segment of GRAPHEMES.segment(text)) count += 1;
-  return count;
-}
 
 /**
  * Interpolate a frozen template. A function replacement is used rather than a plain string so that a
@@ -360,10 +346,6 @@ export function crossUnitRequestDigest(promptContractDigest: string, setDigest: 
   return sha256Hex(canonicalJson({ promptContractDigest, unitSetDigest: setDigest }));
 }
 
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
-}
-
 /**
  * Validate a model response against the cross-unit contract. Every refusal is one of four codes, and
  * the caller records it as a reducer gap; nothing here throws, because an invalid response is a
@@ -373,8 +355,7 @@ export function parseCrossUnitResult(
   text: string,
   expected: { closedOrdinals: ReadonlyArray<number>; citedBlocksByUnit: ReadonlyMap<number, ReadonlyArray<string>> },
 ): CrossUnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;

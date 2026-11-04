@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import type {
   ReviewExcludedFindingProjection,
   ReviewContractRejectionReason,
@@ -124,7 +125,7 @@ export interface ReviewCrossChapterInput {
   omitted: { units: number; findings: number; evidence: number; baselineLeads: number };
 }
 
-export interface ReviewCrossChapterResult {
+export interface ReviewCrossChapterResult extends SalvagedModelResult {
   readonly schema: 'ai7.editorial-review.cross-chapter-result/1';
   readonly findings: ReadonlyArray<{ readonly anchor: ReviewSynthesisEvidence; readonly evidence: ReadonlyArray<ReviewSynthesisEvidence>;
     readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string }>;
@@ -265,6 +266,7 @@ export interface ReviewCategoryRevisionUpdateProjection {
 
 export type ReviewCategoryUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;

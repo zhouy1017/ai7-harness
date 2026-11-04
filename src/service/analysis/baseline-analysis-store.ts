@@ -3573,7 +3573,7 @@ export class BaselineAnalysisStore {
         ...(composition.sources === undefined ? {} : { sources: composition.sources }) },
       // The plan version and the Plan Boundary Split are part of the canonical envelope (Issue #48).
       planVersion: ordinal,
-      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], definition.contractIdentity?.version === 2,
+      boundary: planBoundarySplit(edits.disallowedAdaptations, edits.askFirstAdaptations ?? [], true,
         providerPlan.selectedPolicyIdentity !== undefined),
     };
     const envelope = canonicalRecord(reusePlan === null ? envelopeBase : {

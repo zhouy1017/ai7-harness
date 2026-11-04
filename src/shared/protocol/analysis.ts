@@ -1,3 +1,14 @@
+export interface ModelResultSalvage {
+  readonly section: string;
+  /** Zero-based position in the model's section. */
+  readonly index: number;
+  readonly reason: string;
+}
+
+export interface SalvagedModelResult {
+  readonly salvaged?: ReadonlyArray<ModelResultSalvage>;
+}
+
 import type { QuickStartBaselineAnalysisResult } from './series.js';
 import type {
   AnalysisReusePlanProjection,
@@ -191,7 +202,7 @@ export interface AnalysisCrossUnitFindingProjection {
  * run. The reduction forms no execution-span row of its own — the span table is unit-only — so this
  * is where its one attempt is recorded, transport facts included.
  */
-export interface AnalysisCrossUnitReductionProjection {
+export interface AnalysisCrossUnitReductionProjection extends SalvagedModelResult {
   state: 'closed' | 'gap' | 'not-run';
   /** The exact reason for a gap or for not running; `null` when the reduction closed. */
   reason: string | null;

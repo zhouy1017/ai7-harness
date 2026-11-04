@@ -1,3 +1,4 @@
+import { extractModelJson, type SalvagedModelResult } from '../analysis/canonical.js';
 import { WORKSPACE_SERVICE_WORDS as words } from './agent-workspace-labels.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
 import { MAX_DIALOGUE_PROPOSAL_CHARACTERS, MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
@@ -27,7 +28,7 @@ export interface AgentWorkspaceDropped {
 }
 
 export type AgentWorkspaceReading =
-  | { readonly kind: 'read'; readonly candidates: ReadonlyArray<AgentWorkspaceCandidate>; readonly dropped: ReadonlyArray<AgentWorkspaceDropped> }
+  | { readonly kind: 'read'; readonly salvaged?: SalvagedModelResult['salvaged']; readonly candidates: ReadonlyArray<AgentWorkspaceCandidate>; readonly dropped: ReadonlyArray<AgentWorkspaceDropped> }
   /** The answer as a whole is outside the contract: nothing of it is offered. */
   | { readonly kind: 'withheld'; readonly reason: string };
 
@@ -56,51 +57,13 @@ function locate(selection: string, anchor: string): { from: number; to: number }
 
 /** The answer's one JSON object; a model that fences it in a code block is read the same, and nothing else around it is. */
 function answerObject(text: string, partial: boolean): unknown {
-  // Scan balanced objects rather than a greedy brace regex: strings may themselves contain braces or escaped quotes.
-  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
-    let depth = 0;
-    let quoted = false;
-    let escaped = false;
-    for (let end = start; end < text.length; end += 1) {
-      const char = text[end];
-      if (quoted) {
-        if (escaped) escaped = false;
-        else if (char === '\\') escaped = true;
-        else if (char === '"') quoted = false;
-      } else if (char === '"') quoted = true;
-      else if (char === '{') depth += 1;
-      else if (char === '}' && --depth === 0) {
-        try {
-          const value: unknown = JSON.parse(text.slice(start, end + 1));
-          if (isRecord(value) && value['schema'] === AGENT_WORKSPACE_RESULT_SCHEMA) return value;
-        } catch { /* Keep looking past explanatory text. */ }
-        break;
-      }
-    }
-  }
-  if (partial && text.includes(`"${AGENT_WORKSPACE_RESULT_SCHEMA}"`)) {
-    const start = /"items"\s*:\s*\[/u.exec(text);
-    if (start !== null) {
-      // Completed items can be previewed before the surrounding array/object has arrived.
-      const body = text.slice(start.index + start[0].length);
-      let quoted = false;
-      let escaped = false;
-      let depth = 0;
-      let itemStart = -1;
-      const items: unknown[] = [];
-      for (let at = 0; at < body.length; at += 1) {
-        const char = body[at];
-        if (quoted) {
-          if (escaped) escaped = false;
-          else if (char === '\\') escaped = true;
-          else if (char === '"') quoted = false;
-        } else if (char === '"') quoted = true;
-        else if (char === '{') { if (depth === 0) itemStart = at; depth += 1; }
-        else if (char === '}' && --depth === 0 && itemStart !== -1) {
-          try { items.push(JSON.parse(body.slice(itemStart, at + 1))); } catch { break; }
-        } else if (char === ']' && depth === 0) break;
-      }
-      return { schema: AGENT_WORKSPACE_RESULT_SCHEMA, items };
+  // Keep this parser's schema selection and preview-only salvage policy until H4.
+  for (const salvage of partial ? [false, true] : [false]) {
+    for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+      const value = extractModelJson(text.slice(start), { partial: salvage });
+      if (value?.['schema'] !== AGENT_WORKSPACE_RESULT_SCHEMA) continue;
+      if (!salvage) return value;
+      if (Array.isArray(value['items'])) return { schema: AGENT_WORKSPACE_RESULT_SCHEMA, items: value['items'] };
     }
   }
   return null;

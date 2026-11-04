@@ -1,3 +1,6 @@
+import { baselineAnalysisKindDefinition, factualReviewKindDefinition } from '../../src/service/analysis/kind-definition.js';
+import { factualReviewUnitRecordV2, factualReviewUnitResultOfRecordV2 } from '../../src/service/analysis/factual-review-contract-v2.js';
+import { carryPositionalResult } from '../../src/service/analysis/reused-result.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { BASELINE_UNIT_RESULT_SCHEMA, type BaselineUnitResult } from '../../src/service/analysis/contract.js';
@@ -48,7 +51,16 @@ describe('remapReusedResult', () => {
       conflicts: [],
       unresolved: [{ description: '合成未解事项', sourceRanges: [] }],
       confidence: 'medium',
+      salvaged: [{ section: 'entities', index: 1, reason: 'range-out-of-unit' }],
     };
+    const baseline = baselineAnalysisKindDefinition();
+    expect(baseline.unitResultOfRecord(baseline.unitRecord(result), 2)).toEqual(result);
+    const salvageOnly = { assertions: [], salvaged: result.salvaged };
+    const factual = factualReviewKindDefinition();
+    expect(factual.unitRecord(factual.unitResultOfRecord(salvageOnly, 2))).toEqual(salvageOnly);
+    const v2 = factualReviewUnitResultOfRecordV2({ ...salvageOnly, corrections: [] }, 2);
+    expect(factualReviewUnitRecordV2(v2)).toEqual({ ...salvageOnly, corrections: [] });
+    expect(carryPositionalResult(v2, predecessorUnit, newUnit).salvaged).toEqual(result.salvaged);
     const remapped = remapReusedResult(result, predecessorUnit, newUnit);
     expect(remapped.unitOrdinal).toBe(newUnit.ordinal);
     expect(remapped.entities[0]!.sourceRanges).toEqual([{ blockId: newUnit.blockIds[0], fromGrapheme: 0, toGrapheme: 4 }]);

@@ -1,4 +1,4 @@
-import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { type SalvagedModelResult, DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
 
 /**
@@ -117,7 +117,7 @@ export function parseConflictRegenerateMessage(text: string): ConflictRegenerate
  * `schema` and `text`; anything else, an empty text, or one longer than a 修改建议 may hold withholds it whole.
  */
 export type ConflictRegenerateReading =
-  | { readonly kind: 'read'; readonly text: string }
+  | { readonly kind: 'read'; readonly salvaged?: SalvagedModelResult['salvaged']; readonly text: string }
   | { readonly kind: 'withheld'; readonly reason: string };
 
 export function readConflictRegenerateAnswer(answer: string): ConflictRegenerateReading {

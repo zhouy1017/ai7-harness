@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, graphemeCount, boundedText, stripModelJsonFence, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { CoverageManifestUnitProjection, FactualVerificationPolicyPinProjection } from '../../shared/protocol.js';
 import {
   FACTUAL_ASSERTION_CATEGORIES,
@@ -16,7 +17,6 @@ import {
   type FactualReviewTaskMode,
   type FactualSeverityTier,
 } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 
 /**
@@ -67,7 +67,6 @@ const MAX_ASSERTIONS = 200;
 const MAX_QUOTE_GRAPHEMES = 80;
 const MAX_QUESTION_GRAPHEMES = 120;
 const MAX_BASIS_GRAPHEMES = 200;
-/** Graphemes, the unit every bound and every source range in this contract is measured in. */
 const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
 
 export function goalForFactualReviewMode(mode: FactualReviewTaskMode): string {
@@ -86,7 +85,7 @@ export interface FactualUnitAssertion {
   readonly basis: string;
 }
 
-export interface FactualReviewUnitResult {
+export interface FactualReviewUnitResult extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_REVIEW_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly assertions: ReadonlyArray<FactualUnitAssertion>;
@@ -102,25 +101,14 @@ export interface FactualReviewUnitResult {
 export type FactualUnitResultParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'quote-not-in-block';
 
 export type FactualUnitResultParse =
-  | { ok: true; result: FactualReviewUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: FactualReviewUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: FactualUnitResultParseFailureCode; detail: string };
-
-export function graphemeCount(text: string): number {
-  let count = 0;
-  for (const _segment of GRAPHEMES.segment(text)) count += 1;
-  return count;
-}
-
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
-}
 
 export function parseFactualReviewUnitResult(
   text: string,
   expected: { unitOrdinal: number; blockCount: number },
 ): FactualUnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
+  const body = stripModelJsonFence(text);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body) as unknown;
@@ -396,3 +384,5 @@ export function sliceGraphemes(text: string, fromGrapheme: number, toGrapheme: n
   }
   return sliced;
 }
+
+export { graphemeCount } from './canonical.js';

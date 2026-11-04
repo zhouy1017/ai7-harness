@@ -163,8 +163,9 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ passages: (result as ReadersReportUnitResult).passages }),
+    unitRecord: (result) => ({ passages: (result as ReadersReportUnitResult).passages, ...((result as ReadersReportUnitResult).salvaged === undefined ? {} : { salvaged: (result as ReadersReportUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): ReadersReportUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<ReadersReportUnitResult['salvaged']> }),
       schema: READERS_REPORT_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       passages: record.passages as ReadersReportUnitResult['passages'],
