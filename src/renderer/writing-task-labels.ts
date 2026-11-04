@@ -6,7 +6,7 @@ import type { WritingTaskMaterialProjection, WritingTaskProjection } from '../sh
  * the page's own.
  */
 export const WRITING_HEADING = '新建文档 · 写作任务';
-export const WRITING_LEDE = '选一类文档，AI7 参考下面列出的材料起草。打开草稿后，它就是这本书的这一类文档，处于「起草」阶段，在稿件编辑面上修改。范例只参照，不复制。';
+export const WRITING_LEDE = '选择文档类型，AI7 参考资料起草；范例只参照，不复制。';
 export const WRITING_TYPE_LEGEND = '文档类型（单选）';
 export const WRITING_REFERENCE_HEADING = 'AI7 会参考';
 /**

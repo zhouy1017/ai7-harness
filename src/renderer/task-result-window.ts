@@ -15,7 +15,6 @@ import {
   REVIEW_RESULT_NOT_DONE,
   TASK_RESULT_CLOSE,
   TASK_RESULT_COLUMNS,
-  TASK_RESULT_FOOT_NOTE,
   TASK_RESULT_JUMP,
   TASK_RESULT_KIND,
   TASK_RESULT_LOADING,
@@ -123,7 +122,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   const open = el('button', 'secondary', isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
   open.type = 'button';
   open.dataset['taskResultAction'] = 'open';
-  foot.append(open, el('span', 'field-note task-result-note', TASK_RESULT_FOOT_NOTE));
+  foot.append(open);
   section.append(bar, body, foot);
 
   let closed = false;

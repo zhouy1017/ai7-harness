@@ -13,7 +13,6 @@ import {
   DIALOGUE_ANSWER_HEADING,
   DIALOGUE_AUTHORITY_NOTE,
   DIALOGUE_CONVERT_INCOMPLETE,
-  DIALOGUE_CONVERT_NOTE,
   DIALOGUE_CONVERT_ORIGINAL,
   DIALOGUE_CONVERT_PROPOSED,
   DIALOGUE_CONVERT_RATIONALE,
@@ -418,7 +417,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     cancel.type = 'button';
     cancel.dataset['dialogueAction'] = 'convert-cancel';
     row.append(submit, cancel);
-    form.append(row, el('p', 'field-note', DIALOGUE_CONVERT_NOTE));
+    form.append(row);
     const closeForm = (focusConvert: boolean): void => {
       converting = false;
       form.remove();
