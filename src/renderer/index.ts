@@ -2511,9 +2511,9 @@ async function renderBookWorkbenchChooser(
     const content = panel();
     content.classList.add('book-workbench-chooser');
     content.dataset['currentBookId'] = currentOverview.book.bookId;
+    const heading = element('h2', undefined, '在另一本图书工作台打开');
     content.append(
-      element('p', 'section-label', `${currentOverview.book.title} · 图书工作台`),
-      element('h2', undefined, '在另一本图书工作台打开'),
+      heading,
       element('p', 'lede', '选择会创建或显示目标图书已有的工作台；当前图书工作台保持打开。'),
     );
     const list = element('div', 'recent-work-list');
@@ -2535,7 +2535,7 @@ async function renderBookWorkbenchChooser(
       list.append(row);
     }
     if (list.childElementCount === 0) {
-      list.append(element('p', 'field-note', '没有其他图书可打开。'));
+      heading.append(' · 没有其他图书可打开。');
     }
     content.append(list);
     const actions = element('div', 'button-row');

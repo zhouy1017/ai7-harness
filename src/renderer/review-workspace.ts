@@ -1343,7 +1343,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const heading = el('h6', undefined, FACT_LENS_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'fact-lens-counts', `${factLensCountsLine(lens)} · ${FACT_LENS_NOTE}`));
+    const counts = el('p', 'fact-lens-counts', `${factLensCountsLine(lens)} · ${fact.results.length === 0 ? FACT_LENS_NOTE.replace(/。$/u, '') : FACT_LENS_NOTE}`);
+    if (fact.results.length === 0) counts.append(`；${FACT_LENS_EMPTY_FILTERED}`);
+    section.append(heading, counts);
     if (lens.run?.disclosure != null) section.append(el('p', 'fact-lens-disclosure', lens.run.disclosure));
     const filters = el('div', 'review-filters fact-lens-filters');
     filters.setAttribute('role', 'group');
@@ -1373,7 +1375,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       select('actionNeed', (Object.keys(FACTUAL_ACTION_NEED_LABELS) as FactualActionNeed[]).map((value) => [value, FACTUAL_ACTION_NEED_LABELS[value]] as const)),
     );
     section.append(filters);
-    if (fact.results.length === 0) section.append(el('p', 'field-note', FACT_LENS_EMPTY_FILTERED));
     const list = el('ol', 'fact-lens-rows');
     for (const result of fact.results) list.append(renderFactRow(run, result));
     section.append(list);

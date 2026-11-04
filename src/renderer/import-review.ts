@@ -1085,8 +1085,8 @@ export function createImportReview(options: ImportReviewOptions) {
         }
         mappingsHost.dataset['reimportMappings'] = 'ready';
         mappingsHost.dataset['reimportPageItemCount'] = String(page.items.length);
-        mappingsHost.replaceChildren(element('h3', undefined, '章节对应'),
-          ...(page.items.length === 0 ? [element('p', 'field-note', '没有需要你确定的变化。')] : [list]), navigation);
+        mappingsHost.replaceChildren(element('h3', undefined, `章节对应${page.items.length === 0 ? ' · 没有需要你确定的变化。' : ''}`),
+          ...(page.items.length === 0 ? [] : [list]), navigation);
       } catch (error) {
         mappingsHost.dataset['reimportMappings'] = 'failed';
         mappingsHost.replaceChildren(
