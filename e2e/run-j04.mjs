@@ -2614,7 +2614,7 @@ async function main() {
       { id: 'reduction', removed: false, tag: null, control: null, name: null },
       { id: 'assurance-sampling', removed: false, tag: null, control: 'remove', name: '去掉这一步：核对与抽检' },
       { id: 'safe-retry', removed: false, tag: null, control: 'remove', name: `不允许：${SAFE_RETRY_ADAPTATION}` },
-    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_STEPS_NOTE, PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
+    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
     'plan-edit-controls', editable);
     // The glyph is the style sheet's: the column still reads as the adaptation's words alone.
     const openDrawer = await readDrawer(renderer);

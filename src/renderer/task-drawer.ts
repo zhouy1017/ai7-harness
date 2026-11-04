@@ -119,7 +119,6 @@ import {
   TASK_PLAN_EDIT_ASK_FIRST_NOTE,
   TASK_PLAN_EDIT_RESTORE,
   TASK_PLAN_EDIT_STEP_REMOVED,
-  TASK_PLAN_EDIT_STEPS_NOTE,
   TASK_PLAN_EDIT_TAG,
   TASK_PLAN_FULL_LINK_EDITABLE,
   TASK_BAR_UPDATE_FAILED,
@@ -135,7 +134,6 @@ import {
   TASK_PLAN_FULL_LINK,
   TASK_PLAN_GOAL_TERMS,
   TASK_PLAN_LOCKED,
-  TASK_PLAN_LOCKED_NOTE,
   TASK_PLAN_MATERIALITY_LABELS,
   TASK_PLAN_NO_ADAPTATION,
   TASK_PLAN_NO_REFERENCE,
@@ -1035,7 +1033,6 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (step.removable) item.append(...editControls(next, step.id, step.label, step.removed, removed, 'step'));
       steps.append(item);
     }
-    const stepsNote = next.edit.editable && next.steps.some((step) => step.removable) ? [el('p', 'field-note task-plan-edit-note', TASK_PLAN_EDIT_STEPS_NOTE)] : [];
     const usage = el('span');
     usage.append(next.service.usage);
     if (next.service.usageIsCeiling) usage.append(` · ${TASK_PLAN_CEILING_NOTE}`);
@@ -1048,7 +1045,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
         [TASK_PLAN_SCOPE_TERMS[3], technicalWords(next.scope.notRead, next.scope.notRead.replace('来源材料（来源版本仅作血缘证据，不属于可读范围）', '来源材料'))],
       ])),
-      planSection(2, steps, ...stepsNote, ...assuranceBlock(next)),
+      planSection(2, steps, ...assuranceBlock(next)),
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
@@ -1105,7 +1102,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     }
     const movedIn = el('ul', 'task-plan-list task-plan-asked');
     movedIn.append(...asked);
-    askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), ...(asked.length === 0 ? [] : [movedIn]), locked, el('p', 'field-note', TASK_PLAN_LOCKED_NOTE));
+    askFirst.append(el('h4', undefined, TASK_PLAN_BOUNDARY_COLUMNS[1]), ...(asked.length === 0 ? [] : [movedIn]), locked);
     section.append(adaptable, askFirst);
     return section;
   }
@@ -1689,8 +1686,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         body.querySelector<HTMLElement>(`[data-task-plan-edit="assurance:${option.level}"]`)?.focus();
       });
       const text = el('span', 'task-plan-assurance-text');
-      text.append(el('strong', undefined, option.label), el('span', 'field-note', option.consequence));
-      if (option.requirement !== null) text.append(el('span', 'field-note task-plan-assurance-requirement', option.requirement));
+      const consequence = [option.consequence, option.requirement].filter((line): line is string => line !== null)
+        .map((line) => line.replace(/。$/u, '')).join('；');
+      text.append(el('strong', undefined, option.label), el('span', 'field-note', `${consequence}。`));
       label.append(input, text);
       block.append(label);
     }
