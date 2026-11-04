@@ -621,7 +621,7 @@ async function importAndOpen(renderer, title, distinct = false, start = 'landing
 
 /** Revision17 input controls change only through their real click and must reach the requested checked state. */
 async function clickImportControl(renderer, selector, checked, name) {
-  await assertRenderer(renderer, `(() => {const input=document.querySelector(${JSON.stringify(selector)});if(!(input instanceof HTMLInputElement)||input.disabled||input.checked===${checked})return false;input.click();return input.checked===${checked};})()`, name);
+  await assertRenderer(renderer, `(() => {const input=document.querySelector(${JSON.stringify(selector)});if(!(input instanceof HTMLInputElement)||input.disabled)return false;if(input.checked!==${checked})input.click();return input.checked===${checked};})()`, name);
 }
 
 /** Revision17: prepare the first historical fixture through the public preserved source-only reader. */
