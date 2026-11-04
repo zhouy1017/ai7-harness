@@ -13,7 +13,7 @@ export const CALIBRATION_PAGE_GROUP = '编辑工作';
 export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初评与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
 export const CALIBRATION_HEADING = '校准';
 /** What calibration touches, and what it never does (EVAL-011). */
-export const CALIBRATION_SCOPE = '校准只调整 AI7 给出的初评分数，不改你的评分，也不改风险项。';
+export const CALIBRATION_SCOPE = '仅调整 AI7 初评分数，不改你的评分和风险项。';
 /** Why there is nothing to count, for a service that gives no AI7 初评 scores to adjust (`initialScoresConnected` false). */
 export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的初评分数后，调分记录才开始累积。';
 export const CALIBRATION_SWITCH = '启用校准';
