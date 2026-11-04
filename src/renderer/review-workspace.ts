@@ -1,4 +1,4 @@
-import { technicalWords, identityWords } from './technical-layer.js';
+import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
 import { reviewExcludedHeading } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
@@ -905,13 +905,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       item.dataset['reviewRunState'] = summary.state;
       const opened = next.run?.reviewRunId === summary.reviewRunId;
       if (opened) item.setAttribute('aria-current', 'true');
-      const created = el('span', 'field-note review-run-created', reviewCreatedLine(localInstantLabel(summary.createdAt)));
+      const created = el('span', 'review-run-created', reviewCreatedLine(localInstantLabel(summary.createdAt)));
       created.append(el('span', 'technical-identity', summary.createdAt));
-      item.append(
-        el('span', 'review-run-line', reviewRunLine(summary)),
-        el('span', 'field-note review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`),
-        created,
-      );
+      const details = el('p', 'field-note review-run-details');
+      details.append(el('span', 'review-run-counts', `${reviewCountsLine(summary.findingCounts)} · ${reviewRunReportLine(summary.reportVersion)}`), ' · ', created);
+      item.append(el('span', 'review-run-line', reviewRunLine(summary)), details);
       // 此结果使用的材料后来被排除 (Issue #64, S29b; SER-026), beside the Run in the list too.
       if (summary.historicalMarker !== null) item.append(el('span', 'review-historical-marker-label review-run-marker', summary.historicalMarker));
       const open = actionButton('open-run', 'quiet', () => openRun(summary.reviewRunId));
@@ -982,9 +980,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       local.dataset['localCheck'] = run.localCheck.state;
       local.append(el('p', 'field-note', run.localCheck.options.tables === undefined
         ? '本地文字检查按五项有限规则提示可能问题；无发现不表示整部标准合规。'
-        : '确定性检查在本机完成；字形对照及带条件词形仅供复核。机械修正须由你采纳后才会写入稿件，可在修改记录中撤销。'));
+        : '本机检查结果仅供复核，机械修正经你采纳后才会写入稿件并可撤销。'));
       local.append(el('p', 'field-note', `本次数字依据：${run.localCheck.options.numerals === 'editor-convention' ? '编辑约定' : run.localCheck.options.numerals === 'off' ? '未启用' : run.localCheck.options.publication === 'within-scope' ? '编辑明确声明在适用范围内' : '不在适用范围内，未检查'}。`));
-      for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
+      if (technicalLayerVisible) for (const [rule, count] of Object.entries(run.localCheck.counts ?? {})) local.append(el('p', 'field-note', `${rule}/v1：检查 ${count.checked} 段，排除上下文 ${count.exempt}，跳过 ${count.skipped}，未识别 ${count.notRecognized}，已检查无发现 ${count.noFinding}，发现 ${count.findings}，错误 ${count.error}，未启用 ${count.disabled}，不适用 ${count.outOfApplicability}。`));
       for (const exclusion of run.localCheck.excluded) local.append(el('p', 'field-note', `未生成批注：${exclusion.reason}（${exclusion.candidateId}）。`));
       section.append(local);
       if (run.authorization !== null && (run.state === 'running' || run.canContinue)) {

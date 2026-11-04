@@ -1437,7 +1437,7 @@ async function main() {
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
-      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分。' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
+      started.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' && started.record.total === '总分 0 / 100 · 还有 5 项没有打分' &&
       JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
       started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存评估', '定稿']) &&
       started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
@@ -1865,7 +1865,7 @@ async function main() {
     requireJourney(closedOpen.startFromInitial === '从 AI7 初评开始' && closedOpen.start === '重新评估', 'initial-evaluation-start-offered', closedOpen);
     await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', 'initial-evaluation-begin');
     const draft = await readEvaluation(renderer, (page) => page.record?.heading === '第 14 版 · AI7 初稿', 'initial-evaluation-begun');
-    requireJourney(draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分。' &&
+    requireJourney(draft.record.ai7 === '这一版从 AI7 第 1 次初评开始（读的是修订版 r1）：AI7 的分数列在每一项旁边，记录保存的是你的评分' &&
       JSON.stringify(draft.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '12']) &&
       JSON.stringify(draft.record.ai7Items.map(([itemId, line, offered, ticked]) => [itemId, line, offered, ticked.length])) ===
         JSON.stringify(AI7_ITEM_LINES.map(([itemId, , line]) => [itemId, line.slice(line.indexOf('：') + 1), false, 0])) &&
@@ -3074,7 +3074,7 @@ async function main() {
     // 第 16 版 is seeded from 第 14 版定稿 — its scores, not its conclusion — says in its own words which version it skipped, compares
     // with 第 14 版, and the list keeps 第 15 版 named among the unreadable.
     const skippedVersion = await readEvaluation(renderer, (page) => page.record?.heading === '第 16 版 · 编辑评分中', 'evaluation-damaged-skipped');
-    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分。' &&
+    requireJourney(skippedVersion.record.skipped === '这一版跳过了已损坏的第 15 版，从第 14 版定稿重新评估。' && skippedVersion.record.ai7 === '这一版不是从 AI7 初评开始的：由你打分' &&
       skippedVersion.record.comparison?.[0] === '与第 14 版相比' && JSON.stringify(skippedVersion.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '15.5', '14', '10']) &&
       skippedVersion.record.conclusions.every(([, checked]) => checked === false) &&
       skippedVersion.unreadable === '第 15 版评估记录已损坏，无法显示；其他版本照常可用。' && skippedVersion.startReason === '第 16 版还没有定稿；定稿后才能重新评估。',
@@ -3143,7 +3143,7 @@ async function main() {
     const calibratedLine = (index, after) => ai7Line(index).replace(' · 依据充分度', ` · 校准后 ${after} / 20 · 依据充分度`);
     requireJourney(JSON.stringify(calibratedDraft.record.items.map(([, , score]) => score)) === JSON.stringify(['17', '15', '15.5', '14', '10']) &&
       calibratedDraft.record.total === '总分 71.5 / 100 · 优秀' &&
-      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分。' &&
+      calibratedDraft.record.calibration === 'AI7 的初评分数已按本社校准（依据 1 本书的定稿评估）：调整了 2 项的起始分数，原始分数仍列在每一项旁边；校准只调 AI7 的分数，不调风险项，也不改你的评分' &&
       calibratedDraft.record.ai7Items[0][1] === calibratedLine(0, '17') && calibratedDraft.record.ai7Items[4][1] === calibratedLine(4, '10') &&
       calibratedDraft.record.ai7Items[1][1] === ai7Line(1) && calibratedDraft.record.ai7Items[3][1] === ai7Line(3) &&
       JSON.stringify(calibratedDraft.record.ai7Items.map(([, , offered]) => offered)) === JSON.stringify([false, false, false, false, false]) &&

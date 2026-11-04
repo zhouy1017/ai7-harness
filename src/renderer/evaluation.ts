@@ -1047,13 +1047,20 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const initial = record.initial;
     node.dataset['initial'] = String(initial !== null);
     node.dataset['calibrated'] = String(record.calibration !== null);
-    node.append(el('p', 'field-note evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial)));
-    // The house calibration applied to AI7's starting scores, with the raw scores kept beside each item (EVAL-011a).
     const calibrated = evaluationAi7CalibrationLine(record.calibration);
-    if (calibrated !== null) node.append(el('p', 'field-note evaluation-ai7-calibration', calibrated));
-    // A version begun from a 初评 that completed with gaps says which ranges AI7's draft never read.
     const unread = initial === null ? null : evaluationAi7UnreadLine(initial);
-    if (unread !== null) node.append(el('p', 'field-note evaluation-ai7-unread', unread));
+    const initialLine = el('p', 'field-note evaluation-initial-summary');
+    let firstFragment = true;
+    const fragment = (className: string, text: string): void => {
+      if (!firstFragment) initialLine.append('；');
+      firstFragment = false;
+      initialLine.append(el('span', className, text.replace(/。$/u, '')));
+    };
+    fragment('evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial));
+    if (calibrated !== null) fragment('evaluation-ai7-calibration', calibrated);
+    if (unread !== null) fragment('evaluation-ai7-unread', unread);
+    initialLine.append('。');
+    node.append(initialLine);
     const total = el('p', 'evaluation-total', evaluationTotalLine(profile, record.total));
     total.setAttribute('aria-live', 'polite');
     node.append(total);
