@@ -30,9 +30,7 @@ import {
   writingMaterialsMore,
   writingMaterialsOverTotalNote,
   WRITING_MATERIALS_AT_LIMIT,
-  WRITING_QUICK_PICK_TYPE,
   writingQuickFailed,
-  writingQuickNote,
   writingQuickStarted,
   writingQuickStarting,
   writingOpenTaskTone,
@@ -300,21 +298,6 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     plan.disabled = busy || page.unavailable !== null;
     start.disabled = plan.disabled;
     plan.setAttribute('aria-controls', 'task-drawer');
-    // 快速开始 is the chosen type's writing 默认执行规则's to give (S84b): a rule covers only the type it was set from, so the
-    // type is chosen first; with that type's rule in force and matching, it prepares and starts under it.
-    const offer = chosen?.quickStart ?? null;
-    const rule = offer !== null && offer.available ? offer.rule : null;
-    const quick = action(WRITING_ACTIONS.quick, 'secondary', 'quick', () => {
-      if (rule !== null) void prepare(rule);
-    });
-    quick.disabled = busy || rule === null || page.unavailable !== null;
-    quick.setAttribute('aria-controls', 'task-drawer');
-    if (offer?.rule != null) quick.dataset['ruleVersionId'] = offer.rule.ruleVersionId;
-    const quickReason = el('p', 'field-note writing-quick-reason',
-      rule !== null ? writingQuickNote(rule.name) : offer === null ? WRITING_QUICK_PICK_TYPE : offer.reason ?? '');
-    quickReason.dataset['quickStart'] = rule !== null ? 'available' : 'unavailable';
-    quickReason.id = uid('quick');
-    quick.setAttribute('aria-describedby', quickReason.id);
     const cancel = action(WRITING_ACTIONS.cancel, 'quiet', 'cancel', () => {
       sheet = null;
       paint('[data-writing-action="new"]');

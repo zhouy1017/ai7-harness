@@ -148,7 +148,6 @@ import {
   REVIEW_PLAN_HEADING,
   REVIEW_PREPARING_ESCAPE,
   REVIEW_PROGRESS_HEADING,
-  REVIEW_QUICK_START_REASON,
   REVIEW_REPORT_HEADING,
   REVIEW_REPORT_NONE,
   REVIEW_REPORT_NOTE,
@@ -2579,12 +2578,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     problem.setAttribute('role', 'alert');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
-    const quickReason = el('p', 'field-note review-quick-start-reason', REVIEW_QUICK_START_REASON);
-    quickReason.id = uid('quick-start-reason');
     const start = actionButton('start', 'primary', () => void prepareRun(state, 'start'));
     const prepare = actionButton('prepare', 'secondary', () => void prepareRun(state));
-    const quick = actionButton('quick-start', 'secondary', () => void prepareRun(state, 'quick'));
-    quick.setAttribute('aria-describedby', quickReason.id);
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
@@ -2653,8 +2648,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
       prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
-      quick.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
-      start.disabled = quick.disabled;
+      start.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
       close.disabled = preparing;
       cancelPreparation.hidden = !preparing;
       cancelPreparation.disabled = !preparing;
