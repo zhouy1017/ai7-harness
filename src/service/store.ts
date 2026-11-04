@@ -14962,11 +14962,16 @@ export class EditorialStore {
     const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, 'slot', dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
     const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
     const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
-      if (item.runRecordId === null || !['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
-      const report = this.inspectUsage({ range: 'all', groupBy: 'book', runRecordId: item.runRecordId }).detail?.report;
-      if (!report) return null;
-      return { calls: Object.values(report.usagePerStage).reduce((sum, stage) => sum + stage.requests, 0),
-        elapsed: report.stages.reduce((sum, stage) => sum + (stage.wallMs ?? 0), 0) };
+      if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
+      if (item.runRecordId !== null) return this.#usage.taskSummary({ runRecordId: item.runRecordId });
+      if (item.target.kind === 'review' || item.target.kind === 'review-plan') {
+        return this.#usage.taskSummary({ taskIntentIds: this.#reviewRuns.controlTasks(item.target.bookId, item.target.reviewRunId).map((task) => task.taskIntentId) });
+      }
+      if (item.target.kind === 'dialogue') {
+        const dialogue = this.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, () => null);
+        return { calls: dialogue.attempts.length, elapsed: dialogue.attempts.reduce((sum, attempt) => sum + (attempt.settledAt === null ? 0 : Math.max(0, Date.parse(attempt.settledAt) - Date.parse(attempt.startedAt))), 0) };
+      }
+      return null;
     });
     return estimateTaskStarts({ ...overview, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
       if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
