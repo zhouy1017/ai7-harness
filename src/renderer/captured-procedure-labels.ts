@@ -113,7 +113,7 @@ export function captureExtractLines(
 
 /** Where a capture came from, said once and kept only on this computer (REUSE-015). */
 export function captureSourceLine(runLabel: string, scopeLabel: string): string {
-  return `来源：${runLabel}（${scopeLabel}）。来源只记在本机，不进入工序。`;
+  return `来源：${runLabel} · ${scopeLabel}；只记在本机，不进入工序。`;
 }
 
 export function captureNextVersionOption(title: string, latestVersion: number): string {
