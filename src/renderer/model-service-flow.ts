@@ -118,7 +118,11 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     step.append(el('p', 'field-note', '当前版本尚未接入此渠道。'));
     return step;
   }
-  step.append(el('p', undefined, option.connection === null ? `${channel.channelLabel}：${option.statusLabel}` : `${channel.channelLabel}：${option.statusLabel} · 连接名称：${option.connection.connectionName}`));
+  const channelStatus = el('p', undefined, option.connection === null ? `${channel.channelLabel}：${option.statusLabel}` : `${channel.channelLabel}：${option.statusLabel} · 连接名称：${option.connection.connectionName}`);
+  const stored = el('span', undefined, '；凭据只写入操作系统安全凭据库，保存后不再显示。');
+  stored.dataset['credentialState'] = option.connection?.credentialOperationState ?? 'missing';
+  channelStatus.append(stored);
+  step.append(channelStatus);
   step.dataset['modelRoute'] = option.route;
   step.dataset['modelRouteStatus'] = option.status;
   const form = el('form', 'model-credential-form');
@@ -172,9 +176,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   })());
   actions.append(save, refresh, remove);
   form.append(nameLabel, secretLabel, actions);
-  const stored = el('p', 'field-note', `${ready ? '凭据已保存' : '需设置凭据'}；凭据只写入操作系统安全凭据库，保存后不再显示。`);
-  stored.dataset['credentialState'] = option.connection?.credentialOperationState ?? 'missing';
-  step.append(stored, form);
+  step.append(form);
   return step;
 }
 
