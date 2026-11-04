@@ -1287,7 +1287,7 @@ async function main() {
       if(!(anchorSection instanceof HTMLElement)||!(records instanceof HTMLElement))return false;
       const labels=Array.from(anchorSection.querySelectorAll(':scope > dl > dt'),(node)=>node.textContent);
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
-      return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
+      return JSON.stringify(labels)===JSON.stringify(['稿件','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         (anchorSection.compareDocumentPosition(overview.querySelector('.workbench-actions'))&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
