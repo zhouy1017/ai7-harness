@@ -395,8 +395,8 @@ const PAGE_HELPERS = `(() => {
     field: (name) => block()?.querySelector('form.publication-designate [data-publication-field="' + name + '"]') ?? null,
     radios: () => Array.from(block()?.querySelectorAll('form.publication-designate input[type="radio"][name="publication-milestone"]') ?? []),
     summary: () => Array.from(block()?.querySelectorAll('form.publication-designate dl.publication-designate-summary > dd') ?? []).map((value) => value.textContent ?? ''),
-    status: () => document.querySelector('#persistence-status')?.textContent ?? '',
-    tone: () => document.querySelector('#persistence-status')?.dataset.tone ?? '',
+    status: () => document.querySelector('[data-toast]')?.textContent ?? '',
+    tone: () => document.querySelector('[data-toast]')?.dataset.tone ?? '',
     journal: () => {
       const node = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
       return node === undefined ? null : Number((node.textContent ?? '').slice('修订日志序号 '.length));
@@ -2561,7 +2561,7 @@ async function main() {
     requireJourney(invalid.refusal === '定价要是大于 0 的金额，最多两位小数。' && invalid.focus === 'price' && invalid.books[0]?.[1] === 'missing', 'actuals-invalid-words', invalid);
     requireJourney(await writeField('price', '45'), 'actuals-price-write');
     await clickSelector(renderer, '[data-screen="evaluation-calibration"] [data-calibration-action="save"]', 'actuals-save');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。'`, 'actuals-saved-status');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '定价与首印已录入。'`, 'actuals-saved-status');
     const saved = await readCalibration(renderer, (page) => page.books[0]?.[1] === 'recorded', 'actuals-saved');
     requireJourney(JSON.stringify(saved.books) === JSON.stringify([[bookId, 'recorded', '第 33 次发稿版本 · 定价 ¥45.00 · 首印 3,000 册', false]]) &&
       saved.prediction === '已录入实际数据的已发稿图书 1 / 30 本 · 满 30 本后才能打开' && saved.focus === 'open' && saved.refusal === null, 'actuals-saved-words', saved);
@@ -2609,7 +2609,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const input = document.querySelector('[data-calibration-switch="calibration"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`, 'actuals-preferences-with-form');
     await waitFor(renderer, `!document.querySelector('[data-calibration-switch="calibration"]')?.checked && !document.querySelector('[data-calibration-switch="calibration"]')?.disabled && document.querySelector('[data-calibration-field="price"]')?.value === '55'`, 'actuals-preferences-form-kept');
     await clickSelector(renderer, '[data-calibration-action="save"]', 'actuals-off-page-save');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '定价与首印已录入。' && document.activeElement?.dataset.calibrationAction === 'open'`, 'actuals-off-page-saved');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '定价与首印已录入。' && document.activeElement?.dataset.calibrationAction === 'open'`, 'actuals-off-page-saved');
     await clickSelector(renderer, '[data-calibration-action="next"]', 'actuals-saved-next-page');
     await waitFor(renderer, `document.querySelectorAll('.calibration-book').length === 1 && document.querySelector('.calibration-book')?.dataset.actualsState === 'recorded' && document.querySelector('.calibration-book-line')?.textContent.includes('¥55.00')`, 'actuals-saved-target');
     // The twenty additional Books designated above also exercise the parent's real exemplar catalogue paging.

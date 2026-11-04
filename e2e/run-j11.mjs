@@ -337,6 +337,7 @@ async function toggleHistoryUnclassified(renderer, name) {
   })()`, name);
 }
 const status = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
+const notice = `(document.querySelector('[data-toast]')?.textContent ?? '')`;
 const peopleSection = '[data-screen="book-overview"] .book-people-slot > section.book-people';
 
 /** 新建图书 with a title, through its review, onto the new Book's 工作概览; the Book's identity. */
@@ -376,7 +377,7 @@ async function search(renderer, field, text, name, keyboard = false) {
     await assertRenderer(renderer, `(() => { const input = document.querySelector('#book-filter-text'); input?.focus(); return input !== null && document.activeElement === input; })()`, `${name}-focused`);
     await pressEnter(renderer);
   } else await clickSelector(renderer, '[data-book-filter-action="find"]', `${name}-find`);
-  await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === ${JSON.stringify(field)} && ${status} === '已列出找到的图书'`, `${name}-found`);
+  await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === ${JSON.stringify(field)} && ${notice} === '已列出找到的图书'`, `${name}-found`);
   return renderer.evaluate(CARDS);
 }
 
@@ -1322,7 +1323,7 @@ async function main() {
 
     at('people-saved');
     await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'people-save');
-    await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'people-recorded');
+    await waitFor(renderer, `${notice} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'people-recorded');
     await assertRenderer(renderer, `(() => {
       const section = document.querySelector(${JSON.stringify(peopleSection)});
       const values = Array.from(section.querySelectorAll('dd[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
@@ -1337,7 +1338,7 @@ async function main() {
     // The same set again records nothing and says so.
     await clickSelector(renderer, `${peopleSection} [data-people-action="edit"]`, 'people-edit-again');
     await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'people-save-again');
-    await waitFor(renderer, `${status} === '人员没有变化' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'people-unchanged-said');
+    await waitFor(renderer, `${notice} === '人员没有变化' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'people-unchanged-said');
     // Read here, while this window shows the Book, so the read binds nothing new.
     const peopleBefore = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(firstId)}, historyCursor: null }).then((overview) => JSON.stringify(overview.people))`);
     requireJourney(typeof peopleBefore === 'string' && peopleBefore === JSON.stringify(saved), 'people-unchanged-recorded-nothing');
@@ -1369,7 +1370,7 @@ async function main() {
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'search-none-find');
     await waitFor(renderer, `document.querySelector('.book-filter-none')?.textContent === '没有找到符合的图书。' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 0`, 'search-none');
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'search-clear');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${status} === '已显示全部图书'`, 'search-cleared');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'none' && document.querySelectorAll('[data-screen="landing"] section.recent-work article.book-summary-item').length === 2 && ${notice} === '已显示全部图书'`, 'search-cleared');
 
     // Hold the real request's completion callback until later navigation has acquired user input.
     // The Promise hook exists only during the synchronous click and is restored before any other work.
@@ -1441,7 +1442,7 @@ async function main() {
       JSON.stringify(started.record.items.map(([, legend, score]) => [legend, score])) === JSON.stringify(ITEM_LEGENDS.map((legend) => [legend, ''])) &&
       started.record.conclusions.every(([, checked]) => checked === false) && JSON.stringify(started.record.actions) === JSON.stringify(['保存评估', '定稿']) &&
       started.startReason === '第 1 版还没有定稿；定稿后才能重新评估。', 'evaluation-started-words', started);
-    await waitFor(renderer, `${status} === '已开始第 1 版评估。'`, 'evaluation-started-status', 10_000);
+    await waitFor(renderer, `${notice} === '已开始第 1 版评估。'`, 'evaluation-started-status', 10_000);
 
     at('evaluation-score');
     // A score the scale does not admit shows no band, counts for nothing and says why until it is corrected (Issue #638).
@@ -1483,7 +1484,7 @@ async function main() {
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
     await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
     await submitEvaluationWithPendingInput(renderer, 'save', 'evaluation-save');
-    await waitFor(renderer, `${status} === '评估已保存。'`, 'evaluation-saved-status');
+    await waitFor(renderer, `${notice} === '评估已保存。'`, 'evaluation-saved-status');
     await assertSubmittedEvaluation(renderer, true, 'evaluation-save-keeps-submitted-draft');
     const savedPage = await readEvaluation(renderer, (page) => page.record?.entries === '2', 'evaluation-saved');
     requireJourney(JSON.stringify(savedPage.versions) === JSON.stringify(['第 1 版 · 编辑评分中 · 修订版 r1 · 总分 66.5 / 80 · 优秀（1 项不评） · 修改后再议']) &&
@@ -1497,7 +1498,7 @@ async function main() {
     await fill(renderer, `${risk('facts-and-sources')} [data-evaluation-field="statement"]`, '已核对事实和来源，未发现未解决问题。', 'evaluation-low-risk-statement');
     // 定稿: the version reads as it was, with the actor and the time, and 重新评估 begins the next.
     await submitEvaluationWithPendingInput(renderer, 'finalize', 'evaluation-finalize');
-    await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
+    await waitFor(renderer, `${notice} === '第 1 版评估已定稿。'`, 'evaluation-finalized-status');
     await assertSubmittedEvaluation(renderer, false, 'evaluation-finalize-keeps-submitted-draft');
     const finalizedPage = await readEvaluation(renderer, (page) => page.record?.state === 'finalized', 'evaluation-finalized');
     requireJourney(finalizedPage.record.heading === '第 1 版 · 定稿' && (finalizedPage.record.finalized ?? '').startsWith('定稿 · 本机编辑 · ') &&
@@ -1656,7 +1657,7 @@ async function main() {
     await tick(renderer, `${feedbackItem('entities/0')} .analysis-feedback-reasons input[value="merged"]`, 'feedback-entity-reason');
     await fill(renderer, `${feedbackItem('entities/0')} [data-analysis-feedback-field="correction"]`, ENTITY_CORRECTION, 'feedback-entity-correction');
     await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="record-feedback"]`, 'feedback-entity-record');
-    await waitFor(renderer, `${status} === '反馈已记录。'`, 'feedback-entity-recorded-status');
+    await waitFor(renderer, `${notice} === '反馈已记录。'`, 'feedback-entity-recorded-status');
     const entityJudged = await readFeedback(renderer, (page) => page.card === null && page.metric?.judged === '1', 'feedback-entity-recorded');
     const entityRow = rowOf(entityJudged, 'entities/0');
     requireJourney(entityRow[1] === 'inaccurate' && entityRow[2] === '1' && (entityRow[3] ?? '').startsWith(`你的反馈：不准确 · 把不同人物当成一个 · 修正：${ENTITY_CORRECTION} · `) &&
@@ -1715,7 +1716,7 @@ async function main() {
     const unchanged = await readFeedback(renderer, (page) => typeof page.card?.refusal === 'string', 'feedback-unchanged-refused');
     requireJourney(unchanged.card.refusal === '反馈没有变化。' && rowOf(unchanged, 'entities/0')[2] === '2' &&
       JSON.stringify(unchanged.card.judgments) === JSON.stringify([['accurate', true], ['inaccurate', false], ['incomplete', false]]), 'feedback-unchanged-words', unchanged);
-    await waitFor(renderer, `${status} === '反馈没有变化。'`, 'feedback-unchanged-status');
+    await waitFor(renderer, `${notice} === '反馈没有变化。'`, 'feedback-unchanged-status');
     await clickSelector(renderer, `${feedbackItem('entities/0')} [data-analysis-action="cancel-feedback"]`, 'feedback-unchanged-cancel');
     await readFeedback(renderer, (page) => page.card === null, 'feedback-unchanged-closed');
 
@@ -1908,7 +1909,7 @@ async function main() {
       adjustmentOffered.record.total === '总分 71 / 100 · 优秀', 'initial-evaluation-reasons-unticked', adjustmentOffered.record.ai7Items);
     await tick(renderer, `${item('readers-and-market')} [data-evaluation-field="adjustment-reason"][value="too-high"]`, 'initial-evaluation-reason');
     await clickSelector(renderer, '[data-evaluation-action="save"]', 'initial-evaluation-adjust-save');
-    await waitFor(renderer, `${status} === '评估已保存。'`, 'initial-evaluation-adjust-saved-status');
+    await waitFor(renderer, `${notice} === '评估已保存。'`, 'initial-evaluation-adjust-saved-status');
     const adjusted = await readEvaluation(renderer, (page) => page.record?.heading === '第 14 版 · 编辑评分中' && page.record.entries === '2', 'initial-evaluation-adjusted');
     requireJourney(JSON.stringify(adjusted.record.ai7Items[4]) === JSON.stringify(['readers-and-market', AI7_ITEM_LINES[4][2].slice(AI7_ITEM_LINES[4][2].indexOf('：') + 1), true, ['too-high']]) &&
       adjusted.record.items[4][2] === '10', 'initial-evaluation-adjusted-words', adjusted.record);
@@ -1920,7 +1921,7 @@ async function main() {
     // version before, as 重新评估 carries them.
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'initial-evaluation-conclusion');
     await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'initial-evaluation-finalize');
-    await waitFor(renderer, `${status} === '第 14 版评估已定稿。'`, 'initial-evaluation-finalized-status');
+    await waitFor(renderer, `${notice} === '第 14 版评估已定稿。'`, 'initial-evaluation-finalized-status');
     const finalizedInitial = await readEvaluation(renderer, (page) => page.record?.state === 'finalized' && page.record.heading === '第 14 版 · 定稿', 'initial-evaluation-finalized');
     requireJourney(finalizedInitial.record.total === '总分 71 / 100 · 优秀' && finalizedInitial.record.allDisabled === true &&
       JSON.stringify(finalizedInitial.record.ai7Items[4][3]) === JSON.stringify(['too-high']), 'initial-evaluation-finalized-words', finalizedInitial.record);
@@ -2038,9 +2039,9 @@ async function main() {
     await assertRenderer(renderer, `(() => { const block = document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')[2]; if (!(block instanceof HTMLElement)) return false; block.focus(); const range = document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText', false, ${JSON.stringify(DRAFT_EDIT)}); return block.textContent?.endsWith(${JSON.stringify(DRAFT_EDIT)}); })()`, 'readers-report-edit');
     await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button) => button.textContent === '保存当前编辑' && !button.disabled)`, 'readers-report-edit-save-ready');
     await click(renderer, '保存当前编辑', 'readers-report-edit-save');
-    await waitFor(renderer, `${status}.includes('已写入修订日志')`, 'readers-report-edit-durable');
+    await waitFor(renderer, `${notice}.includes('已写入修订日志')`, 'readers-report-edit-durable');
     await clickSelector(renderer, '.editor-shell[data-deliverable="production-document"] [data-document-action="saveVersion"]', 'readers-report-save-version');
-    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${status} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-deliverable="production-document"] .editor-toolbar h2')?.textContent === '审稿意见 · 给作者的修改意见 · 版本 2' && ${notice} === '已保存为版本 2'`, 'readers-report-version-saved', 120_000);
 
     at('readers-report-docx');
     // Back in 评估 the draft names 版本 2, and 导出… writes it as DOCX through the Save dialog: the card's review, the place it
@@ -2125,7 +2126,7 @@ async function main() {
     at('evaluation-rewrite-accept');
     // 采用重写: a new entry of 第 15 版 with AI7's words, every score and reason as the editor left them.
     await clickSelector(renderer, '[data-evaluation-action="rewrite-accept"]', 'evaluation-rewrite-accept-click');
-    await waitFor(renderer, `${status} === '已采用重写的评语：各项分数没有改动。'`, 'evaluation-rewrite-accepted-status');
+    await waitFor(renderer, `${notice} === '已采用重写的评语：各项分数没有改动。'`, 'evaluation-rewrite-accepted-status');
     const accepted = await readEvaluation(renderer, (page) => page.record?.entries === '3', 'evaluation-rewrite-accepted');
     requireJourney(JSON.stringify(accepted.record.comments) === JSON.stringify(REWRITTEN_COMMENTS) && accepted.record.verdict === REWRITTEN_VERDICT &&
       JSON.stringify(accepted.record.items.map(([, , score]) => score)) === JSON.stringify(['16.5', '15', '13', '14', '10']) &&
@@ -2184,7 +2185,7 @@ async function main() {
     await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'decision-own');
     await waitFor(renderer, `window.__j11.card()?.querySelector('[data-mark-form="decision-reason"] [data-mark-field="reason"]') !== null`, 'decision-own-form');
     await assertRenderer(renderer, `window.__j11.write('reason', ${JSON.stringify(OWN_REASON)}) && window.__j11.act('submit')`, 'decision-own-submit');
-    await waitFor(renderer, `${status} === '已记下你的原因。'`, 'decision-own-status');
+    await waitFor(renderer, `${notice} === '已记下你的原因。'`, 'decision-own-status');
     const own = await readDecision(renderer, (card) => card.state === 'given', 'decision-own-recorded');
     requireJourney(JSON.stringify(own.reason) === JSON.stringify(['free-text', `你的原因：${OWN_REASON}`]) && own.later === '改原因…' && own.prompt === null, 'decision-own-words', own);
     requireJourney(own.reasonSource === '原因来源：你自行输入的文字', 'decision-own-source', own.reasonSource);
@@ -2194,7 +2195,7 @@ async function main() {
     await readDecision(renderer, (card) => card.prompt === null && card.focus === 'reason-revise', 'decision-revise-cancel-focus');
     await assertRenderer(renderer, `window.__j11.act('reason-revise')`, 'decision-revise-again');
     await assertRenderer(renderer, `(() => { const chip = window.__j11.card()?.querySelector('[data-mark-reason-chip="证据不足"]'); if (!(chip instanceof HTMLButtonElement)) return false; chip.click(); return true; })()`, 'decision-revise-chip');
-    await waitFor(renderer, `${status} === '已改好原因；原来的原因仍留在记录里。'`, 'decision-revise-status');
+    await waitFor(renderer, `${notice} === '已改好原因；原来的原因仍留在记录里。'`, 'decision-revise-status');
     const revisedCard = await readDecision(renderer, (card) => card.reason?.[0] === 'suggested', 'decision-revised');
     requireJourney(revisedCard.reason[1].startsWith('你的原因：证据不足（') && revisedCard.reason[1].endsWith(' 改过）') && revisedCard.later === '改原因…', 'decision-revised-words', revisedCard);
     requireJourney(revisedCard.reasonSource === '原因来源：你选择的选项', 'decision-revised-source', revisedCard.reasonSource);
@@ -2297,7 +2298,7 @@ async function main() {
     requireJourney(bookCard.card.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。`, 'learning-book-words', bookCard.card);
     await fill(renderer, `${learningRow('proposal-decision')} [data-learning-field="note"]`, LEARNING_NOTE, 'learning-note');
     await clickSelector(renderer, `${learningRow('proposal-decision')} [data-learning-action="record"]`, 'learning-record');
-    await waitFor(renderer, `${status} === '学习准入决定已记录。'`, 'learning-recorded-status');
+    await waitFor(renderer, `${notice} === '学习准入决定已记录。'`, 'learning-recorded-status');
     const learningRecorded = await readLearning(renderer, (page) => page.card === null && page.books[0]?.materials[0]?.[1] === 'decided', 'learning-recorded');
     requireJourney(learningRecorded.books[0].materials[0][2] === '已决定' && JSON.stringify(learningRecorded.focus) === JSON.stringify(['proposal-decision', 'open']),
       'learning-recorded-words', learningRecorded);
@@ -2474,7 +2475,7 @@ async function main() {
     await fill(renderer, `${peopleSection} input[data-people-field="authors"]`, THIRD_PEOPLE.authors, 'attribution-authors');
     await fill(renderer, `${peopleSection} input[data-people-field="editors"]`, THIRD_PEOPLE.editors, 'attribution-editors');
     await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'attribution-save');
-    await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'attribution-saved');
+    await waitFor(renderer, `${notice} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'attribution-saved');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'attribution-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'attribution-landing-again');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'attribution-quality');
@@ -2501,7 +2502,7 @@ async function main() {
     await clickSelector(renderer, `${peopleSection} [data-people-action="edit"]`, 'later-edit');
     await fill(renderer, `${peopleSection} input[data-people-field="editors"]`, THIRD_PEOPLE.laterEditors, 'later-editors');
     await clickSelector(renderer, `${peopleSection} [data-people-action="save"]`, 'later-save');
-    await waitFor(renderer, `${status} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '2'`, 'later-saved');
+    await waitFor(renderer, `${notice} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '2'`, 'later-saved');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'later-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'later-landing-again');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'later-quality');
@@ -2530,7 +2531,7 @@ async function main() {
     await assertRenderer(renderer, `window.__j11.act('reason-own')`, 'history-reason-own');
     await waitFor(renderer, `window.__j11.card()?.querySelector('[data-mark-form="decision-reason"] [data-mark-field="reason"]') !== null`, 'history-reason-form');
     await assertRenderer(renderer, `window.__j11.write('reason', '交接后的新说明') && window.__j11.act('submit')`, 'history-reason-submit');
-    await waitFor(renderer, `${status} === '已改好原因；原来的原因仍留在记录里。'`, 'history-reason-saved');
+    await waitFor(renderer, `${notice} === '已改好原因；原来的原因仍留在记录里。'`, 'history-reason-saved');
     await pressEscape(renderer);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'open-overview');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)}) !== null`, 'open-overview-shown');
@@ -2890,7 +2891,7 @@ async function main() {
     at('learning-audit-stop-recorded');
     // 确认停止今后使用 appends one exclusion: the explorer shows it standing over the decision it superseded, which stays.
     await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="confirm"]', 'learning-audit-confirm');
-    await waitFor(renderer, `${status} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-recorded-status');
+    await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料。'`, 'learning-audit-recorded-status');
     const stopped = await readAudit(renderer, (page) => page.lineage?.decisions.length === 2 && page.preview === null, 'learning-audit-recorded');
     requireJourney(stopped.lineage.standing === 'excluded' && JSON.stringify(stopped.lineage.decisions) === JSON.stringify([
       ['current', 'learning-audit', '明确排除', '现在的决定 · 在学习回溯中停止今后使用'],
@@ -2939,7 +2940,7 @@ async function main() {
       batchPreview.preview.leftOut[0][1].endsWith(' · 你的原因：分页原因2：在你选中之后改过，不在本次之列') &&
       batchPreview.preview.confirm === true, 'learning-audit-batch-preview-words', batchPreview.preview);
     await clickSelector(renderer, '.learning-remediation-preview [data-learning-audit-action="confirm"]', 'learning-audit-batch-confirm');
-    await waitFor(renderer, `${status} === '已停止今后使用 1 条学习材料；另有 1 条未处理。'`, 'learning-audit-batch-status');
+    await waitFor(renderer, `${notice} === '已停止今后使用 1 条学习材料；另有 1 条未处理。'`, 'learning-audit-batch-status');
     const afterBatch = await readAudit(renderer, (page) => page.view === 'list' && page.rows.length === 0 && page.batch === null, 'learning-audit-batch-done');
     requireJourney(afterBatch.none === '没有符合的学习材料。', 'learning-audit-batch-done-words', afterBatch);
     const batchService = await renderer.evaluate(`Promise.all([${JSON.stringify(auditSecond)}, ${JSON.stringify(auditThird)}].map((materialKey) =>
@@ -2960,7 +2961,7 @@ async function main() {
     const reincludeChosen = await readAudit(renderer, (page) => page.reinclude?.record === true, 'learning-audit-reinclude-chosen');
     requireJourney(reincludeChosen.reinclude.consequence === `仅纳入当前图书：它只在《${THIRD.title}》里帮 AI7 学习。`, 'learning-audit-reinclude-consequence', reincludeChosen.reinclude);
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'learning-audit-reinclude-record');
-    await waitFor(renderer, `${status} === '学习准入决定已记录。'`, 'learning-audit-reinclude-status');
+    await waitFor(renderer, `${notice} === '学习准入决定已记录。'`, 'learning-audit-reinclude-status');
     const reincluded = await readAudit(renderer, (page) => page.lineage?.decisions.length === 3 && page.reinclude === null, 'learning-audit-reincluded');
     requireJourney(reincluded.lineage.standing === 'book' && JSON.stringify(reincluded.lineage.decisions.map(([state, , choice]) => [state, choice])) === JSON.stringify([
       ['current', '仅纳入当前图书'], ['superseded', '明确排除'], ['superseded', '仅纳入当前图书'],
@@ -3072,7 +3073,7 @@ async function main() {
     const plainStart = await renderer.evaluate(`window.ai7.startEvaluation({ fromInitial: false, skipDamaged: false }).then(() => 'started', (error) => error?.message ?? 'failed')`);
     requireJourney(plainStart === '第 15 版评估记录已损坏，不能重新评估。', 'evaluation-damaged-plain-refused', plainStart);
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-damaged-skip');
-    await waitFor(renderer, `${status} === '已开始第 16 版评估。'`, 'evaluation-damaged-started-status', 10_000);
+    await waitFor(renderer, `${notice} === '已开始第 16 版评估。'`, 'evaluation-damaged-started-status', 10_000);
     // 第 16 版 is seeded from 第 14 版定稿 — its scores, not its conclusion — says in its own words which version it skipped, compares
     // with 第 14 版, and the list keeps 第 15 版 named among the unreadable.
     const skippedVersion = await readEvaluation(renderer, (page) => page.record?.heading === '第 16 版 · 编辑评分中', 'evaluation-damaged-skipped');
@@ -3085,7 +3086,7 @@ async function main() {
     requireJourney(skippedService === JSON.stringify([[15], [15], 14, 14, [16, 14, 13, 12, 11, 10, 9, 8, 7, 6]]), 'evaluation-damaged-skipped-service', skippedService);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-damaged-conclusion');
     await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'evaluation-damaged-finalize');
-    await waitFor(renderer, `${status} === '第 16 版评估已定稿。'`, 'evaluation-damaged-finalized-status');
+    await waitFor(renderer, `${notice} === '第 16 版评估已定稿。'`, 'evaluation-damaged-finalized-status');
 
     at('evaluation-calibration-books');
     // One more Book from exact sample1, 校准样书1, with its own AI7 初评 on the adapter and a 定稿 begun from it that departs from AI7:
@@ -3134,7 +3135,7 @@ async function main() {
     }
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', `${name}-conclusion`);
     await clickSelector(renderer, '[data-evaluation-action="finalize"]', `${name}-finalize`);
-    await waitFor(renderer, `${status} === '第 1 版评估已定稿。'`, `${name}-finalized`);
+    await waitFor(renderer, `${notice} === '第 1 版评估已定稿。'`, `${name}-finalized`);
 
     at('evaluation-calibrated-start');
     // Two 调分记录, the gate: the offset exists, over the one Book whose latest 定稿 begun from AI7's 初评 reads — 评估旅程丙's 第 15 版
@@ -3157,7 +3158,7 @@ async function main() {
       'calibrated-draft-service', calibratedService);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'calibrated-conclusion');
     await clickSelector(renderer, '[data-evaluation-action="finalize"]', 'calibrated-finalize');
-    await waitFor(renderer, `${status} === '第 2 版评估已定稿。'`, 'calibrated-finalized');
+    await waitFor(renderer, `${notice} === '第 2 版评估已定稿。'`, 'calibrated-finalized');
 
     at('evaluation-calibration-disclosed');
     // 设置 › 评估校准与预测 reads 已生效 with the basis and each item's offset as computed now; 停用 is recorded, says what it does,
@@ -3410,7 +3411,7 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector(${JSON.stringify(`${wordMaterial} input[value="book"], ${wordMaterial} input[value="house"]`)})`, 'word-no-human-inclusion-affordance');
     await assertRenderer(renderer, `(() => { const input=document.querySelector(${JSON.stringify(`${wordMaterial} input[value="excluded"]`)}); if(!(input instanceof HTMLInputElement)||input.disabled)return false;input.click();return input.checked;})()`, 'word-exclusion-select');
     await clickSelector(renderer, `${wordMaterial} [data-learning-action="record"]`, 'word-exclusion-record');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。' && document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-action="open"]`)})`, 'word-exclusion-recorded');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '学习准入决定已记录。' && document.querySelector(${JSON.stringify(`${wordMaterial} [data-learning-action="open"]`)})`, 'word-exclusion-recorded');
     await clickSelector(renderer, `${wordMaterial} [data-learning-action="open"]`, 'word-exclusion-reinspect');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(wordMaterial)})?.textContent.includes('当前已排除学习')`, 'word-current-exclusion');
     await clickSelector(renderer, `${wordMaterial} [data-learning-action="word-detail"]`, 'word-excluded-historical-inspection');
@@ -3430,7 +3431,7 @@ async function main() {
     await tick(renderer, '.learning-reinclude input[value="house"]', 'word-audit-reinclude-house');
     await readAudit(renderer, (page) => page.reinclude?.record === true, 'word-audit-reinclude-chosen');
     await clickSelector(renderer, '.learning-reinclude [data-learning-audit-action="reinclude-record"]', 'word-audit-reinclude-record');
-    await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.textContent === '学习准入决定已记录。'`, 'word-audit-reinclude-status');
     const wordHistory = JSON.stringify([['current', '纳入出版社经验'], ['superseded', '明确排除']]);
     // An explicit house re-inclusion is a human decision; the standing line must not call it the default.
     const wordDecidedLine = "document.querySelector('.learning-lineage')?.textContent.includes('当前按人工决定纳入本机学习。') && !document.querySelector('.learning-lineage')?.textContent.includes('没有人工纳入决定')";
