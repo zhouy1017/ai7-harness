@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -205,6 +206,9 @@ describe('the words of 交付物', () => {
   it('read the manuscript and the chosen milestone into the form summary before commitment', () => {
     expect(deliverablesManuscriptLine(null)).toBe('这本书还没有稿件；导入稿件后才能保存里程碑版本。');
     expect(deliverablesManuscriptLine(manuscript)).toBe('当前稿件：修订版 r3 · 修订日志序号 4');
+    setTechnicalLayerVisible(false);
+    expect(deliverablesManuscriptLine(manuscript)).toBe('当前稿件');
+    setTechnicalLayerVisible(true);
     expect(publicationSummaryManuscript(manuscript)).toBe('主稿件 · 当前修订版 r3 · 修订日志序号 4');
     expect(publicationSummaryMilestone(milestone(), SAVED_AT)).toBe('「一审稿」 · r1 · 2026/09/22 10:00:00 保存');
     expect(publicationMilestoneOptionLine(milestone(), SAVED_AT)).toBe('用途：阶段留档 · 修订版 r1 · 2026/09/22 10:00:00 保存');

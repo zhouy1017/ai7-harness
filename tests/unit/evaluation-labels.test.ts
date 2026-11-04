@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   EVALUATION_ADJUSTMENT_LEGEND,
@@ -149,6 +150,9 @@ describe('评估 words', () => {
     expect(evaluationHeading({ ordinal: 2, state: 'editing' })).toBe('第 2 版 · 编辑评分中');
     expect(evaluationRevisionLine({ revisionLabel: 'r1', uncheckpointed: false })).toBe('评估的是修订版 r1');
     expect(evaluationRevisionLine({ revisionLabel: 'r1', uncheckpointed: true })).toBe('评估的是修订版 r1（当时另有写入修订日志、尚未保存为修订版的改动）');
+    setTechnicalLayerVisible(false);
+    expect(evaluationRevisionLine({ revisionLabel: 'r1', uncheckpointed: true })).toBe('评估包含当时尚未保存为版本的改动。');
+    setTechnicalLayerVisible(true);
     // The versions that cannot be read are named beside the list (Issue #702 review).
     expect(evaluationUnreadableLine([])).toBeNull();
     expect(evaluationUnreadableLine([1, 3])).toBe('第 1、3 版评估记录已损坏，无法显示；其他版本照常可用。');

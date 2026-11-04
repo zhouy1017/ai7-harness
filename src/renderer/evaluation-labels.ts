@@ -154,7 +154,7 @@ export function evaluationHeading(record: Pick<EvaluationRecordSummaryProjection
 
 /** The revision a version evaluated, and whether edits waited in the journal beyond it then. */
 export function evaluationRevisionLine(record: Pick<EvaluationRecordProjection, 'revisionLabel' | 'uncheckpointed'>): string {
-  return `评估的是修订版${technicalWords(` ${record.revisionLabel}`)}${record.uncheckpointed ? '（当时另有写入修订日志、尚未保存为修订版的改动）' : ''}`;
+  return technicalWords(`评估的是修订版 ${record.revisionLabel}${record.uncheckpointed ? '（当时另有写入修订日志、尚未保存为修订版的改动）' : ''}`, record.uncheckpointed ? '评估包含当时尚未保存为版本的改动。' : '评估基于当时的稿件。');
 }
 
 /**
@@ -333,7 +333,7 @@ export function evaluationAi7UnreadLine(draft: Pick<EvaluationInitialDraftProjec
 
 /** What a version begun from AI7's 初评 says it began from. */
 export function evaluationAi7RecordLine(initial: Pick<EvaluationInitialDraftProjection, 'ordinal' | 'revisionLabel'>): string {
-  return `这一版从 AI7 第 ${initial.ordinal} 次初评开始（读的是修订版${technicalWords(` ${initial.revisionLabel}`)}）：AI7 的分数列在每一项旁边，记录保存的是你的评分。`;
+  return technicalWords(`这一版从 AI7 第 ${initial.ordinal} 次初评开始（读的是修订版 ${initial.revisionLabel}）：AI7 的分数列在每一项旁边，记录保存的是你的评分。`, `这一版参考 AI7 第 ${initial.ordinal} 次初评，评分由你决定。`);
 }
 
 /** The conclusion AI7 would suggest, said as AI7's (EVAL-007). */

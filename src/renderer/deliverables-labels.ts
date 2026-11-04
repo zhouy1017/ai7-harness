@@ -149,7 +149,7 @@ export function milestoneRelationLine(item: Pick<MilestoneListItemProjection, 'c
 export function deliverablesManuscriptLine(manuscript: DeliverablesProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能保存里程碑版本。'
-    : `当前稿件：修订版${technicalWords(` ${manuscript.revisionLabel}`)} · 修订日志序号 ${manuscript.journalSequence}`;
+    : technicalWords(`当前稿件：修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`, '当前稿件');
 }
 
 export function milestoneLabelText(label: string): string {
@@ -158,7 +158,7 @@ export function milestoneLabelText(label: string): string {
 
 /** One listed milestone's purpose, exact version, actor and time (V2-UX-MILE-008). */
 export function milestoneMetaLine(item: Pick<MilestoneListItemProjection, 'purposeLabel' | 'revisionLabel' | 'actor'>, savedAt: string): string {
-  return `用途：${item.purposeLabel} · 修订版${technicalWords(` ${item.revisionLabel}`)} · ${item.actor} · ${savedAt}`;
+  return `用途：${item.purposeLabel}${technicalWords(` · 修订版 ${item.revisionLabel}`)} · ${item.actor} · ${savedAt}`;
 }
 
 export function milestoneNoteLine(note: string): string {

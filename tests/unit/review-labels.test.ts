@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   reviewInfluenceMaterialLine,
@@ -98,6 +99,9 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_DESTINATION_ACTIONS).toEqual(['打开稿件', '工作概览']);
     expect(reviewManuscriptLine(manuscript)).toBe('当前稿件：修订版 r2 · 97 个段落');
     expect(reviewManuscriptLine(null)).toBe('这本书还没有稿件；导入稿件后才能审阅。');
+    setTechnicalLayerVisible(false);
+    expect(reviewManuscriptLine(manuscript)).toBe('当前稿件 · 97 个段落');
+    setTechnicalLayerVisible(true);
   });
 
   it('labels every action with the specification\'s own words', () => {

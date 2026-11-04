@@ -125,7 +125,7 @@ export function reviewGenerateReportLabel(latestVersion: number | null): string 
 export function reviewManuscriptLine(manuscript: ReviewWorkspaceProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能审阅。'
-    : `当前稿件：修订版${technicalWords(` ${manuscript.revisionLabel}`)} · ${manuscript.totalBlocks} 个段落`;
+    : technicalWords(`当前稿件：修订版 ${manuscript.revisionLabel} · ${manuscript.totalBlocks} 个段落`, `当前稿件 · ${manuscript.totalBlocks} 个段落`);
 }
 
 // ---- state pills: text and shape, never colour alone (editor-surfaces §0.3) ----------------------------
