@@ -331,8 +331,14 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
     if (!response.ok) throw Object.assign(new Error('MODEL_DISCOVERY_UNAVAILABLE'), {
       code: response.status === 401 || response.status === 403 ? 'MODEL_DISCOVERY_CREDENTIAL_REJECTED' : 'MODEL_DISCOVERY_UNAVAILABLE', status: response.status,
     });
+    let rawBody: string;
+    try { rawBody = await response.text(); }
+    catch (error) {
+      const transport = classifyTransportError(error, false, init);
+      throw Object.assign(new Error(transport.message), { code: transport.code });
+    }
     let body: unknown;
-    try { body = await response.json(); }
+    try { body = JSON.parse(rawBody) as unknown; }
     catch { throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' }); }
     if (!isRecord(body)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     const google = profile.credentialHeader === 'x-goog-api-key';
