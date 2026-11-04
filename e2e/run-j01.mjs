@@ -1514,7 +1514,7 @@ async function runJourney(
     if (usePrimaryReviewDiagnostics) at(location);
   };
   const hasIdentityFinding = identityClass !== null;
-  const quickImport = start !== 'accepted-review' && !hasIdentityFinding && !degraded && structure === null && !expectInterruption && !stopAfterAcceptedReview && !holdCompletionPaint;
+  const quickImport = start !== 'accepted-review' && !hasIdentityFinding && !degraded && structure === null && textBoxDisposition === null && !expectInterruption && !stopAfterAcceptedReview && !holdCompletionPaint;
   const expectedNonEffects = degraded
     ? [
         '不创建书系或书系成员关系',
