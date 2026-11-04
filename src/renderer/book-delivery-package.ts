@@ -613,9 +613,9 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       item.dataset['packageExportDegraded'] = String(reviewed.degraded);
       const details = el('details', 'package-export-fidelity');
       details.open = current.disclosed.get(file.key) ?? reviewed.degraded;
-      details.append(el('summary', undefined, packageExportFidelitySummary(reviewed.degraded)),
-        renderExportFidelity(reviewed, { heading: false, degradedNote: false }),
-        el('p', 'field-note export-format-line', reviewed.formatLine));
+      const summary = el('summary', undefined, packageExportFidelitySummary(reviewed.degraded));
+      summary.append(' · ', el('span', 'export-format-line', reviewed.formatLine));
+      details.append(summary, renderExportFidelity(reviewed, { heading: false, degradedNote: false }));
       details.addEventListener('toggle', () => current.disclosed.set(file.key, details.open));
       item.append(details);
     }
