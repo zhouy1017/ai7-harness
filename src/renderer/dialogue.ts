@@ -159,7 +159,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     answer.setAttribute('aria-label', DIALOGUE_ANSWER_HEADING);
     if (latest && attempt.state === 'answering') answer.setAttribute('aria-busy', 'true');
     if (attempt.source === 'missing' || attempt.source === 'damaged') {
-      answer.append(el('p', 'field-note', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
+      head.append(el('span', 'dialogue-source-unavailable', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
     }
     for (const fragment of attempt.fragments) answer.append(fragmentNode(fragment.text, fragment.breakAfter));
     if (attempt.question !== undefined) section.append(el('p', 'dialogue-question', `追问：${attempt.question}`));
