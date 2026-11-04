@@ -426,7 +426,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const heading = el('h3', undefined, DELIVERABLES_PUBLICATION_HEADING);
     heading.id = headingId;
     section.setAttribute('aria-labelledby', headingId);
-    section.append(heading, el('p', 'field-note deliverables-manuscript-line', deliverablesManuscriptLine(next.manuscript)));
+    heading.append(' · ', el('span', 'deliverables-manuscript-line', deliverablesManuscriptLine(next.manuscript)));
+    section.append(heading);
     // 导出… of the current revision (Issue #413): a dirty working state is saved as a revision for it first.
     if (next.manuscript !== null) {
       const row = el('div', 'button-row export-open-row');
@@ -901,11 +902,13 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentId'] = documentNow.documentId;
       item.dataset['documentVersion'] = String(documentNow.versions[0]?.ordinal ?? 0);
       item.dataset['documentChanged'] = String(documentNow.changedSinceVersion);
-      item.append(el('p', 'document-card-line', documentCardLine(documentNow)));
+      const context = el('p', 'document-card-context');
+      context.append(el('span', 'document-card-line', documentCardLine(documentNow)));
       // What the material's reading left behind, said as long as the document exists (Issue #547).
       const notCarried = documentNow.origin.marksNotCarried;
-      if (notCarried !== null && notCarried > 0) item.append(el('p', 'field-note document-origin-marks', documentOriginMarksLine(notCarried)));
-      if (documentNow.changedSinceVersion) item.append(el('p', 'field-note document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+      if (notCarried !== null && notCarried > 0) context.append(' · ', el('span', 'document-origin-marks', documentOriginMarksLine(notCarried)));
+      if (documentNow.changedSinceVersion) context.append(' · ', el('span', 'document-changed', DOCUMENT_CHANGED_SINCE_VERSION));
+      item.append(context);
     }
     if (type.notForThisBook) {
       item.append(el('p', 'document-not-for-this-book', type.document === null ? DOCUMENT_STATE_NOT_FOR_THIS_BOOK : `${DOCUMENT_STATE_NOT_FOR_THIS_BOOK} · 文档与版本保留`));
@@ -1103,8 +1106,9 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.dataset['revisionId'] = delivery.revisionId;
     item.dataset['deliveryOrdinal'] = String(delivery.ordinal);
     item.dataset['deliveryExport'] = delivery.export === null ? 'none' : delivery.export.outcome;
-    item.append(el('p', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt))));
-    if (delivery.note !== null) item.append(el('p', 'field-note document-delivery-note', delivery.note));
+    const record = el('p', 'document-delivery-record', documentDeliveryLine(delivery, localInstantLabel(delivery.recordedAt)));
+    if (delivery.note !== null) record.append(' · ', el('span', 'document-delivery-note', delivery.note));
+    item.append(record);
     item.append(el('p', 'document-delivery-export', documentDeliveryExportLine(delivery)));
     const label = documentExportLabel(type.label, delivery.versionLabel);
     const open = el('button', 'secondary', EXPORT_ACTION_LABELS.open);

@@ -436,7 +436,7 @@ const PAGE_HELPERS = `(() => {
     // Its export (Issue #416, S67b): the card below a version, and each file's key, format, words and outcome.
     packageExport: () => window.__j07.pkg()?.querySelector('ol.package-version-list > li > section.package-export') ?? null,
     packageExportFiles: () => Array.from(window.__j07.packageExport()?.querySelectorAll('ol.package-export-files > li') ?? [])
-      .map((item) => [item.dataset.packageExportFile, item.dataset.packageExportFormat, item.querySelector('.package-export-file-label')?.textContent ?? '',
+      .map((item) => [item.dataset.packageExportFile, item.dataset.packageExportFormat, item.querySelector('.package-export-file-label')?.firstChild?.textContent ?? '',
         item.querySelector('.package-export-file-name')?.textContent ?? '', item.dataset.packageExportOutcome ?? '', item.querySelector('.package-export-outcome')?.textContent ?? ''].join('|')),
   };
   return true;
@@ -2031,7 +2031,7 @@ async function main() {
     await waitFor(renderer, `window.__j07.pkg()?.dataset.packageReady === 'true'`, 'package-ready');
     await assertRenderer(renderer, `(() => {
       const bundle = window.__j07.pkg();
-      const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.textContent);
+      const lines = (selector) => Array.from(bundle.querySelectorAll(selector)).map((item) => item.dataset.itemKind + ':' + item.querySelector('.package-item-label')?.firstChild?.textContent);
       const limitations = Array.from(bundle.querySelectorAll('ul.package-limitations > li')).map((item) => item.textContent);
       return JSON.stringify(lines('ul.package-included > li')) === ${JSON.stringify(JSON.stringify([`publication:发稿版本「${FIRST.label}」 · r1`, 'document:新闻稿 · 版本 3', 'evaluation-record:评估记录 · 第 1 版定稿']))} &&
         JSON.stringify(lines('ul.package-excluded > li')) === ${JSON.stringify(JSON.stringify([

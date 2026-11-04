@@ -315,13 +315,12 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const block = el('section', 'package-preview');
     block.dataset['contentDigest'] = next.content.digest;
     block.append(el('h4', undefined, PACKAGE_PREVIEW_HEADING));
-    block.append(el('h5', undefined, PACKAGE_INCLUDED_HEADING), itemList('package-included', next.content.included));
-    if (next.content.includedTruncated) block.append(el('p', 'field-note', PACKAGE_INCLUDED_TRUNCATED));
+    const included = el('h5', undefined, next.content.includedTruncated ? `${PACKAGE_INCLUDED_HEADING} · ${PACKAGE_INCLUDED_TRUNCATED}` : PACKAGE_INCLUDED_HEADING);
+    block.append(included, itemList('package-included', next.content.included));
     block.append(el('h5', undefined, PACKAGE_EXCLUDED_HEADING), itemList('package-excluded', next.content.excluded));
     const limitations = el('ul', 'package-limitations');
     for (const line of next.content.limitations) limitations.append(el('li', undefined, line));
-    block.append(el('h5', undefined, PACKAGE_LIMITATIONS_HEADING), limitations);
-    if (next.content.limitationsTruncated) block.append(el('p', 'field-note', PACKAGE_LIMITATIONS_TRUNCATED));
+    block.append(el('h5', undefined, next.content.limitationsTruncated ? `${PACKAGE_LIMITATIONS_HEADING} · ${PACKAGE_LIMITATIONS_TRUNCATED}` : PACKAGE_LIMITATIONS_HEADING), limitations);
     return block;
   }
 
@@ -376,7 +375,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
 
   function renderVersions(versions: ReadonlyArray<BookDeliveryPackageVersionProjection>, truncated: boolean): HTMLElement {
     const block = el('section', 'package-versions');
-    block.append(el('h4', undefined, PACKAGE_VERSIONS_HEADING));
+    block.append(el('h4', undefined, truncated ? `${PACKAGE_VERSIONS_HEADING} · ${PACKAGE_VERSIONS_TRUNCATED}` : PACKAGE_VERSIONS_HEADING));
     const list = el('ol', 'package-version-list');
     for (const version of versions) {
       const item = el('li');
@@ -411,7 +410,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       list.append(item);
     }
     block.append(list);
-    if (truncated) block.append(el('p', 'field-note', PACKAGE_VERSIONS_TRUNCATED));
     return block;
   }
 
@@ -429,8 +427,8 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     const list = el('ol', 'package-export-list');
     list.setAttribute('aria-label', packageExportsAccessibleName(version.label));
     for (const entry of version.exports) list.append(historyEntry(entry));
+    if (version.exportsTruncated) list.append(el('li', undefined, PACKAGE_EXPORTS_TRUNCATED));
     block.append(list);
-    if (version.exportsTruncated) block.append(el('p', 'field-note', PACKAGE_EXPORTS_TRUNCATED));
     return block;
   }
 
@@ -490,7 +488,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
     if (current.review !== null) {
       const review = current.review;
       panel.dataset['packageExportDegraded'] = String(review.degraded);
-      const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : PACKAGE_EXPORT_FILES_LABEL);
+      const label = el('p', 'package-export-files-label', current.route === 'archive' ? PACKAGE_ARCHIVE_FILES_LABEL : shown === null ? `${PACKAGE_EXPORT_FILES_LABEL} · 勾选本页，翻页会清除选择` : PACKAGE_EXPORT_FILES_LABEL);
       label.id = uid('export-files');
       const list = el('ol', 'package-export-files');
       list.setAttribute('aria-labelledby', label.id);
@@ -499,7 +497,6 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       }
       panel.append(label, list);
       if (shown === null) {
-        if (current.route !== 'archive') panel.append(el('p', 'field-note', '勾选本页要导出的文件，翻页会清除选择。'));
         const pages = el('div', 'button-row');
         for (const [name, offset] of [['上一页', review.offset > 0 ? Math.max(0, review.offset - MAX_BOOK_DELIVERY_PACKAGE_EXPORT_FILES_LISTED) : null], ['下一页', review.nextOffset]] as const) {
           const button = el('button', 'quiet', name);
