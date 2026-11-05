@@ -702,6 +702,12 @@ async function openItem(renderer, itemId, name) {
   await clickSelector(renderer, selector, `${name}-open`);
 }
 
+/** Continue the detailed record checks through the result window's own link. */
+async function openResultRecord(renderer, name) {
+  await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult==='ready'`, `${name}-result`, 30_000);
+  await clickSelector(renderer, '.task-result-window [data-task-result-action="open"]', `${name}-record`);
+}
+
 async function main() {
   parseJourney();
   let browser;
@@ -1215,6 +1221,9 @@ async function main() {
     // place — 等待运行名额 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
     await openAttention(renderer, 'concurrent-b');
     await openItem(renderer, decisionItem.itemId, 'concurrent-b-revision');
+    // The card was checked in place above; continue the concurrency exercise on the Book's analysis surface.
+    await openAnalysisOf(renderer, bookB, 'concurrent-b-workspace');
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-b-workspace-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`, 'concurrent-b-reconfirm-ready', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="reconfirm-plan"]', 'concurrent-b-reconfirm');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'concurrent-b-start-ready', 120_000);
@@ -1262,6 +1271,7 @@ async function main() {
     const secondWindowStarted = performance.now();
     // Use the existing product chooser, as J-12 does, rather than a test hook that creates a window.
     await openItem(renderer, queuedItem.itemId, 'second-window-b');
+    await openAnalysisOf(renderer, bookB, 'second-window-b-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-b-analysis', 30_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'second-window-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-overview-ready', 30_000);
@@ -1295,6 +1305,7 @@ async function main() {
     at('concurrent-pause');
     // 暂停 on 甲, from its own plan: 正在暂停 while its range in flight finishes.
     await openItem(renderer, `analysis:${taskA}`, 'concurrent-a-item');
+    await openAnalysisOf(renderer, bookA, 'concurrent-a-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='executing'`, 'concurrent-a-record', 30_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-a-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(taskA)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='running' && document.querySelector('#task-drawer [data-task-drawer-control="pause"]')?.disabled===false`, 'concurrent-a-pause-ready', 30_000);
@@ -1412,6 +1423,7 @@ async function main() {
     const completionB = settledAll.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId);
     await openAttention(renderer, 'isolation-b');
     await openItem(renderer, completionB.itemId, 'isolation-b');
+    await openResultRecord(renderer, 'isolation-b');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'isolation-b-record', 30_000);
     const settledB2 = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const transitionsB = settledB2?.run?.transitions ?? [];
@@ -1423,6 +1435,7 @@ async function main() {
     'concurrent-b-own-revision', { state: settledB2?.state, run: settledB2?.run?.state, transitions: transitionsB.map((transition) => transition.state), ordinal: settledB2?.resultSetRevision?.ordinal });
     await openAttention(renderer, 'isolation-a');
     await openItem(renderer, `analysis:${taskA}`, 'isolation-a');
+    await openAnalysisOf(renderer, bookA, 'isolation-a-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='paused'`, 'isolation-a-record', 30_000);
     const pausedA = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(pausedA?.bookId === bookA && pausedA.state === 'paused' && pausedA.run?.runRecordId === runA && (pausedA.resultSetRevision ?? null) === null &&
@@ -1514,6 +1527,7 @@ async function main() {
     // its revision 乙's third. ②A names it among the Runs the Enrollment started.
     await openAttention(renderer, 'background-run');
     await openItem(renderer, backgroundCompletion.itemId, 'background-run');
+    await openResultRecord(renderer, 'background-run');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'background-run-card', 30_000);
     const backgroundRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(backgroundRun?.bookId === bookB && backgroundRun.taskIntent?.mode === 'sync-current' &&
