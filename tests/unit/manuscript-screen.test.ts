@@ -234,7 +234,7 @@ describe('the Manuscript screen lifecycle', () => {
     app.open({ ...initial, position: { ...initial.position, label: full, structureLabel: heading, proportion: 0.25 } });
     const position = app.screen.querySelector('.editor-position')!;
     expect(position.textContent).toBe('长标题长标题长标题长标题长标题长…');
-    expect(position.getAttribute('title')).toBe(full);
+    expect(position.getAttribute('title')).toBe(heading);
     app.showing?.destroy();
   });
 

@@ -258,7 +258,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   );
   const meta = element('div', 'editor-meta');
   const position = element('span', 'editor-position', positionWords(initialWindow));
-  position.setAttribute('title', initialWindow.position.label);
+  position.setAttribute('title', initialWindow.position.structureLabel ?? positionWords(initialWindow));
   const revision = element('span', 'editor-revision', revisionWords(initialWindow));
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
@@ -874,7 +874,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     updatePersistenceMenu();
     refreshMilestonePersistence();
     position.textContent = positionWords(currentWindow);
-    position.setAttribute('title', currentWindow.position.label);
+    position.setAttribute('title', currentWindow.position.structureLabel ?? positionWords(currentWindow));
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
     editorHost.dataset['journalSequence'] = String(currentWindow.journalSequence);
