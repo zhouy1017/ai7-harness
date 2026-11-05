@@ -342,7 +342,7 @@ async function click(renderer, label, name) {
   if (label === '向前浏览' || label === '向后浏览') await assertRenderer(renderer, manuscriptBoundary(label), name);
   if (label === '预览替换') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>(item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)})); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
 async function clickBook(renderer, bookId, name) {
@@ -766,7 +766,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && !document.querySelector('[data-action="select-main-role-model"]') && !document.querySelector('[data-search-backend]') && !document.querySelector('.model-service-current-roles')`, 'ordinary-model-single-view');
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const test=flow?.querySelector('[data-action="test-flow-connection"]'); return flow instanceof HTMLElement && test instanceof HTMLButtonElement && flow.getBoundingClientRect().top>=0 && test.getBoundingClientRect().bottom<=innerHeight; })()`, 'ordinary-model-one-screen');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
-    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [role="tab"]'), node=>node.textContent).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-tabs');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]').length===1 && document.querySelector('[data-screen="quality-learning"] [role="tab"]')?.textContent==='反馈历史'`, 'ordinary-quality-feedback-only');
     await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='反馈历史已打开'`, 'ordinary-quality-loaded');
@@ -1317,7 +1317,7 @@ async function main() {
       if(!(anchorSection instanceof HTMLElement)||!(records instanceof HTMLElement))return false;
       const labels=Array.from(anchorSection.querySelectorAll(':scope > dl > dt'),(node)=>node.textContent);
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
-      return JSON.stringify(labels)===JSON.stringify(['稿件','上次位置','保存状态']) &&
+      return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
         anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&

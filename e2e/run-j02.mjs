@@ -834,7 +834,7 @@ async function importAndOpen(renderer, dataRoot) {
   at('import-stage');
   await clickButton(renderer, '导入稿件', 'stage-click');
   await waitForStagedTarget(renderer, dataRoot);
-  await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑段落')`, 'exact-block-count');
+  await assertRenderer(renderer, `document.querySelector('.import-file-card')?.textContent.includes('${BLOCK_COUNT} 个段落')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');

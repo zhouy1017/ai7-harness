@@ -222,6 +222,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
   };
 
   const paint = (focus: string | null): void => {
+    const opened = new Set(Array.from(root.querySelectorAll<HTMLDetailsElement>('.library-material > .knowledge-file-more[open]'), (more) => more.parentElement?.dataset['materialId']));
     const listed = shown();
     root.dataset['materialCount'] = String(listed.length);
     const actions = el('div', 'button-row library-actions');
@@ -233,7 +234,12 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     if (refusal !== null && refusal.materialId === null && preview === null) parts.push(alert(refusal.message));
     if (preview !== null) parts.push(previewSection(preview));
     const list = el('div', 'library-list');
-    for (const material of listed) list.append(card(material));
+    for (const material of listed) {
+      const item = card(material);
+      const more = item.querySelector<HTMLDetailsElement>('.knowledge-file-more');
+      if (more && opened.has(material.materialId)) more.open = true;
+      list.append(item);
+    }
     parts.push(list);
     if (cursor !== null || !onFirstPage) {
       const row = el('div', 'button-row library-more');
@@ -286,7 +292,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       replace(next);
       // Only the index of the card whose index moved is drawn again: nothing the editor is in — a focused heading, an open
       // choice, a note being read — is touched.
-      const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > section.material-index`);
+      const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > details.knowledge-file-more > section.material-index`);
       section?.replaceWith(indexSection(next));
     }
     pollDelay = nextIndexPollDelay(pollDelay, moved);
@@ -390,21 +396,23 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const title = el('h3', undefined, material.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
-    heading.append(el('span', 'library-source', ` · ${librarySourceLine(material, localInstantLabel)}`));
     node.append(heading);
+    node.append(el('p', 'knowledge-file-summary', libraryReferenceLine(material)));
+    const more = el('details', 'knowledge-file-more');
+    more.append(el('summary', undefined, '查看资料'), el('p', 'library-source', librarySourceLine(material, localInstantLabel)));
     const facts = el('dl', 'library-facts');
     facts.append(
       el('dt', undefined, LIBRARY_ATTRIBUTION_TERM), el('dd', 'library-attribution', libraryAttributionLine(material)),
       el('dt', undefined, LIBRARY_ELIGIBILITY_TERM), el('dd', 'library-eligibility', libraryEligibilityLine(material)),
     );
-    node.append(facts);
-    if (material.eligibility?.reasonHasMore) node.append(reasonReader(material.materialId, material.eligibility.ordinal));
-    if (material.eligibilityReset) node.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
-    node.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
-    node.append(indexSection(material));
-    if (refusal?.materialId === material.materialId) node.append(alert(refusal.message));
+    more.append(facts);
+    if (material.eligibility?.reasonHasMore) more.append(reasonReader(material.materialId, material.eligibility.ordinal));
+    if (material.eligibilityReset) more.append(el('p', 'attention-note library-reset', LIBRARY_ELIGIBILITY_RESET));
+    more.append(el('p', `library-reference library-reference-${material.reference.state}`, libraryReferenceLine(material)));
+    more.append(indexSection(material));
+    if (refusal?.materialId === material.materialId) more.append(alert(refusal.message));
     if (chooser?.materialId === material.materialId) {
-      node.append(chooser.kind === 'attribution' ? attributionChooser(material, chooser) : eligibilityChooser(material, chooser));
+      more.append(chooser.kind === 'attribution' ? attributionChooser(material, chooser) : eligibilityChooser(material, chooser));
     } else {
       const row = el('div', 'button-row library-card-actions');
       const waitsForEligibility = material.attribution !== null && (material.eligibility === null || material.eligibility.choice === 'deferred');
@@ -413,7 +421,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       attribute.disabled = busy || preview !== null || chooser !== null;
       eligibility.disabled = busy || preview !== null || chooser !== null || material.attribution === null;
       row.append(attribute, eligibility);
-      node.append(row);
+      more.append(row);
       if (material.attribution === null) eligibility.textContent = `${LIBRARY_ELIGIBILITY} · ${LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION}`;
     }
     // Every decision on record, oldest first, and the exact identities one step below.
@@ -430,7 +438,9 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       el('dt', undefined, '资料'), el('dd', 'technical-identity', material.materialId),
       el('dt', undefined, '文件 SHA-256'), el('dd', 'technical-identity', material.source.sha256),
       el('dt', undefined, '记录摘要'), el('dd', 'technical-identity', material.digest)));
-    node.append(history);
+    more.append(history);
+    more.open = chooser?.materialId === material.materialId || options.focusMaterialId === material.materialId;
+    node.append(more);
     return node;
   };
 

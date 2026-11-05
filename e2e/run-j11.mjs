@@ -63,7 +63,6 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const FIRST = Object.freeze({ title: '人员旅程甲' });
 const SECOND = Object.freeze({ title: '人员旅程乙' });
 const PEOPLE = Object.freeze({ authors: '周一、吴二', editors: '郑三', relatedRole: 'proofreader', relatedName: '王四' });
-const PEOPLE_NOTE = '作者与责编用于标注、查找及反馈与学习归属，不决定操作权限。';
 const SAMPLE1_PATH = resolve(ROOT, 'SampleBooks', 'sample1.docx');
 const THIRD = Object.freeze({ title: '评估旅程丙' });
 /**
@@ -295,7 +294,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => (item.textContent === ${JSON.stringify(label)} || item.getAttribute('aria-label') === ${JSON.stringify(label)})); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 async function clickSelector(renderer, selector, name) {
   await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
@@ -1258,11 +1257,10 @@ async function main() {
     // A new Book has no people yet: each field reads 未填写, and the section says what the people are for.
     await assertRenderer(renderer, `(() => {
       const section = document.querySelector(${JSON.stringify(peopleSection)});
-      const values = Array.from(section.querySelectorAll('dd[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
+      const values = Array.from(section.querySelectorAll('span[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
       return section.querySelector('h3')?.textContent === '人员' && section.dataset.peopleVersion === '0' &&
         JSON.stringify(values) === '["authors:未填写","editors:未填写","related:未填写"]' &&
-        section.querySelector('.book-people-recorded')?.textContent === '尚未填写作者、责编和相关人' &&
-        section.querySelector('.book-people-note')?.textContent === ${JSON.stringify(PEOPLE_NOTE)} &&
+        section.querySelector('.book-people-line [data-people-action=edit]') !== null &&
         section.querySelector('[data-people-action="edit"]')?.textContent === '编辑人员…';
     })()`, 'people-empty-section');
 
@@ -1327,9 +1325,9 @@ async function main() {
     await waitFor(renderer, `${notice} === '人员已保存' && document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'people-recorded');
     await assertRenderer(renderer, `(() => {
       const section = document.querySelector(${JSON.stringify(peopleSection)});
-      const values = Array.from(section.querySelectorAll('dd[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
+      const values = Array.from(section.querySelectorAll('span[data-people-field]'), (dd) => dd.dataset.peopleField + ':' + dd.textContent);
       return JSON.stringify(values) === '["authors:周一、吴二","editors:郑三","related:校对 王四"]' && section.querySelector('form') === null &&
-        (section.querySelector('.book-people-recorded')?.textContent ?? '').startsWith('第 1 次保存 · ') &&
+        section.querySelector('.book-people-line [data-people-action=edit]') !== null &&
         document.activeElement === section.querySelector('[data-people-action="edit"]');
     })()`, 'people-shown');
     const saved = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(firstId)}, historyCursor: null }).then((overview) => overview.people)`);
@@ -1416,7 +1414,7 @@ async function main() {
     requireJourney(JSON.stringify(await renderer.evaluate(CARDS)) === JSON.stringify(cards), 'restart-cards');
     await clickSelector(renderer, `[data-screen="landing"] section.recent-work article.book-summary-item button[data-book-id="${firstId}"]`, 'restart-open-first');
     await waitFor(renderer, `document.querySelector(${JSON.stringify(peopleSection)})?.dataset.peopleVersion === '1'`, 'restart-overview');
-    await assertRenderer(renderer, `JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(`${peopleSection} dd[data-people-field]`)}), (dd) => dd.textContent)) === '["周一、吴二","郑三","校对 王四"]'`, 'restart-overview-people');
+    await assertRenderer(renderer, `JSON.stringify(Array.from(document.querySelectorAll(${JSON.stringify(`${peopleSection} span[data-people-field]`)}), (dd) => dd.textContent)) === '["周一、吴二","郑三","校对 王四"]'`, 'restart-overview-people');
     const peopleAfter = await renderer.evaluate(`window.ai7.getBookOverview({ bookId: ${JSON.stringify(firstId)}, historyCursor: null }).then((overview) => JSON.stringify(overview.people))`);
     requireJourney(peopleAfter === peopleBefore, 'restart-people-moved-nothing');
 

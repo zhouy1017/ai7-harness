@@ -1,3 +1,4 @@
+import { importSteps } from './components/import-steps.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -200,6 +201,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const content = panel();
     content.append(
       element('h2', undefined, '导入稿件'),
+      importSteps('choices'),
       element('p', 'lede', '请选择图书和导入方式。'),
       sourceCard(staged),
     );
@@ -328,7 +330,7 @@ export function createImportReview(options: ImportReviewOptions) {
           radio.setAttribute('aria-label', '重新导入主稿件');
           copy.append(
             element('strong', undefined, '重新导入主稿件'),
-            element('small', undefined, '先明确来源关系并复核逐块比较；没有已确认来源关系时仍可继续保守的两方比较。'),
+            element('small', undefined, '比较新旧稿件，由你决定保留哪些改动。'),
           );
         }
         relationshipChoice.append(radio, copy);
@@ -764,7 +766,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const content = panel();
     content.dataset['importReviewKind'] = 'source-only';
     content.append(
-      element('p', 'section-label', '步骤 2 / 3 · 来源材料导入前复核'),
+      importSteps('review'),
       element('h2', undefined, '复核来源材料导入'),
       element('p', 'lede', '本次提交只形成图书拥有的来源材料记录；不会创建或改变稿件及其工作状态。'),
     );
@@ -806,7 +808,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '保留边界'), element('dd', undefined, review.retainedBoundary.label),
       element('dt', undefined, '文件名'), element('dd', undefined, review.retainedBoundary.displayName),
       element('dt', undefined, '格式'), element('dd', undefined, review.retainedBoundary.format),
-      element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''), retainedBytes,
+      element('dt', undefined, technicalLayerVisible ? '文件大小' : ''), retainedBytes,
     );
     // A retained original the product never parsed has no content or structure identity, so those two
     // rows are absent rather than empty: the surface claims only what was actually derived.
@@ -927,7 +929,7 @@ export function createImportReview(options: ImportReviewOptions) {
     content.dataset['reimportReviewDigest'] = review.reviewDigest;
     content.dataset['reimportCommitAttemptId'] = review.commitAttemptId ?? '';
     content.append(
-      element('p', 'section-label', '步骤 2 / 3 · 稿件重新导入复核'),
+      importSteps('review'),
       element('h2', undefined, '按章节复核稿件重新导入'),
       element('p', 'lede', review.lineage.status === 'verified'
         ? technicalWords('已由所选图书拥有的精确来源版本建立三方比较。', '已与原文件和当前稿件比较。')
@@ -949,7 +951,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dt', undefined, '文件'), element('dd', undefined, review.sourceVersionResult.disposition === 'created' ? '导入新文件' : '使用已导入的文件'),
       element('dt', undefined, '暂存文件名'), element('dd', undefined, review.source.displayName),
       element('dt', undefined, '暂存格式'), element('dd', undefined, review.source.format),
-      element('dt', undefined, technicalLayerVisible ? '暂存来源字节数' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
+      element('dt', undefined, technicalLayerVisible ? '文件大小' : ''), element('dd', undefined, technicalLayerVisible ? String(review.source.sourceBytes) : ''),
       element('dt', undefined, '暂存来源范围'), element('dd', undefined, technicalWords(review.source.provenanceLabel, '已选择文件')),
     );
     target.dataset['reimportSourceSha256'] = review.source.sourceSha256;
@@ -1234,7 +1236,7 @@ export function createImportReview(options: ImportReviewOptions) {
   ): void {
     const content = panel();
     content.append(
-      element('p', 'section-label', '步骤 2 / 3 · 导入前复核'),
+      importSteps('review'),
       element('h2', undefined, '导入前复核'),
       element('p', 'lede', '确认书名与目标后即可导入。'),
     );
@@ -1289,7 +1291,7 @@ export function createImportReview(options: ImportReviewOptions) {
       element('dd', undefined, review.source.displayName),
       element('dt', undefined, '来源边界'),
       element('dd', undefined, technicalWords(review.source.provenanceLabel, '已选择文件')),
-      element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
+      element('dt', undefined, technicalLayerVisible ? '文件大小' : ''),
       sourceBytes,
       element('dt', undefined, '最终动作'),
       element('dd', undefined, finalActionLabel),
