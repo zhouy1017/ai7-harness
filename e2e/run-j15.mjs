@@ -404,7 +404,7 @@ async function readLibrary(renderer, predicate, name) {
   throw error;
 }
 async function clickSelector(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.disabled)return false; node.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.disabled)return false; const more=node.closest('.knowledge-file-more'); if(more instanceof HTMLDetailsElement&&!more.open)more.querySelector(':scope > summary').click(); node.click(); return true; })()`, name);
 }
 async function pressKey(renderer, key) {
   const codes = { ArrowRight: 39, ArrowLeft: 37, Enter: 13 };
@@ -611,6 +611,7 @@ async function main() {
     renderer = await waitForRenderer(manager, 'knowledge-restart-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-restart-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-restart-open');
+    await click(renderer, '审阅规范文件', 'knowledge-restart-open-category');
     const restarted = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-restart-ready-page');
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
@@ -621,6 +622,8 @@ async function main() {
     const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
       const button=document.querySelector(${JSON.stringify(`${cardSelector} ${selector}`)});
       if (!(button instanceof HTMLButtonElement) || button.disabled) return false;
+      const more=button.closest('.knowledge-file-more');
+      if(more instanceof HTMLDetailsElement && !more.open) more.querySelector(':scope > summary').click();
       button.focus(); button.click(); return true;
     })()`, name);
     for (let version = 3; version <= 8; version += 1) {
@@ -632,6 +635,7 @@ async function main() {
         renderer = await waitForRenderer(manager, 'knowledge-page-window');
         await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-page-ready');
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-page-open');
+    await click(renderer, '审阅规范文件', 'knowledge-page-open-category');
         await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
       }
       await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
@@ -736,6 +740,7 @@ async function main() {
     renderer = await waitForRenderer(manager, 'library-picker-window');
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'library-picker-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'library-picker-knowledge');
+    await click(renderer, '审阅规范文件', 'library-picker-knowledge-category');
     await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'library-picker-knowledge-ready');
     // 放入资料… with sample1 as a book the editor collected: the file as it will arrive, named and said to be a 图书 by the
     // editor, then kept whole — deciding nothing: no attribution, no eligibility, and no Task may list it under 允许参考 yet.
