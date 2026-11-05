@@ -2754,6 +2754,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ...(state.definition?.composite !== true ? {} : { procedureDefinition: state.definition.pin }),
       };
       const initial = await api.prepareReviewRun(preparationInput);
+      if (state.dismissed) {
+        await api.cancelServiceJob({ jobId: initial.jobId });
+        options.setStatus('已请求取消审阅准备。', 'success');
+        return;
+      }
       state.job = initial;
       sheetUpdate();
       const completed = await options.awaitServiceJob(initial, (job) => {

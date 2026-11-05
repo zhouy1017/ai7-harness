@@ -114,10 +114,28 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
     goToText: async () => undefined, openPlan: () => undefined, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
-  return { root, surface, status, unexpected, ...calls };
+  return { root, surface, status, unexpected, api, ...calls };
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
+  it('cancels a preparation arriving after the sheet was dismissed without authorizing it', async () => {
+    const view = mount(); const next = workspace();
+    const available = { available: true, unavailableReason: null };
+    next.newReview = available; next.scopeOptions.whole = available;
+    next.categories = [{ categoryId: 'typos-and-usage', label: '文字审阅', description: '给出修改建议。', output: 'change-suggestion', riskPointsOnly: false,
+      batchApply: true, searchEngine: false, modelFree: false, available: true, unavailableReason: null,
+      basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '文字审阅', version: '1' } },
+      guidelineDocuments: [], procedure: { title: '文字审阅', version: '1' }, scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    const pending = deferred<Awaited<ReturnType<RendererApi['prepareReviewRun']>>>();
+    const prepare = vi.fn(() => pending.promise); const cancel = vi.fn(async () => undefined);
+    const authorize = vi.fn(); Object.assign(view.api, { prepareReviewRun: prepare, cancelServiceJob: cancel, authorizeReviewRun: authorize });
+    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
+    expect(prepare).toHaveBeenCalledOnce(); view.root.querySelector('dialog')!.close();
+    pending.resolve({ jobId: OTHER, kind: 'review-run-preparation', state: 'running', progress: { completed: 0, total: 2, label: '正在准备' }, result: null, failure: null });
+    await flush(); expect(cancel).toHaveBeenCalledWith({ jobId: OTHER }); expect(authorize).not.toHaveBeenCalled();
+  });
   it.each([true, false])('shows truthful native search availability in the new-review dialog (admitted: %s)', async (admitted) => {
     const view = mount();
     const next = workspace();
