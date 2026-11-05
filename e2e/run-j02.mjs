@@ -552,18 +552,14 @@ async function openNavigation(renderer, location) {
 }
 
 async function clickVisibleControl(renderer, selector, name) {
-  const point = await renderer.evaluate(`(() => {
-    ${localDebugEnabled() ? `if (!globalThis.__ai7OverlayDebug) {
-      const trace = globalThis.__ai7OverlayDebug = [];
-      const state = () => ({ width: innerWidth, panel: document.querySelector('#manuscript-navigation-panel')?.hidden, expanded: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded') });
-      for (const name of ['mousedown', 'mouseup', 'click']) document.addEventListener(name, event => trace.push({ name, tag: event.target?.tagName, id: event.target?.id, entry: event.target?.closest?.('[data-edge-entry]')?.dataset.edgeEntry, x: event.clientX, y: event.clientY, ...state() }), true);
-      new MutationObserver(() => trace.push({ name: 'mutate', ...state() })).observe(document.querySelector('#manuscript-navigation-panel'), { attributes: true, attributeFilter: ['hidden'] });
-    }` : ''}
+  const point = await renderer.evaluate(`(async () => {
     const node=document.querySelector(${JSON.stringify(selector)});
     if(!(node instanceof HTMLElement)) return null;
     node.scrollIntoView({block:'nearest'});
+    // Resizing animates the shell padding; native pointer coordinates must be taken after that movement ends.
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await Promise.all(document.body.getAnimations().map(animation => animation.finished));
     const r=node.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
-    ${localDebugEnabled() ? `globalThis.__ai7OverlayDebug.push({ name: 'measure', selector: ${JSON.stringify(selector)}, rect: r.toJSON(), animations: document.body.getAnimations().map(item => ({ state: item.playState, progress: item.effect?.getComputedTiming().progress })) });` : ''}
     return r.width>0 && r.height>0 && node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
   })()`);
   requireJourney(point !== null, name);
@@ -578,16 +574,14 @@ async function assertSupportingOverlays(renderer) {
     for (const [entry, id] of [['navigation','manuscript-navigation-panel'], ['analysis','paragraph-analysis-panel']]) {
       await assertRenderer(renderer, `(() => { const node=document.querySelector('[data-edge-entry="${entry}"]'); if(node.getAttribute('aria-expanded')==='true') node.click(); return true; })()`, `overlay-${width}-${entry}-reset`);
       await clickVisibleControl(renderer, `[data-edge-entry="${entry}"]`, `overlay-${width}-${entry}-open`);
-      try { await waitForChecks(renderer, `(() => {
+      await waitForChecks(renderer, `(() => {
         const panel=document.querySelector('#${id}'), box=panel.getBoundingClientRect();
         const workspace=document.querySelector('.editor-workspace').getBoundingClientRect();
         const edge=document.querySelector('.editor-edge').getBoundingClientRect();
         return { visible:!panel.hidden, readable:box.width>=240 && box.height>=100,
           inside:box.top>=workspace.top-1 && box.bottom<=workspace.bottom+1 && box.left>=workspace.left-1 && box.right<=edge.left+1,
           painted:panel.contains(document.elementFromPoint(box.left+20,box.top+20)) };
-      })()`, `overlay-${width}-${entry}-bounds`); }
-      catch (error) { if (localDebugEnabled()) recordDebugDetail('J-02', '[DEBUG-q1-overlay] ' + JSON.stringify(await renderer.evaluate('globalThis.__ai7OverlayDebug'))); throw error; }
-      if (localDebugEnabled()) recordDebugDetail('J-02', '[DEBUG-q1-overlay-pass] ' + JSON.stringify(await renderer.evaluate('globalThis.__ai7OverlayDebug')));
+      })()`, `overlay-${width}-${entry}-bounds`);
       if (entry === 'navigation') {
         await clickVisibleControl(renderer, '#manuscript-search', `overlay-${width}-search-click`);
         await assertRenderer(renderer, `document.activeElement?.id==='manuscript-search'`, `overlay-${width}-search-focused`);
