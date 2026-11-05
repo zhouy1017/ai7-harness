@@ -144,11 +144,12 @@ describe('the one model-service flow', () => {
   });
 
   it('reports a foreground discovery failure even when the catalogue is unchanged', async () => {
+    const reason = '模型服务不可达，请检查网络或网络代理设置';
     const projection = { ...settings(['deepseek-open-platform']),
       routeChoice: { ...settings(['deepseek-open-platform']).routeChoice, unsupportedProviders: [] },
       proxy: { mode: 'direct' }, lastProxyProbe: null, searchBackends: { backends: [], candidates: [] },
       protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
-      modelDiscovery: { status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE', reason: '模型服务不可达，请检查网络或网络代理设置' },
+      modelDiscovery: { status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE', reason },
       launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
         externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
     } as unknown as ModelServiceSettingsProjection;
@@ -173,12 +174,12 @@ describe('the one model-service flow', () => {
       const secret = page.querySelectorAll('input').find((input) => input.type === 'password')!;
       secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
       page.querySelector('.model-credential-form')!.dispatchEvent({ type: 'submit' });
-      await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(`凭据已保存，但无法获取模型列表：${projection.modelDiscovery!.reason}`, 'error'));
+      await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(`凭据已保存，但无法获取模型列表：${reason}`, 'error'));
       // The real visibility listener follows settings after role choices return to their original values.
       (document.body as unknown as MiniElement).dispatchEvent({ type: 'visibilitychange' });
       await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalledOnce());
-      expect(setStatus).toHaveBeenLastCalledWith(projection.modelDiscovery!.reason, 'error');
-      const technical = root.querySelector('.model-service-technical')!;
+      expect(setStatus).toHaveBeenLastCalledWith(reason, 'error');
+      const technical = root.querySelector<HTMLDetailsElement>('.model-service-technical')!;
       expect(technical.open).toBe(false);
       expect(technical.querySelector('[data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')).not.toBeNull();
       poll!();
