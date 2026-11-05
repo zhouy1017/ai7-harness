@@ -864,7 +864,7 @@ async function commitPreparedSourceImport(renderer, expectation = {}) {
   );
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const source = screen?.querySelector('[data-view-source-version-id]'); const record = screen?.querySelector('[data-view-source-import-record-id]'); const actions = source?.closest('.button-row'); const labels = Array.from(actions?.querySelectorAll(':scope > button') ?? [], (button) => button.textContent); return screen?.textContent.includes('来源材料已导入') && source && !source.disabled && record && !record.disabled && actions === record.closest('.button-row') && labels[0] === '查看来源材料' && labels[1] === '查看来源导入记录'; })()`,
+    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const source = screen?.querySelector('[data-view-source-version-id]'); const record = screen?.querySelector('[data-view-source-import-record-id]'); const actions = source?.closest('.button-row'); const labels = Array.from(actions?.querySelectorAll(':scope > button') ?? [], (button) => button.textContent); return Boolean(screen?.querySelector('[data-import-commit-id]')) && source && !source.disabled && record && !record.disabled && actions === record.closest('.button-row') && labels[0] === '查看来源材料' && labels[1] === '查看来源导入记录'; })()`,
     'source-completion-actions',
   );
   const identities = await renderer.evaluate(`(() => {
@@ -1582,6 +1582,7 @@ async function runJourney(
     );
     at('review');
   }
+  if (start !== 'accepted-review') await assertRenderer(renderer, `document.querySelectorAll('.import-steps [data-import-step]').length===4 && document.querySelector('.import-file-card') && !/来源字节数|本机文件选择器|工作流程实例/.test(document.querySelector('#screen').textContent)`, 'import-pills-and-file-summary');
   if (quickImport) {
     await assertRenderer(renderer, `document.querySelector('input[name="import-target"]:checked') && document.querySelector('input[aria-label="作为首份稿件导入"]')?.checked && document.querySelector('#book-title')?.value.length > 0 && !document.querySelector('[data-screen="review"]')`, 'quick-import-defaults-one-page');
   } else if (start !== 'accepted-review') {
@@ -1730,10 +1731,11 @@ async function runJourney(
     'content-contract',
     () => assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
+      `Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]')) && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
       'import-completion',
     ),
   );
+  await assertRenderer(renderer, `document.querySelector('.manuscript-anchor .primary')?.textContent==='打开稿件' && !document.querySelector('.book-overview .success-note') && document.querySelectorAll('.import-steps [data-import-step]').length===4`, 'overview-anchor-first');
   if (holdCompletionPaint) {
     await duringCompletion(
       'held-before-paint',
@@ -2014,7 +2016,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-book-overview');
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="book-overview"]'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation button') ?? [], (button) => button.textContent); return screen?.textContent.includes('尚无稿件') && screen.textContent.includes('图书已创建') && buttons.length === 1 && buttons[0] === '图书' && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入首份稿件'); })()`,
+    `(() => { const screen = document.querySelector('[data-screen="book-overview"]'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation button') ?? [], (button) => button.textContent); return screen?.textContent.includes('尚无稿件') && !screen.querySelector('.success-note') && buttons.length === 1 && buttons[0] === '图书' && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入首份稿件'); })()`,
     'empty-book-only-authority',
   );
   const bookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
@@ -2127,7 +2129,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   );
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const overview = screen?.querySelector('.book-overview'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation [data-record-kind]') ?? [], (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; return overview?.dataset.bookId === ${JSON.stringify(bookId)} && screen.textContent.includes('稿件已导入') && screen.textContent.includes('已有主稿件') && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
+    `(() => { const screen = document.querySelector('[data-screen="imported"]'); const overview = screen?.querySelector('.book-overview'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation [data-record-kind]') ?? [], (button) => button.textContent); const exact = ['图书','主稿件','修订版 r1','来源版本与来源记录','工作流实例与精确 Profile 绑定','稿件导入记录']; return overview?.dataset.bookId === ${JSON.stringify(bookId)} && Boolean(overview?.dataset.importCommitId) && screen.textContent.includes('已有主稿件') && buttons.length === exact.length && buttons.every((label, index) => label === exact[index]); })()`,
     'existing-book-result-overview',
   );
   const importedRoute = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
@@ -3129,7 +3131,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('来源材料已导入')`,
+      `Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
       'source-only-pdf-completion-wording',
     );
     const sourceOnlyPdfIdentities = await renderer.evaluate(`(() => {
@@ -3205,7 +3207,7 @@ async function main() {
     // pinned to a literal.
     await assertRenderer(
       renderer,
-      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑段落`)})`,
+      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.querySelector('.import-file-card')?.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个段落`)})`,
       'text-manuscript-fidelity-clean',
     );
     await clickExactButton(renderer, '查看导入详情', 'text-manuscript-review-action');
@@ -3224,7 +3226,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
+      `Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]')) && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
       'text-manuscript-completion-wording',
     );
     await clickExactButton(renderer, '来源版本与来源记录', 'text-manuscript-view-source');
@@ -3301,7 +3303,7 @@ async function main() {
       );
       await assertRenderer(
         renderer,
-        `document.body.textContent.includes('${LOCAL_DOC_BLOCKS} 个可编辑段落')`,
+        `document.querySelector('.import-file-card')?.textContent.includes('${LOCAL_DOC_BLOCKS} 个段落')`,
         'doc-manuscript-blocks',
       );
       await clickExactButton(renderer, '查看导入详情', 'doc-manuscript-review-action');
@@ -3320,7 +3322,7 @@ async function main() {
       );
       await assertRenderer(
         renderer,
-        `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
+        `Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]')) && document.querySelector('[data-screen="imported"]')?.textContent.includes('工作概览')`,
         'doc-manuscript-completion-wording',
       );
       await clickExactButton(renderer, '来源版本与来源记录', 'doc-manuscript-view-source');
@@ -3483,7 +3485,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `(() => { const screen = document.querySelector('[data-screen="imported"]'); const kinds = Array.from(screen?.querySelectorAll('.record-navigation button[data-record-kind]') ?? [], (button) => button.dataset.recordKind); return screen?.textContent.includes('来源材料已导入') && screen.querySelector('[data-view-source-version-id]') && screen.querySelector('[data-view-source-import-record-id]') && JSON.stringify(kinds) === JSON.stringify(['book','source','source-import-record']); })()`,
+      `(() => { const screen = document.querySelector('[data-screen="imported"]'); const kinds = Array.from(screen?.querySelectorAll('.record-navigation button[data-record-kind]') ?? [], (button) => button.dataset.recordKind); return Boolean(screen?.querySelector('[data-import-commit-id]')) && screen.querySelector('[data-view-source-version-id]') && screen.querySelector('[data-view-source-import-record-id]') && JSON.stringify(kinds) === JSON.stringify(['book','source','source-import-record']); })()`,
       'source-after-commit-exact-completion',
     );
     const sourceRecoveredBookId = await renderer.evaluate(`document.querySelector('[data-screen="imported"] .book-overview')?.dataset.bookId`);
@@ -4472,7 +4474,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入')`,
+      `Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]'))`,
       'before-paint-exact-completion',
     );
     await waitFor(
@@ -4637,7 +4639,7 @@ async function main() {
     );
     await assertRenderer(
       renderer,
-      `document.querySelector('[data-screen="imported"]')?.textContent.includes('稿件已导入') && !document.body.textContent.includes('导入提交结果待确认')`,
+      `Boolean(document.querySelector('[data-screen="imported"] [data-import-commit-id]')) && !document.body.textContent.includes('导入提交结果待确认')`,
       'after-commit-exact-completion',
     );
     await waitFor(

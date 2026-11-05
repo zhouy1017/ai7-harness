@@ -39,21 +39,20 @@ export interface KnowledgeBaseTabView {
 }
 
 export const KNOWLEDGE_BASE_TITLE = '知识库';
-export const KNOWLEDGE_BASE_LEDE = '图书与任务可选用这里的专业资料，不会改动原条目。';
 export const KNOWLEDGE_BASE_TABS_LABEL = '知识库分类';
 
 export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'guidelines',
     label: '审阅规范文件',
-    holds: '审阅按这些文件的编号条款找问题，每次审阅记下它用的版本。导入新版本后，新准备的审阅按新版本；已准备或做过的审阅仍用当时的版本。',
+    holds: '审阅依据的规范文件与编号条款。',
     pending: null,
   },
   {
     tab: 'evaluation',
     label: '评估方案',
     developerOnly: true,
-    holds: '评估按这里的评分项、满分、档位、风险项与结论打分；每一版评估都记下它用的方案版本。',
+    holds: '评估采用的评分项、档位与结论。',
     pending: null,
   },
   { tab: 'rules', label: '工序与规则', developerOnly: true, holds: '专家经验工序与「快速开始」的默认执行规则。', pending: null },
@@ -67,20 +66,20 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'exemplars',
     label: '范例',
-    holds: '按已出版图书组织的审稿意见、新闻稿、宣传文章与评论文章；本社的书设为发稿版本后，交付过的文档自动归入，学习准入默认「仅本社」。',
+    holds: '按已出版图书整理的审稿意见与写作范例。',
     pending: null,
   },
   {
     tab: 'library',
     label: '资料库',
-    holds: '编辑收集的图书、资料、论文与网页；放入后立即可供任务参考，可随时调整归属与使用范围。',
+    holds: '收集图书、论文与网页，供任务参考。',
     pending: null,
   },
   {
     tab: 'external',
     label: '外部来源留存',
     developerOnly: true,
-    holds: '审查时留存的外部资料的跨书索引；归属仍在各书的来源与证据。',
+    holds: '各书审查时留存的外部资料索引。',
     pending: '尚未提供：外部来源留存随外部核查的留存一起到来。',
   },
 ];
