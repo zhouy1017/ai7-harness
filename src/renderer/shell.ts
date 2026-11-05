@@ -155,7 +155,7 @@ export function sidebarBookRows(
 
 /** The first character a collapsed row shows for a Book: its title's, as the editor reads it. */
 export function bookIcon(title: string): string {
-  return [...title.trim()][0] ?? SHELL_LABELS.bookIcon;
+  return title.match(/[\p{L}\p{N}]/u)?.[0] ?? SHELL_LABELS.bookIcon;
 }
 
 /**
@@ -394,7 +394,9 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const bookMenu = el('div', 'sidebar-book-menu');
   bookMenu.setAttribute('popover', 'auto');
   bookMenu.setAttribute('role', 'menu');
+  bookMenu.setAttribute('aria-label', '图书操作');
   let bookMenuOpen = false;
+  bookMenu.addEventListener('toggle', (event) => { bookMenuOpen = (event as ToggleEvent).newState === 'open'; });
   sidebar.replaceChildren(destinations, books, bookGroup, foot, bookMenu);
 
   const allLinks = (): ReadonlyArray<HTMLElement> => [

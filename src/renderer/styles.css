@@ -141,7 +141,6 @@ body { padding-left: var(--sidebar-width); }
 .app-sidebar ul { margin: 0; padding: 0; list-style: none; }
 .app-sidebar li + li { margin-top: .1rem; }
 .sidebar-link { position: relative; display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 30px; padding: .15rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; text-decoration: none; cursor: pointer; }
-.sidebar-link::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border: 1px solid var(--boundary); border-radius: 7px; background: var(--surface); color: var(--action-text); font-size: .95rem; font-weight: 800; }
 .sidebar-link:hover:not([aria-disabled="true"]):not(:disabled) { background: var(--surface-subdued); }
 .sidebar-link[aria-current="page"] { border-color: var(--selection-boundary); background: var(--selection); color: var(--selection-text); box-shadow: inset 3px 0 0 var(--selection-boundary); }
 .sidebar-link[aria-current="true"] { border-color: var(--boundary-strong); }
@@ -166,11 +165,8 @@ body { padding-left: var(--sidebar-width); }
 .nav-book-initial { position: absolute; width: 18px; opacity: 0; overflow: hidden; font-family: "Noto Serif SC", serif; text-align: center; }
 .sidebar-book-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 4px 16px var(--shadow); }
 .sidebar-book-menu:not(:popover-open) { display: none; }
-.sidebar-book-menu .btn { width: 100%; }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
-.sidebar-book-title { display: flex; align-items: center; gap: .55rem; margin: 0; padding: 0 .5rem; font-family: var(--font-serif); font-size: 1.02rem; font-weight: 700; overflow-wrap: anywhere; }
-.sidebar-book-title::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 7px; background: var(--action-primary); color: var(--action-primary-text); font-size: .95rem; }
 .sidebar-group + .sidebar-group { margin-top: .15rem; }
 .sidebar-foot { display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-help-slot:empty { display: none; }
@@ -186,8 +182,6 @@ body { padding-left: var(--sidebar-width); }
 :root[data-sidebar="icons"] .nav-book-initial { position: static; flex: 0 0 18px; opacity: 1; }
 :root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .nav-state, :root[data-sidebar="icons"] .global-attention-entry-label { opacity: 0; }
 :root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .global-attention-entry-label { left: 34px; width: 180px; max-width: 0; height: auto; margin: 0; clip-path: none; pointer-events: none; }
-:root[data-sidebar="icons"] .sidebar-book-title { justify-content: center; padding: 0; font-size: 0; }
-:root[data-sidebar="icons"] .sidebar-book-title::before { font-size: .95rem; }
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry { gap: 0; }
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry .global-attention-badge { position: absolute; top: -2px; right: -2px; min-width: 1.35em; height: 1.35em; font-size: .7rem; }
 :root[data-sidebar="icons"] .task-navigation-badge { position: absolute; top: 0; right: 0; }
@@ -1848,7 +1842,6 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   /* Without colour the sidebar keeps its edge, each icon its outline, and the current row a heavier outline of its own. */
   .app-sidebar, .context-header { color: CanvasText; background: Canvas; border-color: CanvasText; }
   .app-sidebar .global-attention-entry, .sidebar-link { color: LinkText; background: Canvas; border-color: transparent; forced-color-adjust: none; }
-  .sidebar-link::before, .sidebar-book-title::before { color: CanvasText; background: Canvas; border: 1px solid CanvasText; forced-color-adjust: none; }
   .sidebar-link[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; border-color: CanvasText; box-shadow: none; }
   .sidebar-pin, .sidebar-toggle { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
   .settings-row, .settings-coming-soon { color: CanvasText; background: Canvas; border-color: CanvasText; }
@@ -2391,8 +2384,7 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 @keyframes manuscript-marker { 0% { transform: scale(.6); } 55% { transform: scale(1.6); } 100% { transform: scale(1); } }
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.sidebar-link::before, .sidebar-book-title::before { display: none; content: none; }
-.sidebar-link, .sidebar-book-title, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
+.sidebar-link, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
 :root[data-sidebar="icons"] .edge-label { display: none; }
 .btn { display: inline-flex; align-items: center; gap: .35rem; box-sizing: border-box; min-height: 32px; padding: .3rem .8rem; border: 1px solid var(--boundary-strong); border-radius: 7px; font: inherit; line-height: 1.4; cursor: pointer; color: var(--action-text); background: var(--action-secondary); }
 .btn.small, .btn.sidebar-pin { min-height: 26px; padding: .1rem .6rem; font-size: .8rem; }
