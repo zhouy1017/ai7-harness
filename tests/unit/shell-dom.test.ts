@@ -110,11 +110,27 @@ describe('sidebar book entries', () => {
     surface.follow('book-overview', { bookId: 'book-a', title: '甲书', section: 'overview' });
     expect(sidebar.querySelector('[data-shell-book-switcher]')).toBeNull();
     expect(sidebar.querySelector('.sidebar-book-title')).toBeNull();
+    expect(sidebar.querySelector('.sidebar-current-book')?.textContent).toBe('甲书');
     const row = sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')!;
+    expect(row.querySelector('.nav-book-initial')?.textContent).toBe('甲');
+    expect(row.querySelector('.icon')).toBeNull();
+    expect(row.querySelector('.nav-label')?.textContent).toBe('甲书');
+    expect(row.querySelector('.nav-state')?.textContent).toBe('当前');
     expect(row.getAttribute('aria-current')).toBe('true');
     row.click();
     expect(openBook).toHaveBeenCalledWith('book-a');
     sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')!.click();
     expect(openDestination).toHaveBeenCalledWith('library');
+  });
+
+  it('remembers collapse through the existing preference store and keeps row tooltips', async () => {
+    const { sidebar, preferences } = mounted();
+    await preferences.visit({ bookId: 'book-a', title: '甲书', section: 'overview' });
+    await preferences.setCollapsed(true);
+    await preferences.load();
+    expect(document.documentElement.dataset['sidebar']).toBe('icons');
+    expect(preferences.current['shell.sidebarCollapsed']).toBe(true);
+    expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-book="book-a"]')?.title).toContain('甲书');
+    expect(sidebar.querySelector<HTMLAnchorElement>('[data-nav-destination="library"]')?.title).toBe('书库');
   });
 });
