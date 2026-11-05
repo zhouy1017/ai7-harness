@@ -1845,6 +1845,9 @@ async function main() {
     await assertRenderer(renderer, `!document.querySelector('.evaluation-sheet') && !document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-reference-location');
     await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'initial-evaluation-plan', 120_000);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'initial-evaluation-full-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-evaluation-plan-references] [data-evaluation-materials="initial"]')`, 'initial-evaluation-plan-references');
+    await assertRenderer(renderer, `!document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-page-no-references');
     // The plan in the editor's words, as the drawer reads it: its task, its two steps, its 工序, and that it scores nothing for
     // the editor; no button of the drawer carries 授权.
     const planWords = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'initial-evaluation', ref: document.querySelector('#task-drawer').dataset.taskPlanRef })
@@ -2011,6 +2014,8 @@ async function main() {
       ['评估记录第 14 版定稿（审稿评估方案 第 1 版）：各项得分与评语、主要优点与问题、风险与结论', NO_EXEMPLAR],
       ['逐章读取，找出可以引用的段落', '按模板写出审稿意见'], true, true,
     ]), 'readers-report-plan-words', reportPlan);
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'readers-report-full-plan');
+    await waitFor(renderer, `document.querySelector('#task-drawer [data-evaluation-plan-references] [data-evaluation-materials="readersReport"]')`, 'readers-report-plan-references');
     await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes(${JSON.stringify(NO_EXEMPLAR)}) && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'readers-report-plan-shown');
     const preparedReport = await readReport((page) => page.state === 'prepared', 'readers-report-prepared');
     requireJourney(preparedReport.task === '审稿意见「给作者的修改意见」 · 尚未开始' &&

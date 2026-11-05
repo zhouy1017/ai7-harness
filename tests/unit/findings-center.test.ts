@@ -51,13 +51,13 @@ it('confirms all eligible findings in the selected category across list windows'
   });
   try {
     const items: BookFindingsProjection['items'] = Array.from({ length: 41 }, (_, index) => ({
-      id: String(index), category: index === 0 || index === 40 ? 'a' : 'b', categoryLabel: '合成类别', severity: '提示', status: '待处理', summary: '合成发现',
+      id: String(index), category: index === 0 || index === 40 ? 'a' : 'b', categoryLabel: '合成类别', severity: index === 40 ? '必须处理' : '提示', status: index === 40 ? '待复核' : '待处理', summary: '合成发现',
       target: { kind: 'review', reviewRunId: 'run', findingId: String(index), blockId: 'block' },
       ...([0, 1, 40].includes(index) ? { suggestion: { manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '原文', replacement: '修订' } } : {}),
     }));
     const read = vi.fn(async (offset: number): Promise<BookFindingsProjection> => ({
       bookId: 'book', total: 41, offset, next: offset === 0 ? 40 : null, pageSize: 40,
-      groups: ['a', 'b'].map((category) => ({ category, label: category, count: category === 'a' ? 2 : 39, bySeverity: {}, byStatus: {} })),
+      groups: ['a', 'b'].map((category) => ({ category, label: category, count: category === 'a' ? 2 : 39, bySeverity: { '提示': 40, '必须处理': 1 }, byStatus: { '待处理': 40, '待复核': 1 } })),
       items: items.slice(offset, offset + 40),
     }));
     const apply = vi.fn(async () => undefined);
@@ -67,6 +67,13 @@ it('confirms all eligible findings in the selected category across list windows'
     await vi.waitFor(() => expect(batch()?.textContent).toBe('接受并应用全部 3 条'));
     root.querySelector('[data-filter-value="a"]')!.click();
     expect(batch()?.textContent).toBe('接受并应用全部 2 条');
+    root.querySelector('[data-findings-filter="severity"] [data-filter-value="必须处理"]')!.click();
+    expect(batch()?.textContent).toBe('接受并应用全部 1 条');
+    root.querySelector('[data-findings-filter="status"] [data-filter-value="待处理"]')!.click();
+    expect(batch()?.hidden).toBe(true);
+    root.querySelector('[data-findings-filter="status"] [data-filter-value=""]')!.click();
+    root.querySelector('[data-findings-filter="severity"] [data-filter-value=""]')!.click();
+
     const rail = root.querySelector('[data-list-position]')!; rail.value = '1'; rail.dispatchEvent({ type: 'change' });
     await vi.waitFor(() => expect(root.querySelector('.list-position-rail')?.value).toBe('1'));
     expect(batch()?.textContent).toBe('接受并应用全部 2 条');
