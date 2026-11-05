@@ -3205,7 +3205,7 @@ async function main() {
     // pinned to a literal.
     await assertRenderer(
       renderer,
-      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.body.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个可编辑段落`)})`,
+      `${fidelityRowsExpression(CLEAN_FIDELITY_ROWS)} && document.querySelector('.import-file-card')?.textContent.includes(${JSON.stringify(`${textManuscriptParagraphs.length} 个段落`)})`,
       'text-manuscript-fidelity-clean',
     );
     await clickExactButton(renderer, '查看导入详情', 'text-manuscript-review-action');
@@ -3301,7 +3301,7 @@ async function main() {
       );
       await assertRenderer(
         renderer,
-        `document.body.textContent.includes('${LOCAL_DOC_BLOCKS} 个可编辑段落')`,
+        `document.querySelector('.import-file-card')?.textContent.includes('${LOCAL_DOC_BLOCKS} 个段落')`,
         'doc-manuscript-blocks',
       );
       await clickExactButton(renderer, '查看导入详情', 'doc-manuscript-review-action');
