@@ -5,6 +5,7 @@ import type { Decoration, DecorationSet, DecorationSource } from 'prosemirror-vi
 import { describe, expect, it } from 'vitest';
 import type { EditorialMarkAnchorProjection } from '../../src/shared/protocol.js';
 import { buildMarkDecorations, markDecorationPlugin, MARK_DECORATIONS_META, type ActiveMark } from '../../src/renderer/mark-decorations.js';
+import { editorMotionPlugin, EDITOR_MOTION_META } from '../../src/renderer/editor-motion.js';
 
 // Unit (L1) benchmark for the marks drawn over the manuscript window (Issue #1178, F-10 outcome 3): 1,000 synthetic marks — four on
 // each of 250 synthetic paragraphs, no manuscript text — kept in the plugin's DecorationSet. What the view compares is each
@@ -24,6 +25,21 @@ const schema = new Schema({
   },
 });
 const blockId = (index: number) => `blk_${index.toString(16).padStart(24, '0')}`;
+
+it('highlights a jumped-to paragraph and the applied grapheme range without changing manuscript text', () => {
+  const doc = schema.node('doc', null, [schema.node('paragraph', { blockId: 'target' }, schema.text('甲👩‍💻乙丙'))]);
+  const plugin = editorMotionPlugin();
+  let state = EditorState.create({ doc, plugins: [plugin] });
+  state = state.apply(state.tr.setMeta(EDITOR_MOTION_META, { blockId: 'target' }));
+  expect(plugin.getState(state)!.find()).toHaveLength(1);
+  state = state.apply(state.tr.setMeta(EDITOR_MOTION_META, { blockId: 'target', range: { fromGrapheme: 1, toGrapheme: 2 } }));
+  const [underline] = plugin.getState(state)!.find();
+  expect(state.doc.textBetween(underline!.from, underline!.to)).toBe('👩‍💻');
+  expect(state.doc.eq(doc)).toBe(true);
+  state = state.apply(state.tr.setMeta(EDITOR_MOTION_META, null));
+  expect(plugin.getState(state)!.find()).toHaveLength(0);
+  expect(state.doc.eq(doc)).toBe(true);
+});
 const KINDS = ['change-suggestion', 'annotation', 'editor-note', 'personal-highlight'] as const;
 
 function marks(): EditorialMarkAnchorProjection[] {

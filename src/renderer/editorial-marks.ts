@@ -1541,13 +1541,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         control.type = 'button';
         control.setAttribute('role', 'menuitem');
         control.dataset['markAction'] = item.action;
+        const caption = el('span', 'menu-caption');
         if (item.seriesId !== undefined) control.dataset['seriesId'] = item.seriesId;
         if (item.swatch !== undefined) {
           control.dataset['markColor'] = String(item.swatch);
-          control.append(el('span', 'editorial-mark-swatch'));
+          caption.append(el('span', 'editorial-mark-swatch'));
         }
-        control.append(el('span', undefined, item.label));
-        if (item.hint) control.append(el('small', 'muted', item.hint));
+        caption.append(el('span', undefined, item.label));
+        if (item.hint) caption.append(el('small', 'muted', item.hint));
+        control.append(caption);
+        const clipboardShortcuts: Readonly<Record<string, string>> = { cut: 'Ctrl+X', copy: 'Ctrl+C', paste: 'Ctrl+V', 'paste-plain-text': 'Ctrl+Shift+V' };
+        const shortcut = clipboardShortcuts[item.action];
+        const key = el('kbd', 'menu-shortcut', shortcut ?? '');
+        key.setAttribute('aria-hidden', 'true');
+        control.append(key);
         if (item.disabledReason !== undefined || item.run === undefined) {
           control.disabled = true;
           control.setAttribute('aria-disabled', 'true');
@@ -1954,7 +1961,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
     showMenu('selection', '稿件右键菜单', [
       {
-        label: `文字处理 · ${selected}`,
+        label: range.kind === 'none' ? '文字处理' : `文字处理 · ${selected}`,
         items: [
           { action: 'cut', label: '剪切', ...(needsSelection ? { disabledReason: needsSelection } : { run: () => void runClipboard('cut') }) },
           { action: 'copy', label: '复制', ...(needsSelection ? { disabledReason: needsSelection } : { run: () => void runClipboard('copy') }) },
@@ -1962,7 +1969,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           { action: 'paste-plain-text', label: '粘贴为纯文本', run: () => void runClipboard('paste-plain-text') },
         ],
       },
-      {
+      ...(range.kind === 'none' ? [] : [{
         label: '编辑标记',
         ...(why ? { note: why } : {}),
         items: [
@@ -1984,7 +1991,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             }),
           })),
         ],
-      },
+      }]),
       // Across paragraphs (Issue #1176) the AI7 actions take the exact span; marks and 书系 knowledge stay in one paragraph.
       taskGroup,
       ...(knowledge === null ? [] : [knowledge]),

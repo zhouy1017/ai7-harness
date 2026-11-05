@@ -8,7 +8,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { arch, platform, release, tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, IMPORTED_MARKS_AUTHOR, admittedParagraphShapes, admittedParagraphs, admittedSpanText, composeExportAdmittedDocx, readExportedDocx, addReadOnlySourceObjects } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, j07PackageExportFailureLocation, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { openArchivePackageExport, openRemainingPackageExport } from './package-export-readiness.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
@@ -397,10 +397,7 @@ const PAGE_HELPERS = `(() => {
     summary: () => Array.from(block()?.querySelectorAll('form.publication-designate dl.publication-designate-summary > dd') ?? []).map((value) => value.textContent ?? ''),
     status: () => document.querySelector('[data-toast]')?.textContent ?? '',
     tone: () => document.querySelector('[data-toast]')?.dataset.tone ?? '',
-    journal: () => {
-      const node = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => (item.textContent ?? '').startsWith('修订日志序号 '));
-      return node === undefined ? null : Number((node.textContent ?? '').slice('修订日志序号 '.length));
-    },
+    journal: () => ${MANUSCRIPT_JOURNAL_SEQUENCE},
     milestoneSave: () => Array.from(document.querySelectorAll('details.milestone-section button')).find((item) => (item.getAttribute('aria-label') ?? item.textContent) === '保存里程碑版本') ?? null,
     decisionText: () => {
       const clone = block()?.cloneNode(true);
@@ -1312,7 +1309,7 @@ async function main() {
         reason instanceof HTMLElement && !reason.hidden && (reason.textContent ?? '').startsWith('还需要选择一个里程碑版本');
     })()`, 'designate-form-states-everything-and-preselects-nothing');
     await chooseDesignation(renderer, second, 'designate-choose-second');
-    await assertRenderer(renderer, `(() => { const values = window.__j07.summary(); return values[0] === ${JSON.stringify(EXCERPT.title)} && values[1].startsWith('主稿件 · 当前修订版 r2') && values[2].startsWith(${JSON.stringify(`「${SECOND.label}」 · r2 · `)}) && values[3] === '与当前稿件一致' && values[4] === '本机编辑' && values[5] === '确认时记录'; })()`, 'designate-summary-names-the-exact-version');
+    await assertRenderer(renderer, `(() => { const values = window.__j07.summary(); return values[0] === ${JSON.stringify(EXCERPT.title)} && values[1].startsWith('主稿件 · 修订版 2') && values[2].startsWith(${JSON.stringify(`「${SECOND.label}」 · r2 · `)}) && values[3] === '与当前稿件一致' && values[4] === '本机编辑' && values[5] === '确认时记录'; })()`, 'designate-summary-names-the-exact-version');
     // 发稿范围 counts characters as the service does: 81 CJK characters are too many, while 80 characters
     // outside the Basic Multilingual Plane — 160 UTF-16 units, past any HTML maxLength of 80 — are not.
     await fill(renderer, 'form.publication-designate [data-publication-field="scope"]', '范'.repeat(81), 'designate-scope-too-long');

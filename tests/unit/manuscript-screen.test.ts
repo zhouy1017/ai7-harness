@@ -82,6 +82,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       loadWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
+      highlightJump: vi.fn(), highlightAppliedRange: vi.fn(),
       currentBlockStyle: () => ({ kind: 'paragraph', level: null }),
       setBlockStyle: vi.fn(),
       isComposing: () => false,
@@ -219,8 +220,8 @@ describe('the Manuscript screen lifecycle', () => {
       app.screen.querySelector<HTMLButtonElement>('[data-edge-entry="navigation"]')!.click();
       await vi.advanceTimersByTimeAsync(0);
       const headingButton = app.screen.querySelector('.outline-list button')!;
-      expect(headingButton.getAttribute('title')).toBe(`层级 2 · ${heading}`);
-      expect(headingButton.getAttribute('aria-label')).toBe(`层级 2 · ${heading}`);
+      expect(headingButton.getAttribute('title')).toBe(heading);
+      expect(headingButton.getAttribute('aria-label')).toBe(heading);
       app.showing?.destroy();
     } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
   });
@@ -231,8 +232,8 @@ describe('the Manuscript screen lifecycle', () => {
     const app = shell();
     const initial = windowOf('book-one');
     app.open({ ...initial, position: { ...initial.position, label: full, structureLabel: heading, proportion: 0.25 } });
-    const position = app.screen.querySelector('.editor-meta span')!;
-    expect(position.textContent).toBe('长标题长标题长标题长标题长标题长… · 全稿 25.000%');
+    const position = app.screen.querySelector('.editor-position')!;
+    expect(position.textContent).toBe('长标题长标题长标题长标题长标题长…');
     expect(position.getAttribute('title')).toBe(full);
     app.showing?.destroy();
   });
@@ -312,9 +313,29 @@ describe('the Manuscript screen lifecycle', () => {
     const app = shell();
     app.open(windowOf('book-one'));
     const toolbar = app.screen.querySelector('.editor-toolbar')!;
+    expect(toolbar.textContent).toContain('修订版 2');
+    expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
       .toEqual(['撤销', '重做', '重试权威刷新']);
+    app.showing?.destroy();
+  });
+
+  it('reveals paging links only near their loaded window boundary', () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const app = shell();
+    app.open({ ...windowOf('book-one'), previousCursor: 'before', nextCursor: 'after' });
+    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+    const [previous, next] = app.screen.querySelectorAll<HTMLButtonElement>('.window-actions button');
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
+    pane.dispatchEvent({ type: 'scroll' });
+    expect([previous!.hidden, next!.hidden]).toEqual([true, true]);
+    Object.assign(pane, { scrollTop: 984 });
+    pane.dispatchEvent({ type: 'scroll' });
+    expect([previous!.hidden, next!.hidden]).toEqual([true, false]);
+    Object.assign(pane, { scrollTop: 16 });
+    pane.dispatchEvent({ type: 'scroll' });
+    expect([previous!.hidden, next!.hidden]).toEqual([false, true]);
     app.showing?.destroy();
   });
 

@@ -18,7 +18,7 @@ import {
   IMPORTED_MARKS_RECIPE,
   IMPORTED_MARKS_REJECTED_BLOCKS,
 } from './composed-docx.mjs';
-import { attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
+import { MANUSCRIPT_JOURNAL_SEQUENCE, MANUSCRIPT_RAIL_POSITION, manuscriptBoundary, attachProductOutput, awaitWithinDeadline, createJ01CompletionLocation, discloseJourneySkip, installJourneyCancellationCleanup, journeyCheckFailure, LOCAL_ONLY_DOC, localDebugEnabled, localManuscriptAvailable, localManuscriptPath, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, SIDEBAR_LIBRARY_READY, sidebarBookCurrent, sidebarNavigate, runJ14DarkPass } from './controller.mjs';
 import { classifyBrowserLaunchMiss, classifyRendererTargetMiss, createLaunchTrace, formatReadinessTrace, observeLaunchStart, probeStalledProduct, readBrowserLog, sampleProductProcesses, waitingForService } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -717,6 +717,8 @@ async function assertRenderer(renderer, expression, location) {
 }
 
 async function clickExactButton(renderer, label, location) {
+  if (label === '向前浏览' || label === '向后浏览') await assertRenderer(renderer, manuscriptBoundary(label), location);
+  if (label === '预览替换') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
@@ -1258,7 +1260,7 @@ async function createDurableJournalEdit(renderer) {
   await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'pending'`, 'reimport-dirty-save-ready');
   await clickExactButton(renderer, '保存', 'reimport-dirty-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('已写入修订日志')`, 'reimport-dirty-durable');
-  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 1')`, 'reimport-dirty-sequence');
+  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === 1`, 'reimport-dirty-sequence');
 }
 
 async function importInitialManuscriptForReimport(renderer, sourceSha256, sourceBytes, scenario) {
@@ -1773,7 +1775,7 @@ async function runJourney(
   // The window is waited for, not read once: the editor reopened after the J-14 dark pass loads its blocks after it mounts.
   await waitFor(
     renderer,
-    `(() => { const forward = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && document.querySelector('.editor-meta')?.textContent.includes('全稿 0.000%') && forward && !forward.disabled; })()`,
+    `(() => { const forward = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '向后浏览'); return document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]').length === 32 && ${MANUSCRIPT_RAIL_POSITION} === 0 && !document.querySelector('.editor-meta')?.textContent.includes('%') && forward && !forward.disabled; })()`,
     'bounded-window',
   );
   const editAndShortcut = await renderer.evaluate(
@@ -1846,7 +1848,7 @@ async function runJourney(
   requireJourney(persisted?.busy === true && persisted?.durable === true, 'durable-journal-ack');
   await assertRenderer(
     renderer,
-    `document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r1') && document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 1') && !document.querySelector('.editor-meta')?.textContent.includes('稿件修订版 r1')`,
+    `document.querySelector('.editor-meta')?.textContent.includes('修订版 1') && ${MANUSCRIPT_JOURNAL_SEQUENCE} === 1 && !document.querySelector('.editor-meta')?.textContent.includes('稿件修订版 r1')`,
     'r1-journal-sequence',
   );
 }

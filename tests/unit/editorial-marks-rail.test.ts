@@ -103,7 +103,31 @@ describe('the Position Rail at 1,200 marks', () => {
     expect(first.dataset['railCount']).toBe('2');
     expect(first.getAttribute('aria-label')).toBe('修改建议 2 处，跳到这里');
     expect(first.title).toBe('修改建议 2 处');
+    expect(first.className).not.toContain('rail-marker-new');
     first.click();
     expect(jumps).toEqual([blockId(9_999)]);
+    await refresh(rail([...moved, { ...moved[0]!, blockId: blockId(10_000) }]));
+    expect(first.className).toContain('rail-marker-new');
+  });
+
+  it('jumps with the drawn slider keyboard and keeps its accessible position in sync', () => {
+    const track = miniDocument.createElement('div');
+    const jump = vi.fn();
+    const surface = mountPositionRail({ track: track as unknown as HTMLElement, api: { getManuscriptRail: vi.fn() }, binding: () => ({ manuscriptId: 'm', branchId: 'b' }),
+      jumpToBlock: vi.fn(), jumpToProportion: jump, onError: vi.fn() });
+    surface.setPosition(0.25);
+    expect(track.getAttribute('role')).toBe('slider');
+    expect(track.querySelector('input')).toBeNull();
+    track.dispatchEvent({ type: 'keydown', key: 'ArrowDown', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenLastCalledWith(0.26);
+    expect(track.getAttribute('aria-valuenow')).toBe('260000');
+    track.dispatchEvent({ type: 'keydown', key: 'End', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenLastCalledWith(1);
+    track.setAttribute('aria-disabled', 'true');
+    track.dispatchEvent({ type: 'keydown', key: 'Home', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenCalledTimes(2);
+    surface.destroy();
+    track.dispatchEvent({ type: 'keydown', key: 'ArrowUp', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenCalledTimes(2);
   });
 });

@@ -15,6 +15,7 @@ import type {
   DialogueProjection,
   ManuscriptReimportCommitProjection,
   ManuscriptWindowProjection,
+  ManuscriptRailProjection,
   OutlineProjection,
   ReplacementPreviewProjection,
   SearchResultsProjection,
@@ -188,6 +189,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     renderProposalConflict, renderProposalWorkspace, returnToRecoveryComparison } = options;
   const rendererErrorMessage = options.errorMessage;
   let viewportObserver: ResizeObserver | undefined;
+  let taskBadgeTimer: number | undefined;
 
   let destroyed = false;
   let currentWindow = initialWindow;
@@ -239,7 +241,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const versionOf = (windowNow: ManuscriptWindowProjection): string | undefined =>
     productionDocument === undefined ? undefined : documentStanding(productionDocument.document, windowNow.workingDigest).current?.label;
   const revisionWords = (windowNow: ManuscriptWindowProjection): string => {
-    if (!isDocument) return `当前修订版${technicalWords(` ${windowNow.revisionLabel}`)}`;
+    if (!isDocument) return `修订版 ${windowNow.revisionLabel.replace(/^r/u, '')}`;
     if (!technicalLayerVisible) return '当前文档';
     const label = versionOf(windowNow);
     return label === undefined ? DOCUMENT_CHANGED_SINCE_VERSION : `${DOCUMENT_CURRENT_VERSION} ${label}`;
@@ -247,25 +249,20 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const positionWords = (windowNow: ManuscriptWindowProjection): string => {
     const block = windowNow.blocks.find((candidate) => candidate.blockId === windowNow.focusBlockId) ?? windowNow.blocks[0];
     if (block === undefined) return windowNow.position.label;
-    return `${returnChipPlace(windowNow.position.structureLabel, block.position)} · 全稿 ${technicalLayerVisible ? (windowNow.position.proportion * 100).toFixed(3) : Math.round(windowNow.position.proportion * 100)}%`;
+    return returnChipPlace(windowNow.position.structureLabel, block.position);
   };
-  title.append(
+  if (isDocument) title.append(
     element('h2', undefined, productionDocument !== undefined
       ? technicalLayerVisible ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.typeLabel
       : '稿件'),
   );
   const meta = element('div', 'editor-meta');
-  const position = element('span', undefined, positionWords(initialWindow));
+  const position = element('span', 'editor-position', positionWords(initialWindow));
   position.setAttribute('title', initialWindow.position.label);
-  const revision = element('span', undefined, revisionWords(initialWindow));
-  const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
-  journal.dataset['editorTechnical'] = 'true';
+  const revision = element('span', 'editor-revision', revisionWords(initialWindow));
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
-  const journalDetails = element('details', 'editor-technical-details');
-  journalDetails.dataset['editorTechnicalDisclosure'] = 'journal';
-  journalDetails.append(element('summary', undefined, '查看技术详情'), journal);
-  meta.append(position, revision, technicalDisclosure(journalDetails), recoveredState);
+  meta.append(revision, position, recoveredState);
   // 回到<位置> (Issue #423, S77a; TASK-045): the way back a jump left, in the context header until it is used.
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;
@@ -360,6 +357,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const outlineSection = element('section', 'navigator-section');
   outlineSection.append(element('h3', undefined, '结构导航'));
   const outlineList = element('div', 'outline-list');
+  let railProjection: ManuscriptRailProjection | undefined;
   outlineList.setAttribute('role', 'list');
   const previousOutline = button('上一组结构', 'quiet', () => void loadOutline(outlinePage?.previousCursor ?? null));
   const nextOutline = button('下一组结构', 'quiet', () => void loadOutline(outlinePage?.nextCursor ?? null));
@@ -391,7 +389,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const exclusionSummary = element(
     'p',
     'field-note replacement-exclusion-summary',
-    `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 0 处。`,
+    '已排除 0 处。',
   );
   exclusionSummary.id = 'replacement-exclusion-summary';
   exclusionSummary.hidden = true;
@@ -501,7 +499,39 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     note,
     milestoneButton,
   );
-  navigator.append(outlineSection, searchSection);
+  const navigationModes = element('div', 'filter-choices navigation-modes');
+  const outlineMode = button('大纲', 'quiet', () => showNavigationMode('outline'));
+  const findMode = button('查找', 'quiet', () => showNavigationMode('find'));
+  const replaceMode = button('替换', 'quiet', () => showNavigationMode('replace'));
+  navigationModes.setAttribute('aria-label', '导航模式');
+  navigationModes.append(outlineMode, findMode, replaceMode);
+  const legend = element('div', 'navigation-legend');
+  for (const [kind, label] of [['change-suggestion', '修改建议'], ['annotation', '批注'], ['editor-note', '备注']] as const) {
+    const item = element('span', undefined, label);
+    item.dataset['legendKind'] = kind;
+    legend.append(item);
+  }
+  const navigationFooter = element('footer', 'navigation-footer', '按章节或标记回到原文。');
+  navigator.append(searchInput, navigationModes, outlineSection, searchSection, legend, navigationFooter);
+  searchLabel.hidden = true;
+  searchInput.type = 'search';
+  searchInput.placeholder = '搜索稿件';
+  searchInput.setAttribute('aria-label', '搜索稿件');
+  searchInput.addEventListener('input', () => {
+    if (navigationMode === 'outline') paintOutline();
+  });
+  let navigationMode: 'outline' | 'find' | 'replace' = 'outline';
+  function showNavigationMode(mode: typeof navigationMode): void {
+    navigationMode = mode;
+    for (const [control, active] of [[outlineMode, 'outline'], [findMode, 'find'], [replaceMode, 'replace']] as const) {
+      control.setAttribute('aria-pressed', String(mode === active));
+    }
+    outlineSection.hidden = mode !== 'outline';
+    searchSection.hidden = mode === 'outline';
+    replacementLabel.hidden = replacementInput.hidden = prepareReplacementButton.hidden = mode !== 'replace';
+    searchInput.placeholder = mode === 'outline' ? '搜索章节' : '搜索稿件';
+    if (mode === 'outline') paintOutline();
+  }
   const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
   const exportRoot = element('aside', 'manuscript-export-slot'); content.append(exportRoot);
   const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
@@ -530,21 +560,24 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     const reference = (event.target as Element | null)?.closest<HTMLElement>('[data-note-reference]')?.dataset['noteReference'];
     if (reference !== undefined) { event.preventDefault(); void navigate({ kind: 'block', blockId: reference }); }
   });
-  const positionRailLabel = element('label', 'position-rail-label', '全稿位置');
-  positionRailLabel.htmlFor = 'manuscript-position';
-  const positionRail = element('input', 'position-rail');
-  positionRail.id = 'manuscript-position';
-  positionRail.type = 'range';
-  positionRail.min = '0';
-  positionRail.max = '1000000';
-  positionRail.step = '1';
-  positionRail.value = String(Math.round(initialWindow.position.proportion * 1_000_000));
   const previousWindow = button('向前浏览', 'quiet', () => void navigateCursor('previous'));
   const nextWindow = button('向后浏览', 'quiet', () => void navigateCursor('next'));
   const windowActions = element('nav', 'window-actions');
   windowActions.setAttribute('aria-label', '稿件窗口');
   windowActions.append(previousWindow, nextWindow);
-  manuscript.append(editorWindow, windowActions);
+  const localThumb = element('div', 'local-thumb');
+  localThumb.setAttribute('aria-hidden', 'true');
+  manuscript.append(editorWindow, localThumb, windowActions);
+  const updateScrollChrome = (): void => {
+    const overflow = editorWindow.scrollHeight - editorWindow.clientHeight;
+    previousWindow.hidden = currentWindow.previousCursor === null || editorWindow.scrollTop > 24;
+    nextWindow.hidden = currentWindow.nextCursor === null || overflow <= 0 || editorWindow.scrollTop < overflow - 24;
+    localThumb.hidden = overflow <= 0;
+    if (overflow > 0) {
+      const height = Math.max(24, editorWindow.clientHeight ** 2 / editorWindow.scrollHeight);
+      localThumb.setAttribute('style', `height:${height}px;transform:translateY(${Math.max(0, Math.min(1, editorWindow.scrollTop / overflow)) * (editorWindow.clientHeight - height)}px)`);
+    }
+  };
 
   // The right edge (editor-surfaces §1 右缘一列): three entries and the one persistent whole-manuscript
   // control. The rail stays visible while the panel is closed; the pane's own scrollbar shows only
@@ -580,14 +613,17 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const edgeEntries = element('div', 'edge-entries');
   for (const [entry, id] of [[navigationEntry, 'i-nav'], [analysisEntry, 'i-analysis'], [tasksEntry, 'i-task']] as const) {
     const label = element('span', 'edge-label', entry.textContent ?? '');
-    entry.replaceChildren(icon(id), label);
+    const badge = element('span', 'edge-badge');
+    badge.setAttribute('aria-hidden', 'true');
+    badge.hidden = true;
+    entry.replaceChildren(icon(id), label, badge);
     entry.setAttribute('aria-label', label.textContent ?? '');
   }
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
-  railTrack.append(positionRail);
+  railTrack.id = 'manuscript-position';
   const railColumn = element('div', 'rail-column');
-  railColumn.append(positionRailLabel, railTrack);
+  railColumn.append(railTrack);
   edge.append(edgeEntries, railColumn);
   // The document's workflow moves by the editor's commands in its lens (Issue #415, S66c); a refused move reads it again.
   const documentLens = productionDocument === undefined ? undefined : renderDocumentLens(productionDocument, {
@@ -621,9 +657,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     analysisPositionSource = 'scroll';
     localParagraphPanel?.refresh();
     editorWindow.dataset['scrolling'] = 'true';
+    manuscript.dataset['scrolling'] = 'true';
+    updateScrollChrome();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
     scrollingTimer = window.setTimeout(() => {
       delete editorWindow.dataset['scrolling'];
+      delete manuscript.dataset['scrolling'];
     }, 900);
   }, { passive: true });
 
@@ -810,7 +849,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const updateExclusionSummary = (): void => {
     exclusionSummary.hidden = searchPage === undefined || searchPage.totalMatches === 0;
     exclusionSummary.textContent =
-      `最多排除 ${MAX_REPLACEMENT_EXCLUSIONS.toLocaleString('zh-CN')} 处，且至少保留 1 处；当前排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处。`;
+      `已排除 ${excludedMatchIds.size.toLocaleString('zh-CN')} 处，至少保留 1 处。`;
     exclusionSummary.dataset['excludedCount'] = String(excludedMatchIds.size);
     exclusionSummary.dataset['exclusionLimit'] = String(MAX_REPLACEMENT_EXCLUSIONS);
   };
@@ -838,13 +877,13 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     position.setAttribute('title', currentWindow.position.label);
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
-    journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
+    editorHost.dataset['journalSequence'] = String(currentWindow.journalSequence);
+    railTrack.dataset['windowPosition'] = String(Math.round(currentWindow.position.proportion * 1_000_000));
     recoveredState.hidden = currentWindow.recoveredStateReview === null;
-    positionRail.value = String(Math.round(currentWindow.position.proportion * 1_000_000));
-    positionRail.setAttribute('aria-valuetext', `全稿 ${technicalLayerVisible ? (currentWindow.position.proportion * 100).toFixed(3) : Math.round(currentWindow.position.proportion * 100)}%`);
     manuscriptRail?.setPosition(currentWindow.position.proportion);
     previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
     nextWindow.disabled = authoritativeMutationBusy() || currentWindow.nextCursor === null;
+    updateScrollChrome();
   };
 
   const syncAuthoritativeMutationControls = (): void => {
@@ -852,7 +891,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     editorHost.dataset['authoritativeMutation'] = authoritativeMutation ? 'true' : 'false';
     undo.disabled = busy;
     redo.disabled = busy;
-    positionRail.disabled = busy;
+    railTrack.setAttribute('aria-disabled', String(busy));
     previousOutline.disabled = busy;
     nextOutline.disabled = busy;
     milestoneName.disabled = busy;
@@ -1167,6 +1206,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       if (!loaded) return false;
       currentWindow = next;
       updateWindowChrome();
+      if (navigation.target.kind === 'block' || navigation.target.kind === 'proportion') editor.highlightJump(next.focusBlockId ?? next.blocks[0]?.blockId ?? '');
       // A search range belongs to this loaded window. Apply it before a slow position write releases
       // the arrival to later paging; otherwise its continuation can select in a window already left.
       if (onArrival && !onArrival()) return false;
@@ -1296,24 +1336,33 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     });
   }
 
+  function paintOutline(): void {
+    if (outlinePage === undefined) return;
+    outlineList.replaceChildren();
+    const query = navigationMode === 'outline' ? searchInput.value.trim().toLocaleLowerCase() : '';
+    for (const entry of outlinePage.entries) {
+      if (query && !entry.text.toLocaleLowerCase().includes(query)) continue;
+      const chapter = railProjection?.chapters.find((candidate) => candidate.blockId === entry.blockId);
+      const label = entry.text;
+      const open = button('', 'quiet', () => void navigate({ kind: 'block', blockId: entry.blockId }));
+      open.append(element('span', 'outline-title', label));
+      if (chapter !== undefined) open.append(element('small', 'outline-counts', `批注 ${chapter.annotations} · 建议 ${chapter.suggestions} · 备注 ${chapter.notes}`), element('span', 'outline-percent', `${Math.round(chapter.proportion * 100)}%`));
+      open.setAttribute('title', label);
+      open.setAttribute('aria-label', chapter === undefined ? label : `${label} · 批注 ${chapter.annotations} · 建议 ${chapter.suggestions} · 备注 ${chapter.notes} · ${Math.round(chapter.proportion * 100)}%`);
+      open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
+      open.setAttribute('role', 'listitem');
+      outlineList.append(open);
+    }
+    navigationFooter.textContent = railProjection === undefined ? '按章节或标记回到原文。'
+      : `${railProjection.chaptersTruncated ? '已显示' : '共'} ${railProjection.chapters.length} 个章节 · ${Math.round(currentWindow.position.proportion * 100)}%`;
+  }
   async function loadOutline(cursor: string | null, propagateFailure = false): Promise<void> {
     try {
       const binding = editor?.currentWindow() ?? currentWindow;
       const page = await api.getOutline({ manuscriptId: binding.manuscriptId, branchId: binding.branchId, cursor });
       if (destroyed) return;
       outlinePage = page;
-      outlineList.replaceChildren();
-      for (const entry of page.entries) {
-        const label = `${entry.kind === 'title' ? '标题' : `层级 ${entry.level}`} · ${entry.text}${entry.displayTextTruncated ? '（显示已截断）' : ''}`;
-        const open = button(label, 'quiet', () =>
-          void navigate({ kind: 'block', blockId: entry.blockId }),
-        );
-        open.setAttribute('title', label);
-        open.setAttribute('aria-label', label);
-        open.style.setProperty('--outline-depth', String(Math.max(0, entry.level - 1)));
-        open.setAttribute('role', 'listitem');
-        outlineList.append(open);
-      }
+      paintOutline();
       previousOutline.hidden = page.previousCursor === null;
       nextOutline.hidden = page.nextCursor === null;
     } catch (error) {
@@ -1485,6 +1534,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   }
 
   async function runSearch(): Promise<void> {
+    if (navigationMode === 'outline') showNavigationMode('find');
     if (authoritativeMutationBusy() || serviceJobBusy()) return;
     const query = searchInput.value.normalize('NFC');
     const refusal = searchQueryRefusal(query);
@@ -1817,7 +1867,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     }
   }
 
-  positionRail.addEventListener('change', () => void navigate({ kind: 'proportion', proportion: Number(positionRail.value) / 1_000_000 }));
   milestoneName.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
   for (const radio of purposeRadios) radio.addEventListener('change', () => syncMilestoneForm(authoritativeMutationBusy()));
   customPurpose.addEventListener('input', () => syncMilestoneForm(authoritativeMutationBusy()));
@@ -1825,6 +1874,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let viewportHeight = editorWindow.clientHeight;
   let reflowScroll: { top: number } | undefined;
   const noteViewportResize = (): void => {
+    updateScrollChrome();
     if (viewportWidth === editorWindow.clientWidth && viewportHeight === editorWindow.clientHeight) return;
     viewportWidth = editorWindow.clientWidth;
     viewportHeight = editorWindow.clientHeight;
@@ -1951,8 +2001,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       retryRequired = state.retryRequired;
       editingInterrupted = state.interrupted;
       editorHost.dataset['editorPersistence'] = state.dirty || state.saving || state.retryRequired || state.interrupted ? 'pending' : 'confirmed';
+      editorHost.dataset['journalSequence'] = String(state.journalSequence);
       updatePersistenceMenu();
-      journal.textContent = `修订日志序号 ${state.journalSequence}`;
       // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
       protectionSurface?.update(state.protection);
       setCloseRisk(closeRisk);
@@ -1981,6 +2031,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     onCommand: (command) => {
       if (command === 'search' || command === 'replace') {
         setNavigationOpen(true);
+        showNavigationMode(command === 'replace' ? 'replace' : 'find');
         (command === 'search' ? searchInput : replacementInput).focus();
       }
       else if (command === 'undo' || command === 'redo') void runHistory(command);
@@ -2002,11 +2053,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     'edit.save': () => editor?.flush(),
     'edit.undo': () => runHistory('undo'),
     'edit.redo': () => runHistory('redo'),
-    'edit.replace': () => { setNavigationOpen(true); replacementInput.focus(); },
-    'edit.previousWindow': () => previousWindow.click(),
-    'edit.nextWindow': () => nextWindow.click(),
+    'edit.replace': () => { setNavigationOpen(true); showNavigationMode('replace'); replacementInput.focus(); },
+    'edit.previousWindow': () => navigateCursor('previous'),
+    'edit.nextWindow': () => navigateCursor('next'),
     'search.find': () => {
       setNavigationOpen(true);
+      showNavigationMode('find');
       searchInput.focus();
     },
     'search.next': () => {
@@ -2034,10 +2086,40 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     binding: () => ({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId }),
     // A marker's paragraph gone between the rail's read and the click is said as the service says it.
     jumpToBlock: (blockId) => void surface.jump({ blockId, markId: null }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法移动到该稿件位置。'), 'error')),
+    jumpToProportion: (proportion) => void navigate({ kind: 'proportion', proportion }),
+    onRead: (rail) => {
+      railProjection = rail;
+      paintOutline();
+      const badge = navigationEntry.querySelector<HTMLElement>('.edge-badge')!;
+      badge.dataset['count'] = String(rail.marks.length);
+      badge.hidden = rail.marks.length === 0;
+      badge.title = rail.marksTruncated ? '已显示的标记' : '稿件标记';
+      const analysisBadge = analysisEntry.querySelector<HTMLElement>('.edge-badge')!;
+      analysisBadge.dataset['count'] = String(rail.uncovered?.length ?? 0);
+      analysisBadge.hidden = !rail.uncovered?.length;
+      analysisBadge.title = '分析未覆盖处';
+    },
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });
   manuscriptRail.setPosition(initialWindow.position.proportion);
   manuscriptRail.refresh();
+  const readTaskBadge = async (): Promise<void> => {
+    try {
+      const tasks = await api.inspectBookTasks();
+      if (destroyed) return;
+      const count = tasks.groups.filter((group) => group.key !== 'recent').reduce((sum, group) => sum + group.total, 0);
+      const badge = tasksEntry.querySelector<HTMLElement>('.edge-badge')!;
+      badge.dataset['count'] = String(count);
+      badge.hidden = count === 0;
+      badge.title = `${count} 项进行中或等你处理的任务`;
+    } catch {
+      // The task panel owns its retry/error surface; an unread count is never presented as zero.
+      tasksEntry.querySelector<HTMLElement>('.edge-badge')!.hidden = true;
+    } finally {
+      if (!destroyed) taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), 2_000);
+    }
+  };
+  if (!isDocument) void readTaskBadge();
   editorialMarks = mountEditorialMarks({
     scroll: editorWindow,
     host: editorHost,
@@ -2112,13 +2194,19 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
         await invalidateSearchIfStale('稿件已由应用写入；先前搜索结果和返回位置已失效。');
         await loadOutline(null, true);
       });
-      if (written) setStatus(done, 'success');
+      if (written) {
+        setStatus(done, 'success');
+        if (written.application.kind === 'apply' && written.card !== null) {
+          editor?.highlightAppliedRange(written.card.blockId, written.card.fromGrapheme, written.card.toGrapheme);
+        }
+      }
       manuscriptRail?.refresh();
       return written;
     },
     setStatus,
     errorMessage: rendererErrorMessage,
   });
+  showNavigationMode('outline');
   updateWindowChrome();
   void loadOutline(null);
   editor.focus();
@@ -2137,6 +2225,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     if (reviewMarksTimer !== undefined) window.clearTimeout(reviewMarksTimer);
     viewportObserver?.disconnect();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
+    if (taskBadgeTimer !== undefined) window.clearTimeout(taskBadgeTimer);
     if (milestonePersistenceTimer !== undefined) window.clearTimeout(milestonePersistenceTimer);
     if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);
     milestonePersistenceRead += 1;
