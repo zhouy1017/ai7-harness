@@ -490,15 +490,18 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .global-attention-group-count { color: var(--text-subdued); font-size: .9rem; font-weight: 700; }
 .global-attention-empty { margin: .55rem 0 0; color: var(--text-subdued); }
 .global-attention-items { display: grid; gap: .7rem; margin: .8rem 0 0; padding: 0; list-style: none; }
-.global-attention-item { display: grid; gap: .3rem; min-width: 0; padding: .75rem .9rem; border: 1px solid var(--boundary); border-left: 4px solid var(--boundary); border-radius: 10px; background: var(--surface); }
+.global-attention-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .3rem .9rem; min-width: 0; padding: .75rem .9rem; border: 1px solid var(--boundary); border-left: 4px solid var(--boundary); border-radius: 10px; background: var(--surface); }
 .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid var(--status-blocked); }
-.global-attention-book { margin: 0; color: var(--text-subdued); font-size: .9rem; }
-.global-attention-object { margin: 0; font-size: 1rem; }
-.global-attention-open { min-height: 32px; padding: 0; border: 0; background: transparent; color: var(--action-primary-hover); font: inherit; font-weight: 800; text-align: left; text-decoration: underline; text-underline-offset: .2em; cursor: pointer; overflow-wrap: anywhere; }
+.global-attention-body { min-width: 0; }
+.global-attention-book { margin: 0; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; }
+.global-attention-object { display: flex; align-items: center; gap: .25rem; margin: 0; font-size: 1rem; white-space: nowrap; overflow: hidden; }
+.global-attention-object-name { overflow: hidden; text-overflow: ellipsis; }
+.global-attention-pill { flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+.global-attention-open { max-width: 14rem; white-space: normal; }
 .global-attention-open:disabled { cursor: not-allowed; }
-.global-attention-state { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; margin: 0; }
-.global-attention-time { color: var(--text-subdued); font-size: .86rem; }
 .global-attention-reason, .global-attention-next { margin: 0; line-height: 1.6; }
+.global-attention-reason { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-subdued); }
+.global-attention-item > .technical-details { grid-column: 1 / -1; }
 .global-attention-next { font-weight: 700; }
 .task-overview { display: grid; gap: 1rem; }
 .task-overview-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
@@ -515,10 +518,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-overview-items { display: grid; gap: .6rem; margin-top: .7rem; }
 .task-overview-card { display:flex; align-items:center; gap:16px; position:relative; padding:14px 16px; border:1px solid var(--boundary); border-radius:10px; background:var(--surface); cursor:pointer; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
 .task-overview-card:hover { border-color: var(--action-text); }
-.task-overview-book { font-family: var(--font-serif); }
+.task-overview-book { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
 .task-overview-separator { color: var(--text-subdued); }
 .task-overview-state { margin-left: auto; }
 .task-overview-card-line { color: var(--text-subdued); font-size: .92rem; }
+.task-overview-card-kind, .task-overview-card-time { color: var(--text-subdued); font-size: .82rem; }
+.task-panel-mode-meaning { display: block; color: var(--text-subdued); }
 .task-overview-progress { width: 100%; height: 6px; accent-color: var(--action-text); }
 .task-overview-action-hint { color: var(--action-text); font-size: .86rem; }
 .task-overview-sheet-note { padding: 0 1.2rem; color: var(--text-subdued); }

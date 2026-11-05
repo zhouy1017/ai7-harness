@@ -82,7 +82,7 @@ describe('待我处理 over 结果待确认 a completed Run left', () => {
     expect(GLOBAL_ATTENTION_STATE_LABELS[item.state]).toBe('结果待确认');
     expect(globalAttentionView(projection)[0]!.items[0]!.stateLabel).toBe('该单元结果未知');
     expect(globalAttentionObjectLabel(item.object)).toBe('基线分析 · 1 个阅读范围、保证抽样、运行反思');
-    expect(globalAttentionReason(item)).toBe('运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果未知的单元缺口，AI7 没有自动再发。后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。');
+    expect(globalAttentionReason(item)).toBe('回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。');
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS[item.nextStep]).toBe(TASK_BAR_VIEW_UNCONFIRMED);
     expect(globalAttentionObjectLabel({ kind: 'unconfirmed', taskKind: 'writing', ranges: 3, steps: [] })).toBe('写作任务 · 3 个阅读范围');
   });
