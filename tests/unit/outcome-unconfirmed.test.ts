@@ -99,13 +99,9 @@ describe('the drawer\'s 结果待确认 block', () => {
     };
     expect(unconfirmedHeading(listed)).toBe('该单元结果未知');
     expect(unconfirmedHeading({ ...listed, ranges: [] })).toBe('结果待确认');
-    expect(unconfirmedStatement(listed)).toBe('1 个阅读范围、保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果未知的单元缺口，AI7 没有自动再发。' +
-      '后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。' +
-      '保留为缺口只记下你的确认：不发送任何内容，不改变结果；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。');
-    // Only a step listed: nothing a later Task reads is named as sent again, so the statement says no such thing (#763 review).
-    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('保证抽样的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
-      '保留为缺口只记下你的确认：不发送任何内容，不改变结果。');
-    // A range counted in a text the Book has moved on from says so.
+    expect(unconfirmedStatement(listed)).toBe('回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认，以后重读会先说明。');
+    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认。');
+    expect(unconfirmedStatement(listed).length).toBeLessThanOrEqual(60);
     expect(unconfirmedLine({ unitOrdinal: 4, earlierText: true, category: null })).toBe('第 4 个阅读范围（当时的文字） · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ unitOrdinal: 3, category: '错别字与规范用语' })).toBe('「错别字与规范用语」第 3 个阅读范围 · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ unitOrdinal: 3, category: null, rereadFailed: true })).toContain('上次重读未成功');

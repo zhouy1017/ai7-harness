@@ -201,9 +201,12 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       try {
         const next = await window.ai7.getModelServiceSettings();
         const channel = next.channels.find((item) => item.channelId === modelServiceChannel) ?? next.channels.find((item) => item.route !== null && next.routeChoice.routes.some((route) => route.route === item.route && route.connection?.credentialOperationState === 'ready'));
-        const result = discover && channel?.route ? await window.ai7.refreshModelServiceModels({ route: channel.route }) : next;
+        // A passive settings read carries no discovery outcome; keep the last outcome until another discovery replaces it.
+        const result = discover && channel?.route ? await window.ai7.refreshModelServiceModels({ route: channel.route })
+          : { ...next, ...(projection.modelDiscovery === undefined ? {} : { modelDiscovery: projection.modelDiscovery }) };
         const changed = catalogueKey(result) !== signature;
-        if (content.isConnected && changed && result.modelDiscovery?.status === 'failure') setStatus(result.modelDiscovery.reason, 'error');
+        // A requested discovery has its own outcome even when the catalogue/failure matches the last render.
+        if (content.isConnected && (discover || changed) && result.modelDiscovery?.status === 'failure') setStatus(result.modelDiscovery.reason, 'error');
         if (content.isConnected && changed && !(document.activeElement instanceof HTMLInputElement && content.contains(document.activeElement))) renderModelServiceSettingsProjection(result);
       } catch { /* Keep the visible fields; a failed discovery offers its own retry. */ }
       finally { reading = false; }

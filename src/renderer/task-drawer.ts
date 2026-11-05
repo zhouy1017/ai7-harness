@@ -25,7 +25,7 @@ import type { PreferencesRendererApi } from '../shared/preferences.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
 import { TASK_PAGE_FAILED, TASK_PAGE_NAMES, taskPageMore, taskPageShown, taskResendSummary } from './analysis-paging-labels.js';
 import { isStartWhenOnlineTaskKind } from '../shared/protocol.js';
-import { localInstantLabel } from './plan-preview-labels.js';
+import { localInstantLabel, RUN_LIVENESS_STAGE_LABELS } from './plan-preview-labels.js';
 import { mountTaskComposer, mountTaskPanel, type ComposerRange, type TaskComposerSeed } from './task-panel.js';
 import { mountDialogue } from './dialogue.js';
 import { DIALOGUE_TITLE } from './dialogue-labels.js';
@@ -490,8 +490,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   });
   modes.append(...modeButtons);
   const close = control(TASK_DRAWER_CLOSE, 'quiet task-drawer-close', 'close');
+  close.setAttribute('aria-label', TASK_DRAWER_CLOSE);
+  close.title = TASK_DRAWER_CLOSE;
+  close.textContent = '';
+  close.classList.add('status-dismiss');
   close.addEventListener('click', () => surface.close(true));
-  header.append(back, title, pill, modes, close);
+  const identity = el('div', 'task-drawer-identity');
+  const heading = el('div', 'task-drawer-heading');
+  heading.append(title, pill);
+  identity.append(back, heading);
+  header.append(identity, modes, close);
   const body = el('div', 'task-drawer-body');
   // The open questions stand first in the body, and a repaint of the plan below them never removes them: a note being
   // written keeps its focus and its composition while the Run reads on (Issue #422, S76d).
@@ -673,6 +681,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    */
   function schedulePoll(next: TaskPlanProjection): void {
     clearPoll();
+    scheduleActivityClock(next);
     const waiting = next.state.key === 'waiting';
     // 正在取消 and 正在暂停 are followed like 运行中 until the Run has stopped (Issue #422, CTRL-005); a stopped Run is
     // read again slowly, so 续行 is offered once what it waits for — the slot, the network, the provider's account limit
@@ -733,8 +742,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const key = JSON.stringify(next);
     const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
-      // Nothing moved, but the activity card's times did: it holds no control, so it is simply drawn again.
-      if (next.runControl !== null) body.querySelector('.task-plan-activity')?.replaceWith(activityBlock(next.runControl));
+      if (next.runControl !== null) activityBlock(next.runControl);
       schedulePoll(next);
       return;
     }
@@ -777,6 +785,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     pill.className = `state-term status-pill review-pill task-drawer-pill review-pill-${tone.tone}`;
     pill.dataset['pillTone'] = tone.tone;
     pill.dataset['pillShape'] = tone.shape;
+    pill.dataset['busy'] = String(['running', 'pausing', 'cancelling'].includes(next.state.key));
     pill.textContent = next.runOutcome?.label ?? next.state.label;
     const active = document.activeElement;
     const restore = active instanceof HTMLElement && (body.contains(active) || bar.contains(active)) ? active.dataset['taskDrawerControl'] ?? null : null;
@@ -1080,7 +1089,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       planSection(3, listOf(participation, 'task-plan-list task-plan-participation')),
       planSection(4, facts([
         ...(!technicalLayerVisible ? [
-          [TASK_PLAN_SERVICE_TERMS[1], ordinaryProviderName(next.service.provider)] as const,
+          [TASK_PLAN_SERVICE_TERMS[7], next.service.budgetCeiling.replace('tokens', '词元')] as const,
           ['预计用时', next.service.duration] as const,
         ] : [
         [TASK_PLAN_SERVICE_TERMS[0], next.service.role],
@@ -1301,14 +1310,21 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     const redoing = redoPending !== null && redoPending.ref === next.ref && next.state.key === 'cancelling';
     bar.hidden = false;
     bar.dataset['taskBar'] = view.readiness;
-    const parts: HTMLElement[] = [el('p', 'task-bar-summary', view.summary)];
+    const parts: HTMLElement[] = [];
     if (view.status !== null) {
-      const status = el('p', 'task-bar-status', view.status);
+      const status = el('p', 'state-term task-bar-status', view.status);
+      status.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
+      status.dataset['busy'] = pill.dataset['busy'] ?? 'false';
       status.setAttribute('role', 'status');
       status.tabIndex = -1;
       parts.push(status);
+    } else {
+      const state = el('span', 'state-term task-bar-state', next.state.label);
+      state.dataset['pillTone'] = TASK_PLAN_STATE_PILLS[next.state.key].tone;
+      parts.push(state);
     }
-    if (view.statement !== null) parts.push(el('p', 'task-bar-statement', view.statement));
+    parts.push(el('p', 'task-bar-summary', view.summary));
+    if (view.statement !== null) parts.push(el('p', 'task-bar-statement', technicalLayerVisible ? view.statement : '仅执行本次计划，改稿、受控动作、里程碑与发稿另行决定。'));
     let noteId: string | null = null;
     if (view.note !== null) {
       const note = el('p', 'task-bar-note', redoing ? TASK_BAR_REDOING_NOTE : view.note);
@@ -2214,18 +2230,23 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
    * LIVE-003's own words when the step has run longer than this Run can account for.
    */
   function activityBlock(run: TaskPlanRunControlProjection): HTMLElement {
-    const section = el('section', 'task-plan-activity');
-    section.setAttribute('aria-label', TASK_PLAN_ACTIVITY_TITLE);
-    section.dataset['taskPlanActivity'] = run.cancelling ? 'cancelling' : run.pausing ? 'pausing'
+    const previous = body.querySelector<HTMLElement>('.task-plan-activity');
+    const state = run.cancelling ? 'cancelling' : run.pausing ? 'pausing'
       : run.continuation !== null ? 'stopped' : run.activity === null ? 'unreported' : 'running';
+    const retained = previous?.dataset['runId'] === run.runRecordId && previous.dataset['taskPlanActivity'] === state;
+    const section = retained ? previous : el('section', 'task-plan-activity');
+    section.dataset['runId'] = run.runRecordId;
+    section.setAttribute('aria-label', TASK_PLAN_ACTIVITY_TITLE);
+    section.dataset['taskPlanActivity'] = state;
     const heading = el('h3', 'task-plan-activity-title', TASK_PLAN_ACTIVITY_TITLE);
-    section.append(heading);
+    if (!retained) section.append(heading);
     const activity = run.activity;
     // A stopped Run: nothing is in flight, and what it kept is its continuation point (CONT-015).
     if (run.continuation !== null) {
       section.dataset['taskPlanActivityProgress'] = `${run.continuation.unitsSettled ?? 'unreadable'}/${run.continuation.unitsTotal}`;
       heading.append(' · ', el('span', 'task-plan-activity-status', taskBarContinuationNote(run.continuation.unitsSettled, run.continuation.unitsTotal, run.continuation.pendingAnswerUnits,
         plan?.listPages?.['runControl.continuation.pendingAnswerUnits']?.total)));
+      if (retained) section.querySelector('h3')?.replaceWith(heading);
       return section;
     }
     if (activity === null) {
@@ -2233,12 +2254,39 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       return section;
     }
     const now = Date.now();
+    let progress = section.querySelector<HTMLElement>('.task-plan-progress');
+    if (progress === null) {
+      const chain = el('ol', 'task-plan-stage-chain');
+      for (const [stage, label] of Object.entries(RUN_LIVENESS_STAGE_LABELS)) {
+        const node = el('li', undefined, label.replace(/^正在/u, '').replace('分析已保存，正在', ''));
+        node.dataset['stage'] = stage;
+        chain.append(node);
+      }
+      progress = el('div', 'task-plan-progress');
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-label', '阅读范围进度');
+      progress.setAttribute('aria-valuemin', '0');
+      progress.append(el('span', 'task-plan-progress-fill'));
+      section.append(chain, progress);
+    }
+    progress.setAttribute('aria-valuemax', String(activity.unitsTotal));
+    progress.setAttribute('aria-valuenow', String(activity.unitsSettled));
+    progress.firstElementChild!.setAttribute('style', `width: ${activity.unitsTotal === 0 ? 0 : activity.unitsSettled / activity.unitsTotal * 100}%`);
+    for (const node of section.querySelectorAll<HTMLElement>('[data-stage]')) {
+      if (node.dataset['stage'] === activity.stage) node.setAttribute('aria-current', 'step');
+      else node.removeAttribute('aria-current');
+    }
     section.dataset['taskPlanActivityProgress'] = `${activity.unitsSettled}/${activity.unitsTotal}`;
     if (activity.currentUnitOrdinal !== null) section.dataset['taskPlanActivityUnit'] = String(activity.currentUnitOrdinal);
+    else delete section.dataset['taskPlanActivityUnit'];
     if (activity.inFlightUnits !== undefined) section.dataset['taskPlanActivityUnits'] = activity.inFlightUnits.map((unit) => unit.unitOrdinal).join(',');
+    else delete section.dataset['taskPlanActivityUnits'];
     if (taskPlanActivityIsStale(activity, now)) {
       section.dataset['runLiveness'] = 'stale';
-      section.append(el('p', 'attention-note', TASK_PLAN_ACTIVITY_STALE));
+      if (!section.querySelector('.attention-note')) section.append(el('p', 'attention-note', TASK_PLAN_ACTIVITY_STALE));
+    } else {
+      delete section.dataset['runLiveness'];
+      section.querySelector('.attention-note')?.remove();
     }
     const facts = el('dl', 'task-plan-facts task-plan-activity-facts');
     for (const [term, value] of taskPlanActivityRows(activity, run.executingSince, now, run.update)) {
@@ -2246,8 +2294,29 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       cell.dataset['taskPlanActivityRow'] = term;
       facts.append(el('dt', undefined, term), cell);
     }
-    section.append(facts);
+    const oldFacts = section.querySelector('.task-plan-activity-facts');
+    const cells = oldFacts?.querySelectorAll('dd');
+    const newCells = facts.querySelectorAll('dd');
+    if (cells && cells.length === newCells.length && [...cells].every((cell, index) => cell.dataset['taskPlanActivityRow'] === newCells[index]?.dataset['taskPlanActivityRow'])) {
+      cells.forEach((cell, index) => { if (cell.textContent !== newCells[index]!.textContent) cell.textContent = newCells[index]!.textContent; });
+    } else if (oldFacts) oldFacts.replaceWith(facts);
+    else section.append(facts);
     return section;
+  }
+
+  let activityClock: number | undefined;
+  function scheduleActivityClock(next: TaskPlanProjection): void {
+    if (activityClock !== undefined) window.clearInterval(activityClock);
+    activityClock = undefined;
+    if (!['running', 'pausing', 'cancelling'].includes(next.state.key)) return;
+    activityClock = window.setInterval(() => {
+      if (root.hidden || view !== 'plan' || interrupted || plan?.runControl?.activity == null) {
+        window.clearInterval(activityClock);
+        activityClock = undefined;
+        return;
+      }
+      activityBlock(plan.runControl);
+    }, 1_000);
   }
 
   /**
@@ -2425,8 +2494,9 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   /** The plan below the open questions: everything in the body after them goes, and they stay where they are. */
   function replaceBody(...children: HTMLElement[]): void {
     if (body.firstElementChild !== questions) body.prepend(questions);
-    for (const child of [...body.children]) if (child !== questions) child.remove();
-    body.append(...children);
+    const retained = new Set<HTMLElement>([questions, ...children]);
+    for (const child of [...body.children]) if (!retained.has(child as HTMLElement)) child.remove();
+    children.forEach((child, index) => { if (body.children[index + 1] !== child) body.insertBefore(child, body.children[index + 1] ?? null); });
   }
 
   /**

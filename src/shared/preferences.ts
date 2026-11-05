@@ -213,7 +213,7 @@ export interface LayoutRegions {
 /** Safe minimum and maximum of each resizable region (VIEW-007), the keyboard step, and the size a first drag starts from. */
 export const REGION_BOUNDS = Object.freeze({
   supportingWidth: Object.freeze({ min: 256, max: 560, step: 16, initial: 336 }),
-  drawerWidth: Object.freeze({ min: 320, max: 640, step: 16, initial: 416 }),
+  drawerWidth: Object.freeze({ min: 420, max: 600, step: 16, initial: 500 }),
 });
 
 export const DEFAULT_LAYOUT_REGIONS: LayoutRegions = Object.freeze({ supportingWidth: null, drawerWidth: null, hidden: Object.freeze([]) });
@@ -413,7 +413,12 @@ export function readPreferenceEnvelope(stored: unknown): { values: PreferenceVal
   let damaged = Object.keys(held).some((key) => !isPreferenceKey(key));
   for (const [key, definition] of Object.entries(PREFERENCE_KEYS) as Array<[PreferenceKey, PreferenceDefinition<unknown>]>) {
     if (!Object.hasOwn(held, key)) continue;
-    if (definition.validate(held[key])) values[key] = held[key];
+    let value = held[key];
+    // Earlier releases admitted 320–640px. Preserve the rest of a saved layout when narrowing the drawer range.
+    if (key === 'layout.regions' && isPlainObject(value) && within(value['drawerWidth'], { min: 320, max: 640 }) && Number.isInteger(value['drawerWidth'])) {
+      value = { ...value, drawerWidth: Math.max(REGION_BOUNDS.drawerWidth.min, Math.min(REGION_BOUNDS.drawerWidth.max, value['drawerWidth'])) };
+    }
+    if (definition.validate(value)) values[key] = value;
     else damaged = true;
   }
   return { values: values as unknown as PreferenceValues, damaged };
