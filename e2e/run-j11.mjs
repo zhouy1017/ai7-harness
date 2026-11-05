@@ -3116,7 +3116,7 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
     };
     const runInitialEvaluation = async (name) => {
-      await clickSelector(renderer, '[data-evaluation-action="new-evaluation"]', `${name}-start`);
+      await clickSelector(renderer, '[data-evaluation-action="start-initial"]', `${name}-start`);
       const settled = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.initial?.state), `${name}-ended`);
       requireJourney(settled.initial.state === 'settled' && settled.startFromInitial === '从 AI7 初评开始', `${name}-settled`, settled.initial);
     };
