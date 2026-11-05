@@ -292,7 +292,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
       replace(next);
       // Only the index of the card whose index moved is drawn again: nothing the editor is in — a focused heading, an open
       // choice, a note being read — is touched.
-      const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > section.material-index`);
+      const section = root.querySelector<HTMLElement>(`article.library-material[data-material-id="${next.materialId}"] > details.knowledge-file-more > section.material-index`);
       section?.replaceWith(indexSection(next));
     }
     pollDelay = nextIndexPollDelay(pollDelay, moved);

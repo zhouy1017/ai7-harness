@@ -635,7 +635,7 @@ async function main() {
         renderer = await waitForRenderer(manager, 'knowledge-page-window');
         await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'knowledge-page-ready');
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-page-open');
-    await click(renderer, '审阅规范文件', 'knowledge-page-open-category');
+        await click(renderer, '审阅规范文件', 'knowledge-page-open-category');
         await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-page-loaded');
       }
       await activateGuideline('[data-guideline-action="import"]', 'knowledge-page-import-start');
@@ -881,7 +881,7 @@ async function main() {
     await fill(renderer, '[data-library-field="reason"]', longReason, 'library-long-note');
     await clickSelector(renderer, '[data-library-action="confirm-eligibility"]', 'library-long-note-save');
     await readLibrary(renderer, (page) => page.cards[0]?.decisions === '5' && page.cards[0].chooser === null, 'library-long-note-saved');
-    const reader = 'article.library-material > .library-reason-reader';
+    const reader = 'article.library-material > .knowledge-file-more > .library-reason-reader';
     await clickSelector(renderer, `${reader} [data-library-action="read-reason"]`, 'library-full-note-open');
     let reconstructed = '';
     for (let part = 0; part < 4; part += 1) {
