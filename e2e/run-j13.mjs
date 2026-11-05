@@ -61,7 +61,7 @@ const SCOPE_CHANGED = '书系检索范围已变化 · 需要重新确认计划';
 const MARKER = '此结果使用的材料后来被排除';
 const CAPTURE_CANCELLED = '这次审阅已取消，不能保存为可复用工序；从一次完成的审阅保存。';
 const EXCLUDED_REASON = `书系「${SERIES}」可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。`;
-const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
+const CONSISTENCY_BASIS = `地点「${PLACE}」 · 书系一致性检查`;
 let location = 'entry';
 
 function at(next) {

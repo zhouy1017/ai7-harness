@@ -6,6 +6,7 @@ import { EditorView } from 'prosemirror-view';
 import { readSelectionSpan, type SpanSourceBlock } from '../shared/selection-span.js';
 import type { SelectionSpanBlockPin } from '../shared/protocol/selection-span.js';
 import { MARK_DECORATIONS_META, markDecorationPlugin } from './mark-decorations.js';
+import { EDITOR_MOTION_META, editorMotionPlugin } from './editor-motion.js';
 import { newParagraphIdentity, structuralInput, structuralKey, type PendingStructure } from './editor-structure.js';
 import { observeSourceImages, sourceBlockDom, sourceBlockView, sourceNodeKind } from './editor-source.js';
 import {
@@ -55,6 +56,8 @@ export interface BoundedEditor {
   loadWindow(windowProjection: ManuscriptWindowProjection, continuity?: EditorContinuity): boolean;
   loadNavigationWindow(windowProjection: ManuscriptWindowProjection, continuity: EditorContinuity): boolean;
   selectRange(blockId: string, fromGrapheme: number, toGrapheme: number): boolean;
+  highlightJump(blockId: string): void;
+  highlightAppliedRange(blockId: string, fromGrapheme: number, toGrapheme: number): void;
   currentWindow(): ManuscriptWindowProjection;
   isComposing(): boolean;
   /**
@@ -425,6 +428,19 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
   // left behind while its `scroll` event is still to come.
   let pendingRestore: { frame: number; run: () => void } | undefined;
   let ownScroll: { top: number } | undefined;
+  let smoothJump = false;
+  const endSmoothJump = (): void => { smoothJump = false; };
+  options.scrollContainer.addEventListener('scrollend', endSmoothJump);
+  options.scrollContainer.addEventListener('wheel', endSmoothJump, { passive: true });
+  options.scrollContainer.addEventListener('pointerdown', endSmoothJump);
+  options.scrollContainer.addEventListener('keydown', endSmoothJump);
+  const scrollToTarget = (target: HTMLElement): void => {
+    const pane = options.scrollContainer;
+    const box = target.getBoundingClientRect();
+    const desired = Math.max(0, Math.min(pane.scrollHeight - pane.clientHeight, pane.scrollTop + box.top - pane.getBoundingClientRect().top - (pane.clientHeight - box.height) / 2));
+    smoothJump = Math.abs(pane.scrollTop - desired) > 1 && document.documentElement.dataset['reducedMotion'] !== 'true' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ block: 'center', behavior: smoothJump ? 'smooth' : 'instant' });
+  };
   const markOwnScroll = (): void => {
     const mark = { top: options.scrollContainer.scrollTop };
     ownScroll = mark;
@@ -560,7 +576,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
     EditorState.create({
       schema: ai7Schema,
       doc: createDocument(blocks),
-      plugins: [transactionFilter, markPlugin, keymap(baseKeymap)],
+      plugins: [transactionFilter, markPlugin, editorMotionPlugin(), keymap(baseKeymap)],
     });
 
   let view: EditorView;
@@ -654,7 +670,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         const containerTop = options.scrollContainer.getBoundingClientRect().top;
         options.scrollContainer.scrollTop += target.getBoundingClientRect().top - containerTop - continuity.scrollAnchor.offset;
       } else if (target) {
-        target.scrollIntoView({ block: 'center' });
+        scrollToTarget(target);
       }
       // An explicit command can move focus while this arrival waits for its frame (for example, starting a document
       // phase just after saving a version). Restore the arrival, but do not reclaim focus from that later command.
@@ -1210,7 +1226,7 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
         !Number.isSafeInteger(fromGrapheme) ||
         !Number.isSafeInteger(toGrapheme) ||
         fromGrapheme < 0 ||
-        toGrapheme <= fromGrapheme ||
+        toGrapheme < fromGrapheme ||
         toGrapheme > text.length
       ) return false;
       settlePendingRestore();
@@ -1224,9 +1240,15 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       return true;
     },
     currentWindow: () => windowProjection,
+    highlightJump: (blockId) => {
+      if (!destroyed) view.dispatch(view.state.tr.setMeta(EDITOR_MOTION_META, { blockId }));
+    },
+    highlightAppliedRange: (blockId, fromGrapheme, toGrapheme) => {
+      if (!destroyed) view.dispatch(view.state.tr.setMeta(EDITOR_MOTION_META, { blockId, range: { fromGrapheme, toGrapheme } }));
+    },
     isComposing: () => composing,
     isOwnScroll: () =>
-      focusReveal !== undefined || (ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top),
+      smoothJump || focusReveal !== undefined || (ownScroll !== undefined && options.scrollContainer.scrollTop === ownScroll.top),
     setMarks: (marks, truncated) => {
       if (destroyed) return;
       windowProjection = { ...windowProjection, marks, marksTruncated: truncated };
@@ -1293,6 +1315,10 @@ export function mountBoundedEditor(options: MountOptions): BoundedEditor {
       options.onAnnouncement('本地业务服务已中断；未保存文字仍保留在编辑区，但尚未获得持久写入确认。', 'error');
     },
     destroy: () => {
+      options.scrollContainer.removeEventListener('scrollend', endSmoothJump);
+      options.scrollContainer.removeEventListener('wheel', endSmoothJump);
+      options.scrollContainer.removeEventListener('pointerdown', endSmoothJump);
+      options.scrollContainer.removeEventListener('keydown', endSmoothJump);
       stopSourceImages();
       destroyed = true;
       if (pendingRestore) cancelAnimationFrame(pendingRestore.frame);

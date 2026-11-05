@@ -4738,6 +4738,9 @@ export class BoundedManuscriptStore {
       annotations: 0,
       notes: 0,
     }));
+    const firstOmitted = outline[MAX_RAIL_CHAPTERS];
+    const retainedEnd = firstOmitted === undefined ? Number.POSITIVE_INFINITY
+      : workingOffsetBefore(this.#db, branchId, asNumber(firstOmitted.position));
     const places = openMarkPlaces(this.#db, branchId, MAX_RAIL_MARKS + 1);
     const offsets = new Map<number, number>();
     const marks = places.slice(0, MAX_RAIL_MARKS).map((place) => {
@@ -4750,7 +4753,7 @@ export class BoundedManuscriptStore {
       // The chapter a mark belongs to is the last one that starts at or before it.
       let owner = -1;
       for (let index = 0; index < chapters.length && chapters[index]!.startCharacter <= character; index += 1) owner = index;
-      if (owner >= 0) {
+      if (owner >= 0 && character < (chapters[owner + 1]?.startCharacter ?? retainedEnd)) {
         const chapter = chapters[owner]!;
         if (place.kind === 'change-suggestion') chapter.suggestions += 1;
         else if (place.kind === 'annotation') chapter.annotations += 1;

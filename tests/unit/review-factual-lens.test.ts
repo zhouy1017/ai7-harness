@@ -98,7 +98,7 @@ afterEach(() => {
 const flush = async (): Promise<void> => { for (let count = 0; count < 25; count += 1) await Promise.resolve(); };
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
 
-function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
+function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, procedureId: string | null = null) {
   const root = new MiniElement('main');
   miniDocument.body.append(root);
   const inspectReviewWorkspace = vi.fn<RendererApi['inspectReviewWorkspace']>().mockImplementation(async (input) => workspace(input?.reviewRunId ?? RUN, state, findingsCount));
@@ -107,17 +107,69 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
   const calls = { inspectReviewWorkspace, inspectFactualVerification, inspectEvidenceWorkspace };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
-  const status = vi.fn();
-  const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: null, api,
+  const status = vi.fn(); const searchSettings = vi.fn();
+  const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: null, api, procedureId,
     awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
     setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
-    goToText: async () => undefined, openPlan: () => undefined, planChanged: () => undefined });
+    goToText: async () => undefined, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
-  return { root, surface, status, unexpected, ...calls };
+  return { root, surface, status, unexpected, api, searchSettings, ...calls };
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
+  it('keeps the reopened sheet choices when the previous native close event arrives asynchronously', async () => {
+    const view = mount(); const next = workspace(); const available = { available: true, unavailableReason: null };
+    next.newReview = available; next.scopeOptions.whole = available;
+    next.categories = ['typos-and-usage', 'style-and-format', 'plot-consistency'].map((categoryId) => ({
+      categoryId, label: categoryId, description: '提供审阅发现。', output: 'annotation', riskPointsOnly: false,
+      batchApply: false, searchEngine: false, modelFree: false, available: true, unavailableReason: null,
+      basis: { categoryId, executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅工序', version: '1' } },
+      guidelineDocuments: [], procedure: { title: '审阅工序', version: '1' }, scopes: { whole: available, chapters: available, changed: unavailable, selection: available },
+    }));
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    const sheet = view.root.querySelector('dialog')!;
+    // HTMLDialogElement.close clears open synchronously and queues its close event as a task.
+    sheet.close = () => { sheet.open = false; setTimeout(() => sheet.dispatchEvent({ type: 'close' }), 0); };
+    sheet.close(); view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    await new Promise((resolve) => setTimeout(resolve, 0)); await flush();
+    expect(sheet.open).toBe(true);
+    expect(sheet.querySelectorAll('input').filter((input) => input.name === 'review-category')).toHaveLength(3);
+    expect(sheet.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
+  });
+  it('retains custom local procedure identity beside the selected local check on its sheet', async () => {
+    const procedureId = 'ai7-procedure/local-custom';
+    const view = mount('failed', 1, `${procedureId}@1`);
+    const next = workspace(); const available = { available: true, unavailableReason: null };
+    next.newReview = available; next.scopeOptions.whole = available;
+    view.api.procedureLibrary = vi.fn().mockResolvedValue({ procedures: [{ procedureId, executorKind: 'local-text-check',
+      versions: [{ procedureId, version: 1, digest: 'a'.repeat(64) }], documents: [{ version: 1, title: '自用离线工序' }] }] });
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    const sheet = view.root.querySelector('dialog')!;
+    expect(sheet.open).toBe(true);
+    expect(sheet.querySelectorAll('input').find((input) => input.value === 'local-text-check')?.checked).toBe(true);
+    expect(sheet.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
+    expect(sheet.querySelector(`[data-procedure-definition="${procedureId}@1"]`)).not.toBeNull();
+  });
+  it('cancels a preparation arriving after the sheet was dismissed without authorizing it', async () => {
+    const view = mount(); const next = workspace();
+    const available = { available: true, unavailableReason: null };
+    next.newReview = available; next.scopeOptions.whole = available;
+    next.categories = [{ categoryId: 'typos-and-usage', label: '文字审阅', description: '给出修改建议。', output: 'change-suggestion', riskPointsOnly: false,
+      batchApply: true, searchEngine: false, modelFree: false, available: true, unavailableReason: null,
+      basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '文字审阅', version: '1' } },
+      guidelineDocuments: [], procedure: { title: '文字审阅', version: '1' }, scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    const pending = deferred<Awaited<ReturnType<RendererApi['prepareReviewRun']>>>();
+    const prepare = vi.fn(() => pending.promise); const cancel = vi.fn(async () => undefined);
+    const authorize = vi.fn(); Object.assign(view.api, { prepareReviewRun: prepare, cancelServiceJob: cancel, authorizeReviewRun: authorize });
+    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    view.root.querySelector('[data-review-action="start"]')!.click(); await flush();
+    expect(prepare).toHaveBeenCalledOnce(); view.root.querySelector('dialog')!.close();
+    pending.resolve({ jobId: OTHER, kind: 'review-run-preparation', state: 'running', progress: { completed: 0, total: 2, label: '正在准备' }, result: null, failure: null });
+    await flush(); expect(cancel).toHaveBeenCalledWith({ jobId: OTHER }); expect(authorize).not.toHaveBeenCalled();
+  });
   it.each([true, false])('shows truthful native search availability in the new-review dialog (admitted: %s)', async (admitted) => {
     const view = mount();
     const next = workspace();
@@ -128,17 +180,24 @@ describe('terminal factual results through the mounted review workspace (#1058 /
       batchApply: false, searchEngine: true, modelFree: false, materialReferencesAllowed: false,
       basis: { categoryId: 'factual-review', executor: 'factual-review-kind', searchEngine: true, guidelineDocuments: [], procedure: { title: '事实核查', version: '1' },
         ...(admitted ? { modelChannelSearchLabel: 'DeepSeek 开放平台（官方）' } : {}) },
-      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, available: admitted, unavailableReason: admitted ? null : reason,
+      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, available: admitted, unavailableReason: admitted ? null : reason, networkUnavailable: !admitted,
       scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
     view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
     Object.assign(view.root.querySelector('dialog')!, { showModal: vi.fn(), close: vi.fn() });
     view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
     const option = view.root.querySelector('[data-review-category-option="factual-review"]')!;
-    if (admitted) expect(option.querySelector('.review-category-basis')!.textContent).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
-    else {
-      expect(option.querySelector('.review-category-reason')!.textContent).toContain(reason);
-      expect(option.textContent).not.toContain('一键启用');
+    expect(option.querySelector('.review-category-basis')!.textContent).toBe('事实核查');
+    expect(view.root.querySelector('.review-network-notice')!.hidden).toBe(true);
+    if (!admitted) expect(option.querySelector('.review-category-reason')!.textContent).toBe('此类别需要联网检索。');
+    const box = option.querySelector('input')!; box.checked = true; box.dispatchEvent({ type: 'change' });
+    expect(view.root.querySelector('.review-network-notice')!.hidden).toBe(admitted);
+    if (!admitted) {
+      expect(view.root.querySelector('.review-network-notice')!.textContent).toBe('联网检索尚未就绪，请到设置中配置后再开始。');
+      expect(view.root.querySelector('[data-review-action="start"]')!.disabled).toBe(true);
+      const settings = view.root.querySelector('[data-review-action="open-search-settings"]')!;
+      expect(settings.hidden).toBe(false); settings.click(); expect(view.searchSettings).toHaveBeenCalledOnce();
     }
+
   });
 
   it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {

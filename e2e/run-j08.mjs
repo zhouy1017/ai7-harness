@@ -566,7 +566,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const journal=document.querySelector('[data-recovery-candidate="journal"] input'); journal.click(); return journal.checked; })()`, 'restore-journal-select');
     await assertRenderer(renderer, `!document.querySelector('.recovery-selection-consequence')?.hidden && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='恢复为新版本')?.disabled`, 'restore-consequence-visible');
     await click(renderer, '恢复为新版本', 'restore-descendant');
-    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'restored-r2', 120_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'restored-r2', 120_000);
     await assertRenderer(renderer, `!document.querySelector('.recovered-state-marker')?.hidden && document.querySelector('.recovered-state-marker')?.textContent==='当前为恢复的工作状态'`, 'recovered-marker');
     await click(renderer, '撤销', 'history-floor-undo');
     await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('没有可撤销')`, 'history-floor-enforced');

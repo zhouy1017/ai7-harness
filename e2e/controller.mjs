@@ -5,6 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { readReadinessTrace } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+// Manuscript control projections shared by the synchronized #1322 Journey delta.
+export const MANUSCRIPT_JOURNAL_SEQUENCE = `Number(document.querySelector('[data-editor-persistence]')?.dataset.journalSequence)`;
+// The loaded window's position, rather than a pointer's preview while its jump is still in flight.
+export const MANUSCRIPT_RAIL_POSITION = `Number(document.querySelector('#manuscript-position')?.dataset.windowPosition)`;
+export function manuscriptRailJump(proportionExpression) {
+  return `(() => { const rail = document.querySelector('#manuscript-position[role="slider"]'); if (!(rail instanceof HTMLElement)) return false; rail.setAttribute('aria-valuenow', String(Math.round((${proportionExpression}) * 1_000_000))); rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
+}
+export function manuscriptBoundary(label) {
+  return `(() => { const pane = document.querySelector('.editor-window'); const item = Array.from(document.querySelectorAll('.window-actions button')).find(button => button.textContent === ${JSON.stringify(label)}); if (!(pane instanceof HTMLElement) || !item || item.disabled) return false; if (pane.scrollHeight > pane.clientHeight) { pane.scrollTop = ${JSON.stringify(label)} === '向前浏览' ? 16 : pane.scrollHeight - pane.clientHeight - 16; pane.dispatchEvent(new Event('scroll')); } return !item.hidden; })()`;
+}
 const JOURNEY_RUNNER_ENTRY = resolve(ROOT, 'e2e', 'run.mjs');
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const CANCELLATION_MESSAGE = 'ai7-e2e-cancel';

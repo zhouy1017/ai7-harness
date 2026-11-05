@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -565,7 +565,7 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
-  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
+  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === ${expectedSequence}`, 'edit-sequence');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'edit-return');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'edit-returned');
 }
@@ -921,7 +921,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-window')`, 'shell-frame-back-ready');
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
-    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
+    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, outsideToolbar: details?.closest('.editor-toolbar')===null, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
     requireJourney(Object.values(closedDisclosure ?? { missing: false }).every(Boolean), 'journal-disclosure-closed', closedDisclosure);
     await pressKey(renderer, ENTER_KEY);
     await waitFor(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').checkVisibility(); })()`, 'journal-disclosure-keyboard-open');
