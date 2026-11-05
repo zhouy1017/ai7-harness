@@ -98,6 +98,18 @@ describe('the preferences registry', () => {
 });
 
 describe('createPreferenceStore', () => {
+  it.each([[320, 420], [416, 420], [601, 600], [640, 600]])('clamps legacy drawer width %i to %i without losing other layout preferences', async (oldWidth, width) => {
+    const layout = { supportingWidth: 448, drawerWidth: oldWidth, hidden: ['position-rail'] };
+    await writeFile(join(sandbox, PREFERENCES_FILE_NAME), JSON.stringify({ version: 1, values: { 'layout.regions': layout } }), 'utf8');
+    const store = createPreferenceStore(sandbox);
+    const expected = { ...layout, drawerWidth: width };
+    expect(store.read().values['layout.regions']).toEqual(expected);
+    expect(store.read().notice).toBeNull();
+    store.save({ key: 'shell.sidebarCollapsed', value: true });
+    expect(createPreferenceStore(sandbox).read().values['layout.regions']).toEqual(expected);
+    expect(PREFERENCE_KEYS['layout.regions'].validate(layout)).toBe(false);
+  });
+
   it('reads defaults with nothing to disclose before the first save', () => {
     const store = createPreferenceStore(sandbox);
     expect(store.read()).toEqual({ version: 1, values: preferenceDefaults(), notice: null });
