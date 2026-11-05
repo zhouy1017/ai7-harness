@@ -266,19 +266,10 @@ async function createRendererManager(browser) {
 
 async function waitFor(renderer, expression, name, timeout = 60_000) {
   const deadline = Date.now() + timeout;
-  const probe = async (phase) => {
-    if (name === 'model-refresh-discovery-failure-visible' && localDebugEnabled()) recordDebugDetail('J-12', `[DEBUG-b2-refresh] ${phase} ${JSON.stringify(await renderer.evaluate(`(async () => {
-      const status=document.querySelector('#persistence-status'), technical=document.querySelector('.model-service-technical');
-      const settings=await window.ai7.getModelServiceSettings();
-      return {status:status?.textContent,tone:status?.dataset.tone,technicalOpen:technical?.open,discoveryCode:technical?.querySelector('[data-model-discovery-code]')?.dataset.modelDiscoveryCode,discovery:settings.modelDiscovery,visibility:document.visibilityState};
-    })()`))}`);
-  };
-  await probe('start');
   while (Date.now() < deadline) {
-    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) { await probe('pass'); return; }
+    if (await renderer.evaluate(`Boolean(${expression})`).catch(() => false)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
-  await probe('timeout');
   throw journeyCheckFailure('J-12', name);
 }
 
