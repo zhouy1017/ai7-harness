@@ -527,7 +527,7 @@ export function registerProductionAndPackageHandlers(context: {
       requireCurrentRouteGeneration(owned, generation);
       if (result && typeof result === 'object' && 'bookId' in result && result.bookId !== request.bookId) throw new ServiceCallError('TASK_OVERVIEW_INVALID', '任务结果不属于所选图书。');
       // Preparation jobs stay owned here until terminal; the overview never borrows a Book-route job capability.
-      if (!['redoTaskPlan', 'prepareBaselineAnalysis', 'prepareCustomAnalysis', 'promoteTaskIntentDraft'].includes(request.operation)) return result;
+      if (!['redoTaskPlan', 'prepareBaselineAnalysis', 'prepareCustomAnalysis', 'prepareReviewRun', 'promoteTaskIntentDraft'].includes(request.operation)) return result;
       let job = result as ServiceJobProjection;
       while (job.state === 'queued' || job.state === 'running') {
         await new Promise<void>((resolve) => setTimeout(resolve, 10));

@@ -1,3 +1,4 @@
+import { reviewPlanReferenceField } from './task-material-selection.js';
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
@@ -220,6 +221,10 @@ export interface TaskDrawerSurface {
 
 type DrawerApi = Pick<
   RendererApi,
+  | 'inspectReviewWorkspace'
+  | 'prepareReviewRun'
+  | 'searchReferableMaterials'
+  | 'inspectBookSeries'
   | 'inspectTaskOverview'
   | 'controlAllTasks'
   | 'startQuickTasks'
@@ -1068,11 +1073,22 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     usage.append(next.service.usage);
     if (next.service.usageIsCeiling) usage.append(` · ${TASK_PLAN_CEILING_NOTE}`);
     const participation = [next.participation.during, ...(next.participation.after === null ? [] : [`${TASK_PLAN_AFTERWARDS}：${next.participation.after}`])];
+    const references = next.kind === 'review-run' ? reviewPlanReferenceField({ api, bookId: next.bookId, reviewRunId: next.ref,
+      awaitJob: (job) => options.awaitServiceJob(job, () => undefined), change: (operation) => {
+      if (plan?.ref !== next.ref || !beginWork()) return;
+      const asked = request;
+      for (const input of whole.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button, select')) input.disabled = true;
+      void operation().then((ref) => {
+        if (request?.ref === next.ref && request.bookId === next.bookId) request = { ...request, ref };
+      }).catch((error: unknown) => {
+        refusal = options.errorMessage(error, '未能更新参考资料。');
+      }).finally(() => { options.onRecorded('review-run', next.bookId, request?.ref ?? undefined); endWork(asked); });
+    } }) : null;
     whole.append(
       planSection(0, facts([[TASK_PLAN_GOAL_TERMS[0], next.goal.sentence], [TASK_PLAN_GOAL_TERMS[1], listOf(next.outcomes, 'task-plan-list')]])),
       planSection(1, facts([
         [TASK_PLAN_SCOPE_TERMS[0], next.scope.process],
-        [TASK_PLAN_SCOPE_TERMS[1], next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference, 'task-plan-list')],
+        [TASK_PLAN_SCOPE_TERMS[1], references ?? (next.scope.reference.length === 0 ? TASK_PLAN_NO_REFERENCE : listOf(next.scope.reference, 'task-plan-list'))],
         [TASK_PLAN_SCOPE_TERMS[2], next.scope.send],
         [TASK_PLAN_SCOPE_TERMS[3], technicalWords(next.scope.notRead, next.scope.notRead.replace('来源材料（来源版本仅作血缘证据，不属于可读范围）', '来源材料'))],
       ])),

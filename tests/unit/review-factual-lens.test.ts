@@ -134,11 +134,16 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     Object.assign(view.root.querySelector('dialog')!, { showModal: vi.fn(), close: vi.fn() });
     view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
     const option = view.root.querySelector('[data-review-category-option="factual-review"]')!;
-    if (admitted) expect(option.querySelector('.review-category-basis')!.textContent).toContain('将使用 DeepSeek 开放平台（官方） 自带的联网搜索');
-    else {
-      expect(option.querySelector('.review-category-reason')!.textContent).toContain(reason);
-      expect(option.textContent).not.toContain('一键启用');
+    expect(option.querySelector('.review-category-basis')!.textContent).toBe('事实核查');
+    expect(view.root.querySelector('.review-network-notice')!.hidden).toBe(true);
+    if (!admitted) expect(option.querySelector('.review-category-reason')!.textContent).toBe('此类别需要联网检索。');
+    const box = option.querySelector('input')!; box.checked = true; box.dispatchEvent({ type: 'change' });
+    expect(view.root.querySelector('.review-network-notice')!.hidden).toBe(admitted);
+    if (!admitted) {
+      expect(view.root.querySelector('.review-network-notice')!.textContent).toBe('联网检索尚未就绪，请到设置中配置后再开始。');
+      expect(view.root.querySelector('[data-review-action="start"]')!.disabled).toBe(true);
     }
+
   });
 
   it('shows each factual finding once with its Lens states and ordinary review actions (#1287)', async () => {

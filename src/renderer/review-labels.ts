@@ -1,6 +1,7 @@
 import { technicalWords } from './technical-layer.js';
 import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
+  REVIEW_SCOPE_LABELS,
   type ReviewChapterOptionProjection,
   type ReviewCoverageRowProjection,
   type ReviewCoverageState,
@@ -75,7 +76,7 @@ export const REVIEW_ACTION_LABELS = {
   'open-run': '查看这次审阅',
   // 开始审阅 (ADR 0096 §3): the sheet's one explicit action; 先看计划 opens the plan first.
   start: '开始审阅',
-  prepare: '查看计划',
+  prepare: '先看计划',
   'quick-start': '快速开始',
   'cancel-preparation': '取消准备',
   'close-sheet': '取消',
@@ -238,7 +239,32 @@ export const REVIEW_QUICK_START_REASON = '快速开始先准备所选类别的�
 export const REVIEW_CONSEQUENCE_TERMS = ['会读取', '会发送', '不会做', '费用'] as const;
 /** §10's target words for what a Task never does, the editor's half; the technical half is the plan's. */
 export const REVIEW_NOT_DO = '不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。';
-export const REVIEW_COST_BEFORE_PLAN = '先看计划后显示';
+/** Owner #1320 disposition: unit counts × one call, plus cross-chapter synthesis; no price source. */
+export function estimateReviewCalls(category: { modelFree: boolean; crossChapter?: boolean; changedUnits?: number },
+  scope: ReviewScopeKind | null, counts: ReviewWorkspaceProjection['scopeUnitCounts'],
+  range: { startPosition: number; endPosition: number } | null): number | null {
+  if (category.modelFree) return 0;
+  if (scope === null) return null;
+  const units = scope === 'selection' ? 1 : scope === 'changed' ? category.changedUnits ?? null
+    : scope === 'whole' ? counts?.whole ?? null
+      : range === null || range.startPosition > range.endPosition ? null
+        : counts?.units.filter((unit) => unit.endPosition >= range.startPosition && unit.startPosition <= range.endPosition).length ?? null;
+  return units === null ? null : units === 0 ? 0 : units + (category.crossChapter ? 1 : 0);
+}
+
+export function reviewConsequenceEstimate(selected: ReadonlyArray<{ label: string; modelFree: boolean; crossChapter?: boolean; changedUnits?: number }>,
+  scope: ReviewScopeKind | null, workspace: Pick<ReviewWorkspaceProjection, 'manuscript' | 'scopeUnitCounts'>,
+  chapters: { from: ReviewChapterOptionProjection | null; to: ReviewChapterOptionProjection | null }): { read: string; send: string; notDo: string; cost: string } {
+  const range = chapters.from === null || chapters.to === null ? null : { startPosition: chapters.from.position, endPosition: chapters.to.endPosition };
+  const calls = selected.map((entry) => estimateReviewCalls(entry, scope, workspace.scopeUnitCounts, range));
+  const scopeName = scope === null ? '所选范围' : REVIEW_SCOPE_LABELS[scope];
+  return { read: selected.length === 0 ? '选好类别后显示' : reviewReadConsequence(scope, workspace.manuscript, chapters),
+    send: selected.length === 0 ? '选好类别后显示' : selected.every((entry) => entry.modelFree) ? '只在本机读取，不发送任何内容。'
+      : reviewSendConsequence(selected).replace('所读范围内的稿件正文', `${scopeName}的正文`),
+    notDo: REVIEW_NOT_DO,
+    cost: selected.length === 0 ? '选好类别后显示' : calls.some((count) => count === null) ? '选好范围后显示调用估计'
+      : `约 ${calls.reduce<number>((sum, count) => sum + (count ?? 0), 0)} 次模型调用` };
+}
 export const REVIEW_PICK_CATEGORY = '请至少选择一个审阅类别。';
 export const REVIEW_PICK_SCOPE = '请选择审阅范围。';
 export const REVIEW_PICK_CHAPTERS = '请选择起止的章。';

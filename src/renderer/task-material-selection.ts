@@ -81,6 +81,69 @@ export function taskMaterialSelectionReason(item: WritingTaskMaterialProjection,
   return null;
 }
 
+/** The optional references of a review live in segment 2 of the full plan (#1320). */
+export function reviewPlanReferences(options: {
+  api: Pick<RendererApi, 'searchReferableMaterials'>; bookId: string; items: readonly WritingTaskMaterialProjection[];
+  selected: ReadonlySet<string>; change(selected: Set<string>): void;
+}): HTMLElement {
+  const root = document.createElement('div'); root.className = 'task-reference-chips';
+  root.dataset['reviewPlanReferences'] = '';
+  const selected = new Set(taskMaterialSelection(options.items, options.selected));
+  for (const item of options.items.filter((item) => selected.has(item.materialId))) {
+    const chip = createButton(); chip.classList.add('small'); chip.textContent = `${item.title} ×`;
+    chip.setAttribute('aria-label', `移除参考《${item.title}》`);
+    chip.addEventListener('click', () => { const next = new Set(selected); next.delete(item.materialId); options.change(next); });
+    root.append(chip);
+  }
+  const add = document.createElement('details');
+  const summary = document.createElement('summary'); summary.textContent = '+ 添加参考…'; add.append(summary);
+  for (const item of options.items) {
+    const row = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox';
+    input.dataset['reviewMaterial'] = item.materialId; input.checked = selected.has(item.materialId);
+    const reason = taskMaterialSelectionReason(item, options.items, selected);
+    input.disabled = reason !== null; row.title = reason ?? '';
+    input.addEventListener('change', () => { const next = new Set(selected); if (input.checked) next.add(item.materialId); else next.delete(item.materialId); options.change(next); });
+    row.append(input, document.createTextNode(item.title)); add.append(row);
+  }
+  add.append(similarMaterialsField(options.api, options.bookId, options.items, selected, (id) => options.change(new Set([...selected, id]))));
+  root.append(add);
+  return root;
+}
+
+/** Read the current Book-owned plan input; editing references prepares a new plan, never authorizes it. */
+export function reviewPlanReferenceField(options: {
+  api: Pick<RendererApi, 'inspectReviewWorkspace' | 'prepareReviewRun' | 'searchReferableMaterials' | 'inspectBookSeries'>;
+  bookId: string; reviewRunId: string;
+  awaitJob: (job: Awaited<ReturnType<RendererApi['prepareReviewRun']>>) => Promise<import('../shared/protocol.js').ServiceWireJobProjection>;
+  change(operation: () => Promise<string>): void;
+}): HTMLElement {
+  const host = document.createElement('div');
+  void options.api.inspectReviewWorkspace({ reviewRunId: options.reviewRunId }).then(async (workspace) => {
+    if (!host.isConnected) return;
+    const input = workspace.run?.referenceInput;
+    if (!input || !workspace.categories.some((entry) => input.categoryIds.includes(entry.categoryId) && entry.materialReferencesAllowed)) return;
+    const selected = new Set(taskMaterialSelection(workspace.materials?.items ?? [], new Set(input.materialIds ?? [])));
+    const update = (next: ReadonlySet<string>, seriesId = input.seriesId ?? null): void => options.change(async () => {
+      const job = await options.api.prepareReviewRun({ ...input, materialIds: taskMaterialSelection(workspace.materials?.items ?? [], next), seriesId });
+      const completed = await options.awaitJob(job);
+      const result = completed.result;
+      if (completed.kind !== 'review-run-preparation' || completed.state !== 'completed' || !result || !('scopeOptions' in result) || !result.run) throw new Error('未能更新参考资料。');
+      return result.run.reviewRunId;
+    });
+    host.append(reviewPlanReferences({ api: options.api, bookId: options.bookId, items: workspace.materials?.items ?? [], selected, change: update }));
+    if (input.capturedProcedure != null) return;
+    const page = await options.api.inspectBookSeries({ bookId: options.bookId, membershipsAfter: null });
+    if (!host.isConnected || page.memberships.length === 0) return;
+    const row = document.createElement('label'); const select = document.createElement('select');
+    select.dataset['reviewField'] = 'series-scope'; select.append(new Option('仅本书，不参考书系知识', ''));
+    for (const series of page.memberships) select.append(new Option(`书系《${series.title}》`, series.seriesId));
+    select.value = input.seriesId ?? '';
+    select.addEventListener('change', () => update(selected, select.value || null));
+    row.append(document.createTextNode('允许参考 '), select); host.append(row);
+  }).catch(() => { if (host.isConnected) host.textContent = '参考资料读取失败，请重新打开计划。'; });
+  return host;
+}
+
 /** Local discovery leaves every choice to the editor and uses the fieldset's existing reference bounds. */
 export function similarMaterialsField(api: Pick<RendererApi, 'searchReferableMaterials'>, bookId: string,
   items: readonly WritingTaskMaterialProjection[], selected: ReadonlySet<string>, choose: (materialId: string) => void): HTMLElement {
