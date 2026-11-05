@@ -114,7 +114,6 @@ import { USAGE_RETURN, USAGE_SECTION_LABEL, USAGE_TITLE, USAGE_RUN_TITLE, USAGE_
 import { SERIES_BACK_TO_LIST, SERIES_LEDE, SERIES_STATUS, SERIES_TITLE } from './series-labels.js';
 import { CALIBRATION_PAGE_GROUP, CALIBRATION_PAGE_TITLE, CALIBRATION_STATUS } from './evaluation-calibration-labels.js';
 import {
-  EVALUATION_LEDE,
   EVALUATION_STATUS,
   EVALUATION_TITLE,
   evaluationOverviewLine,
@@ -2667,8 +2666,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
   const content = panel();
   content.classList.add('book-findings'); content.dataset['bookId'] = bookId;
   const host = element('div', 'findings-center');
-  content.append(element('h2', undefined, FINDINGS_CENTER_WORDS.heading),
-    element('p', 'lede', FINDINGS_CENTER_WORDS.lede), host);
+  content.append(host);
   replaceScreen('book-findings', content, { bookId, title: bookTitle, section: 'findings' });
   agentWorkspaceReturns.set(content, () => renderBookFindings(bookId, bookTitle));
   mountFindingsCenter(host, (offset) => window.ai7.inspectBookFindings({ offset }), (item: BookFindingProjection) => {
@@ -2694,7 +2692,7 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
         }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '未能撤销应用。'), 'error'));
       } } });
     } catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
-  });
+  }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); });
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }
 
@@ -2927,11 +2925,7 @@ function renderBookEvaluation(bookId: string, bookTitle: string, focus?: { recor
   content.classList.add('book-evaluation');
   content.dataset['bookId'] = bookId;
   const host = element('div', 'evaluation-host');
-  content.append(
-    element('h2', undefined, EVALUATION_TITLE),
-    element('p', 'field-note', EVALUATION_LEDE),
-    host,
-  );
+  content.append(host);
   let firstEvaluationRead = true;
   const surface = mountEvaluation({
     root: host,
