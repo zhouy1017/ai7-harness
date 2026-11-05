@@ -2379,7 +2379,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
       const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
-      categoryLegend.append(' · ', line);
+      form.append(line);
     }
     procedureField.hidden = state.definition !== null;
     categories.append(categoryLegend);
