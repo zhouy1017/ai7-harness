@@ -213,7 +213,7 @@ export interface LayoutRegions {
 /** Safe minimum and maximum of each resizable region (VIEW-007), the keyboard step, and the size a first drag starts from. */
 export const REGION_BOUNDS = Object.freeze({
   supportingWidth: Object.freeze({ min: 256, max: 560, step: 16, initial: 336 }),
-  drawerWidth: Object.freeze({ min: 320, max: 640, step: 16, initial: 416 }),
+  drawerWidth: Object.freeze({ min: 420, max: 600, step: 16, initial: 500 }),
 });
 
 export const DEFAULT_LAYOUT_REGIONS: LayoutRegions = Object.freeze({ supportingWidth: null, drawerWidth: null, hidden: Object.freeze([]) });

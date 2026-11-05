@@ -124,6 +124,14 @@ export class MiniElement {
     for (const node of incoming) { node.remove(); node.parentElement = this; }
     this.children.unshift(...incoming);
   }
+  insertBefore(node: MiniElement, reference: MiniElement | null): MiniElement {
+    if (node === reference) return node;
+    node.remove();
+    node.parentElement = this;
+    if (reference === null) this.children.push(node);
+    else this.children.splice(this.children.indexOf(reference), 0, node);
+    return node;
+  }
   replaceChildren(...nodes: Array<MiniElement | string>): void {
     for (const child of this.children) child.parentElement = null;
     this.children.length = 0;

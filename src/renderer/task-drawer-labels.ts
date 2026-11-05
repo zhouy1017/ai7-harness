@@ -143,20 +143,32 @@ export function groupedCount(value: number): string {
 export const TASK_PLAN_COMPACT_TERMS = ['处理', '发送', '会得到', '不会', '中途'] as const;
 export const TASK_PLAN_FULL_LINK = '完整计划（6 段）';
 /** §6: the same link on a plan the editor can edit says so. */
-export const TASK_PLAN_FULL_LINK_EDITABLE = '完整计划（6 段）· 可以改步骤与限制';
+export const TASK_PLAN_FULL_LINK_EDITABLE = TASK_PLAN_FULL_LINK;
 /** The usage figure is a ceiling the Run cannot pass, never a forecast of what it will use. */
 export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
 /** The five rows of 精简, each one line built from the projection's own sentences. */
 export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<readonly [string, string]> {
   plan = taskPlanWording(plan);
-  const usage = `用量：${plan.service.usage}${plan.service.usageIsCeiling ? `（${TASK_PLAN_CEILING_NOTE}）` : ''}`;
+  const references = plan.listPages?.['scope.reference']?.total ?? plan.scope.reference.length;
+  const sends = !plan.service.send.includes('不发送') && !plan.service.send.includes('不会发送');
+  const ceiling = plan.service.budgetCeiling.match(/[\d,]+/u)?.[0];
+  const budget = ceiling === undefined ? '未设预算上限' : `上限${ceiling}词元`;
+  const nonEffects: Readonly<Record<TaskPlanKind, string>> = {
+    'fixed-task': '不运行、改稿、导出发布、存里程碑或越界阅读。',
+    'baseline-analysis': '不改稿、导出发布、存里程碑、越界阅读或作事实判定。',
+    'review-run': '不改稿、导出发布、存里程碑或越界处理。',
+    'initial-evaluation': '不改稿、导出发布、存里程碑、代评分定论、评风险或联网预测。',
+    'readers-report': '不改稿、导出、存里程碑、改评估、写营销、交付或越界阅读。',
+    'evaluation-rewrite': '不改稿、导出、存里程碑、改分、自动记评估、定论或评风险。',
+    writing: '不改稿、导出、存里程碑、交付、改评估分析、越界阅读或照抄。',
+  };
   return [
-    ['处理', plan.scope.reference.length === 0 ? plan.scope.process : `${plan.scope.process}；参考 ${plan.scope.reference.join('、')}`],
-    ['发送', `${plan.service.send} · ${usage} · ${plan.service.budgetCeiling}`],
-    ['会得到', plan.outcomes.join('；')],
-    ['不会', plan.notDo.editorial.join(' · ')],
-    ['中途', plan.participation.after === null ? plan.participation.during : `${plan.participation.during}；结束后：${plan.participation.after}`],
+    ['处理', references === 0 ? '只处理任务卡所列范围，不参考其他材料。' : `处理任务卡所列范围，参考 ${references} 项材料。`],
+    ['发送', sends ? `计划内材料发往模型，按用量计费，${budget}。` : `不发送内容，无模型用量，${budget}。`],
+    ['会得到', `${TASK_BAR_OUTCOMES[plan.kind]}。`],
+    ['不会', nonEffects[plan.kind]],
+    ['中途', plan.kind === 'fixed-task' ? '只记录本次授权，无需中途参与。' : plan.participation.during === '预计无需中途参与' ? '预计无需参与，可随时暂停或取消。' : '需你决定时先询问，可随时暂停或取消。'],
   ];
 }
 
@@ -475,8 +487,7 @@ export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled
 export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
 export const TASK_BAR_UNCONFIRMED_HEADING = '该单元结果未知';
 export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
-  return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。` +
-    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 ${unconfirmed} 个记为结果未知的单元缺口`;
+  return `${unconfirmed} 处回答未传全，处理与计费未知且不会重发，取消后保留其余 ${unitsSettled - unconfirmed}/${unitsTotal} 处结果。`;
 }
 /** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
 export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
@@ -516,11 +527,7 @@ export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<Unconfirmed
 }
 /** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
 export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rangesTotal = listed.ranges.length): string {
-  const what = unconfirmedWhat(rangesTotal, [...new Set(listed.steps.map((step) => step.stage))]);
-  // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
-  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为${rangesTotal > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。` +
-    `${rangesTotal > 0 ? '后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。' : ''}` +
-    `保留为缺口只记下你的确认：不发送任何内容，不改变结果${rangesTotal === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
+  return `回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认${rangesTotal > 0 ? '，以后重读会先说明' : ''}。`;
 }
 /**
  * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
@@ -680,15 +687,7 @@ export interface TaskBarView {
 
 /** AUTH-001 and §6: the bar's one summary line, from the plan it states. */
 export function taskBarSummary(plan: TaskPlanProjection): string {
-  return [
-    `《${plan.goal.chips.book}》`,
-    plan.goal.chips.position,
-    ...(plan.planVersion === null ? [] : [`计划版本 ${plan.planVersion}`]),
-    plan.service.role,
-    plan.service.budgetCeiling,
-    `产出：${TASK_BAR_OUTCOMES[plan.kind]}`,
-    '不改稿',
-  ].join(' · ');
+  return `产出${TASK_BAR_OUTCOMES[plan.kind]}，不修改稿件。`;
 }
 
 const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT, tone: 'secondary', disabledReason: null };

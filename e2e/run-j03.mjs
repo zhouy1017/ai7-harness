@@ -433,7 +433,7 @@ async function readDrawer(renderer) {
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
       columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'),
-      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.closest('.task-plan-unavailable')?(node.getAttribute('aria-label')??node.textContent):node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
+      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.dataset.taskDrawerControl==='close'?node.getAttribute('aria-label'):node.closest('.task-plan-unavailable')?(node.getAttribute('aria-label')??node.textContent):node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
       footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       bar:(() => {
         const bar=drawer.querySelector('.task-drawer-bar');
@@ -973,11 +973,11 @@ async function main() {
       JSON.stringify(compact.chips) === JSON.stringify({ book: 'J-03 sample1 任务授权', position: '全书', selected: `已选 ${selectedCount} 字`, revision: '任务输入修订版 r2', procedure: '工序「固定任务」' }) &&
       compact.saved === '已为任务保存修订版 r2，之后的编辑不影响这项任务。' && compact.drift === null &&
       JSON.stringify(compact.rows) === JSON.stringify({
-        处理: `《J-03 sample1 任务授权》全书 · ${selectedCount} 字 · 任务输入修订版 r2`,
-        发送: '本环境不连接模型服务，不会发送任何内容 · 用量：不发送，没有模型用量 · 未设置任务预算上限',
-        会得到: '一条运行记录：只记录这次运行授权，不派发，不产出重点清单',
-        不会: '不会开始运行（只记录） · 不会直接修改稿件 · 不导出或发布 · 不存里程碑版本 · 不读这本书以外的内容',
-        中途: '预计无需中途参与',
+        处理: '只处理任务卡所列范围，不参考其他材料。',
+        发送: '不发送内容，无模型用量，未设预算上限。',
+        会得到: '一条运行记录（不派发）。',
+        不会: '不运行、改稿、导出发布、存里程碑或越界阅读。',
+        中途: '只记录本次授权，无需中途参与。',
       }) &&
       compact.sections.length === 0 && Object.keys(compact.technical).length === 0 &&
       // Synchronized delta with Issue #423 (S77a): `← 任务` leads to the Book's 任务 panel.
@@ -988,6 +988,15 @@ async function main() {
       compact.controls['full-link']?.text === '完整计划（6 段）' && compact.controls.close?.text === '关闭' &&
       compact.footer === '计划说明，不是运行授权', 'drawer-compact-plan', compact);
 
+    await assertRenderer(renderer, `(() => {
+      const drawer=document.querySelector('#task-drawer'), head=drawer?.querySelector('.task-drawer-head');
+      const rows=Array.from(drawer.querySelectorAll('[data-task-plan-row]'));
+      return head?.children.length===3 && head.children[0].contains(drawer.querySelector('h2')) && head.children[0].contains(drawer.querySelector('.task-drawer-pill')) &&
+        head.children[1].classList.contains('task-drawer-modes') && head.children[2].getAttribute('aria-label')==='关闭' && head.children[2].textContent==='' &&
+        rows.length===5 && rows.every(row=>[...row.textContent].length<=36 && (row.textContent.match(/[。！？]/gu)??[]).length===1) &&
+        [...drawer.querySelector('.task-bar-summary').textContent].length<=40;
+    })()`, 'drawer-prototype-density');
+
     at('drawer-bar-record-only');
     // Issue #420 (S74a): the footer is the authorization bar. It sums the plan up in one line, states what
     // starting decides (AUTH-003), and offers 开始任务 — which here only records, and says so (ADR 0055) —
@@ -995,7 +1004,7 @@ async function main() {
     // `missing`, and this Task's route sends nothing, so the start needs none: it is offered all the same.
     requireJourney(missingConnection?.credentialOperationState === 'missing' && compact.bar !== null &&
       compact.bar.state === 'record-only' && compact.bar.start === 'record-only' &&
-      compact.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
+      compact.bar.summary === '产出一条运行记录（不派发），不修改稿件。' &&
       compact.bar.statement === '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定' &&
       compact.bar.note === '此任务只记录运行，不会派发' && compact.bar.status === null && compact.bar.refusal === null &&
       JSON.stringify(compact.bar.actions) === JSON.stringify([
@@ -1025,7 +1034,7 @@ async function main() {
     const full = await readDrawer(renderer);
     requireJourney(full?.stored === 'full' && full.controls['mode-full']?.pressed === 'true' && full.controls['mode-compact']?.pressed === 'false' &&
       JSON.stringify(full.sections) === JSON.stringify(['1要做什么 · 会得到什么', '2处理哪些内容 · 参考什么', '3怎么做', '4你会参与的地方', '5预计与限制', '6会得到 / 不会做']) &&
-      full.terms['做什么'] === TASK_GOAL && full.terms['要处理'] === compact.rows['处理'] && full.terms['允许参考'] === '不参考其他材料' &&
+      full.terms['做什么'] === TASK_GOAL && full.terms['要处理'] === `《J-03 sample1 任务授权》全书 · ${selectedCount} 字 · 任务输入修订版 r2` && full.terms['允许参考'] === '不参考其他材料' &&
       full.terms['可能发送'] === '不发送任何内容' && full.terms['不会读'] === '其他图书；来源材料（来源版本仅作血缘证据，不属于可读范围）' &&
       JSON.stringify(full.steps) === JSON.stringify(['准备任务输入 → 任务输入修订版 r2', '记录运行（不派发） → 运行记录']) &&
       JSON.stringify(full.participation) === JSON.stringify(['预计无需中途参与']) &&
@@ -1082,7 +1091,7 @@ async function main() {
     // At 1120 px and wider the page makes room for the drawer, which is a column beside it; below, the
     // drawer lies over the page and the page keeps its width (editor-surfaces §0.3).
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1180, height: 820, deviceScaleFactor: 1, mobile: false });
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('[data-toast]'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length===1; })()`, 'drawer-push-column');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('[data-toast]'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.width-500)<=1 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length===1; })()`, 'drawer-push-column');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 820, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page)return false; const box=drawer.getBoundingClientRect(); return innerWidth===1000 && getComputedStyle(document.body).paddingRight==='0px' && getComputedStyle(drawer).position==='fixed' && page.getBoundingClientRect().right>box.left+100 && box.width<=document.documentElement.clientWidth; })()`, 'drawer-overlay-below-1120');
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -1171,7 +1180,7 @@ async function main() {
       recordedDrawer.technical['run-record']?.startsWith(`${authorized.runRecord.runRecordId} · recorded-not-dispatched · `) &&
       recordedDrawer.technical['plan-envelope'] === authorized.planEnvelope.digest && recordedDrawer.footer === '计划说明，不是运行授权' &&
       recordedDrawer.bar?.state === 'started' && recordedDrawer.bar.status === '已记录（不派发）' && recordedDrawer.bar.statement === null &&
-      recordedDrawer.bar.note === null && recordedDrawer.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
+      recordedDrawer.bar.note === null && recordedDrawer.bar.summary === '产出一条运行记录（不派发），不修改稿件。' &&
       JSON.stringify(recordedDrawer.bar.actions) === JSON.stringify([{ name: 'run-link', text: '查看运行记录', disabled: false, reason: null }]),
     'drawer-recorded-plan', recordedDrawer);
     await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link,tasks' && document.activeElement?.dataset.taskDrawerControl==='run-link' && ${AUTHORIZE_LABELED_BUTTONS}===0`, 'drawer-records-nothing');
