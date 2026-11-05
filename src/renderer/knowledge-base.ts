@@ -358,7 +358,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(all);
     }
     back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
-    back.append(button('返回知识库', 'quiet', () => void renderKnowledgeBase()));
+    back.append(button('返回', 'quiet', () => void returnToOrigin()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
       element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
