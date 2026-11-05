@@ -18,8 +18,11 @@ import type {
 import {
   ADMITTED_BASELINE_DOCX,
   composeManuscriptDocx,
+  sourceSpanText,
   type ComposedManuscriptRequest,
 } from '../support/composed-fixture.js';
+import { writeSyntheticDocx } from '../support/synthetic-docx.js';
+import { MAX_RAIL_CHAPTERS } from '../../src/shared/protocol.js';
 import { downgradeKindCoupledRelations } from '../support/analysis-ledger-revisions.js';
 import { REVIEW_RUN_RELATIONS_DROP_ORDER } from '../support/review-categories.js';
 import { PUBLICATION_VERSION_RELATIONS_DROP_ORDER } from '../support/publication-versions.js';
@@ -523,6 +526,30 @@ describe('Editorial Marks on a manuscript', () => {
       store.close();
     }
   }, 300_000);
+
+  it('does not fold omitted chapters into the last retained chapter count', async () => {
+    const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const path = join(roots.inputRoot, 'rail-chapters.docx');
+      const text = graphemesOf(await sourceSpanText(ADMITTED_BASELINE_DOCX, { block: 5 })).slice(0, 20).join('');
+      await writeSyntheticDocx(path, { paragraphs: Array.from({ length: MAX_RAIL_CHAPTERS + 1 }, () => ({ text, style: 'Heading1' })) });
+      const staged = await store.stageSelectedManuscript(randomUUID(), path);
+      const review = store.prepareNewBookReview(staged.draftId, staged.draftVersion, { kind: 'new-book', choiceId: 'new-book', confirmedTitle: staged.titleSuggestion.value }, false);
+      const commitId = randomUUID();
+      const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest!, commitId });
+      await store.acknowledgeImportCompletion(commitId);
+      const book = { manuscriptId: imported.manuscriptId, branchId: imported.branchId };
+      const window = store.getManuscriptWindowAt(book.manuscriptId, book.branchId, { kind: 'proportion', proportion: 1 });
+      for (const block of window.blocks.slice(-2)) store.createEditorialMark(markInput(book, window, block.blockId, 0, 1, 'annotation'));
+      const rail = store.getManuscriptRail(book.manuscriptId, book.branchId);
+      expect(rail.chapters).toHaveLength(MAX_RAIL_CHAPTERS);
+      expect(rail.chaptersTruncated).toBe(true);
+      expect(rail.marks).toHaveLength(2);
+      expect(rail.chapters.at(-1)!.annotations).toBe(1);
+      expect(rail.chapters.reduce((sum, chapter) => sum + chapter.annotations, 0)).toBe(1);
+      store.markCleanShutdown();
+    } finally { store.close(); }
+  });
 
   it('migrates a revision-21 store forward, adding the mark and effect relations and keeping what it held', async () => {
     const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');

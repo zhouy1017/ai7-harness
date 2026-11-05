@@ -2829,6 +2829,7 @@ function renderBookReview(bookId: string, bookTitle: string, focus: ReviewFocus 
     },
     openProposalWorkspace: (input) => renderProposalWorkspace(input, bookId, bookTitle),
     openPlan: (reviewRunId) => openTaskPlan(bookId, 'review-run', reviewRunId),
+    openRules: () => void renderKnowledgeBase('guidelines'),
     openSearchSettings: () => { void leaveThen(async () => { await renderModelServiceSettings(); document.querySelector('[data-search-backends]')?.scrollIntoView(); }); },
     planChanged: () => taskDrawer.refresh('review-run'),
     recorded: (reviewRunId) => { globalAttentionReader.refresh(); manuscriptOnScreen?.followReviewMarks(bookId, reviewRunId); },

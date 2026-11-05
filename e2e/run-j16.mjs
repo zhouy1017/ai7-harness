@@ -6,7 +6,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { ADMITTED_BASELINE_DOCX, composeRevisedAdmittedDocx } from './composed-docx.mjs';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { MANUSCRIPT_RAIL_POSITION, manuscriptRailJump, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 
@@ -1138,9 +1138,7 @@ async function main() {
         delete globalThis.__j16ReleaseFrames;
       };
       window.requestAnimationFrame = (callback) => { held.push(callback); return 1; };
-      const rail = document.querySelector('#manuscript-position');
-      rail.value = '500000';
-      rail.dispatchEvent(new Event('change'));
+      ${manuscriptRailJump('0.5')};
     })()`);
     // The real navigation sets its guard synchronously, before awaiting the window read.
     await clickSelector(renderer, '#context-header .return-chip-host [data-return-chip]', 'chip-use');
@@ -1635,7 +1633,7 @@ async function main() {
     // paragraph, with its choice and its words (review P2-5); the load is named in `data-window-loads`.
     await assertRenderer(renderer, `(() => { const select = window.__j16.composer()?.querySelector('select[data-mark-field="procedure"]'); if (!(select instanceof HTMLSelectElement)) return false; select.value = 'reanalyze-range'; select.dispatchEvent(new Event('change', { bubbles: true })); return select.value === 'reanalyze-range'; })()`, 'selection-task-mark-choose-procedure');
     const loadsBefore = await windowLoads();
-    await assertRenderer(renderer, `(() => { const rail = document.querySelector('[data-screen="editor"] input#manuscript-position'); if (!(rail instanceof HTMLInputElement)) return false; rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`, 'selection-task-rail-load');
+    await assertRenderer(renderer, manuscriptRailJump(`${MANUSCRIPT_RAIL_POSITION} / 1_000_000`), 'selection-task-rail-load');
     await waitFor(renderer, `(document.querySelector('[data-screen="editor"] [data-window-loads]')?.dataset.windowLoads ?? '') !== ${JSON.stringify(loadsBefore)}`, 'selection-task-load-happened', 30_000);
     const loadsAfter = await windowLoads();
     const kept = await renderer.evaluate(`(() => { const composer = window.__j16.composer(); const block = window.__j16.block(${JSON.stringify(taskBlock)}); if (composer === null || block === null) return null; return { kind: composer.dataset.markComposer, choice: composer.querySelector('select[data-mark-field="procedure"]')?.value ?? null, quote: composer.querySelector('.editorial-mark-quote')?.textContent ?? null, below: composer.getBoundingClientRect().top >= block.getBoundingClientRect().bottom - 1 }; })()`);

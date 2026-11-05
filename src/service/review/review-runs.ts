@@ -848,6 +848,7 @@ interface BaselineReading {
 
 /** What one category of the configuration can do now, read once per projection or preparation. */
 interface CategoryReading {
+  readonly networkUnavailable?: boolean;
   readonly modelChannelSearchLabel?: string;
   readonly entry: ReviewCategoryConfigurationEntry;
   /** Why the category cannot run at all now; `null` when it can. */
@@ -1982,8 +1983,9 @@ export class ReviewRunStore {
       fromChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.[0] ?? null : from,
       toChapterBlockId: snapshot.scope.kind === 'selection' ? snapshot.scope.blockIds?.at(-1) ?? null : to };
     return { categoryIds: snapshot.categories.map((category) => category.categoryId), scope,
+      seriesId: snapshot.categories.find((category) => category.entry.seriesKnowledge === undefined && category.entry.seriesScopes?.length === 1)?.entry.seriesScopes?.[0]?.seriesId ?? null,
       capturedProcedure: captured === null ? null : { versionId: captured.versionId, documentSha256: captured.documentSha256 },
-      procedureDefinition: snapshot.composite?.procedure ?? null, localCheck: snapshot.localPlan?.options,
+      procedureDefinition: snapshot.composite?.procedure ?? null, ...(snapshot.localPlan === undefined ? {} : { localCheck: snapshot.localPlan.options }),
       materialIds: snapshot.materialReferences?.references.map((reference) => reference.materialId) ?? [] };
   }
 
@@ -3521,6 +3523,12 @@ export class ReviewRunStore {
       })(),
       ...(this.#ledgers.materialOffers === undefined ? {} : { materials: this.#ledgers.materialOffers(bookId) }),
       manuscript: head,
+      scopeUnitCounts: head === null || head.totalBlocks === 0 ? { whole: 0, units: [] } : (() => {
+        const manifest = deriveCoverageManifest({ bookId, manuscriptId: head.manuscriptId, branchId: head.branchId,
+          revisionId: head.revisionId, revisionLabel: head.revisionLabel, revisionDigest: head.workingDigest,
+          blocks: this.#ledgers.baseline().readWorkingBlocks(head.branchId) });
+        return { whole: manifest.units.length, units: manifest.units.map(({ startPosition, endPosition }) => ({ startPosition, endPosition })) };
+      })(),
       configuration: this.#configurationPin(house),
       categories: readings.map((reading) => this.#workspaceCategory(reading, chapters)),
       coverage: this.#coverage(bookId, head, readings, baseline),
@@ -3531,9 +3539,11 @@ export class ReviewRunStore {
           : this.#bookWaits(bookId) ? { available: false, unavailableReason: RUN_WAITING_REASON } : { available: true, unavailableReason: null },
       runs: listed.map((snapshot) => this.#summary(views.get(snapshot.reviewRunId)!)),
       runsTruncated: rows.length > MAX_REVIEW_RUN_SUMMARIES,
-      run: run?.projection ?? null,
+      run: run === null ? null : { ...run.projection,
+        ...(head !== null && run.projection.state === 'prepared' && run.projection.authorization === null
+          ? { referenceInput: this.repeatRequest(bookId, run.projection.reviewRunId) } : {}) },
     };
-    return run === null ? workspace : { ...workspace, run: findingPage(workspace, run.projection, run.candidates) };
+    return run === null ? workspace : { ...workspace, run: findingPage(workspace, workspace.run!, run.candidates) };
   }
 
   #head(bookId: string): ManuscriptHead | null {
@@ -4265,6 +4275,7 @@ export class ReviewRunStore {
     return {
       entry,
       unavailableReason: researchUnavailableReason ?? (entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null),
+      networkUnavailable: researchUnavailableReason !== null,
       facts,
       projection,
       ...(modelChannelSearchLabel === undefined ? {} : { modelChannelSearchLabel }),
@@ -4295,6 +4306,9 @@ export class ReviewRunStore {
       searchEngine: entry.searchEngine,
       modelFree: entry.executor === 'baseline-leads' || entry.executor === 'local-text-check',
       materialReferencesAllowed: entry.executor === 'review-category-contract',
+      networkUnavailable: reading.networkUnavailable === true,
+      crossChapter: entry.crossChapter !== undefined,
+      changedUnits: reading.unread?.units ?? 0,
       basis: { ...reviewCategoryBasis(entry), ...(reading.modelChannelSearchLabel === undefined ? {} : { modelChannelSearchLabel: reading.modelChannelSearchLabel }) },
       guidelineDocuments: entry.guidelineDocuments.map((document) => ({
         documentId: document.documentId, title: document.title, issuer: document.issuer, version: document.version, clauseCount: document.clauses.length,

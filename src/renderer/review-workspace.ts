@@ -4,9 +4,9 @@ import { readActionDefaults, rememberActionDefaults } from './action-defaults.js
 import { showToast } from './components/toast.js';
 import { filterChoices } from './components/controls.js';
 import { recordedReviewBasisWords, reviewBasisWords } from './review-basis.js';
-import { reviewExcludedHeading } from './review-labels.js';
+import { reviewExcludedHeading, estimateReviewCalls, reviewConsequenceEstimate } from './review-labels.js';
 import { learningReasonAskCard } from './analysis-feedback.js';
-import { taskMaterialSelection, taskMaterialSelectionReason, taskMaterialSizeText, similarMaterialsField } from './task-material-selection.js';
+import { taskMaterialSelection } from './task-material-selection.js';
 import { appendTaskPlanPage, retainTaskPlanPages } from './analysis-paging.js';
 import { TASK_PAGE_FAILED, TASK_SELECTED_CHAPTER_NOT_LOADED, taskPageMore } from './analysis-paging-labels.js';
 import { LEARNING_AUDIT_KIND_LABELS } from './learning-audit-labels.js';
@@ -34,7 +34,6 @@ import {
   type ResearchEvidenceBookProjection,
   type ReviewEvidenceSource,
   type ServiceWireJobProjection as ServiceJobProjection,
-  type WritingTaskMaterialProjection,
 } from '../shared/protocol.js';
 import { findingResearchLines, readFindingResearch, readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -131,7 +130,6 @@ import {
   REVIEW_CONVERT_RATIONALE,
   REVIEW_CONVERT_TO,
   REVIEW_CONVERT_TO_HINT,
-  REVIEW_COST_BEFORE_PLAN,
   REVIEW_COVERAGE_HEADING,
   REVIEW_COVERAGE_PILLS,
   REVIEW_EXPORT_NEEDS_REPORT,
@@ -147,7 +145,6 @@ import {
   REVIEW_PICK_CHAPTERS,
   REVIEW_PICK_SCOPE,
   REVIEW_PLAN_HEADING,
-  REVIEW_PREPARING_ESCAPE,
   REVIEW_PROGRESS_HEADING,
   REVIEW_REPORT_HEADING,
   REVIEW_REPORT_NO_MUST_ITEMS,
@@ -192,7 +189,6 @@ import {
   reviewPlanCategoriesLine,
   reviewPreparationLine,
   reviewQuote,
-  reviewReadConsequence,
   reviewReplacementLine,
   reviewReportAppendixLine,
   reviewReportConfigurationLine,
@@ -210,7 +206,6 @@ import {
   reviewRunMetaLine,
   reviewRunReportLine,
   reviewRunsTruncatedLine,
-  reviewSendConsequence,
   reviewShownLine,
   type ReviewAction,
   type ReviewPill,
@@ -280,6 +275,7 @@ export interface MountReviewWorkspaceOptions {
   openProposalWorkspace?(input: { manuscriptId: string; branchId: string; resultId: string | null }): void;
   openPlan(reviewRunId: string): void;
   openSearchSettings?(): void;
+  openRules?(): void;
   /** The Run on show changed state: the drawer reads its plan again if it shows it. */
   planChanged(): void;
   /** 开始审阅 recorded this Run's authorization from the sheet, as the drawer's 开始任务 would (ADR 0096 §3). */
@@ -332,6 +328,7 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  dismissed: boolean;
   localOptions: import('../shared/protocol/procedures.js').LocalCheckOptions;
   seriesId: string | null;
   readonly seriesChoices: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
@@ -2202,6 +2199,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   ): Promise<void> {
     if (destroyed || projection === null || sheet.open || working || sheetOpening) return;
     sheetOpening = true;
+    // Native close clears `open` before its queued close event cleans up the old form.
+    // Preserve a quick reopen instead of letting that event clear the new form.
+    if (sheetState !== null) await new Promise<void>((resolve) => sheet.addEventListener('close', () => resolve(), { once: true }));
+    if (destroyed || projection === null) { sheetOpening = false; return; }
     const defaults = await readActionDefaults();
     // 按已保存的工序 (Issue #65, S30): the house's enabled Captured Procedures, each as it applies to this Book (Issue #66,
     // S31b), read as the sheet opens. A sheet that cannot read them still opens, offering none.
@@ -2216,6 +2217,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
+      dismissed: false,
       localOptions: { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
         tables: { characters: true, variantWords: true, bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
       seriesId: null,
@@ -2360,18 +2362,18 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         procedureField.append(list);
       }
     }
-    form.append(procedureField);
+
     const categories = el('fieldset', 'review-category-options');
     const categoryLegend = el('legend', undefined, REVIEW_CATEGORY_LEGEND);
     if (state.definition !== null) {
       const labels = state.definition.categoryIds.map((categoryId) => workspace.categories.find((entry) => entry.categoryId === categoryId)?.label ?? categoryId);
       const line = el('span', 'review-sheet-definition', `按工序《${state.definition.title}》${technicalWords(`第 ${state.definition.pin.version} 版`, '版本')}依次审阅：${labels.join(' → ')}；成员不能单独增减。`);
       line.dataset['procedureDefinition'] = `${state.definition.pin.procedureId}@${state.definition.pin.version}`;
-      categoryLegend.append(' · ', line);
+      form.append(line);
     }
     procedureField.hidden = state.definition !== null;
     categories.append(categoryLegend);
-    const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
+    const categoryInputs = new Map<string, { input: HTMLInputElement; label: HTMLLabelElement; reason: HTMLElement; calls: HTMLElement; entry: ReviewWorkspaceCategoryProjection }>();
     const localCategory: ReviewWorkspaceCategoryProjection = {
       categoryId: 'local-text-check', label: '本地文字检查', description: '单独在本机检查标点、规范字形与异形词；数字检查可选。',
       output: 'change-suggestion', riskPointsOnly: false, batchApply: true, searchEngine: false, modelFree: true,
@@ -2381,8 +2383,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       scopes: { whole: workspace.scopeOptions.whole, chapters: workspace.scopeOptions.chapters,
         changed: { available: false, unavailableReason: '本地文字检查请选择全书、选章或当前选区。' }, selection: { available: true, unavailableReason: null } },
     };
-    const offeredCategories = workspace.categories.some((entry) => entry.categoryId === localCategory.categoryId)
-      ? workspace.categories : [localCategory, ...workspace.categories];
+    const localMode = state.categories.has(localCategory.categoryId);
+    const offeredCategories = [...(localMode ? [localCategory] : []), ...workspace.categories.filter((entry) => entry.categoryId !== localCategory.categoryId)];
     for (const entry of offeredCategories) {
       const label = el('label', 'review-category-option');
       label.dataset['reviewCategoryOption'] = entry.categoryId;
@@ -2392,13 +2394,16 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       input.value = entry.categoryId;
       input.checked = state.categories.has(entry.categoryId);
       const text = el('span', 'review-category-text');
-      const basis = el('span', 'review-category-basis', reviewBasisWords(entry.basis));
+      const basis = el('a', 'review-category-basis', [...entry.guidelineDocuments.map((document) => document.title), entry.procedure.title].join(' · '));
+      basis.href = '#'; basis.title = basis.textContent ?? '';
+      basis.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); sheet.close(); options.openRules?.(); });
       basis.id = uid('category-basis');
       const reason = el('span', 'review-category-reason');
       reason.id = uid('category-reason');
       input.setAttribute('aria-describedby', `${basis.id} ${reason.id}`);
-      text.append(el('strong', undefined, entry.label), basis, reason);
-      label.append(input, text);
+      text.append(el('strong', undefined, entry.label), el('span', 'review-category-description', entry.description.split(/[；。]/u)[0] + '。'), reason);
+      const calls = el('span', 'review-category-calls');
+      label.append(input, text, basis, calls);
       input.addEventListener('change', () => {
         if (input.checked && entry.categoryId === 'local-text-check') state.categories.clear();
         else if (input.checked) state.categories.delete('local-text-check');
@@ -2408,11 +2413,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         renderSheet(workspace, state);
       });
       categories.append(label);
-      if (!entry.available && entry.searchEngine && entry.unavailableReason?.includes('设置 › 联网检索') && options.openSearchSettings !== undefined) {
-        const settings = actionButton('open-search-settings', 'quiet', () => { sheet.close(); options.openSearchSettings!(); });
-        categories.append(settings);
-      }
-      categoryInputs.set(entry.categoryId, { input, label, reason, entry });
+      categoryInputs.set(entry.categoryId, { input, label, reason, calls, entry });
     }
     const localOptions = el('fieldset', 'review-local-options');
     localOptions.dataset['localCheckOptions'] = '';
@@ -2479,7 +2480,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       sheet.addEventListener('close', () => editor.destroy(), { once: true });
       void refreshHouse();
     }
-    categories.append(localOptions);
+    const localRow = categories.querySelector<HTMLElement>('[data-review-category-option="local-text-check"]');
+    if (localRow) localOptions.prepend(localRow);
 
     const scopes = el('fieldset', 'review-scope-options');
     scopes.append(el('legend', undefined, REVIEW_SCOPE_LEGEND));
@@ -2506,10 +2508,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const why = el('span', undefined, ` · ${availability.unavailableReason ?? ''}`);
         why.id = uid('scope-reason');
         input.setAttribute('aria-describedby', why.id);
+        why.className = 'visually-hidden'; label.title = availability.unavailableReason ?? '';
         name.append(why);
       }
       if (kind === 'changed') {
-        label.append(changedNote);
         input.setAttribute('aria-describedby', [input.getAttribute('aria-describedby'), changedNote.id].filter((id) => id !== null).join(' '));
       }
       input.addEventListener('change', () => {
@@ -2521,6 +2523,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       scopes.append(label);
       scopeInputs.set(kind, input);
     }
+    scopes.append(changedNote);
     const chapterOptions = workspace.scopeOptions.chapters.chapters;
     const range = el('div', 'review-chapter-range');
     const chapterSelect = (which: 'from' | 'to'): HTMLSelectElement => {
@@ -2571,23 +2574,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     scopes.append(range);
 
-    const { field: materialField, inputs: materialInputs, items: materialItems } = reviewMaterialsField(workspace.materials, state, updateSheet);
-    if (state.seriesChoices.length > 0 && (state.procedure === null || state.procedure.resolved?.runSourceScope === 'series')) {
-      const row = el('label', 'review-field');
-      row.append(el('span', undefined, '参考什么'));
-      const select = el('select');
-      select.dataset['reviewField'] = 'series-scope';
-      select.append(new Option('仅本书，不参考书系知识', ''));
-      for (const series of state.seriesChoices) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
-      select.value = state.seriesId ?? '';
-      select.addEventListener('change', () => { state.seriesId = select.value || null; state.problem = null; updateSheet(); });
-      row.append(select);
-      materialField.append(row);
-    }
-    materialField.append(similarMaterialsField(api, workspace.bookId, materialItems, state.materialIds, (materialId) => {
-      state.materialIds.add(materialId); state.problem = null; updateSheet();
-    }));
-
+    const networkNotice = el('p', 'review-network-notice');
+    networkNotice.setAttribute('role', 'status');
+    const networkSettings = actionButton('open-search-settings', 'quiet', () => { sheet.close(); options.openSearchSettings?.(); });
     const consequences = el('dl', 'review-consequences');
     const consequenceValues = REVIEW_CONSEQUENCE_TERMS.map((term) => {
       const value = el('dd');
@@ -2600,7 +2589,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     notDoValue.dataset['consequence'] = 'not-do';
     notDoValue.textContent = REVIEW_NOT_DO;
     costValue.dataset['consequence'] = 'cost';
-    costValue.textContent = REVIEW_COST_BEFORE_PLAN;
 
     const problem = el('p', 'review-problem review-sheet-problem');
     problem.setAttribute('role', 'alert');
@@ -2612,8 +2600,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const cancelPreparation = actionButton('cancel-preparation', 'quiet', () => void cancelJob(state, cancelPreparation));
     const close = actionButton('close-sheet', 'quiet', () => sheet.close());
     const actions = el('div', 'button-row review-sheet-actions');
-    actions.append(start, prepare, cancelPreparation, close);
-    form.append(categories, scopes, materialField, problem, progress, actions);
+    const primaryActions = el('div', 'button-row'); primaryActions.append(start, prepare, cancelPreparation);
+    actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
+    const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
+    form.append(...(localMode && state.categories.size === 1 ? [localOptions] : [categories, localOptions]), scopes, consequences, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
@@ -2622,7 +2612,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
       procedureField.dataset['procedureLoading'] = String(loading);
-      for (const { input, label, reason, entry } of categoryInputs.values()) {
+      for (const { input, label, reason, calls, entry } of categoryInputs.values()) {
         input.checked = state.categories.has(entry.categoryId);
         const scopeAvailability = state.scope === null ? null : entry.scopes[state.scope];
         const step = filled?.steps.find((candidate) => candidate.categoryId === entry.categoryId) ?? null;
@@ -2631,17 +2621,24 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           : step !== null && !step.available
             ? step.unavailableReason
             : !entry.available ? entry.unavailableReason : scopeAvailability !== null && !scopeAvailability.available ? scopeAvailability.unavailableReason : null;
-        if (why !== null && input.checked) {
+        const networkUnavailable = entry.networkUnavailable === true;
+        if (why !== null && input.checked && !networkUnavailable) {
           input.checked = false;
           state.categories.delete(entry.categoryId);
         }
         // A filled sheet's categories are the procedure's: neither added to nor dropped here (ADR 0087 §4) — but a Series step
         // is the editor's to choose at each run (S31b; REUSE-050).
-        input.disabled = why !== null || preparing || !procedureCategoryOpen(filled !== null, step);
+        input.disabled = (why !== null && !networkUnavailable) || preparing || !procedureCategoryOpen(filled !== null, step);
         if (step !== null && step.available && step.chosenApart) label.dataset['procedureChosenApart'] = 'true';
         else delete label.dataset['procedureChosenApart'];
-        reason.textContent = why ?? '';
+        reason.textContent = networkUnavailable ? '此类别需要联网检索。' : (why ?? '').split(/[；。]/u)[0] + (why === null ? '' : '。');
+        const from = chapterOptions.find((chapter) => chapter.blockId === state.from);
+        const to = chapterOptions.find((chapter) => chapter.blockId === state.to);
+        const count = estimateReviewCalls(entry, state.scope, workspace.scopeUnitCounts, from && to ? { startPosition: from.position, endPosition: to.endPosition } : null);
+        calls.textContent = count === null ? '选好范围后估计' : `约 ${count} 次调用`;
         reason.hidden = why === null;
+        const description = label.querySelector<HTMLElement>('.review-category-description');
+        if (description) description.hidden = why !== null;
         if (why === null) {
           delete label.dataset['unavailableReason'];
           delete input.dataset['unavailableReason'];
@@ -2655,8 +2652,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       confirmation.disabled = state.localOptions.numerals === 'off';
       confirmation.checked = state.localOptions.numeralsConfirmed;
       for (const [kind, input] of scopeInputs) input.disabled = !scopeAvailability(workspace, state, kind).available || preparing || (filled !== null && kind !== filled.scopeSlot);
-      const currentOffers = projection?.materials?.items ?? materialItems;
-      const acceptsMaterials = syncReviewMaterials(materialInputs, currentOffers, state, workspace.categories, preparing || loading);
+
       const notes = reviewChangedScopeNotes(workspace.coverage, state.categories);
       changedNote.textContent = notes.join(' ');
       changedNote.hidden = notes.length === 0;
@@ -2667,15 +2663,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       toSelect.disabled = state.scope !== 'chapters' || preparing;
       const from = chapterOptions.find((chapter) => chapter.blockId === state.from) ?? null;
       const to = chapterOptions.find((chapter) => chapter.blockId === state.to) ?? null;
-      readValue.textContent = reviewReadConsequence(state.scope, workspace.manuscript, { from, to });
-      const send = local ? '只在本机读取冻结的所选正文，不发送任何内容；不调用模型。' : reviewSendConsequence(workspace.categories.filter((entry) => state.categories.has(entry.categoryId)));
-      sendValue.textContent = state.materialIds.size === 0 || !acceptsMaterials ? send
-        : `${send.replace(/。$/u, '')}；所选资料库资料的文字随稿件一并发往，只参照，不照抄。`;
+      const selected = local ? [localCategory] : workspace.categories.filter((entry) => state.categories.has(entry.categoryId));
+      const estimate = reviewConsequenceEstimate(selected, state.scope, workspace, { from, to });
+      readValue.textContent = estimate.read; sendValue.textContent = estimate.send;
+      notDoValue.textContent = estimate.notDo; costValue.textContent = estimate.cost;
+      const networkBlocked = selected.some((entry) => entry.networkUnavailable === true);
+      networkNotice.hidden = !networkBlocked;
+      networkSettings.hidden = !networkBlocked || options.openSearchSettings === undefined;
+      networkNotice.textContent = networkBlocked ? '联网检索尚未就绪，请到设置中配置后再开始。' : '';
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
-      prepare.disabled = preparing || loading || (state.materialIds.size > 0 && !acceptsMaterials);
+      prepare.disabled = preparing || loading || networkBlocked;
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       start.disabled = prepare.disabled || state.categories.size === 0 || state.scope === null;
       close.disabled = preparing;
@@ -2685,7 +2685,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       else delete cancelPreparation.dataset['serviceJobId'];
     }
     sheetUpdate = updateSheet;
-    sheetContent(sheet, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== title && node !== actions), actions, form);
+    sheetContent(sheet, bar, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== actions), actions, form);
     updateSheet();
   }
 
@@ -2736,7 +2736,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       reviewFrom: state.from, reviewTo: state.to }).catch(() => options.setStatus('未能记住本次审阅设置。', 'error'));
     options.setStatus(REVIEW_STATUS_LINES.preparing, 'busy');
     try {
-      const initial = await api.prepareReviewRun({
+      const preparationInput: Parameters<ReviewApi['prepareReviewRun']>[0] = {
         ...(categoryIds.includes('local-text-check') ? { localCheck: state.localOptions } : {}),
         ...(state.seriesId === null ? {} : { seriesId: state.seriesId }),
         categoryIds,
@@ -2744,7 +2744,13 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         ...(state.materialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(projection.materials?.items ?? [], state.materialIds) }),
         ...(choice.pin === null ? {} : { capturedProcedure: choice.pin }),
         ...(state.definition?.composite !== true ? {} : { procedureDefinition: state.definition.pin }),
-      });
+      };
+      const initial = await api.prepareReviewRun(preparationInput);
+      if (state.dismissed) {
+        await api.cancelServiceJob({ jobId: initial.jobId });
+        options.setStatus('已请求取消审阅准备。', 'success');
+        return;
+      }
       state.job = initial;
       sheetUpdate();
       const completed = await options.awaitServiceJob(initial, (job) => {
@@ -2754,6 +2760,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
       if (destroyed) return;
       state.job = null;
+      if (state.dismissed) {
+        options.setStatus(completed.state === 'cancelled' ? REVIEW_STATUS_LINES.preparationCancelled : '已关闭审阅配置。', 'success');
+        return;
+      }
       if (completed.state === 'cancelled') {
         sheetUpdate();
         options.setStatus(REVIEW_STATUS_LINES.preparationCancelled, 'success');
@@ -2812,6 +2822,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch (error) {
       if (destroyed) return;
       state.job = null;
+      if (state.dismissed) {
+        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
+        return;
+      }
       announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
       sheetUpdate();
     }
@@ -2829,17 +2843,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
   }
 
-  // Escape closes the sheet as a native dialog does — except while a plan is being prepared, when the way
-  // out is 取消准备, so a preparation never runs on with nobody watching it.
-  sheet.addEventListener('cancel', (event) => {
-    if (sheetState !== null && sheetState.job !== null) {
-      event.preventDefault();
-      options.setStatus(REVIEW_PREPARING_ESCAPE, 'busy');
+  const escapeFromPage = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape' && !event.isComposing && sheet.open && !sheet.contains(event.target as Node)) {
+      event.preventDefault(); sheet.close();
     }
-  });
+  };
+  document.addEventListener('keydown', escapeFromPage);
   sheet.addEventListener('close', () => {
     const state = sheetState;
     sheetState = null;
+    if (state) {
+      state.dismissed = true;
+      if (state.job) void api.cancelServiceJob({ jobId: state.job.jobId }).catch((error: unknown) => options.setStatus(options.errorMessage(error, '取消准备未完成。'), 'error'));
+    }
     sheet.replaceChildren();
     sheetUpdate = () => undefined;
     if (destroyed || state === null) return;
@@ -2858,6 +2874,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     refresh: () => refresh(true),
     destroy: () => {
       destroyed = true;
+      document.removeEventListener('keydown', escapeFromPage);
       generation += 1;
       clearFactual(true);
       clearPoll();
@@ -2865,82 +2882,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       exporter.destroy();
     },
   };
-}
-
-type ReviewMaterialInput = { item: WritingTaskMaterialProjection; input: HTMLInputElement; reason: HTMLElement; separator: HTMLElement };
-
-/** 新建审阅's 允许参考 fieldset: one choice per offered 资料库 item, ticking one is the sheet's to refresh (Issue #428). */
-export function reviewMaterialsField(
-  offers: ReviewWorkspaceProjection['materials'],
-  state: { materialIds: Set<string>; problem: string | null },
-  updateSheet: () => void,
-): { field: HTMLElement; inputs: ReviewMaterialInput[]; items: ReadonlyArray<WritingTaskMaterialProjection> } {
-  const field = el('fieldset', 'review-materials');
-  const legend = el('legend', undefined, '允许参考 · 资料库');
-  if ((offers?.more ?? 0) > 0) legend.append(el('span', undefined, ' · '), el('span', undefined, `还有 ${offers!.more} 份资料未列出；这里显示最近到来的 50 份。`));
-  field.append(legend);
-  const statement = offers?.statement ?? '暂无可参考的资料库资料。';
-  const items = offers?.items ?? [];
-  field.append(el('p', 'field-note', items.length === 0 ? statement : `${statement.replace(/。$/u, '')}；资料只供调用模型的审阅类别参考，事实核查与只读已有线索的类别不参考这些资料。`));
-  const inputs = items.map((item) => {
-    const label = el('label', 'review-category-option');
-    const input = el('input');
-    input.type = 'checkbox';
-    input.dataset['reviewMaterial'] = item.materialId;
-    input.addEventListener('change', () => {
-      if (input.checked) state.materialIds.add(item.materialId);
-      else state.materialIds.delete(item.materialId);
-      state.problem = null;
-      updateSheet();
-    });
-    const reason = el('span');
-    reason.id = uid('material-reason');
-    input.setAttribute('aria-describedby', reason.id);
-    const name = el('span', undefined, `《${item.title}》 · ${item.scope === 'book' ? '这本书' : '社级'} · ${taskMaterialSizeText(item)}`);
-    const separator = el('span', undefined, ' · ');
-    separator.hidden = true;
-    name.append(separator, reason);
-    label.append(input, name);
-    field.append(label);
-    return { item, input, reason, separator };
-  });
-  return { field, inputs, items };
-}
-
-/** Bring the fieldset up to the offers now: keep the still-offered ticks, name why a choice is off, and say whether a category here reads them. */
-export function syncReviewMaterials(
-  inputs: ReadonlyArray<ReviewMaterialInput>,
-  currentOffers: ReadonlyArray<WritingTaskMaterialProjection>,
-  state: { materialIds: Set<string>; categories: ReadonlySet<string> },
-  categories: ReadonlyArray<Pick<ReviewWorkspaceCategoryProjection, 'categoryId' | 'materialReferencesAllowed'>>,
-  busy: boolean,
-): boolean {
-  const retained = taskMaterialSelection(currentOffers, state.materialIds);
-  state.materialIds.clear();
-  for (const id of retained) state.materialIds.add(id);
-  const acceptsMaterials = categories.some((entry) => state.categories.has(entry.categoryId) && entry.materialReferencesAllowed === true);
-  for (const { item, input, reason, separator } of inputs) {
-    const offered = currentOffers.find((entry) => entry.materialId === item.materialId);
-    const why = reviewMaterialChoiceReason(offered, currentOffers, state.materialIds, acceptsMaterials);
-    input.checked = state.materialIds.has(item.materialId);
-    input.disabled = busy || (why !== null && !input.checked);
-    reason.textContent = why ?? '';
-    reason.hidden = why === null;
-    separator.hidden = why === null;
-  }
-  return acceptsMaterials;
-}
-
-/** Why one 允许参考 choice of 新建审阅 cannot be ticked now, or `null` when it can: the sheet shows it under the choice. */
-export function reviewMaterialChoiceReason(
-  offered: WritingTaskMaterialProjection | undefined,
-  offers: ReadonlyArray<WritingTaskMaterialProjection>,
-  selected: ReadonlySet<string>,
-  acceptsMaterials: boolean,
-): string | null {
-  if (offered === undefined) return '这份资料现在不在可参考的清单中。';
-  if (!acceptsMaterials) return '请先选择调用模型的审阅类别；事实核查与只读已有线索的类别不参考资料库。';
-  return taskMaterialSelectionReason(offered, offers, selected);
 }
 
 /**

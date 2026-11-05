@@ -7,6 +7,19 @@ import { ServiceCallError } from '../../src/main/service-client.js';
 
 beforeEach(() => handlers.clear());
 describe('cross-Book overview bridge', () => {
+  it('owns optional review-reference preparation through job completion in the selected Book', async () => {
+    const bookId = 'b0000000-0000-4000-8000-000000000001'; const owned = { routeGeneration: 1 };
+    const call = vi.fn(async (operation: string) => operation === 'inspectTaskOverview' ? { books: [{ bookId }] }
+      : operation === 'prepareReviewRun' ? { jobId: 'job', state: 'running' } : { jobId: 'job', state: 'completed', result: { bookId } });
+    registerProductionAndPackageHandlers({ requireSender: () => owned, requireAuthority: () => {},
+      serializeEffect: (effect: () => Promise<unknown>) => effect(), requireCurrentRouteGeneration: () => {}, service: { call },
+    } as unknown as Parameters<typeof registerProductionAndPackageHandlers>[0]);
+    await handlers.get(IPC_CHANNELS.inspectTaskOverview)!({});
+    await expect(handlers.get(IPC_CHANNELS.taskOverviewCall)!({}, { bookId, operation: 'prepareReviewRun', input: { categoryIds: ['typos-and-usage'] } }))
+      .resolves.toMatchObject({ ok: true, result: { state: 'completed', result: { bookId } } });
+    expect(call).toHaveBeenCalledWith('prepareReviewRun', { bookId, categoryIds: ['typos-and-usage'] });
+    expect(call).toHaveBeenCalledWith('pollServiceJob', { jobId: 'job' });
+  });
   it('refuses a Book that this window has not read in the overview', async () => {
     const call = vi.fn();
     registerProductionAndPackageHandlers({ requireSender: () => ({}), requireAuthority: () => {}, service: { call } } as unknown as Parameters<typeof registerProductionAndPackageHandlers>[0]);
