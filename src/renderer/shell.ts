@@ -347,6 +347,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const bookGroup = el('section', 'sidebar-book');
   bookGroup.setAttribute('aria-label', SHELL_LABELS.currentBook);
   bookGroup.hidden = true;
+  const bookHeading = el('p', 'sidebar-current-book sidebar-group-label');
+  bookGroup.append(bookHeading);
   const sectionLinks = new Map<ShellBookSection, HTMLAnchorElement>();
   let agentWorkspaceLink: HTMLAnchorElement | null = null;
   for (const group of SHELL_BOOK_GROUPS) {
@@ -389,13 +391,21 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const helpSlot = el('div', 'sidebar-help-slot');
   helpSlot.dataset['shellSlot'] = 'help';
   foot.append(settings, helpSlot);
-  sidebar.replaceChildren(destinations, books, bookGroup, foot);
+  const bookMenu = el('div', 'sidebar-book-menu');
+  bookMenu.setAttribute('popover', 'auto');
+  bookMenu.setAttribute('role', 'menu');
+  let bookMenuOpen = false;
+  sidebar.replaceChildren(destinations, books, bookGroup, foot, bookMenu);
 
   const allLinks = (): ReadonlyArray<HTMLElement> => [
     ...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin'),
   ];
 
   const paintBooks = (values: PreferenceValues): void => {
+    if (bookMenuOpen) {
+      bookMenu.hidePopover();
+      bookMenuOpen = false;
+    }
     const focused = document.activeElement instanceof HTMLElement && books.contains(document.activeElement) ? document.activeElement : null;
     const focusKind = focused?.dataset['navPin'] !== undefined ? 'navPin' : 'navBook';
     const focusBook = focused?.dataset[focusKind];
@@ -412,8 +422,11 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         const item = el('li', 'sidebar-book-row');
         item.dataset['navBookRow'] = row.bookId;
         const link = navLink(row.title, bookIcon(row.title), () => options.openBook(row.bookId));
+        const initial = el('span', 'nav-book-initial', bookIcon(row.title));
+        initial.setAttribute('aria-hidden', 'true');
+        link.replaceChildren(initial, el('span', 'nav-label', row.title));
         link.dataset['navBook'] = row.bookId;
-        link.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.state));
+        link.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.current ? '当前' : row.state));
         if (row.current) link.append(el('span', 'nav-state', '当前'));
         if (row.current) link.setAttribute('aria-current', 'true');
         const pin = el('button', 'sidebar-pin', row.pinned ? '★' : '☆');
@@ -421,11 +434,31 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         pin.dataset['navPin'] = row.bookId;
         pin.setAttribute('aria-pressed', String(row.pinned));
         pin.setAttribute('aria-label', row.pinned ? SHELL_LABELS.unpin(row.title) : SHELL_LABELS.pin(row.title));
+        pin.title = pin.getAttribute('aria-label') ?? '';
         pin.addEventListener('click', () => {
           if (interrupted) return;
           void preferences.togglePin({ bookId: row.bookId, title: row.title }, options.pinLimit).catch((error: unknown) => {
             options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
           });
+        });
+        item.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          if (interrupted) return;
+          const action = el('button', 'quiet', pin.title);
+          action.type = 'button';
+          action.setAttribute('role', 'menuitem');
+          action.addEventListener('click', () => {
+            bookMenu.hidePopover();
+            bookMenuOpen = false;
+            pin.focus();
+            pin.click();
+          });
+          bookMenu.replaceChildren(action);
+          bookMenu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 240))}px`;
+          bookMenu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 48))}px`;
+          bookMenu.showPopover();
+          bookMenuOpen = true;
+          action.focus();
         });
         item.append(link, pin);
         items.append(item);
@@ -487,6 +520,8 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     bookGroup.hidden = book === null;
     if (book !== null) {
       bookGroup.dataset['bookId'] = book.bookId;
+      bookHeading.textContent = book.title;
+      bookHeading.title = book.title;
     } else {
       delete bookGroup.dataset['bookId'];
     }

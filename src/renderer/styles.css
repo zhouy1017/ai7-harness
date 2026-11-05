@@ -131,39 +131,47 @@ button:focus-visible, input:focus-visible {
 
 /* The shell (Issue #934, wave 11 slice 11a; editor-surfaces §0.3): a two-level sidebar fixed on the left, the context
    header above the screen. The page makes room for the sidebar as it does for the Task Drawer on the right; below 760 px,
-   or when the editor collapses it, the sidebar shows icons only — each row's icon is one character of its own name, and
+   or when the editor collapses it, the sidebar shows SVG icons and Book initials, and
    the name stays the row's accessible name. */
-:root { --sidebar-width: 14rem; --sidebar-icons-width: 3.6rem; }
+:root { --sidebar-width: 14rem; --sidebar-icons-width: 56px; }
 :root[data-sidebar="icons"] { --sidebar-width: var(--sidebar-icons-width); }
 body { padding-left: var(--sidebar-width); }
-.app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .9rem; width: var(--sidebar-width); padding: .8rem .55rem 4rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid var(--boundary); background: var(--shell); color: var(--text); }
+.app-sidebar { position: fixed; z-index: 25; top: 0; bottom: 0; left: 0; display: flex; flex-direction: column; gap: .4rem; width: var(--sidebar-width); padding: .5rem .55rem; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; border-right: 1px solid var(--boundary); background: var(--shell); color: var(--text); }
 .app-sidebar ul { margin: 0; padding: 0; list-style: none; }
 .app-sidebar li + li { margin-top: .1rem; }
-.sidebar-link { position: relative; display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 40px; padding: .35rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-weight: 700; text-align: left; text-decoration: none; cursor: pointer; }
+.sidebar-link { position: relative; display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 30px; padding: .15rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; text-decoration: none; cursor: pointer; }
 .sidebar-link::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border: 1px solid var(--boundary); border-radius: 7px; background: var(--surface); color: var(--action-text); font-size: .95rem; font-weight: 800; }
 .sidebar-link:hover:not([aria-disabled="true"]):not(:disabled) { background: var(--surface-subdued); }
 .sidebar-link[aria-current="page"] { border-color: var(--selection-boundary); background: var(--selection); color: var(--selection-text); box-shadow: inset 3px 0 0 var(--selection-boundary); }
 .sidebar-link[aria-current="true"] { border-color: var(--boundary-strong); }
 .sidebar-link[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
 .sidebar-link:focus-visible, .sidebar-pin:focus-visible, .sidebar-toggle:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
-.nav-label { min-width: 0; overflow-wrap: anywhere; }
+.nav-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 待我处理's entry keeps its own label and number (global-attention.ts) and takes the row's shape here. */
-.app-sidebar .global-attention-entry { min-height: 40px; padding: .35rem .5rem; border-radius: 8px; border-color: transparent; background: transparent; }
+.app-sidebar .global-attention-entry { min-height: 30px; padding: .15rem .5rem; border-radius: 8px; border-color: transparent; background: transparent; }
 .app-sidebar .global-attention-entry .global-attention-badge { margin-left: auto; }
 .sidebar-group-label { margin: 0 0 .25rem .5rem; color: var(--text-subdued); font-size: .74rem; font-weight: 800; letter-spacing: .08em; }
-.sidebar-books, .sidebar-book { display: grid; gap: .55rem; padding-top: .7rem; border-top: 1px solid var(--boundary); }
+.sidebar-books, .sidebar-book { display: grid; flex: 0 0 auto; gap: .2rem; padding-top: .35rem; border-top: 1px solid var(--boundary); }
+.sidebar-books > div { max-height: clamp(80px, calc(100dvh - 720px), 260px); overflow: auto; scrollbar-width: thin; }
 .sidebar-book[hidden] { display: none; }
-.sidebar-book-row { display: flex; align-items: center; gap: .2rem; }
-.sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: wrap; min-width: 0; row-gap: 0; }
-.sidebar-book-row .nav-label { flex: 1 1 calc(100% - 2.6rem); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
-.nav-state { flex: 1 1 100%; padding-left: 2.45rem; color: var(--text-subdued); font-size: .78rem; font-weight: 400; }
-.sidebar-pin { flex: 0 0 auto; min-width: 32px; min-height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--action-text); font-size: 1rem; cursor: pointer; }
+.sidebar-book-row { position: relative; display: flex; align-items: center; }
+.sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; min-height: 26px; }
+.sidebar-book-row .nav-label { flex: 1 1 auto; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
+.nav-state { flex: 0 0 auto; padding: 0; color: var(--text-subdued); font-size: .7rem; font-weight: 400; }
+.sidebar-pin { position: absolute; right: 0; opacity: 0; pointer-events: none; min-width: 26px; min-height: 26px; border: 0; border-radius: 6px; background: var(--shell); color: var(--action-text); font-size: 1rem; cursor: pointer; }
+.sidebar-book-row:hover .sidebar-pin, .sidebar-book-row:focus-within .sidebar-pin { opacity: 1; pointer-events: auto; }
+.sidebar-book-row:hover .sidebar-link, .sidebar-book-row:focus-within .sidebar-link { padding-right: 30px; }
+.sidebar-current-book { margin-bottom: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: "Noto Serif SC", serif; letter-spacing: 0; }
+.nav-book-initial { position: absolute; width: 18px; opacity: 0; overflow: hidden; font-family: "Noto Serif SC", serif; text-align: center; }
+.sidebar-book-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 4px 16px var(--shadow); }
+.sidebar-book-menu:not(:popover-open) { display: none; }
+.sidebar-book-menu .btn { width: 100%; }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
 .sidebar-book-title { display: flex; align-items: center; gap: .55rem; margin: 0; padding: 0 .5rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.02rem; font-weight: 700; overflow-wrap: anywhere; }
 .sidebar-book-title::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 7px; background: var(--action-primary); color: var(--action-primary-text); font-size: .95rem; }
-.sidebar-group + .sidebar-group { margin-top: .35rem; }
-.sidebar-foot { display: grid; gap: .2rem; margin-top: auto; padding-top: .7rem; border-top: 1px solid var(--boundary); }
+.sidebar-group + .sidebar-group { margin-top: .15rem; }
+.sidebar-foot { display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-help-slot:empty { display: none; }
 /* Icons only: the names leave the row's box but not the accessibility tree. */
 /* A thin scrollbar and a narrow inset keep the icon column inside the rail when the Book's groups make it scroll. */
@@ -174,10 +182,14 @@ body { padding-left: var(--sidebar-width); }
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
 }
 :root[data-sidebar="icons"] .sidebar-pin { display: none; }
+:root[data-sidebar="icons"] .nav-book-initial { position: static; flex: 0 0 18px; opacity: 1; }
+:root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .nav-state, :root[data-sidebar="icons"] .global-attention-entry-label { opacity: 0; }
+:root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .global-attention-entry-label { left: 34px; width: 180px; max-width: 0; height: auto; margin: 0; clip-path: none; pointer-events: none; }
 :root[data-sidebar="icons"] .sidebar-book-title { justify-content: center; padding: 0; font-size: 0; }
 :root[data-sidebar="icons"] .sidebar-book-title::before { font-size: .95rem; }
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry { gap: 0; }
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry .global-attention-badge { position: absolute; top: -2px; right: -2px; min-width: 1.35em; height: 1.35em; font-size: .7rem; }
+:root[data-sidebar="icons"] .task-navigation-badge { position: absolute; top: 0; right: 0; }
 
 .context-header { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1.2rem; padding: .75rem clamp(1rem, 3vw, 2.5rem); border-bottom: 1px solid var(--boundary); background: var(--shell); }
 .sidebar-toggle { flex: 0 0 auto; min-width: 40px; min-height: 40px; border: 1px solid var(--boundary-strong); border-radius: 8px; background: var(--action-secondary); color: var(--action-text); font-size: 1.05rem; cursor: pointer; }
@@ -2228,8 +2240,12 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
 
 /* ---- Wave 16 slice 16a (Issue #1002, ADR 0092): restrained motion, searchable multi-book switcher, and progressive technical disclosure ---- */
 /* Only presentation properties interpolate; safety/status visibility remains immediate. */
-body { transition: padding-left .2s cubic-bezier(.22, 1, .36, 1), padding-right .2s cubic-bezier(.22, 1, .36, 1); }
-.app-sidebar { transition: width .2s cubic-bezier(.22, 1, .36, 1), padding .2s cubic-bezier(.22, 1, .36, 1); }
+body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-right var(--motion-slow) var(--motion-ease); }
+.app-sidebar { transition: width var(--motion-slow) var(--motion-ease), padding var(--motion-slow) var(--motion-ease); }
+.app-sidebar .nav-label, .app-sidebar .nav-state, .app-sidebar .global-attention-entry-label, .nav-book-initial, .app-sidebar .icon { transition: opacity var(--motion-slow) var(--motion-ease), max-width var(--motion-slow) var(--motion-ease); }
+.app-sidebar .nav-label, .app-sidebar .global-attention-entry-label { max-width: 180px; }
+.app-sidebar .icon { opacity: .8; }
+:root[data-sidebar="icons"] .app-sidebar .icon { opacity: 1; }
 .editor-technical-details { font-size: .8rem; color: var(--text-subdued); }
 .editor-technical-details summary { cursor: pointer; }
 :root[data-reduced-motion="true"] *, :root[data-reduced-motion="true"] *::before, :root[data-reduced-motion="true"] *::after {

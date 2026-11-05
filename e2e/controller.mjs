@@ -139,7 +139,7 @@ export function sidebarBookCurrent(bookId, section) {
 }
 
 /** At the 200% reflow width (640 CSS px) the sidebar shows icons only, every row keeping its name, and fits its column. */
-export const SIDEBAR_ICONS_ONLY = `(() => { const bar=document.querySelector('#app-sidebar'); if(!(bar instanceof HTMLElement)||document.documentElement.dataset.sidebar!=='icons')return false; const box=bar.getBoundingClientRect(); const rows=Array.from(bar.querySelectorAll('.sidebar-link')); return box.width<=64 && bar.scrollWidth<=bar.clientWidth+2 && rows.length>=6 && rows.every((row)=>(row.getAttribute('aria-label')??row.textContent??'').trim().length>0 && row.getBoundingClientRect().width<=box.width); })()`;
+export const SIDEBAR_ICONS_ONLY = `(() => { const bar=document.querySelector('#app-sidebar'); if(!(bar instanceof HTMLElement)||document.documentElement.dataset.sidebar!=='icons')return false; const box=bar.getBoundingClientRect(); const rows=Array.from(bar.querySelectorAll('.sidebar-link')); return Math.abs(box.width-56)<1 && bar.scrollWidth<=bar.clientWidth+2 && rows.length>=6 && rows.every((row)=>row.title.trim().length>0 && row.getBoundingClientRect().width<=box.width && (row.querySelector('[data-icon]') || row.querySelector('.nav-book-initial')?.textContent)); })()`;
 
 const J01_COMMON_COMPLETION_PHASES = Object.freeze([
   'imported-transition',
