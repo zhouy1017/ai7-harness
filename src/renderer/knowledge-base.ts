@@ -430,6 +430,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     panelNode.setAttribute('aria-labelledby', `knowledge-tab-${tab}`);
     const back = element('div', 'button-row');
     back.append(button('返回知识库', 'quiet', () => void renderKnowledgeBase()));
+    back.append(button('返回', 'quiet', () => void returnToOrigin()));
     const holds = element('p', 'lede knowledge-holds', view.holds);
     content.append(
       element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),

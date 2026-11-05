@@ -1599,7 +1599,7 @@ function identityFindingDisclosure(
   if (!technicalLayerVisible) {
     const books = [...new Set(findings.map((finding) => `《${finding.bookTitle}》`))];
     disclosure.append(element('h3', undefined, '这个文件已有导入记录'),
-      element('p', undefined, `已在${books.join('、')}中导入，请确认本次图书与导入方式。`));
+      element('p', undefined, `已在${books.join('、')}中导入。${reviewTarget ? `本次选择：${reviewTarget}。` : '请确认本次图书与导入方式。'}`));
     return disclosure;
   }
   disclosure.append(

@@ -396,7 +396,6 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     const title = el('h3', undefined, material.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
-    heading.append(el('span', 'library-source', ` · ${librarySourceLine(material, localInstantLabel)}`));
     node.append(heading);
     node.append(el('p', 'knowledge-file-summary', libraryReferenceLine(material)));
     const more = el('details', 'knowledge-file-more');

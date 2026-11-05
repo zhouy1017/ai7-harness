@@ -39,7 +39,6 @@ export interface KnowledgeBaseTabView {
 }
 
 export const KNOWLEDGE_BASE_TITLE = '知识库';
-export const KNOWLEDGE_BASE_LEDE = '图书与任务可选用这里的专业资料，不会改动原条目。';
 export const KNOWLEDGE_BASE_TABS_LABEL = '知识库分类';
 
 export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
