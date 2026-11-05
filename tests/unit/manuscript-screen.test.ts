@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer/manuscript-screen.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
-import type { ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
+import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
 
 // The Manuscript screen's own lifecycle (Issue #1127, revision 3), on its actual mount with each child owner and the service
 // as a boundary double: a mount that throws after the shell attached it can still be read, settled and destroyed, once, and
@@ -21,6 +21,7 @@ const children = vi.hoisted(() => ({
   editors: [] as unknown[],
   editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
+  rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
 }));
 
 vi.mock('../../src/renderer/editor-modes.js', async (importOriginal) => ({
@@ -52,7 +53,10 @@ vi.mock('../../src/renderer/paragraph-analysis.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/renderer/position-rail.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/position-rail.js')>(),
-  mountPositionRail: () => ({ setPosition: vi.fn(), refresh: vi.fn(), destroy: () => children.destroyed.push('rail') }),
+  mountPositionRail: (options: { onRead?: (rail: ManuscriptRailProjection) => void }) => {
+    children.rails.push(options);
+    return { setPosition: vi.fn(), refresh: vi.fn(), destroy: () => children.destroyed.push('rail') };
+  },
 }));
 vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/editorial-marks.js')>(),
@@ -171,6 +175,7 @@ beforeEach(() => {
   children.editors.length = 0;
   children.editorSurfaces.length = 0;
   children.protections.length = 0;
+  children.rails.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
@@ -337,6 +342,40 @@ describe('the Manuscript screen lifecycle', () => {
     pane.dispatchEvent({ type: 'scroll' });
     expect([previous!.hidden, next!.hidden]).toEqual([false, true]);
     app.showing?.destroy();
+  });
+
+  it('offers both available boundary links when a window fits without any scrolling', () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    let resize = (): void => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    const app = shell();
+    app.open({ ...windowOf('book-one'), previousCursor: 'before', nextCursor: 'after' });
+    const pane = app.screen.querySelector('.editor-window')!;
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 500, scrollTop: 0 });
+    resize();
+    expect([...app.screen.querySelectorAll<HTMLButtonElement>('.window-actions button')].map((item) => [item.hidden, item.disabled]))
+      .toEqual([[false, false], [false, false]]);
+    app.showing?.destroy();
+  });
+
+  it('labels capped chapter counts as partial and omits counts for chapters outside the retained rail', async () => {
+    Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
+    try {
+      const entries = ['blk_3', 'omitted'].map((blockId) => ({ blockId, kind: 'heading', level: 1, text: blockId, displayTextTruncated: false }));
+      const rendererApi = new Proxy(api, { get: (target, key) => key === 'getOutline' ? async () => ({ entries, previousCursor: null, nextCursor: null }) : Reflect.get(target, key) });
+      const app = shell(rendererApi);
+      app.open(windowOf('book-one'));
+      children.rails.at(-1)!.onRead!({ manuscriptId: 'm', branchId: 'b', revisionId: 'r', journalSequence: 1, totalCharacters: 100,
+        chapters: [{ blockId: 'blk_3', title: '第一章', level: 1, proportion: .25, suggestions: 0, annotations: 1, notes: 0 }], chaptersTruncated: true,
+        marks: [], marksTruncated: false, uncovered: null });
+      await vi.advanceTimersByTimeAsync(0);
+      const rows = app.screen.querySelectorAll('.outline-list button');
+      expect(rows[0]!.querySelector('.outline-counts')?.textContent).toContain('批注 1');
+      expect(rows[1]!.querySelector('.outline-counts')).toBeNull();
+      expect(rows[1]!.querySelector('.outline-percent')).toBeNull();
+      expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('已显示 1 个章节 · 标记计数为已显示部分');
+      app.showing?.destroy();
+    } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
   });
 
   it.each(['modes', 'editor'] as const)(

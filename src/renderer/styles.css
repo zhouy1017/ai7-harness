@@ -1614,10 +1614,10 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editorial-mark-menu-item:disabled { color: var(--text-subdued); cursor: not-allowed; }
 .editorial-mark-menu-item small { display: block; }
 .editorial-mark-menu-item .menu-shortcut { flex: 0 0 6.5rem; margin-left: auto; text-align: right; color: var(--text-subdued); font: inherit; font-size: .72rem; }
-.editorial-mark-swatch { flex: none; align-self: center; width: .95rem; height: .95rem; border: 1px solid var(--boundary); border-radius: 3px; }
-[data-mark-color="1"] > .editorial-mark-swatch { background: var(--mark-highlight-1); }
-[data-mark-color="2"] > .editorial-mark-swatch { background: var(--mark-highlight-2); }
-[data-mark-color="3"] > .editorial-mark-swatch { background: var(--mark-highlight-3); }
+.editorial-mark-swatch { display: inline-block; vertical-align: middle; margin-right: .4rem; width: .95rem; height: .95rem; border: 1px solid var(--boundary); border-radius: 3px; }
+[data-mark-color="1"] .editorial-mark-swatch { background: var(--mark-highlight-1); }
+[data-mark-color="2"] .editorial-mark-swatch { background: var(--mark-highlight-2); }
+[data-mark-color="3"] .editorial-mark-swatch { background: var(--mark-highlight-3); }
 .editorial-mark-card, .editorial-mark-composer { max-width: 100%; padding: .85rem 1rem 1rem; }
 .editorial-mark-card[data-mark-kind="change-suggestion"] { border-top: 3px solid var(--mark-suggestion); }
 .editorial-mark-card[data-mark-kind="annotation"] { border-top: 3px solid var(--mark-annotation); }

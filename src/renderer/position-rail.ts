@@ -92,7 +92,6 @@ export function mountPositionRail(options: MountOptions): PositionRail {
   let position = 0;
   let confirmedPosition = 0;
   let pointer: number | undefined;
-  let pointerClick = false;
   const setPosition = (proportion: number): void => {
     position = Math.min(1, Math.max(0, proportion));
     now.style.top = percent(position);
@@ -109,6 +108,13 @@ export function mountPositionRail(options: MountOptions): PositionRail {
     options.track.setAttribute('aria-valuemax', '1000000');
   }
   const disabled = (): boolean => options.track.getAttribute('aria-disabled') === 'true';
+  const commitPosition = (): void => {
+    if (!interactive || disabled()) return;
+    const value = Number(options.track.getAttribute('aria-valuenow')) / 1_000_000;
+    if (!Number.isFinite(value)) return;
+    setPosition(value);
+    options.jumpToProportion?.(position);
+  };
   const pointAt = (event: MouseEvent): void => {
     const box = options.track.getBoundingClientRect();
     if (box.height > 0) setPosition(Math.round((event.clientY - box.top) / box.height * 1_000_000) / 1_000_000);
@@ -117,7 +123,6 @@ export function mountPositionRail(options: MountOptions): PositionRail {
     if (!interactive || disabled() || event.button !== 0 || (event.target as Element).closest('.rail-marker')) return;
     event.preventDefault();
     pointer = event.pointerId;
-    pointerClick = false;
     options.track.focus({ preventScroll: true });
     options.track.setPointerCapture(event.pointerId);
     pointAt(event);
@@ -126,17 +131,10 @@ export function mountPositionRail(options: MountOptions): PositionRail {
   const pointerUp = (event: PointerEvent): void => {
     if (pointer !== event.pointerId) return;
     pointer = undefined;
-    pointerClick = true;
     options.track.releasePointerCapture(event.pointerId);
-    if (!disabled()) options.jumpToProportion?.(position);
+    commitPosition();
   };
   const pointerCancel = (): void => { pointer = undefined; setPosition(confirmedPosition); };
-  const click = (event: MouseEvent): void => {
-    if (pointerClick) { pointerClick = false; return; }
-    if (!interactive || disabled() || (event.target as Element).closest('.rail-marker')) return;
-    pointAt(event);
-    options.jumpToProportion?.(position);
-  };
   const keyDown = (event: KeyboardEvent): void => {
     if (!interactive || disabled()) return;
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1
@@ -146,14 +144,14 @@ export function mountPositionRail(options: MountOptions): PositionRail {
     if (next === null) return;
     event.preventDefault();
     setPosition(next);
-    options.jumpToProportion?.(position);
+    commitPosition();
   };
   options.track.addEventListener('pointerdown', pointerDown);
   options.track.addEventListener('pointermove', pointerMove);
   options.track.addEventListener('pointerup', pointerUp);
   options.track.addEventListener('pointercancel', pointerCancel);
   options.track.addEventListener('keydown', keyDown);
-  options.track.addEventListener('click', click);
+  options.track.addEventListener('change', commitPosition);
 
   const tickNodes = new Map<string, HTMLElement>();
   const gapNodes = new Map<string, HTMLElement>();
@@ -249,7 +247,7 @@ export function mountPositionRail(options: MountOptions): PositionRail {
       options.track.removeEventListener('pointerup', pointerUp);
       options.track.removeEventListener('pointercancel', pointerCancel);
       options.track.removeEventListener('keydown', keyDown);
-      options.track.removeEventListener('click', click);
+      options.track.removeEventListener('change', commitPosition);
       for (const node of [ticks, gaps, line, now, lanes]) node.remove();
     },
   };

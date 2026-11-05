@@ -190,6 +190,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const rendererErrorMessage = options.errorMessage;
   let viewportObserver: ResizeObserver | undefined;
   let taskBadgeTimer: number | undefined;
+  let taskBadgeReading = false;
 
   let destroyed = false;
   let currentWindow = initialWindow;
@@ -260,6 +261,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const position = element('span', 'editor-position', positionWords(initialWindow));
   position.setAttribute('title', initialWindow.position.structureLabel ?? positionWords(initialWindow));
   const revision = element('span', 'editor-revision', revisionWords(initialWindow));
+  const journal = element('span', undefined, `修订日志序号 ${initialWindow.journalSequence}`);
+  journal.dataset['editorTechnical'] = 'true';
   const recoveredState = element('strong', 'recovered-state-marker', '当前为恢复的工作状态');
   recoveredState.hidden = initialWindow.recoveredStateReview === null;
   meta.append(revision, position, recoveredState);
@@ -570,8 +573,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   manuscript.append(editorWindow, localThumb, windowActions);
   const updateScrollChrome = (): void => {
     const overflow = editorWindow.scrollHeight - editorWindow.clientHeight;
-    previousWindow.hidden = currentWindow.previousCursor === null || editorWindow.scrollTop > 24;
-    nextWindow.hidden = currentWindow.nextCursor === null || overflow <= 0 || editorWindow.scrollTop < overflow - 24;
+    previousWindow.hidden = currentWindow.previousCursor === null || (overflow > 0 && editorWindow.scrollTop > 24);
+    nextWindow.hidden = currentWindow.nextCursor === null || (overflow > 0 && editorWindow.scrollTop < overflow - 24);
     localThumb.hidden = overflow <= 0;
     if (overflow > 0) {
       const height = Math.max(24, editorWindow.clientHeight ** 2 / editorWindow.scrollHeight);
@@ -667,7 +670,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   }, { passive: true });
 
   const identities = element('details', 'editor-identities');
-  identities.append(element('summary', undefined, '当前业务绑定'));
+  identities.dataset['editorTechnicalDisclosure'] = 'journal';
+  identities.append(element('summary', undefined, '查看技术详情'));
   const identityGrid = element('dl', 'identity-grid');
   identityGrid.append(
     element('dt', undefined, '图书'),
@@ -679,7 +683,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     element('dt', undefined, '修订版'),
     element('dd', undefined, initialWindow.revisionLabel),
   );
-  identities.append(identityGrid);
+  identities.append(identityGrid, journal);
   content.append(toolbar, workspace, technicalDisclosure(identities));
   if (options.reimportNotice !== undefined) toolbar.after(options.reimportNotice);
   const toggleSaveMenu = (): void => {
@@ -878,12 +882,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     revision.textContent = revisionWords(currentWindow);
     documentLens?.update(currentWindow.workingDigest);
     editorHost.dataset['journalSequence'] = String(currentWindow.journalSequence);
+    journal.textContent = `修订日志序号 ${currentWindow.journalSequence}`;
     railTrack.dataset['windowPosition'] = String(Math.round(currentWindow.position.proportion * 1_000_000));
     recoveredState.hidden = currentWindow.recoveredStateReview === null;
     manuscriptRail?.setPosition(currentWindow.position.proportion);
     previousWindow.disabled = authoritativeMutationBusy() || currentWindow.previousCursor === null;
     nextWindow.disabled = authoritativeMutationBusy() || currentWindow.nextCursor === null;
     updateScrollChrome();
+    paintNavigationFooter();
   };
 
   const syncAuthoritativeMutationControls = (): void => {
@@ -1353,8 +1359,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       open.setAttribute('role', 'listitem');
       outlineList.append(open);
     }
+    paintNavigationFooter();
+  }
+  function paintNavigationFooter(): void {
     navigationFooter.textContent = railProjection === undefined ? '按章节或标记回到原文。'
-      : `${railProjection.chaptersTruncated ? '已显示' : '共'} ${railProjection.chapters.length} 个章节 · ${Math.round(currentWindow.position.proportion * 100)}%`;
+      : `${railProjection.chaptersTruncated ? '已显示' : '共'} ${railProjection.chapters.length} 个章节${railProjection.chaptersTruncated || railProjection.marksTruncated ? ' · 标记计数为已显示部分' : ''} · ${Math.round(currentWindow.position.proportion * 100)}%`;
   }
   async function loadOutline(cursor: string | null, propagateFailure = false): Promise<void> {
     try {
@@ -2002,6 +2011,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       editingInterrupted = state.interrupted;
       editorHost.dataset['editorPersistence'] = state.dirty || state.saving || state.retryRequired || state.interrupted ? 'pending' : 'confirmed';
       editorHost.dataset['journalSequence'] = String(state.journalSequence);
+      journal.textContent = `修订日志序号 ${state.journalSequence}`;
       updatePersistenceMenu();
       // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
       protectionSurface?.update(state.protection);
@@ -2104,9 +2114,14 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   manuscriptRail.setPosition(initialWindow.position.proportion);
   manuscriptRail.refresh();
   const readTaskBadge = async (): Promise<void> => {
+    if (taskBadgeReading || destroyed || document.visibilityState === 'hidden') return;
+    taskBadgeReading = true;
+    let pollMs = 2_000;
     try {
+      if (taskDrawer.view?.()?.kind === 'panel') return;
       const tasks = await api.inspectBookTasks();
       if (destroyed) return;
+      if (!tasks.running) pollMs = 10_000;
       const count = tasks.groups.filter((group) => group.key !== 'recent').reduce((sum, group) => sum + group.total, 0);
       const badge = tasksEntry.querySelector<HTMLElement>('.edge-badge')!;
       badge.dataset['count'] = String(count);
@@ -2116,10 +2131,18 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       // The task panel owns its retry/error surface; an unread count is never presented as zero.
       tasksEntry.querySelector<HTMLElement>('.edge-badge')!.hidden = true;
     } finally {
-      if (!destroyed) taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), 2_000);
+      taskBadgeReading = false;
+      if (!destroyed && document.visibilityState !== 'hidden') taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), pollMs);
     }
   };
-  if (!isDocument) void readTaskBadge();
+  function taskBadgeVisibility(): void {
+    if (taskBadgeTimer !== undefined) window.clearTimeout(taskBadgeTimer);
+    if (document.visibilityState !== 'hidden') void readTaskBadge();
+  }
+  if (!isDocument) {
+    document.addEventListener('visibilitychange', taskBadgeVisibility);
+    void readTaskBadge();
+  }
   editorialMarks = mountEditorialMarks({
     scroll: editorWindow,
     host: editorHost,
@@ -2226,6 +2249,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     viewportObserver?.disconnect();
     if (scrollingTimer !== undefined) window.clearTimeout(scrollingTimer);
     if (taskBadgeTimer !== undefined) window.clearTimeout(taskBadgeTimer);
+    document.removeEventListener('visibilitychange', taskBadgeVisibility);
     if (milestonePersistenceTimer !== undefined) window.clearTimeout(milestonePersistenceTimer);
     if (railRefreshTimer !== undefined) window.clearTimeout(railRefreshTimer);
     milestonePersistenceRead += 1;
