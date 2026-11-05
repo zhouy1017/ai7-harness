@@ -4625,6 +4625,8 @@ export interface BookTasksProjection {
   groups: ReadonlyArray<BookTaskGroupProjection>;
   /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
   running: boolean;
+  /** Snapshot-pinned pages retain every card field when a group exceeds the reply budget. */
+  readonly listPages?: TaskPlanProjection['listPages'];
 }
 
 // ---- 任务总览 (Issue #1328, T1 rev 2) ---------------------------------------------------------------
@@ -5779,7 +5781,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    */
   inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
   getTaskPlanPage: {
-    input: Omit<InspectTaskPlanInput, 'kind'> & { kind: TaskPlanKind | 'task-intent-drafts'; path: string; afterOrdinal: number; digest: string };
+    input: Omit<InspectTaskPlanInput, 'kind'> & { kind: TaskPlanKind | 'task-intent-drafts' | 'book-tasks'; path: string; afterOrdinal: number; digest: string };
     output: { path: string; items: ReadonlyArray<unknown> | string; nextOrdinal: number | null; digest: string };
   };
   /**
