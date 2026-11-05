@@ -1,21 +1,15 @@
 import {
   BOOK_PEOPLE_NAME_SEPARATOR,
   MAX_BOOK_PERSON_NAME_CHARACTERS,
-  type BookPeopleProjection,
   type BookSummaryFilter,
   type BookSummaryProjection,
 } from '../shared/protocol.js';
 
-/**
- * Every word of 作者 · 责编 · 相关人 (Issue #431, plan slice S83; V2-UX-BOOK-006, IA-008) on 工作概览 and in 书库. Authors
- * and editors are attribution dimensions, never accounts or permissions, and the words say so once. Pure, so the unit
- * suite pins every string byte for byte.
- */
+/** Labels and name formatting for the personnel line, edit form and library filters. */
 
 export const BOOK_PEOPLE_HEADING = '人员';
 export const BOOK_PEOPLE_FIELD_LABELS = { authors: '作者', editors: '责编', related: '相关人' } as const;
 export const BOOK_PEOPLE_EMPTY = '未填写';
-export const BOOK_PEOPLE_NOTE = '作者与责编用于标注、查找及反馈与学习归属，不决定操作权限。';
 export const BOOK_PEOPLE_ACTION_LABELS = {
   edit: '编辑人员…',
   save: '保存人员',
@@ -53,11 +47,6 @@ export function bookPeopleNamesLine(names: ReadonlyArray<string>): string {
 /** `校对 王四；美编 冯五`, or `未填写`. */
 export function bookPeopleRelatedLine(related: ReadonlyArray<{ roleLabel: string; name: string }>): string {
   return related.length === 0 ? BOOK_PEOPLE_EMPTY : related.map((person) => `${person.roleLabel} ${person.name}`).join('；');
-}
-
-/** When they were last saved, or that they were never. */
-export function bookPeopleRecordedLine(people: Pick<BookPeopleProjection, 'version' | 'recordedAt'>, recordedAt: string | null): string {
-  return people.version === 0 || recordedAt === null ? '尚未填写作者、责编和相关人。' : `第 ${people.version} 次保存 · ${recordedAt}`;
 }
 
 // ---- 书库 --------------------------------------------------------------------------------------------------------

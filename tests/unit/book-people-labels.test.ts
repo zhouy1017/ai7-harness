@@ -6,11 +6,10 @@ import { BUILTIN_BOOK_PEOPLE_ROLES } from '../../src/service/book-people.js';
 // list as configuration.
 
 describe('the words of 人员', () => {
-  it('names the fields, the form and what the people are for', () => {
+  it('names the fields and form and formats personnel names', () => {
     expect(labels.BOOK_PEOPLE_HEADING).toBe('人员');
     expect(labels.BOOK_PEOPLE_FIELD_LABELS).toEqual({ authors: '作者', editors: '责编', related: '相关人' });
     expect(labels.BOOK_PEOPLE_EMPTY).toBe('未填写');
-    expect(labels.BOOK_PEOPLE_NOTE).toBe('作者与责编用于标注、查找及反馈与学习归属，不决定操作权限。');
     expect(labels.BOOK_PEOPLE_ACTION_LABELS).toEqual({ edit: '编辑人员…', save: '保存人员', cancel: '取消', addRelated: '添加相关人', removeRelated: '移除' });
     expect(labels.BOOK_PEOPLE_NAMES_HINT).toBe('多个名字用「、」隔开；每个名字最多 40 个字。');
     expect([labels.BOOK_PEOPLE_ROLE_LABEL, labels.BOOK_PEOPLE_NAME_LABEL, labels.BOOK_PEOPLE_RELATED_NONE]).toEqual(['角色', '名字', '还没有相关人。']);
@@ -20,8 +19,6 @@ describe('the words of 人员', () => {
     expect(labels.bookPeopleNamesLine(['周一', '吴二'])).toBe('周一、吴二');
     expect(labels.bookPeopleNamesLine([])).toBe('未填写');
     expect(labels.bookPeopleRelatedLine([{ roleLabel: '校对', name: '王四' }, { roleLabel: '美编', name: '冯五' }])).toBe('校对 王四；美编 冯五');
-    expect(labels.bookPeopleRecordedLine({ version: 0, recordedAt: null }, null)).toBe('尚未填写作者、责编和相关人。');
-    expect(labels.bookPeopleRecordedLine({ version: 2, recordedAt: 'x' }, '9月24日 23:00')).toBe('第 2 次保存 · 9月24日 23:00');
   });
 
   it('shows the people on a card and names what the library search found', () => {
