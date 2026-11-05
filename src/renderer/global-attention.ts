@@ -243,17 +243,19 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     pill.id = stateId;
     pill.dataset['pillTone'] = view.pill.tone;
     pill.dataset['pillShape'] = view.pill.shape;
-    const stateLine = el('p', 'global-attention-state');
-    stateLine.append(pill, el('span', 'global-attention-time', view.time));
+    title.append(' · ', pill);
+    title.title = `${view.openName} · ${view.stateLabel}`;
+    open.title = view.time;
     const reason = el('p', 'global-attention-reason', view.reason);
     reason.id = reasonId;
-    node.append(
-      title,
-      stateLine,
-      reason,
-      open,
+    reason.title = view.reason;
+    const body = el('div', 'global-attention-body');
+    body.append(title, reason);
+    node.append(body, open);
+    if (technicalLayerVisible) node.append(
       options.technicalDetails(
         'global-attention-facts',
+        ...fact('时间', view.time),
         ...fact(GLOBAL_ATTENTION_TECHNICAL_ITEM, view.itemId),
         ...projection.technical.flatMap((row) => fact(row.label, row.value)),
       ),

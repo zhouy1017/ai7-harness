@@ -63,12 +63,12 @@ const APPLIED_TEXT = '〔并行应用〕';
 const GROUP_ORDER = Object.freeze(['exceptions', 'decisions', 'active', 'recent']);
 const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决定', '运行中与已暂停', '最近完成']);
 // The screen's own words (`src/renderer/global-attention-labels.ts`), pinned there by its unit suite.
-const REASON_BLOCKED = '授权已记录，派发前阻止：当前启动没有可执行的路由。';
-const REASON_PLAN_REVISION = '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
+const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
+const REASON_PLAN_REVISION = '计划依据已有变化，请确认新计划后再开始。';
 const ACTIVE_EMPTY = '没有正在运行或中途停止的任务。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
-const REASON_WAITING_CAPACITY = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
+const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
 const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 // 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
@@ -653,7 +653,7 @@ const READ_PAGE = `(() => {
         shape: item.querySelector('.global-attention-pill')?.dataset.pillShape ?? null,
         reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
-        time: item.querySelector('.global-attention-time')?.textContent ?? null,
+        time: item.querySelector('.global-attention-open')?.title ?? null,
         technical: (() => { const layer=item.querySelector('details.technical-details'); return layer === null ? null : layer.hidden ? false : layer.open; })(),
       })),
     })),
@@ -1060,6 +1060,15 @@ async function main() {
     'four-groups-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
     // 异常与结果待确认: the first Book's Run, blocked before dispatch — its Book, object, exact state, reason and step.
     const blockedItem = exceptions[0];
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.global-attention-item')).every((item) => {
+      const body = item.querySelector('.global-attention-body');
+      const title = body?.querySelector('.global-attention-object');
+      const reason = body?.querySelector('.global-attention-reason');
+      return body?.children.length === 2 && title?.querySelector('.global-attention-pill') !== null &&
+        [...(reason?.textContent ?? '')].length <= 60 && !item.textContent.includes('安全的下一步：') &&
+        getComputedStyle(title).whiteSpace === 'nowrap' && getComputedStyle(reason).whiteSpace === 'nowrap' &&
+        getComputedStyle(title.querySelector('.global-attention-book')).fontFamily.includes('Noto Serif SC');
+    })`, 'attention-two-line-copy');
     requireJourney(exceptions.length === 1 && blockedItem?.itemId === `analysis:${blockedA.taskIntent.taskIntentId}` && blockedItem.state === 'analysis-blocked' &&
       blockedItem.blocked === 'true' && blockedItem.target === 'analysis' && blockedItem.bookId === bookA && blockedItem.book === `《${FIRST.title}》` &&
       blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `查看运行 · 《${FIRST.title}》 · 基线分析 · 首次基线分析` &&

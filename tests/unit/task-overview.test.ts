@@ -40,6 +40,10 @@ describe('task overview', () => {
       const projection = composeTaskOverview({ groups: [{ key: 'active', items: [task('active', state, 'waiting')], total: 1 }], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
       expect(projection.runningCount).toBe(0); expect(projection.queuedCount).toBe(1);
       const card = taskOverviewCard(projection.groups[1]!.items[0]!, vi.fn());
+      expect(card.querySelector('.task-overview-card-kind')!.textContent).toBe(projection.groups[1]!.items[0]!.taskKind);
+      expect(card.querySelector('.task-overview-card-title .state-term')).not.toBeNull();
+      expect(card.querySelector('.task-overview-card-time')!.textContent).toContain('记录于');
+      expect([...card.querySelector('.task-overview-card-line')!.textContent!].length).toBeLessThanOrEqual(60);
       expect(card.querySelector('[data-task-action="pause"]')).toBeNull();
       expect(card.querySelector('[data-task-action="up"]')).toBeNull();
       expect(card.textContent).toContain(state === 'analysis-waiting-network' ? '等待联网' : state === 'analysis-waiting-connection' ? '等待模型连接' : state === 'analysis-waiting-admission' ? '等待开始前检查' : '等待运行名额');

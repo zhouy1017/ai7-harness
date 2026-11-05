@@ -1,5 +1,6 @@
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
+import { attentionSentence } from './global-attention-labels.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_TASK_INTENT_DRAFT_RANGES,
@@ -67,6 +68,7 @@ import {
   taskComposerResolutionReady,
   taskComposerRevisionLine,
   TASK_PANEL_COMPOSE_FIRST,
+  TASK_PANEL_COMPOSE_MEANINGS,
   TASK_PANEL_COMPOSE_FIRST_QUICK,
   TASK_PANEL_COMPOSE_HEADING,
   TASK_PANEL_COMPOSE_NONE,
@@ -170,7 +172,7 @@ export function composeOptions(projection: Pick<BaselineAnalysisProjection, 'act
     return {
       mode,
       label: entry.label,
-      meaning: entry.meaning.replaceAll('内容块', '段落'),
+      meaning: TASK_PANEL_COMPOSE_MEANINGS[mode],
       available,
       reason: controls.blockedByActiveRun ? controls.blockedReason : entry.unavailableReason,
       goal: entry.goal as BaselineAnalysisGoal,
@@ -332,11 +334,13 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
       });
       const words = el('span', 'task-panel-mode-words');
       words.append(el('strong', undefined, choice.label));
+      const meaning = el('span', 'task-panel-mode-meaning', choice.meaning);
       if (!choice.available && choice.reason !== null) {
-        const reason = el('span', choice.mode === selected ? 'task-panel-compose-why' : undefined, choice.reason);
-        words.append(' · ', reason);
-        if (choice.mode === selected) { reason.id = uid('compose-why'); selectedReason = reason; }
+        meaning.textContent = attentionSentence(choice.reason);
+        meaning.title = choice.reason;
+        if (choice.mode === selected) { meaning.classList.add('task-panel-compose-why'); meaning.id = uid('compose-why'); selectedReason = meaning; }
       }
+      words.append(meaning);
       label.append(input, words);
       fieldset.append(label);
     }
