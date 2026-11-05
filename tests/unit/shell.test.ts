@@ -50,7 +50,7 @@ describe('the sidebar', () => {
   });
   it('lists the seven global destinations in their fixed order, each with a fixed SVG symbol ID', () => {
     expect(SHELL_DESTINATIONS.map((entry) => [entry.key, entry.label])).toEqual([
-      ['attention', '待我处理'], ['tasks', '任务'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体（记忆与全局指导）'],
+      ['attention', '待我处理'], ['tasks', '任务'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体'],
     ]);
     for (const entry of [...SHELL_DESTINATIONS, SHELL_SETTINGS]) {
       expect(entry.icon).toMatch(/^i-[a-z]+$/u);
@@ -80,6 +80,8 @@ describe('the sidebar', () => {
   it('gives every collapsed Book row a name that says its Book and state, and a first-character icon', () => {
     expect(bookIcon('  sample1 ')).toBe('s');
     expect(bookIcon('𠀋字书')).toBe('𠀋');
+    expect(bookIcon(' 《「“…样书》')).toBe('样');
+    expect(bookIcon('「……」')).toBe('书');
     expect(bookIcon('')).toBe('书');
     expect(SHELL_LABELS.bookRowName('样书', shellRecentStateLine('review'))).toBe('《样书》 · 上次在「审阅」');
     expect(SHELL_LABELS.pin('样书')).toBe('置顶《样书》');

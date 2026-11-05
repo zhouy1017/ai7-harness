@@ -96,7 +96,6 @@ import {
   TASK_PLAN_EDIT_STEP_REMOVED,
   TASK_PLAN_EDIT_STEPS_NOTE,
   TASK_PLAN_EDIT_TAG,
-  TASK_PLAN_FULL_LINK_EDITABLE,
   taskPlanEditCount,
   taskPlanEditCountAfterDrift,
   taskPlanEditRemoveStep,
@@ -288,11 +287,29 @@ describe('精简 and 完整 (D6)', () => {
     expect(TASK_PLAN_FULL_LINK).toBe('完整计划（6 段）');
     expect(taskPlanCompactRows(plan())).toEqual([
       ['处理', '只处理任务卡所列范围，不参考其他材料。'],
-      ['发送', '不发送内容，无模型用量，未设预算上限。'],
+      ['发送', '不发送，无模型用量。'],
       ['会得到', '一份基线分析。'],
-      ['不会', '不改稿、导出发布、存里程碑、越界阅读或作事实判定。'],
+      ['不会', '不改稿、导出发布。'],
       ['中途', '预计无需参与，可随时暂停或取消。'],
     ]);
+  });
+
+  it('derives compact usage and non-effects from the plan facts', () => {
+    const original = plan();
+    const rowsFor = (fact: string) => Object.fromEntries(taskPlanCompactRows(plan({
+      notDo: { ...original.notDo, editorial: [...original.notDo.editorial, fact] },
+      service: { ...original.service, send: '范围内正文发往已选模型', usage: '达到 80,000 tokens 后不再发送新的请求（8 个阅读范围）' },
+    })));
+    expect(rowsFor('不重新读取所选范围以外的正文')['不会']).toBe('不改稿、导出发布、重读范围外正文。');
+    expect(rowsFor('不读允许参考以外的资料')['不会']).toBe('不改稿、导出发布、读参考外资料。');
+    expect(rowsFor('不作事实判定')['发送']).toBe('发往模型，达到 80,000 tokens 后不再发送。');
+    for (const facts of [
+      ['不照抄范例：与范例比较', '不照抄资料库资料：逐份比较', '不交付、不发送：草稿由你修改', '不改评估记录与基线分析', '不读这本书以外的稿件'],
+      ['不读所选范围以外的正文', '不在所选段落以外标出发现：只计数', '不给出合规、查重或政策结论'],
+    ]) {
+      const compact = Object.fromEntries(taskPlanCompactRows(plan({ notDo: { editorial: [...original.notDo.editorial, '不存里程碑版本', ...facts], technical: [] } })));
+      expect([...compact['不会']!].length).toBeLessThanOrEqual(36);
+    }
   });
 
   it('labels a usage ceiling as a ceiling, never a prediction, and names what is referred to and what follows the Run', () => {
@@ -303,7 +320,7 @@ describe('精简 and 完整 (D6)', () => {
     });
     const rows = Object.fromEntries(taskPlanCompactRows(live));
     expect(rows['处理']).toBe('处理任务卡所列范围，参考 1 项材料。');
-    expect(rows['发送']).toBe('不发送内容，无模型用量，上限240,000词元。');
+    expect(rows['发送']).toBe('不发送，达到 240,000 tokens 后不再发送。');
     expect(TASK_PLAN_CEILING_NOTE).toBe('上限，不是预测');
     expect(rows['中途']).toBe('预计无需参与，可随时暂停或取消。');
     for (const kind of TASK_PLAN_KINDS) {
@@ -782,7 +799,6 @@ describe('the editable plan (S73)', () => {
     expect(TASK_PLAN_EDIT_STEPS_NOTE).toBe('这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。');
     // S76d (Issue #422): the move is offered now, and the note says what it means for the Run.
     expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('这一步暂停等你回答，其他阅读范围继续。');
-    expect(TASK_PLAN_FULL_LINK_EDITABLE).toBe('完整计划（6 段）');
     expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
     expect(taskPlanEditCount(2)).toBe('你改了 2 处');
     expect(taskPlanEditCountAfterDrift(1)).toBe('你改了 1 处；重新确认计划后再更新计划');

@@ -688,6 +688,27 @@ async function arrangePreferenceJudgments(session: Session, book: Book): Promise
 }
 
 describe('a Review Run over the real store on exact sample1', () => {
+  it('keeps change-plan redo independent of the previous series selection', async () => {
+    const session = await openLayeredSelection();
+    try {
+      const book = await importBook(session);
+      const seriesId = makeJ13Series(session.store, book.bookId);
+      let progress = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy,
+        null, [], null, null, seriesId);
+      while (!progress.done) progress = session.store.advanceReviewRunPreparationWork(progress.workId!);
+      const run = progress.projection!.run!;
+      expect(run.referenceInput?.seriesId).toBe(seriesId);
+      session.store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+      const handoff = session.store.reviewRunDriveSteps.start(run.reviewRunId, TYPOS)!;
+      session.store.reviewRunDriveSteps.recordDispatch(run.reviewRunId, TYPOS, handoff.runRecordId);
+      handoff.ledger.cancelWaiting(book.bookId, run.categories[0]!.taskIntentId!);
+      session.store.finishCancelledReviewRun(handoff.runRecordId);
+      const redo = session.store.redoTaskRequest({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(redo).toMatchObject({ redoOf: run.reviewRunId, categoryIds: [TYPOS], scope: WHOLE });
+      expect(redo).not.toHaveProperty('seriesId');
+    } finally { await close(session); }
+  });
+
   it('projects current scope units and repeat inputs for references without preparing or authorizing work', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const before = workspace(session, book, null);

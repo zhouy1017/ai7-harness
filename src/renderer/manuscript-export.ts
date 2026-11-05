@@ -19,8 +19,6 @@ import { readActionDefaults, rememberActionDefaults } from './action-defaults.js
 
 /** Inline export choices followed by one native Save dialog and the recorded result. */
 export interface ManuscriptExportSurface {
-  /** Open the card for one version; `opener` gets focus back when the card closes. */
-  open(target: ManuscriptExportTargetInput, label: string | null, opener: HTMLElement | null): void;
   menu(target: ManuscriptExportTargetInput | (() => ManuscriptExportTargetInput), label: string | null): HTMLElement;
   /** Whether a call of the card is in flight, so the destination does not redraw under it. */
   busy(): boolean;
@@ -223,7 +221,6 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
   });
   render();
   return {
-    open(target, _label, source) { opener = source; void exportFile(target); },
     menu(targetOrRead, label) {
       const target = (): ManuscriptExportTargetInput => typeof targetOrRead === 'function' ? targetOrRead() : targetOrRead;
       const menu = el('details', 'export-menu'); menu.dataset['exportMenu'] = target().kind;

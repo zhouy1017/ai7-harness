@@ -48,6 +48,14 @@ function press(platform: CommandPlatform, code: string, held: { mod?: boolean; c
 }
 
 describe('the command registry', () => {
+  it('lists the moved view shortcuts and retains a noncolliding saved focus binding', () => {
+    expect(COMMANDS.find((command) => command.id === 'view.openTasks')).toMatchObject({ name: '查看任务', defaults: { win32: 'F7' } });
+    expect(COMMANDS.find((command) => command.id === 'view.focusMode')).toMatchObject({ name: '专注模式', defaults: { win32: 'F8' } });
+    expect(effectiveSequence('evaluation.start', {}, 'win32')).toBe('Mod+Shift+E');
+    const saved = { 'view.focusMode': 'Mod+Shift+J' };
+    expect(validatedBindings(saved, 'win32')).toEqual(saved);
+    expect(validatedBindings({ 'view.focusMode': 'Mod+Shift+E' }, 'win32')).toEqual({});
+  });
   it('covers the complete sidebar Book sections, settings and toggle without replacing shell navigation', () => {
     expect(BOOK_SECTION_COMMANDS.map((entry) => entry[2])).toEqual(SHELL_BOOK_SECTIONS);
     expect(COMMANDS.some((entry) => entry.id === 'nav.settings')).toBe(true);

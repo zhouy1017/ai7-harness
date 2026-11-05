@@ -1,4 +1,5 @@
 import { completedWithGapsLabel } from '../shared/analysis-run-summary.js';
+import type { TaskOverviewItemProjection } from '../shared/protocol.js';
 import { technicalLayerVisible } from './technical-layer.js';
 import {
   BASELINE_ANALYSIS_MODE_LABELS,
@@ -562,8 +563,10 @@ function runningReason(progress: GlobalAttentionItemProjection['facts']['progres
 }
 
 /** When the state began — or, in 最近完成, when the work completed — in local time. */
-export function globalAttentionTimeLine(group: GlobalAttentionGroupKey, at: string): string {
-  return `${group === 'recent' ? '完成于' : '记录于'} ${localInstantLabel(at)}`;
+export function globalAttentionTimeLine(group: GlobalAttentionGroupKey, at: string, state?: GlobalAttentionStateKey | TaskOverviewItemProjection['state']): string {
+  const verb = state === 'cancelled' || state === 'analysis-cancelled' ? '取消于'
+    : state === 'stopped' || state === 'review-stopped' || state === 'dialogue-stopped' ? '停止于' : '完成于';
+  return `${group === 'recent' ? verb : '记录于'} ${localInstantLabel(at)}`;
 }
 
 // ---- the whole view as data ------------------------------------------------------------------------------
@@ -613,7 +616,7 @@ export function globalAttentionView(projection: GlobalAttentionProjection): Read
         pill: GLOBAL_ATTENTION_STATE_PILLS[entry.state],
         reason: globalAttentionReason(entry),
         nextStep: globalAttentionNextStepLine(entry.nextStep),
-        time: globalAttentionTimeLine(group.key, entry.at),
+        time: globalAttentionTimeLine(group.key, entry.at, entry.state),
         openName: `${book} · ${object}`,
       };
     }),
