@@ -2014,7 +2014,7 @@ async function runEmptyBookFirstImport(renderer, expectation, restartReviewedImp
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"] .book-overview[data-manuscript-state="empty"]')`, 'empty-book-overview');
   await assertRenderer(
     renderer,
-    `(() => { const screen = document.querySelector('[data-screen="book-overview"]'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation button') ?? [], (button) => button.textContent); return screen?.textContent.includes('尚无稿件') && screen.textContent.includes('图书已创建') && buttons.length === 1 && buttons[0] === '图书' && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入首份稿件'); })()`,
+    `(() => { const screen = document.querySelector('[data-screen="book-overview"]'); const buttons = Array.from(screen?.querySelectorAll('.record-navigation button') ?? [], (button) => button.textContent); return screen?.textContent.includes('尚无稿件') && !screen.querySelector('.success-note') && buttons.length === 1 && buttons[0] === '图书' && Array.from(screen.querySelectorAll('button')).some((button) => button.textContent === '导入首份稿件'); })()`,
     'empty-book-only-authority',
   );
   const bookId = await renderer.evaluate(`document.querySelector('[data-screen="book-overview"] .book-overview')?.dataset.bookId`);
