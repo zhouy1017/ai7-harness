@@ -1,5 +1,6 @@
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
+import { appendTaskPlanPage } from './analysis-paging.js';
 import {
   BASELINE_ANALYSIS_TASK_GOAL,
   MAX_TASK_INTENT_DRAFT_RANGES,
@@ -84,7 +85,7 @@ import {
  */
 export interface TaskPanelOptions {
   settle?(): Promise<boolean>;
-  readonly api: Pick<RendererApi, 'inspectBookTasks' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun' | 'controlTaskRun' | 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>;
+  readonly api: Pick<RendererApi, 'inspectBookTasks' | 'getTaskPlanPage' | 'inspectBaselineAnalysis' | 'pauseBaselineAnalysisRun' | 'resumeBaselineAnalysisRun' | 'controlTaskRun' | 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** A Task's plan in the drawer; `cancel` opens it with 取消任务's Cancellation Impact Summary open. */
@@ -217,7 +218,17 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const mine = ++ticket;
     const wasRunning = tasks?.running === true;
     void Promise.all([
-      api.inspectBookTasks(),
+      api.inspectBookTasks().then(async (next) => {
+        for (const path of Object.keys(next.listPages ?? {})) {
+          while (next.listPages![path]!.nextOrdinal !== null) {
+            if (mine !== ticket || bookId !== book || next.bookId !== book) return next;
+            const meta = next.listPages![path]!;
+            next = appendTaskPlanPage(next, await api.getTaskPlanPage({ kind: 'book-tasks', ref: null, path,
+              afterOrdinal: meta.nextOrdinal!, digest: meta.digest }));
+          }
+        }
+        return next;
+      }),
       withAnalysis || !analysisRead ? api.inspectBaselineAnalysis().then((value) => value, () => null) : Promise.resolve(undefined),
     ]).then(
       ([next, nextAnalysis]) => {

@@ -355,7 +355,22 @@ it('pages the 500 retained drafts a Book lists, each saved for real, and refuses
     const drafts = store.inspectTaskIntentDrafts({ bookId, draftId: null });
     expect(drafts.drafts).toHaveLength(500);
     sweep('short-generated', '500-drafts', 'inspectTaskIntentDrafts', drafts);
-    sweep('short-generated', '500-drafts', 'inspectBookTasks', store.inspectBookTasks(bookId, () => null));
+    const tasks = store.inspectBookTasks(bookId, () => null);
+    sweep('short-generated', '500-drafts', 'inspectBookTasks', tasks);
+    const firstTasks = taskPlanOutbound(tasks) as typeof tasks;
+    expectNonEmptyPages(firstTasks.listPages);
+    let taskWire = firstTasks;
+    for (const path of Object.keys(taskWire.listPages ?? {})) {
+      while (taskWire.listPages![path]!.nextOrdinal != null) {
+        const meta = taskWire.listPages![path]!;
+        const page = store.getTaskPlanPage({ bookId, kind: 'book-tasks', ref: null, path, afterOrdinal: meta.nextOrdinal!, digest: meta.digest });
+        expect(serializedBytes(page)).toBeLessThanOrEqual(MAX_FRAME_BYTES / 2);
+        expect(encodeServiceResponse({ id: ID, ok: true, op: 'getTaskPlanPage', result: page }).length).toBeLessThanOrEqual(MAX_FRAME_BYTES + 4);
+        taskWire = appendTaskPlanPage(taskWire, page);
+      }
+      expect(taskWire.listPages![path]!.shown).toBe(taskWire.listPages![path]!.total);
+    }
+    expect(taskWire.groups).toEqual(tasks.groups);
     const first = taskPlanOutbound(drafts) as typeof drafts;
     expectNonEmptyPages(first.listPages);
     let wire = first;
@@ -369,6 +384,9 @@ it('pages the 500 retained drafts a Book lists, each saved for real, and refuses
     expect(wire.listPages!.drafts!.shown).toBe(500);
     // One more save moves the list (the newest leads, the oldest leaves the read): the earlier snapshot is refused plainly.
     save(500);
+    const staleTasks = firstTasks.listPages!['groups.0.items']!;
+    expect(() => store.getTaskPlanPage({ bookId, kind: 'book-tasks', ref: null, path: 'groups.0.items', afterOrdinal: staleTasks.nextOrdinal!, digest: staleTasks.digest }))
+      .toThrow(/任务列表已变化/u);
     const stale = first.listPages!.drafts!;
     expect(() => store.getTaskPlanPage({ bookId, kind: 'task-intent-drafts', ref: null, path: 'drafts', afterOrdinal: stale.nextOrdinal!, digest: stale.digest }))
       .toThrow(/任务草稿已变化/u);
@@ -379,10 +397,12 @@ it('admits a page read only of a declared kind, naming its Task unless it reads 
   const frame = (input: Record<string, unknown>) => new TextEncoder().encode(JSON.stringify({ id: ID, op: 'getTaskPlanPage', input }));
   const read = { bookId: ID, kind: 'baseline-analysis', ref: ID, path: 'technical.0.value', afterOrdinal: 0, digest: 'a'.repeat(64) };
   expect(decodeRequest(frame(read))).toEqual({ id: ID, op: 'getTaskPlanPage', input: read });
-  for (const bookWide of [{ kind: 'task-intent-drafts', path: 'drafts' }, { kind: 'review-run', path: 'scopeOptions.chapters.chapters' }]) {
+  for (const bookWide of [{ kind: 'task-intent-drafts', path: 'drafts' }, { kind: 'review-run', path: 'scopeOptions.chapters.chapters' },
+    { kind: 'book-tasks', path: 'groups.0.items' }]) {
     expect(decodeRequest(frame({ ...read, ...bookWide, ref: null })).op).toBe('getTaskPlanPage');
   }
   for (const refused of [{ ...read, ref: null }, { ...read, kind: 'review-run', ref: null }, { ...read, kind: 'unknown' },
+    { ...read, kind: 'book-tasks', ref: null, path: 'groups.3.items' },
     { ...read, digest: 'A'.repeat(64) }, { ...read, afterOrdinal: -1 }, { ...read, extra: true }]) {
     expect(() => decodeRequest(frame(refused))).toThrow(ProtocolError);
   }
