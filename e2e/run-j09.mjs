@@ -1792,15 +1792,16 @@ async function main() {
       JSON.stringify(questionAttention.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
     await openItem(renderer, questionItem.itemId, 'model-question-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question')?.textContent==='本范围按哪个阅读重点处理？'`, 'model-question-drawer', 30_000);
-    const questionPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}})`);
+    const questionPlan = await renderer.evaluate(`window.ai7.taskOverviewCall({operation:'inspectTaskPlan',bookId:${JSON.stringify(questionBook)},input:{kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}}})`);
     const questionCard = questionPlan.clarifications.find((card) => card.origin === 'model' && card.state === 'open');
     requireJourney(questionCard?.options.filter((option) => option.id.startsWith('model-option-')).length === 2 && questionCard.freeTextAllowed === true, 'model-question-options');
 
     at('model-question-answer-turn');
     await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(`[data-task-drawer-control="clarification-option:${questionCard.requestId}:model-option-0"]`)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return input.checked; })()`, 'model-question-choose');
     await clickSelector(renderer, `[data-task-drawer-control="clarification-submit:${questionCard.requestId}"]`, 'model-question-submit');
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((p)=>p.taskIntent?.taskIntentId===${JSON.stringify(questionTask)} && ['completed','completed-with-gaps'].includes(p.run?.state))`, 'model-question-completes', 120_000);
-    const questionDone = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    const questionReading = `window.ai7.taskOverviewCall({operation:'inspectBaselineAnalysis',bookId:${JSON.stringify(questionBook)},input:{revisionId:null}})`;
+    await waitFor(renderer, `${questionReading}.then((p)=>p.taskIntent?.taskIntentId===${JSON.stringify(questionTask)} && ['completed','completed-with-gaps'].includes(p.run?.state))`, 'model-question-completes', 120_000);
+    const questionDone = await renderer.evaluate(questionReading);
     requireJourney(questionDone.resultSetRevision?.units.filter((unit) => unit.state === 'closed').length === SAMPLE1_UNITS && questionDone.run?.attempt?.spans.length === SAMPLE1_UNITS + 1, 'model-question-one-follow-up');
     await openAttention(renderer, 'model-question-answered-attention');
     const answeredAttention = await readSettledAttention(renderer);
