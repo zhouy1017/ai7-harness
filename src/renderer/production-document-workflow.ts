@@ -8,7 +8,6 @@ import {
   type ProductionDocumentProjection,
   type ProductionDocumentWorkflowProjection,
 } from '../shared/protocol.js';
-import { publicationCountLine } from './deliverables-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
 import {
   DOCUMENT_PHASE_ACTION_LABELS,
@@ -57,6 +56,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -131,14 +131,14 @@ export function renderDocumentWorkflow(
     if (phase.latest !== null) {
       const line = phaseLatestLine(phase.latest, localInstantLabel(phase.latest.recordedAt));
       if (phase.latest.reason === null) {
-        item.append(el('p', 'field-note document-phase-latest', line));
+        head.append(el('span', 'document-phase-latest', line));
       } else {
         const why = el('details', 'document-phase-reason');
         why.append(el('summary', undefined, DOCUMENT_PHASE_SHOW_REASON), el('p', 'document-phase-latest', line));
         item.append(why);
       }
     }
-    if (phase.moves > 1) item.append(el('p', 'field-note document-phase-moves', phaseMovesLine(phase.moves)));
+    if (phase.moves > 1) head.append(el('span', 'document-phase-moves', phaseMovesLine(phase.moves)));
     if (actions !== null && phase.actions.length > 0) {
       const buttons = el('div', 'button-row compact-actions');
       for (const action of phase.actions) {
@@ -196,10 +196,7 @@ export function renderDocumentWorkflow(
     words.value = state.text;
     words.disabled = working;
     words.dataset['phaseReasonText'] = 'true';
-    // Counted as the service counts it, and refused here with its reason rather than by the frame (Issue #626), as the 发稿
-    // and 交付 forms do.
-    const count = el('small', 'field-note document-phase-reason-count', publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS));
-    count.id = uid('document-phase-reason-count');
+    words.setAttribute('aria-description', `最多 ${MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS} 字`);
     // Its own class, as the 发稿 fields' problems have theirs: the form's one `field-error` stays the form's own ask.
     const textProblem = el('p', 'document-phase-reason-problem');
     textProblem.id = uid('document-phase-reason-problem');
@@ -209,14 +206,13 @@ export function renderDocumentWorkflow(
       textProblem.hidden = problem === null;
       words.setAttribute('aria-invalid', problem === null ? 'false' : 'true');
     };
-    words.setAttribute('aria-describedby', `${count.id} ${textProblem.id}`);
+    words.setAttribute('aria-describedby', textProblem.id);
     words.addEventListener('input', () => {
       state.text = words.value;
-      count.textContent = publicationCountLine(state.text.trim(), MAX_PRODUCTION_DOCUMENT_PHASE_REASON_CHARACTERS);
       showTextProblem();
     });
     showTextProblem();
-    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words, count, textProblem);
+    textLabel.append(el('span', undefined, DOCUMENT_PHASE_REASON_TEXT_LABEL), words, textProblem);
     node.append(choices, textLabel);
     if (state.problem !== null) {
       const problem = el('p', 'field-error', state.problem);
@@ -257,14 +253,15 @@ export function renderDocumentWorkflow(
 
   function draw(): void {
     section.dataset['workflowTransitions'] = String(workflow.transitions);
-    const profile = el('p', 'field-note document-workflow-profile',
+    const profile = el('span', 'document-workflow-profile',
       workflowProfileLine(workflow.profile.name, workflow.profile.version, localInstantLabel(workflow.profile.activatedAt)));
-    const summary = el('p', 'document-workflow-summary', workflow.summary);
+    const summary = el('span', 'document-workflow-summary', workflow.summary);
+    const context = el('p', 'document-workflow-context');
+    context.append(profile, ' · ', summary);
     const nextHeading = el('h3', undefined, DOCUMENT_WORKFLOW_NEXT_HEADING);
     nextHeading.id = uid('document-workflow-next');
-    const next = workflow.next.length === 0
-      ? el('p', 'field-note document-workflow-next-empty', DOCUMENT_WORKFLOW_NEXT_EMPTY)
-      : el('ol', 'document-workflow-next');
+    const next = el('ol', 'document-workflow-next');
+    if (workflow.next.length === 0) nextHeading.append(' · ', el('span', 'document-workflow-next-empty', DOCUMENT_WORKFLOW_NEXT_EMPTY));
     if (workflow.next.length > 0) {
       next.setAttribute('aria-labelledby', nextHeading.id);
       for (const entry of workflow.next) {
@@ -278,7 +275,7 @@ export function renderDocumentWorkflow(
     const phases = el('ol', 'document-phases');
     phases.setAttribute('aria-labelledby', phasesHeading.id);
     for (const phase of workflow.phases) phases.append(phaseRow(phase));
-    section.replaceChildren(profile, summary, nextHeading, next, phasesHeading, phases);
+    section.replaceChildren(context, nextHeading, ...(workflow.next.length > 0 ? [next] : []), phasesHeading, phases);
     const target = focusNext;
     focusNext = null;
     if (target === null) return;

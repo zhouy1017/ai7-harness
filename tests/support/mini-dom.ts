@@ -32,6 +32,10 @@ export class MiniElement {
   parentElement: MiniElement | null = null;
   #text = '';
   #listeners = new Map<string, Listener[]>();
+  open = false;
+  show(): void { this.open = true; }
+  close(): void { this.open = false; this.dispatchEvent({ type: 'close' }); }
+  matches(selector: string): boolean { return selector === ':hover' ? false : matches(this, selector); }
   hidden = false;
   disabled = false;
   checked = false;
@@ -69,10 +73,11 @@ export class MiniElement {
 
   get className(): string { return this.attributes.get('class') ?? ''; }
   set className(value: string) { this.attributes.set('class', value); }
-  get classList(): { contains(name: string): boolean; add(...names: string[]): void } {
+  get classList(): { contains(name: string): boolean; add(...names: string[]): void; remove(...names: string[]): void } {
     return {
       contains: (name) => this.className.split(/\s+/u).includes(name),
       add: (...names) => { this.className = [...new Set([...this.className.split(/\s+/u).filter(Boolean), ...names])].join(' '); },
+      remove: (...names) => { this.className = this.className.split(/\s+/u).filter((name) => name && !names.includes(name)).join(' '); },
     };
   }
   get id(): string { return this.attributes.get('id') ?? ''; }
@@ -113,6 +118,20 @@ export class MiniElement {
         this.#adopt(node);
       }
     }
+  }
+  prepend(...nodes: Array<MiniElement | string>): void {
+    const added = new MiniElement('fragment'); added.append(...nodes);
+    const incoming = [...added.children];
+    for (const node of incoming) { node.remove(); node.parentElement = this; }
+    this.children.unshift(...incoming);
+  }
+  insertBefore(node: MiniElement, reference: MiniElement | null): MiniElement {
+    if (node === reference) return node;
+    node.remove();
+    node.parentElement = this;
+    if (reference === null) this.children.push(node);
+    else this.children.splice(this.children.indexOf(reference), 0, node);
+    return node;
   }
   replaceChildren(...nodes: Array<MiniElement | string>): void {
     for (const child of this.children) child.parentElement = null;
@@ -252,8 +271,13 @@ function compound(element: MiniElement, part: string): boolean {
 }
 
 export const miniDocument = {
+  visibilityState: 'visible',
+  addEventListener(type: string, listener: Listener): void { miniDocument.body.addEventListener(type, listener); },
+  removeEventListener(type: string, listener: Listener): void { miniDocument.body.removeEventListener(type, listener); },
   body: new MiniElement('body'),
   activeElement: null as MiniElement | null,
+  querySelector(selector: string): MiniElement | null { return miniDocument.body.querySelector(selector); },
+  createElementNS(_namespace: string, tag: string): MiniElement { return new MiniElement(tag); },
   createElement(tag: string): MiniElement {
     if (tag === 'button') return new MiniButton(tag);
     if (tag === 'input') return new MiniInput(tag);

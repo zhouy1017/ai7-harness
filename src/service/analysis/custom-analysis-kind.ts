@@ -256,8 +256,9 @@ export function customAnalysisKindDefinition(version: CustomAnalysisVersionInput
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ rows: (result as CustomAnalysisUnitResult).rows }),
+    unitRecord: (result) => ({ rows: (result as CustomAnalysisUnitResult).rows, ...((result as CustomAnalysisUnitResult).salvaged === undefined ? {} : { salvaged: (result as CustomAnalysisUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): CustomAnalysisUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<CustomAnalysisUnitResult['salvaged']> }),
       schema: CUSTOM_ANALYSIS_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       rows: record.rows as CustomAnalysisUnitResult['rows'],
@@ -291,6 +292,14 @@ export function customAnalysisPlan(
   const [units] = plan.steps;
   return {
     ...plan,
+    wording: { ...plan.wording,
+      goal: [`逐单元回答自定义分析「${version.title}」`, { technical: `第 ${version.version} 版` }, '的提问，定位每条回答所依据的原文，形成结果集修订版。'],
+      procedure: [`自定义分析 · ${version.title}`, { technical: ` · 第 ${version.version} 版` }],
+      scopeSend: [...(plan.wording?.scopeSend ?? [plan.scope.send]), live ? '，以及该维度' : '；实时运行时会一并发送该维度',
+        { technical: `第 ${version.version} 版的` }, `提问模板「${version.questionTemplate}」`],
+      ...(live ? { serviceSend: [...(plan.wording?.serviceSend ?? [plan.service.send]), '；该维度', { technical: `第 ${version.version} 版的` }, `提问模板「${version.questionTemplate}」`] } : {}),
+      outcomes: [[`自定义分析「${version.title}」`, { technical: `第 ${version.version} 版` }, '的结果集修订版：每个单元的回答与引文，在「分析 › 自定义」中查看']],
+    },
     // 同类型重做 / 重新准备 / 重新确认 (Issue #931) stay as the shared builder offers them; the drawer prepares each again on this
     // dimension (`custom`), on the version the plan froze, never through the baseline's preparation.
     custom: { dimensionId: version.dimensionId },

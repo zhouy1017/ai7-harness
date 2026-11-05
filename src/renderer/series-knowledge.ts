@@ -75,6 +75,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -173,11 +174,11 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     nodes.push(toolbar);
     if (propose !== null) nodes.push(draftForm(propose, 'propose'));
 
-    nodes.push(el('h4', undefined, KNOWLEDGE_ITEMS_HEADING));
+    const itemsHeading = el('h4', undefined, KNOWLEDGE_ITEMS_HEADING);
+    if (knowledge.items.length === 0) itemsHeading.append(' · ', el('span', 'knowledge-items-empty', searched === '' ? KNOWLEDGE_ITEMS_EMPTY : KNOWLEDGE_SEARCH_NONE));
+    nodes.push(itemsHeading);
     if (knowledge.itemCount > 0) nodes.push(searchRow());
-    if (knowledge.items.length === 0) {
-      nodes.push(el('p', 'field-note knowledge-items-empty', searched === '' ? KNOWLEDGE_ITEMS_EMPTY : KNOWLEDGE_SEARCH_NONE));
-    } else {
+    if (knowledge.items.length > 0) {
       const list = el('ul', 'knowledge-items');
       for (const item of knowledge.items) list.append(itemNode(item));
       nodes.push(list);
@@ -185,9 +186,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     if (knowledge.itemsNext !== null) nodes.push(moreRow(KNOWLEDGE_ITEMS_MORE, 'items-more', () => void loadItems(false)));
     if (itemsLater) nodes.push(moreRow('回到首批条目', 'items-reset', () => void loadItems(true, true)));
     if (conflictReader !== null) nodes.push(conflictReaderNode());
-    nodes.push(el('h4', undefined, KNOWLEDGE_CANDIDATES_HEADING));
-    if (knowledge.candidates.length === 0) nodes.push(el('p', 'field-note knowledge-candidates-empty', KNOWLEDGE_CANDIDATES_EMPTY));
-    else {
+    const candidatesHeading = el('h4', undefined, KNOWLEDGE_CANDIDATES_HEADING);
+    if (knowledge.candidates.length === 0) candidatesHeading.append(' · ', el('span', 'knowledge-candidates-empty', KNOWLEDGE_CANDIDATES_EMPTY));
+    nodes.push(candidatesHeading);
+    if (knowledge.candidates.length > 0) {
       const list = el('ul', 'knowledge-candidates');
       for (const candidate of knowledge.candidates) list.append(candidateNode(candidate));
       nodes.push(list);
@@ -238,12 +240,14 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     node.dataset['itemId'] = item.itemId;
     const current = item.current;
     node.dataset['revision'] = String(current.ordinal);
-    const title = el('p', 'knowledge-item-title', knowledgeItemLine(item));
+    const title = el('span', 'knowledge-item-title', knowledgeItemLine(item));
     title.tabIndex = -1;
-    node.append(title, el('p', 'knowledge-item-content', current.content),
-      el('p', 'field-note knowledge-item-provenance', knowledgeProvenanceLine(current.provenance)), el('p', 'field-note knowledge-item-reuse', knowledgeReuseLine(current)));
+    const context = el('p');
+    context.append(title, ' · ', el('span', 'knowledge-item-provenance', knowledgeProvenanceLine(current.provenance).replace(/。$/u, '')), '；',
+      el('span', 'knowledge-item-reuse', knowledgeReuseLine(current)));
+    node.append(context, el('p', 'knowledge-item-content', current.content));
     const kept = knowledgeKeptConflictsLine(current.conflictCount);
-    if (kept !== null) node.append(el('p', 'field-note knowledge-item-conflicts', kept), conflictButton(item.itemId, current));
+    if (kept !== null) { context.append(' · ', el('span', 'knowledge-item-conflicts', kept)); node.append(conflictButton(item.itemId, current)); }
     const forItem = action(KNOWLEDGE_PROPOSE_FOR_ITEM, 'quiet', 'propose-item', () => {
       if (busy) return;
       propose = { target: item.itemId, targetLabel: `「${item.subject}」（${item.classLabel}）`, subject: '', knowledgeClass: '', content: '' };
@@ -262,9 +266,10 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const state = histories.get(item.itemId) ?? { open: false, revisions: null, nextBefore: null, later: false, failed: false, retryFresh: true };
     const details = el('details', 'knowledge-item-history');
     details.open = state.open;
-    details.append(el('summary', undefined, knowledgeRevisionsSummary(item.revisionCount)));
+    const summary = el('summary', undefined, knowledgeRevisionsSummary(item.revisionCount));
+    details.append(summary);
     if (state.revisions === null) {
-      if (state.open && !state.failed) details.append(el('p', 'field-note', KNOWLEDGE_STATUS.loadingMore));
+      if (state.open && !state.failed) summary.append(' · ', KNOWLEDGE_STATUS.loadingMore);
     } else {
       const list = el('ol');
       for (const revision of state.revisions) {
@@ -277,8 +282,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
       if (state.later) details.append(moreRow('回到最新版本', 'revisions-reset', () => void loadRevisions(item.itemId, true)));
     }
     if (state.failed) {
-      details.append(el('p', 'field-note', '历次版本未能读取。可以重试；已有页面保留。'));
-      details.append(moreRow('重试读取版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.retryFresh)));
+      details.append(moreRow('读取失败 · 重试版本', 'revisions-retry', () => void loadRevisions(item.itemId, state.retryFresh)));
     }
     details.addEventListener('toggle', () => {
       if (!details.isConnected) return;
@@ -315,8 +319,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     for (const entry of reader.page.conflicts) list.append(el('li', undefined, entry.line));
     section.append(title, list);
     if (reader.failed) {
-      section.append(el('p', 'field-note', '冲突未能读取。已有页面保留，可以重试。'));
-      section.append(moreRow('重试读取冲突', 'conflicts-retry', () => void loadConflicts(reader.requestedAfter)));
+      section.append(moreRow('读取失败 · 重试冲突', 'conflicts-retry', () => void loadConflicts(reader.requestedAfter)));
     }
     if (reader.page.nextAfter !== null) section.append(moreRow('下一批冲突', 'conflicts-more', () => void loadConflicts(reader.page.nextAfter!)));
     if (reader.after > 0) section.append(moreRow('回到首批冲突', 'conflicts-reset', () => void loadConflicts(0)));
@@ -447,8 +450,9 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     const node = el('li', 'knowledge-candidate');
     node.dataset['candidateId'] = candidate.candidateId;
     node.dataset['authoring'] = candidate.authoring;
-    node.append(el('p', 'knowledge-candidate-target', knowledgeTargetLine(candidate)), el('p', 'knowledge-candidate-content', candidate.content),
-      el('p', 'field-note knowledge-candidate-provenance', knowledgeProvenanceLine(candidate.provenance)));
+    const target = el('p', 'knowledge-candidate-target', knowledgeTargetLine(candidate));
+    target.append(' · ', el('span', 'knowledge-candidate-provenance', knowledgeProvenanceLine(candidate.provenance)));
+    node.append(target, el('p', 'knowledge-candidate-content', candidate.content));
     if (candidate.conflicts > 0) node.append(el('p', 'attention-note knowledge-candidate-conflict', '存在书系知识冲突 · 需要处理'));
     const open = action(KNOWLEDGE_REVIEW_OPEN, 'quiet', 'review', () => void openReview(candidate.candidateId));
     open.disabled = busy || reviewing !== null;
@@ -582,12 +586,16 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
     box.append(heading);
     if (review !== null) {
       box.dataset['version'] = String(review.candidate.version);
-      box.append(el('p', 'knowledge-review-identity', knowledgeReviewIdentity(review)), el('p', 'knowledge-review-content', review.candidate.content),
-        el('p', 'field-note knowledge-review-provenance', knowledgeProvenanceLine(review.candidate.provenance)));
-      if (review.current !== null) box.append(el('p', 'field-note knowledge-review-superseded', knowledgeSupersededLine(review.current)));
+      const identity = el('p', 'knowledge-review-identity', knowledgeReviewIdentity(review));
+      identity.append(' · ', el('span', 'knowledge-review-provenance', knowledgeProvenanceLine(review.candidate.provenance)));
+      box.append(identity, el('p', 'knowledge-review-content', review.candidate.content));
+      if (review.current !== null) identity.append(' · ', el('span', 'knowledge-review-superseded', knowledgeSupersededLine(review.current)));
       if (review.conflictLabel !== null) {
         const conflicts = el('div', 'knowledge-review-conflicts');
-        conflicts.append(el('p', 'attention-note knowledge-conflict-label', review.conflictLabel));
+        const conflictStatus = el('p', 'attention-note');
+        conflictStatus.append(el('span', 'knowledge-conflict-label', review.conflictLabel), ' · ', el('span', 'knowledge-conflicts-range',
+          `第 ${review.conflictsAfter + 1}–${review.conflictsAfter + review.conflicts.length} 处 / 共 ${review.conflictCount} 处冲突`));
+        conflicts.append(conflictStatus);
         const list = el('ul');
         for (const conflict of review.conflicts) {
           const line = el('li', undefined, conflict.line);
@@ -595,8 +603,6 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
           list.append(line);
         }
         conflicts.append(list);
-        conflicts.append(el('p', 'field-note knowledge-conflicts-range',
-          `第 ${review.conflictsAfter + 1}–${review.conflictsAfter + review.conflicts.length} 处 / 共 ${review.conflictCount} 处冲突`));
         const paging = el('div', 'button-row');
         if (review.conflictsNextAfter !== null) paging.append(action('更多冲突…', 'quiet', 'review-conflicts-next',
           () => void readReviewConflicts(review!.conflictsNextAfter!)));
@@ -615,16 +621,18 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
           paint('[data-knowledge-action="preserve"]');
         });
         keep.setAttribute('aria-pressed', String(preserved));
+        if (preserved) keep.append(' · ', el('span', 'knowledge-preserved-note', KNOWLEDGE_PRESERVED_NOTE));
         const close = action(KNOWLEDGE_CANCEL, 'secondary', 'review-cancel', () => closeReview());
         for (const button of [editButton, keep, close]) button.disabled = busy;
         choices.append(editButton, keep, close);
         conflicts.append(choices);
-        if (preserved) conflicts.append(el('p', 'field-note knowledge-preserved-note', KNOWLEDGE_PRESERVED_NOTE));
         box.append(conflicts);
       }
       if (edit !== null) box.append(draftForm(edit, 'edit'));
       const uses = el('fieldset', 'knowledge-reuse');
-      uses.append(el('legend', undefined, KNOWLEDGE_REUSE_LEGEND));
+      const reuseHeading = el('legend', undefined, KNOWLEDGE_REUSE_LEGEND);
+      reuseHeading.append(' · ', el('span', 'knowledge-promote-note', KNOWLEDGE_PROMOTE_NOTE));
+      uses.append(reuseHeading);
       for (const entry of review.reuseScopes) {
         const choice = el('label', 'knowledge-reuse-choice');
         const radio = el('input');
@@ -641,7 +649,7 @@ export function mountSeriesKnowledge(options: MountSeriesKnowledgeOptions): { up
         choice.append(radio, el('span', undefined, entry.label));
         uses.append(choice);
       }
-      box.append(uses, el('p', 'field-note knowledge-promote-note', KNOWLEDGE_PROMOTE_NOTE));
+      box.append(uses);
       const waits = knowledgePromoteWaits(review, reuse !== null, preserved);
       const buttons = el('div', 'button-row');
       const promote = action(review.actionLabel, 'primary', 'promote', () => void submitPromote());

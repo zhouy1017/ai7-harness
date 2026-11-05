@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { TaskPlanProjection, TaskPlanStartProjection, TaskPlanStateKey } from '../../src/shared/protocol.js';
 import { IPC_CHANNELS, TASK_PLAN_KINDS } from '../../src/shared/protocol.js';
 import {
@@ -95,7 +96,6 @@ import {
   TASK_PLAN_EDIT_STEP_REMOVED,
   TASK_PLAN_EDIT_STEPS_NOTE,
   TASK_PLAN_EDIT_TAG,
-  TASK_PLAN_FULL_LINK_EDITABLE,
   taskPlanEditCount,
   taskPlanEditCountAfterDrift,
   taskPlanEditRemoveStep,
@@ -109,6 +109,9 @@ import {
   groupedCount,
   taskBarSummary,
   taskBarContinuationNote,
+  taskBarResumeOutcome,
+  taskBarResumableStatement,
+  taskBarResumableStatus,
   taskPlanActivityIsStale,
   taskPlanActivityRows,
   taskBarView,
@@ -283,12 +286,30 @@ describe('精简 and 完整 (D6)', () => {
     expect(TASK_PLAN_COMPACT_TERMS).toEqual(['处理', '发送', '会得到', '不会', '中途']);
     expect(TASK_PLAN_FULL_LINK).toBe('完整计划（6 段）');
     expect(taskPlanCompactRows(plan())).toEqual([
-      ['处理', '《合成书名》全书 · 12,345 字 · 8 个阅读范围'],
-      ['发送', '本环境不连接模型服务，不会发送任何内容 · 用量：不发送，没有模型用量 · 未设置任务预算上限'],
-      ['会得到', '一份基线分析；这次运行的运行报告'],
-      ['不会', '不会直接修改稿件 · 不导出或发布'],
-      ['中途', '预计无需中途参与'],
+      ['处理', '只处理任务卡所列范围，不参考其他材料。'],
+      ['发送', '不发送，无模型用量。'],
+      ['会得到', '一份基线分析。'],
+      ['不会', '不改稿、导出发布。'],
+      ['中途', '预计无需参与，可随时暂停或取消。'],
     ]);
+  });
+
+  it('derives compact usage and non-effects from the plan facts', () => {
+    const original = plan();
+    const rowsFor = (fact: string) => Object.fromEntries(taskPlanCompactRows(plan({
+      notDo: { ...original.notDo, editorial: [...original.notDo.editorial, fact] },
+      service: { ...original.service, send: '范围内正文发往已选模型', usage: '达到 80,000 tokens 后不再发送新的请求（8 个阅读范围）' },
+    })));
+    expect(rowsFor('不重新读取所选范围以外的正文')['不会']).toBe('不改稿、导出发布、重读范围外正文。');
+    expect(rowsFor('不读允许参考以外的资料')['不会']).toBe('不改稿、导出发布、读参考外资料。');
+    expect(rowsFor('不作事实判定')['发送']).toBe('发往模型，达到 80,000 tokens 后不再发送。');
+    for (const facts of [
+      ['不照抄范例：与范例比较', '不照抄资料库资料：逐份比较', '不交付、不发送：草稿由你修改', '不改评估记录与基线分析', '不读这本书以外的稿件'],
+      ['不读所选范围以外的正文', '不在所选段落以外标出发现：只计数', '不给出合规、查重或政策结论'],
+    ]) {
+      const compact = Object.fromEntries(taskPlanCompactRows(plan({ notDo: { editorial: [...original.notDo.editorial, '不存里程碑版本', ...facts], technical: [] } })));
+      expect([...compact['不会']!].length).toBeLessThanOrEqual(36);
+    }
   });
 
   it('labels a usage ceiling as a ceiling, never a prediction, and names what is referred to and what follows the Run', () => {
@@ -298,10 +319,20 @@ describe('精简 and 完整 (D6)', () => {
       participation: { during: '预计无需中途参与', after: '每一类完成后，它的发现立即可以处理' },
     });
     const rows = Object.fromEntries(taskPlanCompactRows(live));
-    expect(rows['处理']).toBe('《合成书名》全书 · 12,345 字 · 8 个阅读范围；参考 上一份基线分析（第 1 份，读的是 r1）');
-    expect(rows['发送']).toBe(`本环境不连接模型服务，不会发送任何内容 · 用量：至多 240,000 tokens（8 个阅读范围）（${TASK_PLAN_CEILING_NOTE}） · 任务运行预算上限：240,000 tokens`);
+    expect(rows['处理']).toBe('处理任务卡所列范围，参考 1 项材料。');
+    expect(rows['发送']).toBe('不发送，达到 240,000 tokens 后不再发送。');
     expect(TASK_PLAN_CEILING_NOTE).toBe('上限，不是预测');
-    expect(rows['中途']).toBe('预计无需中途参与；结束后：每一类完成后，它的发现立即可以处理');
+    expect(rows['中途']).toBe('预计无需参与，可随时暂停或取消。');
+    for (const kind of TASK_PLAN_KINDS) {
+      const candidate = plan({ ...live, kind, service: { ...live.service, send: '范围内正文发往已选模型' } });
+      const compact = taskPlanCompactRows(candidate);
+      expect(compact).toHaveLength(5);
+      for (const [, sentence] of compact) {
+        expect([...sentence].length).toBeLessThanOrEqual(36);
+        expect(sentence.match(/[。！？]/gu)).toHaveLength(1);
+      }
+      expect(taskBarSummary(candidate).length).toBeLessThanOrEqual(40);
+    }
   });
 
   it('names 完整\'s six sections, TASK-030\'s separate regions, and PLAN-012\'s two columns', () => {
@@ -325,6 +356,9 @@ describe('精简 and 完整 (D6)', () => {
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中，由这份计划设定）');
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（使用中）');
     expect(taskPlanDefaultRuleCurrent({ ...current, state: 'deactivated', fromThisPlan: false })).toBe('这本书的默认执行规则：开始同步 · 第 2 版（已停用）');
+    setTechnicalLayerVisible(false);
+    expect(taskPlanDefaultRuleCurrent({ ...current, state: 'active', fromThisPlan: true })).toBe('这本书的默认规则：开始同步 · 第 2 版 · 使用中 · 由这份计划设定');
+    setTechnicalLayerVisible(true);
     expect(taskPlanQuickStarted('开始同步 · 第 2 版')).toBe('已按默认执行规则「开始同步 · 第 2 版」快速开始');
     expect(TASK_PLAN_VIEW_RULES).toBe('查看规则');
     expect(taskPlanQuickStartFellBack(['离线：这台设备现在没有网络。'])).toBe('快速开始没有开始这项任务：离线：这台设备现在没有网络。');
@@ -379,11 +413,11 @@ describe('the authorization bar (S74a)', () => {
   });
 
   it('sums the plan up in one line: 书 · 范围 · 计划版本 · 模型角色 · 预算上限 · 产出 · 不改稿 (AUTH-001)', () => {
-    expect(taskBarSummary(plan())).toBe('《合成书名》 · 全书 · 计划版本 1 · 主编辑角色 · 未设置任务预算上限 · 产出：一份基线分析 · 不改稿');
+    expect(taskBarSummary(plan())).toBe('产出一份基线分析，不修改稿件。');
     // A kind that keeps no plan versions names none rather than inventing one.
-    expect(taskBarSummary(plan({ kind: 'fixed-task', planVersion: null }))).toBe('《合成书名》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿');
+    expect(taskBarSummary(plan({ kind: 'fixed-task', planVersion: null }))).toBe('产出一条运行记录（不派发），不修改稿件。');
     expect(taskBarSummary(plan({ kind: 'review-run', planVersion: null, goal: { ...plan().goal, chips: { ...plan().goal.chips, position: '「第一章」至「第三章」' } } })))
-      .toBe('《合成书名》 · 「第一章」至「第三章」 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿');
+      .toBe('产出审阅发现与审阅报告，不修改稿件。');
   });
 
   it('offers 开始任务, 返回修改 into the plan\'s editing, and 保存草稿 while the plan can start (AUTH-002, PLAN-011)', () => {
@@ -405,6 +439,12 @@ describe('the authorization bar (S74a)', () => {
     const noRoute = taskBarView(barOf({ readiness: 'no-route' }));
     expect(noRoute.note).toBe(TASK_BAR_NOTES['no-route']);
     expect(action(noRoute, 'start')?.disabledReason).toBeNull();
+    setTechnicalLayerVisible(false);
+    try {
+      const ordinary = taskBarView(barOf({ readiness: 'no-route' }));
+      expect(ordinary.note).toBe('当前设置只能记录任务，暂时无法执行。');
+      expect(ordinary.actions).toEqual(noRoute.actions);
+    } finally { setTechnicalLayerVisible(true); }
   });
 
   it('says why a plan can never be started, beside a disabled 开始任务, and offers nothing that starts it (Issue #432 re-review)', () => {
@@ -631,6 +671,30 @@ describe('the authorization bar (S74a)', () => {
     expect(taskBarContinuationNote(null, 8)).toBe('已保存的阅读进度无法核对，这次运行不能续行；可以取消它，再重新开始');
   });
 
+  it('shows the reason and time of the previous continuation, with network settings for reachability stops (Issue #1309)', () => {
+    const stopped = {
+      runRecordId: 'run', cancelling: false, pausing: false,
+      stopReason: 'proxy-unreachable' as const, stopAt: '2026-09-23T04:05:06.000Z',
+      cancel: { reason: null, impact: [] }, pause: { reason: '不能暂停' }, resume: { reason: null }, redo: { reason: null },
+      activity: null, executingSince: null, continuation: { unitsSettled: 3, unitsTotal: 8, pendingAnswerUnits: [] }, update: null,
+      accountLimit: null, outcomeUnknown: null,
+    };
+    const view = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'resumable', label: '任务已中断 · 可续行' }, runControl: stopped }));
+    expect(view.note).toContain('上次续行于');
+    expect(view.note).toContain('因 代理不可达 停下');
+    expect(view.statement).toBe(taskBarResumableStatement('proxy-unreachable'));
+    expect(view.status).toBe(taskBarResumableStatus('proxy-unreachable'));
+    expect(view.actions[0]).toMatchObject({ name: 'connect', label: '去设置 › 模型服务 › 网络代理' });
+    expect(view.actions[1]).toMatchObject({ name: 'resume', label: '续行' });
+    const { stopAt: _stopAt, ...firstStopControl } = stopped;
+    const firstStop = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, {
+      state: { key: 'resumable', label: '任务已中断 · 可续行' }, runControl: firstStopControl,
+    }));
+    expect(firstStop.note).not.toContain('上次续行于');
+    expect(taskBarResumeOutcome('proxy-unreachable', true)).toEqual({ message: '续行后仍然 代理不可达；没有发送任何书稿内容', tone: 'error' });
+    expect(taskBarResumeOutcome('proxy-unreachable', false)).toEqual({ message: '已续行，从已保存的进度接着读。', tone: 'success' });
+  });
+
   it('states a cancelled wait as cancelled with nothing sent — never as 已中断 — and only links to it (OFF-010, OFF-012)', () => {
     const cancelled = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'cancelled', label: '已取消' } }));
     expect(cancelled).toMatchObject({ statement: null, note: null, status: '已取消 · 未发送任何内容' });
@@ -699,7 +763,7 @@ describe('the activity card (Issue #422, AUTH-011)', () => {
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:05.000Z'))).toBe(false);
     expect(taskPlanActivityIsStale(activity, at('2026-09-24T01:01:11.000Z'))).toBe(true);
     expect(taskPlanActivityIsStale({ ...activity, currentUnitStartedAt: null }, at('2026-09-24T02:00:00.000Z'))).toBe(false);
-    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。');
+    expect(TASK_PLAN_ACTIVITY_UNREPORTED).toBe('任务在上次关闭时未结束，目前没有运行；可以取消并重新准备。');
   });
 
   it('shows every governed unit and starts stale timing at that request admission (#1131)', () => {
@@ -734,8 +798,7 @@ describe('the editable plan (S73)', () => {
     expect(TASK_PLAN_EDIT_RESTORE).toBe('恢复');
     expect(TASK_PLAN_EDIT_STEPS_NOTE).toBe('这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。');
     // S76d (Issue #422): the move is offered now, and the note says what it means for the Run.
-    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。');
-    expect(TASK_PLAN_FULL_LINK_EDITABLE).toBe('完整计划（6 段）· 可以改步骤与限制');
+    expect(TASK_PLAN_EDIT_ASK_FIRST_NOTE).toBe('这一步暂停等你回答，其他阅读范围继续。');
     expect(TASK_PLAN_MATERIALITY_LABELS).toEqual({ material: '关键内容', derived: '随之变化', edited: '你改的' });
     expect(taskPlanEditCount(2)).toBe('你改了 2 处');
     expect(taskPlanEditCountAfterDrift(1)).toBe('你改了 1 处；重新确认计划后再更新计划');
@@ -811,7 +874,7 @@ describe('the Run Budget Ceiling in the drawer (S16a)', () => {
     expect(TASK_PLAN_BUDGET_NOTE).toBe('用量和费用仍受所选模型服务的账户控制与计费条款约束。');
     expect(TASK_PLAN_BUDGET_SET).toBe('设置上限…');
     expect(TASK_PLAN_BUDGET_REMOVE).toBe('去掉上限');
-    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限（tokens）');
+    expect(TASK_PLAN_BUDGET_INPUT).toBe('预算上限 · 词元');
     expect(TASK_PLAN_BUDGET_HINT).toBe('这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。');
     expect(TASK_PLAN_BUDGET_APPLY).toBe('设定');
     expect(TASK_PLAN_BUDGET_CANCEL).toBe('取消');
@@ -907,9 +970,7 @@ describe('结果待确认 in the drawer (S16c)', () => {
 
   it('names the unconfirmed ranges and what the editor can do, with no repeat-shaped action', () => {
     expect([TASK_BAR_VIEW_UNCONFIRMED, TASK_BAR_UNCONFIRMED_HEADING]).toEqual(['查看未确认的部分', '该单元结果未知']);
-    expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe(
-      '1 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。' +
-      '其余已读完的 7 / 8 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 1 个记为结果未知的单元缺口');
+    expect(taskBarOutcomeUnknownNote(1, 8, 8)).toBe('1 处回答未传全，处理与计费未知且不会重发，取消后保留其余 7/8 处结果。');
     expect(taskBarOutcomeUnknownNote(1, 8, 8)).not.toMatch(/续行|重做|再次计费/u);
     expect(taskBarUnconfirmedUnit(4, 1)).toBe('第 4 个阅读范围 · 请求已发出 1 次 · 回答没有完整传回');
     const unknown = taskBarView(barOf({ readiness: 'started', planEnvelopeDigest: null }, { state: { key: 'outcome-unknown', label: '结果待确认' }, runControl: control }));

@@ -12,18 +12,17 @@ import type {
  */
 
 export const SERIES_TITLE = '书系';
-export const SERIES_LEDE = '书系把相关的图书放在一起。加入书系只让以后的任务可以明确选用书系的范围：不会让一本书读到另一本书的原文，也不会自动授权任何任务。';
+export const SERIES_LEDE = '书系归集相关图书，供以后任务明确选择范围；加入书系不会让一本书读到另一本书的原文，也不会自动授权任务。';
 export const SERIES_EMPTY = '还没有书系。';
 export const SERIES_CREATE_OPEN = '新建书系…';
 export const SERIES_CREATE = '新建书系';
 export const SERIES_CANCEL = '取消';
 export const SERIES_NAME_LABEL = '书系名称';
-export const SERIES_NOTE_LABEL = '说明（可选）';
+export const SERIES_NOTE_LABEL = '说明 · 可选';
 export const SERIES_MEMBERS_HEADING = '成员与共享范围';
 /** SER-001: membership is a scope for later explicit selection, and the page is no reader of the members' manuscripts. */
 export const SERIES_SCOPE_NOTE = '成员只表示以后的任务可以明确选用这个书系的范围；这里不汇总、也不打开成员图书的原文。';
 export const SERIES_MEMBERS_EMPTY = '书系里还没有图书。';
-export const SERIES_MEMBER_COLUMNS = ['图书', '作者', '责编', '加入时间', '书系一致性审阅', '操作'] as const;
 export const SERIES_ADD_OPEN = '加入书系…';
 export const SERIES_REMOVE_OPEN = '移出书系…';
 export const SERIES_ADD_NONE = '所有图书都已在这个书系中。';
@@ -68,12 +67,12 @@ export function seriesListLine(series: Pick<SeriesSummaryProjection, 'title' | '
 }
 
 /** 书系一致性审阅 for one member: when it last ran, or that it has not, and whether it can be chosen now or why not (Issue #64, S29a). */
-export function seriesConsistencyLine(
+export function seriesConsistencyLines(
   member: Pick<SeriesMemberProjection, 'seriesConsistencyReview' | 'seriesConsistencyUnavailableReason'>,
   instant: (iso: string) => string,
-): string {
+): { reviewed: string; availability: string } {
   const last = member.seriesConsistencyReview === null ? '尚未审阅' : `审阅于 ${instant(member.seriesConsistencyReview.reviewedAt)}`;
-  return member.seriesConsistencyUnavailableReason === null ? `${last} · 可以审阅` : `${last} · 暂不能审阅：${member.seriesConsistencyUnavailableReason}`;
+  return { reviewed: last, availability: member.seriesConsistencyUnavailableReason === null ? '可以审阅' : '暂不能审阅' };
 }
 
 /** A list of names, or 未填写. */

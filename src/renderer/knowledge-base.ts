@@ -1,3 +1,5 @@
+import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
+import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { mountEditableProcedureLibrary } from './procedure-library.js';
 import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
 import { mountEditQualitySignals } from './quality-learning.js';
@@ -10,8 +12,8 @@ import { mountLearningMaterials } from './quality-learning.js';
 import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
-import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, type QualityLearningTab } from './quality-learning-labels.js';
-import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_LATER, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, visibleQualityLearningTabs, type QualityLearningTab } from './quality-learning-labels.js';
+import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
 import { mountImportedSkills } from './imported-skills.js';
@@ -56,14 +58,36 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it; `materialId` is
    * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
    */
-  async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocused = false, materialId: string | null = null): Promise<void> {
+  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null): Promise<void> {
+    if (tab === 'home') {
+      const content = panel();
+      content.classList.add('knowledge-base');
+      content.dataset['knowledgeTab'] = 'home';
+      const home = element('div', 'knowledge-home');
+      const back = element('div', 'button-row');
+      back.append(button('返回', 'quiet', () => void returnToOrigin()));
+      content.append(element('h2', undefined, KNOWLEDGE_BASE_TITLE), home, back);
+      replaceScreen('knowledge-base', content);
+      options.rememberReturn(content, () => renderKnowledgeBase());
+      await mountKnowledgeBaseHome(home, window.ai7, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
+      if (content.isConnected) setStatus('知识库已打开');
+      return;
+    }
+    if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
+      await renderKnowledgeBase();
+      setStatus('该页在开发者模式下显示');
+      return;
+    }
     if (tab === 'rules') {
+      const { content } = knowledgeBasePage(tab, tabFocused);
       setStatus('正在读取工序与规则…', 'busy');
       try {
         const [rules, procedures] = await Promise.all([window.ai7.inspectDefaultExecutionRules(), window.ai7.inspectKnowledgeProcedures()]);
+        if (!content.isConnected || !technicalLayerVisible) return;
         renderKnowledgeBaseProjection(rules, tabFocused, procedures);
         setStatus('工序与规则已打开');
       } catch (error) {
+        if (!content.isConnected || !technicalLayerVisible) return;
         setStatus(rendererErrorMessage(error, '无法读取工序与规则。'), 'error');
       }
       return;
@@ -146,8 +170,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         renderExemplars(root, next);
       },
     };
-    root.append(exemplarImportButton(surface));
-    if (projection.books.length === 0) root.append(element('p', 'field-note exemplars-empty', EXEMPLARS_EMPTY));
+    const importRow = element('div', 'button-row');
+    if (projection.books.length === 0) importRow.append(element('span', 'exemplars-empty', EXEMPLARS_EMPTY));
+    importRow.append(exemplarImportButton(surface));
+    root.append(importRow);
     const list = element('div', 'exemplar-list');
     const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
       list.replaceChildren();
@@ -160,13 +186,16 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const heading = element('h3', undefined, `《${book.bookTitle}》`);
         heading.tabIndex = -1;
         first ??= heading;
-        card.append(
-          heading,
-          element('p', 'field-note exemplar-attribution', exemplarAttribution(book)),
-          element('p', 'field-note exemplar-designation', exemplarDesignation(book, localInstantLabel)),
-        );
+        const context = element('p', 'field-note');
         const skipped = book.skipped ?? [];
-        if (book.exemplars.length === 0 && skipped.length === 0) card.append(element('p', 'field-note', EXEMPLARS_NONE_DELIVERED));
+        const hasExtra = book.exemplars.length === 0 || skipped.length > 0;
+        context.append(element('span', 'exemplar-attribution', exemplarAttribution(book).replace(/。$/u, '')), '；',
+          element('span', 'exemplar-designation', hasExtra ? exemplarDesignation(book, localInstantLabel).replace(/。$/u, '') : exemplarDesignation(book, localInstantLabel)));
+        if (book.exemplars.length === 0 && skipped.length === 0) context.append(`；${EXEMPLARS_NONE_DELIVERED}`);
+        if (skipped.length > 0) context.append('；', element('span', 'exemplars-skipped', exemplarSkippedNote(skipped)));
+        card.append(heading, context);
+        const more = element('details', 'knowledge-file-more');
+        more.append(element('summary', undefined, '查看范例'));
         const items = element('ul', 'exemplar-items');
         for (const exemplar of book.exemplars) {
           const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
@@ -176,11 +205,11 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
           if (exemplar.imported) item.append(exemplarEligibility(surface, exemplar));
           items.append(item);
         }
-        if (book.exemplars.length > 0) card.append(items);
+        if (book.exemplars.length > 0) more.append(items);
         // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
-        if (skipped.length > 0) card.append(element('p', 'field-note exemplars-skipped', exemplarSkippedNote(skipped)));
-        card.append(readersReportExemplars(book));
-        if (book.imported) card.append(exemplarImportButton(surface, book));
+        more.append(readersReportExemplars(book));
+        if (book.imported) more.append(exemplarImportButton(surface, book));
+        card.append(more);
         list.append(card);
       }
       root.dataset['exemplarBooks'] = String(list.children.length);
@@ -225,12 +254,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     };
     more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
     firstPage.addEventListener('click', () => void turn(null));
-    root.append(list, moreRow, ...EXEMPLARS_LATER.map((line) => element('p', 'field-note exemplars-later', line)));
+    root.append(list, moreRow);
   }
 
   /**
    * A published Book's 审稿意见 as 范例 offers them (Issue #429; KB-006): one line per template with a draft, at the version 图书交付包
-   * pins, each with `归入范例（仅本社）` until the editor admits that exact version. Admitting replaces only this list, from the Book
+   * pins, each with `归入本社范例` until the editor admits that exact version. Admitting replaces only this list, from the Book
    * the service answers with, and focus lands on the line admitted.
    */
   function readersReportExemplars(book: ExemplarBookProjection): HTMLElement {
@@ -279,20 +308,28 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * 待我处理 opens it, for that Book, with the way to every Book one step away; and 学习回溯 (Issue #62, S27a), the learning
    * audit of every material's lineage and 停止今后使用.
    */
-  async function renderQualityLearning(tab: QualityLearningTab, bookId: string | null, tabFocused = false,
+  async function renderQualityLearning(tab: QualityLearningTab = technicalLayerVisible ? 'learning' : 'feedback', bookId: string | null = null, tabFocused = false,
     openMaterial: { readonly bookId: string; readonly materialKey: string } | null = null, returnToReview: (() => void) | null = null): Promise<void> {
+    if (!technicalLayerVisible && QUALITY_LEARNING_TABS.find((entry) => entry.tab === tab)?.developerOnly === true) {
+      await renderQualityLearning('feedback', null);
+      setStatus('该页在开发者模式下显示');
+      return;
+    }
+    const qualityTabs = visibleQualityLearningTabs(technicalLayerVisible);
     const content = panel();
     content.classList.add('quality-learning');
     content.dataset['qualityTab'] = tab;
     const tabs = element('div', 'knowledge-tabs quality-tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', QUALITY_LEARNING_TABS_LABEL);
-    QUALITY_LEARNING_TABS.forEach((entry, index) => {
+    qualityTabs.forEach((entry, index) => {
+      const developerOnly = technicalLayerVisible && entry.developerOnly === true;
       const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
         if (entry.tab !== tab) void renderQualityLearning(entry.tab, null, true);
       });
       node.id = `quality-tab-${entry.tab}`;
       node.dataset['qualityTab'] = entry.tab;
+      if (developerOnly) node.dataset['developerOnly'] = 'true';
       node.setAttribute('role', 'tab');
       node.setAttribute('aria-selected', String(entry.tab === tab));
       node.setAttribute('aria-controls', 'quality-panel');
@@ -301,7 +338,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
         if (step === 0) return;
         event.preventDefault();
-        const next = QUALITY_LEARNING_TABS[(index + step + QUALITY_LEARNING_TABS.length) % QUALITY_LEARNING_TABS.length]!;
+        const next = qualityTabs[(index + step + qualityTabs.length) % qualityTabs.length]!;
         void renderQualityLearning(next.tab, null, true);
       });
       tabs.append(node);
@@ -359,18 +396,21 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    */
   function knowledgeBasePage(tab: KnowledgeBaseTab, tabFocused: boolean): { content: HTMLElement; panelNode: HTMLElement } {
     const view = knowledgeBaseTabView(tab);
+    const knowledgeTabs = visibleKnowledgeBaseTabs(technicalLayerVisible);
     const content = panel();
     content.classList.add('knowledge-base');
     content.dataset['knowledgeTab'] = tab;
     const tabs = element('div', 'knowledge-tabs');
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', KNOWLEDGE_BASE_TABS_LABEL);
-    KNOWLEDGE_BASE_TAB_VIEWS.forEach((entry, index) => {
+    knowledgeTabs.forEach((entry, index) => {
+      const developerOnly = technicalLayerVisible && entry.developerOnly === true;
       const node = button(entry.label, entry.tab === tab ? 'secondary' : 'quiet', () => {
         if (entry.tab !== tab) void renderKnowledgeBase(entry.tab, true);
       });
       node.id = `knowledge-tab-${entry.tab}`;
       node.dataset['knowledgeTab'] = entry.tab;
+      if (developerOnly) node.dataset['developerOnly'] = 'true';
       node.setAttribute('role', 'tab');
       node.setAttribute('aria-selected', String(entry.tab === tab));
       node.setAttribute('aria-controls', 'knowledge-panel');
@@ -379,7 +419,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
         if (step === 0) return;
         event.preventDefault();
-        const next = KNOWLEDGE_BASE_TAB_VIEWS[(index + step + KNOWLEDGE_BASE_TAB_VIEWS.length) % KNOWLEDGE_BASE_TAB_VIEWS.length]!;
+        const next = knowledgeTabs[(index + step + knowledgeTabs.length) % knowledgeTabs.length]!;
         void renderKnowledgeBase(next.tab, true);
       });
       tabs.append(node);
@@ -389,12 +429,12 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     panelNode.setAttribute('role', 'tabpanel');
     panelNode.setAttribute('aria-labelledby', `knowledge-tab-${tab}`);
     const back = element('div', 'button-row');
+    back.append(button('返回知识库', 'quiet', () => void renderKnowledgeBase()));
     back.append(button('返回', 'quiet', () => void returnToOrigin()));
     const holds = element('p', 'lede knowledge-holds', view.holds);
     content.append(
       element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),
-      element('h2', undefined, KNOWLEDGE_BASE_TITLE),
-      element('p', 'field-note', KNOWLEDGE_BASE_LEDE),
+      element('h2', undefined, view.label),
       tabs,
       holds,
     );
@@ -488,10 +528,9 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         if (custom.isConnected) custom.append(element('p', 'attention-note', rendererErrorMessage(error, '无法读取自定义分析维度。')));
       });
     }
-    panelNode.append(element('p', 'field-note', projection.statement));
-    if (projection.rules.length === 0) {
-      panelNode.append(element('p', 'field-note default-rule-empty', '还没有默认执行规则。在分析或写作任务的完整计划里点「设为快速开始默认…」就能设定。'));
-    }
+    const ruleContext = element('p', 'field-note', projection.rules.length === 0 ? projection.statement.replace(/。$/u, '') : projection.statement);
+    if (projection.rules.length === 0) ruleContext.append('；', element('span', 'default-rule-empty', '还没有默认执行规则，可在分析或写作任务计划中设置。'));
+    panelNode.append(ruleContext);
     const list = element('div', 'default-rule-list');
     for (const rule of projection.rules) {
       const card = element('article', 'default-rule-card');
@@ -500,7 +539,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       card.dataset['rulePattern'] = rule.pattern;
       card.dataset['ruleOrdinal'] = String(rule.ordinal);
       const heading = element('div', 'default-rule-heading');
-      const state = element('span', `status-pill default-rule-state-${rule.state}`, rule.stateLabel);
+      const state = element('span', `state-term status-pill default-rule-state-${rule.state}`, rule.stateLabel);
       heading.append(element('h3', undefined, `《${rule.bookTitle}》 · ${rule.name}`), state);
       const set = `由${rule.setBy}设定于 ${localInstantLabel(rule.setAt)}${rule.state === 'deactivated' ? ` · 停用于 ${localInstantLabel(rule.stateRecordedAt)}` : ''}`;
       // 查看: what the rule binds, in the rows the confirmation listed, and one step further the exact identities.
@@ -515,9 +554,10 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       }
       view.append(summary, binds, technicalDetails('default-rule-facts',
         element('dt', undefined, '规则'), element('dd', 'technical-identity', `${rule.ruleId} · ${rule.taskKind} · ${rule.pattern}`),
-        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `第 ${rule.ordinal} 版 · ${rule.ruleVersionId}`),
+        element('dt', undefined, '规则版本'), element('dd', 'technical-identity', `${technicalWords(`第 ${rule.ordinal} 版`, '版本')} · ${rule.ruleVersionId}`),
         element('dt', undefined, '设定时查看的计划'), element('dd', 'technical-identity', `${rule.sourceTaskIntentId} · ${rule.sourcePlanEnvelopeDigest}`)));
-      card.append(heading, element('p', undefined, rule.does), element('p', 'field-note', set), view);
+      heading.append(element('span', undefined, set));
+      card.append(heading, element('p', undefined, rule.does), view);
       if (rule.state === 'active') {
         const off = button('停用', 'secondary', async () => {
           off.disabled = true;

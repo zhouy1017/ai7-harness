@@ -30,6 +30,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -73,7 +74,8 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
   const stopRow = el('div', 'button-row');
   stopRow.append(stop);
   progress.append(progressLine, stopRow);
-  root.replaceChildren(el('h3', undefined, DATABASE_EXPORT_HEADING), el('p', 'field-note', DATABASE_EXPORT_LEDE), toolbar, progress, prepared, records);
+  const intro = el('p', 'field-note', DATABASE_EXPORT_LEDE);
+  root.replaceChildren(el('h3', undefined, DATABASE_EXPORT_HEADING), intro, toolbar, progress, prepared, records);
 
   // 取消导出 answers the export's own state, never the window's busy one.
   const setBusy = (value: boolean): void => {
@@ -132,14 +134,14 @@ export function mountDatabaseExport(options: MountDatabaseExportOptions): void {
       root.dataset['databaseExports'] = String(history.total);
       const list = el('ol');
       for (const receipt of history.exports) list.append(el('li', `database-export-record outcome-${receipt.outcome}`, databaseExportRecordLine(receipt, instant)));
-      records.replaceChildren(
-        el('summary', undefined, databaseExportRecordsLabel(history.exports.length, history.total)),
-        history.total === 0 ? el('p', 'field-note', DATABASE_EXPORT_NO_RECORDS) : list,
-      );
+      intro.textContent = history.total === 0 ? `${DATABASE_EXPORT_LEDE.replace(/。$/u, '')}；${DATABASE_EXPORT_NO_RECORDS}` : DATABASE_EXPORT_LEDE;
+      records.hidden = history.total === 0;
+      records.replaceChildren(el('summary', undefined, databaseExportRecordsLabel(history.exports.length, history.total)), ...(history.total === 0 ? [] : [list]));
       // A window opened while an export runs follows it as the one that began it would.
       if (history.activity?.state === 'running' && following === null && !busy) void resume(history.activity);
     } catch (error) {
       if (!root.isConnected) return;
+      records.hidden = false;
       records.replaceChildren(el('p', 'attention-note', errorMessage(error, DATABASE_EXPORT_STATUS_LINES.recordsUnavailable)));
     }
   };

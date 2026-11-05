@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import {
   LEARNING_INFLUENCE_RESULT_MARKER,
   LEARNING_INFLUENCE_WITHDRAWN_LABEL,
@@ -22,7 +23,7 @@ import { learningChoiceLabel } from './quality-learning-labels.js';
 export const LEARNING_AUDIT_HEADING = '学习回溯';
 /** What the audit is and is not (LAUD-001, LAUD-009, LAUD-012), said once above it. */
 export const LEARNING_AUDIT_NOTE =
-  '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么。停止今后使用不会删除任何历史，这里也不授予任何权限。';
+  '学习回溯只是记录：每条学习材料从哪里来、准入怎样决定、后来影响了什么；停止今后使用不会删除任何历史，这里也不授予任何权限。';
 export const LEARNING_AUDIT_FILTERS = {
   query: '搜索',
   book: '图书',
@@ -50,7 +51,7 @@ export const LEARNING_AUDIT_SERIES_UNAVAILABLE = '书系记录无法读取，书
 /** The filters LAUD-002 names that are not offered yet, and why. */
 export const LEARNING_AUDIT_FILTERS_LATER =
   '记忆候选、已启用记忆、后续使用和历史影响暂不能筛选；每条材料的编辑记忆状态和实际使用过的任务，在它的来源链里查看。模型自动归纳尚未提供。';
-export const LEARNING_AUDIT_EMPTY = '还没有学习材料。你在修改建议、分析结果和审阅里写下的原因与改动，会在这里留下来源链。';
+export const LEARNING_AUDIT_EMPTY = '还没有学习材料，你在修改建议、分析结果和审阅里的原因与改动会留下来源链。';
 export const LEARNING_AUDIT_NONE_MATCH = '没有符合的学习材料。';
 export const LEARNING_AUDIT_OPEN = '查看来源链…';
 export const LEARNING_AUDIT_MORE = '更多学习材料…';
@@ -105,13 +106,13 @@ export const LEARNING_LINEAGE_NOT_YET = '尚未生成';
 export const LEARNING_LINEAGE_TASKS_NONE = '尚未被任何任务使用';
 /** What the forward stages are, and why two are empty: said once, so an empty stage never reads as a hidden one. */
 export const LEARNING_LINEAGE_WHY_EMPTY =
-  '学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；这条材料目前没有编辑撰写的候选或已启用记忆，并非被隐藏。模型自动归纳尚未提供。';
+  '学习信号来自这条材料参与生成的本社审阅偏好版本，任务是实际参考这些版本的审阅；目前没有编辑撰写的候选或已启用记忆，并非被隐藏，模型自动归纳尚未提供。';
 /**
  * Candidate and active states are independent: an editor's proposed memory is real before explicit acceptance.
  */
 export function learningLineageWhy(activeMemories: number, memoryCandidates = 0): string {
   return activeMemories === 0 && memoryCandidates === 0 ? LEARNING_LINEAGE_WHY_EMPTY
-    : `学习信号是这条材料参与生成的本社审阅偏好版本，使用过的任务是实际参考过这些版本的审阅；当前有 ${memoryCandidates} 条编辑撰写的候选、${activeMemories} 条已启用记忆。候选须明确接受后使用，来源受限时暂停使用；模型自动归纳尚未提供。`;
+    : `学习信号来自这条材料参与生成的本社审阅偏好版本，任务是实际参考这些版本的审阅；当前有 ${memoryCandidates} 条编辑撰写的候选、${activeMemories} 条已启用记忆；候选须明确接受后使用，来源受限时暂停使用，模型自动归纳尚未提供。`;
 }
 export function learningLineageMemories(count: number): string {
   return `${count} 条你明确新建的编辑记忆引用了它；停止今后使用后，这些记忆会暂停使用，记录原样保留。`;
@@ -131,7 +132,7 @@ export const LEARNING_LINEAGE_TASK_USE: Readonly<Record<LearningLineageTaskProje
 
 /** One 使用过的任务 (Issue #912): the 审阅 category, the version it read, where it stands, and its marker. */
 export function learningLineageTaskLine(task: Pick<LearningLineageTaskProjection, 'label' | 'versionOrdinal' | 'use' | 'marked'>): string {
-  return `${task.label} · 参考 v${task.versionOrdinal} · ${LEARNING_LINEAGE_TASK_USE[task.use]}${task.marked ? ` · 已标上「${LEARNING_INFLUENCE_RESULT_MARKER}」` : ''}`;
+  return `${task.label} · 参考 ${technicalWords(`v${task.versionOrdinal}`)} · ${LEARNING_LINEAGE_TASK_USE[task.use]}${task.marked ? ` · 已标上「${LEARNING_INFLUENCE_RESULT_MARKER}」` : ''}`;
 }
 
 export function learningLineageEarlierTasks(count: number): string {

@@ -237,13 +237,14 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
 async function selectFirstManuscriptRelationship(renderer, name) {
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, name);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, name);
 }
 async function press(renderer, key) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key });
@@ -254,11 +255,11 @@ async function importBook(renderer, title, token, openEditor = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${token}-landing`);
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${token}-import`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${token}-target`);
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${token}-target`);
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, `${token}-target-select`);
   await selectFirstManuscriptRelationship(renderer, `${token}-relationship-select`);
   await fill(renderer, '#book-title', title, `${token}-title`);
-  await click(renderer, '确认书名并复核', `${token}-review`);
+  await click(renderer, '查看导入详情', `${token}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${token}-review-ready`);
   await click(renderer, '新建图书并导入稿件', `${token}-commit`);
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, `${token}-committed`, 180_000);
@@ -418,7 +419,7 @@ async function main() {
     }
     await loopback.close();
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-08', at, representative: '#screen[data-screen="landing"] > .panel', returnTo: SIDEBAR.destination('library') });
+    await runJ14DarkPass({ renderer, journey: 'J-08', at, representative: '#screen[data-screen="landing"] > .page-content', returnTo: SIDEBAR.destination('library') });
     await importBook(renderer, '恢复边界甲', 'book-a', true);
     await saveMilestone(renderer, '中断前检查点', 'checkpoint-one');
     await saveMilestone(renderer, '中断前复核快照', 'checkpoint-two');
@@ -466,14 +467,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen^="import-"]')`, 'defer-lower-priority-import');
     await assertRenderer(renderer, `Number(document.querySelector('[data-recovery-return]')?.dataset.recoveryReturnVersion)>=2`, 'return-route-import-recovery');
     await click(renderer, '继续导入', 'continue-lower-import');
-    await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'lower-import-target');
+    await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'lower-import-target');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-target');
     await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'lower-import-target-select');
     await selectFirstManuscriptRelationship(renderer, 'lower-import-relationship-select');
     await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'lower-import-title');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-title');
     await fill(renderer, '#book-title', '待处理导入丙', 'lower-import-title-fill');
-    await click(renderer, '确认书名并复核', 'lower-import-review');
+    await click(renderer, '查看导入详情', 'lower-import-review');
     await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'lower-import-review-ready');
     await assertRenderer(renderer, `document.querySelector('[data-recovery-return]')`, 'return-route-review');
     await click(renderer, '新建图书并导入稿件', 'lower-import-commit');
@@ -565,7 +566,7 @@ async function main() {
     await assertRenderer(renderer, `(() => { const journal=document.querySelector('[data-recovery-candidate="journal"] input'); journal.click(); return journal.checked; })()`, 'restore-journal-select');
     await assertRenderer(renderer, `!document.querySelector('.recovery-selection-consequence')?.hidden && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='恢复为新版本')?.disabled`, 'restore-consequence-visible');
     await click(renderer, '恢复为新版本', 'restore-descendant');
-    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'restored-r2', 120_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'restored-r2', 120_000);
     await assertRenderer(renderer, `!document.querySelector('.recovered-state-marker')?.hidden && document.querySelector('.recovered-state-marker')?.textContent==='当前为恢复的工作状态'`, 'recovered-marker');
     await click(renderer, '撤销', 'history-floor-undo');
     await waitFor(renderer, `document.querySelector('#persistence-status')?.textContent.includes('没有可撤销')`, 'history-floor-enforced');

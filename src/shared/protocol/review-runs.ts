@@ -1,3 +1,5 @@
+import type { SalvagedModelResult } from './analysis.js';
+import type { ReviewCategoryBasis } from '../review-basis.js';
 import type {
   ReviewExcludedFindingProjection,
   ReviewContractRejectionReason,
@@ -124,10 +126,10 @@ export interface ReviewCrossChapterInput {
   omitted: { units: number; findings: number; evidence: number; baselineLeads: number };
 }
 
-export interface ReviewCrossChapterResult {
+export interface ReviewCrossChapterResult extends SalvagedModelResult {
   readonly schema: 'ai7.editorial-review.cross-chapter-result/1';
   readonly findings: ReadonlyArray<{ readonly anchor: ReviewSynthesisEvidence; readonly evidence: ReadonlyArray<ReviewSynthesisEvidence>;
-    readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string }>;
+    readonly severity: ReviewFindingSeverity; readonly note: string; readonly clauseId: string | null }>;
   readonly rejected: ReadonlyArray<{ readonly index: number; readonly text: string; readonly reason: 'schema-invalid' | 'evidence-unknown' }>;
   readonly input: ReviewCrossChapterInput;
 }
@@ -265,6 +267,7 @@ export interface ReviewCategoryRevisionUpdateProjection {
 
 export type ReviewCategoryUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;
@@ -482,6 +485,11 @@ export interface ReviewAvailabilityProjection {
 
 /** One category of the configuration as the 新建审阅 sheet shows it, its basis stated once (REV-010). */
 export interface ReviewWorkspaceCategoryProjection {
+  /** This category's research backend cannot currently run. */
+  networkUnavailable?: boolean;
+  /** Scope-derived estimates only; not a usage or billing promise (#1320). */
+  crossChapter?: boolean;
+  changedUnits?: number;
   /** Only model-calling review contracts consume 资料库 references; factual review does not. */
   materialReferencesAllowed?: boolean;
   categoryId: string;
@@ -493,7 +501,7 @@ export interface ReviewWorkspaceCategoryProjection {
   searchEngine: boolean;
   /** Whether the category reads without a model and sends nothing: the leads read the baseline analysis. */
   modelFree: boolean;
-  basisStatement: string;
+  basis: ReviewCategoryBasis;
   guidelineDocuments: ReadonlyArray<{ documentId: string; title: string; issuer: string; version: string; clauseCount: number }>;
   procedure: { title: string; version: string };
   available: boolean;
@@ -587,7 +595,7 @@ export interface ReviewRunCategoryProjection {
   output: ReviewCategoryOutputKind;
   riskPointsOnly: boolean;
   batchApply: boolean;
-  basisStatement: string;
+  basis: ReviewCategoryBasis;
   state: ReviewRunCategoryState;
   stateLabel: string;
   detail: string | null;
@@ -802,6 +810,8 @@ export interface ReviewReportRecord extends ReviewReportDerivedSections {
 
 /** The opened Review Run (the latest when none is named) with its categories, findings and Report. */
 export interface ReviewRunProjection {
+  /** Existing repeat preparation input for optional references before authorization. */
+  referenceInput?: Omit<PrepareReviewRunInput, 'bookId'>;
   localCheck?: {
     planDigest: string;
     options: import('./procedures.js').LocalCheckOptions;
@@ -882,6 +892,8 @@ export interface TaskMaterialOffersProjection {
  * basis, the coverage matrix, the scope options, the 审阅记录, and the opened Run.
  */
 export interface ReviewWorkspaceProjection {
+  /** Own ranges of the current coverage units, without manuscript text. */
+  scopeUnitCounts?: { whole: number; units: ReadonlyArray<{ startPosition: number; endPosition: number }> };
   /** Latest editor-declared Book table, carried by its existing local ReviewRun. */
   localBookTerms?: readonly import('./procedures.js').BookTermEntry[];
   listPages?: TaskPlanProjection['listPages'];

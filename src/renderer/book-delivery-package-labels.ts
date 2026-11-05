@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type { BookDeliveryPackageVersionProjection } from '../shared/protocol.js';
 
 /**
@@ -10,7 +11,7 @@ import type { BookDeliveryPackageVersionProjection } from '../shared/protocol.js
 export const PACKAGE_HEADING = '图书交付包';
 export const PACKAGE_CONDITIONS_HEADING = '内容情况';
 /** A condition's state in words and shape, never by colour alone. */
-export const PACKAGE_CONDITION_STATE = { met: '✓ 可用', unmet: '○ 未包含' } as const;
+export const PACKAGE_CONDITION_STATE = { met: '可用', unmet: '未包含' } as const;
 export const PACKAGE_PREVIEW_HEADING = '清单预览';
 export const PACKAGE_INCLUDED_HEADING = '包含';
 export const PACKAGE_EXCLUDED_HEADING = '不包含';
@@ -32,7 +33,7 @@ export const PACKAGE_STATUS_LINES = {
   refreshFailed: '无法读取图书交付包。',
 } as const;
 
-/** Why `准备图书交付包` is unavailable: the conditions that do not hold yet, in the table's order. */
+/** Why `准备图书交付包` is unavailable: the conditions that do not hold yet, in the conditions' order. */
 export function packageNotReadyLine(unmet: ReadonlyArray<string>): string {
   return `还不能准备：${unmet.join('、')}未满足。`;
 }
@@ -44,7 +45,7 @@ export function packageChangedLine(label: string): string {
 
 /** `v2 · 图书交付包已准备 · 暂无导出记录` (DPKG-011): the prepared state beside its derived export history. */
 export function packageVersionLine(version: Pick<BookDeliveryPackageVersionProjection, 'label' | 'exportHistoryLabel'>): string {
-  return `${version.label} · ${PACKAGE_PREPARED} · ${version.exportHistoryLabel}`;
+  return `${technicalWords(`${version.label} · `)}${PACKAGE_PREPARED} · ${version.exportHistoryLabel}`;
 }
 
 /** `用途：交出版社存档 · 9月24日 12:30`. */

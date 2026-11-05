@@ -1,3 +1,6 @@
+import { windowStep } from './components/controls.js';
+import { showToast } from './components/toast.js';
+import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { readProposalWorkspace } from './proposal-workspace.js';
 import { readFindingSources } from './research-evidence-labels.js';
 import { findingEvidenceList } from './research-evidence.js';
@@ -272,6 +275,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -775,7 +779,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: suggestion
         ? [
             { name: 'proposedText', label: '改为', value: range.text, required: false, hint: '留空表示删去这段文字。' },
-            { name: 'rationale', label: '修改理由（可选）', value: '', required: false },
+            { name: 'rationale', label: '修改理由 · 可选', value: '', required: false },
           ]
         : [{ name: 'body', label: kind === 'annotation' ? '批注内容' : '备注内容', value: '', required: true }],
       submitLabel: suggestion ? '提出修改建议' : kind === 'annotation' ? '添加批注' : '添加备注',
@@ -847,7 +851,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       fields: suggestion
         ? [
             { name: 'proposedText', label: '改为', value: source.pinnedText, required: false, hint: '留空表示删去这段文字。' },
-            { name: 'rationale', label: '修改理由（可选）', value: source.kind === 'annotation' || source.kind === 'editor-note' ? source.body : '', required: false },
+            { name: 'rationale', label: '修改理由 · 可选', value: source.kind === 'annotation' || source.kind === 'editor-note' ? source.body : '', required: false },
           ]
         : [{ name: 'body', label: target === 'annotation' ? '批注内容' : '备注内容', value: source.body, required: true }],
       submitLabel: CONVERT_LABELS[target],
@@ -1034,7 +1038,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const kindLabel = el('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]);
     const source = el('span', 'editorial-mark-source', `${markSourceLine(card)} · ${markTimeLabel(card.createdAt)}`);
     source.dataset['markSource'] = card.source.kind;
-    const state = el('span', 'status-pill', markStateLabel(card));
+    const state = el('span', 'state-term status-pill', markStateLabel(card));
     state.dataset['markState'] = card.suggestion?.decision?.disposition ?? card.status;
     const dismiss = actionButton('close', '关闭', 'quiet', () => {
       closeFloating();
@@ -1210,7 +1214,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                     name: 'proposedText', label: '编辑建议文本', value: suggestion.proposedText, required: false,
                     hint: inserts ? '填写要在此插入的文字。' : '留空表示删去这段文字。',
                   },
-                  { name: 'reason', label: '为什么这样改？（可选 · 帮助 AI7 学习你的判断）', value: '', required: false },
+                  { name: 'reason', label: '为什么这样改？ · 可选', value: '', required: false },
                 ],
                 submitLabel: '接受修改后的版本并应用',
                 submit: (values) => writeManuscript(card.markId, (clientEffectId) => api.applyChangeSuggestion({
@@ -1317,7 +1321,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       identities.append(el('dt', undefined, term), el('dd', undefined, value));
     }
     technical.append(identities);
-    panel.append(technical);
+    panel.append(technicalDisclosure(technical));
 
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);
@@ -1493,6 +1497,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         recoveryCards.delete(markId);
         if (decidedBefore !== undefined) notePrompt(decidedBefore, applied.result.card);
         if (applied.result.card !== null) showCard(applied.result.card);
+        if (decidedBefore !== undefined) showToast(done, { action: { label: '撤销', run: () => void writeManuscript(markId,
+          (clientEffectId) => api.reverseAppliedChangeSuggestion({ ...binding(), markId, clientEffectId }), '已撤销本次应用。') } });
         return;
       }
       if (applied.outcome === null) throw applied.outcomeFailure;
@@ -1535,13 +1541,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         control.type = 'button';
         control.setAttribute('role', 'menuitem');
         control.dataset['markAction'] = item.action;
+        const caption = el('span', 'menu-caption');
         if (item.seriesId !== undefined) control.dataset['seriesId'] = item.seriesId;
         if (item.swatch !== undefined) {
           control.dataset['markColor'] = String(item.swatch);
-          control.append(el('span', 'editorial-mark-swatch'));
+          caption.append(el('span', 'editorial-mark-swatch'));
         }
-        control.append(el('span', undefined, item.label));
-        if (item.hint) control.append(el('small', 'muted', item.hint));
+        caption.append(el('span', undefined, item.label));
+        if (item.hint) caption.append(el('small', 'muted', item.hint));
+        control.append(caption);
+        const clipboardShortcuts: Readonly<Record<string, string>> = { cut: 'Ctrl+X', copy: 'Ctrl+C', paste: 'Ctrl+V', 'paste-plain-text': 'Ctrl+Shift+V' };
+        const shortcut = clipboardShortcuts[item.action];
+        const key = el('kbd', 'menu-shortcut', shortcut ?? '');
+        key.setAttribute('aria-hidden', 'true');
+        control.append(key);
         if (item.disabledReason !== undefined || item.run === undefined) {
           control.disabled = true;
           control.setAttribute('aria-disabled', 'true');
@@ -1864,7 +1877,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const status = el('p', 'muted');
     status.setAttribute('aria-live', 'polite');
     const row = el('div', 'button-row');
-    const next = el('button', 'quiet', '下一页书系');
+    const next = windowStep(el('button', 'quiet', '向后浏览书系'), 'after', '向后浏览书系');
     const reset = el('button', 'quiet', '回到第一页');
     const retry = el('button', 'quiet', '重试读取书系');
     const cancel = el('button', 'quiet', '取消');
@@ -1925,6 +1938,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     await load(null);
   };
 
+  let contextParagraph: string | null = null;
   const showSelectionMenu = (at: { x: number; y: number }, reread = true): void => {
     const range = editor.selectedRange();
     const markable = range.kind === 'range' || range.kind === 'unsettled';
@@ -1934,11 +1948,20 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     const needsSelection = range.kind === 'none' ? '先选中文字' : undefined;
     const shown = inSeries?.current() ?? null;
     const shownProcedures = houseProcedures?.current() ?? null;
+    const paragraph = range.kind === 'none' && contextParagraph ? editor.currentWindow().blocks.find((block) => block.blockId === contextParagraph) : undefined;
+    const taskGroup = aiTaskGroup(paragraph ? undefined : range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span');
+    if (paragraph) for (const item of taskGroup.items) {
+      if (!item.run) continue;
+      const run = item.run;
+      item.run = () => { if (editor.selectRange(paragraph.blockId, 0, [...new Intl.Segmenter('zh', { granularity: 'grapheme' }).segment(paragraph.text)].length)) run(); };
+      if (item.action === 'task-on-selection') item.label = '就本段发起任务…';
+      if (item.action === 'ask-on-selection') item.label = '就本段提问…';
+    }
     const knowledge = inSeries === null || options.proposeSeriesKnowledge === undefined ? null
       : seriesKnowledgeMenuGroup(shown, why, { compose: (series) => void composeKnowledge(series), choose: () => void chooseKnowledgeSeries() });
     showMenu('selection', '稿件右键菜单', [
       {
-        label: `文字处理 · ${selected}`,
+        label: range.kind === 'none' ? '文字处理' : `文字处理 · ${selected}`,
         items: [
           { action: 'cut', label: '剪切', ...(needsSelection ? { disabledReason: needsSelection } : { run: () => void runClipboard('cut') }) },
           { action: 'copy', label: '复制', ...(needsSelection ? { disabledReason: needsSelection } : { run: () => void runClipboard('copy') }) },
@@ -1946,7 +1969,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           { action: 'paste-plain-text', label: '粘贴为纯文本', run: () => void runClipboard('paste-plain-text') },
         ],
       },
-      {
+      ...(range.kind === 'none' ? [] : [{
         label: '编辑标记',
         ...(why ? { note: why } : {}),
         items: [
@@ -1968,9 +1991,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
             }),
           })),
         ],
-      },
+      }]),
       // Across paragraphs (Issue #1176) the AI7 actions take the exact span; marks and 书系 knowledge stay in one paragraph.
-      aiTaskGroup(range.kind === 'range' || range.kind === 'span' ? undefined : why ?? selectionMenuReason(range.kind), shownProcedures, range.kind === 'span'),
+      taskGroup,
       ...(knowledge === null ? [] : [knowledge]),
     ], at);
     if (!reread || (inSeries === null && houseProcedures === null && polishRoute === null)) return;
@@ -2121,6 +2144,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   };
   const onContextMenu = (event: MouseEvent): void => {
     event.preventDefault();
+    contextParagraph = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]')?.dataset['blockId'] ?? null : null;
     const mark = collapsedBeforeContextClick ? markAt(event.target, true) : undefined;
     collapsedBeforeContextClick = true;
     if (mark) showMarkMenu(mark, { x: event.clientX, y: event.clientY });
@@ -2130,6 +2154,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
     event.preventDefault();
     const selection = window.getSelection();
+    contextParagraph = selection?.anchorNode?.parentElement?.closest<HTMLElement>('[data-block-id]')?.dataset['blockId'] ?? null;
     const rects = selection !== null && selection.rangeCount > 0 ? selection.getRangeAt(0).getClientRects() : undefined;
     const rect = rects && rects.length > 0 ? rects[rects.length - 1]! : options.host.getBoundingClientRect();
     const at = { x: rect.right, y: rect.bottom };

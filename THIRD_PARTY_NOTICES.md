@@ -223,3 +223,14 @@ not be used in advertising or otherwise to promote the sale, use or other
 dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 ```
+
+## Bundled Noto SC fonts (OFL-1.1)
+
+Noto Sans SC 2.004 and Noto Serif SC 2.003, Regular and Bold, are bundled from the official
+[notofonts/noto-cjk releases](https://github.com/notofonts/noto-cjk/releases).
+Copyright statements remain embedded in the fonts; the complete upstream SIL Open Font License 1.1
+texts are retained in `assets/fonts/OFL-Sans.txt` and `assets/fonts/OFL-Serif.txt`.
+`assets/fonts/manifest.json` records release URLs, source archive/face digests and shipped WOFF2 digests.
+The fonts retain the full upstream SC glyph repertoire and are losslessly encoded as WOFF2.
+The build ships that manifest and both complete licenses under `dist/notices/fonts/`;
+font bytes ship under `dist/renderer/fonts/` in both the installer and portable package.

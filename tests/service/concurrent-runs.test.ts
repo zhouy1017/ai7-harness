@@ -1,3 +1,5 @@
+import { startQuickTasks } from '../support/quick-tasks.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { randomUUID } from 'node:crypto';
 import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/protected-secret-identity.js';
@@ -10,7 +12,7 @@ import { ProtocolError, decodeRequest } from '../../src/service/request-frames.j
 import { DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
-import { RESUME_BLOCKED_SLOT } from '../../src/service/task-plan.js';
+
 import { graphemesOf } from '../../src/shared/mark-anchor.js';
 import {
   BASELINE_ANALYSIS_MODE_GOALS,
@@ -168,6 +170,25 @@ function active(projection: GlobalAttentionProjection): Array<[string | null, st
 }
 
 describe('the execution owner\'s concurrency governor over the real store on exact sample1', () => {
+  it('records a queued continuation refusal when the execution route changes before dispatch (#1328)', async () => {
+    const store = await openWithRoute(); const gate = sharedHold(); const original = ownerOf(store, gate.hold);
+    let changed: BaselineAnalysisExecutionOwner | null = null;
+    try {
+      const book = await preparedBook(store, '续行路线变化', true);
+      const { runRecordId } = start(store, original, book);
+      await until(() => original.progressFor(runRecordId) !== null, 'first run active');
+      store.requestBaselineAnalysisPause(book.bookId, book.taskIntentId); original.pauseRun(runRecordId); gate.allow(1);
+      await until(() => store.inspectBaselineAnalysis(book.bookId).state === 'paused', 'run paused');
+      await original.dispose(); changed = ownerOf(store, null, { fixture: otherFixture });
+      changed.freezeQueue(true); changed.resumeOrQueue(runRecordId, store.baselineAnalysisLedger);
+      expect(changed.queuePosition(runRecordId)).toBe(1);
+      changed.freezeQueue(false);
+      expect(changed.queuePosition(runRecordId)).toBeNull();
+      const paused = store.inspectTaskOverview(() => null, 2, () => null, false).groups.find((group) => group.key === 'paused')!.items[0]!;
+      expect(paused.attention.facts.resumeFailure).toBeTruthy();
+      expect(paused.detail).toBe(paused.attention.facts.resumeFailure);
+    } finally { gate.allow(SAMPLE1_UNITS); await original.dispose(); await changed?.dispose(); store.close(); }
+  });
   it('keeps the admitted v1 fixture serial when an unrelated top-level execution declaration says three (#1131)', async () => {
     const selectedProduction = await resolveSourceCheckoutLaunchPolicy(roots.codeRoot, 'ordinary-production');
     launchPolicy = { ...launchPolicy, providerProcessing: { ...launchPolicy.providerProcessing,
@@ -223,6 +244,43 @@ describe('the execution owner\'s concurrency governor over the real store on exa
       await owner.dispose();
       store.close();
     }
+  }, 300_000);
+
+  it('enqueues a multi-Book quick start, freezes admission and starts the task moved to the top first', async () => {
+    const gate = sharedHold();
+    const store = await openWithRoute();
+    const owner = ownerOf(store, gate.hold);
+    const progress = (id: string) => owner.progressFor(id);
+    try {
+      const books: Book[] = [];
+      for (const [index, name] of ['甲', '乙', '丙', '丁'].entries()) books.push(await preparedBook(store, `L2 任务总览 ${name}`, index === 0));
+      gate.allow(1);
+      const result = await startQuickTasks({ tasks: books.map((book) => ({ bookId: book.bookId, procedureId: 'baseline-analysis' })) }, {
+        store, jobs: new CooperativeJobOwner(store), policy: launchPolicy, execution: owner, driveReview: () => {},
+        credentialReadiness: async () => null, connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => owner.busy },
+      });
+      expect([result.started, result.queued]).toEqual([2, 2]);
+      const overview = () => store.inspectTaskOverview(progress, owner.capacity, (id) => owner.queuePosition(id), owner.queueFrozen);
+      const queued = overview().groups.find((group) => group.key === 'queued')!.items;
+      expect(queued.map((item) => [item.bookId, item.queuePosition])).toEqual([[books[2]!.bookId, 1], [books[3]!.bookId, 2]]);
+      expect(owner.reorderQueuedRun(queued[1]!.runRecordId!, 1)).toBe(1);
+      owner.freezeQueue(true);
+      const active = store.inspectBaselineAnalysis(books[0]!.bookId, progress);
+      store.requestBaselineAnalysisPause(books[0]!.bookId, active.taskIntent!.taskIntentId);
+      owner.pauseRun(active.run!.runRecordId);
+      gate.allow(2);
+      await until(() => store.inspectBaselineAnalysis(books[0]!.bookId, progress).state === 'paused', 'first task paused');
+      expect(overview().groups.find((group) => group.key === 'queued')!.items.map((item) => item.bookId)).toEqual([books[3]!.bookId, books[2]!.bookId]);
+      owner.freezeQueue(false);
+      await until(() => progress(queued[1]!.runRecordId!) !== null, 'top task admitted');
+      expect(owner.queuePosition(queued[0]!.runRecordId!)).toBe(1);
+      expect(overview().groups.find((group) => group.key === 'running')!.total).toBe(2);
+      gate.allow(SAMPLE1_UNITS);
+      await owner.whenIdle();
+      const recent = overview().groups.find((group) => group.key === 'recent')!.items;
+      expect(recent.length).toBe(3);
+      expect(recent.every((item) => item.usage !== null && item.usage.calls > 0)).toBe(true);
+    } finally { gate.allow(SAMPLE1_UNITS); await owner.dispose(); store.close(); }
   }, 300_000);
 
   it('runs two Books at once, holds a third at 等待运行名额 until a place frees, and keeps every Run to its own Book', async () => {
@@ -307,7 +365,7 @@ describe('the execution owner\'s concurrency governor over the real store on exa
         { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => owner.busy },
         progress,
       );
-      expect(resume.runControl?.resume?.reason).toBe(RESUME_BLOCKED_SLOT);
+      expect(resume.runControl?.resume?.reason).toBeNull();
 
       // 取消任务 on 乙: it stops after its range in flight, and what it read forms its own partial revision.
       expect(store.requestBaselineAnalysisCancel(yi.bookId, yi.taskIntentId)).toBe(runYi.runRecordId);

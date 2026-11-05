@@ -205,6 +205,7 @@ async function settle(renderer, expression, timeout = 15_000) {
   return state;
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
@@ -292,6 +293,7 @@ const PAGE_HELPERS = `(() => {
       return true;
     },
     status: () => document.querySelector('#persistence-status')?.textContent ?? '',
+    notice: () => document.querySelector('[data-toast]')?.textContent ?? '',
   };
   return true;
 })()`;
@@ -300,11 +302,11 @@ async function importAndOpen(renderer, title) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', 'import-start');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
@@ -318,7 +320,7 @@ async function importAndOpen(renderer, title) {
 
 /** Wait until nothing typed is waiting for the journal, and no mark command is in flight. */
 async function settled(renderer, name) {
-  await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑')?.disabled === true && document.documentElement.dataset.ai7CloseRisk !== 'true'`, name);
+  await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed' && document.documentElement.dataset.ai7CloseRisk !== 'true'`, name);
 }
 
 /**
@@ -483,13 +485,13 @@ async function main() {
     await importAndOpen(renderer, EXCERPT.title);
     await assertRenderer(renderer, PAGE_HELPERS, 'page-helpers');
     at('selected-fast-text-scope-refusal');
-    // Refresh this same Book surface so its compact selector reads the persisted independent Fast choice.
+    // The selected Fast binding remains in Settings; the Book header keeps its title and processing indication.
     await renderer.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>{
       const role=settings.roles.find((item)=>item.roleId==='fast-interaction');
       window.__j05FastSelected=role.binding.providerId==='deepseek-open-platform' && role.connection.fastSelected===true;
     })`);
     requireJourney(await renderer.evaluate(`Boolean(window.__j05FastSelected)`), 'selected-fast-exact-recorded-choice');
-    await waitFor(renderer, `document.querySelector('[data-compact-model-selection="fast-interaction"]')?.textContent.includes('DeepSeek')`, 'selected-fast-compact-display');
+    await assertRenderer(renderer, `document.querySelector('#context-title')?.textContent===${JSON.stringify(EXCERPT.title)} && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型') && !document.querySelector('#context-header').textContent.includes('deepseek-flash')`, 'book-header-title-and-processing');
     requireJourney(await renderer.evaluate(`window.ai7.listPriorWork().then(async (work)=>{
       const book=work.find((item)=>item.bookTitle===${JSON.stringify(EXCERPT.title)});
       const routes=await window.ai7.inspectFastInteractionRoutes({bookId:book.bookId});
@@ -507,15 +509,15 @@ async function main() {
     await assertRenderer(renderer, `(() => { window.__j05Original = { first: window.__j05.text(${JSON.stringify(first)}), second: window.__j05.text(${JSON.stringify(second)}) }; return typeof window.__j05Original.first === 'string'; })()`, 'original-text-kept');
 
     at('selection-menu-empty');
-    // With nothing selected the mark entries explain themselves instead of acting, and only paste stands.
+    // With nothing selected the 编辑标记 group is absent; clipboard shortcuts keep their own column.
     await rightClickUntil(
       renderer,
       `window.__j05.place(${JSON.stringify(first)}, 0, 0)`,
       `window.__j05.block(${JSON.stringify(first)})`,
-      `window.__j05.menu()?.dataset.markMenu === 'selection' && window.__j05.menu().textContent.includes('未选中文字')`,
+      `window.__j05.menu()?.dataset.markMenu === 'selection' && !window.__j05.menu().querySelector('[role="group"][aria-label="编辑标记"]')`,
       'empty-menu',
     );
-    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 3 && groups[0].startsWith('文字处理') && groups[1] === '编辑标记' && groups[2] === 'AI7 任务' && disabled('add-annotation') && disabled('add-editor-note') && disabled('add-change-suggestion') && disabled('add-highlight-1') && disabled('cut') && disabled('copy') && !disabled('paste') && menu.textContent.includes('先选中一段文字'); })()`, 'empty-menu-explains');
+    await assertRenderer(renderer, `(() => { const menu = window.__j05.menu(); const groups = Array.from(menu.querySelectorAll('[role="group"]')).map((group) => group.getAttribute('aria-label')); const disabled = (action) => window.__j05.item(action)?.disabled === true; return groups.length === 2 && groups[0] === '文字处理' && groups[1] === 'AI7 任务' && !window.__j05.item('add-annotation') && !window.__j05.item('add-editor-note') && !window.__j05.item('add-change-suggestion') && !window.__j05.item('add-highlight-1') && disabled('cut') && disabled('copy') && !disabled('paste') && !menu.textContent.includes('先选中一段文字') && window.__j05.item('copy')?.querySelector('.menu-shortcut')?.textContent === 'Ctrl+C'; })()`, 'empty-menu-hides-mark-group');
     await press(renderer, 'Escape');
     await waitFor(renderer, `window.__j05.menu() === null && document.activeElement === document.querySelector('[data-testid="manuscript-editor"]')`, 'escape-returns-focus', 15_000);
 
@@ -549,7 +551,7 @@ async function main() {
 
     at('mark-highlight');
     await chooseMenuItem(renderer, 'add-highlight-2', 'highlight-choose');
-    await waitFor(renderer, `window.__j05.mark('personal-highlight', ${JSON.stringify(first)}).length > 0 && window.__j05.status().includes('已加高亮')`, 'highlight-drawn');
+    await waitFor(renderer, `window.__j05.mark('personal-highlight', ${JSON.stringify(first)}).length > 0 && window.__j05.notice().includes('已加高亮')`, 'highlight-drawn');
     await assertRenderer(renderer, `(() => { const mark = window.__j05.mark('personal-highlight', ${JSON.stringify(first)})[0]; const block = window.__j05.block(${JSON.stringify(first)}); return mark.dataset.markColor === '2' && mark.dataset.markSource === 'editor' && mark.dataset.markAnchor === 'exact' && window.__j05.markText('personal-highlight', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.highlight[0]}, ${RANGES.highlight[1]}) && block.dataset.markLine === 'personal-highlight' && getComputedStyle(block).borderLeftWidth === '3px' && getComputedStyle(mark).backgroundColor === 'rgb(255, 224, 194)' && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first; })()`, 'highlight-exact-and-colored');
     // A highlight has no card: a click on it opens nothing.
     await assertRenderer(renderer, `window.__j05.place(${JSON.stringify(first)}, 0, 0)`, 'highlight-caret');
@@ -569,7 +571,7 @@ async function main() {
     await waitFor(renderer, `window.__j05.composer() === null && window.__j05.mark('annotation', ${JSON.stringify(first)}).length > 0`, 'annotation-drawn');
     await assertRenderer(renderer, `window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'annotation' && window.__j05.markText('annotation', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.annotation[0]}, ${RANGES.annotation[1]})`, 'annotation-line-outranks-highlight');
     await openMarkCard(renderer, 'annotation', first, 'annotation-open');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.getAttribute('role') === 'dialog' && card.querySelector('[data-mark-source]')?.dataset.markSource === 'editor' && card.querySelector('[data-mark-source]').textContent.startsWith('你 · ') && card.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(ANNOTATION_BODY)} && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.textContent.includes('批注随稿件导出') && !card.querySelector('details.technical-details').open && window.__j05.mark('annotation', ${JSON.stringify(first)})[0].classList.contains('editorial-mark-active'); })()`, 'annotation-card-decision-layer');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.getAttribute('role') === 'dialog' && card.querySelector('[data-mark-source]')?.dataset.markSource === 'editor' && card.querySelector('[data-mark-source]').textContent.startsWith('你 · ') && card.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(ANNOTATION_BODY)} && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.textContent.includes('批注随稿件导出') && (!card.querySelector('details.technical-details').open || card.querySelector('details.technical-details').hidden) && window.__j05.mark('annotation', ${JSON.stringify(first)})[0].classList.contains('editorial-mark-active'); })()`, 'annotation-card-decision-layer');
     // The card sits below its paragraph and keeps to the text column.
     await assertRenderer(renderer, `(() => { const card = window.__j05.card().getBoundingClientRect(); const block = window.__j05.block(${JSON.stringify(first)}).getBoundingClientRect(); return Math.abs(card.left - block.left) <= 2 && Math.abs(card.width - block.width) <= 2 && card.top >= block.bottom - 1; })()`, 'annotation-card-aligned-to-text-column');
     await assertRenderer(renderer, `window.__j05.act('reply')`, 'annotation-reply-open');
@@ -603,7 +605,7 @@ async function main() {
     await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'create-change-suggestion'`, 'suggestion-composer');
     await assertRenderer(renderer, `window.__j05.composer().querySelector('[data-mark-field="proposedText"]').value === window.__j05Original.first.slice(${RANGES.suggestion[0]}, ${RANGES.suggestion[1]}) && window.__j05.write('proposedText', ${JSON.stringify(SUGGESTED_TEXT)}) && window.__j05.write('rationale', ${JSON.stringify(SUGGESTED_REASON)}) && window.__j05.act('submit')`, 'suggestion-submit');
     await waitFor(renderer, `window.__j05.mark('change-suggestion', ${JSON.stringify(first)}).length > 0 && window.__j05.composer() === null`, 'suggestion-drawn');
-    await assertRenderer(renderer, `window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'change-suggestion' && document.querySelector('[data-mark-preview]') === null && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.status().includes('稿件本身未改动')`, 'suggestion-changes-no-text');
+    await assertRenderer(renderer, `window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'change-suggestion' && document.querySelector('[data-mark-preview]') === null && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.notice().includes('稿件本身未改动')`, 'suggestion-changes-no-text');
     await openMarkCard(renderer, 'change-suggestion', first, 'suggestion-open');
     // 预览 · 未应用: the replacement shows in place, labelled, while the manuscript stays the original.
     await assertRenderer(renderer, `(() => { const preview = document.querySelector('[data-mark-preview]'); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]; return preview?.querySelector('.editorial-mark-preview-text')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && preview.querySelector('.editorial-mark-preview-label')?.textContent === '预览 · 未应用' && preview.contentEditable === 'false' && mark.classList.contains('editorial-mark-previewed') && getComputedStyle(mark).textDecorationLine.includes('line-through') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first; })()`, 'suggestion-previews-in-place');
@@ -636,7 +638,7 @@ async function main() {
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-decision]') === null && window.__j05.card().querySelector('[data-mark-state]').textContent === '待你处理' && document.querySelector('[data-mark-preview]') !== null`, 'withdrawn-returns-to-undecided');
     await assertRenderer(renderer, `window.__j05.act('accept-with-edit')`, 'accept-with-edit-open');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="accept-with-edit"] [data-mark-field="proposedText"]')?.value === ${JSON.stringify(SUGGESTED_TEXT)}`, 'accept-with-edit-form');
-    await assertRenderer(renderer, `window.__j05.card().querySelector('[data-mark-form] label:last-of-type span').textContent.startsWith('为什么这样改？（可选') && window.__j05.card().querySelector('[data-mark-form] [data-mark-action="submit"]').textContent === '接受修改后的版本并应用' && window.__j05.write('proposedText', ${JSON.stringify(ACCEPTED_TEXT)}) && window.__j05.write('reason', ${JSON.stringify(ACCEPTED_REASON)}) && window.__j05.act('submit')`, 'accept-with-edit-submit');
+    await assertRenderer(renderer, `window.__j05.card().querySelector('[data-mark-form] label:last-of-type span').textContent.startsWith('为什么这样改？ · 可选') && window.__j05.card().querySelector('[data-mark-form] [data-mark-action="submit"]').textContent === '接受修改后的版本并应用' && window.__j05.write('proposedText', ${JSON.stringify(ACCEPTED_TEXT)}) && window.__j05.write('reason', ${JSON.stringify(ACCEPTED_REASON)}) && window.__j05.act('submit')`, 'accept-with-edit-submit');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]?.dataset.markStatus === 'applied'`, 'accept-with-edit-applied');
     // One interaction recorded the decision and its reason, approved the Effect and wrote the text; 已应用 is said of the receipt.
     await assertRenderer(renderer, `(() => { const card = window.__j05.card(); window.__j05Original.first = window.__j05Original.first.slice(0, ${RANGES.suggestion[0]}) + ${JSON.stringify(ACCEPTED_TEXT)} + window.__j05Original.first.slice(${RANGES.suggestion[1]}); const terms = Array.from(card.querySelectorAll('[data-mark-receipt] dt')).map((term) => term.textContent); return card.querySelector('[data-mark-state]').textContent === '已应用' && card.querySelector('[data-mark-application]').textContent.startsWith('已应用 · 已写入稿件') && card.querySelector('[data-mark-reason]')?.dataset.markReason === 'reason-field' && card.querySelector('[data-mark-reason]').textContent.includes(${JSON.stringify(ACCEPTED_REASON)}) && card.querySelector('[data-mark-reasons]') === null && card.querySelector('[data-mark-region="content"] ins').textContent === ${JSON.stringify(ACCEPTED_TEXT)} && document.querySelector('[data-mark-preview]') === null && !card.querySelector('[data-mark-receipt]').open && ['应用（Effect）', '提案决定', '应用批准（Effect Approval）', '派发', '应用凭据（Effect Receipt）', '应用前的稿件', '应用后的稿件'].every((term) => terms.includes(term)) && card.querySelector('[data-mark-action="prepare-reverse"]')?.disabled === false && card.querySelector('[data-mark-action="accept-and-apply"]') === null && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first && window.__j05.markText('change-suggestion', ${JSON.stringify(first)}) === ${JSON.stringify(ACCEPTED_TEXT)}; })()`, 'accepted-with-edit-is-applied-with-its-receipt');
@@ -646,7 +648,11 @@ async function main() {
     await click(renderer, '撤销', 'undo-after-apply');
     await waitFor(renderer, `window.__j05.status().includes('没有可撤销的编辑') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first`, 'apply-is-not-undone-by-history', 15_000);
     await openMarkCard(renderer, 'change-suggestion', first, 'applied-card-again');
-    await assertRenderer(renderer, `(() => { const details = window.__j05.card().querySelector('details.technical-details'); details.open = true; const terms = Array.from(details.querySelectorAll('dt')).map((term) => term.textContent); return terms.includes('提案修改项') && terms.includes('提案决定') && terms.includes('标记时的修订版'); })()`, 'technical-identities-are-one-step-away');
+    await assertRenderer(renderer, `(() => { const summary = document.querySelector('[data-technical-collection] > summary') ?? window.__j05.card().querySelector('details.technical-details > summary'); if (!(summary instanceof HTMLElement)) return false; summary.click(); return true; })()`, 'technical-identities-open');
+    await waitFor(renderer, `window.__j05.card().querySelector('details.technical-details dl')?.checkVisibility() === true`, 'technical-identities-visible');
+    await assertRenderer(renderer, `(() => { const details = window.__j05.card().querySelector('details.technical-details'); const terms = Array.from(details.querySelectorAll('dt')).map((term) => term.textContent); return terms.includes('提案修改项') && terms.includes('提案决定') && terms.includes('标记时的修订版'); })()`, 'technical-identities-are-one-step-away');
+    await assertRenderer(renderer, `(() => { const summary = document.querySelector('[data-technical-collection] > summary') ?? window.__j05.card().querySelector('details.technical-details > summary'); summary.click(); return true; })()`, 'technical-identities-close');
+    await waitFor(renderer, `window.__j05.card().querySelector('details.technical-details dl')?.checkVisibility() === false`, 'technical-identities-hidden');
     await press(renderer, 'Escape');
 
     at('apply-accept-and-apply');
@@ -659,7 +665,7 @@ async function main() {
     await openMarkCard(renderer, 'change-suggestion', second, 'apply-card');
     await assertRenderer(renderer, `window.__j05.act('accept-and-apply')`, 'accept-and-apply');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(APPLIED_TEXT)} + window.__j05Original.second.slice(${RANGES.applied[1]})`, 'accept-and-apply-wrote-the-text');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(second)})[0]; return card.querySelector('[data-mark-state]').textContent === '已应用' && mark.dataset.markStatus === 'applied' && mark.dataset.markDisposition === 'accepted' && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j05.block(${JSON.stringify(second)}).dataset.markLine === undefined && window.__j05.status().includes('已应用这条修改建议'); })()`, 'accept-and-apply-recorded-and-receipted');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(second)})[0]; return card.querySelector('[data-mark-state]').textContent === '已应用' && mark.dataset.markStatus === 'applied' && mark.dataset.markDisposition === 'accepted' && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === ${JSON.stringify(APPLIED_TEXT)} && window.__j05.block(${JSON.stringify(second)}).dataset.markLine === undefined && window.__j05.notice().includes('已应用这条修改建议'); })()`, 'accept-and-apply-recorded-and-receipted');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); const wrote = page.journalSequence === window.__j05Journal + 1; window.__j05Journal = page.journalSequence; return wrote; })()`, 'accept-and-apply-wrote-once');
 
     at('apply-reverse');
@@ -877,7 +883,7 @@ async function main() {
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return true; })()`, 'lost-ack-journal-before');
     await openMarkCard(renderer, 'change-suggestion', second, 'lost-ack-card');
     await assertRenderer(renderer, `(() => { window.__j05ReceiptStates = []; new MutationObserver((records) => { for (const record of records) for (const node of record.addedNodes) if (node instanceof HTMLElement) { if (node.dataset.applyReceiptState) window.__j05ReceiptStates.push(node.dataset.applyReceiptState); for (const child of node.querySelectorAll('[data-apply-receipt-state]')) window.__j05ReceiptStates.push(child.dataset.applyReceiptState); } }).observe(document.body, { childList: true, subtree: true }); return window.__j05.act('accept-and-apply'); })()`, 'lost-ack-accept-and-apply');
-    await waitFor(renderer, `window.__j05.status().includes('写入结果已从记录确认') && window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(LOST_ACK_TEXT)} + window.__j05Second.slice(${RANGES.applied[1]})`, 'lost-ack-answered-from-the-records');
+    await waitFor(renderer, `window.__j05.notice().includes('写入结果已从记录确认') && window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(${JSON.stringify(second)}) === window.__j05Second.slice(0, ${RANGES.applied[0]}) + ${JSON.stringify(LOST_ACK_TEXT)} + window.__j05Second.slice(${RANGES.applied[1]})`, 'lost-ack-answered-from-the-records');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); return page.journalSequence === window.__j05Journal + 1 && window.__j05.card().querySelector('[data-mark-action="accept-and-apply"]') === null && window.__j05.card().querySelector('[data-mark-state]').textContent === '已应用'; })()`, 'lost-ack-wrote-exactly-once');
     await press(renderer, 'Escape');
     await settled(renderer, 'lost-ack-settled');
@@ -997,7 +1003,7 @@ async function main() {
     );
     await chooseMenuItem(renderer, 'task-on-selection', 'span-task-choose');
     const composerOf = `document.querySelector('#task-drawer:not([hidden]) .task-composer')`;
-    await waitFor(renderer, `(() => { const composer = ${composerOf}; const quotes = Array.from(composer?.querySelectorAll('li.task-composer-range blockquote') ?? [], (node) => node.textContent); return composer?.dataset.taskComposer === 'new' && quotes.length === 1 && quotes[0] === window.__j05Span.words; })()`, 'span-composer-quotes-span', 30_000);
+    await waitFor(renderer, `(() => { const composer = ${composerOf}; const quotes = Array.from(composer?.querySelectorAll('li.task-composer-range .task-composer-range-quote') ?? [], (node) => node.textContent); return composer?.dataset.taskComposer === 'new' && quotes.length === 1 && quotes[0] === window.__j05Span.words; })()`, 'span-composer-quotes-span', 30_000);
     await assertRenderer(renderer, `(() => { const composer = ${composerOf}; const goal = composer.querySelector('[data-task-composer-field="goal"]'); const outcome = composer.querySelector('[data-task-composer-field="outcome-review"]'); if (!(goal instanceof HTMLTextAreaElement) || !(outcome instanceof HTMLInputElement)) return false; goal.focus(); goal.value = '核对这三段的称谓是否前后一致'; goal.dispatchEvent(new Event('input', { bubbles: true })); outcome.click(); return outcome.checked; })()`, 'span-goal-and-outcome');
     await waitFor(renderer, `${composerOf}?.querySelector('[data-task-composer-action="prepare"]')?.disabled === false`, 'span-prepare-ready', 10_000);
     await assertRenderer(renderer, `(() => { ${composerOf}.querySelector('[data-task-composer-action="save-draft"]').click(); return true; })()`, 'span-prepare');
@@ -1009,7 +1015,7 @@ async function main() {
     // offered no choice, as a one-paragraph draft is here, and 准备计划 stays disabled with that reason. The card names the span.
     // Promotion over exactly the span, its plan statement and `draft-span` pins are proven by tests/service/task-intent-drafts.test.ts.
     at('selection-span-no-review-choice');
-    await waitFor(renderer, `(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range small.field-note')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字 · 修订版 ' + range.revisionLabel; })()`, 'span-promote-withheld-by-reason', 10_000);
+    await waitFor(renderer, `(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range blockquote footer')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字 · 修订版 ' + range.revisionLabel; })()`, 'span-promote-withheld-by-reason', 10_000);
     await assertRenderer(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({ reviewRunId: null })).run === null && window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c)()`, 'span-nothing-prepared-or-written');
     await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'span-drawer-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
@@ -1039,8 +1045,10 @@ async function main() {
     await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'local-authorize-exact-plan');
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
-    // #1164 / J-05: one editor action applies the exact non-overlapping mechanical suggestions through the existing batch authority.
+    // Q1: batch application lists the exact suggestions and waits for the editor's confirmation.
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
+    await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-batch-confirm-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="batch-confirm"]').click(); return true; })()`, 'local-batch-confirm');
     await waitFor(renderer, `(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`, 'local-batch-committed');
     await waitFor(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-return-to-mark');
     // The finding retains the same suggestion and Apply lineage; its reverse action restores the tester edit.

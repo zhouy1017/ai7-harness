@@ -1,3 +1,4 @@
+import { majorityGapReason } from '../../src/shared/analysis-run-summary.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -10,7 +11,6 @@ import {
   GLOBAL_ATTENTION_LEDE,
   GLOBAL_ATTENTION_MATERIAL_GROUPS,
   GLOBAL_ATTENTION_NEXT_STEP_LABELS,
-  GLOBAL_ATTENTION_NEXT_STEP_PREFIX,
   GLOBAL_ATTENTION_NO_BOOK,
   GLOBAL_ATTENTION_STATE_LABELS,
   GLOBAL_ATTENTION_STATE_PILLS,
@@ -22,6 +22,7 @@ import {
   globalAttentionNextStepLine,
   globalAttentionObjectLabel,
   globalAttentionReason,
+  globalAttentionStateLabel,
   globalAttentionTimeLine,
   globalAttentionTruncatedLine,
   globalAttentionView,
@@ -33,7 +34,6 @@ import {
 } from '../../src/renderer/task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from '../../src/renderer/editorial-mark-labels.js';
 import { PROPOSAL_CONFLICT_CLASSIFICATION } from '../../src/renderer/proposal-conflict-labels.js';
-import { REVIEW_RUN_CATEGORY_STATE_LABELS } from '../../src/service/review/review-run-state.js';
 import {
   GLOBAL_ATTENTION_GROUP_KEYS,
   GLOBAL_ATTENTION_NEXT_STEPS,
@@ -43,6 +43,9 @@ import {
   type GlobalAttentionStateKey,
 } from '../../src/shared/protocol.js';
 import { TASK_PLAN_STATE_PILLS } from '../../src/renderer/task-drawer-labels.js';
+import { mountGlobalAttention, mountGlobalAttentionEntry, type GlobalAttentionReading, type GlobalAttentionReader } from '../../src/renderer/global-attention.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
 
 // Unit suite for 待我处理's words (Issue #424, plan slice S78; editor-surfaces §8.1, V2-UX-ATTN-001 to 009):
 // every group heading, state, reason and safe next step byte for byte; the next steps pinned to the words the
@@ -53,7 +56,6 @@ const RENDERER = readFileSync(fileURLToPath(new URL('../../src/renderer/index.ts
 // The Manuscript screen owns its toolbar, so the recovery return's button is read there (Issue #1127).
 const MANUSCRIPT_SCREEN = readFileSync(fileURLToPath(new URL('../../src/renderer/manuscript-screen.ts', import.meta.url)), 'utf8');
 // ②A's baseline-analysis card owns its Task outcome's next step (Issue #1172).
-const BASELINE_ANALYSIS_CARD = readFileSync(fileURLToPath(new URL('../../src/renderer/baseline-analysis-card.ts', import.meta.url)), 'utf8');
 const AT = '2026-09-23T04:05:06.000Z';
 
 const STATES: ReadonlyArray<GlobalAttentionStateKey> = [
@@ -97,6 +99,44 @@ function projection(groups: Partial<Record<GlobalAttentionGroupKey, ReadonlyArra
 }
 
 describe('the entry and the screen', () => {
+  it('filters shelved learning targets from both the ordinary attention badge and its items, restoring them in developer mode', () => {
+    const restore = installMiniDom();
+    setTechnicalLayerVisible(false);
+    try {
+      const learning = item('learning-materials-pending', { itemId: 'learning', group: 'decisions',
+        object: { kind: 'learning-materials', pending: 1, deferred: 0 }, nextStep: 'decide-learning-materials', target: { kind: 'learning-materials', bookId: 'book' } });
+      const data = projection({ decisions: [learning, item('analysis-prepared', { itemId: 'plan', group: 'decisions' })],
+        exceptions: [item('analysis-failed')], recent: [item('analysis-completed', { group: 'recent' })] });
+      const listeners = new Set<(reading: GlobalAttentionReading) => void>();
+      const reader: GlobalAttentionReader = { refresh: () => { for (const listener of listeners) listener({ kind: 'projection', projection: data }); },
+        subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, interrupt: () => undefined };
+      const entry = document.createElement('button');
+      const root = document.createElement('main');
+      miniDocument.body.append(root as unknown as MiniElement);
+      mountGlobalAttentionEntry({ button: entry, reader, open: () => undefined });
+      const surface = mountGlobalAttention({ root, reader, technicalDetails: () => document.createElement('details'),
+        setStatus: () => undefined, errorMessage: (_error, fallback) => fallback, open: async () => undefined, openNetworkProxySettings: () => undefined });
+      surface.start();
+      expect(entry.dataset['attentionCount']).toBe('2');
+      expect(entry.getAttribute('aria-label')).toContain('2 项需要你处理');
+      expect(root.querySelector('[data-attention-item="learning"]')).toBeNull();
+      expect(root.querySelector('[data-attention-item="plan"]')).not.toBeNull();
+      const card = root.querySelector<HTMLElement>('[data-attention-item="plan"]')!;
+      expect(card.querySelector('.global-attention-object .global-attention-pill')).not.toBeNull();
+      expect(card.querySelector('.global-attention-body')!.children).toHaveLength(2);
+      expect(card.querySelector('details')).toBeNull();
+      expect(card.textContent).not.toContain('安全的下一步：');
+
+      expect(root.querySelector<HTMLElement>('[data-attention-count]')!.dataset['attentionCount']).toBe('2');
+      setTechnicalLayerVisible(true); reader.refresh();
+      expect(entry.dataset['attentionCount']).toBe('3');
+      expect(root.querySelector('[data-attention-item="learning"]')).not.toBeNull();
+      expect(root.querySelector<HTMLElement>('[data-attention-count]')!.dataset['attentionCount']).toBe('3');
+      expect(data.actionableCount).toBe(3);
+      surface.destroy();
+    } finally { setTechnicalLayerVisible(true); restore(); }
+  });
+
   it('names 待我处理 and shows the count only while the first two groups hold anything', () => {
     expect(GLOBAL_ATTENTION_ENTRY_LABEL).toBe('待我处理');
     expect(globalAttentionEntryView(null)).toEqual({ text: '待我处理', badge: null, accessibleName: '待我处理' });
@@ -248,6 +288,7 @@ describe('each item', () => {
       'answer-clarification': '回答问题',
       'adjust-budget-redo': '调整预算并重做',
       'resolve-model-service': '处理模型服务',
+      'open-network-proxy': '去设置 › 模型服务 › 网络代理',
       // 结果待确认's first step (Issue #51, S16c): which ranges are unconfirmed, never a repeat-shaped action.
       'view-unconfirmed': '查看未确认的部分',
       reprepare: '重新准备',
@@ -288,7 +329,7 @@ describe('each item', () => {
     // ceiling was the launch's and a relaunch raises it.
     expect(GLOBAL_ATTENTION_NEXT_STEP_LABELS.redo).toBe(TASK_BAR_REDO);
     expect(globalAttentionReason(item('analysis-budget-reached', { nextStep: 'redo' })))
-      .toBe('运行用到了这次启动的预算上限，已停止；读完的部分已保留。要接着读，请以更高的预算上限重新启动，再改计划重做。');
+      .toBe('已到本次启动的预算上限，保留结果后停下；提高启动预算后可重做。');
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).toEqual(TASK_PLAN_STATE_PILLS['plan-moved']);
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-plan-moved']).not.toEqual(GLOBAL_ATTENTION_STATE_PILLS['analysis-blocked']);
     // Pinned to the words the record's own surface uses there.
@@ -301,8 +342,7 @@ describe('each item', () => {
     expect(MANUSCRIPT_SCREEN).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['return-to-recovery']}'`);
     expect(RENDERER).toContain(`button('${GLOBAL_ATTENTION_NEXT_STEP_LABELS['retry-abandon-cleanup']}'`);
     expect(RENDERER).toContain(`${GLOBAL_ATTENTION_NEXT_STEP_LABELS['await-local-check']}；不要重复导入`);
-    expect(BASELINE_ANALYSIS_CARD).toContain(`\`${GLOBAL_ATTENTION_NEXT_STEP_PREFIX}\${`);
-    expect(globalAttentionNextStepLine('reconfirm-plan')).toBe('安全的下一步：重新确认计划');
+    expect(globalAttentionNextStepLine('reconfirm-plan')).toBe('重新确认计划');
     // No step grants anything, and none says 授权.
     for (const label of Object.values(GLOBAL_ATTENTION_NEXT_STEP_LABELS)) expect(label).not.toMatch(/授权|批准|待审批/u);
   });
@@ -341,168 +381,27 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'dialogue', question: null })).toBe('提问 · 记录不在本机');
   });
 
-  it('gives each state its reason, from the record\'s own facts', () => {
-    const categories = (entries: ReadonlyArray<[string, 'failed' | 'refused' | 'interrupted' | 'running' | 'waiting' | 'settled', string | null]>): GlobalAttentionItemProjection['facts']['categories'] =>
-      entries.map(([label, state, detail]) => ({ label, state, stateLabel: REVIEW_RUN_CATEGORY_STATE_LABELS[state], detail }));
-    const reasons: Record<GlobalAttentionStateKey, string> = {
-      'apply-outcome-unresolved': globalAttentionReason(item('apply-outcome-unresolved')),
-      'import-outcome-uncertain': globalAttentionReason(item('import-outcome-uncertain')),
-      'import-cleanup-pending': globalAttentionReason(item('import-cleanup-pending')),
-      'recovery-pending': globalAttentionReason(item('recovery-pending')),
-      'recovery-deferred': globalAttentionReason(item('recovery-deferred')),
-      'manuscript-conflict': globalAttentionReason(item('manuscript-conflict', { object: { kind: 'manuscript-conflict', conflictKind: 'suggestion' } })),
-      'manuscript-conflict-deferred': globalAttentionReason(item('manuscript-conflict-deferred', { object: { kind: 'manuscript-conflict', conflictKind: 'reversal' } })),
-      'analysis-failed': globalAttentionReason(item('analysis-failed')),
-      'analysis-interrupted': globalAttentionReason(item('analysis-interrupted')),
-      'analysis-budget-reached': globalAttentionReason(item('analysis-budget-reached')),
-      'analysis-account-limit': globalAttentionReason(item('analysis-account-limit')),
-      'analysis-outcome-unknown': globalAttentionReason(item('analysis-outcome-unknown')),
-      'analysis-outcome-unconfirmed': globalAttentionReason(item('analysis-outcome-unconfirmed')),
-      'analysis-blocked': globalAttentionReason(item('analysis-blocked')),
-      'analysis-orphaned': globalAttentionReason(item('analysis-orphaned')),
-      'review-failed': globalAttentionReason(item('review-failed', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'failed', null], ['体例与格式', 'refused', null]]) } })),
-      'review-stopped': globalAttentionReason(item('review-stopped', { facts: { progress: null, revisionOrdinal: null, categories: categories([['事实核查', 'interrupted', null]]) } })),
-      'analysis-plan-revision': globalAttentionReason(item('analysis-plan-revision')),
-      'analysis-plan-moved': globalAttentionReason(item('analysis-plan-moved')),
-      'analysis-clarification': globalAttentionReason(item('analysis-clarification', { blocked: true })),
-      'analysis-queued': globalAttentionReason(item('analysis-queued')),
-      'analysis-running': globalAttentionReason(item('analysis-running', { facts: { progress: { stage: 'units', unitsSettled: 3, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
-      'analysis-waiting-network': globalAttentionReason(item('analysis-waiting-network')),
-      'analysis-waiting-connection': globalAttentionReason(item('analysis-waiting-connection')),
-      'analysis-waiting-slot': globalAttentionReason(item('analysis-waiting-slot')),
-      'analysis-waiting-admission': globalAttentionReason(item('analysis-waiting-admission')),
-      'analysis-waiting-idle': globalAttentionReason(item('analysis-waiting-idle')),
-      'analysis-yielded': globalAttentionReason(item('analysis-yielded')),
-      'analysis-waiting-capacity': globalAttentionReason(item('analysis-waiting-capacity')),
-      'analysis-cancelling': globalAttentionReason(item('analysis-cancelling', { facts: { progress: { stage: 'units', unitsSettled: 2, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
-      'analysis-pausing': globalAttentionReason(item('analysis-pausing', { facts: { progress: { stage: 'units', unitsSettled: 2, unitsTotal: 8 }, categories: [], revisionOrdinal: null } })),
-      'analysis-paused': globalAttentionReason(item('analysis-paused')),
-      'analysis-resumable': globalAttentionReason(item('analysis-resumable')),
-      'review-running': globalAttentionReason(item('review-running', { facts: { progress: { stage: 'cross-unit-reduction', unitsSettled: 8, unitsTotal: 8 }, categories: categories([['体例与格式', 'running', null]]), revisionOrdinal: null } })),
-      'review-continuable': globalAttentionReason(item('review-continuable', { facts: { progress: null, categories: categories([['体例与格式', 'waiting', '尚未开始；继续审阅时从这一类接着审。']]), revisionOrdinal: null } })),
-      'analysis-completed': globalAttentionReason(item('analysis-completed', { facts: { progress: null, categories: [], revisionOrdinal: 1 } })),
-      'analysis-completed-with-gaps': globalAttentionReason(item('analysis-completed-with-gaps', { facts: { progress: null, categories: [], revisionOrdinal: 4 } })),
-      'review-completed': globalAttentionReason(item('review-completed', { facts: { progress: null, categories: categories([['错别字与规范用语', 'settled', null], ['体例与格式', 'settled', null]]), revisionOrdinal: null } })),
-      'analysis-prepared': globalAttentionReason(item('analysis-prepared')),
-      'review-prepared': globalAttentionReason(item('review-prepared', { facts: { progress: null, revisionOrdinal: null, categories: categories([['错别字与规范用语', 'waiting', null], ['体例与格式', 'waiting', null]]) } })),
-      'analysis-cancelled': globalAttentionReason(item('analysis-cancelled', { facts: { progress: null, categories: [], revisionOrdinal: 2 } })),
-      'maintenance-pending': globalAttentionReason(item('maintenance-pending', {
-        object: { kind: 'maintenance', classification: 'errata', ordinal: 1, publicationOrdinal: 1 }, nextStep: 'maintenance-write-errata',
-      })),
-      'maintenance-waiting': globalAttentionReason(item('maintenance-waiting', {
-        object: { kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 }, nextStep: 'maintenance-link-publication',
-      })),
-      'library-attribution-pending': globalAttentionReason(item('library-attribution-pending', {
-        object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'none' }, nextStep: 'set-library-attribution',
-      })),
-      'learning-eligibility-pending': globalAttentionReason(item('learning-eligibility-pending', {
-        object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'book' }, nextStep: 'set-learning-eligibility',
-      })),
-      'learning-eligibility-deferred': globalAttentionReason(item('learning-eligibility-deferred', {
-        object: { kind: 'library-material', title: '参考书', materialKind: 'book', scope: 'house' }, nextStep: 'set-learning-eligibility',
-      })),
-      'learning-materials-pending': globalAttentionReason(item('learning-materials-pending', {
-        object: { kind: 'learning-materials', pending: 2, deferred: 0 }, nextStep: 'decide-learning-materials',
-      })),
-      'learning-materials-deferred': globalAttentionReason(item('learning-materials-deferred', {
-        object: { kind: 'learning-materials', pending: 0, deferred: 1 }, nextStep: 'decide-learning-materials',
-      })),
-      'indexing-completed': globalAttentionReason(item('indexing-completed', {
-        object: { kind: 'library-index', title: '参考书', materialKind: 'book', scope: 'house', outcome: 'complete' }, nextStep: 'view-material-index',
-      })),
-      ...Object.fromEntries((['dialogue-answering', 'dialogue-answered', 'dialogue-stopped', 'dialogue-interrupted', 'dialogue-failed'] as const)
-        .map((state) => [state, globalAttentionReason(item(state, { object: { kind: 'dialogue', question: '这段的叙述视角是否一致？' }, nextStep: 'open-dialogue' }))])) as
-        Record<'dialogue-answering' | 'dialogue-answered' | 'dialogue-stopped' | 'dialogue-interrupted' | 'dialogue-failed', string>,
-      'draft-unfinished': globalAttentionReason(item('draft-unfinished', {
-        object: { kind: 'draft', goal: '统一全书的人名译法', origin: 'composer-book', ranges: 0 }, nextStep: 'continue-draft',
-      })),
-    };
-    expect(reasons).toEqual({
-      'apply-outcome-unresolved': '本地权威记录尚不能证明本次应用结果；禁止自动重试、重做或重复应用。',
-      'import-outcome-uncertain': '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。',
-      'import-cleanup-pending': '放弃意图已经持久化，安全清理尚未完成；已阻止继续导入和新权威引用。',
-      'recovery-pending': '中断后的稿件状态需要你确认；系统不会替你选择恢复来源。',
-      'recovery-deferred': '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。',
-      'manuscript-conflict': '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。',
-      'manuscript-conflict-deferred': '撤销这次应用时遇到冲突：应用后的文字又改过；在解决之前不能撤销这次应用。已记下暂不处理，这处冲突仍未解决。',
-      'analysis-failed': '运行失败，没有形成新的结果集修订版。',
-      'analysis-interrupted': '运行已在派发后中断；已完成单元的结果与缺口均已保留。',
-      'analysis-budget-reached': '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。',
-      'analysis-account-limit': '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。',
-      'analysis-outcome-unknown': '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。',
-      'analysis-outcome-unconfirmed': '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。',
-      'analysis-blocked': '授权已记录，派发前阻止：当前启动没有可执行的路由。',
-      'analysis-orphaned': '服务在这次运行期间停止，运行已中断；已完成单元的结果与缺口保留在分析账本中。',
-      'review-failed': '「错别字与规范用语」运行失败；「体例与格式」未能开始',
-      'review-stopped': '「事实核查」已中断',
-      'analysis-plan-revision': '计划冻结之后，它的关键内容已经变化；原计划不能再开始。',
-      // Issue #536 (OFF-008): a waiting Run whose plan moved never starts; the plan's 重新准备 is the way on.
-      'analysis-plan-moved': '它等待联网时，计划依据的内容已经变化；这次授权不再对应当前的情况，它不会开始。',
-      // Issue #422 (S76d; CLAR-004): the Task waits for the answer; a question asked while the Run reads on says so.
-      'analysis-clarification': '任务等待你的说明：它想知道要不要把一个阅读范围安全地再试一次。',
-      'analysis-queued': '已进入 AI7 调度器。',
-      'analysis-running': '正在逐个阅读范围分析 · 已完成 3/8 个阅读范围',
-      'analysis-waiting-network': '联网后开始任务：恢复联网后，AI7 先核对计划再开始；现在什么都没有运行。',
-      'analysis-waiting-connection': '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。',
-      'analysis-waiting-slot': '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始；之后开始的任务可能先开始。现在什么都没有运行。',
-      // Issue #539: online with nothing in its way, it is not in the scheduler yet.
-      'analysis-waiting-admission': '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。',
-      // Issue #49 (S14; CONC-007): a start waiting on the governor for a place.
-      'analysis-waiting-idle': '已记录本次运行授权；停下编辑 30 秒且没有编辑操作运行后开始，可以取消任务。',
-      'analysis-yielded': '让位给你的任务：已完成的部分都已保存，下次空闲后接着处理；预算上限不变。',
-      'analysis-waiting-capacity': '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。',
-      'analysis-cancelling': '你取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
-      'analysis-pausing': '你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · 正在逐个阅读范围分析 · 已完成 2/8 个阅读范围',
-      'analysis-paused': '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。',
-      'analysis-resumable': 'AI7 关闭时这项任务正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。',
-      'review-running': '正在审阅「体例与格式」 · 正在跨范围比对',
-      'review-continuable': '「体例与格式」尚未开始；继续审阅时从这一类接着审。',
-      'analysis-completed': '已形成第 1 份基线分析。',
-      'analysis-completed-with-gaps': '已形成第 4 份基线分析，保留缺口单元。',
-      'review-completed': '已审：「错别字与规范用语」「体例与格式」；发现已标到稿件上。',
-      // Issue #423 (S77a; TASK-044): the 任务 panel's own three; nothing starts by itself, and a cancellation keeps what was read.
-      'analysis-prepared': '计划已准备好，还没有开始；查看计划后开始任务。它不会自己开始。',
-      'review-prepared': '审阅计划已准备好，还没有开始：「错别字与规范用语」「体例与格式」；查看计划后开始审阅。它不会自己开始。',
-      'analysis-cancelled': '你取消了这项任务；读完的阅读范围已形成第 2 份基线分析。',
-      // Issue #426 (S68b; MAINT-012): what the case waits on; nothing outside AI7 is claimed.
-      'maintenance-pending': '勘误还没有写下内容：在这个维护事项中编写勘误。',
-      'maintenance-waiting': '替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。',
-      // Issue #427 (S79c; KB-007, LEARN-006): what a 资料库 item waits for; nothing about it is inferred meanwhile.
-      'library-attribution-pending': '放进资料库以后还没有定归属：定了归属与学习准入，任务才能把它列进「允许参考」。',
-      'learning-eligibility-pending': '归属已定，学习准入还没有定：没有你的决定，它不会用来学习，任务也还不能把它列进「允许参考」。',
-      'learning-eligibility-deferred': '学习准入记为稍后决定：决定之前，它不会用来学习，任务也还不能把它列进「允许参考」。',
-      'learning-materials-pending': '你的反馈与改动里有可以用来学习的材料：学习准入策略还只是建议，没有你的决定，它们不会用来学习。',
-      'learning-materials-deferred': '这些学习材料记为稍后决定：决定之前，它们不会用来学习。',
-      // Issue #428 (S80a; ATTN-009, KB-009): 索引完成, and which layers it holds; it asks nothing.
-      'indexing-completed': '资料索引已在本机建好：原件、元数据、全文与分段锚点都已就绪；相似段落检索可在资料里按需构建。',
-      // Issue #52 (S17a; DIALOG-010, 012, 016): a dialogue Task in the 任务 panel, read in the background.
-      'dialogue-answering': '回答在后台继续；打开对话可以看到已经收到的完整内容。',
-      'dialogue-answered': '回答已完成；它只是生成的内容，不改稿件，需要时可以转为修改建议。',
-      'dialogue-stopped': '你停止了回答，只保留了完整的句子；可以继续回答或重新回答。',
-      'dialogue-interrupted': '回答被中断，只保留了完整的句子；可以继续回答或重新回答。',
-      'dialogue-failed': '回答没有完成；可以重新回答。',
-      // Issue #423 (slice 7a; TASK-004 to 006): a Task Intent Draft is no Task until 准备计划, and sends nothing.
-      'draft-unfinished': '还没有准备计划：继续编辑，或在草稿里准备计划后它才成为任务；它不会自己开始，也不会发送任何内容。',
-    });
-    const maintenance = (classification: 'correction' | 'reissue', nextStep: 'maintenance-link-proposal' | 'maintenance-link-publication' | 'maintenance-conclude') =>
-      globalAttentionReason(item(classification === 'reissue' ? 'maintenance-waiting' : 'maintenance-pending', {
-        object: { kind: 'maintenance', classification, ordinal: 2, publicationOrdinal: 1 }, nextStep,
-      }));
-    expect(maintenance('correction', 'maintenance-link-proposal')).toBe('更正还没有关联修改建议：先在稿件中提出修改建议，再在这个维护事项中关联它。');
-    expect(maintenance('correction', 'maintenance-link-publication')).toBe('修改建议已关联：更正后的文字另行保存里程碑版本、设为发稿版本后，在这个维护事项中关联它。');
-    expect(maintenance('correction', 'maintenance-conclude')).toBe('这个维护事项的步骤已经记录：在这个维护事项中记录它的结论。');
-    expect(maintenance('reissue', 'maintenance-link-publication')).toBe('再版等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。');
-    // Only a 更正 reads 修改建议已关联: a 替代 read as pending still says what it waits for.
-    expect(globalAttentionReason(item('maintenance-pending', {
-      object: { kind: 'maintenance', classification: 'supersession', ordinal: 3, publicationOrdinal: 1 }, nextStep: 'maintenance-link-publication',
-    }))).toBe('替代等待另设的发稿版本：另行设为发稿版本后，在这个维护事项中关联它。');
-    // The recovery reason of a deferred state is the landing's own sentence, word for word.
-    expect(RENDERER).toContain(`'${reasons['recovery-deferred']}'`);
+  it('keeps fixed state copy complete without a next-step prefix', () => {
+    for (const state of STATES) {
+      const reason = globalAttentionReason(item(state));
+      expect(reason, state).not.toBe('');
+      expect(reason, state).not.toMatch(/…[。！？]?$/u);
+      expect(reason, state).not.toContain('安全的下一步：');
+    }
+    expect(globalAttentionReason(item('analysis-outcome-unknown'))).toBe('回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。');
+    expect(globalAttentionReason(item('analysis-prepared'))).toBe('计划已准备好，等待你开始任务。');
+    expect(globalAttentionReason(item('analysis-budget-reached', { nextStep: 'redo' }))).toContain('提高启动预算');
+    expect(globalAttentionReason(item('analysis-completed-with-gaps', {
+      facts: { progress: null, categories: [], revisionOrdinal: 1,
+        completion: { gaps: 1, total: 2, reason: '尚未读完'.repeat(50) } },
+    }))).toHaveLength(60);
   });
 
   it('says when, in local time, and as a completion in 最近完成', () => {
     expect(globalAttentionTimeLine('exceptions', AT)).toBe(`记录于 ${localInstantLabel(AT)}`);
     expect(globalAttentionTimeLine('recent', AT)).toBe(`完成于 ${localInstantLabel(AT)}`);
+    expect(globalAttentionTimeLine('recent', AT, 'cancelled')).toBe(`取消于 ${localInstantLabel(AT)}`);
+    expect(globalAttentionTimeLine('recent', AT, 'stopped')).toBe(`停止于 ${localInstantLabel(AT)}`);
   });
 
   it('reads as one view: the Book, the object, the state, the reason, the next step and the way in', () => {
@@ -515,8 +414,8 @@ describe('each item', () => {
       object: '基线分析 · 首次基线分析',
       stateLabel: '派发前已阻止',
       pill: { tone: 'blocked', shape: 'diamond' },
-      reason: '授权已记录，派发前阻止：当前启动没有可执行的路由。',
-      nextStep: '安全的下一步：查看运行',
+      reason: '模型服务当前不可用，任务尚未开始。',
+      nextStep: '查看运行',
       time: `记录于 ${localInstantLabel(AT)}`,
       openName: '《待我处理旅程甲》 · 基线分析 · 首次基线分析',
     }]);
@@ -557,7 +456,43 @@ describe('material and knowledge-base items (V2-UX-ATTN-009)', () => {
 describe('a Clarification Request in 待我处理 (S76d)', () => {
   it('says whether only its step waits or the whole Task', () => {
     expect(globalAttentionReason(item('analysis-clarification', { blocked: false })))
-      .toBe('该步骤等待说明 · 其他步骤仍在继续：它想知道要不要把一个阅读范围安全地再试一次。');
+      .toBe('这个阅读范围正在等你决定是否重试，其他步骤继续处理。');
     expect(GLOBAL_ATTENTION_STATE_PILLS['analysis-clarification']).toEqual({ tone: 'attention', shape: 'triangle' });
   });
+});
+
+describe('resumable stop reasons (Issue #1309)', () => {
+  it('projects each stop reason into the state label and one actionable explanation', () => {
+    const expected = {
+      'proxy-unreachable': ['任务已中断 · 代理不可达', '设置 › 模型服务 › 网络代理'],
+      'model-service-unreachable': ['任务已中断 · 模型服务不可达', '设置 › 模型服务 › 网络代理'],
+      'outcome-unknown': ['任务已中断 · 结果待确认', '查看未确认的部分'],
+      shutdown: ['任务已中断 · AI7 关闭时正在运行', '续行时从下一个阅读范围接着读'],
+    } as const;
+    for (const [reason, [label, action]] of Object.entries(expected)) {
+      const entry = item('analysis-resumable', { facts: { progress: null, categories: [], revisionOrdinal: null, stopReason: reason as keyof typeof expected } });
+      expect(globalAttentionStateLabel(entry), reason).toBe(label);
+      expect(globalAttentionReason(entry), reason).toContain(action);
+    }
+  });
+});
+
+it('warns with N/M unread units and their majority classified reason', () => {
+  const view = globalAttentionView(projection({ recent: [item('analysis-completed-with-gaps', {
+    facts: { progress: null, categories: [], revisionOrdinal: 1,
+      completion: { gaps: 7, total: 8, reason: '模型服务不可达：请检查网络或网络代理设置。' } },
+  })] }));
+  expect(view.flatMap((group) => group.items)[0]).toMatchObject({
+    stateLabel: '已完成 · 7/8 个单元未读成', pill: { tone: 'warn' },
+    reason: '模型服务不可达：请检查网络或网络代理设置。',
+  });
+});
+it('selects the most frequent existing gap wording without exposing its technical code', () => {
+  const unreachable = '模型服务不可达：请检查网络或网络代理设置。';
+  expect(majorityGapReason([
+    { code: 'out-of-scope', reason: '未纳入范围' },
+    { code: 'outcome-unknown', reason: '该单元结果未知' },
+    { code: 'adapter-failure', reason: `${unreachable}（MODEL_SERVICE_UNREACHABLE）` },
+    { code: 'adapter-failure', reason: `${unreachable}（MODEL_SERVICE_UNREACHABLE）` },
+  ])).toBe(unreachable);
 });

@@ -24,7 +24,7 @@ describe('first-run guidance', () => {
   it('names the model service as optional and links the four existing surfaces in order', () => {
     expect(FIRST_RUN_CARD_LABELS.modelStep).toContain('可选');
     expect(FIRST_RUN_CARD_LABELS.modelNote).toBe('本地编辑与恢复不依赖模型服务');
-    expect(FIRST_RUN_CARD_LABELS.sampleUnavailable).toBe('示例书尚未提供');
+    expect(FIRST_RUN_CARD_LABELS.sampleUnavailable).toBe('示例书尚未提供。');
     expect(SAMPLE_GUIDANCE_LABELS.steps.map((step) => `${step.label}:${step.section}`))
       .toEqual(['分析:analysis', '审阅:review', '标记:manuscript', '导出:deliverables']);
   });

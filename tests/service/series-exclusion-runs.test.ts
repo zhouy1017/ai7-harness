@@ -184,7 +184,7 @@ describe('a Series Retrieval Exclusion over Review Runs', () => {
       takeInRevision(store, seriesId, itemOf(store, seriesId), '更新后的合成知识，用于后续任务。', 'series-tasks');
       const offered = store.inspectCapturedProcedureApplicability(bookId).procedures;
       expect([[ '', SHEET_PROCEDURE_NONE, null ], ...offered.map((entry) => [entry.procedureId, sheetProcedureOption(entry), entry.fit])])
-        .toEqual([[ '', '不按工序（自己选类别）', null ], [saved.procedureId, '《书系复核》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选', 'all']]);
+        .toEqual([[ '', '不按工序 · 自己选类别', null ], [saved.procedureId, '《书系复核》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选', 'all']]);
       // Since ADR 0090 (#66) the save writes the /2 successor, whose Series ceiling the resolved Run reads; /1 never widens (unit).
       expect(store.inspectCapturedProcedureRun(bookId, saved.procedureId).resolved?.runSourceScope).toBe('series');
     });

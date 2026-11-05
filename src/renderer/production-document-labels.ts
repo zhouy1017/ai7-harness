@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   ProductionDocumentDeliveryProjection,
   ProductionDocumentPhaseAction,
@@ -57,7 +58,7 @@ export function documentSourceLine(source: ProductionDocumentSourceProjection, i
 }
 
 /** Where a document drafted by a writing Task (Issue #432, S84a) came from: AI7's draft, never a file of the Book's. */
-export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草（范例只参照，不复制）';
+export const DOCUMENT_DRAFTED_ORIGIN = '由写作任务起草 · 范例只参照，不复制';
 
 /** The first line of a document's card: its latest version and the material it was made from. */
 export function documentCardLine(document: ProductionDocumentProjection): string {
@@ -90,8 +91,8 @@ export const DELIVERY_VERSION_LEGEND = '交付哪一版';
 export const DELIVERY_UNSAVED_NOTE = '有修改尚未保存为版本：交付「现在的文字」会先把它保存为新的版本；也可以交付已保存的版本。';
 export const DELIVERY_RECIPIENT_LEGEND = '交给谁';
 export const DELIVERY_CUSTOM_RECIPIENT = '自行输入';
-export const DELIVERY_CUSTOM_LABEL = '交给谁（自行输入）';
-export const DELIVERY_NOTE_LABEL = '备注（可不填）';
+export const DELIVERY_CUSTOM_LABEL = '交给谁 · 自行输入';
+export const DELIVERY_NOTE_LABEL = '备注 · 可不填';
 /** Stated beside `交付` before the editor confirms (DELIV-003): a delivery records and never sends. */
 export const DELIVERY_STATEMENT = '交付只记录这一版交给了谁；AI7 不会发送，文件由你导出到所选位置后自行交出。';
 export const DELIVERY_BLOCKERS = {
@@ -101,14 +102,14 @@ export const DELIVERY_BLOCKERS = {
 } as const;
 /** The first choice while the text moved past the latest version (DELIV-003): `现在的文字（交付时先保存为版本 3）`. */
 export function documentCurrentTextChoice(nextOrdinal: number): string {
-  return `现在的文字（交付时先保存为版本 ${nextOrdinal}）`;
+  return `现在的文字 · 交付时先保存为版本${technicalWords(` ${nextOrdinal}`)}`;
 }
 /** What a Delivery Record's export came to, when none has been made yet. */
 export const DELIVERY_NO_EXPORT = '暂无导出记录';
 
 /** `第 1 次交付 · 宣传部 · 版本 2 · 9月24日 11:00`: never 已交付 (PUB-009's words stay out of 交付物). */
 export function documentDeliveryLine(delivery: Pick<ProductionDocumentDeliveryProjection, 'ordinal' | 'recipient' | 'versionLabel'>, recordedAt: string): string {
-  return `第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label} · ${delivery.versionLabel} · ${recordedAt}`;
+  return `第 ${delivery.ordinal} 次交付 · ${delivery.recipient.label}${technicalWords(` · ${delivery.versionLabel}`)} · ${recordedAt}`;
 }
 
 /** What the delivery's export came to: the file written, or nothing yet. */
@@ -123,7 +124,7 @@ export function documentDeliveredLine(ordinal: number, recipient: string): strin
 
 /** The export card's name for a document version: `新闻稿 · 版本 2`. */
 export function documentExportLabel(typeLabel: string, versionLabel: string): string {
-  return `${typeLabel} · ${versionLabel}`;
+  return `${typeLabel}${technicalWords(` · ${versionLabel}`)}`;
 }
 
 export const DOCUMENT_STATUS_LINES = {
@@ -195,7 +196,7 @@ export const DOCUMENT_VERSIONS_TRUNCATED = '更早的版本保留在文档的历
 /** The version the working text stands on. */
 export const DOCUMENT_VERSION_CURRENT_MARK = '当前';
 export const DOCUMENT_MATERIALS_HEADING = '这份文档的材料';
-export const DOCUMENT_MATERIALS_EMPTY = '暂无材料。任务简报、引语台账、事实核查记录与参考的范例会列在这里。';
+export const DOCUMENT_MATERIALS_EMPTY = '暂无材料，任务简报、引语台账、事实核查记录与范例会列在这里。';
 
 /** A version row: `版本 2 · 2026年9月24日 10:30`. */
 export function documentVersionLine(label: string, createdAt: string): string {
@@ -224,7 +225,7 @@ export const DOCUMENT_PHASE_CONFIRM_LABELS: Readonly<Record<'skip' | 'reopen', s
   skip: '确认跳过',
   reopen: '确认重新打开',
 };
-export const DOCUMENT_PHASE_REASON_TEXT_LABEL = '说明（选「自行输入」时必填）';
+export const DOCUMENT_PHASE_REASON_TEXT_LABEL = '说明 · 选择自行输入时必填';
 export const DOCUMENT_PHASE_CANCEL = '取消';
 export const DOCUMENT_PHASE_REASON_NEEDED = '请先选一个原因。';
 export const DOCUMENT_PHASE_CUSTOM_NEEDED = '选了「自行输入」，请写下原因。';
@@ -245,7 +246,7 @@ export const DOCUMENT_PHASE_MOVE_FAILED = '无法记录这一步。';
 
 /** `基础书稿编辑流程 2.0.0 · 启用于 2026年9月24日 10:30`: the profile the document follows (WORK-002). */
 export function workflowProfileLine(name: string, version: string, activatedAt: string): string {
-  return `${name} ${version} · 启用于 ${activatedAt}`;
+  return `${name}${technicalWords(` ${version}`)} · 启用于 ${activatedAt}`;
 }
 
 /** An accessible name for a phase's move: `开始「起草」`. */

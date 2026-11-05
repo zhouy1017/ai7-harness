@@ -1,3 +1,5 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BookTasksProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
@@ -15,7 +17,7 @@ const TASKS: BookTasksProjection = {
 let uninstall: () => void;
 beforeEach(() => {
   uninstall = installMiniDom();
-  (globalThis as Record<string, unknown>)['window'] = { setTimeout, clearTimeout };
+  (globalThis as Record<string, unknown>)['window'] = { setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => {} };
 });
 afterEach(() => {
   delete (globalThis as Record<string, unknown>)['window'];
@@ -24,21 +26,24 @@ afterEach(() => {
 
 function harness() {
   const reads = { tasks: 0, plans: 0 };
+  let selectedBook = BOOK;
   const root = miniDocument.createElement('aside');
   miniDocument.body.append(root);
   const api = {
-    inspectBookTasks: async () => { reads.tasks += 1; return TASKS; },
+    inspectTaskOverview: async () => ({ groups: ['running', 'queued', 'waiting', 'paused', 'recent'].map((key) => ({ key, items: [], total: 0 })), books: [{ bookId: selectedBook, title: '春江' }], capacity: 2, queueFrozen: false, runningCount: 0, queuedCount: 0, actionableCount: 0 }),
+    inspectBookTasks: async () => { reads.tasks += 1; return { ...TASKS, bookId: selectedBook }; },
     inspectBaselineAnalysis: async () => { throw new Error('none'); },
     inspectTaskPlan: async () => { reads.plans += 1; throw new Error('none'); },
-    inspectTaskIntentDrafts: async () => ({ bookId: BOOK, bookTitle: '春江', manuscript: null, drafts: [] }),
+    inspectTaskIntentDrafts: async () => ({ bookId: selectedBook, bookTitle: '春江', manuscript: null, drafts: [] }),
   };
   const drawer: TaskDrawerSurface = mountTaskDrawer({
+    resumeDraft: (bookId: string, resume: () => void) => { selectedBook = bookId; resume(); },
     root, shell: miniDocument.body, api, technicalDetails: () => miniDocument.createElement('div'),
     errorMessage: (_error: unknown, fallback: string) => fallback, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn(),
   } as unknown as MountTaskDrawerOptions);
   const find = (selector: string): MiniElement | null => root.querySelector(selector);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-  return { root, drawer, reads, find, settle };
+  return { root, drawer, reads, find, settle, selectBook: (bookId: string) => { selectedBook = bookId; } };
 }
 
 describe('the 任务 panel as the right co-pilot', () => {
@@ -92,15 +97,27 @@ describe('the 任务 panel as the right co-pilot', () => {
   });
 
   it('parks unsaved composer words when the global destination closes it', async () => {
-    const { root, drawer, find, settle } = harness();
+    const { root, drawer, find, settle, selectBook } = harness();
     drawer.openComposer({ bookId: BOOK, bookTitle: '春江', origin: 'composer-book', manuscript: null, ranges: [] }, () => null);
     await settle();
+    expect(find('.task-composer')?.tagName).toBe('SECTION');
+    expect(find('.task-composer')?.classList.contains('sheet')).toBe(false);
     find('[data-task-composer-field="goal"]')!.value = '核对人物称谓';
+    find('[data-task-composer-field="goal"]')!.dispatchEvent({ type: 'input' });
     drawer.followScreen('global-agent', null);
     expect(root.hidden).toBe(true);
     expect(drawer.view()).toBeNull();
     drawer.followScreen('editor', BOOK);
     expect(root.hidden).toBe(true);
+    expect(find('[data-task-composer-field="goal"]')).toBeNull();
+    selectBook(OTHER); drawer.openPanel(OTHER, () => null); await settle();
+    find('[data-task-composer-action="resume"]')!.click();
     expect(find('[data-task-composer-field="goal"]')?.value).toBe('核对人物称谓');
   });
+});
+
+it('scans the Book task drawer in ordinary mode (#1315)', async () => {
+  setTechnicalLayerVisible(false);
+  try { const view = harness(); view.drawer.openPanel(BOOK, () => null); await view.settle(); expectNoTechnicalText(view.root); view.drawer.close(false); }
+  finally { setTechnicalLayerVisible(true); }
 });

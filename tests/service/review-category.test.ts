@@ -7,7 +7,7 @@ import { EditorialStore, REVIEW_CATEGORY_CACHE_CAPACITY } from '../../src/servic
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { kindLocalTools } from '../../src/service/analysis/live-kind-admission.js';
 import { BaselineAnalysisExecutionOwner, ExecutionAdmissionError } from '../../src/service/analysis/execution.js';
-import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { graphemeCount, normalizedQuotation, sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
 import { runReportUsageReconciles } from '../../src/service/analysis/run-report.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { reviewCategoryContract, reviewCategoryContractDigest, type ReviewCategoryContractInput } from '../../src/service/review/review-category-contract.js';
@@ -161,7 +161,10 @@ function requireAnchored(book: Book, settled: ReviewCategoryProjection): void {
   for (const finding of revision.findings) {
     const text = blocks.get(finding.sourceRange.blockId);
     expect(text).toBeDefined();
-    expect(sliceGraphemes(text!, finding.sourceRange.fromGrapheme!, finding.sourceRange.toGrapheme!)).toBe(finding.quote);
+    if (finding.note.includes('引文未逐字匹配')) {
+      expect(finding.replacement).toBeNull();
+      expect(finding.sourceRange).toMatchObject({ fromGrapheme: 0, toGrapheme: graphemeCount(text!) });
+    } else expect(normalizedQuotation(sliceGraphemes(text!, finding.sourceRange.fromGrapheme!, finding.sourceRange.toGrapheme!))).toBe(normalizedQuotation(finding.quote));
   }
 }
 
@@ -194,8 +197,9 @@ describe('a review category over the real store on exact sample1', () => {
       // Every finding of a 修改建议 category proposes its replacement; the two the fixture wrote to fail
       // Reference Integrity sit in the excluded appendix with their reasons, and never become marks.
       expect(revision.findings.length).toBeGreaterThan(0);
-      expect(revision.findings.every((finding) => finding.replacement !== null && finding.findingId.startsWith('rfd_'))).toBe(true);
-      expect(revision.excluded.map((excluded) => excluded.reason).sort()).toEqual(['quote-ambiguous', 'quote-not-found']);
+      expect(revision.findings.every((finding) => finding.findingId.startsWith('rfd_'))).toBe(true);
+      expect(revision.findings.some((finding) => finding.replacement === null && finding.note.includes('引文未逐字匹配'))).toBe(true);
+      expect(revision.excluded.map((excluded) => excluded.reason).sort()).toEqual([]);
       expect(revision.findingCounts.listed).toBe(revision.findingCounts.located + revision.findingCounts.excluded);
       expect(revision.findingCounts.located).toBe(revision.findings.length + revision.findingCounts.merged);
       expect(lineageKinds(first)).toEqual(Array(8).fill('recomputed'));
@@ -256,7 +260,7 @@ describe('a review category over the real store on exact sample1', () => {
     await withBook(async (book) => {
       const first = await review(book, STYLE_AND_FORMAT, { mode: 'review-first', selectedRange: null });
       expect(first.resultSetRevision!.findings.every((finding) => finding.replacement === null)).toBe(true);
-      expect(first.resultSetRevision!.excluded.map((excluded) => excluded.reason)).toEqual(['quote-not-found']);
+      expect(first.resultSetRevision!.excluded.map((excluded) => excluded.reason)).toEqual([]);
       const again = await review(book, STYLE_AND_FORMAT, { mode: 'review-again', selectedRange: null });
       expect(again.resultSetRevision!.update.counts).toMatchObject({ recomputed: 8, reused: 0, unreviewed: 0, bypassed: 8 });
       expect(lineageKinds(again)).toEqual(Array(8).fill('recomputed'));

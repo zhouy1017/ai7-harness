@@ -1,3 +1,4 @@
+import { identityWords } from '../../src/renderer/technical-layer.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createContext, runInContext } from 'node:vm';
@@ -64,7 +65,7 @@ async function refusalHarness(surface: 'task' | 'overview' | 'analysis', code: s
     if (scope === 'read-failed') throw new Error('scope unavailable');
     return { launchPolicy: { operationalScope: scope } };
   });
-  const context = createContext({
+  const context = createContext({ identityWords,
     document: miniDocument, screen: miniDocument.body, performance,
     window: { setTimeout, ai7: surface === 'task' ? { getModelServiceSettings, inspectTaskAuthorization } : new Proxy({}, { get: serviceRead }) },
     host, taskHost: host, analysisHost: host, first: true,

@@ -15,11 +15,11 @@ import {
   exportReceiptMeta, exportSavedRevisionLine, exportShownRows, type ExportAction,
 } from './manuscript-export-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 
 /** Inline export choices followed by one native Save dialog and the recorded result. */
 export interface ManuscriptExportSurface {
-  /** Open the card for one version; `opener` gets focus back when the card closes. */
-  open(target: ManuscriptExportTargetInput, label: string | null, opener: HTMLElement | null): void;
+  menu(target: ManuscriptExportTargetInput | (() => ManuscriptExportTargetInput), label: string | null): HTMLElement;
   /** Whether a call of the card is in flight, so the destination does not redraw under it. */
   busy(): boolean;
   /** Close the card without a word, unless a call of it is in flight: what it exports is no longer on show. */
@@ -32,9 +32,10 @@ type ExportApi = Pick<RendererApi, 'reviewManuscriptExport' | 'chooseManuscriptE
 export interface MountManuscriptExportOptions {
   /** The card's slot on 交付物: the surface draws into it and clears it when the card closes. */
   root: HTMLElement;
+  beforeExport?(): Promise<boolean>;
   bookId: string;
   api: ExportApi;
-  technicalDetails(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
+  technicalDetails?(gridClass: string | undefined, ...rows: ReadonlyArray<HTMLElement>): HTMLElement;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   /** 交付物 changed under the card — a revision saved for the export, or an approved export: read it again. */
@@ -47,6 +48,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -58,7 +60,7 @@ function renderExportFidelityRow(row: ExportFidelityRowProjection): HTMLElement 
   item.dataset['exportCount'] = String(row.count);
   const name = el('span', 'export-fidelity-name', row.label);
   name.append(el('span', 'count', exportCountText(row.count)));
-  const pill = el('span', `status-pill export-status-${row.status}`, exportPillText(row));
+  const pill = el('span', `state-term status-pill export-status-${row.status}`, exportPillText(row));
   const detail = el('p', 'export-fidelity-detail', row.detail);
   const positions = exportPositionsLine(row);
   if (positions !== null) detail.append(el('span', 'export-fidelity-positions', positions));
@@ -78,7 +80,7 @@ export function renderExportFidelity(
   section.dataset['exportDegraded'] = reviewed.degraded ? 'true' : 'false';
   section.dataset['exportRestoration'] = reviewed.restoration;
   if (parts.heading) section.append(el('h5', undefined, EXPORT_FIDELITY_HEADING));
-  section.append(el('p', 'export-restoration-line', reviewed.restorationLine));
+  section.append(el('p', 'export-restoration-line', reviewed.restorationLine.replace('直接并入正文（作为定稿基线）', '直接并入正文 · 定稿基线')));
   if (reviewed.retentionSummary !== null) section.append(el('p', 'export-retention-summary', reviewed.retentionSummary));
   const list = el('ol', 'export-fidelity-list');
   for (const row of exportShownRows(reviewed.fidelity)) list.append(renderExportFidelityRow(row));
@@ -112,6 +114,7 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
 
   function render(): void {
     if (destroyed) return;
+    root.hidden = phase === 'idle';
     const section = el('section', phase === 'idle' ? 'export-preferences' : 'manuscript-export');
     if (activeTarget !== null) {
       section.dataset['exportTarget'] = activeTarget.kind;
@@ -177,9 +180,12 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
 
   async function exportFile(target: ManuscriptExportTargetInput): Promise<void> {
     if (destroyed || busy) return;
+    if (options.beforeExport && !await options.beforeExport()) return;
+    if (destroyed || busy) return;
     busy = true; activeTarget = target; receipt = null; reviewed = null; problem = null; phase = 'reviewing'; render();
     const selected = { ...switches };
     try {
+      await rememberActionDefaults({ exportFormat: format, ...selected }).catch(() => options.setStatus('未能记住导出选项，本次仍会继续导出。', 'error'));
       options.setStatus(EXPORT_STATUS_LINES.choosing, 'busy');
       const review = await api.reviewManuscriptExport({ target, options: selected, format });
       if (destroyed) return;
@@ -207,9 +213,32 @@ export function mountManuscriptExport(options: MountManuscriptExportOptions): Ma
     }
   }
 
+  void readActionDefaults().then((defaults) => {
+    if (busy || destroyed) return;
+    format = defaults.exportFormat;
+    switches = { includeAnnotations: defaults.includeAnnotations, includeSuggestions: defaults.includeSuggestions, includeEditorNotes: defaults.includeEditorNotes };
+    render();
+  });
   render();
   return {
-    open(target, _label, source) { opener = source; void exportFile(target); },
+    menu(targetOrRead, label) {
+      const target = (): ManuscriptExportTargetInput => typeof targetOrRead === 'function' ? targetOrRead() : targetOrRead;
+      const menu = el('details', 'export-menu'); menu.dataset['exportMenu'] = target().kind;
+      const summary = el('summary', undefined, '导出 ▾'); menu.append(summary);
+      const body = el('div', 'export-menu-body'); menu.append(body);
+      for (const [value, name] of [['docx', 'DOCX'], ['pdf', 'PDF'], ['markdown', 'Markdown']] as const) {
+        const button = el('button', 'quiet', name); button.type = 'button'; button.dataset['exportAction'] = 'open';
+        button.dataset['exportTarget'] = target().kind; button.dataset['exportFormatAction'] = value;
+        button.setAttribute('aria-label', `导出 ${label ?? '稿件'} · ${name}`);
+        button.addEventListener('click', () => { if (busy) return; format = value; opener = summary; menu.open = false; void exportFile(target()); }); body.append(button);
+      }
+      const settings = el('details', 'export-menu-options'); settings.append(el('summary', undefined, '导出选项'));
+      for (const key of EXPORT_OPTION_ORDER) { const label = el('label', 'export-option'); const box = el('input'); box.type = 'checkbox'; box.checked = switches[key];
+        box.addEventListener('change', () => { switches = { ...switches, [key]: box.checked }; void rememberActionDefaults({ [key]: box.checked }).catch(() => options.setStatus('未能记住导出选项。', 'error')); });
+        menu.addEventListener('toggle', () => { box.checked = switches[key]; }); label.append(box, el('span', undefined, EXPORT_OPTION_LABELS[key])); settings.append(label); }
+      body.append(settings);
+      return menu;
+    },
     busy: () => busy,
     close: reset,
     destroy() { destroyed = true; },

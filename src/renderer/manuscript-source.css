@@ -1,5 +1,5 @@
 .manuscript-source-block { margin: 1.2rem 0; }
-.manuscript-source-label, .manuscript-source-image figcaption { color: var(--text-subdued); font: 0.78rem/1.6 system-ui, sans-serif; margin: 0.4rem 0; }
+.manuscript-source-label, .manuscript-source-image figcaption { color: var(--text-subdued); font: 0.78rem/1.6 "Noto Sans SC", system-ui, sans-serif; margin: 0.4rem 0; }
 .manuscript-source-table { width: 100%; border-collapse: collapse; font-size: 0.92em; }
 .manuscript-source-table td { border: 1px solid var(--boundary-strong); padding: 0.5rem 0.7rem; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
 .manuscript-table-source-text, .manuscript-table-continuation { display: none; }

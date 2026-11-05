@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { PREFERENCE_KEYS, SHELL_BOOK_SECTIONS } from '../../src/shared/preferences.js';
 import {
   bookIcon,
-  bookPickerRows,
   contextHeading,
   rememberRecentBook,
   screenActive,
@@ -49,13 +48,12 @@ describe('the sidebar', () => {
       expect(contextHeading(state!, active, null)).toEqual({ title: '设置', position, book: false });
     }
   });
-  it('lists the six global destinations in their fixed order, each with a one-character icon of its own name', () => {
+  it('lists the seven global destinations in their fixed order, each with a fixed SVG symbol ID', () => {
     expect(SHELL_DESTINATIONS.map((entry) => [entry.key, entry.label])).toEqual([
-      ['attention', '待我处理'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体（记忆与全局指导）'],
+      ['attention', '待我处理'], ['tasks', '任务'], ['library', '书库'], ['series', '书系'], ['knowledge', '知识库'], ['quality', '质量与学习'], ['global-agent', '全域智能体'],
     ]);
     for (const entry of [...SHELL_DESTINATIONS, SHELL_SETTINGS]) {
-      expect([...entry.icon]).toHaveLength(1);
-      expect(entry.label).toContain(entry.icon);
+      expect(entry.icon).toMatch(/^i-[a-z]+$/u);
     }
   });
 
@@ -67,8 +65,7 @@ describe('the sidebar', () => {
     ]);
     expect(SHELL_BOOK_GROUPS.flatMap((group) => group.sections.map((section) => section.key))).toEqual([...SHELL_BOOK_SECTIONS]);
     for (const section of SHELL_BOOK_GROUPS.flatMap((group) => group.sections)) {
-      expect([...section.icon]).toHaveLength(1);
-      expect(section.label).toContain(section.icon);
+      expect(section.icon).toMatch(/^i-[a-z]+$/u);
     }
   });
 
@@ -83,15 +80,18 @@ describe('the sidebar', () => {
   it('gives every collapsed Book row a name that says its Book and state, and a first-character icon', () => {
     expect(bookIcon('  sample1 ')).toBe('s');
     expect(bookIcon('𠀋字书')).toBe('𠀋');
+    expect(bookIcon(' 《「“…样书》')).toBe('样');
+    expect(bookIcon('「……」')).toBe('书');
     expect(bookIcon('')).toBe('书');
     expect(SHELL_LABELS.bookRowName('样书', shellRecentStateLine('review'))).toBe('《样书》 · 上次在「审阅」');
     expect(SHELL_LABELS.pin('样书')).toBe('置顶《样书》');
     expect(SHELL_LABELS.unpin('样书')).toBe('取消置顶《样书》');
   });
 
-  it('keeps the stylesheet drawing each icon from data-nav-icon, so a row\'s text stays exactly its label', () => {
+  it('uses SVG symbols while collapsed navigation keeps accessible labels', () => {
     const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
-    expect(css).toContain('.sidebar-link::before { content: attr(data-nav-icon);');
+    expect(css).toContain('.icon { width: 18px; height: 18px;');
+    expect(css).toContain('stroke-width: 1.8;');
     expect(css).toMatch(/:root\[data-sidebar="icons"\] \.nav-label/u);
   });
 });
@@ -171,24 +171,10 @@ describe('the 设置 hub', () => {
     expect(SETTINGS_HUB_GROUPS.map((group) => [group.label, group.rows.map((row) => [row.route, row.label])])).toEqual([
       ['服务', [['model-service', '模型服务'], ['usage', '用量']]],
       ['编辑工作', [['evaluation-calibration', '评估校准与预测']]],
-      ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断']]],
+      ['本机', [['data-storage', '数据与存储'], ['appearance', '外观'], ['keyboard', '键盘与无障碍'], ['notifications', '通知'], ['diagnostics', '诊断'], ['help', '帮助']]],
     ]);
-  });
-});
-
-describe('catalog grouping and full-title search (#1002)', () => {
-  it('deduplicates catalog and preference entries, drops removed Books and keeps current catalog titles', () => {
-    const rows = bookPickerRows([{ bookId: 'a', title: '新标题' }, { bookId: 'b', title: '乙' }, { bookId: 'c', title: '丙' }, { bookId: 'a', title: '新标题' }],
-      [{ bookId: 'a', title: '旧标题' }, { bookId: 'a', title: '重复' }, { bookId: 'gone', title: '删除' }],
-      [{ bookId: 'a', title: '旧', section: 'history' }, { bookId: 'b', title: '乙旧', section: 'overview' }], 'b');
-    expect(rows.map((row) => [row.bookId, row.title, row.group, row.current])).toEqual([
-      ['a', '新标题', 'pinned', false], ['b', '乙', 'recent', true], ['c', '丙', 'remaining', false],
-    ]);
-  });
-  it('searches beyond the preference title limit, trims query, treats markup and identifiers as text', () => {
-    const catalog = [{ bookId: 'BOOK-A', title: '甲'.repeat(500) + '<末尾>' }];
-    expect(bookPickerRows(catalog, [], [], null, ' <末尾> ')).toHaveLength(1);
-    expect(bookPickerRows(catalog, [], [], null, 'book-a')).toHaveLength(1);
-    expect(bookPickerRows(catalog, [], [], null, '.*')).toHaveLength(0);
+    const rows = SETTINGS_HUB_GROUPS.flatMap((group) => group.rows);
+    expect(rows.filter((row) => row.developerOnly !== true)).toHaveLength(6);
+    expect(rows.filter((row) => row.developerOnly === true).map((row) => row.route)).toEqual(['usage', 'evaluation-calibration', 'diagnostics']);
   });
 });

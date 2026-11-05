@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   reviewInfluenceMaterialLine,
@@ -7,7 +8,6 @@ import {
   REVIEW_CAPABILITY_REASON,
   REVIEW_CATEGORY_STATE_PILLS,
   REVIEW_CONSEQUENCE_TERMS,
-  REVIEW_COST_BEFORE_PLAN,
   REVIEW_COVERAGE_PILLS,
   REVIEW_DESTINATION_ACTIONS,
   REVIEW_EXPORT_NEEDS_REPORT,
@@ -86,7 +86,7 @@ const third: ReviewChapterOptionProjection = { blockId: 'blk_c', title: '第三�
 function category(overrides: Partial<ReviewRunCategoryProjection>): ReviewRunCategoryProjection {
   return {
     categoryId: 'typos-and-usage', label: '错别字与规范用语', position: 1, output: 'change-suggestion', riskPointsOnly: false, batchApply: true,
-    basisStatement: '依据：…', state: 'waiting', stateLabel: '等待审阅', detail: null, taskIntentId: 'task', planEnvelopeDigest: 'a'.repeat(64),
+    basis: { categoryId: 'typos-and-usage', executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } }, state: 'waiting', stateLabel: '等待审阅', detail: null, taskIntentId: 'task', planEnvelopeDigest: 'a'.repeat(64),
     modeLabel: '全书审阅', plan: null, progress: null, findingsCount: 0, excludedCount: 0, ...overrides,
   };
 }
@@ -98,16 +98,20 @@ describe('the words of the 审阅 destination', () => {
     expect(REVIEW_DESTINATION_ACTIONS).toEqual(['打开稿件', '工作概览']);
     expect(reviewManuscriptLine(manuscript)).toBe('当前稿件：修订版 r2 · 97 个段落');
     expect(reviewManuscriptLine(null)).toBe('这本书还没有稿件；导入稿件后才能审阅。');
+    setTechnicalLayerVisible(false);
+    expect(reviewManuscriptLine(manuscript)).toBe('当前稿件 · 97 个段落');
+    setTechnicalLayerVisible(true);
   });
 
   it('labels every action with the specification\'s own words', () => {
     expect(REVIEW_ACTION_LABELS).toEqual({
       'new-review': '新建审阅',
       'new-local-check': '本地文字检查',
+      'open-search-settings': '设置联网检索',
       'rereview-changed': '只审改动过的章',
       'open-run': '查看这次审阅',
       start: '开始审阅',
-      prepare: '查看计划',
+      prepare: '先看计划',
       'quick-start': '快速开始',
       'cancel-preparation': '取消准备',
       'close-sheet': '取消',
@@ -176,7 +180,6 @@ describe('the words of the 审阅 destination', () => {
 
   it('states the four consequences of 新建审阅 before any plan exists', () => {
     expect(REVIEW_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
-    expect(REVIEW_COST_BEFORE_PLAN).toBe('先看计划后显示');
     expect(REVIEW_NOT_DO).toBe('不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。');
     // A Review Run never takes a 默认执行规则: there is nothing to set first, so nothing says it is not set yet.
     expect(REVIEW_QUICK_START_REASON).toBe('快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。');
@@ -185,6 +188,10 @@ describe('the words of the 审阅 destination', () => {
     expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件（修订版 r2）的全部 97 个段落');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: null })).toBe('选好起止的章后显示');
     expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」（段落 1–43）');
+    setTechnicalLayerVisible(false);
+    expect(reviewReadConsequence('whole', manuscript, none)).toBe('当前稿件的全部 97 个段落');
+    expect(reviewReadConsequence('chapters', manuscript, { from: first, to: third })).toBe('所选各章：从「第一章」到「第三章」 · 第 1–43 段');
+    setTechnicalLayerVisible(true);
     expect(reviewReadConsequence('changed', manuscript, none)).toBe('每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审');
     expect(reviewReadConsequence('selection', manuscript, none)).toBe('稿件里选中的文字');
     expect(reviewSendConsequence([])).toBe('选好类别后显示');
@@ -254,7 +261,7 @@ describe('the words of the 审阅 destination', () => {
   });
 
   it('holds 忽略并说明 to a reason the service will take', () => {
-    expect(REVIEW_IGNORE_LABEL).toBe('忽略的原因（必填，最多 500 字）');
+    expect(REVIEW_IGNORE_LABEL).toBe('忽略原因 · 必填，最多 500 字');
     expect(reviewIgnoreReasonProblem('')).toBe(REVIEW_IGNORE_REQUIRED);
     expect(reviewIgnoreReasonProblem('   ')).toBe('忽略一条发现需要说明原因。');
     expect(reviewIgnoreReasonProblem(`  ${'字'.repeat(500)}  `)).toBeNull();

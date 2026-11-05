@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import type { BaselineAnalysisProjection, CapturedProcedureApplicabilityEntryProjection, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import {
   SELECTION_JOIN_REFUSED,
@@ -81,9 +82,13 @@ describe('the words of 就这段发起任务…', () => {
     expect(SELECTION_TASK_TITLE).toBe('就这段发起任务');
     expect(SELECTION_TASK_FIELD).toBe('工序');
     expect(SELECTION_TASK_PREPARE).toBe('发起任务');
-    expect(SELECTION_TASK_NOTE).toBe('只把所选文字所在的这一段交给任务：按包含它的阅读范围读取，计划里写明读哪些范围；审阅只在这一段上标出发现。点击发起任务即可开始，可随时查看计划。');
+    expect(SELECTION_TASK_NOTE).toBe('任务只针对所选段落，按包含它的阅读范围读取并在计划中列明；审阅只在该段标出发现，可直接开始或查看计划。');
     expect(selectionTaskContextLine({ bookTitle: '合成书名', revisionLabel: 'r3', journalSequence: 12, graphemes: 10, position: 7 }))
       .toBe('《合成书名》 · 修订版 r3 · 修订日志序号 12 · 已选 10 字 · 第 7 段');
+    setTechnicalLayerVisible(false);
+    expect(selectionTaskContextLine({ bookTitle: '合成书名', revisionLabel: 'r3', journalSequence: 12, graphemes: 10, position: 7 }))
+      .toBe('《合成书名》 · 已选 10 字 · 第 7 段');
+    setTechnicalLayerVisible(true);
     expect(SELECTION_TASK_DOCUMENT_REASON).toBe('在交付物工具栏点击「发起任务」，以当前文档为目标。');
     expect(SELECTION_TASK_REANALYZE).toBe('重新分析这段');
     expect(selectionTaskReviewLabel('错别字与规范用语')).toBe('审阅这段 · 「错别字与规范用语」');

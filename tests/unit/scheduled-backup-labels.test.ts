@@ -27,7 +27,7 @@ import {
 describe('定期自动备份\'s words', () => {
   it('says what the switch does and never does', () => {
     expect([SCHEDULED_BACKUP_HEADING, SCHEDULED_BACKUP_SWITCH]).toEqual(['定期自动备份', '定期自动备份']);
-    expect(SCHEDULED_BACKUP_LEDE).toBe('打开后，AI7 每天把产品数据备份一次到本机的备份位置，保留 14 天。备份不含模型服务凭据，也不加密。关闭后不再备份，已有的备份保留到到期。');
+    expect(SCHEDULED_BACKUP_LEDE).toBe('打开后每天在本机备份并保留 14 天，不含模型服务凭据且不加密；关闭后不再备份，已有备份保留到期。');
     expect(SCHEDULED_BACKUP_NONE).toBe('还没有备份。');
     expect(SCHEDULED_BACKUP_STATUS_LINES.backedUp).toBe('已打开定期自动备份，并完成了今天的备份。');
     expect(SCHEDULED_BACKUP_STATUS_LINES.turnedOff).toBe('已关闭定期自动备份；已有的备份保留到到期。');

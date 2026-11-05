@@ -592,7 +592,7 @@ describe('normalizeModelResponse', () => {
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: 'not-an-array' })).toEqual({ kind: 'malformed', reason: 'response-not-a-record' });
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [] })).toEqual({ kind: 'malformed', reason: 'choice-absent' });
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: {} }] })).toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
-    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: [{ type: 'text' }] } }] }))
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: 3 } }] }))
       .toEqual({ kind: 'malformed', reason: 'answer-channel-absent' });
   });
 
@@ -600,6 +600,14 @@ describe('normalizeModelResponse', () => {
     // What makes replaying a past response possible at all: one function, one profile, one body.
     expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: '' } }] }))
       .toEqual({ kind: 'empty-answer', reasoningPresent: false, usage: null });
+  });
+
+  it('reads null and text-part arrays and returns partial usage on an incomplete 2xx reply (#1311)', () => {
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: null } }] })).toMatchObject({ kind: 'empty-answer' });
+    expect(normalizeModelResponse(OPENCODE_GO_V4_FLASH_PROFILE, { choices: [{ message: { content: [{ type: 'text', text: 'a', extra: true }, null, { type: 'text', text: 'b' }] } }] }))
+      .toMatchObject({ kind: 'answer', text: 'ab' });
+    expect(parseProviderResponse(201, { choices: [{ message: { content: 'partial' }, finish_reason: 'length' }], usage: { prompt_tokens: 5, completion_tokens: 3 } }, codes, OPENCODE_GO_ROUTE_PROFILE, OPENCODE_GO_V4_FLASH_PROFILE))
+      .toMatchObject({ kind: 'partial', text: 'partial', usage: { inputTokens: 5, outputTokens: 3 } });
   });
 });
 
@@ -877,6 +885,22 @@ describe('classification', () => {
     expect(classifyTransportError(Object.assign(new Error(exact.message), { requestSent: false }), true, request).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
   });
 
+  it('preserves an observed direct connection failure as resendable and records no send (#1305)', async () => {
+    const unreachable = Object.assign(new Error('private connection details'), { code: 'MODEL_SERVICE_UNREACHABLE' });
+    const init = {};
+    const error = modelRequestNotSent(init, unreachable);
+    expect(classifyTransportError(error, true, init)).toEqual({ code: 'MODEL_SERVICE_UNREACHABLE', message: '模型服务不可达：请检查网络或网络代理设置。' });
+    expect(classifyTransportError(error, true, { ...init }).code).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
+    const running = adapter({ ticket: ticketFor(), secret: 'placeholder', transport: async (_url, init) => {
+      throw modelRequestNotSent(init, unreachable);
+    } });
+    const chunks = await collect(running.adapter.stream(request()));
+    expect(chunks.at(-1)).toMatchObject({ reason: { failure: { code: 'MODEL_SERVICE_UNREACHABLE' } } });
+    expect(running.adapter.lastRequestNotSent).toBe(true);
+    expect(classifyModelFailure({ code: 'MODEL_SERVICE_UNREACHABLE', message: '' }, codes))
+      .toMatchObject({ signal: 'failed', failureClass: 'adapter-failure', retrySafe: true, reason: '模型服务不可达：请检查网络或网络代理设置。' });
+  });
+
   it('keys failure classes on the DSH constants and the AI7 codes', () => {
     expect(classifyModelFailure({ code: QUOTA_EXCEEDED_CODE, message: '' }, codes)).toMatchObject({ signal: 'failed', failureClass: 'provider-account-limit' });
     expect(classifyModelFailure({ code: INVALID_CREDENTIAL_CODE, message: '' }, codes)).toMatchObject({ failureClass: 'invalid-credential' });
@@ -892,7 +916,7 @@ describe('classification', () => {
 
   it('admits exactly rate limits, transport failures, and 5xx provider errors to the one safe retry (Issue #48)', () => {
     const verdict = (code: string, status?: number) => classifyModelFailure({ code, message: '', ...(status === undefined ? {} : { status }) }, codes);
-    expect(RETRY_SAFE_FAILURE_TABLE).toEqual({ RATE_LIMIT: 'any-status', TRANSPORT_FAILED: 'any-status', PROVIDER_ERROR: 'server-status-only' });
+    expect(RETRY_SAFE_FAILURE_TABLE).toEqual({ RATE_LIMIT: 'any-status', TRANSPORT_FAILED: 'any-status', MODEL_SERVICE_UNREACHABLE: 'any-status', PROVIDER_ERROR: 'server-status-only' });
     expect(verdict(AI7_FAILURE_CODES.RATE_LIMIT)).toMatchObject({ failureClass: 'rate-limit', retrySafe: true, status: null });
     expect(verdict(AI7_FAILURE_CODES.RATE_LIMIT, 429)).toMatchObject({ retrySafe: true, status: 429 });
     expect(verdict(AI7_FAILURE_CODES.TRANSPORT_FAILED)).toMatchObject({ failureClass: 'adapter-failure', retrySafe: true });

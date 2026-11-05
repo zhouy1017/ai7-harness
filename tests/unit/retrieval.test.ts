@@ -156,8 +156,8 @@ describe('registered local tools without egress', () => {
     policy: { operationalScope: 'development-ci', providerProcessingVersion: 'v1', liveTransmissionAllowed: false, authorizedLiveTransmissionCount: 0 } });
   it('canonicalizes bounded arguments and admits only the rule-named schema set', () => {
     expect(canonicalToolArguments('retrieve', { query: ' alpha ', k: 8 })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
-    expect(canonicalToolArguments('retrieve', { query: 'alpha', k: 9 })).toBeNull();
-    expect(canonicalToolArguments('retrieve', { query: 'alpha', sourceKinds: ['other'] })).toBeNull();
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', k: 9 })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
+    expect(canonicalToolArguments('retrieve', { query: 'alpha', sourceKinds: ['other'] })).toEqual({ tool: 'retrieve', query: 'alpha', k: 8 });
     expect(toolSetEqualsPlatformSchemas(LEGACY_LOCAL_TOOL_SCHEMAS, ruleNamedToolSchemas(false, true))).toBe(true);
     const facts = binding();
     const payload = { provider: facts.route, model: facts.model, system: facts.systemPrompt, tools: LEGACY_LOCAL_TOOL_SCHEMAS,
@@ -241,4 +241,14 @@ describe('the Egress Gate admits exactly the rule-named tool set (#893 review)',
     expect(JSON.stringify(tripped)).toContain('检索未完成');
     expect(JSON.stringify(tripped)).not.toContain('联网核查未完成');
   });
+});
+
+
+it('drops only unmatched retrieval references from prose-wrapped observation entries (#1311 H2)', () => {
+  const text = '说明。```json\n' + JSON.stringify({ observations: [{ note: '合成观察', retrievalAnchor: 'a'.repeat(64) }, { note: '保留观察' }] }) + '\n```';
+  const validated = prepareRetrievalResult(text, null);
+  const result = JSON.parse(validated.text) as { observations: unknown[]; salvaged?: unknown[] };
+  markRetrievalResult(result, validated.rejected);
+  expect(result.observations).toEqual([{ note: '合成观察' }, { note: '保留观察' }]);
+  expect(result.salvaged).toEqual([{ section: 'observations.0', index: 0, reason: 'retrieval-reference-not-exact-fetched' }]);
 });

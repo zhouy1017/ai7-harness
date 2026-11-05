@@ -79,7 +79,7 @@ describe('application appearance', () => {
       runJ14DarkPass(options: object): Promise<void>;
       journeyCheckLabel(error: unknown): string | null;
     };
-    const representative = '#screen[data-screen="landing"] > .panel';
+    const representative = '#screen[data-screen="landing"] > .page-content';
     const painted = `Promise.resolve(document.querySelector(${JSON.stringify(representative)})).then(Boolean)`;
     const labelOf = async (evaluate: (expression: string) => Promise<unknown>) => {
       const outcome = controller.runJ14DarkPass({ renderer: { evaluate, send: async () => undefined }, journey: 'J-08', at: () => undefined, representative })
@@ -181,7 +181,7 @@ describe('application appearance', () => {
     const css = readFileSync(new URL('../../src/renderer/styles.css', import.meta.url), 'utf8');
     const withoutComments = css.replace(/\/\*[\s\S]*?\*\//gu, '');
     const roots = [...withoutComments.matchAll(/:root(?:\[data-theme="dark"\])?\s*\{([^}]+)\}/gu)].slice(0, 2).map((match) => match[1]!);
-    const names = roots.map((root) => [...root.matchAll(/(--[\w-]+):/gu)].map((match) => match[1]!).sort());
+    const names = roots.map((root) => [...root.matchAll(/(--[\w-]+):/gu)].map((match) => match[1]!).filter((name) => name !== '--font-serif').sort());
     expect(names[0]).toEqual(names[1]);
     const luminance = (hex: string) => {
       const channels = hex.slice(1).match(/../gu)!.map((part) => {

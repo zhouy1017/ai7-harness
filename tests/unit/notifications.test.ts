@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, mountQuietNotice } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../../src/shared/protocol.js';
+import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 
 const START = Date.parse('2026-10-17T10:00:00Z');
 function item(overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -39,6 +40,52 @@ function setup() {
   return { notifier, notices, navigate, prefs: (change: Partial<typeof prefs>) => { prefs = { ...prefs, ...change }; }, focus: (value: boolean) => { focused = value; } };
 }
 afterEach(() => vi.restoreAllMocks());
+
+it('keeps a delayed completion on its Book and opens only while that Book is still current', async () => {
+  const restore = installMiniDom();
+  try {
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let currentBookId = event.book.bookId;
+    let release!: (value: TaskOverviewProjection) => void;
+    const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+    const open = vi.fn();
+    const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
+    const pending = openCurrentBookCompletion(event, options);
+    currentBookId = 'another-book'; release(overview); await pending;
+    expect(open).not.toHaveBeenCalled();
+    currentBookId = event.book.bookId;
+    await openCurrentBookCompletion(event, options);
+    expect(open).toHaveBeenCalledExactlyOnceWith(overview.groups.find((group) => group.key === 'recent')!.items[0]);
+  } finally { restore(); }
+});
+
+it('keeps manuscript focus when a current-Book completion arrives or finishes reading', async () => {
+  const restore = installMiniDom();
+  try {
+    const editor = miniDocument.createElement('div'); editor.dataset['testid'] = 'manuscript-editor';
+    const text = miniDocument.createElement('span'); editor.append(text);
+    const elsewhere = miniDocument.createElement('button'); miniDocument.body.append(editor, elsewhere);
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let release!: (value: TaskOverviewProjection) => void;
+    const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+    const read = vi.fn(() => reading); const open = vi.fn();
+    const options = { currentBookId: () => event.book.bookId, enabled: () => true, read, open };
+    text.focus();
+    await openCurrentBookCompletion(event, { ...options, read: async () => overview });
+    expect(open).not.toHaveBeenCalled();
+    elsewhere.focus();
+    const pending = openCurrentBookCompletion(event, options);
+    text.focus(); release(overview); await pending;
+    expect(read).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+    expect(miniDocument.activeElement).toBe(text);
+    elsewhere.focus();
+    await openCurrentBookCompletion(event, options);
+    expect(open).toHaveBeenCalledOnce();
+  } finally { restore(); }
+});
 
 describe('privacy-safe main notifications', () => {
   it('shows generic silent actionable text when unfocused, and only navigates on click', () => {
@@ -105,14 +152,14 @@ describe('privacy-safe main notifications', () => {
     for (const [key, value] of Object.entries(preferenceDefaults())) if (key.startsWith('notifications.')) expect(value).toBe(false);
     expect(new Set(Object.values(NOTIFICATION_LABELS)).size).toBe(Object.values(NOTIFICATION_LABELS).length);
     for (const label of Object.values(NOTIFICATION_LABELS)) expect(label).not.toMatch(/Synthetic|\$\{|\{.*\}|书稿|任务已完成/u);
-    expect(completionLabel(item({ group: 'recent', state: 'review-completed' }))).toBe('审阅结果已可查看');
+    expect(completionLabel(item({ group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } }))).toBe('《Synthetic private title》审阅完成');
   });
   it('tells 结果待确认 from a failure and a pending decision, and a coalesced notice names the most pressing class', () => {
     const classes = [
       notificationClass(item()),
       notificationClass(item({ group: 'exceptions', state: 'analysis-failed' })),
       notificationClass(item({ group: 'exceptions', state: 'apply-outcome-unresolved' })),
-      notificationClass(item({ group: 'recent', state: 'review-completed' })),
+      notificationClass(item({ group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } })),
       notificationClass(item({ group: 'recent', state: 'analysis-completed' })),
     ];
     expect(classes).toEqual(['pending', 'failure', 'ambiguous', 'candidate', 'outcome']);
@@ -170,6 +217,49 @@ describe('renderer projection observer', () => {
 });
 
 describe('quiet notice lifetime', () => {
+  it.each(['error', 'busy'] as const)('keeps %s visible beyond the transient lifetime without a toast', (tone) => {
+    const restore = installMiniDom();
+    vi.useFakeTimers();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update(tone === 'error' ? '模型服务不可达' : '正在测试连接…', tone);
+      vi.advanceTimersByTime(10_000);
+      expect(surface.hidden).toBe(false);
+      expect(surface.dataset['tone']).toBe(tone);
+      expect(miniDocument.body.querySelector('[data-toast]') === null).toBe(true);
+    } finally { vi.useRealTimers(); restore(); }
+  });
+
+  it('keeps an unacknowledged error when a later success notice expires', () => {
+    const restore = installMiniDom();
+    vi.useFakeTimers();
+    try {
+      const surface = miniDocument.createElement('div');
+      miniDocument.body.append(surface);
+      const update = createStatusSurface(surface as unknown as HTMLElement);
+      update('凭据被拒', 'error');
+      update('正在测试连接…', 'busy');
+      expect(surface.textContent).toContain('凭据被拒');
+      expect(surface.textContent).toContain('正在测试连接…');
+      update('其他设置已保存', 'success');
+      expect(surface.textContent).toBe('凭据被拒');
+      expect(surface.dataset['tone']).toBe('error');
+      const toast = miniDocument.body.querySelector('[data-toast]')!;
+      expect(toast.textContent).toBe('其他设置已保存');
+      vi.advanceTimersByTime(2_500);
+      expect(toast.hidden).toBe(true);
+      expect(surface.textContent).toBe('凭据被拒');
+      expect(surface.hidden).toBe(false);
+      surface.querySelector('button')!.click();
+      expect(surface.hidden).toBe(true);
+      update('正在测试连接…', 'busy');
+      expect(surface.textContent).toBe('正在测试连接…');
+      expect(surface.dataset['tone']).toBe('busy');
+    } finally { vi.useRealTimers(); restore(); }
+  });
+
   it('replaces the one notice, pauses its remaining reading time on hover and focus, and dismisses without touching the record', async () => {
     const restore = installMiniDom();
     vi.useFakeTimers();
@@ -191,17 +281,17 @@ describe('quiet notice lifetime', () => {
       expect(host.hidden).toBe(false);
       hovering = false;
       host.dispatchEvent({ type: 'mouseleave' });
-      vi.advanceTimersByTime(3_999);
+      vi.advanceTimersByTime(499);
       expect(host.hidden).toBe(false);
       vi.advanceTimersByTime(1);
       expect(host.hidden).toBe(true);
 
-      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed' });
+      const latest = item({ itemId: 'latest', group: 'recent', state: 'review-completed', object: { kind: 'review', ordinal: 1 } });
       const original = structuredClone(latest);
       show(item({ group: 'recent', state: 'analysis-completed' }));
       show(latest);
       expect(miniDocument.body.children).toHaveLength(1);
-      expect(host.children[0]?.textContent).toBe('审阅结果已可查看');
+      expect(host.children[0]?.textContent).toBe('《Synthetic private title》审阅完成');
       const view = host.children[1]!;
       view.focus();
       host.dispatchEvent({ type: 'focusin' });
@@ -220,7 +310,7 @@ describe('quiet notice lifetime', () => {
 });
 
 describe('a Run started from the Task Drawer reaches the observer', () => {
-  it('a read at the start follows the Run in flight to its outcome; without it the outcome is never heard', async () => {
+  it('automatically follows new Runs and reports their completion only once', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('window', { setTimeout, clearTimeout });
     try {
@@ -233,12 +323,12 @@ describe('a Run started from the Task Drawer reaches the observer', () => {
       reader.subscribe((reading) => { if (reading.kind === 'projection') observe(reading.projection); });
       reader.refresh();
       await vi.advanceTimersByTimeAsync(0);
-      // Started on the same screen: nothing reads again, so the outcome stays unheard however long the Run takes.
+      // A new task is followed even when the previous reading had no running work.
       current = running;
       current = settled;
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(completed).not.toHaveBeenCalled();
-      // The drawer's record of the start reads at once; the slow poll then follows the Run to its outcome.
+      expect(completed).toHaveBeenCalledOnce();
+      // Reading the same completion again does not open a second result.
       current = running;
       reader.refresh();
       await vi.advanceTimersByTimeAsync(0);

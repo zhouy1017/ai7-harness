@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   DatabaseExportActivityProjection,
   DatabaseExportContentsProjection,
@@ -14,7 +15,7 @@ import { exportBytesLabel } from './manuscript-export-labels.js';
 
 export const DATABASE_EXPORT_HEADING = '导出数据库';
 /** What the one file holds, and what it does not (DSTO-017; ADR 0079 §1.6: not encrypted, no credential). */
-export const DATABASE_EXPORT_LEDE = '把全部图书、稿件与历史、知识库和设置打包成一个文件。文件不含模型服务凭据，也不加密；包里记录数据版本和导出时间。';
+export const DATABASE_EXPORT_LEDE = '全部图书、稿件与历史、知识库和设置打包为未加密文件，不含模型服务凭据。';
 export const DATABASE_EXPORT_ACTIONS = {
   choose: '导出数据库…',
   approve: '按上述方式导出',
@@ -62,7 +63,7 @@ export function databaseExportActivityLine(activity: Pick<DatabaseExportActivity
 
 /** `3 本图书 · 5 个来源版本 · 资料库 2 项 · 书系 1 个`. */
 export function databaseExportContentsLine(contents: DatabaseExportContentsProjection): string {
-  return `${contents.books} 本图书 · ${contents.sourceVersions} 个来源版本 · 资料库 ${contents.libraryMaterials} 项 · 书系 ${contents.series} 个`;
+  return `${contents.books} 本图书 · ${contents.sourceVersions} ${technicalWords('个来源版本', '条来源记录')} · 资料库 ${contents.libraryMaterials} 项 · 书系 ${contents.series} 个`;
 }
 
 /** The prepared file as `按上述方式导出` will write it: name and size, place, create or replace, contents, versions. */
@@ -72,7 +73,7 @@ export function databaseExportPreparedRows(preparation: DatabaseExportPreparatio
     ['位置', preparation.destination],
     ['方式', preparation.dispositionLabel],
     ['内容', databaseExportContentsLine(preparation.contents)],
-    ['版本', `数据版本 ${preparation.dataVersion} · 软件 ${preparation.softwareVersion}`],
+    ['版本', technicalWords(`数据版本 ${preparation.dataVersion} · 软件 ${preparation.softwareVersion}`, "数据备份")],
   ];
 }
 

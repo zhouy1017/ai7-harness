@@ -48,10 +48,18 @@ function press(platform: CommandPlatform, code: string, held: { mod?: boolean; c
 }
 
 describe('the command registry', () => {
+  it('lists the moved view shortcuts and retains a noncolliding saved focus binding', () => {
+    expect(COMMANDS.find((command) => command.id === 'view.openTasks')).toMatchObject({ name: '查看任务', defaults: { win32: 'F7' } });
+    expect(COMMANDS.find((command) => command.id === 'view.focusMode')).toMatchObject({ name: '专注模式', defaults: { win32: 'F8' } });
+    expect(effectiveSequence('evaluation.start', {}, 'win32')).toBe('Mod+Shift+E');
+    const saved = { 'view.focusMode': 'Mod+Shift+J' };
+    expect(validatedBindings(saved, 'win32')).toEqual(saved);
+    expect(validatedBindings({ 'view.focusMode': 'Mod+Shift+E' }, 'win32')).toEqual({});
+  });
   it('covers the complete sidebar Book sections, settings and toggle without replacing shell navigation', () => {
     expect(BOOK_SECTION_COMMANDS.map((entry) => entry[2])).toEqual(SHELL_BOOK_SECTIONS);
     expect(COMMANDS.some((entry) => entry.id === 'nav.settings')).toBe(true);
-    expect(COMMANDS.some((entry) => entry.id === 'view.toggleSidebar')).toBe(true);
+    expect(effectiveSequence('view.toggleSidebar', {}, 'win32')).toBe('Mod+Backslash');
   });
   it('declares only navigation, search and view commands, each with a Chinese name and a default per platform', () => {
     expect(new Set(COMMANDS.map((command) => command.id)).size).toBe(COMMANDS.length);
@@ -71,12 +79,12 @@ describe('the command registry', () => {
     }
   });
 
-  it('maps no command to an authority-bearing action (KEY-004)', () => {
+  it('keeps disposition commands out of the registry; Q1 adds explicit task start and input surfaces', () => {
     const forbidden = ['开始任务', '采纳', '设为发稿版本', '保存为里程碑版本', '删除', '批准', '授权', '应用', '放弃', '覆盖', '替换全部', '确认'];
     for (const command of COMMANDS) {
       for (const word of forbidden) expect(command.name, command.id).not.toContain(word);
-      expect(command.id, command.id).toMatch(/^(?:nav|search|view)\./u);
-      expect(command.id, command.id).not.toMatch(/start|run|authoriz|adopt|apply|publish|designate|delete|approve|milestone|decision/iu);
+      expect(command.id, command.id).toMatch(/^(?:nav|search|view|command|book|review|evaluation)\./u);
+      expect(command.id, command.id).not.toMatch(/authoriz|adopt|apply|publish|designate|delete|approve|milestone|decision/iu);
     }
     expect(FIXED_COMMANDS.map((fixed) => fixed.id)).toEqual(['edit.save', 'edit.undo', 'edit.redo', 'edit.replace', 'edit.previousWindow', 'edit.nextWindow']);
   });

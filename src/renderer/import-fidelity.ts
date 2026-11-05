@@ -17,7 +17,6 @@ import {
   needsDegradationDecision,
   offersTextBoxChoice,
   roundTripCard,
-  textBoxChoiceStatement,
 } from './import-fidelity-labels.js';
 
 /**
@@ -34,6 +33,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -75,25 +75,20 @@ function textBoxChoice(
       if (radio.checked) onChange(option.disposition);
     });
     const copy = el('span');
-    copy.append(el('strong', undefined, option.label), el('small', undefined, option.hint));
+    copy.append(el('strong', undefined, option.controlLabel));
     label.append(radio, copy);
     fieldset.append(label);
   }
-  if (mode === 'stated') fieldset.append(el('p', 'field-note', textBoxChoiceStatement(current)));
   return fieldset;
 }
 
 function fidelityRow(category: FidelityCategoryProjection, choice: HTMLElement | null): HTMLElement {
-  const row = el('div', 'fidelity-row');
-  row.setAttribute('role', 'row');
+  const row = el('li', 'fidelity-row');
   row.dataset['fidelityCategory'] = category.key;
   const name = el('div', 'fidelity-name');
-  name.setAttribute('role', 'cell');
   name.append(document.createTextNode(category.label), el('span', 'count', fidelityCountText(category.count)));
-  const status = el('div', `status-pill status-${category.status}`, fidelityPillText(category));
-  status.setAttribute('role', 'cell');
+  const status = el('div', `state-term status-pill status-${category.status}`, fidelityPillText(category));
   const detail = el('div', 'fidelity-detail', fidelitySurfaceDetail(category));
-  detail.setAttribute('role', 'cell');
   if (choice !== null) detail.append(choice);
   row.append(name, status, detail);
   return row;
@@ -115,9 +110,8 @@ export function renderFidelityReview(
   let chosen: TextBoxDisposition = textBox.kind === 'stated' && textBox.disposition !== null ? textBox.disposition : 'retain';
   const offered = textBox.kind === 'offer' && offersTextBoxChoice(fidelity, conversion);
   const stated = textBox.kind === 'stated' && textBox.disposition !== null;
-  const table = el('div', 'fidelity-list');
-  table.setAttribute('role', 'table');
-  table.setAttribute('aria-label', '导入保真审阅');
+  const list = el('ul', 'fidelity-list');
+  list.setAttribute('aria-label', '导入保真审阅');
   // The summary says what the choice does as the editor makes it, not only once the review states it (Issue #532).
   let summary: HTMLElement | null = null;
   for (const category of fidelityRows(fidelity)) {
@@ -127,10 +121,10 @@ export function renderFidelityReview(
           if (summary !== null) summary.textContent = fidelitySummaryLine(fidelity, chosen);
         })
       : null;
-    table.append(fidelityRow(category, choice));
+    list.append(fidelityRow(category, choice));
   }
   const card = roundTripCard(fidelity);
-  const body: HTMLElement[] = card === undefined ? [table] : [table, roundTripCardElement(card)];
+  const body: HTMLElement[] = card === undefined ? [list] : [list, roundTripCardElement(card)];
   const elements: HTMLElement[] = [];
   if (conversion !== null) {
     const note = el('p', 'attention-note', conversionNoteText(conversion));

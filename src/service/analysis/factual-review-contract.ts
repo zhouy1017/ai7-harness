@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, graphemeCount, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, DIGEST_PATTERN, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
 import type { CoverageManifestUnitProjection, FactualVerificationPolicyPinProjection } from '../../shared/protocol.js';
 import {
   FACTUAL_ASSERTION_CATEGORIES,
@@ -16,7 +17,6 @@ import {
   type FactualReviewTaskMode,
   type FactualSeverityTier,
 } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
 
 /**
@@ -67,7 +67,6 @@ const MAX_ASSERTIONS = 200;
 const MAX_QUOTE_GRAPHEMES = 80;
 const MAX_QUESTION_GRAPHEMES = 120;
 const MAX_BASIS_GRAPHEMES = 200;
-/** Graphemes, the unit every bound and every source range in this contract is measured in. */
 const GRAPHEMES = new Intl.Segmenter('zh', { granularity: 'grapheme' });
 
 export function goalForFactualReviewMode(mode: FactualReviewTaskMode): string {
@@ -86,10 +85,12 @@ export interface FactualUnitAssertion {
   readonly basis: string;
 }
 
-export interface FactualReviewUnitResult {
+export interface FactualReviewUnitResult extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_REVIEW_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly assertions: ReadonlyArray<FactualUnitAssertion>;
+  /** Original zero-based positions, used by retrieval validation after per-entry filtering. */
+  readonly acceptedIndexes?: ReadonlyArray<number>;
 }
 
 /**
@@ -102,77 +103,55 @@ export interface FactualReviewUnitResult {
 export type FactualUnitResultParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-mismatch' | 'quote-not-in-block';
 
 export type FactualUnitResultParse =
-  | { ok: true; result: FactualReviewUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: FactualReviewUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: FactualUnitResultParseFailureCode; detail: string };
 
-export function graphemeCount(text: string): number {
-  let count = 0;
-  for (const _segment of GRAPHEMES.segment(text)) count += 1;
-  return count;
-}
+const CLASS_ALIASES: Readonly<Record<string, FactualAssertionClass>> = {
+  事实: 'real-world-fact', 事实断言: 'real-world-fact', fact: 'real-world-fact', 引文: 'quotation', quote: 'quotation',
+  稿件陈述: 'report-about-manuscript', 虚构设定: 'fictional-canon', 虚构: 'fictional-canon', 判断: 'judgment', 评价: 'judgment',
+};
+const CATEGORY_ALIASES: Readonly<Record<string, FactualAssertionCategory>> = {
+  time: '时间', 日期: '时间', 年代: '时间', place: '地点', person: '人物', organization: '机构', object: '器物',
+  number: '数字', 数值: '数字', quotation: '引文', history: '史实', 历史: '史实', technology: '技术', other: '其他',
+};
+const SEVERITY_ALIASES: Readonly<Record<string, FactualSeverityTier>> = {
+  high: 'A', 高: 'A', 严重: 'A', medium: 'B', 中: 'B', low: 'C', 低: 'C', 建议: 'C',
+};
 
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
+/** Validate exact quotation/ordinal before constructing any canonical record from model values. */
+export function parseFactualAssertion(candidate: unknown, expected: { blockCount: number }, reader: ModelResultReader, index: number): FactualUnitAssertion | null {
+  if (!hasKeys(candidate, ['quote', 'blockOrdinal']) || !boundedText(candidate.quote, MAX_QUOTE_GRAPHEMES)) {
+    reader.drop('assertions', index, 'quote-invalid'); return null;
+  }
+  const ordinal = modelNumber(candidate.blockOrdinal);
+  if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 1 || (ordinal as number) > expected.blockCount) {
+    reader.drop('assertions', index, 'quote-not-in-block'); return null;
+  }
+  if (ordinal !== candidate.blockOrdinal) reader.drop('assertions', index, 'blockOrdinal-normalized');
+  const question = reader.text(candidate.question, MAX_QUESTION_GRAPHEMES, 'assertions', index, true);
+  const basis = reader.text(candidate.basis, MAX_BASIS_GRAPHEMES, 'assertions', index, true);
+  if (question === null || basis === null) { reader.drop('assertions', index, 'text-invalid'); return null; }
+  return { quote: candidate.quote, blockOrdinal: ordinal as number,
+    assertionClass: reader.enum(candidate.assertionClass, FACTUAL_ASSERTION_CLASSES, CLASS_ALIASES, 'judgment', 'assertions', index),
+    category: reader.enum(candidate.category, FACTUAL_ASSERTION_CATEGORIES, CATEGORY_ALIASES, '其他', 'assertions', index),
+    severity: reader.enum(candidate.severity, FACTUAL_SEVERITY_TIERS, SEVERITY_ALIASES, 'C', 'assertions', index), question, basis };
 }
 
 export function parseFactualReviewUnitResult(
   text: string,
   expected: { unitOrdinal: number; blockCount: number },
 ): FactualUnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): FactualUnitResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'assertions'])) {
-    return invalid('单元结果键集合不符合事实核查契约 v1。');
-  }
-  if (parsed.schema !== FACTUAL_REVIEW_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是事实核查契约 v1。');
-  if (!Number.isSafeInteger(parsed.unitOrdinal) || (parsed.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (parsed.unitOrdinal !== expected.unitOrdinal) {
-    return {
-      ok: false,
-      code: 'unit-mismatch',
-      detail: `单元结果声明的序号 ${String(parsed.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。`,
-    };
-  }
-  if (!Array.isArray(parsed.assertions) || parsed.assertions.length > MAX_ASSERTIONS) return invalid('断言集合不符合事实核查契约 v1。');
-  const assertions: FactualUnitAssertion[] = [];
-  for (const candidate of parsed.assertions) {
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['quote', 'blockOrdinal', 'assertionClass', 'category', 'severity', 'question', 'basis'])) {
-      return invalid('断言键集合不符合事实核查契约 v1。');
-    }
-    if (!boundedText(candidate.quote, MAX_QUOTE_GRAPHEMES)) return invalid('引文缺失或超出 80 字素边界。');
-    if (!Number.isSafeInteger(candidate.blockOrdinal) || (candidate.blockOrdinal as number) < 1) return invalid('断言的内容块序号无效。');
-    if (!FACTUAL_ASSERTION_CLASSES.includes(candidate.assertionClass as FactualAssertionClass)) return invalid('断言类别不在闭合集合内。');
-    if (!FACTUAL_ASSERTION_CATEGORIES.includes(candidate.category as FactualAssertionCategory)) return invalid('断言主题不在闭合集合内。');
-    if (!FACTUAL_SEVERITY_TIERS.includes(candidate.severity as FactualSeverityTier)) return invalid('断言分级不在闭合集合内。');
-    if (!boundedText(candidate.question, MAX_QUESTION_GRAPHEMES)) return invalid('核查问题缺失或超出 120 字素边界。');
-    if (!boundedText(candidate.basis, MAX_BASIS_GRAPHEMES)) return invalid('依据缺失或超出 200 字素边界。');
-    if ((candidate.blockOrdinal as number) > expected.blockCount) {
-      return {
-        ok: false,
-        code: 'quote-not-in-block',
-        detail: `断言引用的内容块序号 ${String(candidate.blockOrdinal)} 不在本单元列出的 ${expected.blockCount} 个内容块内。`,
-      };
-    }
-    assertions.push({
-      quote: candidate.quote,
-      blockOrdinal: candidate.blockOrdinal as number,
-      assertionClass: candidate.assertionClass as FactualAssertionClass,
-      category: candidate.category as FactualAssertionCategory,
-      severity: candidate.severity as FactualSeverityTier,
-      question: candidate.question,
-      basis: candidate.basis,
-    });
-  }
-  const result: FactualReviewUnitResult = { schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  const reader = ModelResultReader.read(text, FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, expected.unitOrdinal);
+  if (reader === null) return ModelResultReader.failure(text);
+  const acceptedIndexes: number[] = [];
+  const assertions = reader.array(reader.value.assertions, 'assertions', MAX_ASSERTIONS).flatMap((candidate, index) => {
+    const assertion = parseFactualAssertion(candidate, expected, reader, index);
+    if (assertion !== null) acceptedIndexes.push(index);
+    return assertion === null ? [] : [assertion];
+  });
+  if (assertions.length === 0 && !reader.empty('assertions')) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
+  return reader.finish<FactualReviewUnitResult>({ schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions,
+    ...(acceptedIndexes.some((original, index) => original !== index) ? { acceptedIndexes } : {}) });
 }
 
 /** The frozen prompt contract. Every field is model-facing text or a fixed format; none is manuscript content. */
@@ -258,8 +237,8 @@ export function parseFactualReviewUnitMessageHeader(text: string): FactualUnitMe
   const firstLine = text.split('\n', 1)[0] ?? '';
   const match = HEADER_PATTERN.exec(firstLine);
   if (match === null) return null;
-  const ordinal = Number(match[1]);
-  const total = Number(match[2]);
+  const ordinal = modelNumber(match[1]);
+  const total = modelNumber(match[2]);
   if (!Number.isSafeInteger(ordinal) || ordinal < 1 || !Number.isSafeInteger(total) || total < ordinal) return null;
   return { ordinal, total, unitDigest: match[3]! };
 }
@@ -396,3 +375,5 @@ export function sliceGraphemes(text: string, fromGrapheme: number, toGrapheme: n
   }
   return sliced;
 }
+
+export { graphemeCount } from './canonical.js';

@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type { EditorialLearningProjection, HouseReviewPreferenceProjection, LearningSignal, RendererApi } from '../shared/protocol.js';
 import { learningChoiceLabel } from './quality-learning-labels.js';
 import { mountWordTrackedEditDetail } from './quality-learning.js';
@@ -5,6 +6,7 @@ import { mountWordTrackedEditDetail } from './quality-learning.js';
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -42,7 +44,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       .finally(() => { busy = false; if (section.isConnected) paint(); });
   };
   const action = (label: string, operation: () => void): HTMLButtonElement => {
-    const button = el('button', label); button.type = 'button'; button.className = 'secondary'; button.disabled = busy;
+    const button = el('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary'); button.disabled = busy;
     button.addEventListener('click', operation); return button;
   };
   const paint = (): void => {
@@ -95,10 +97,10 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
       item.append(el('h4', current.title), el('p', `${current.editorialDimension} · 信心 ${Math.round(current.confidence * 100)}% · ${state === 'proposed' ? current.actor === 'AI7' ? 'AI7 整理，待接受' : '编辑撰写，待接受' : state === 'frozen' ? '已冻结' : state === 'inactive' ? '已停用' : usable ? '已启用' : '来源受限，暂停使用'}`));
       const lineage = el('details', ''); lineage.append(el('summary', '来源与版本历史'));
       for (const source of [...current.positiveExamples, ...current.negativeExamples]) {
-        lineage.append(el('p', `图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`));
+        lineage.append(el('p', technicalWords(`图书 ${source.bookId} · 标记 ${source.markId ?? '无'} · 决定 ${source.decisionId} · 修订 ${source.revisionId} · 日志 ${source.journalSequence} · 原因版本 ${source.reasonRevision}`)));
       }
-      for (const source of sources ?? []) lineage.append(el('p', `来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`));
-      for (const version of history) lineage.append(el('p', `v${version.ordinal} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
+      for (const source of sources ?? []) lineage.append(el('p', technicalWords(`来源 ${source.sourceKey} · 图书 ${source.source.bookId} · ${source.admission.kind === 'automatic' ? '默认本机准入' : `编辑准入 ${source.admission.decisionId}`} · ${source.sourceKind === undefined ? `决定 ${source.source.decisionId}` : source.sourceKind === 'manual-edit-journal' ? '手动修改观察' : 'Word 修改样本'}`)));
+      for (const version of history) lineage.append(el('p', `${technicalWords(`v${version.ordinal}`)} · ${{ proposed: '候选', active: '启用', inactive: '停用', frozen: '冻结' }[version.schema === 'ai7.global-editorial-memory/2' ? version.state : version.activation]} · ${version.recordedAt}`));
       if (nextHistoryOffset != null) lineage.append(action('更早版本', () => {
         void api.inspectEditorialLearning({ signalOffset, itemOffset, detailItemId: current.itemId, historyOffset: nextHistoryOffset })
           .then((next) => { page = next; paint(); }).catch(() => { status.textContent = '无法读取更早版本。'; });
@@ -161,7 +163,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         }), detail);
       } else if (signal.kind === 'manual-edit-journal') {
         row.append(el('p', `手动编辑 · 日志 ${signal.source.journalSequence} · ${signal.source.memberCount} 个段落；不代表采纳建议。`));
-      } else row.append(el('p', `决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`));
+      } else row.append(el('p', technicalWords(`决定 ${signal.source.decisionId} · 修订 ${signal.source.revisionId} · 日志 ${signal.source.journalSequence}${signal.rewriteDistance === null ? '' : ` · 改写距离 ${signal.rewriteDistance}`}`)));
       if (signal.kind !== 'word-tracked-edit' && signal.kind !== 'manual-edit-journal' && signal.memoryCandidate != null) {
         const checkbox = el('input', ''); checkbox.type = 'checkbox'; checkbox.dataset['memorySource'] = signal.signalId; checkbox.checked = selected.has(signal.signalId); checkbox.disabled = busy;
         checkbox.addEventListener('change', () => { if (checkbox.checked) selected.set(signal.signalId, signal); else selected.delete(signal.signalId); });
@@ -225,7 +227,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   if (projection.current === null || projection.current.lines.length === 0) section.append(el('p', '尚无符合学习准入的审阅反馈。'));
   if (projection.current !== null) {
     const version = projection.current;
-    section.append(el('h4', `本社审阅偏好 v${version.ordinal}`), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`));
+    section.append(el('h4', `本社审阅偏好 ${technicalWords(`v${version.ordinal}`)}`), el('p', `来源：${version.sourceCount} 条已判定反馈 · ${version.recordedAt}`));
     const lines = el('ul', '');
     for (const line of version.lines) {
       const item = el('li', line.text);
@@ -249,7 +251,7 @@ export function renderHouseReviewPreference(root: HTMLElement, projection: House
   }
   const history = el('details', '');
   history.append(el('summary', '版本历史'));
-  for (const version of [...projection.history].reverse()) history.append(el('p', `v${version.ordinal} · ${version.sourceCount} 条反馈 · ${version.recordedAt}`));
+  for (const version of [...projection.history].reverse()) history.append(el('p', `${technicalWords(`v${version.ordinal}`)} · ${version.sourceCount} 条反馈 · ${version.recordedAt}`));
   section.append(history);
   root.append(section);
 }

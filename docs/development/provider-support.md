@@ -880,13 +880,31 @@ A credential slot is a logical slot of the Main Editorial Role, one per configur
 
 Generated from the search backend documents under [`config/providers/search-backends/`](../../config/providers/search-backends/), validated by [`search-backend.v1.schema.json`](../../config/providers/search-backends/search-backend.v1.schema.json) (Issue #883; Owner decisions 24⁵). Each declares one vendor's web search interface, its per-call price, whether a key is required and its credential slot. The generator contributes the slot to the Credential Broker's closed set and the enrollment helper's list and nothing else: no route id, provider label or model profile, so no search backend is a Model Role binding. A document authorizes no transmission and admits no host in the Egress Gate; the measured profile, the exclusions and the ranking are the [search backend evaluation](search-backend-evaluation.md)'s.
 
+Issue #1312: new tasks prefer a measured native backend of the Main model channel and reuse its model credential reference. Without one they use the selected keyed search backend, then any keyed backend; the default-off editor override always uses configured search. OpenAI and Claude remain unmeasured candidates; their fixed public-query connection tests use the corresponding model channel only when the selected policy admits the exact backend and credential mapping. Selected v33 admits only the DeepSeek direct candidate test, so OpenAI and Claude tests are refused before credential release or transport. Candidate probes do not admit them for tasks or fallback; native tasks never switch to a configured backup unless the override is enabled.
+
 | Backend | Support | Endpoint | Key | Price | Slot | Development Credential Reference |
 | --- | --- | --- | --- | --- | --- | --- |
+| Claude 官方搜索 | supported | `POST https://api.anthropic.com/v1/messages` (`anthropic-messages-web-search`) | required, `x-api-key` with `anthropic-version: 2023-06-01` | 10 USD per 1,000 calls — USD 10 per 1,000 web searches. | `search-anthropic` | `e48163ca-581c-41bf-b984-85c9de57733c` |
 | 博查 Bocha Web Search | supported | `POST https://api.bochaai.com/v1/web-search` (`bocha-web-search`) | required, `authorization: Bearer` | 0.036 CNY per 1 call — historical list-price input retained from the evaluation; source unverified, re-verify before display in 设置 (source unverified: Vendor PDF attachment read by the Worker on 2026-10-16, exact URL not retained; portal pricing page unreachable at review time (redirects to Feishu); re-verify before the price is shown in 设置.) | `search-bochaai` | `6e655b12-b3b0-430e-811c-911b5d0f2ccd` |
 | Brave Search API | supported | `GET https://api.search.brave.com/res/v1/web/search` (`brave-web-search`) | required, `x-subscription-token` | 5 USD per 1,000 calls — the Search plan's price per 1,000 requests, with $5 of free credit every month and 50 queries per second; the Answers plan ($4 per 1,000 plus tokens) is not this interface | `search-brave` | `3f0f367d-f343-4123-b86d-31d0bfac556e` |
 | DeepSeek 服务端搜索（官方） | supported | `POST https://api.deepseek.com/anthropic/v1/messages` (`anthropic-messages-web-search`) | required, `x-api-key` with `anthropic-version: 2023-06-01` | no per-call price — billed by tokens alone, with no per-search fee: deepseek-flash input $0.15 off-peak / $0.30 peak and output $0.60 / $1.20 per million tokens (cache hits $0.003 / $0.006); the search's own extra model requests are billed as tokens too, so the evaluation records the measured token cost per call | `search-deepseek` | `5d835534-e000-4b72-91c8-1dd986a6fcc7` |
+| OpenAI 官方搜索 | supported | `POST https://api.openai.com/v1/responses` (`openai-responses-web-search`) | required, `authorization: Bearer` | 10 USD per 1,000 calls — USD 10 per 1,000 web searches plus content tokens. | `search-openai` | `44d0a420-ddb3-4e65-9a2f-a2c00698c150` |
 | Parallel Search | supported | `POST https://api.parallel.ai/v1/search` (`parallel-search`) | required, `x-api-key` | 5 USD per 1,000 calls — the default `advanced` mode with 10 results per request, which is what the evaluation sends; `basic` is also $5, `fast` and `turbo` $1 per 1,000, extra results $1 per 1,000; 5,000 requests a month are free | `search-parallel` | `983793e7-f281-4767-b5e6-9342a2d00202` |
 | TinyFish Search | supported | `GET https://api.search.tinyfish.ai/` (`tinyfish-search`) | required, `x-api-key` | 0 USD per 1 call — Search is free: the pricing page prints $0.00 per request at 30 requests per minute and 500 per hour, while the Search API page says free up to 12,000 requests per day with a positive wallet balance beyond; Search never draws on the wallet | `search-tinyfish` | `59d3a3a4-d852-4b15-bbea-f1eefe4e63dd` |
+
+### `search-anthropic`
+
+- Document: [`config/providers/search-backends/search-anthropic.json`](../../config/providers/search-backends/search-anthropic.json); service name `anthropic`.
+- Reachability as the vendor states it: Official Anthropic API endpoint; account reachability has not been measured.
+- 候选接口 · 未实测。
+
+Readings:
+
+- `anthropic-web-search` — `vendor-documentation`, Anthropic Messages API web search tool documentation (Issue #1312)., read 2026-11-04. Messages API tool web_search_20250305 accepts name web_search and max_uses 1 and returns web_search_tool_result blocks. Price is USD 10 / 1,000 searches. This backend is not live measured.
+
+Open:
+
+- Candidate interface only: live latency and Chinese/international hit rate have not been measured.
 
 ### `search-bochaai`
 
@@ -932,6 +950,20 @@ Readings:
 Open:
 
 - The server tool type is not named by DeepSeek. The evaluation sends Anthropic's `web_search_20250305` server tool on `deepseek-flash`; whether the endpoint runs it for a client other than Claude Code is what the measurement settles, and its outcome is this backend's verdict.
+
+### `search-openai`
+
+- Document: [`config/providers/search-backends/search-openai.json`](../../config/providers/search-backends/search-openai.json); service name `openai`.
+- Reachability as the vendor states it: Official OpenAI API endpoint; account reachability has not been measured.
+- 候选接口 · 未实测。
+
+Readings:
+
+- `openai-web-search` — `vendor-documentation`, OpenAI Responses API web search documentation and pricing (Issue #1312)., read 2026-11-04. Responses API tools include web_search; results expose url_citation annotations and sources. Price is USD 10 / 1,000 searches plus content tokens. This backend is not live measured.
+
+Open:
+
+- Candidate interface only: live latency and Chinese/international hit rate have not been measured.
 
 ### `search-parallel`
 

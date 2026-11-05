@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import {
   ANALYSIS_FEEDBACK_OTHER,
   ANALYSIS_FEEDBACK_REASONS,
@@ -22,13 +23,13 @@ export const ANALYSIS_FEEDBACK_CHANGE = '改反馈…';
 export const ANALYSIS_FEEDBACK_RECORD = '记录反馈';
 export const ANALYSIS_FEEDBACK_CANCEL = '取消';
 export const ANALYSIS_FEEDBACK_JUDGMENT_LEGEND = '这一条';
-export const ANALYSIS_FEEDBACK_REASON_LEGEND = '原因（可不选）';
+export const ANALYSIS_FEEDBACK_REASON_LEGEND = '原因 · 可不选';
 export const ANALYSIS_FEEDBACK_OTHER_LABEL = '其他 / 自行输入';
 export const ANALYSIS_FEEDBACK_OTHER_TEXT = '写下原因';
-export const ANALYSIS_FEEDBACK_CORRECTION = `修正说明（可不填，${MAX_ANALYSIS_FEEDBACK_TEXT_GRAPHEMES} 字以内）`;
+export const ANALYSIS_FEEDBACK_CORRECTION = `修正说明 · 可不填，最多 ${MAX_ANALYSIS_FEEDBACK_TEXT_GRAPHEMES} 字`;
 export const ANALYSIS_FEEDBACK_HEADING = '你的分析反馈';
 /** What the metric is and is not (ANALYSIS-024, FDBK-012), said once beside it. */
-export const ANALYSIS_FEEDBACK_METRIC_NOTE = '只统计你明确给出的判断：没有判断的条目不算认可；这是对分析结果的评价，不代表事实核实，也不改变 AI7 的做法。';
+export const ANALYSIS_FEEDBACK_METRIC_NOTE = '只统计明确判断，没有判断的条目不算认可；评价不代表事实核实，也不改变 AI7 的做法。';
 export const ANALYSIS_FEEDBACK_STATUS = {
   loading: '正在读取分析反馈…',
   unavailable: '无法读取分析反馈。',
@@ -64,7 +65,7 @@ export function analysisFeedbackToggleName(changing: boolean, itemName: string):
 /** The revision the judgments bind and how many of its items carry one — never how many do not (FDBK-008) — for the technical half. */
 export function analysisFeedbackRevisionLine(projection: Pick<AnalysisFeedbackProjection, 'revisionOrdinal' | 'revisionId' | 'items'>): string {
   const judged = projection.items.filter((item) => item.latest !== null).length;
-  return `Revision ${projection.revisionOrdinal} · ${projection.revisionId} · 已判断 ${judged} 条`;
+  return `${technicalWords(`Revision ${projection.revisionOrdinal} · ${projection.revisionId} · `)}已判断 ${judged} 条`;
 }
 
 /** The alternatives offered for a judgment of this kind of item, in their fixed order, 其他 last; none for 准确. */

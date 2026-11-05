@@ -1,3 +1,5 @@
+import { filterChoices } from './components/controls.js';
+import { identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { MAX_BATCH_APPLY_SUGGESTIONS } from '../shared/protocol.js';
 import type { RendererApi, ProposalWorkspaceInput, ProposalWorkspaceProjection, ProposalNavigatorItem, ProposalReviewReturnPosition, ProposalDraftDisposition, ProposalDraftBatchProjection, EditorialMarkCardProjection, ManuscriptWindowProjection, ApplyReceiptProjection, BatchProposalDecisionDraftInput } from '../shared/protocol.js';
 import { graphemesOf } from '../shared/mark-anchor.js';
@@ -10,7 +12,7 @@ import { proposalIdentityRows, proposalPreparationLine } from './technical-layer
 const dispositions = { accepted: '拟采纳', rejected: '拟拒绝', deferred: '暂不决定' } as const;
 const exclusionLabels = { conflict: '未解决冲突', 'unclassified-stale': '旧基准尚未分类', unloaded: '未加载', 'other-version': '其他版本', 'atomic-group': '原子组需单独处理', applied: '已经应用' } as const;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, className?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node;
+  const node = document.createElement(tag); if (text !== undefined) node.textContent = identityWords(text, className); if (className) node.className = className; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
 }
 function button(label: string, action: string, run: () => void): HTMLButtonElement {
   const node = el('button', label, 'secondary'); node.type = 'button'; node.dataset['proposalAction'] = action; node.addEventListener('click', run); return node;
@@ -19,7 +21,7 @@ function button(label: string, action: string, run: () => void): HTMLButtonEleme
 function technical(rows: ReadonlyArray<readonly [string, string]>): HTMLElement {
   const details = el('details', undefined, 'technical-details'); const list = el('dl');
   for (const [term, value] of rows) list.append(el('dt', term), el('dd', value, 'technical-identity'));
-  details.append(el('summary', '查看技术详情'), list); return details;
+  details.append(el('summary', '查看技术详情'), list); return technicalDisclosure(details);
 }
 function region(title: string, ...nodes: HTMLElement[]): HTMLElement { const section = el('section', undefined, 'proposal-region'); section.append(el('h4', title), ...nodes); return section; }
 
@@ -90,9 +92,15 @@ export function mountProposalWorkspace(options: {
     (position.review === 'all' || (position.review === 'unreviewed' ? item.draft === null && item.disposition === null : position.review === 'reviewed' ? item.draft !== null || item.disposition !== null : position.review === 'stale' ? item.stale : item.conflict))); }
   function refreshList(): void { const items = filtered(); list.setItems(items, Math.max(0, items.findIndex((item) => item.markId === position.activeMarkId))); }
   async function refresh(): Promise<void> { workspace = await readProposalWorkspace(api, input); if (destroyed) return; prepared = null; batch = null; refreshList(); renderControls(); if (active) { active = workspace.items.find((item) => item.markId === active!.markId) ?? null; if (active) await loadComparison(active); } }
-  function selectFilter<T extends string>(label: string, values: ReadonlyArray<readonly [T, string]>, value: T, change: (value: T) => void): HTMLLabelElement {
-    const field = el('label', label); const select = el('select'); for (const [key, title] of values) { const option = el('option', title); option.value = key; select.append(option); } select.value = value;
-    select.addEventListener('change', () => { change(select.value as T); prepared = null; batch = null; refreshList(); renderControls(); void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error')); }); field.append(select); return field;
+  function selectFilter<T extends string>(label: string, values: ReadonlyArray<readonly [T, string]>, value: T, change: (value: T) => void): HTMLDivElement {
+    const field = el('div', label);
+    const choices = filterChoices({ label, choices: values, value, change: (next) => {
+      change(next as T); prepared = null; batch = null; refreshList(); renderControls();
+      void persist().catch(() => options.setStatus('审阅位置未能保存。', 'error'));
+    } });
+    choices.dataset['proposalFilter'] = label;
+    field.append(choices);
+    return field;
   }
   async function previewBatch(request: BatchProposalDecisionDraftInput): Promise<ProposalDraftBatchProjection> {
     const first = await api.batchProposalDecisionDraft({ ...request, offset: 0 });
@@ -146,7 +154,7 @@ export function mountProposalWorkspace(options: {
     const decision = suggestion.decision;
     if (decision !== null) {
       if (decision.reason !== null) yours.append(el('p', `你的原因：${decision.reason}`));
-      const reasons = el('details'); reasons.append(el('summary', '你的原因（可选）'));
+      const reasons = el('details'); reasons.append(el('summary', '你的原因 · 可选'));
       const saveReason = (reason: string, reasonSource: 'suggested' | 'free-text'): void => void act(async () => {
         const target = { ...binding, windowStartBlockId: item.blockId, markId: item.markId, decisionId: decision.decisionId, reason, reasonSource };
         if (decision.reasonState === 'given') await api.recordProposalDecisionFeedback({ ...target, action: 'revise', expectedFeedback: decision.feedbackEntries });

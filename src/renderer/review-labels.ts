@@ -1,5 +1,7 @@
+import { technicalWords } from './technical-layer.js';
 import {
   MAX_REVIEW_FINDING_REASON_CHARACTERS,
+  REVIEW_SCOPE_LABELS,
   type ReviewChapterOptionProjection,
   type ReviewCoverageRowProjection,
   type ReviewCoverageState,
@@ -47,16 +49,15 @@ export {
 // ---- the destination --------------------------------------------------------------------------------
 
 export const REVIEW_SECTION_LABEL = '工作 · 审阅';
-export const REVIEW_LEDE = '按类别审读这本书的稿件：选好类别和范围，先看计划，授权一次后逐类审阅。发现以修改建议和批注标在稿件上，由你逐条决定；审阅本身不改稿件。';
+export const REVIEW_LEDE = '按类别审读稿件，发现会同步到原文。';
 /** The editor toolbar's group (V2-UX-IA-006: 工作 · 稿件 / 审阅 / 评估 / 交付物) and its one entry today. */
 export const REVIEW_WORK_GROUP_LABEL = '工作';
 export const REVIEW_ENTRY_LABEL = '审阅';
 export const REVIEW_CARD_HEADING = '审阅';
 export const REVIEW_COVERAGE_HEADING = '审阅覆盖矩阵';
 export const REVIEW_COVERAGE_NOTE = '每一类对照当前稿件：稿件改动后需要复审的类别会标出来，可以只审改动过的章。';
-export const REVIEW_COVERAGE_COLUMNS = ['类别', '当前稿件', '上次审阅', '改动', '可以做什么'] as const;
 export const REVIEW_RUNS_HEADING = '审阅记录';
-export const REVIEW_NO_RUNS = '还没有审阅记录；每新建一次审阅，都会记在这里。';
+export const REVIEW_NO_RUNS = '还没有审阅记录。';
 export const REVIEW_WORKSPACE_UNAVAILABLE = '无法读取这本书的审阅记录。';
 
 /** The persistent actions of the destination, in the order it builds them (V2-UX-LAYER-005). */
@@ -69,11 +70,12 @@ export const REVIEW_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as co
 export const REVIEW_ACTION_LABELS = {
   'new-review': '新建审阅',
   'new-local-check': '本地文字检查',
+  'open-search-settings': '设置联网检索',
   'rereview-changed': '只审改动过的章',
   'open-run': '查看这次审阅',
   // 开始审阅 (ADR 0096 §3): the sheet's one explicit action; 先看计划 opens the plan first.
   start: '开始审阅',
-  prepare: '查看计划',
+  prepare: '先看计划',
   'quick-start': '快速开始',
   'cancel-preparation': '取消准备',
   'close-sheet': '取消',
@@ -123,13 +125,13 @@ export function reviewGenerateReportLabel(latestVersion: number | null): string 
 export function reviewManuscriptLine(manuscript: ReviewWorkspaceProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能审阅。'
-    : `当前稿件：修订版 ${manuscript.revisionLabel} · ${manuscript.totalBlocks} 个段落`;
+    : technicalWords(`当前稿件：修订版 ${manuscript.revisionLabel} · ${manuscript.totalBlocks} 个段落`, `当前稿件 · ${manuscript.totalBlocks} 个段落`);
 }
 
 // ---- state pills: text and shape, never colour alone (editor-surfaces §0.3) ----------------------------
 
 /** The four tones of §0.3's state pill — 好 / 注意 / 阻塞 / 进行中 — and a neutral one for what has not begun. */
-export type ReviewPillTone = 'good' | 'attention' | 'blocked' | 'progress' | 'neutral';
+export type ReviewPillTone = 'warn' | 'good' | 'attention' | 'blocked' | 'progress' | 'neutral';
 /** The shape each pill draws beside its words, so the pill still reads without colour and in forced colours. */
 export type ReviewPillShape = 'circle' | 'ring' | 'half' | 'triangle' | 'square' | 'diamond' | 'check' | 'dash';
 export interface ReviewPill {
@@ -187,7 +189,7 @@ export const REVIEW_STATUS_PILLS: Readonly<Record<ReviewFindingStatus, ReviewPil
 // ---- the coverage matrix and the 审阅记录 -----------------------------------------------------------
 
 export function reviewCoverageLastReview(row: Pick<ReviewCoverageRowProjection, 'lastRunOrdinal' | 'lastReviewedRevisionLabel'>): string {
-  return row.lastRunOrdinal === null ? '—' : `第 ${row.lastRunOrdinal} 次 · 读的是 ${row.lastReviewedRevisionLabel ?? '—'}`;
+  return row.lastRunOrdinal === null ? '—' : `第 ${row.lastRunOrdinal} 次 · 读的是 ${technicalWords(row.lastReviewedRevisionLabel ?? '—', "修订版")}`;
 }
 
 export function reviewCoverageChanges(row: Pick<ReviewCoverageRowProjection, 'changedBlocks'>): string {
@@ -215,7 +217,7 @@ export function reviewRunLine(summary: Pick<ReviewRunSummaryProjection, 'label' 
 }
 
 export function reviewRunReportLine(reportVersion: number | null): string {
-  return reportVersion === null ? '尚未生成报告' : `报告第 ${reportVersion} 版`;
+  return reportVersion === null ? '尚未生成报告' : `报告${technicalWords(`第 ${reportVersion} 版`, '版本')}`;
 }
 
 export function reviewRunsTruncatedLine(listed: number): string {
@@ -225,9 +227,9 @@ export function reviewRunsTruncatedLine(listed: number): string {
 // ---- 新建审阅 --------------------------------------------------------------------------------------
 
 export const REVIEW_SHEET_TITLE = '新建审阅';
-export const REVIEW_SHEET_NOTE = '选择审阅类别，默认检查全书。点击开始审阅即可运行，也可按需查看计划；本地文字检查单独运行。';
-export const REVIEW_CATEGORY_LEGEND = '审阅类别（可多选）';
-export const REVIEW_SCOPE_LEGEND = '审阅范围（四选一）';
+export const REVIEW_SHEET_NOTE = '选择审阅类别后即可开始，默认检查全书。';
+export const REVIEW_CATEGORY_LEGEND = '审阅类别 · 可多选';
+export const REVIEW_SCOPE_LEGEND = '审阅范围';
 export const REVIEW_CHAPTER_FROM = '从';
 export const REVIEW_CHAPTER_TO = '到';
 export const REVIEW_CHAPTER_PLACEHOLDER = '请选择';
@@ -236,12 +238,36 @@ export const REVIEW_QUICK_START_REASON = '快速开始先准备所选类别的�
 export const REVIEW_CONSEQUENCE_TERMS = ['会读取', '会发送', '不会做', '费用'] as const;
 /** §10's target words for what a Task never does, the editor's half; the technical half is the plan's. */
 export const REVIEW_NOT_DO = '不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。';
-export const REVIEW_COST_BEFORE_PLAN = '先看计划后显示';
+/** Owner #1320 disposition: unit counts × one call, plus cross-chapter synthesis; no price source. */
+export function estimateReviewCalls(category: { modelFree: boolean; crossChapter?: boolean; changedUnits?: number },
+  scope: ReviewScopeKind | null, counts: ReviewWorkspaceProjection['scopeUnitCounts'],
+  range: { startPosition: number; endPosition: number } | null): number | null {
+  if (category.modelFree) return 0;
+  if (scope === null) return null;
+  const units = scope === 'selection' ? 1 : scope === 'changed' ? category.changedUnits ?? null
+    : scope === 'whole' ? counts?.whole ?? null
+      : range === null || range.startPosition > range.endPosition ? null
+        : counts?.units.filter((unit) => unit.endPosition >= range.startPosition && unit.startPosition <= range.endPosition).length ?? null;
+  return units === null ? null : units === 0 ? 0 : units + (category.crossChapter ? 1 : 0);
+}
+
+export function reviewConsequenceEstimate(selected: ReadonlyArray<{ label: string; modelFree: boolean; crossChapter?: boolean; changedUnits?: number }>,
+  scope: ReviewScopeKind | null, workspace: Pick<ReviewWorkspaceProjection, 'manuscript' | 'scopeUnitCounts'>,
+  chapters: { from: ReviewChapterOptionProjection | null; to: ReviewChapterOptionProjection | null }): { read: string; send: string; notDo: string; cost: string } {
+  const range = chapters.from === null || chapters.to === null ? null : { startPosition: chapters.from.position, endPosition: chapters.to.endPosition };
+  const calls = selected.map((entry) => estimateReviewCalls(entry, scope, workspace.scopeUnitCounts, range));
+  const scopeName = scope === null ? '所选范围' : REVIEW_SCOPE_LABELS[scope];
+  return { read: selected.length === 0 ? '选好类别后显示' : reviewReadConsequence(scope, workspace.manuscript, chapters),
+    send: selected.length === 0 ? '选好类别后显示' : selected.every((entry) => entry.modelFree) ? '只在本机读取，不发送任何内容。'
+      : reviewSendConsequence(selected).replace('所读范围内的稿件正文', `${scopeName}的正文`),
+    notDo: REVIEW_NOT_DO,
+    cost: selected.length === 0 ? '选好类别后显示' : calls.some((count) => count === null) ? '选好范围后显示调用估计'
+      : `约 ${calls.reduce<number>((sum, count) => sum + (count ?? 0), 0)} 次模型调用` };
+}
 export const REVIEW_PICK_CATEGORY = '请至少选择一个审阅类别。';
 export const REVIEW_PICK_SCOPE = '请选择审阅范围。';
 export const REVIEW_PICK_CHAPTERS = '请选择起止的章。';
 export const REVIEW_CHAPTERS_REVERSED = '结束的章不能在开始的章之前。';
-export const REVIEW_PREPARING_ESCAPE = '正在准备审阅计划；要停止，请点「取消准备」。';
 
 export function reviewChapterOptionLabel(chapter: Pick<ReviewChapterOptionProjection, 'title' | 'position' | 'endPosition'>): string {
   return `${chapter.title}（段落 ${chapter.position}–${chapter.endPosition}）`;
@@ -257,11 +283,11 @@ export function reviewReadConsequence(
     case null:
       return '选好范围后显示';
     case 'whole':
-      return manuscript === null ? '这本书还没有稿件。' : `当前稿件（修订版 ${manuscript.revisionLabel}）的全部 ${manuscript.totalBlocks} 个段落`;
+      return manuscript === null ? '这本书还没有稿件。' : technicalWords(`当前稿件（修订版 ${manuscript.revisionLabel}）的全部 ${manuscript.totalBlocks} 个段落`, `当前稿件的全部 ${manuscript.totalBlocks} 个段落`);
     case 'chapters':
       return chapters.from === null || chapters.to === null
         ? '选好起止的章后显示'
-        : `所选各章：从「${chapters.from.title}」到「${chapters.to.title}」（段落 ${chapters.from.position}–${chapters.to.endPosition}）`;
+        : technicalWords(`所选各章：从「${chapters.from.title}」到「${chapters.to.title}」（段落 ${chapters.from.position}–${chapters.to.endPosition}）`, `所选各章：从「${chapters.from.title}」到「${chapters.to.title}」 · 第 ${chapters.from.position}–${chapters.to.endPosition} 段`);
     case 'changed':
       return '每一类上次审阅之后改动过的章；没有审阅过的类别不能这样审';
     case 'selection':
@@ -364,7 +390,7 @@ export const REVIEW_RESULTS_HEADING = '发现';
 export const REVIEW_FILTER_LABELS = { category: '类别', severity: '严重度', status: '状态', chapter: '章' } as const;
 export const REVIEW_FILTER_ALL = '全部';
 export const REVIEW_FILTER_NOTE = '筛选只改变这里显示哪些发现，不改变发现本身。';
-export const REVIEW_NO_FINDINGS = '这次审阅还没有发现；每一类完成后，它的发现会立即出现在这里。';
+export const REVIEW_NO_FINDINGS = '这次审阅还没有发现。';
 export const REVIEW_NO_FILTERED_FINDINGS = '没有符合筛选的发现。';
 /** V2-UX-REV-003: categories 5 and 6 mark only this, never a compliance, plagiarism or policy verdict. */
 export const REVIEW_RISK_POINT = '需人工复核的风险点';
@@ -417,12 +443,12 @@ export function reviewIgnoreReasonLine(reason: string): string {
 
 // ---- a finding's own actions ------------------------------------------------------------------------
 
-export const REVIEW_IGNORE_LABEL = `忽略的原因（必填，最多 ${MAX_REVIEW_FINDING_REASON_CHARACTERS} 字）`;
+export const REVIEW_IGNORE_LABEL = `忽略原因 · 必填，最多 ${MAX_REVIEW_FINDING_REASON_CHARACTERS} 字`;
 export const REVIEW_IGNORE_NOTE = '忽略后，这条发现在稿件上的标记会移开；原因会记下来，用于改进审阅。';
 export const REVIEW_IGNORE_REQUIRED = '忽略一条发现需要说明原因。';
 export const REVIEW_CONVERT_TO = '改为';
 export const REVIEW_CONVERT_TO_HINT = '留空表示删去这段文字。';
-export const REVIEW_CONVERT_RATIONALE = '修改理由（可选）';
+export const REVIEW_CONVERT_RATIONALE = '修改理由 · 可选';
 export const REVIEW_CONVERT_NOTE = '转为修改建议后，这条批注记为已处理；稿件本身不变，修改建议仍要你接受才会写入。';
 
 /**
@@ -478,7 +504,7 @@ export function reviewRunHeading(label: string): string {
 }
 
 export function reviewRunMetaLine(scopeLabel: string, revisionLabel: string): string {
-  return `${scopeLabel.replaceAll('内容块', '段落')} · 读的是修订版 ${revisionLabel}`;
+  return `${scopeLabel.replaceAll('内容块', '段落')} · 读的是修订版 ${technicalWords(revisionLabel)}`;
 }
 
 export function reviewCreatedLine(localInstant: string): string {
@@ -539,7 +565,7 @@ export const REVIEW_SCOPE_STOP_NOTE = '这次审阅所依据的书系材料已�
 export const REVIEW_INFLUENCE_STOP_NOTE = '这次审阅参考的本社审阅偏好中有学习材料已停止今后使用，它在下一次读取前停下了。已经写到稿件上的发现和已形成的结果都保持原样，已经发给模型服务的内容无法收回。只能重新执行（不含该影响），或取消任务；不能继续审阅或重试。';
 /** 为什么会影响这个结果 (Issue #912; LAUD-004): the version each category read, and the materials behind it. */
 export const REVIEW_INFLUENCE_HEADING = '为什么会影响这个结果';
-export const REVIEW_INFLUENCE_NOTE = '本社审阅偏好只供参考，不是规则或事实证据。这里列出这次审阅读到的版本，以及它出自哪些已判定的反馈；打开来源链可以看到每条反馈后来影响了什么。';
+export const REVIEW_INFLUENCE_NOTE = '本社审阅偏好只供参考，不是规则或事实证据；这里列出本次读取的版本和来源反馈，可打开来源链查看后续影响。';
 
 export function reviewInfluenceLine(entry: { readonly categoryLabel: string; readonly ordinal: number; readonly sourceCount: number }): string {
   return `${entry.categoryLabel}：参考本社审阅偏好 v${entry.ordinal}（来源：${entry.sourceCount} 条已判定反馈）`;
@@ -571,7 +597,7 @@ export function reviewBatchAppliedLine(count: number, recovered: boolean): strin
 }
 
 export function reviewReportGeneratedLine(version: number): string {
-  return `已生成审阅报告第 ${version} 版。`;
+  return `已生成审阅报告${technicalWords(`第 ${version} 版`, '版本')}。`;
 }
 
 // ---- entry points ----------------------------------------------------------------------------------

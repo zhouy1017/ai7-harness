@@ -1,7 +1,8 @@
+import { extractModelJson, hasKeys, type SalvagedModelResult } from '../analysis/canonical.js';
 import { WORKSPACE_SERVICE_WORDS as words } from './agent-workspace-labels.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
 import { MAX_DIALOGUE_PROPOSAL_CHARACTERS, MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
-import { AGENT_WORKSPACE_RESULT_SCHEMA, MAX_AGENT_WORKSPACE_ITEMS, MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS } from '../dialogue/contract.js';
+import { MAX_AGENT_WORKSPACE_ITEMS, MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS } from '../dialogue/contract.js';
 
 /**
  * A workspace turn's answer read as a change set (Issue #90, wave 13 slice 13a; HARNESS-INTEGRATION l.66 `contentCandidate`):
@@ -27,7 +28,7 @@ export interface AgentWorkspaceDropped {
 }
 
 export type AgentWorkspaceReading =
-  | { readonly kind: 'read'; readonly candidates: ReadonlyArray<AgentWorkspaceCandidate>; readonly dropped: ReadonlyArray<AgentWorkspaceDropped> }
+  | { readonly kind: 'read'; readonly salvaged?: SalvagedModelResult['salvaged']; readonly candidates: ReadonlyArray<AgentWorkspaceCandidate>; readonly dropped: ReadonlyArray<AgentWorkspaceDropped> }
   /** The answer as a whole is outside the contract: nothing of it is offered. */
   | { readonly kind: 'withheld'; readonly reason: string };
 
@@ -35,11 +36,6 @@ const NOT_A_CHANGE_SET = words.invalidAnswer;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function sameKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
-  const own = Object.keys(value);
-  return own.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
 /** Where `anchor` stands in `selection`, in graphemes, when it occurs there exactly once on whole graphemes; else why not. */
@@ -56,68 +52,29 @@ function locate(selection: string, anchor: string): { from: number; to: number }
 
 /** The answer's one JSON object; a model that fences it in a code block is read the same, and nothing else around it is. */
 function answerObject(text: string, partial: boolean): unknown {
-  // Scan balanced objects rather than a greedy brace regex: strings may themselves contain braces or escaped quotes.
-  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
-    let depth = 0;
-    let quoted = false;
-    let escaped = false;
-    for (let end = start; end < text.length; end += 1) {
-      const char = text[end];
-      if (quoted) {
-        if (escaped) escaped = false;
-        else if (char === '\\') escaped = true;
-        else if (char === '"') quoted = false;
-      } else if (char === '"') quoted = true;
-      else if (char === '{') depth += 1;
-      else if (char === '}' && --depth === 0) {
-        try {
-          const value: unknown = JSON.parse(text.slice(start, end + 1));
-          if (isRecord(value) && value['schema'] === AGENT_WORKSPACE_RESULT_SCHEMA) return value;
-        } catch { /* Keep looking past explanatory text. */ }
-        break;
-      }
-    }
-  }
-  if (partial && text.includes(`"${AGENT_WORKSPACE_RESULT_SCHEMA}"`)) {
-    const start = /"items"\s*:\s*\[/u.exec(text);
-    if (start !== null) {
-      // Completed items can be previewed before the surrounding array/object has arrived.
-      const body = text.slice(start.index + start[0].length);
-      let quoted = false;
-      let escaped = false;
-      let depth = 0;
-      let itemStart = -1;
-      const items: unknown[] = [];
-      for (let at = 0; at < body.length; at += 1) {
-        const char = body[at];
-        if (quoted) {
-          if (escaped) escaped = false;
-          else if (char === '\\') escaped = true;
-          else if (char === '"') quoted = false;
-        } else if (char === '"') quoted = true;
-        else if (char === '{') { if (depth === 0) itemStart = at; depth += 1; }
-        else if (char === '}' && --depth === 0 && itemStart !== -1) {
-          try { items.push(JSON.parse(body.slice(itemStart, at + 1))); } catch { break; }
-        } else if (char === ']' && depth === 0) break;
-      }
-      return { schema: AGENT_WORKSPACE_RESULT_SCHEMA, items };
+  // Both preview and settlement retain complete items from unfinished envelopes.
+  for (const salvage of partial ? [false, true] : [false]) {
+    for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+      const value = extractModelJson(text.slice(start), { partial: salvage });
+      if (!Array.isArray(value?.items)) continue;
+      return value;
     }
   }
   return null;
 }
 
 /**
- * Read a workspace answer against the selection it was asked about. The answer is one JSON object holding exactly `schema`
- * and `items`; anything else withholds it whole. Each item holds exactly `anchor`, `proposedText` and `rationale`.
+ * Read the first object with items, ignoring echoed schema and extra fields. Each item is independently anchored;
+ * a malformed item or unfinished trailing value cannot erase candidates already read.
  */
-export function readAgentWorkspaceAnswer(text: string, selection: string, partial = false): AgentWorkspaceReading {
+export function readAgentWorkspaceAnswer(text: string, selection: string, partial = true): AgentWorkspaceReading {
   let parsed: unknown;
   try {
     parsed = answerObject(text, partial);
   } catch {
     return { kind: 'withheld', reason: NOT_A_CHANGE_SET };
   }
-  if (!isRecord(parsed) || !sameKeys(parsed, ['schema', 'items']) || parsed['schema'] !== AGENT_WORKSPACE_RESULT_SCHEMA || !Array.isArray(parsed['items'])) {
+  if (!isRecord(parsed) || !Array.isArray(parsed['items'])) {
     return { kind: 'withheld', reason: NOT_A_CHANGE_SET };
   }
   const candidates: AgentWorkspaceCandidate[] = [];
@@ -126,8 +83,9 @@ export function readAgentWorkspaceAnswer(text: string, selection: string, partia
     const ordinal = index + 1;
     const drop = (reason: string): void => { dropped.push({ ordinal, reason }); };
     if (ordinal > MAX_AGENT_WORKSPACE_ITEMS) { drop(words.tooMany(MAX_AGENT_WORKSPACE_ITEMS)); continue; }
-    if (!isRecord(item) || !sameKeys(item, ['anchor', 'proposedText', 'rationale'])) { drop(words.invalidItem); continue; }
-    const { anchor, proposedText, rationale } = item;
+    if (!isRecord(item) || !hasKeys(item, ['anchor', 'proposedText'])) { drop(words.invalidItem); continue; }
+    const { anchor, proposedText } = item;
+    const rationale = item.rationale ?? '';
     if (typeof anchor !== 'string' || typeof proposedText !== 'string' || typeof rationale !== 'string' ||
         !anchor.isWellFormed() || !proposedText.isWellFormed() || !rationale.isWellFormed()) { drop(words.invalidItem); continue; }
     if (anchor.length === 0) { drop(words.noAnchor); continue; }
@@ -137,14 +95,10 @@ export function readAgentWorkspaceAnswer(text: string, selection: string, partia
       continue;
     }
     const line = [...rationale.replace(/\s+/gu, ' ').trim()].slice(0, MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS).join('');
-    if (line.length === 0) {
-      drop(words.invalidRationale(MAX_AGENT_WORKSPACE_RATIONALE_CHARACTERS));
-      continue;
-    }
     const place = locate(selection, anchor);
     if (typeof place === 'string') { drop(place); continue; }
     if (candidates.some((kept) => place.from < kept.toGrapheme && kept.fromGrapheme < place.to)) { drop(words.overlap); continue; }
     candidates.push({ ordinal, anchor, proposedText, rationale: line, fromGrapheme: place.from, toGrapheme: place.to });
   }
-  return { kind: 'read', candidates, dropped };
+  return { kind: 'read', candidates, dropped, ...(dropped.length > 0 ? { salvaged: dropped.map((entry) => ({ section: 'items', index: entry.ordinal - 1, reason: entry.reason })) } : {}) };
 }

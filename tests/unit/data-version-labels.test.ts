@@ -46,7 +46,7 @@ describe('数据版本', () => {
   it('holds the Data Version to the classification of every schema revision after the release baseline (Issue #433, S85b)', () => {
     // Frozen at the 1.0.0 boundary (Issue #967): baseline 83 remains fixed; revision 84 adds model selections and
     // translation-attempt metadata additively, so both revisions remain inside Data Version 1.
-    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([83, [{ revision: 84, class: 'additive' }, { revision: 85, class: 'additive' }, { revision: 86, class: 'additive' }, { revision: 87, class: 'additive' }, { revision: 88, class: 'additive' }, { revision: 89, class: 'additive' }, { revision: 90, class: 'additive' }, { revision: 91, class: 'additive' }, { revision: 92, class: 'additive' }, { revision: 93, class: 'additive' }, { revision: 94, class: 'additive' }, { revision: 95, class: 'additive' }, { revision: 96, class: 'additive' }, { revision: 97, class: 'additive' }, { revision: 98, class: 'additive' }, { revision: 99, class: 'additive' }, { revision: 100, class: 'additive' }, { revision: 101, class: 'additive' }, { revision: 102, class: 'additive' }, { revision: 103, class: 'additive' }, { revision: 104, class: 'additive' }, { revision: 105, class: 'additive' }, { revision: 106, class: 'additive' }, { revision: 107, class: 'additive' }]]);
+    expect([DATA_VERSION_BASELINE_REVISION, SCHEMA_REVISION_CLASSES]).toEqual([83, [{ revision: 84, class: 'additive' }, { revision: 85, class: 'additive' }, { revision: 86, class: 'additive' }, { revision: 87, class: 'additive' }, { revision: 88, class: 'additive' }, { revision: 89, class: 'additive' }, { revision: 90, class: 'additive' }, { revision: 91, class: 'additive' }, { revision: 92, class: 'additive' }, { revision: 93, class: 'additive' }, { revision: 94, class: 'additive' }, { revision: 95, class: 'additive' }, { revision: 96, class: 'additive' }, { revision: 97, class: 'additive' }, { revision: 98, class: 'additive' }, { revision: 99, class: 'additive' }, { revision: 100, class: 'additive' }, { revision: 101, class: 'additive' }, { revision: 102, class: 'additive' }, { revision: 103, class: 'additive' }, { revision: 104, class: 'additive' }, { revision: 105, class: 'additive' }, { revision: 106, class: 'additive' }, { revision: 107, class: 'additive' }, { revision: 108, class: 'additive' }]]);
     // The software's Data Version is always the classification's at its terminal revision: a breaking revision added to the
     // list without raising DATA_VERSION, or DATA_VERSION raised without one, fails here.
     expect(DATA_VERSION).toBe(dataVersionAt(LATEST_SCHEMA_VERSION));
@@ -127,14 +127,15 @@ describe('数据版本 words', () => {
     // Going back is the earlier AI7's, which cannot open the upgraded data: the steps move it aside first (Issue #433 review).
     const places = { dataRoot: 'C:\\Users\\编辑\\AppData\\Roaming\\AI7', backupLocation: 'C:\\Users\\编辑\\AppData\\Roaming\\AI7-backups' };
     expect(dataVersionRollbackSteps(upgrade, places)).toEqual({
-      lead: '回退只恢复升级前的数据，AI7 不保留、也不运行旧版软件。升级前的 AI7（0.1.0）打不开升级后的数据，所以先把它挪开：',
+      lead: '回退只恢复升级前的数据，AI7 不保留、也不运行旧版软件；升级前的 AI7（0.1.0）打不开升级后的数据，所以先把它挪开：',
       steps: [
-        '关闭 AI7，把数据文件夹「C:\\Users\\编辑\\AppData\\Roaming\\AI7」改名，例如在名字后面加上「-升级后」。不要删除它，升级后的数据都在里面。',
+        '关闭 AI7，把数据文件夹「C:\\Users\\编辑\\AppData\\Roaming\\AI7」改名，例如在名字后面加上「-升级后」；不要删除它，升级后的数据都在里面。',
         '安装并启动升级前的 AI7（0.1.0）：它以空白数据启动。',
         '在它的「设置 › 数据与存储」里选「导入数据库…」，选「C:\\Users\\编辑\\AppData\\Roaming\\AI7-backups」里的「AI7 升级前备份 2026-09-26 10-00-05.ai7db」，再选「替换本机全部数据」。',
       ],
     });
     expect(dataVersionRollbackSteps({ ...upgrade, fromSoftwareVersion: null }, places).steps[1]).toBe('安装并启动升级前的 AI7：它以空白数据启动。');
+    expect(dataVersionRollbackSteps(upgrade, { ...places, dataRoot: 'C:\\编辑。存档' }).steps[0]).toContain('C:\\编辑。存档');
     const rollback = { softwareVersion: '0.0.9', dataVersion: 1, backupFileName: 'AI7 升级前备份 2026-09-26 09-00-00.ai7db', backupPresent: true };
     const partial = dataVersionRollbackSteps({ ...upgrade, fromSoftwareVersion: '0.0.10', rollback }, places);
     expect(partial.lead).toContain('未完成升级的中间状态');

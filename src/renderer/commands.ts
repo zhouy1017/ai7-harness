@@ -12,8 +12,8 @@ import {
 /**
  * The remappable command set and its one label source (Issue #936, plan slice 11c; V2-UX-KEY-001 to KEY-004, KEY-006, KEY-011,
  * KEY-012). Limited Shortcut Remapping applies only to declared navigation, search and view commands; editable-text,
- * OS-reserved and IME-reserved keys never are. No command here starts, adopts, designates, deletes or otherwise carries
- * authority: a command moves the editor to a place or focuses a control and nothing more (KEY-004).
+ * OS-reserved and IME-reserved keys never are. Owner #1330 extends KEY-004 with explicit evaluation start and the task
+ * palette; their start actions still prepare and authorize the exact plan. Disposition commands remain outside this registry.
  *
  * A binding is a sequence of one or two chords written `Mod+Alt+Shift+Key` — `Mod` is Ctrl on Windows and Command on macOS,
  * `Ctrl` is Control on macOS only — and a preference holds only the commands the editor changed; a missing entry stands for
@@ -51,6 +51,11 @@ export const BOOK_SECTION_COMMANDS = [
 
 /** The remappable commands, in the order the settings table lists them. */
 export const COMMANDS: readonly CommandDefinition[] = [
+  { id: 'command.palette', name: COMMAND_NAMES['command.palette'], group: 'navigation', context: 'application', defaults: both('Mod+K') },
+  { id: 'book.switch', name: COMMAND_NAMES['book.switch'], group: 'navigation', context: 'application', defaults: both('Mod+P') },
+  { id: 'review.new', name: COMMAND_NAMES['review.new'], group: 'navigation', context: 'book', defaults: both('Mod+Shift+R') },
+  { id: 'evaluation.start', name: COMMAND_NAMES['evaluation.start'], group: 'navigation', context: 'book', defaults: both('Mod+Shift+E') },
+  { id: 'nav.tasks', name: COMMAND_NAMES['nav.tasks'], group: 'navigation', context: 'application', defaults: both('Mod+Shift+T') },
   { id: 'nav.attention', name: COMMAND_NAMES['nav.attention'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+1', darwin: 'Mod+Alt+1' } },
   { id: 'nav.library', name: COMMAND_NAMES['nav.library'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+2', darwin: 'Mod+Alt+2' } },
   { id: 'nav.series', name: COMMAND_NAMES['nav.series'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+3', darwin: 'Mod+Alt+3' } },
@@ -61,15 +66,15 @@ export const COMMANDS: readonly CommandDefinition[] = [
     defaults: { win32: `Alt+Shift+${index + 1}`, darwin: `Mod+Alt+Shift+${index + 1}` },
   })),
   { id: 'nav.settings', name: COMMAND_NAMES['nav.settings'], group: 'navigation', context: 'application', defaults: both('Mod+Comma') },
-  { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Shift+B') },
+  { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Backslash') },
   { id: 'nav.back', name: COMMAND_NAMES['nav.back'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+ArrowLeft', darwin: 'Mod+BracketLeft' } },
   { id: 'search.find', name: COMMAND_NAMES['search.find'], group: 'search', context: 'manuscript', defaults: both('Mod+F') },
   { id: 'search.next', name: COMMAND_NAMES['search.next'], group: 'search', context: 'manuscript', defaults: { win32: 'F3', darwin: 'Mod+G' } },
   { id: 'search.previous', name: COMMAND_NAMES['search.previous'], group: 'search', context: 'manuscript', defaults: { win32: 'Shift+F3', darwin: 'Mod+Shift+G' } },
   { id: 'view.focusManuscript', name: COMMAND_NAMES['view.focusManuscript'], group: 'view', context: 'manuscript', defaults: both('Mod+Shift+M') },
-  { id: 'view.openTasks', name: COMMAND_NAMES['view.openTasks'], group: 'view', context: 'book', defaults: both('Mod+Shift+T') },
+  { id: 'view.openTasks', name: COMMAND_NAMES['view.openTasks'], group: 'view', context: 'book', defaults: both('F7') },
   // 专注模式 (Issue #951, wave 12 slice 12a; ED-004): the manuscript's view command; Esc and the header's restore control leave it too.
-  { id: 'view.focusMode', name: COMMAND_NAMES['view.focusMode'], group: 'view', context: 'manuscript', defaults: both('Mod+Shift+E') },
+  { id: 'view.focusMode', name: COMMAND_NAMES['view.focusMode'], group: 'view', context: 'manuscript', defaults: both('F8') },
 ];
 
 /**
@@ -333,7 +338,7 @@ const TEXT_EDITING_KEYS = new Set(['A', 'C', 'X', 'V', 'Y', 'Z', 'Backspace', 'D
 /** Keys that type, commit an input method's composition, or leave a field — with any modifier but Alt they stay the text's. */
 const TYPING_KEYS = new Set(['Space', 'Enter', 'Escape', 'Tab', 'Backspace', 'Delete', 'Insert']);
 const SYSTEM_FUNCTION_KEYS = new Set(['F1', 'F5', 'F10', 'F11', 'F12']);
-const WINDOW_COMMAND_LETTERS = ['W', 'Q', 'N', 'R', 'P', 'O', 'T'];
+const WINDOW_COMMAND_LETTERS = ['W', 'Q', 'N', 'R', 'O', 'T'];
 
 /** Why a single chord may never be bound, or `null`. Judged on the platform's own conventions. */
 export function reservedReason(chord: Chord, platform: CommandPlatform): BindingRefusalReason | null {
@@ -366,7 +371,7 @@ export function reservedReason(chord: Chord, platform: CommandPlatform): Binding
     if (mod && key === 'Escape') return 'os-reserved';
     if (mod && !alt && !shift && WINDOW_COMMAND_LETTERS.includes(letter)) return 'os-reserved';
   } else {
-    if (mod && !alt && !shift && ['Q', 'H', 'M', 'W', 'N', 'R', 'P', 'O', 'T', 'Tab', 'Backquote'].includes(letter)) return 'os-reserved';
+    if (mod && !alt && !shift && ['Q', 'H', 'M', 'W', 'N', 'R', 'O', 'T', 'Tab', 'Backquote'].includes(letter)) return 'os-reserved';
     if (mod && key === 'Tab') return 'os-reserved';
     if (mod && alt && key === 'Escape') return 'os-reserved';
     if (mod && !alt && shift && ['3', '4', '5'].includes(key)) return 'os-reserved';
@@ -476,6 +481,7 @@ export interface CommandDispatcherOptions {
 }
 
 export interface CommandDispatcher {
+  execute(id: string): void;
   /** Handlers by command id; a command with no handler on the current screen does nothing. */
   register(handlers: Readonly<Record<string, CommandHandler>>): () => void;
   /** The listener for the window's `keydown`. */
@@ -511,6 +517,7 @@ export function createCommandDispatcher(options: CommandDispatcherOptions): Comm
   };
 
   return {
+    execute: run,
     register(next) {
       const ids = Object.keys(next);
       for (const id of ids) handlers.set(id, next[id]!);

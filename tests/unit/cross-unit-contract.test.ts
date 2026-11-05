@@ -187,62 +187,24 @@ describe('parseCrossUnitResult (Baseline Cross-Unit Reduction Contract v1)', () 
     }
   });
 
-  it('refuses a response that is not JSON', () => {
-    expect(parseCrossUnitResult('这不是 JSON', EXPECTED)).toEqual({ ok: false, code: 'not-json', detail: '模型输出不是 JSON。' });
+  it('drops bad entries and sides, downgrading a finding with fewer than two units to a note', () => {
+    const body = validResult();
+    (body.findings as unknown[]).push(null, { kind: 'contradiction', description: '合成观察', sides: [{ unitOrdinal: 99 }] });
+    const parsed = parseCrossUnitResult(JSON.stringify(body), EXPECTED);
+    expect(parsed.ok && parsed.result.findings).toHaveLength(1);
+    expect(parsed.ok && parsed.result.notes).toHaveLength(2);
+    expect(parsed.ok && parsed.result.salvaged).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reason: 'entry-invalid' }), expect.objectContaining({ reason: 'unit-out-of-set' }),
+    ]));
+    expect(parseCrossUnitResult('not json', EXPECTED)).toMatchObject({ ok: false, code: 'not-json' });
   });
 
-  it('refuses every shape the schema does not admit', () => {
-    const refuse = (mutate: (body: Record<string, unknown>) => void) => {
-      const body = validResult();
-      mutate(body);
-      return parseCrossUnitResult(JSON.stringify(body), EXPECTED);
-    };
-    expect(refuse((body) => { body.extra = 1; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { delete body.notes; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { body.schema = 'other/1'; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { body.notes = [42]; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { (body.findings as Array<{ kind: string }>)[0]!.kind = 'plot-hole'; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { (body.findings as Array<{ confidence: string }>)[0]!.confidence = 'certain'; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { (body.findings as Array<{ description: string }>)[0]!.description = ''; })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    // 400 graphemes is the bound; 401 is not.
-    expect(refuse((body) => { (body.findings as Array<{ description: string }>)[0]!.description = '合'.repeat(400); }).ok).toBe(true);
-    expect(refuse((body) => { (body.findings as Array<{ description: string }>)[0]!.description = '合'.repeat(401); })).toMatchObject({ ok: false, code: 'schema-invalid' });
-    expect(refuse((body) => { body.findings = Array.from({ length: 201 }, () => (validResult().findings as unknown[])[0]); }))
-      .toMatchObject({ ok: false, code: 'schema-invalid' });
+  it('drops only unlisted ranges and replaces invalid offsets with whole-block references', () => {
+    const body = validResult();
+    (body.findings as Array<{ sides: Array<{ sourceRanges: unknown[] }> }>)[0]!.sides[0]!.sourceRanges = [range(BLOCK_D), range(BLOCK_A, 5, 2)];
+    const parsed = parseCrossUnitResult(JSON.stringify(body), EXPECTED);
+    expect(parsed.ok && parsed.result.findings[0]!.sides[0]!.sourceRanges).toEqual([range(BLOCK_A)]);
+    expect(parsed.ok && parsed.result.salvaged).toHaveLength(2);
   });
 
-  it('refuses a finding that does not span two distinct units of the set', () => {
-    const single = validResult();
-    (single.findings as Array<{ sides: unknown[] }>)[0]!.sides = [{ unitOrdinal: 1, sourceRanges: [range(BLOCK_A)] }];
-    expect(parseCrossUnitResult(JSON.stringify(single), EXPECTED)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    const sameUnit = validResult();
-    (sameUnit.findings as Array<{ sides: unknown[] }>)[0]!.sides = [
-      { unitOrdinal: 1, sourceRanges: [range(BLOCK_A)] },
-      { unitOrdinal: 1, sourceRanges: [range(BLOCK_B)] },
-    ];
-    expect(parseCrossUnitResult(JSON.stringify(sameUnit), EXPECTED)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    const tooMany = validResult();
-    (tooMany.findings as Array<{ sides: unknown[] }>)[0]!.sides = Array.from({ length: 9 }, (_item, index) => ({
-      unitOrdinal: index % 2 === 0 ? 1 : 3, sourceRanges: [],
-    }));
-    expect(parseCrossUnitResult(JSON.stringify(tooMany), EXPECTED)).toMatchObject({ ok: false, code: 'schema-invalid' });
-  });
-
-  it('refuses a side on a unit outside the closed set', () => {
-    const outside = validResult();
-    (outside.findings as Array<{ sides: Array<{ unitOrdinal: number }> }>)[0]!.sides[1]!.unitOrdinal = 2;
-    expect(parseCrossUnitResult(JSON.stringify(outside), EXPECTED)).toMatchObject({ ok: false, code: 'unit-out-of-set' });
-  });
-
-  it('refuses a source range the cited unit never listed', () => {
-    const outside = validResult();
-    (outside.findings as Array<{ sides: Array<{ sourceRanges: unknown[] }> }>)[0]!.sides[0]!.sourceRanges = [range(BLOCK_D)];
-    expect(parseCrossUnitResult(JSON.stringify(outside), EXPECTED)).toMatchObject({ ok: false, code: 'range-out-of-unit' });
-    const malformed = validResult();
-    (malformed.findings as Array<{ sides: Array<{ sourceRanges: unknown[] }> }>)[0]!.sides[0]!.sourceRanges = [range(BLOCK_B, 5, 2)];
-    expect(parseCrossUnitResult(JSON.stringify(malformed), EXPECTED)).toMatchObject({ ok: false, code: 'schema-invalid' });
-    const unknownBlock = validResult();
-    (unknownBlock.findings as Array<{ sides: Array<{ sourceRanges: unknown[] }> }>)[0]!.sides[0]!.sourceRanges = [range('blk_zzz')];
-    expect(parseCrossUnitResult(JSON.stringify(unknownBlock), EXPECTED)).toMatchObject({ ok: false, code: 'schema-invalid' });
-  });
 });

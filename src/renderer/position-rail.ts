@@ -5,9 +5,8 @@ import type { ManuscriptRailProjection, RendererApi } from '../shared/protocol.j
  * ED-011, ED-015, ED-020, ED-059). Three parallel lanes stand in one narrow column: chapter ticks and
  * the ranges the analysis left unread on one side of the track, the track with the current position
  * in the middle, and the open 修改建议, 批注 and 备注 on the other side, each kind in its fixed colour
- * and its own sub-lane. The range input the surface already had stays the control — pointer, keyboard
- * and the accessible value are its — and this module only draws behind it and answers a click on a
- * marker with a jump. It reads no manuscript text: every place is a proportion.
+ * and its own sub-lane. The drawn track handles pointer and keyboard jumps without a native range.
+ * It reads no manuscript text: every place is a proportion.
  */
 export interface PositionRail {
   /** Read the places again: marks changed, text moved, or an analysis settled. */
@@ -18,11 +17,13 @@ export interface PositionRail {
 }
 
 interface MountOptions {
-  /** The positioned box the track is drawn in; the range input lies over it. */
+  /** The positioned box containing the drawn track and its markers. */
   track: HTMLElement;
   api: Pick<RendererApi, 'getManuscriptRail'>;
   binding(): { manuscriptId: string; branchId: string };
   jumpToBlock(blockId: string): void;
+  jumpToProportion?(proportion: number): boolean | void | Promise<boolean | void>;
+  onRead?(rail: ManuscriptRailProjection): void;
   onError(error: unknown): void;
 }
 
@@ -38,11 +39,13 @@ const LANE_LABELS: Readonly<Record<(typeof LANE_KINDS)[number], string>> = {
 function el(tag: 'div' | 'button', className: string): HTMLElement {
   const node = document.createElement(tag);
   node.className = className;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
 function percent(proportion: number): string {
-  return `${(Math.min(1, Math.max(0, proportion)) * 100).toFixed(3)}%`;
+  // Drawing precision is independent of the editor-facing label's rounded percentage.
+  return `${Math.min(1, Math.max(0, proportion)) * 100}%`;
 }
 
 /**
@@ -85,10 +88,77 @@ export function mountPositionRail(options: MountOptions): PositionRail {
   options.track.append(gaps, ticks, line, now, lanes);
   let destroyed = false;
   let generation = 0;
+  let drawn = false;
+  let position = 0;
+  let confirmedPosition = 0;
+  let pointer: number | undefined;
+  const setPosition = (proportion: number): void => {
+    position = Math.min(1, Math.max(0, proportion));
+    now.style.top = percent(position);
+    options.track.setAttribute('aria-valuenow', String(Math.round(position * 1_000_000)));
+    options.track.setAttribute('aria-valuetext', `全稿 ${Math.round(position * 100)}%`);
+  };
+  const interactive = options.jumpToProportion !== undefined;
+  if (interactive) {
+    options.track.tabIndex = 0;
+    options.track.setAttribute('role', 'slider');
+    options.track.setAttribute('aria-label', '全稿位置');
+    options.track.setAttribute('aria-orientation', 'vertical');
+    options.track.setAttribute('aria-valuemin', '0');
+    options.track.setAttribute('aria-valuemax', '1000000');
+  }
+  const disabled = (): boolean => options.track.getAttribute('aria-disabled') === 'true';
+  const commitPosition = (): void => {
+    if (!interactive || disabled()) return;
+    const value = Number(options.track.getAttribute('aria-valuenow')) / 1_000_000;
+    if (!Number.isFinite(value)) return;
+    setPosition(value);
+    void Promise.resolve(options.jumpToProportion?.(position)).then((accepted) => {
+      if (!destroyed && accepted === false) setPosition(confirmedPosition);
+    });
+  };
+  const pointAt = (event: MouseEvent): void => {
+    const box = options.track.getBoundingClientRect();
+    if (box.height > 0) setPosition(Math.round((event.clientY - box.top) / box.height * 1_000_000) / 1_000_000);
+  };
+  const pointerDown = (event: PointerEvent): void => {
+    if (!interactive || disabled() || event.button !== 0 || (event.target as Element).closest('.rail-marker')) return;
+    event.preventDefault();
+    pointer = event.pointerId;
+    options.track.focus({ preventScroll: true });
+    options.track.setPointerCapture(event.pointerId);
+    pointAt(event);
+  };
+  const pointerMove = (event: PointerEvent): void => { if (pointer === event.pointerId) pointAt(event); };
+  const pointerUp = (event: PointerEvent): void => {
+    if (pointer !== event.pointerId) return;
+    pointer = undefined;
+    options.track.releasePointerCapture(event.pointerId);
+    commitPosition();
+  };
+  const pointerCancel = (): void => { pointer = undefined; setPosition(confirmedPosition); };
+  const keyDown = (event: KeyboardEvent): void => {
+    if (!interactive || disabled()) return;
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? 1
+      : event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? position - 0.01
+        : event.key === 'ArrowDown' || event.key === 'ArrowRight' ? position + 0.01
+          : event.key === 'PageUp' ? position - 0.1 : event.key === 'PageDown' ? position + 0.1 : null;
+    if (next === null) return;
+    event.preventDefault();
+    setPosition(next);
+    commitPosition();
+  };
+  options.track.addEventListener('pointerdown', pointerDown);
+  options.track.addEventListener('pointermove', pointerMove);
+  options.track.addEventListener('pointerup', pointerUp);
+  options.track.addEventListener('pointercancel', pointerCancel);
+  options.track.addEventListener('keydown', keyDown);
+  options.track.addEventListener('change', commitPosition);
 
   const tickNodes = new Map<string, HTMLElement>();
   const gapNodes = new Map<string, HTMLElement>();
   const markerNodes = new Map<string, HTMLElement>();
+  const markerTimers = new Map<HTMLElement, ReturnType<typeof setTimeout>>();
   /** The paragraph each marker jumps to, as last drawn. */
   const targets = new WeakMap<HTMLElement, string>();
 
@@ -129,11 +199,20 @@ export function mountPositionRail(options: MountOptions): PositionRail {
       marker.dataset['railLane'] = String(held.lane + 1);
       marker.style.top = percent((held.slot + 0.5) / LANE_SLOTS);
       marker.tabIndex = -1;
+      marker.addEventListener('animationend', () => marker.classList.remove('rail-marker-new'));
       marker.addEventListener('click', () => options.jumpToBlock(targets.get(marker)!));
       return marker;
     }, (marker, held) => {
       targets.set(marker, held.blockId);
       if (marker.dataset['railCount'] === String(held.count)) return;
+      if (drawn && held.count > Number(marker.dataset['railCount'] ?? 0)) {
+        marker.classList.add('rail-marker-new');
+        clearTimeout(markerTimers.get(marker));
+        markerTimers.set(marker, setTimeout(() => {
+          marker.classList.remove('rail-marker-new');
+          markerTimers.delete(marker);
+        }, 400));
+      }
       marker.dataset['railCount'] = String(held.count);
       marker.setAttribute('aria-label', `${LANE_LABELS[held.kind]} ${held.count} 处，跳到这里`);
       marker.title = `${LANE_LABELS[held.kind]} ${held.count} 处`;
@@ -143,6 +222,8 @@ export function mountPositionRail(options: MountOptions): PositionRail {
     options.track.dataset['railSparse'] = rail.chaptersTruncated || rail.marksTruncated ? 'true' : 'false';
     options.track.dataset['railAnalysed'] = rail.uncovered === null ? 'false' : 'true';
     options.track.dataset['railJournal'] = String(rail.journalSequence);
+    drawn = true;
+    options.onRead?.(rail);
   };
 
   const refresh = (): void => {
@@ -158,11 +239,17 @@ export function mountPositionRail(options: MountOptions): PositionRail {
 
   return {
     refresh,
-    setPosition: (proportion) => {
-      now.style.top = percent(proportion);
-    },
+    setPosition: (proportion) => { confirmedPosition = proportion; setPosition(proportion); },
     destroy: () => {
       destroyed = true;
+      for (const timer of markerTimers.values()) clearTimeout(timer);
+      markerTimers.clear();
+      options.track.removeEventListener('pointerdown', pointerDown);
+      options.track.removeEventListener('pointermove', pointerMove);
+      options.track.removeEventListener('pointerup', pointerUp);
+      options.track.removeEventListener('pointercancel', pointerCancel);
+      options.track.removeEventListener('keydown', keyDown);
+      options.track.removeEventListener('change', commitPosition);
       for (const node of [ticks, gaps, line, now, lanes]) node.remove();
     },
   };

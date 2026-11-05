@@ -1,3 +1,4 @@
+import { windowStep } from './components/controls.js';
 import type { EvaluationCalibrationBookProjection, EvaluationCalibrationCursor, EvaluationCalibrationProjection, RendererApi } from '../shared/protocol.js';
 import { formatPriceFen, parseFirstPrint, parsePriceYuan } from '../shared/evaluation-calibration.js';
 import {
@@ -49,6 +50,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -112,16 +114,28 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     const calibrationSection = el('section', 'calibration-section calibration-calibration');
     const calibrationSwitch = switchNode('calibration', CALIBRATION_SWITCH, calibration.enabled, false, (on) =>
       void savePreferences({ predictionEnabled: prediction.enabled, calibrationEnabled: on }, 'calibration'));
+    const method = el('p', 'field-note');
+    method.append(CALIBRATION_SCOPE.replace(/。$/u, ''), '；', el('span', 'calibration-method', CALIBRATION_METHOD));
+    const progress = el('p', 'calibration-status');
+    progress.append(el('span', 'calibration-progress', calibrationProgressLine(calibration)));
+    const unreadable = calibrationUnreadableLine(calibration.unreadableBooks);
+    if (unreadable !== null) progress.append(' · ', el('span', 'calibration-unreadable', unreadable));
+    if (!calibration.enabled) progress.append(' · ', el('span', 'calibration-off-effect', CALIBRATION_OFF_EFFECT));
     // The house offset as computed now (EVAL-011a): its basis and each item's offset past the gate, or what it waits for.
     const offsetNode = el('div', 'calibration-offset');
     offsetNode.dataset['calibrationOffset'] = calibration.offset === null ? 'waiting' : 'computed';
+    const offsetSummary = el('p', 'field-note');
+    if (!calibration.initialScoresConnected) offsetSummary.append(el('span', 'calibration-waiting', CALIBRATION_WAITING.replace(/。$/u, '')), '；');
     if (calibration.offset === null) {
-      offsetNode.append(el('p', 'field-note calibration-offset-waiting', calibrationOffsetWaiting(calibration.threshold)));
+      offsetSummary.append(el('span', 'calibration-offset-waiting', calibrationOffsetWaiting(calibration.threshold)));
+      offsetNode.append(offsetSummary);
     } else {
-      offsetNode.append(el('p', 'field-note calibration-offset-basis', calibrationBasisLine(calibration.offset)));
       // Why the basis may be fewer Books than 调分记录 counts (a damaged from-初评 version): said beside the two counts.
       const withoutBasis = calibrationWithoutBasisLine(calibration.offset);
-      if (withoutBasis !== null) offsetNode.append(el('p', 'field-note calibration-offset-without-basis', withoutBasis));
+      const basis = calibrationBasisLine(calibration.offset);
+      offsetSummary.append(el('span', 'calibration-offset-basis', withoutBasis === null ? basis : basis.replace(/。$/u, '')));
+      if (withoutBasis !== null) offsetSummary.append('；', el('span', 'calibration-offset-without-basis', withoutBasis));
+      offsetNode.append(offsetSummary);
       const list = el('ul', 'calibration-offset-list');
       for (const item of calibration.offset.items) {
         const line = el('li', undefined, calibrationOffsetLine(item));
@@ -133,16 +147,10 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     }
     calibrationSection.append(
       el('h3', undefined, CALIBRATION_HEADING),
-      el('p', 'calibration-progress', calibrationProgressLine(calibration)),
-      ...(calibrationUnreadableLine(calibration.unreadableBooks) === null ? []
-        : [el('p', 'field-note calibration-unreadable', calibrationUnreadableLine(calibration.unreadableBooks)!)]),
-      el('p', 'field-note', CALIBRATION_SCOPE),
-      el('p', 'field-note calibration-method', CALIBRATION_METHOD),
-      // Said while AI7 gives no 初评 to adjust (Issue #430 review), not by the count: after S81b a count below ten is progress.
-      ...(!calibration.initialScoresConnected ? [el('p', 'field-note calibration-waiting', CALIBRATION_WAITING)] : []),
+      progress,
+      method,
       offsetNode,
       // Off: new versions start from the raw 初评, and the switch stays reversible (EVAL-011).
-      ...(calibration.enabled ? [] : [el('p', 'field-note calibration-off-effect', CALIBRATION_OFF_EFFECT)]),
       calibrationSwitch,
     );
     refusalFor('calibration', calibrationSection);
@@ -165,7 +173,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     heading.dataset['calibrationPageHeading'] = '';
     actualsSection.append(heading);
     const books = visibleBooks();
-    if (books.length === 0) actualsSection.append(el('p', 'field-note calibration-actuals-empty', ACTUALS_EMPTY));
+    if (books.length === 0) heading.append(' · ', el('span', 'calibration-actuals-empty', ACTUALS_EMPTY));
     const list = el('ul', 'calibration-actuals-list');
     for (const book of books) list.append(bookNode(book));
     if (books.length > 0) actualsSection.append(list);
@@ -177,7 +185,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
     }
     if (projection.nextCursor !== null) {
       const nextCursor = projection.nextCursor;
-      const next = action('下一页图书', 'secondary', 'next', () => void page(nextCursor));
+      const next = windowStep(action('下一页图书', 'secondary', 'next', () => void page(nextCursor)), 'after', "向后浏览图书");
       next.disabled = busy;
       pages.append(next);
     }
@@ -330,7 +338,7 @@ export function mountEvaluationCalibration(options: MountEvaluationCalibrationOp
 
   return {
     async load(): Promise<void> {
-      root.replaceChildren(el('p', 'field-note', CALIBRATION_STATUS.loading));
+      root.replaceChildren();
       projection = await readPage();
       if (!root.isConnected) return;
       const focus = options.focusBookId;

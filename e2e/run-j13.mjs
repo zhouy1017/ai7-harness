@@ -43,7 +43,7 @@ const SECOND = '星河之二';
 const OUTSIDE = '书系之外';
 const SERIES = '星河三部曲';
 const NOTE = '同一个宇宙里的三部长篇。';
-const SERIES_LEDE = '书系把相关的图书放在一起。加入书系只让以后的任务可以明确选用书系的范围：不会让一本书读到另一本书的原文，也不会自动授权任何任务。';
+const SERIES_LEDE = '书系归集相关图书，供以后任务明确选择范围；加入书系不会让一本书读到另一本书的原文，也不会自动授权任务。';
 const SCOPE_NOTE = '成员只表示以后的任务可以明确选用这个书系的范围；这里不汇总、也不打开成员图书的原文。';
 const STALE = '预览之后，书系成员或相关记录有了变化；请重新查看影响，再决定。';
 const GROUPS = [['future-tasks', '未来任务'], ['runs', '已授权或正在运行'], ['knowledge-learning', '书系知识与学习'], ['history', '历史记录']];
@@ -61,7 +61,7 @@ const SCOPE_CHANGED = '书系检索范围已变化 · 需要重新确认计划';
 const MARKER = '此结果使用的材料后来被排除';
 const CAPTURE_CANCELLED = '这次审阅已取消，不能保存为可复用工序；从一次完成的审阅保存。';
 const EXCLUDED_REASON = `书系「${SERIES}」可用于一致性审阅的书系知识都已排除在书系检索之外；停止排除或纳入其他书系知识后才能选。`;
-const CONSISTENCY_BASIS = `依据：书系「${SERIES}」的书系知识：地点「${PLACE}」第 2 版 · 工序：书系一致性检查（第 1 版） · 不使用搜索引擎`;
+const CONSISTENCY_BASIS = `地点「${PLACE}」 · 书系一致性检查`;
 let location = 'entry';
 
 function at(next) {
@@ -220,7 +220,8 @@ async function assertRenderer(renderer, expression, name) {
 }
 
 async function click(renderer, label, name) {
-  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
+  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
 async function clickSelector(renderer, selector, name) {
@@ -249,6 +250,7 @@ async function press(renderer, key) {
 }
 
 const status = `(document.querySelector('#persistence-status')?.textContent ?? '')`;
+const notice = `(document.querySelector('[data-toast]')?.textContent ?? '')`;
 
 /** Create an empty Book titled `title`; its checks are labelled by `name`, never by the title (Issue #652). */
 async function createEmptyBook(renderer, title, name) {
@@ -287,7 +289,7 @@ const READ_SERIES_LIST = `(() => {
   return {
     lede: screen.querySelector('.series-lede')?.textContent ?? null,
     empty: root.querySelector('.series-empty')?.textContent ?? null,
-    items: Array.from(root.querySelectorAll('li.series-item'), (item) => [item.dataset.seriesId ?? null, item.querySelector('[data-series-action="open"]')?.textContent ?? null, item.querySelector('.series-item-note')?.textContent ?? null]),
+    items: Array.from(root.querySelectorAll('li.series-item'), (item) => [item.dataset.seriesId ?? null, item.querySelector('[data-series-action="open"]')?.firstChild?.textContent ?? null, item.querySelector('.series-item-note')?.textContent ?? null]),
     form: root.querySelector('form.series-create-form') !== null,
     createDisabled: create instanceof HTMLButtonElement ? create.disabled : null,
     refusal: root.querySelector('.series-refusal')?.textContent ?? null,
@@ -309,8 +311,9 @@ const READ_SERIES = `(() => {
     note: screen.querySelector('.series-note')?.textContent ?? null,
     scopeNote: root.querySelector('.series-scope-note')?.textContent ?? null,
     membersEmpty: root.querySelector('.series-members-empty')?.textContent ?? null,
-    members: Array.from(root.querySelectorAll('table.series-member-table tbody tr'), (row) => [row.dataset.bookId ?? null, ...Array.from(row.children, (cell) => cell.textContent ?? '')]),
-    columns: Array.from(root.querySelectorAll('table.series-member-table thead th'), (cell) => cell.textContent ?? ''),
+    members: Array.from(root.querySelectorAll('.series-member-card'), (row) => [row.dataset.bookId ?? null,
+      ...['.series-member-title', '.series-member-authors', '.series-member-editors', '.series-member-joined', '.series-consistency', '[data-series-action="remove-open"]'].map((selector) => row.querySelector(selector)?.textContent ?? '')]),
+    memberPills: Array.from(root.querySelectorAll('.series-member-card .series-consistency'), (line) => line.querySelectorAll('.state-term').length),
     addOpen: addOpen instanceof HTMLButtonElement ? !addOpen.disabled : null,
     addNone: root.querySelector('.series-add-none')?.textContent ?? null,
     chooser: root.querySelector('.series-add-chooser') === null ? null : Array.from(root.querySelectorAll('input[name="series-add-book"]'), (radio) => [radio.value, radio.checked, radio.parentElement?.textContent ?? '']),
@@ -326,7 +329,7 @@ const READ_SERIES = `(() => {
     },
     refusal: root.querySelector('.series-refusal')?.textContent ?? null,
     historyEmpty: root.querySelector('.series-history-empty')?.textContent ?? null,
-    history: Array.from(root.querySelectorAll('ol.series-history > li'), (item) => [item.dataset.changeKind ?? null, item.dataset.bookId ?? null, item.querySelector('.series-change-line')?.textContent ?? null, item.querySelectorAll('.series-impact-group').length]),
+    history: Array.from(root.querySelectorAll('ol.series-history > li'), (item) => [item.dataset.changeKind ?? null, item.dataset.bookId ?? null, item.querySelector('.series-change-line')?.firstChild?.textContent ?? null, item.querySelectorAll('.series-impact-group').length]),
     focus: root.contains(document.activeElement) ? ${FOCUS} : null,
   };
 })()`;
@@ -340,7 +343,7 @@ const READ_BOOK_SERIES = `(() => {
     none: section.querySelector('.book-series-none')?.textContent ?? null,
     memberships: Array.from(section.querySelectorAll('.book-series-membership'), (line) => [line.dataset.seriesId ?? null, line.textContent ?? '']),
     summary: section.querySelector('details.book-series-history > summary')?.textContent ?? null,
-    history: Array.from(section.querySelectorAll('details.book-series-history li.series-change'), (item) => [item.dataset.changeKind ?? null, item.querySelector('.series-change-line')?.textContent ?? null]),
+    history: Array.from(section.querySelectorAll('details.book-series-history li.series-change'), (item) => [item.dataset.changeKind ?? null, item.querySelector('.series-change-line')?.firstChild?.textContent ?? null]),
   };
 })()`;
 
@@ -389,15 +392,15 @@ async function bookSide(renderer, bookId, name) {
 async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(sample1.sha256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(sample1.bytes))}`, `${name}-exact-source`);
   await fill(renderer, '#book-title', title, `${name}-title`);
-  await click(renderer, '确认书名并复核', `${name}-review`);
+  await click(renderer, '查看导入详情', `${name}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
   await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, `${name}-review-clean`);
   await click(renderer, '新建图书并导入稿件', `${name}-commit`);
@@ -505,7 +508,7 @@ const READ_KNOWLEDGE = `(() => {
     items: Array.from(root.querySelectorAll('li.knowledge-item'), (item) => [item.dataset.itemId ?? null, text(item.querySelector('.knowledge-item-title')), text(item.querySelector('.knowledge-item-content')),
       text(item.querySelector('.knowledge-item-provenance')), text(item.querySelector('.knowledge-item-reuse')), text(item.querySelector('.knowledge-item-conflicts')), text(item.querySelector('details.knowledge-item-history > summary'))]),
     itemsEmpty: text(root.querySelector('.knowledge-items-empty')),
-    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, text(item.querySelector('.knowledge-candidate-target')),
+    candidates: Array.from(root.querySelectorAll('li.knowledge-candidate'), (item) => [item.dataset.candidateId ?? null, item.dataset.authoring ?? null, item.querySelector('.knowledge-candidate-target')?.firstChild?.textContent ?? null,
       text(item.querySelector('.knowledge-candidate-provenance')), item.querySelector('.knowledge-candidate-conflict') !== null]),
     candidatesEmpty: text(root.querySelector('.knowledge-candidates-empty')),
     form: form === null ? null : {
@@ -514,7 +517,7 @@ const READ_KNOWLEDGE = `(() => {
     },
     review: review === null ? null : {
       candidateId: review.dataset.candidateId ?? null,
-      identity: text(review.querySelector('.knowledge-review-identity')),
+      identity: review.querySelector('.knowledge-review-identity')?.firstChild?.textContent ?? null,
       provenance: text(review.querySelector('.knowledge-review-provenance')),
       superseded: text(review.querySelector('.knowledge-review-superseded')),
       conflictLabel: text(review.querySelector('.knowledge-conflict-label')),
@@ -591,7 +594,7 @@ const READ_CAPTURE = `(() => {
   return {
     kind: dialog.dataset.captureKind ?? null,
     kept: dialog.dataset.captureKept ?? null,
-    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.textContent ?? null]),
+    steps: Array.from(dialog.querySelectorAll('[data-capture-step]'), (label) => [label.dataset.captureStep, label.dataset.captureEligible, label.querySelector('input')?.checked ?? null, label.querySelector('.procedure-capture-step-text')?.firstChild?.textContent ?? null]),
     kinds: Array.from(dialog.querySelectorAll('[data-capture-kind]'), (label) => [label.dataset.captureKind, label.querySelector('input')?.disabled ?? null, label.querySelector('input')?.checked ?? null]),
     why: dialog.querySelector('.procedure-capture-why p')?.textContent ?? null,
     extract: Array.from(dialog.querySelectorAll('.procedure-capture-extract li'), (item) => item.textContent),
@@ -684,7 +687,6 @@ const READ_SHEET_PROCEDURE = `(() => {
 /** 知识库 › 工序与规则 from 书库. */
 async function openProcedures(renderer, name) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), `${name}-knowledge`);
-  await waitFor(renderer, `document.querySelector('.review-guidelines')?.dataset.guidelines==='ready'`, `${name}-knowledge-ready`);
   await click(renderer, '工序与规则', `${name}-rules`);
   await waitFor(renderer, `document.querySelector('.knowledge-captured-procedures')`, `${name}-rules-ready`);
 }
@@ -855,7 +857,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('series')), 'series-destination');
     const empty = await readSeriesList(renderer, () => true, 'series-empty-page');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-13', at, representative: '#screen[data-screen="series-list"] > .panel', returnTo: SIDEBAR.destination('series') });
+    await runJ14DarkPass({ renderer, journey: 'J-13', at, representative: '#screen[data-screen="series-list"] > .page-content', returnTo: SIDEBAR.destination('series') });
     await readSeriesList(renderer, () => true, 'series-empty-page-after-dark-pass');
     requireJourney(empty.lede === SERIES_LEDE && empty.empty === '还没有书系。' && empty.items.length === 0 && !empty.form, 'series-empty-words', empty);
     requireJourney(JSON.stringify(await renderer.evaluate('window.ai7.inspectSeriesList()')) === JSON.stringify({ series: [], nextCursor: null }), 'series-empty-service');
@@ -873,7 +875,7 @@ async function main() {
     await fill(renderer, '#series-title', SERIES, 'series-title');
     await fill(renderer, '#series-note', NOTE, 'series-note');
     await clickSelector(renderer, '[data-series-action="create"]', 'series-create');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已新建书系「${SERIES}」`)}`, 'series-created-status');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已新建书系「${SERIES}」`)}`, 'series-created-status');
     const created = await readSeriesList(renderer, (page) => page.items.length === 1 && !page.form, 'series-created');
     const seriesId = created.items[0][0];
     requireJourney(UUID_PATTERN.test(seriesId ?? '') && created.items[0][1] === `书系「${SERIES}」 · 成员 0 本` && created.items[0][2] === NOTE && created.focus === 'open', 'series-created-words', created);
@@ -884,7 +886,7 @@ async function main() {
     // 成员与共享范围: what membership means, no member yet, 加入书系… and no change recorded.
     await clickSelector(renderer, `[data-series-id="${seriesId}"] [data-series-action="open"]`, 'series-open-entry');
     const page = await readSeries(renderer, (read) => read.seriesId === seriesId, 'series-page');
-    requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE && page.membersEmpty === '书系里还没有图书。' &&
+    requireJourney(page.heading === `书系「${SERIES}」` && page.note === NOTE && page.scopeNote === SCOPE_NOTE.replace(/。$/u, '') && page.membersEmpty === '书系里还没有图书。' &&
       page.members.length === 0 && page.addOpen === true && page.historyEmpty === '还没有成员变更。' && page.history.length === 0 && page.preview === null, 'series-page-words', page);
 
     at('membership-add-preview');
@@ -912,9 +914,9 @@ async function main() {
     // 加入书系: the member row with its people, when it joined and 尚未审阅, focus on its 移出书系…, and one record that keeps
     // the four groups it showed; the service and the Book's own side agree.
     await clickSelector(renderer, '[data-series-action="commit"]', 'add-commit');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已加入书系「${SERIES}」：《${FIRST}》`)}`, 'added-status');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${FIRST}》`)}`, 'added-status');
     const added = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'added');
-    requireJourney(JSON.stringify(added.columns) === JSON.stringify(['图书', '作者', '责编', '加入时间', '书系一致性审阅', '操作']) &&
+    requireJourney(added.memberPills[0] === 2 &&
       added.members[0][0] === first && added.members[0][1] === `《${FIRST}》` && added.members[0][2] === '未填写' && added.members[0][3] === '未填写' &&
       added.members[0][4].length > 0 && added.members[0][5] === `尚未审阅 · 暂不能审阅：${NO_KNOWLEDGE}` && added.members[0][6] === '移出书系…' && added.focus === 'remove-open' &&
       JSON.stringify(added.history) === JSON.stringify([['add', first, `加入书系 · 《${FIRST}》`, 4]]), 'added-words', added);
@@ -954,7 +956,7 @@ async function main() {
     requireJourney(refreshed.preview.bookId === second && refreshed.focus === 'preview-heading' &&
       JSON.stringify(refreshed.preview.actions) === JSON.stringify([['commit', '加入书系'], ['preview-cancel', '取消']]), 'stale-refreshed-words', refreshed);
     await clickSelector(renderer, '[data-series-action="commit"]', 'stale-commit-again');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已加入书系「${SERIES}」：《${SECOND}》`)}`, 'stale-added-status');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${SECOND}》`)}`, 'stale-added-status');
     const both = await readSeries(renderer, (read) => read.members.length === 2 && read.preview === null, 'stale-added');
     // Members newest joined first (Issue #63 review): the Book just added heads the table.
     requireJourney(JSON.stringify(both.members.map(([id]) => id)) === JSON.stringify([second, first]) &&
@@ -967,7 +969,7 @@ async function main() {
     await choose(renderer, '#book-filter-field', 'series', 'library-field');
     await fill(renderer, '#book-filter-text', SERIES, 'library-text');
     await clickSelector(renderer, '[data-book-filter-action="find"]', 'library-find');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'series' && ${status} === '已列出找到的图书'`, 'library-found');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"] section.recent-work')?.dataset.bookFilter === 'series' && ${notice} === '已列出找到的图书'`, 'library-found');
     const found = await renderer.evaluate(`[document.querySelector('.book-filter-line')?.textContent ?? null, Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item button[data-book-id]'), (button) => button.dataset.bookId)]`);
     requireJourney(JSON.stringify(found) === JSON.stringify([`按书系查找「${SERIES}」`, [first, second]]), 'library-found-words', found);
     await clickSelector(renderer, '[data-book-filter-action="clear"]', 'library-clear');
@@ -978,10 +980,10 @@ async function main() {
     const firstSide = await bookSide(renderer, first, 'first-side');
     requireJourney(firstSide.none === null && firstSide.memberships.length === 1 && firstSide.memberships[0][0] === seriesId &&
       firstSide.memberships[0][1].startsWith(`书系「${SERIES}」 · `) && firstSide.memberships[0][1].endsWith(' 加入') &&
-      firstSide.summary === '书系成员变更记录（1）' && JSON.stringify(firstSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`]]), 'first-side-words', firstSide);
+      firstSide.summary === '书系成员变更记录 · 1' && JSON.stringify(firstSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`]]), 'first-side-words', firstSide);
     await backToLibrary(renderer, 'first-side');
     const secondSide = await bookSide(renderer, second, 'second-side');
-    requireJourney(secondSide.memberships.length === 1 && secondSide.summary === '书系成员变更记录（3）' &&
+    requireJourney(secondSide.memberships.length === 1 && secondSide.summary === '书系成员变更记录 · 3' &&
       JSON.stringify(secondSide.history) === JSON.stringify([['add', `加入书系「${SERIES}」`], ['remove', `移出书系「${SERIES}」`], ['add', `加入书系「${SERIES}」`]]), 'second-side-words', secondSide);
     await backToLibrary(renderer, 'second-side');
     const outsideSide = await bookSide(renderer, outside, 'outside-side');
@@ -991,7 +993,7 @@ async function main() {
     at('membership-remove');
     // 移出书系… from the member's row: its own preview, prospective, then exactly `移出书系`; focus returns to 加入书系….
     await openSeries(renderer, seriesId, 'remove-series');
-    await clickSelector(renderer, `tr[data-book-id="${first}"] [data-series-action="remove-open"]`, 'remove-open');
+    await clickSelector(renderer, `.series-member-card[data-book-id="${first}"] [data-series-action="remove-open"]`, 'remove-open');
     const leave = await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.focus === 'preview-heading', 'remove-preview');
     requireJourney(leave.preview.heading === '移出书系的影响' && leave.preview.identity === `图书《${FIRST}》 · 书系「${SERIES}」` &&
       JSON.stringify(leave.preview.groups.map(([key, title]) => [key, title])) === JSON.stringify(GROUPS) &&
@@ -999,7 +1001,7 @@ async function main() {
       leave.preview.groups[1][3].includes('已经冻结的任务范围不会因移出而改变，任务也不会被取消。') &&
       JSON.stringify(leave.preview.actions) === JSON.stringify([['commit', '移出书系'], ['preview-cancel', '取消']]), 'remove-preview-words', leave);
     await clickSelector(renderer, '[data-series-action="commit"]', 'remove-commit');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已移出书系「${SERIES}」：《${FIRST}》`)}`, 'removed-status');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已移出书系「${SERIES}」：《${FIRST}》`)}`, 'removed-status');
     const removed = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'removed');
     requireJourney(removed.members[0][0] === second && removed.focus === 'add-open' && removed.history.length === 5 &&
       JSON.stringify(removed.history[0]) === JSON.stringify(['remove', first, `移出书系 · 《${FIRST}》`, 4]), 'removed-words', removed);
@@ -1019,7 +1021,7 @@ async function main() {
     'restart-series-words', after);
     await leaveSeries(renderer, 'restart-series');
     const firstAfter = await bookSide(renderer, first, 'restart-first');
-    requireJourney(firstAfter.none === '不在任何书系中。' && firstAfter.summary === '书系成员变更记录（2）' &&
+    requireJourney(firstAfter.none === '不在任何书系中。' && firstAfter.summary === '书系成员变更记录 · 2' &&
       JSON.stringify(firstAfter.history.map(([kind]) => kind)) === JSON.stringify(['remove', 'add']), 'restart-first-words', firstAfter);
     await backToLibrary(renderer, 'restart-first');
 
@@ -1049,13 +1051,13 @@ async function main() {
     at('j14-series-reflow-forced-colors');
     // At 200% the member table stacks and the preview's groups wrap within the width; under forced colours the preview keeps
     // its border.
-    await clickSelector(renderer, `tr[data-book-id="${second}"] [data-series-action="remove-open"]`, 'reflow-preview-open');
+    await clickSelector(renderer, `.series-member-card[data-book-id="${second}"] [data-series-action="remove-open"]`, 'reflow-preview-open');
     await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.preview.heading !== null, 'reflow-preview');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-preview'), document.querySelector('table.series-member-table'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && getComputedStyle(document.querySelector('table.series-member-table tbody tr')).display==='block'; })()`, 'series-reflow', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-preview'), document.querySelector('.series-member-list'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && document.querySelector('li.series-member-card')!==null && document.querySelector('.series-page table')===null; })()`, 'series-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(renderer, `(() => {
       if (!matchMedia('(forced-colors: active)').matches) return false;
@@ -1082,7 +1084,7 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="preview"]', 'knowledge-add-preview');
     await readSeries(renderer, (read) => read.preview?.bookId === member && read.preview.heading !== null, 'knowledge-add-preview-shown');
     await clickSelector(renderer, '[data-series-action="commit"]', 'knowledge-add-commit');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已加入书系「${SERIES}」：《${MEMBER}》`)}`, 'knowledge-added');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${MEMBER}》`)}`, 'knowledge-added');
     const noKnowledge = await readKnowledge(renderer, () => true, 'knowledge-empty');
     requireJourney(noKnowledge.note === KNOWLEDGE_NOTE && noKnowledge.itemsEmpty === '还没有书系知识。' && noKnowledge.candidatesEmpty === '没有待审阅的候选项。' &&
       noKnowledge.form === null && noKnowledge.review === null, 'knowledge-empty-words', noKnowledge);
@@ -1108,7 +1110,7 @@ async function main() {
     requireJourney(composer[0] === quote && composer[1] === '' && composer[2] === '' && JSON.stringify(composer[3]) === JSON.stringify(['请选择', '正典设定', '人物', '地点', '时间线', '术语', '连续性规则', '共同文风', '定位']) && composer[4] === quote,
       'knowledge-composer-words', composer);
     await assertRenderer(renderer, `window.__j13.write('subject', ${JSON.stringify(PLACE)}) && window.__j13.write('knowledgeClass', 'places') && window.__j13.act('submit')`, 'knowledge-composer-submit');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已提议为书系「${SERIES}」的知识候选项`)} && window.__j13.composer() === null`, 'knowledge-proposed');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已提议为书系「${SERIES}」的知识候选项`)} && window.__j13.composer() === null`, 'knowledge-proposed');
 
     at('knowledge-editor-authored');
     // On the Series page the candidate waits with where it came from; the editor's own candidate for the same name — however
@@ -1131,7 +1133,7 @@ async function main() {
     await choose(renderer, '#knowledge-class-propose', 'places', 'knowledge-propose-class');
     await fill(renderer, '#knowledge-content-propose', EDITOR_WORDS, 'knowledge-propose-content');
     await clickSelector(renderer, '[data-knowledge-action="propose"]', 'knowledge-propose');
-    await waitFor(renderer, `${status} === ${JSON.stringify(`已提议为书系「${SERIES}」的知识候选项`)}`, 'knowledge-proposed-again');
+    await waitFor(renderer, `${notice} === ${JSON.stringify(`已提议为书系「${SERIES}」的知识候选项`)}`, 'knowledge-proposed-again');
     const twoCandidates = await readKnowledge(renderer, (read) => read.candidates.length === 2 && read.form === null, 'knowledge-two-candidates');
     requireJourney(twoCandidates.candidates.every((candidate) => candidate[4] === true) && twoCandidates.candidates[1][1] === 'editor' && twoCandidates.candidates[1][3] === '编辑撰写' && twoCandidates.focus === 'review',
       'knowledge-two-candidates-words', twoCandidates);
@@ -1154,10 +1156,10 @@ async function main() {
     requireJourney(stillWaits.review.promote[1] === true, 'knowledge-still-waits', stillWaits);
     await clickSelector(renderer, '[data-knowledge-action="preserve"]', 'knowledge-preserve');
     const kept = await readKnowledge(renderer, (read) => read.review?.preserved !== null && read.review?.preserved !== undefined, 'knowledge-preserved');
-    requireJourney(kept.review.preserved === '已选择保留已披露冲突：冲突会随这一版一起记录，不代表核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
+    requireJourney(kept.review.preserved === '冲突会一并记录，未经核实。' && kept.review.dispositions[1][2] === 'true' && kept.review.promote[1] === false && kept.review.waits === null,
       'knowledge-preserved-words', kept);
     await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-promote');
-    await waitFor(renderer, `${status} === '书系知识已纳入'`, 'knowledge-promoted-status');
+    await waitFor(renderer, `${notice} === '书系知识已纳入'`, 'knowledge-promoted-status');
     const promotedOne = await readKnowledge(renderer, (read) => read.items.length === 1 && read.review === null, 'knowledge-promoted');
     requireJourney(promotedOne.items[0][1] === `「${PLACE}」 · 地点 · 第 1 版` && promotedOne.items[0][2] === quote && promotedOne.items[0][3] === `来自《${MEMBER}》r1 的原文：「${quote}」` &&
       promotedOne.items[0][4] === '以后的用途：只用于书系一致性审阅' && promotedOne.items[0][5] === '保留了 1 处已披露冲突，未作核实。' && promotedOne.focus === 'item-title' &&
@@ -1177,7 +1179,7 @@ async function main() {
     await clickSelector(renderer, `form.knowledge-form-edit input[name="knowledge-target"][value="${itemId}"]`, 'knowledge-edit-target');
     await readKnowledge(renderer, (read) => JSON.stringify(read.review?.editTargets) === JSON.stringify([['new', false], [itemId, true]]), 'knowledge-edit-target-chosen');
     await clickSelector(renderer, '[data-knowledge-action="edit-save"]', 'knowledge-edit-save');
-    await waitFor(renderer, `${status} === '候选项已更新，请重新审阅。'`, 'knowledge-edited');
+    await waitFor(renderer, `${notice} === '候选项已更新，请重新审阅。'`, 'knowledge-edited');
     const reread = await readKnowledge(renderer, (read) => read.review?.editing === false && read.review.identity !== null && read.focus === 'review-heading', 'knowledge-reread');
     requireJourney(reread.review.identity === `书系「${SERIES}」 · 条目「${PLACE}」（地点）` && reread.review.conflictLabel === null && reread.review.conflicts.length === 0 &&
       reread.review.superseded === `将被取代的当前版本：第 1 版 · ${quote}` && JSON.stringify(reread.review.promote) === JSON.stringify(['纳入书系知识', true]) &&
@@ -1185,7 +1187,7 @@ async function main() {
     await clickSelector(renderer, 'input[name="knowledge-reuse"][value="series-tasks"]', 'knowledge-edit-reuse');
     await readKnowledge(renderer, (read) => read.review?.promote?.[1] === false, 'knowledge-edit-ready');
     await clickSelector(renderer, '[data-knowledge-action="promote"]', 'knowledge-edit-promote');
-    await waitFor(renderer, `${status} === '书系知识已更新'`, 'knowledge-updated-status');
+    await waitFor(renderer, `${notice} === '书系知识已更新'`, 'knowledge-updated-status');
     const updated = await readKnowledge(renderer, (read) => read.items[0]?.[1] === `「${PLACE}」 · 地点 · 第 2 版` && read.review === null, 'knowledge-updated');
     requireJourney(updated.items[0][2] === EDITOR_WORDS && updated.items[0][3] === '编辑撰写' && updated.items[0][4] === '以后的用途：以后的书系范围任务都可以选用' &&
       updated.items[0][5] === null && updated.items[0][6] === '历次版本（2）' && updated.candidatesEmpty === '没有待审阅的候选项。', 'knowledge-updated-words', updated);
@@ -1265,16 +1267,16 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
-    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='never'`, 'consistency-coverage-never');
+    await assertRenderer(renderer, `!document.querySelector('.review-coverage') && document.querySelector('.review-workspace-card.surface-empty')`, 'consistency-coverage-empty');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
     const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
-    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && sheet.checked.length === 0, 'consistency-sheet-offered', sheet);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
+    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['typos-and-usage']), 'consistency-sheet-offered', sheet);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='series-consistency'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId) && prepared.categories.length === 1 &&
-      prepared.categories[0].categoryId === 'series-consistency' && prepared.categories[0].basisStatement === CONSISTENCY_BASIS &&
+      prepared.categories[0].categoryId === 'series-consistency' && prepared.categories[0].basis.searchEngine === false && prepared.categories[0].basis.guidelineDocuments[0].version === '2' &&
       (prepared.categories[0].planEnvelopeDigest ?? '').length === 64, 'consistency-prepared-run', prepared?.categories);
 
     at('consistency-review-run');
@@ -1286,13 +1288,13 @@ async function main() {
     const reviewed = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     const findings = reviewed?.findings ?? [];
     requireJourney(reviewed?.state === 'settled' && reviewed.categories.length === 1 && reviewed.categories[0].state === 'settled' &&
-      reviewed.categories[0].findingsCount === 3 && reviewed.categories[0].excludedCount === 0 && reviewed.categories[0].basisStatement === CONSISTENCY_BASIS &&
+      reviewed.categories[0].findingsCount === 3 && reviewed.categories[0].excludedCount === 0 && reviewed.categories[0].basis.searchEngine === false && reviewed.categories[0].basis.guidelineDocuments[0].version === '2' &&
       findings.length === 3 && findings.every((finding) => finding.categoryId === 'series-consistency' && finding.output === 'annotation' &&
         finding.markId !== null && finding.status === 'pending' && finding.anchorState === 'exact' && finding.clauseRefs.length === 1 &&
         finding.clauseRefs[0].clauseId === 'series-knowledge/1' && finding.clauseRefs[0].documentTitle === `地点「${PLACE}」` &&
         finding.clauseRefs[0].text === `地点「${PLACE}」：${EDITOR_WORDS}`),
     'consistency-run-settled', { state: reviewed?.state, categories: reviewed?.categories, findings: findings.map((finding) => [finding.status, finding.anchorState, finding.clauseRefs]) });
-    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
+    await assertRenderer(renderer, `document.querySelector('.review-coverage-card[data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelector('.review-coverage-card[data-review-category="series-consistency"] .state-term')!==null && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'consistency-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'consistency-drawer-closed');
 
@@ -1340,7 +1342,7 @@ async function main() {
     await openMemberReview();
     await clickSelector(renderer, '[data-review-action="new-review"]', 'exclusion-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-sheet-open');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exclusion-prepared', 120_000);
     const heldRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(heldRun?.state === 'prepared' && heldRun.ordinal === 2 && UUID_PATTERN.test(heldRun.reviewRunId), 'exclusion-prepared-run', heldRun?.state);
@@ -1423,7 +1425,7 @@ async function main() {
     // The first Run's result used the item: it is marked beside the Run, its report and each finding, and nothing is rewritten.
     await clickSelector(renderer, 'ol.review-runs li[data-review-run="1"] [data-review-action="open-run"]', 'exclusion-open-first');
     await waitFor(renderer, `document.querySelector('section.review-run')?.dataset.reviewRunState==='settled' && document.querySelectorAll('article.review-finding').length===3`, 'exclusion-first-open');
-    await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent === ${JSON.stringify(MARKER)} && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
+    await assertRenderer(renderer, `document.querySelector('section.review-run .review-historical-marker .review-historical-marker-label')?.textContent?.startsWith(${JSON.stringify(`${MARKER} · `)}) === true && document.querySelector('.review-report-marker')?.textContent === ${JSON.stringify(MARKER)} && Array.from(document.querySelectorAll('article.review-finding .review-finding-marker')).every((line) => line.textContent === ${JSON.stringify(MARKER)}) && document.querySelectorAll('article.review-finding .review-finding-marker').length === 3 && document.querySelector('ol.review-runs li[data-review-run="1"] .review-run-marker')?.textContent === ${JSON.stringify(MARKER)}`, 'exclusion-marker-shown');
     await leaveMemberReview();
 
     at('exclusion-ended');
@@ -1753,18 +1755,18 @@ async function main() {
     const knowledgeChooser = '[data-mark-composer="choose-knowledge-series"]';
     await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-first');
     for (let pass = 0; pass < 2; pass += 1) {
-      await click(renderer, '下一页书系', 'knowledge-member-series-next');
+      await clickSelector(renderer, '[data-window-step="after"][aria-label="向后浏览书系"]', 'knowledge-member-series-next');
       await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail');
       await click(renderer, '回到第一页', 'knowledge-member-series-reset');
       await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 50`, 'knowledge-member-series-reset-ready');
     }
-    await click(renderer, '下一页书系', 'knowledge-member-series-next-final');
+    await clickSelector(renderer, '[data-window-step="after"][aria-label="向后浏览书系"]', 'knowledge-member-series-next-final');
     await waitFor(renderer, `document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button').length === 2`, 'knowledge-member-series-tail-final');
     const offPage = await renderer.evaluate(`(() => { const item = Array.from(document.querySelectorAll('${knowledgeChooser} .knowledge-series-choices button')).find((node) => node.textContent === '分页书系050'); if (!(item instanceof HTMLButtonElement)) return null; const id = item.dataset.seriesId; item.click(); return id; })()`);
     requireJourney(UUID_PATTERN.test(offPage ?? ''), 'knowledge-member-series-tail-identity');
     await waitFor(renderer, `window.__j13.composer()?.dataset.markComposer === 'propose-series-knowledge'`, 'knowledge-member-series-composer');
     await assertRenderer(renderer, `window.__j13.composer().querySelector('[data-mark-quote]').textContent === ${JSON.stringify(quote)} && window.__j13.write('subject', '分页原文提议') && window.__j13.write('knowledgeClass', 'canon') && window.__j13.act('submit')`, 'knowledge-member-series-submit');
-    await waitFor(renderer, `window.__j13.composer() === null && ${status} === '已提议为书系「分页书系050」的知识候选项'`, 'knowledge-member-series-proposed');
+    await waitFor(renderer, `window.__j13.composer() === null && ${notice} === '已提议为书系「分页书系050」的知识候选项'`, 'knowledge-member-series-proposed');
     requireJourney(await renderer.evaluate(`(async () => {
       const page = await window.ai7.inspectSeriesKnowledgeCandidates({ seriesId: ${JSON.stringify(offPage)}, after: null });
       const candidate = page.candidates[0];
@@ -1787,7 +1789,7 @@ async function main() {
     await openBookReview(renderer, MEMBER, member, 'capture-source-review');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'capture-source-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'capture-source-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
     const sourceRun = await startPreparedReview(renderer, 'capture-source-run');
     // The member's 第 3 次审阅, after 书系一致性's two: the capture names it by those words, so the Journey pins it by its ordinal here.
     requireJourney(sourceRun?.state === 'settled' && sourceRun.ordinal === 3 && sourceRun.procedure === null && sourceRun.capture?.available === true &&
@@ -1797,9 +1799,12 @@ async function main() {
     at('capture-source-set');
     // 将以上工序保存为可复用工序: the source set — both categories, each kept — the classification it recommends and why, what
     // extraction keeps and what it never saves. Removing a step changes what it keeps; nothing can be added or reordered.
-    // #1084: current authored contracts use numbered v2 blocks; exclusions remain readable beside accepted marks.
-    requireJourney(sourceRun.excludedTotal > 0 && sourceRun.excluded.some((entry) => entry.reasonCode === 'quote-not-found'), 'capture-v2-excluded-projection');
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent.startsWith('未列为发现的 ') && details.querySelectorAll('.review-excluded-entry').length>0 && !details.querySelector('[data-review-finding-id]'); })()`, 'capture-v2-visible-excluded');
+    // #1311/H3 retains unmatched v2 quotes as disclosed whole-block annotations. The unchanged authored fixture must
+    // exercise that salvage behavior here; expecting the former quote-not-found exclusion would discard the usable finding.
+    const salvaged = sourceRun.findings.find((finding) => finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'));
+    requireJourney(sourceRun.excludedTotal === 0 && salvaged !== undefined && salvaged.markId !== null && salvaged.replacement === null, 'capture-v2-salvaged-projection');
+    await assertRenderer(renderer, `document.querySelector('details.review-excluded')===null && document.querySelectorAll('article.review-finding').length>0`, 'capture-v2-visible-salvaged');
+    await assertRenderer(renderer, `(() => { const finding=document.querySelector('article[data-finding-id="${salvaged.findingId}"]'); return finding instanceof HTMLElement && finding.textContent.includes('引文未逐字匹配'); })()`, 'capture-v2-visible-salvage');
     await clickSelector(renderer, 'section.review-report [data-review-action="capture"]', 'capture-open');
     const captureSheet = await readCapture(renderer, (read) => read.steps.length === 2 && read.focused, 'capture-sheet');
     requireJourney(JSON.stringify(captureSheet.steps.map(([id, eligible, checked]) => [id, eligible, checked])) === JSON.stringify([['style-and-format', 'true', true], ['literary-expression', 'true', true]]) &&
@@ -1818,7 +1823,7 @@ async function main() {
     at('capture-save');
     // 保存为可复用工序: version 1, 待验证 — nothing runs, and the document holds nothing of the Book.
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'capture-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'capture-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${notice}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'capture-saved');
     const savedProcedures = await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`);
     const procedureId = savedProcedures?.procedures?.[0]?.procedureId;
     requireJourney(savedProcedures?.procedures?.length === 1 && UUID_PATTERN.test(procedureId ?? '') && savedProcedures.procedures[0].latestState === 'enabled',
@@ -1845,7 +1850,7 @@ async function main() {
     await fill(renderer, 'dialog.procedure-capture [data-capture-field="proposal-title"]', PROPOSAL_TITLE, 'proposal-title');
     await fill(renderer, 'dialog.procedure-capture [data-capture-field="missing-capability"]', '核对图注与正文图号是否一致。', 'proposal-capability');
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'proposal-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存开发建议《${PROPOSAL_TITLE}》第 1 版；只记在本机，AI7 不会发送它。`)}`, 'proposal-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${notice}===${JSON.stringify(`已保存开发建议《${PROPOSAL_TITLE}》第 1 版；只记在本机，AI7 不会发送它。`)}`, 'proposal-saved');
 
     at('capture-validate-enable');
     // 知识库 › 工序与规则 lists it apart from the built-in 工序: dashed 待验证. Its versions open a page at a time; 验证并启用…
@@ -1904,16 +1909,16 @@ async function main() {
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.procedure-capture [data-capture-field="target"]'); if(!(select instanceof HTMLSelectElement))return false; select.value=${JSON.stringify(procedureId)}; select.dispatchEvent(new Event('change',{bubbles:true})); return select.value===${JSON.stringify(procedureId)}; })()`, 'version-two-target');
     await readCapture(renderer, (read) => read.kept === 'style-and-format,literary-expression', 'version-two-kept');
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'version-two-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 2 版 · 已启用，可直接运行。`)}`, 'version-two-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${notice}===${JSON.stringify(`已保存《${PROCEDURE_TITLE}》第 2 版 · 已启用，可直接运行。`)}`, 'version-two-saved');
     await leaveReviewToLibrary(renderer, 'version-two-validate-leave');
     await openProcedures(renderer, 'version-two-validate');
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="versions"]`, 'version-two-versions');
     const enabledTwo = await readProcedures(renderer, (page) => page.procedures[0]?.versions[0]?.state === 'enabled', 'version-two-enabled');
     requireJourney(JSON.stringify(enabledTwo.procedures[0].versions.map((version) => [version.version, version.state, version.latestEligible, version.eligiblePill])) ===
-      JSON.stringify([['2', 'enabled', 'true', '最新可用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
-      // 最新可用's meaning is a visible field note, for sighted users as much as for a screen reader (Issue #684).
+      JSON.stringify([['2', 'enabled', 'true', '新建审阅默认使用'], ['1', 'enabled', 'false', null]]) && enabledTwo.procedures[0].versions[1].runLinks.length === 1 &&
+      // The visible status now states directly which version new reviews use (Issue #684).
       JSON.stringify(enabledTwo.procedures[0].versions.map((version) => version.eligibleNote)) ===
-        JSON.stringify([{ text: '新建审阅按这个工序运行时，默认用这一版。', visible: true }, null]) &&
+        JSON.stringify([null, null]) &&
       enabledTwo.procedures[0].versions[1].runLinks[0][1].startsWith(`《${CAPTURE_TARGET_TITLE}》第 1 次审阅 · 已完成 · `), 'version-two-latest-eligible', enabledTwo.procedures[0].versions);
 
     at('procedure-exact-version');
@@ -1964,7 +1969,7 @@ async function main() {
     requireJourney(stopPreview.procedures[0].versions[1].state === 'enabled' && previewRead.heading === `停用《${PROCEDURE_TITLE}》第 1 版` && previewRead.after === '2' &&
       JSON.stringify(previewRead.versions) === JSON.stringify([['1', '1', '0']]) &&
       JSON.stringify(previewRead.prepared) === JSON.stringify([`《${CAPTURE_TARGET_TITLE}》第 2 次审阅 · 计划已冻结 · 待授权`]) &&
-      previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版。' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
+      previewRead.afterLine === '停用后，新建审阅按这个工序运行时用第 2 版' && (previewRead.kept ?? '').startsWith('不会删除任何东西'), 'stop-preview-words', previewRead);
     await waitFor(renderer, `document.activeElement === document.querySelector('.captured-procedure-stop h5')`, 'stop-preview-focused', 10_000);
     await clickSelector(renderer, '.captured-procedure-stop [data-procedure-action="confirm-stop"]', 'stop-confirm');
     const stopped = await readProcedures(renderer, (page) => page.procedures[0]?.versions[1]?.state === 'stopped', 'stop-stopped');
@@ -1972,7 +1977,7 @@ async function main() {
     requireJourney(stopped.procedures[0].runnable === 'true' && stopped.procedures[0].run && stoppedOne.pill === '已停用' && stoppedOne.pillBorder === 'dotted' &&
       stoppedOne.actions.length === 0 && stoppedOne.stop === null && stoppedOne.runs === '按这一版运行过 1 次；另有 1 次已准备、未开始' && stoppedTwo.latestEligible === 'true' &&
       stoppedTwo.state === 'enabled', 'stop-card', stopped.procedures[0]);
-    await waitFor(renderer, `${status}===${JSON.stringify(`已停用《${PROCEDURE_TITLE}》的这一版；按它运行过的审阅仍然记着它。`)}`, 'stop-status', 10_000);
+    await waitFor(renderer, `${notice}===${JSON.stringify(`已停用《${PROCEDURE_TITLE}》的这一版；按它运行过的审阅仍然记着它。`)}`, 'stop-status', 10_000);
     await clickSelector(renderer, `[data-version="1"] button.captured-procedure-run-link[data-review-run-id="${ran.reviewRunId}"]`, 'stop-open-linked-run');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review')?.dataset.bookId===${JSON.stringify(targetBook)} && document.querySelector('section.review-run')?.dataset.reviewRunId===${JSON.stringify(ran.reviewRunId)}`, 'stop-linked-run-open', 60_000);
     await waitFor(renderer, `document.querySelector('.review-procedure-pin')?.dataset.procedureStopped==='true' && document.querySelector('.review-procedure-pin')?.dataset.procedureVersion==='1'`, 'stop-pin-kept', 30_000);
@@ -1986,7 +1991,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] [data-procedure-action="stop-all"]`, 'stop-all-open');
     const allPreview = (await readProcedures(renderer, (page) => page.procedures[0]?.stopAll !== null, 'stop-all-preview')).procedures[0].stopAll;
     requireJourney(allPreview.heading === `停用《${PROCEDURE_TITLE}》尚未停用的 1 个版本` && allPreview.after === '' && JSON.stringify(allPreview.versions) === JSON.stringify([['2', '0', '0']]) &&
-      allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存。', 'stop-all-words', allPreview);
+      allPreview.afterLine === '停用后，这个工序没有可以运行的版本；要再用它，请从一次新的审阅重新保存', 'stop-all-words', allPreview);
     await clickSelector(renderer, `[data-procedure-id="${procedureId}"] > .captured-procedure-stop [data-procedure-action="confirm-stop"]`, 'stop-all-confirm');
     const allStopped = await readProcedures(renderer, (page) => page.procedures[0]?.runnable === 'false', 'stop-all-stopped');
     requireJourney(!allStopped.procedures[0].run && allStopped.procedures[0].pill === '已停用' && allStopped.procedures[0].pillBorder === 'dotted' &&
@@ -2016,7 +2021,7 @@ async function main() {
       'series-procedure-source-set', seriesCapture.steps);
     await fill(renderer, 'dialog.procedure-capture [data-capture-field="title"]', SERIES_PROCEDURE_TITLE, 'series-procedure-title');
     await clickSelector(renderer, 'dialog.procedure-capture [data-capture-action="save"]', 'series-procedure-save');
-    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${status}===${JSON.stringify(`已保存《${SERIES_PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'series-procedure-saved');
+    await waitFor(renderer, `!document.querySelector('dialog.procedure-capture') && ${notice}===${JSON.stringify(`已保存《${SERIES_PROCEDURE_TITLE}》第 1 版 · 已启用，可直接运行。`)}`, 'series-procedure-saved');
     const seriesProcedureId = (await renderer.evaluate(`window.ai7.inspectCapturedProcedures()`))?.procedures?.find((entry) => entry.title === SERIES_PROCEDURE_TITLE)?.procedureId;
     requireJourney(UUID_PATTERN.test(seriesProcedureId ?? '') && seriesProcedureId !== procedureId, 'series-procedure-saved-service');
     await leaveReviewToLibrary(renderer, 'series-procedure-leave');
@@ -2024,7 +2029,7 @@ async function main() {
     await clickSelector(renderer, `[data-procedure-id="${seriesProcedureId}"] [data-procedure-action="versions"]`, 'series-procedure-versions');
     const seriesCard = (page) => page.procedures.find((card) => card.id === seriesProcedureId);
     const seriesPending = await readProcedures(renderer, (page) => seriesCard(page)?.versions.length === 1, 'series-procedure-listed');
-    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择。',
+    requireJourney(seriesCard(seriesPending).versions[0].requirement === '适用条件：「书系一致性」要这本书在一个书系里，书系资料在每次运行时另行选择',
       'series-procedure-requirement', seriesCard(seriesPending).versions[0]);
     await readProcedures(renderer, (page) => seriesCard(page)?.versions[0]?.state === 'enabled' && seriesCard(page)?.run === true, 'series-procedure-enabled');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'series-procedure-back');
@@ -2040,13 +2045,13 @@ async function main() {
     const READ_OFFERED = `Array.from(document.querySelectorAll('dialog.review-sheet [data-review-field="procedure"] option'), (option) => [option.value, option.textContent, option.dataset.procedureFit ?? null])`;
     const offeredHere = await renderer.evaluate(READ_OFFERED);
     // 《体例复核》's versions are all stopped: it is offered nowhere.
-    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+    requireJourney(JSON.stringify(offeredHere) === JSON.stringify([['', '不按工序 · 自己选类别', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书能运行全部 1 步；「书系一致性」要你另行勾选`, 'all']]), 'series-sheet-offered', offeredHere);
     at('procedure-recommendation');
     await assertRenderer(renderer, `(() => { const select=document.querySelector('dialog.review-sheet [data-review-field="procedure"]'); if(!(select instanceof HTMLSelectElement))return false;select.value=${JSON.stringify(seriesProcedureId)};select.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'series-procedure-choose');
     const seriesSheet = await readUntil(renderer, READ_SHEET_PROCEDURE, (read) => read?.version === '1', 'series-sheet-filled');
     // The status says what the sheet ticked — nothing, here — in the sheet's own words (S31b review P3-5).
-    await waitFor(renderer, `${status}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
+    await waitFor(renderer, `${notice}===${JSON.stringify(`已读取《${SERIES_PROCEDURE_TITLE}》第 1 版：要运行的类别由你勾选。`)}`, 'series-sheet-status', 10_000);
     at('procedure-series-step-optin');
     const seriesCeiling = await renderer.evaluate(`(async () => { const procedure=await window.ai7.inspectCapturedProcedure({procedureId:${JSON.stringify(seriesProcedureId)},before:null}); const preview=await window.ai7.previewCapturedProcedureValidation({versionId:procedure.versions[0].versionId}); return preview.ceiling.runSourceScope; })()`);
     requireJourney(seriesCeiling === 'series', 'procedure-v2-series-ceiling');
@@ -2117,8 +2122,8 @@ async function main() {
       JSON.stringify(selectionRun.categories) === JSON.stringify(['series-consistency']) && selectionRun.procedure?.procedureId === seriesProcedureId &&
       selectionRun.procedure.version === 1 && JSON.stringify(selectionRun.procedure.leftOut) === JSON.stringify([]), 'selection-procedure-pinned', selectionRun);
     await clickSelector(renderer, '[data-screen="editor"] [data-edge-entry="tasks"]', 'selection-procedure-tasks');
-    const SELECTION_CARD = `#task-drawer .task-panel li.task-card[data-task-item-id$="${selectionRun.reviewRunId}"]`;
-    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card!==null && (card.querySelector('.task-card-title')?.textContent??'').endsWith(' · 所选段落') && card.querySelector('[data-task-action="jump"]')?.disabled===false;})()`, 'selection-procedure-card', 30_000);
+    const SELECTION_CARD = `#task-drawer .task-panel .task-overview-card[data-task-item-id$="${selectionRun.reviewRunId}"]`;
+    await waitFor(renderer, `(() => { const card=document.querySelector(${JSON.stringify(SELECTION_CARD)}); return card!==null && (card.querySelector('.task-overview-card-title strong')?.textContent??'').endsWith(' · 所选段落') && card.querySelector('[data-task-action="jump"]')?.disabled===false;})()`, 'selection-procedure-card', 30_000);
     // With the caret put on another paragraph of the window, 跳到所选文字 brings it back onto the Task's paragraph; the panel stays.
     const awayBlock = await renderer.evaluate(`Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((node) => (node.textContent ?? '').length > 0 && node.dataset.blockId !== ${JSON.stringify(selectionBlock)})?.dataset.blockId ?? null`);
     requireJourney(/^blk_[0-9a-f]{24}$/.test(awayBlock ?? ''), 'selection-procedure-away-block');
@@ -2137,7 +2142,7 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'series-mismatch-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'series-mismatch-sheet');
     const offeredThere = await renderer.evaluate(READ_OFFERED);
-    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序（自己选类别）', null],
+    requireJourney(JSON.stringify(offeredThere) === JSON.stringify([['', '不按工序 · 自己选类别', null],
       [seriesProcedureId, `《${SERIES_PROCEDURE_TITLE}》第 1 版 · 这本书现在不能运行（「书系一致性」：${SERIES_NOT_IN_SERIES}）`, 'none']]), 'series-mismatch-offered', offeredThere);
     await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'series-mismatch-close');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true`, 'series-mismatch-closed');
@@ -2151,7 +2156,7 @@ async function main() {
     await clickSelector(renderer, '.developer-proposal [data-procedure-action="proposal-versions"]', 'proposal-file-versions');
     await readProcedures(renderer, (page) => page.proposals[0]?.versions.length === 1, 'proposal-file-versions-open');
     await clickSelector(renderer, '.developer-proposal [data-procedure-action="proposal-file"]', 'proposal-file-save');
-    await waitFor(renderer, `${status}===${JSON.stringify(`已导出为文件「${PROPOSAL_FILE_NAME}」；AI7 不会发送它。`)}`, 'proposal-file-status', 30_000);
+    await waitFor(renderer, `${notice}===${JSON.stringify(`已导出为文件「${PROPOSAL_FILE_NAME}」；AI7 不会发送它。`)}`, 'proposal-file-status', 30_000);
     const proposalFile = await readFile(proposalPath, 'utf8');
     requireJourney(proposalFile.startsWith(`# 开发建议：${PROPOSAL_TITLE}\n`) && proposalFile.includes('核对图注与正文图号是否一致。') &&
       proposalFile.includes('AI7 不会发送这份开发建议') && !proposalFile.includes(MEMBER) && !proposalFile.includes(member) && !proposalFile.includes(targetBook),

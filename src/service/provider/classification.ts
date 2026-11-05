@@ -33,6 +33,7 @@ export const AI7_FAILURE_CODES = {
   PROVIDER_ERROR: 'PROVIDER_ERROR',
   INVALID_RESPONSE: 'INVALID_RESPONSE',
   TRANSPORT_FAILED: 'TRANSPORT_FAILED',
+  MODEL_SERVICE_UNREACHABLE: 'MODEL_SERVICE_UNREACHABLE',
   PROXY_UNREACHABLE: 'AI7_PROXY_UNREACHABLE',
 } as const;
 
@@ -81,14 +82,15 @@ export interface ClassifiedModelFailure {
 /**
  * The closed retry-safe classification table (Issue #48, the `safe-retry` Plan Adaptation): a failed
  * unit request may be repeated once inside the unchanged Plan Envelope only when its code is
- * `RATE_LIMIT`, `TRANSPORT_FAILED`, or `PROVIDER_ERROR` carrying a 5xx server status. Every other
- * code — Provider Account Limit, invalid credential, context-window exceeded, interruption, egress
+ * `RATE_LIMIT`, `TRANSPORT_FAILED`, observed `MODEL_SERVICE_UNREACHABLE`, or `PROVIDER_ERROR` carrying a 5xx server status.
+ * Every other code — Provider Account Limit, invalid credential, context-window exceeded, interruption, egress
  * refusal, network denial, fixture mismatch, invalid response, an outcome that cannot be known (Issue #51, S16c), and
  * any unknown adapter code — is never retried and keeps its first-attempt meaning.
  */
 export const RETRY_SAFE_FAILURE_TABLE: Readonly<Record<string, 'any-status' | 'server-status-only'>> = {
   [AI7_FAILURE_CODES.RATE_LIMIT]: 'any-status',
   [AI7_FAILURE_CODES.TRANSPORT_FAILED]: 'any-status',
+  [AI7_FAILURE_CODES.MODEL_SERVICE_UNREACHABLE]: 'any-status',
   [AI7_FAILURE_CODES.PROVIDER_ERROR]: 'server-status-only',
 };
 
@@ -106,6 +108,9 @@ export function classifyModelFailure(failure: ModelFailureFacts, codes: DshFailu
     ({ signal, failureClass, reason, code, status, retrySafe: isRetrySafeFailure(failure) });
   if (code === AI7_FAILURE_CODES.PROXY_UNREACHABLE) {
     return classified('interrupted', 'proxy-unreachable', '代理不可达：请检查网络代理设置后续行。');
+  }
+  if (code === AI7_FAILURE_CODES.MODEL_SERVICE_UNREACHABLE) {
+    return classified('failed', 'adapter-failure', '模型服务不可达：请检查网络或网络代理设置。');
   }
   if (code === codes.QUOTA_EXCEEDED_CODE) {
     return classified('failed', 'provider-account-limit', 'Provider Account Limit：模型服务账户限额阻止了本次请求。');

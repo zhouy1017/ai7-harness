@@ -441,6 +441,7 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     // 待我处理 (Issue #424) reads across every Book, so it names none.
     case 'inspectGlobalAgent':
     case 'inspectGlobalAttention':
+    case 'inspectTaskOverview':
     case 'runReconnectPreflight':
     case 'inspectDefaultExecutionRules':
     // 知识库 › 工序与规则's 工序 (Issue #427, S79d) are the house's, so the read names no Book.
@@ -449,6 +450,26 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'inspectCapturedProcedures':
     case 'shutdown': {
       requireInput(value.input, [], tentativeId);
+      break;
+    }
+    case 'controlAllTasks': {
+      const input = requireInput(value.input, ['action'], tentativeId);
+      if (input.action !== 'pause' && input.action !== 'resume') throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'reorderQueuedRun': {
+      const input = requireInput(value.input, ['runRecordId', 'position'], tentativeId);
+      if (!validUuid(input.runRecordId) || !isSafeInteger(input.position, 1)) throw new ProtocolError(tentativeId);
+      break;
+    }
+    case 'startQuickTasks': {
+      const input = requireInput(value.input, ['tasks'], tentativeId);
+      if (!Array.isArray(input.tasks) || input.tasks.length > 64) throw new ProtocolError(tentativeId);
+      for (const task of input.tasks) {
+        if (!isRecord(task) || !hasExactKeys(task, ['bookId', 'procedureId', ...(task.repeat === undefined ? [] : ['repeat'])]) || !validUuid(task.bookId) || !isBoundedString(task.procedureId, 160)) throw new ProtocolError(tentativeId);
+        if (task.repeat !== undefined && (!isRecord(task.repeat) || !hasExactKeys(task.repeat, ['kind', 'ref']) ||
+          !['baseline-analysis', 'review-run', 'initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'].includes(String(task.repeat.kind)) || !validUuid(task.repeat.ref))) throw new ProtocolError(tentativeId);
+      }
       break;
     }
     case 'inspectEvaluationProfiles': {
@@ -488,7 +509,9 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       break;
     }
     case 'saveModelServiceProxy': {
-      const input = value.input;
+      if (!isRecord(value.input)) throw new ProtocolError(tentativeId);
+      const { probeRoute, ...input } = value.input;
+      if (probeRoute !== undefined && !(MODEL_SERVICE_ROUTES as readonly unknown[]).includes(probeRoute)) throw new ProtocolError(tentativeId);
       if (!isRecord(input) || !(input.mode === 'direct' && hasExactKeys(input, ['mode']) ||
           input.mode === 'proxy' && hasExactKeys(input, ['mode', 'protocol', 'hostPort']) &&
           (input.protocol === 'http' || input.protocol === 'https') && isBoundedString(input.hostPort, 300))) {
@@ -499,7 +522,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'selectSearchBackend':
     case 'removeSearchBackendCredential': {
       // Issue #1226: `role: 'fallback'` names the 备用来源, whose `null` clears it; a candidate id is never a backend here.
-      const input = op === 'selectSearchBackend' ? requireInputWithOptional(value.input, ['backendId'], ['role'], tentativeId) : requireInput(value.input, ['backendId'], tentativeId);
+      const input = op === 'selectSearchBackend' ? requireInputWithOptional(value.input, ['backendId'], ['role', 'alwaysUseSelectedBackend'], tentativeId) : requireInput(value.input, ['backendId'], tentativeId);
+      if (input.alwaysUseSelectedBackend !== undefined && (typeof input.alwaysUseSelectedBackend !== 'boolean' || input.role !== undefined)) throw new ProtocolError(tentativeId);
       if ((input.role !== undefined && input.role !== 'fallback') || !(input.role === 'fallback' && input.backendId === null) && (!isBoundedString(input.backendId, 80) || !/^search-[a-z][a-z0-9-]*$/u.test(input.backendId))) throw new ProtocolError(tentativeId);
       break;
     }
@@ -762,8 +786,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     case 'getTaskPlanPage': {
       const input = requireInput(value.input, ['bookId', 'kind', 'ref', 'path', 'afterOrdinal', 'digest'], tentativeId);
-      if (!validUuid(input.bookId) || !(TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) || input.kind === 'task-intent-drafts') ||
-          !(validUuid(input.ref) || input.ref === null && (input.kind === 'task-intent-drafts' && input.path === 'drafts' || input.kind === 'review-run' && input.path === 'scopeOptions.chapters.chapters')) ||
+      if (!validUuid(input.bookId) || !(TASK_PLAN_KINDS.includes(input.kind as TaskPlanKind) || input.kind === 'task-intent-drafts' || input.kind === 'book-tasks') ||
+          !(validUuid(input.ref) || input.ref === null && (input.kind === 'task-intent-drafts' && input.path === 'drafts' || input.kind === 'review-run' && input.path === 'scopeOptions.chapters.chapters' || input.kind === 'book-tasks' && /^groups\.[0-2]\.items$/u.test(String(input.path)))) ||
           !isBoundedString(input.path, 160) || !isSafeInteger(input.afterOrdinal, 0) ||
           !isBoundedString(input.digest, 64) || !HEX_DIGEST_PATTERN.test(input.digest)) throw new ProtocolError(tentativeId);
       break;
@@ -2737,9 +2761,10 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     case 'stopDialogueAnswer':
     case 'continueDialogueAnswer':
     case 'regenerateDialogueAnswer': {
-      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : [], tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'dialogueId', 'attemptId'], value.op === 'continueDialogueAnswer' ? ['question'] : value.op === 'stopDialogueAnswer' ? ['cancel'] : [], tentativeId);
       if (!validUuid(input.bookId) || !validUuid(input.dialogueId) || !validUuid(input.attemptId)) throw new ProtocolError(tentativeId);
       if (input.question !== undefined && !isBoundedString(input.question, MAX_DIALOGUE_QUESTION_CHARACTERS)) throw new ProtocolError(tentativeId);
+      if (input.cancel !== undefined && typeof input.cancel !== 'boolean') throw new ProtocolError(tentativeId);
       break;
     }
     case 'convertDialogueToChangeSuggestion': {

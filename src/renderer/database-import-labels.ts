@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   DatabaseImportBookProjection,
   DatabaseImportPreviewProjection,
@@ -33,8 +34,8 @@ export const DATABASE_IMPORT_ACTIONS = {
 /** The choices a previewed file offers; neither is preselected (DSTO-017). */
 export const DATABASE_IMPORT_CHOICES_LEGEND = '怎样使用这个文件';
 export const DATABASE_IMPORT_CHOICES = {
-  replace: '替换本机全部数据（先自动备份，可回退）',
-  merge: '只导入其中的图书，与本机合并（重名的另存）',
+  replace: '替换本机全部数据 · 先自动备份，可回退',
+  merge: '导入图书并与本机合并 · 重名的另存',
 } as const;
 /** What `替换本机全部数据` will do, stated before it is confirmed. */
 export const DATABASE_REPLACE_CONSEQUENCE =
@@ -93,7 +94,7 @@ export function databaseImportVersionLine(preview: Pick<DatabaseImportPreviewPro
     'older-data-version': `比本机的数据版本 ${preview.localDataVersion} 旧，暂不能导入`,
     'newer-schema': '由更新的 AI7 做成，请先更新 AI7',
   }[preview.compatibility];
-  return `数据版本 ${preview.dataVersion} · ${fit} · 软件 ${preview.softwareVersion}`;
+  return `${technicalWords(`数据版本 ${preview.dataVersion} · `)}${fit}${technicalWords(` · 软件 ${preview.softwareVersion}`)}`;
 }
 
 /** The previewed file, as 导入数据库 states it before anything is chosen: file, origin, versions, contents, integrity. */

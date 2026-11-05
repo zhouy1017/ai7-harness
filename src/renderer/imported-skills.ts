@@ -1,3 +1,4 @@
+import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import type {
   BookSummaryCursor, BookSummaryProjection, ImportedSkillAcquisitionProjection, ImportedSkillRevisionProjection, ImportedSkillsProjection,
   ImportedSkillUpdateCandidateProjection, ImportedSkillUpdateCheckProjection, RendererApi,
@@ -13,7 +14,7 @@ import {
 } from './imported-skill-labels.js';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; return node;
+  const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (tag === 'button') node.className = `${node.className} btn`.trim(); return node;
 }
 interface Options {
   readonly root: HTMLElement;
@@ -41,7 +42,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   let booksAfter: BookSummaryCursor | null = null;
   let selectedBook = '';
   const button = (text: string, action: string, run: () => Promise<string | null | void>): HTMLButtonElement => {
-    const node = el('button', text); node.type = 'button'; node.className = 'quiet'; node.dataset['skillAction'] = action;
+    const node = el('button', text); node.type = 'button'; node.className = 'btn ' + ('quiet'); node.dataset['skillAction'] = action;
     node.disabled = busy; node.addEventListener('click', () => void act(run)); return node;
   };
   /** `run` answers the status line to show, or `null` when nothing changed (a cancelled picker, a page read). */
@@ -202,11 +203,11 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
   /** REUSE-021: identity, kind, source revision, provenance, license and notices, digest and conversion — before keeping. */
   function acquisitionPanel(read: ImportedSkillAcquisitionProjection): HTMLElement {
     const panel = el('article'); panel.className = 'imported-skill-detail'; panel.dataset['skillAcquisition'] = read.acquisitionId;
-    const title = el('h4', `${read.name} · ${read.kind} · 来源 ${read.sourceRevision} · 尚未保留`); title.tabIndex = -1;
+    const title = el('h4', `${read.name} · ${read.kind}${technicalWords(` · 来源 ${read.sourceRevision}`)} · 尚未保留`); title.tabIndex = -1;
     panel.append(title, el('p', `来源：${read.sourcePath}`), el('p', `许可：${read.license ?? '未提供'}`),
-      el('p', `声明文件：${read.notices.join('、') || '未提供'}`), el('p', `内容 SHA-256 ${read.contentSha256}`));
+      el('p', `声明文件：${read.notices.join('、') || '未提供'}`), el('p', technicalWords(`内容 SHA-256 ${read.contentSha256}`)));
     const files = el('ul');
-    for (const file of read.files) files.append(el('li', `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`));
+    for (const file of read.files) files.append(el('li', `${file.path}${technicalWords(` · ${file.bytes} 字节 · SHA-256 ${file.sha256}`)}`));
     panel.append(el('h5', '所选文件'), files, el('h5', '转换报告'));
     for (const [key, label] of [['preserved', '保留'], ['mapped', '确定性映射'], ['reviewRequired', '需要审查'], ['unsupported', '不支持']] as const) {
       panel.append(el('p', `${label}：${read.conversion[key].join('；') || '无'}`));
@@ -250,7 +251,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     detail.append(title, el('p', `来源：${revision.sourcePath}`), el('p', `许可：${revision.license ?? '未提供'}`), el('p', `声明文件：${revision.notices.join('、') || '未提供'}`));
     const identities = el('details'); identities.append(el('summary', '查看技术详情'));
     identities.append(el('p', `来源快照：${revision.snapshotId} · SHA-256 ${revision.snapshotSha256}`), el('p', `工作修订：${revision.revisionId} · SHA-256 ${revision.workingSha256}`));
-    detail.append(identities);
+    detail.append(technicalDisclosure(identities));
     const conversion = el('section'); conversion.append(el('h5', '转换报告'));
     for (const [key, label] of [['preserved', '保留'], ['mapped', '确定性映射'], ['reviewRequired', '需要审查'], ['unsupported', '不支持']] as const) {
       const list = el('ul');
@@ -263,7 +264,7 @@ export function mountImportedSkills({ root, api, setStatus, errorMessage }: Opti
     for (const [label, records] of [['来源快照', revision.files], ['工作修订', revision.workingFiles]] as const) {
       files.append(el('h5', label));
       for (const file of records) {
-        const member = el('details'); member.append(el('summary', `${file.path} · ${file.bytes} 字节 · SHA-256 ${file.sha256}`));
+        const member = el('details'); member.append(el('summary', `${file.path}${technicalWords(` · ${file.bytes} 字节 · SHA-256 ${file.sha256}`)}`));
         const bytes = Uint8Array.from(atob(file.base64), (value) => value.charCodeAt(0));
         member.append(el('pre', new TextDecoder().decode(bytes))); files.append(member);
       }

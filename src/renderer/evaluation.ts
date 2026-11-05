@@ -1,3 +1,5 @@
+import { filterChoices, stateTerm } from './components/controls.js';
+import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
   EvaluationAdjustment,
@@ -13,7 +15,7 @@ import type {
   RendererApi,
   ServiceWireJobProjection as ServiceJobProjection,
 } from '../shared/protocol.js';
-import { READERS_REPORT_TEMPLATE_LABELS } from '../shared/protocol.js';
+import { MAX_WRITING_MATERIALS, MAX_WRITING_MATERIAL_GRAPHEMES, MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES, READERS_REPORT_TEMPLATE_LABELS } from '../shared/protocol.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import { documentExportLabel } from './production-document-labels.js';
 import {
@@ -30,11 +32,8 @@ import {
   EVALUATION_ADJUSTMENT_NOTE,
   EVALUATION_ADJUSTMENT_REASON_LABELS,
   EVALUATION_AI7_HEADING,
-  EVALUATION_AI7_LEDE,
   EVALUATION_AI7_NONE,
-  EVALUATION_AI7_OPEN_PLAN,
   EVALUATION_AI7_OPEN_TASK,
-  EVALUATION_AI7_PREPARE,
   EVALUATION_AI7_STATUS,
   EVALUATION_AI7_SUGGESTED,
   EVALUATION_START_FROM_INITIAL,
@@ -50,7 +49,6 @@ import {
   EVALUATION_AI7_PENDING,
   EVALUATION_COMMENT,
   EVALUATION_CONCLUSION_LEGEND,
-  EVALUATION_EMPTY,
   EVALUATION_FINALIZE,
   EVALUATION_FINALIZE_NEEDS_SCORE,
   EVALUATION_NOT_RATED,
@@ -103,7 +101,6 @@ import {
   EVALUATION_REWRITE_BEFORE,
   EVALUATION_REWRITE_EMPTY,
   EVALUATION_REWRITE_HEADING,
-  EVALUATION_REWRITE_LEDE,
   EVALUATION_REWRITE_STALE,
   EVALUATION_REWRITE_STATUS,
   EVALUATION_REWRITE_VERDICT,
@@ -171,7 +168,8 @@ const INITIAL_POLL_MS = 1000;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -225,19 +223,23 @@ export function evaluationMaterialsField(
 ): HTMLElement {
   const fieldset = el('fieldset', 'evaluation-materials');
   fieldset.dataset['evaluationMaterials'] = kind;
-  fieldset.append(el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`));
-  fieldset.append(el('p', 'field-note', page.materials?.statement ?? '暂无可参考的资料库资料。'));
-  // 初评 carries no 定稿 of its own, so its row says what references never override there (Issue #795 item 3); 审稿意见, which
-  // drafts from a 定稿 record, keeps the 定稿 wording.
-  fieldset.append(el('p', 'field-note', kind === 'readersReport'
-    ? '资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。'
-    : '资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。'));
+  const legend = el('legend', undefined, templateLabel === undefined ? '允许参考 · 资料库' : `允许参考 · 资料库 · 「${templateLabel}」`);
+  if ((page.materials?.more ?? 0) > 0) legend.append(el('span', undefined, ' · '), el('span', undefined, `另有 ${page.materials!.more} 份资料未列出。`));
+  fieldset.append(legend);
   const items = page.materials?.items ?? [];
+  const guidance = items.length === 0 ? page.materials?.statement ?? '暂无可参考的资料库资料。'
+    : `最多参考 ${MAX_WRITING_MATERIALS} 份，每份不超过 ${MAX_WRITING_MATERIAL_GRAPHEMES.toLocaleString('zh-CN')} 字、合计不超过 ${MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES.toLocaleString('zh-CN')} 字；只参照、不照抄，不改变评估方案或${kind === 'readersReport' ? '定稿' : '初评'}的分数、评语与结论。`;
+  if (items.length === 0) legend.append(el('span', undefined, ' · '), el('span', undefined, guidance));
+  else fieldset.append(el('p', 'field-note', guidance));
   // A choice the page no longer offers, or no longer lets be ticked, leaves the selection with its reason (Issue #759).
   const { kept: retained, removals } = reconcileTaskMaterialSelection(selected, items, selected);
   selected.clear();
   for (const id of retained) selected.add(id);
-  for (const note of removals) fieldset.append(el('p', 'field-note evaluation-material-removed', note));
+  if (removals.length > 0) {
+    const removed = el('ul');
+    for (const note of removals) removed.append(el('li', 'evaluation-material-removed', note));
+    fieldset.append(removed);
+  }
   for (const item of items) {
     const label = el('label', 'evaluation-choice');
     const input = el('input');
@@ -252,54 +254,70 @@ export function evaluationMaterialsField(
       else selected.delete(item.materialId);
       repaint(item.materialId);
     });
-    label.append(input, el('span', undefined, `《${item.title}》 · ${taskMaterialSizeText(item)}`));
-    if (reason !== null) label.append(el('span', 'field-note', reason));
+    const name = el('span', undefined, `《${item.title}》 · ${taskMaterialSizeText(item)}`);
+    if (reason !== null) name.append(el('span', undefined, ' · '), el('span', undefined, reason));
+    label.append(input, name);
     fieldset.append(label);
   }
-  if ((page.materials?.more ?? 0) > 0) fieldset.append(el('p', 'field-note', `另有 ${page.materials!.more} 份资料未列出。`));
   const sending = taskMaterialSendLine(items, selected);
   if (sending !== null) fieldset.append(el('p', 'field-note evaluation-material-send', sending));
   const frozen = page.materialReferences?.[kind] ?? [];
   if (frozen.length > 0) {
-    fieldset.append(el('p', 'field-note', '这份计划允许参考：'));
-    for (const line of frozen) fieldset.append(el('p', 'field-note evaluation-material-pin', line));
+    const list = el('ul', 'evaluation-material-pins');
+    for (const line of frozen) list.append(el('li', 'evaluation-material-pin', line));
+    fieldset.append(el('strong', undefined, '这份计划允许参考：'), list);
   }
   return fieldset;
 }
 
-/**
- * 审稿意见's 允许参考 (Issue #795 item 4): one fieldset per template, each with its own selection, so 起草 of a template sends only
- * what was ticked for it. The template whose Task is prepared keeps its choices locked beside its plan's frozen rows; the other
- * stays editable while it may be prepared. Exported so the real rows run under a DOM stub in tests.
- */
-export function readersReportMaterialsFields(
-  page: Pick<EvaluationWorkspaceProjection, 'materials' | 'materialReferences' | 'readersReport'>,
-  selections: Map<ReadersReportTemplate, Set<string>>,
-  busy: boolean,
-  repaint: (template: ReadersReportTemplate, materialId: string) => void,
-): Array<{ template: ReadersReportTemplate; available: boolean; selected: Set<string>; field: HTMLElement }> {
-  const task = page.readersReport.task;
-  const blocked = page.materialReferences?.blocked.readersReport === true;
-  return page.readersReport.templates.map((entry) => {
-    const own = task !== null && task.template === entry.template;
-    const available = entry.prepare.allowed && !(own && task.state === 'prepared' && !blocked);
-    const selected = selections.get(entry.template) ?? new Set<string>();
-    selections.set(entry.template, selected);
-    // The latest Task's frozen rows are its own template's; the other template's fieldset shows none.
-    const references = page.materialReferences === undefined || own ? page.materialReferences : { ...page.materialReferences, readersReport: [] };
-    const field = evaluationMaterialsField({ ...(page.materials === undefined ? {} : { materials: page.materials }), ...(references === undefined ? {} : { materialReferences: references }) },
-      'readersReport', selected, available, busy, (materialId) => repaint(entry.template, materialId), entry.label);
-    field.dataset['template'] = entry.template;
-    return { template: entry.template, available, selected, field };
-  });
+/** Optional reference choices belong to segment 2 of the full plan, never the evaluation page. */
+export function evaluationPlanReferenceField(options: {
+  api: Pick<RendererApi, 'inspectEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' | 'searchReferableMaterials'>;
+  bookId: string; ref: string; kind: 'initial-evaluation' | 'readers-report'; editable: boolean;
+  reference: ReadonlyArray<string>;
+  awaitJob(job: ServiceJobProjection): Promise<ServiceJobProjection>;
+  change(operation: () => Promise<string>): void;
+}): HTMLElement {
+  const host = el('div', 'task-reference-chips');
+  host.dataset['evaluationPlanReferences'] = '';
+  for (const text of options.reference) host.append(stateTerm(text));
+  if (options.reference.length === 0) host.append(el('span', undefined, '不参考其他材料'));
+  if (!options.editable) return host;
+  void options.api.inspectEvaluation({ recordId: null }).then((page) => {
+    if (!host.isConnected || page.bookId !== options.bookId) return;
+    const initial = options.kind === 'initial-evaluation';
+    const task = initial ? page.initial.task : page.readersReport.task;
+    if (task?.taskIntentId !== options.ref || task.state !== 'prepared') return;
+    const template = page.readersReport.task?.template;
+    const input = initial ? page.materialReferences?.initialInput : page.materialReferences?.readersReportInput;
+    const selected = new Set(input?.materialIds ?? []);
+    let seriesId = initial ? page.materialReferences?.initialInput?.seriesId ?? null : null;
+    const update = (): void => options.change(async () => {
+      const materialIds = taskMaterialSelection(page.materials?.items ?? [], selected);
+      const job = initial ? await options.api.prepareInitialEvaluation({ materialIds, seriesId })
+        : await options.api.prepareReadersReport({ template: template!, materialIds });
+      const completed = await options.awaitJob(job);
+      const result = completed.result;
+      if (completed.state !== 'completed' || !result || !('initial' in result)) throw new Error('未能更新参考资料。');
+      const ref = (initial ? result.initial.task : result.readersReport.task)?.taskIntentId;
+      if (!ref) throw new Error('未能更新参考资料。');
+      return ref;
+    });
+    const materialLines = page.materialReferences?.[initial ? 'initial' : 'readersReport'] ?? [];
+    const basis = options.reference.filter((line) => !materialLines.includes(line));
+    host.replaceChildren(...basis.map((line) => stateTerm(line)), evaluationMaterialsField(page, initial ? 'initial' : 'readersReport', selected, true, false, update));
+    host.append(similarMaterialsField(options.api, page.bookId, page.materials?.items ?? [], selected, (id) => { selected.add(id); update(); }));
+    if (initial && page.market.series.length > 0) host.append(filterChoices({ label: '书系参考',
+      choices: [['', '仅本书'], ...page.market.series.map((series) => [series.seriesId, `书系《${series.title}》`] as const)],
+      value: seriesId ?? '', change: (value) => { seriesId = value || null; update(); },
+    }));
+  }).catch(() => { if (host.isConnected) host.append(el('p', undefined, '参考资料读取失败，请重新打开计划。')); });
+  return host;
 }
 
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
-  const initialMaterialIds = new Set<string>();
-  let seriesId: string | null = null;
-  const reportMaterialIds = new Map<ReadersReportTemplate, Set<string>>();
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
@@ -317,18 +335,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     errorMessage,
     onChanged: () => undefined,
     openerOf: (target) => target.kind === 'document'
-      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-readers-report-action="export"]`)
+      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-export-menu] > summary`)
       : null,
   });
-
-  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement => {
-    const field = evaluationMaterialsField(page, kind, selected, available, busy,
-      (materialId) => paint(`[data-evaluation-materials="${kind}"] [data-evaluation-material="${materialId}"]`, true));
-    if (available && !busy) field.append(similarMaterialsField(api, page.bookId, page.materials?.items ?? [], selected, (id) => {
-      selected.add(id); paint(`[data-evaluation-materials="${kind}"]`, true);
-    }));
-    return field;
-  };
 
   /**
    * 审稿意见 (Issue #429, S81c; EVAL-013): the 定稿 version it drafts from, that the house has no 审稿意见 among its 范例 yet,
@@ -340,50 +349,43 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.dataset['readersReportState'] = report.task?.state ?? 'none';
     const heading = el('h3', undefined, READERS_REPORT_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', READERS_REPORT_LEDE));
+    const context = el('p', 'field-note', `${READERS_REPORT_LEDE.replace(/。$/u, '')}；`);
+    context.append(el('span', 'readers-report-exemplars', `${report.exemplars.statement.replace(/。$/u, '')}。`));
+    section.append(heading, context);
     const basis = readersReportBasisLine(report.basis);
     if (basis !== null) section.append(el('p', 'readers-report-basis', basis));
-    section.append(el('p', 'field-note readers-report-exemplars', `${report.exemplars.statement}。`));
     const task = report.task;
     if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
-    for (const { template, available, selected, field } of readersReportMaterialsFields(page, reportMaterialIds, busy, (template, materialId) =>
-      paint(`[data-evaluation-materials="readersReport"][data-template="${template}"] [data-evaluation-material="${materialId}"]`, true))) {
-      if (available && !busy) field.append(similarMaterialsField(api, page.bookId, page.materials?.items ?? [], selected, (id) => {
-        selected.add(id); paint(`[data-evaluation-materials="readersReport"][data-template="${template}"]`, true);
-      }));
-      section.append(field);
-    }
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
       item.dataset['template'] = entry.template;
-      item.append(el('span', 'readers-report-template', entry.label));
+      const template = el('div', 'readers-report-template-heading');
+      template.append(el('h4', 'readers-report-template', entry.label));
+      item.append(template);
       const row = el('div', 'button-row');
       const own = task !== null && task.template === entry.template;
       if (entry.draft !== null) {
         const draft = entry.draft;
         item.dataset['documentId'] = draft.document.documentId;
-        item.append(el('p', 'field-note readers-report-draft', readersReportDraftLine(draft)));
+        template.append(' · ', el('span', 'readers-report-draft', readersReportDraftLine(draft)));
         const open = action(READERS_REPORT_ACTIONS.openDraft, 'primary', 'open-draft', () => void openDraft(draft));
         open.dataset['readersReportAction'] = 'open-draft';
         open.disabled = busy;
         row.append(open);
         const latest = draft.document.versions[0];
         if (latest !== undefined) {
-          const exportButton = action(READERS_REPORT_ACTIONS.exportDraft, 'secondary', 'export-draft', () => {
-            if (busy || exporter.busy()) return;
-            exporter.open({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
-              documentExportLabel(draft.typeLabel, latest.label), exportButton);
-          });
-          exportButton.dataset['readersReportAction'] = 'export';
-          exportButton.disabled = busy || exporter.busy();
-          row.append(exportButton);
+          const menu = exporter.menu({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
+            documentExportLabel(draft.typeLabel, latest.label));
+          menu.dataset['readersReportExport'] = '';
+          for (const button of menu.querySelectorAll('button')) button.disabled = busy || exporter.busy();
+          row.append(menu);
         }
       } else if (entry.drafted !== null) {
         const drafted = entry.drafted;
-        item.append(el('p', 'field-note readers-report-drafted', readersReportDraftedLine(drafted)));
+        template.append(' · ', el('span', 'readers-report-drafted', readersReportDraftedLine(drafted)));
         const create = action(READERS_REPORT_ACTIONS.createDraft, 'primary', 'create-draft', () => void createDraft(drafted.revisionId));
         create.dataset['readersReportAction'] = 'create-draft';
         create.disabled = busy;
@@ -400,7 +402,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        item.append(el('p', 'field-note readers-report-reason', entry.prepare.reason));
+        template.append(' · ', el('span', 'readers-report-reason', entry.prepare.reason));
       }
       if (own && (task.state !== 'prepared' || reportBlocked)) {
         const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
@@ -424,9 +426,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(READERS_REPORT_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      // Only this template's own selection is sent (Issue #795 item 4).
-      const selected = reportMaterialIds.get(template) ?? new Set<string>();
-      const job = await api.prepareReadersReport({ template, ...(selected.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], selected) }) });
+      // Optional references can be changed in this template's full plan.
+      const job = await api.prepareReadersReport({ template });
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {
@@ -493,37 +494,38 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const initialNode = (page: EvaluationWorkspaceProjection): HTMLElement => {
     const initial = page.initial;
     const section = el('section', 'evaluation-initial');
+    if (page.recordCount === 0 && initial.latest === null) section.classList.add('surface-empty');
     section.dataset['initialState'] = initial.task?.state ?? 'none';
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', EVALUATION_AI7_LEDE));
-    const initialBlocked = page.materialReferences?.blocked.initial === true;
-    section.append(materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked)));
-    if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'field-note', initial.task.historicalMarker));
-    if (page.market.series.length > 0 && initial.prepare.allowed) {
-      const row = el('label', 'evaluation-field');
-      row.append(el('span', undefined, '参考什么'));
-      const select = el('select');
-      select.dataset['evaluationField'] = 'series-scope';
-      select.append(new Option('仅本书，不参考书系知识', ''));
-      for (const series of page.market.series) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
-      select.value = seriesId ?? '';
-      select.disabled = busy;
-      select.addEventListener('change', () => { seriesId = select.value || null; });
-      row.append(select);
-      section.append(row);
-    }
-    if (initial.task !== null) section.append(el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task)));
     const latest = initial.latest;
-    const initialProfile = latest?.profile ?? page.profile;
     if (latest === null) {
-      section.append(el('p', 'field-note evaluation-initial-none', EVALUATION_AI7_NONE));
-    } else {
+      section.append(el('h2', undefined, EVALUATION_AI7_HEADING), stateTerm(initial.task?.label ?? '尚未评估', initial.task?.state === 'settled' ? 'good' : initial.task?.state === 'failed' ? 'blocked' : initial.task?.state === 'executing' || initial.task?.state === 'queued' ? 'progress' : 'neutral'));
+      section.append(el('p', 'lede evaluation-initial-none', EVALUATION_AI7_NONE));
+      const consequences = el('dl', 'review-consequences evaluation-consequences');
+      for (const [term, words] of [
+        ['会读取', '当前稿件与本社评估方案。'],
+        ['会发送', '发送内容与模型服务以本次计划为准。'],
+        ['不会做', '不改稿、不定稿，也不替你选择出版结论。'],
+        ['费用', '按实际模型用量计费，预算上限见计划。'],
+      ]) consequences.append(el('dt', undefined, term), el('dd', undefined, words));
+      section.append(consequences);
+    } else section.append(heading);
+    const initialBlocked = page.materialReferences?.blocked.initial === true;
+    if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'attention-note', initial.task.historicalMarker));
+    if (initial.task !== null) {
+      const taskLine = el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task));
+      if (initial.task.historicalMarker !== undefined) taskLine.append(` · ${initial.task.historicalMarker}`);
+      section.append(taskLine);
+    }
+    const initialProfile = latest?.profile ?? page.profile;
+    if (latest !== null) {
       section.dataset['initialRevision'] = latest.revisionId;
       section.dataset['initialCurrent'] = String(latest.current);
-      section.append(el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(initialProfile, latest)));
+      const latestLine = el('p', 'evaluation-initial-latest', evaluationAi7LatestLine(initialProfile, latest));
       const unread = evaluationAi7UnreadLine(latest);
-      if (unread !== null) section.append(el('p', 'field-note evaluation-initial-unread', unread));
+      if (unread !== null) latestLine.append(' · ', el('span', 'evaluation-initial-unread', unread));
+      section.append(latestLine);
       const items = el('ul', 'evaluation-initial-items');
       for (const item of initialProfile.items) {
         const ai7 = latest.items.find((entry) => entry.itemId === item.itemId);
@@ -547,27 +549,17 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     const row = el('div', 'button-row evaluation-initial-actions');
     const task = initial.task;
-    if (task !== null && task.state === 'prepared' && !initialBlocked) {
-      const open = action(EVALUATION_AI7_OPEN_PLAN, 'primary', 'open-initial-plan', () => options.openPlan(task.taskIntentId));
+    const canStart = initial.prepare.allowed || (task?.state === 'prepared' && !initialBlocked);
+    const start = action('开始评估', 'primary', 'start-initial', () => void prepareInitial());
+    const preview = action('先看计划', 'quiet', 'prepare-initial', () => void prepareInitial(true));
+    preview.classList.add('text-link');
+    start.disabled = preview.disabled = busy || !canStart;
+    row.append(start, preview);
+    if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', initial.prepare.reason));
+    if (task !== null && task.state !== 'prepared') {
+      const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
       open.disabled = busy;
-      open.setAttribute('aria-controls', 'task-drawer');
       row.append(open);
-    } else {
-      if (initial.prepare.allowed) {
-        const prepare = action(EVALUATION_AI7_PREPARE[initial.prepare.mode], latest === null ? 'primary' : 'secondary', 'start-initial', () => void prepareInitial());
-        const preview = action('查看计划', 'secondary', 'prepare-initial', () => void prepareInitial(true));
-        preview.disabled = busy; row.append(preview);
-        prepare.disabled = busy;
-        row.append(prepare);
-      } else {
-        row.append(el('p', 'field-note evaluation-initial-reason', initial.prepare.reason));
-      }
-      if (task !== null) {
-        const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
-        open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
-        row.append(open);
-      }
     }
     section.append(row);
     return section;
@@ -583,18 +575,20 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const section = el('section', 'evaluation-market');
     const heading = el('h3', undefined, EVALUATION_MARKET_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', EVALUATION_MARKET_LEDE), el('p', 'field-note evaluation-market-basis', EVALUATION_MARKET_OFFLINE));
     const market = record.initial?.market ?? null;
+    const context = el('p', 'field-note');
+    context.append(EVALUATION_MARKET_LEDE.replace(/。$/u, ''), '；', el('span', 'evaluation-market-basis', EVALUATION_MARKET_OFFLINE.replace(/。$/u, '')), '；',
+      el('span', 'evaluation-comparables-web', market === null ? EVALUATION_COMPARABLES_NO_WEB.replace(/。$/u, '') : EVALUATION_COMPARABLES_NO_WEB));
+    if (market === null) context.append('；', el('span', 'evaluation-market-none', record.initial === null ? EVALUATION_MARKET_NONE_ALONE : EVALUATION_MARKET_NONE_INITIAL));
+    section.append(heading, context);
     section.dataset['marketAi7'] = String(market !== null);
-    if (market === null) {
-      section.append(el('p', 'field-note evaluation-market-none', record.initial === null ? EVALUATION_MARKET_NONE_ALONE : EVALUATION_MARKET_NONE_INITIAL));
-    } else {
+    if (market !== null) {
       const lists = el('div', 'evaluation-market-lists');
       for (const key of ['readers', 'sellingPoints', 'channels'] as const) {
         const card = el('div', 'evaluation-market-list');
         card.dataset['marketList'] = key;
         const title = el('h4', undefined, EVALUATION_MARKET_LISTS[key]);
-        title.append(' ', el('span', 'status-pill evaluation-market-ai7', EVALUATION_MARKET_AI7));
+        title.append(' ', el('span', 'state-term status-pill evaluation-market-ai7', EVALUATION_MARKET_AI7));
         const list = el('ul');
         for (const line of market[key]) list.append(el('li', undefined, line));
         card.append(title, list);
@@ -602,15 +596,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       section.append(lists);
       // What AI7 wrote but the page does not show, and why: a quantity it cannot support, or a part out of shape (S81b2).
-      for (const reason of market.withheld) section.append(el('p', 'field-note evaluation-market-withheld', reason));
+      if (market.withheld.length > 0) {
+        const withheld = el('ul', 'evaluation-market-warnings');
+        for (const reason of market.withheld) withheld.append(el('li', 'evaluation-market-withheld', reason));
+        section.append(withheld);
+      }
     }
     // Comparable books from house data, each tagged with its source (EVAL-009); no other house's book while the web is not connected.
     const comparables = el('div', 'evaluation-comparables');
-    comparables.append(el('h4', undefined, EVALUATION_COMPARABLES_HEADING));
-    if (page.market.seriesUnreadable) {
-      comparables.append(el('p', 'field-note evaluation-comparables-none', EVALUATION_COMPARABLES_UNREADABLE));
-    } else if (page.market.comparables.length === 0) {
-      comparables.append(el('p', 'field-note evaluation-comparables-none', page.market.series.length === 0 ? EVALUATION_COMPARABLES_NO_SERIES : EVALUATION_COMPARABLES_EMPTY_SERIES));
+    const comparablesHeading = el('h4', undefined, EVALUATION_COMPARABLES_HEADING);
+    comparables.append(comparablesHeading);
+    if (page.market.seriesUnreadable || page.market.comparables.length === 0) {
+      const none = page.market.seriesUnreadable ? EVALUATION_COMPARABLES_UNREADABLE : page.market.series.length === 0 ? EVALUATION_COMPARABLES_NO_SERIES : EVALUATION_COMPARABLES_EMPTY_SERIES;
+      comparablesHeading.append(' · ', el('span', 'evaluation-comparables-none', none));
     } else {
       const list = el('ul', 'evaluation-comparable-list');
       for (const comparable of page.market.comparables) {
@@ -622,14 +620,13 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       comparables.append(list);
       const more = evaluationComparablesMoreLine(page.market);
-      if (more !== null) comparables.append(el('p', 'field-note', more));
+      if (more !== null) comparablesHeading.append(` · ${more}`);
     }
-    comparables.append(el('p', 'field-note evaluation-comparables-web', EVALUATION_COMPARABLES_NO_WEB));
     section.append(comparables);
     // 预测 · 低确定性 (EVAL-009, EVAL-010): a block of its own, never a promise.
     const prediction = el('div', 'evaluation-prediction');
     const title = el('h4', undefined, EVALUATION_PREDICTION_HEADING);
-    title.append(' ', el('span', 'status-pill evaluation-prediction-pill', EVALUATION_PREDICTION_NOT_PROMISE));
+    title.append(' ', el('span', 'state-term status-pill evaluation-prediction-pill', EVALUATION_PREDICTION_NOT_PROMISE));
     const rows = el('dl', 'evaluation-prediction-rows');
     const row = (key: keyof typeof EVALUATION_PREDICTION_LABELS, lines: ReadonlyArray<string>): void => {
       const term = el('dt', undefined, EVALUATION_PREDICTION_LABELS[key]);
@@ -657,7 +654,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     section.dataset['rewriteState'] = rewrite.task?.state ?? 'none';
     const heading = el('h3', undefined, EVALUATION_REWRITE_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', EVALUATION_REWRITE_LEDE));
+    section.append(heading);
     const task = rewrite.task !== null && rewrite.task.recordId === record.recordId ? rewrite.task : null;
     if (task !== null) section.append(el('p', 'evaluation-rewrite-task', evaluationRewriteTaskLine(task)));
     const proposal = rewrite.proposal;
@@ -665,11 +662,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const card = el('div', 'evaluation-rewrite-proposal');
       card.dataset['revisionId'] = proposal.revisionId;
       card.dataset['current'] = String(proposal.current);
-      card.append(el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal)));
-      const reading = el('p', 'field-note evaluation-rewrite-reading', evaluationRewriteReadingLine(proposal.reading));
+      const line = el('p', 'evaluation-rewrite-proposal-line', evaluationRewriteProposalLine(proposal));
+      const reading = el('span', 'evaluation-rewrite-reading', evaluationRewriteReadingLine(proposal.reading));
       reading.dataset['unitsRead'] = String(proposal.reading.unitsRead);
       reading.dataset['unitsTotal'] = String(proposal.reading.unitsTotal);
-      card.append(reading);
+      line.append(' · ', reading);
+      card.append(line);
       const list = el('dl', 'evaluation-rewrite-items');
       const pair = (label: string, before: string | null, after: string, itemId: string | null, evidence: NonNullable<typeof proposal>['items'][number]['evidence'], evidenceCount: number): void => {
         const value = el('dd');
@@ -700,8 +698,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (proposal.verdict !== null) pair(EVALUATION_REWRITE_VERDICT, proposal.verdict.before, proposal.verdict.after, null, [], 0);
       card.append(list);
       // What AI7 wrote but does not offer, and why: a 评语 or the 总评 that stated a score or a conclusion.
-      for (const reason of proposal.withheld) card.append(el('p', 'field-note evaluation-rewrite-withheld', reason));
-      if (!proposal.current) card.append(el('p', 'field-note evaluation-rewrite-stale', EVALUATION_REWRITE_STALE));
+      if (proposal.withheld.length > 0 || !proposal.current) {
+        const warnings = el('ul', 'evaluation-rewrite-warnings');
+        for (const reason of proposal.withheld) warnings.append(el('li', 'evaluation-rewrite-withheld', reason));
+        if (!proposal.current) warnings.append(el('li', 'evaluation-rewrite-stale', EVALUATION_REWRITE_STALE));
+        card.append(warnings);
+      }
       const actions = el('div', 'button-row evaluation-rewrite-actions');
       const accept = action(EVALUATION_REWRITE_ACTIONS.accept, 'primary', 'rewrite-accept', () => void decideRewrite(proposal.revisionId, 'accept'));
       accept.disabled = busy || !proposal.current || (proposal.items.length === 0 && proposal.verdict === null);
@@ -711,7 +713,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       card.append(actions);
       section.append(card);
     } else if (rewrite.decided !== null) {
-      section.append(el('p', 'field-note evaluation-rewrite-decided', evaluationRewriteDecidedLine(rewrite.decided)));
+      heading.append(' · ', el('span', 'evaluation-rewrite-decided', evaluationRewriteDecidedLine(rewrite.decided)));
     }
     const row = el('div', 'button-row evaluation-rewrite-start');
     if (task !== null && task.state === 'prepared') {
@@ -725,7 +727,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         prepare.disabled = busy;
         row.append(prepare);
       } else {
-        row.append(el('p', 'field-note evaluation-rewrite-reason', rewrite.prepare.reason));
+        heading.append(' · ', el('span', 'evaluation-rewrite-reason', rewrite.prepare.reason));
       }
       if (task !== null) {
         const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
@@ -842,6 +844,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
     const parts: HTMLElement[] = [initialNode(workspace)];
+    const start = el('div', 'button-row evaluation-start');
+    const empty = workspace.recordCount === 0 && workspace.record === null && workspace.initial.latest === null;
     // The versions, newest first; each opens as it was recorded.
     if (workspace.records.length > 0) {
       const versions = el('section', 'evaluation-versions');
@@ -861,7 +865,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       }
       versions.append(list);
       const unreadable = evaluationUnreadableLine(workspace.unreadableRecords);
-      if (unreadable !== null) versions.append(el('p', 'field-note evaluation-unreadable', unreadable));
+      if (unreadable !== null) heading.append(' · ', el('span', 'evaluation-unreadable', unreadable));
       if (leaving !== null && workspace.record !== null) {
         // Typed work is never lost by a click on the list: staying is the first way, and the discard says what it does.
         const target = leaving;
@@ -894,28 +898,31 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     } else {
       // No version reads: either none was begun, or every one is damaged — then say which, never 「no version yet」 (Issue #708).
       const unreadable = evaluationUnreadableLine(workspace.unreadableRecords, false);
-      parts.push(unreadable === null ? el('p', 'field-note evaluation-empty', EVALUATION_EMPTY) : el('p', 'field-note evaluation-unreadable', unreadable));
+      if (unreadable !== null) start.append(el('span', 'evaluation-unreadable', unreadable));
     }
-    const start = el('div', 'button-row evaluation-start');
     start.dataset['skipDamaged'] = String(workspace.start.allowed && workspace.start.skipDamaged !== null);
     if (workspace.start.allowed) {
       // 从 AI7 初评开始 leads once AI7's latest 初评 read the text as it stands (EVAL-001, EVAL-006); the editor may still begin alone.
       const fromInitial = workspace.start.fromInitial;
       if (fromInitial !== null) {
-        const seeded = action(EVALUATION_START_FROM_INITIAL, 'primary', 'start-from-initial', () => void begin_(true));
+        const seeded = action(EVALUATION_START_FROM_INITIAL, 'quiet', 'start-from-initial', () => void begin_(true));
         seeded.disabled = busy;
         start.append(seeded);
       }
       // While the latest version cannot be read (Issue #726), the start names the 定稿 it will seed from and says what it skips.
-      const begin = action(evaluationStartLabel(workspace.start), workspace.start.kind === 'first' && fromInitial === null ? 'primary' : 'secondary', 'start', () => void begin_(false));
+      const begin = action(workspace.start.kind === 'first' ? '自行填写评估' : evaluationStartLabel(workspace.start), 'quiet', 'start', () => void begin_(false));
       begin.disabled = busy;
+      if (workspace.start.skipDamaged !== null) begin.append(' · ', el('span', 'evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
       start.append(begin);
-      if (workspace.start.skipDamaged !== null) start.append(el('p', 'field-note evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
     } else {
       start.append(el('p', 'field-note evaluation-start-reason', workspace.start.reason));
     }
-    parts.push(start);
-    parts.push(readersReportNode(workspace));
+    if (empty) {
+      const more = el('details', 'evaluation-more');
+      more.append(el('summary', undefined, '更多 ▾'), start);
+      parts[0]!.append(more);
+    } else parts.push(start);
+    if (workspace.readersReport.basis !== null) parts.push(readersReportNode(workspace));
     // 按我的评分重写评语 sits just above the version it rewrites (Issue #429, S81b2; EVAL-008).
     if (workspace.record !== null) parts.push(rewriteNode(workspace, workspace.record));
     if (refusal !== null) {
@@ -943,13 +950,21 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   /** 准备 AI7 初评: the Task's plan prepared as one cooperative job, then opened in the Task Drawer, whose bar starts it. */
   const prepareInitial = async (preview = false): Promise<void> => {
     if (busy || workspace === null) return;
+    if (workspace.initial.task?.state === 'prepared' && workspace.materialReferences?.blocked.initial !== true) {
+      const ref = workspace.initial.task.taskIntentId;
+      if (preview) { options.openPlan(ref); return; }
+      busy = true;
+      try { await startPreparedTask(api, 'initial-evaluation', ref); workspace = { ...await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null }), record: workspace.record }; }
+      catch (error) { setStatus(errorMessage(error, EVALUATION_AI7_STATUS.failed), 'error'); }
+      finally { busy = false; paint(null, true); }
+      return;
+    }
     busy = true;
     refusal = null;
     setStatus(EVALUATION_AI7_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      const job = await api.prepareInitialEvaluation({ ...(seriesId === null ? {} : { seriesId }),
-        ...(initialMaterialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], initialMaterialIds) }) });
+      const job = await api.prepareInitialEvaluation({});
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {
@@ -1035,24 +1050,38 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.dataset['entries'] = String(record.entries);
     const heading = el('h3', undefined, evaluationHeading(record));
     heading.tabIndex = -1;
-    node.append(heading, el('p', 'field-note evaluation-revision', evaluationRevisionLine(record)));
-    // Which words are AI7's could not all be checked: they stay marked as AI7's, and the page says so (Issue #702 review).
-    if (record.ai7WordsNotice !== null) node.append(el('p', 'field-note evaluation-ai7-words-notice', record.ai7WordsNotice));
+    heading.append(' · ', el('span', 'evaluation-revision', evaluationRevisionLine(record)));
+    node.append(heading);
+    // Preserve the notices about attribution and damaged versions with the record they qualify.
+    const skipped = evaluationSkippedRecordsLine(record);
+    if (record.ai7WordsNotice !== null || skipped !== null) {
+      const notices = el('p', 'field-note');
+      if (record.ai7WordsNotice !== null) notices.append(el('span', 'evaluation-ai7-words-notice', skipped === null ? record.ai7WordsNotice : record.ai7WordsNotice.replace(/。$/u, '')));
+      if (skipped !== null) {
+        if (record.ai7WordsNotice !== null) notices.append('；');
+        notices.append(el('span', 'evaluation-skipped', skipped));
+      }
+      node.append(notices);
+    }
     const finalized = evaluationFinalizedLine(record, localInstantLabel);
     if (finalized !== null) node.append(el('p', 'evaluation-finalized', finalized));
-    // A version that skipped damaged versions when it began says so, in its own words (Issue #726).
-    const skipped = evaluationSkippedRecordsLine(record);
-    if (skipped !== null) node.append(el('p', 'field-note evaluation-skipped', skipped));
     const initial = record.initial;
     node.dataset['initial'] = String(initial !== null);
     node.dataset['calibrated'] = String(record.calibration !== null);
-    node.append(el('p', 'field-note evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial)));
-    // The house calibration applied to AI7's starting scores, with the raw scores kept beside each item (EVAL-011a).
     const calibrated = evaluationAi7CalibrationLine(record.calibration);
-    if (calibrated !== null) node.append(el('p', 'field-note evaluation-ai7-calibration', calibrated));
-    // A version begun from a 初评 that completed with gaps says which ranges AI7's draft never read.
     const unread = initial === null ? null : evaluationAi7UnreadLine(initial);
-    if (unread !== null) node.append(el('p', 'field-note evaluation-ai7-unread', unread));
+    const initialLine = el('p', 'field-note evaluation-initial-summary');
+    let firstFragment = true;
+    const fragment = (className: string, text: string): void => {
+      if (!firstFragment) initialLine.append('；');
+      firstFragment = false;
+      initialLine.append(el('span', className, text.replace(/。$/u, '')));
+    };
+    fragment('evaluation-ai7', initial === null ? EVALUATION_AI7_PENDING : evaluationAi7RecordLine(initial));
+    if (calibrated !== null) fragment('evaluation-ai7-calibration', calibrated);
+    if (unread !== null) fragment('evaluation-ai7-unread', unread);
+    initialLine.append('。');
+    node.append(initialLine);
     const total = el('p', 'evaluation-total', evaluationTotalLine(profile, record.total));
     total.setAttribute('aria-live', 'polite');
     node.append(total);
@@ -1070,8 +1099,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const content = record.content.items[index]!;
       const set = el('fieldset', 'evaluation-item');
       set.dataset['itemId'] = item.itemId;
-      set.append(el('legend', undefined, evaluationItemLegend(item)));
-      if (item.description) set.append(el('p', 'field-note evaluation-item-description', item.description));
+      const legend = el('legend', undefined, evaluationItemLegend(item));
+      if (item.description) legend.append(' · ', el('span', 'evaluation-item-description', item.description));
+      set.append(legend);
       const score = el('input');
       score.type = 'number';
       score.min = '0';
@@ -1081,9 +1111,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       score.value = content.score === null ? '' : String(content.score);
       score.disabled = readOnly || content.notRated !== null;
       score.dataset['evaluationField'] = 'score';
-      const band = el('span', 'status-pill evaluation-band', content.score === null ? '' : evaluationBandLabel(profile, content.score, item.fullMarks));
+      const band = el('span', 'state-term status-pill evaluation-band', content.score === null ? '' : evaluationBandLabel(profile, content.score, item.fullMarks));
       band.hidden = content.score === null;
-      const invalid = el('p', 'field-note evaluation-score-invalid', evaluationScoreInvalidLine(item.fullMarks));
+      const invalid = el('span', 'evaluation-score-invalid', evaluationScoreInvalidLine(item.fullMarks));
       invalid.id = `evaluation-score-invalid-${record.recordId}-${item.itemId}`;
       invalid.hidden = true;
       const notRated = el('input');
@@ -1099,7 +1129,9 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const scoreRow = el('div', 'evaluation-score-row');
       const notRatedLabel = el('label', 'evaluation-choice');
       notRatedLabel.append(notRated, el('span', undefined, EVALUATION_NOT_RATED));
-      scoreRow.append(field(`${EVALUATION_SCORE}（0 – ${item.fullMarks}）`, score), band, notRatedLabel);
+      const scoreField = field(`${EVALUATION_SCORE} · 0–${item.fullMarks}`, score);
+      scoreField.append(invalid);
+      scoreRow.append(scoreField, band, notRatedLabel);
       const reasonField = field(EVALUATION_NOT_RATED_REASON, reason);
       reasonField.hidden = content.notRated === null;
       // AI7's score beside the editor's (EVAL-006): the record keeps the editor's, and where they differ the editor may say why.
@@ -1112,7 +1144,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         line.dataset['sufficiency'] = ai7.sufficiency;
         if (calibrated !== null) line.dataset['calibrated'] = String(calibrated.adjusted);
         beside.push(line);
-        if (ai7.comment !== null) beside.push(el('p', 'field-note evaluation-item-ai7-comment', `AI7 评语：${ai7.comment}`));
+        if (ai7.comment !== null) {
+          const comment = el('figure', 'evaluation-item-ai7-comment');
+          comment.append(el('figcaption', undefined, 'AI7 评语'), el('blockquote', undefined, ai7.comment));
+          beside.push(comment);
+        }
         // What AI7's score rests on (EVAL-006): each note it made toward the item, with the range it read it in.
         if (ai7.evidence.length > 0) {
           const evidence = el('details', 'evaluation-item-ai7-evidence');
@@ -1128,7 +1164,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         }
         beside.push(adjustmentNode(record, item.itemId, content.adjustment ?? null, readOnly));
       }
-      set.append(scoreRow, invalid, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
+      set.append(scoreRow, ...beside, reasonField, field(EVALUATION_COMMENT, textarea(content.comment ?? '', 'comment')));
       set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="comment"]')!.disabled = readOnly;
       // Only a score the scale admits reaches a band; any other says why and counts for nothing until it is corrected,
       // while the form keeps it as typed for the service's own refusal (Issue #638).
@@ -1212,18 +1248,20 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     node.append(lists);
     // The conclusion: none chosen until the editor chooses (EVAL-007).
     const conclusion = el('fieldset', 'evaluation-conclusion');
-    conclusion.append(el('legend', undefined, EVALUATION_CONCLUSION_LEGEND));
+    const conclusionLegend = el('legend', undefined, EVALUATION_CONCLUSION_LEGEND);
+    if (initial !== null && initial.suggestedConclusion === null) conclusionLegend.append(' · ', el('span', 'evaluation-ai7-conclusion', evaluationAi7ConclusionLine(record.profile, null)));
+    conclusion.append(conclusionLegend);
+    const blocked = el('span', 'evaluation-recommend-blocked', EVALUATION_RECOMMEND_BLOCKED);
+    blocked.id = `evaluation-blocked-${record.recordId}`;
+    blocked.hidden = true;
     for (const option of record.profile.conclusions) {
       const choice = radio(`evaluation-conclusion-${record.recordId}`, option.conclusion, option.label, record.content.conclusion === option.conclusion, readOnly);
       choice.dataset['conclusion'] = option.conclusion;
       // AI7's suggestion is marked as AI7's and never chosen for the editor (EVAL-007).
       if (initial?.suggestedConclusion === option.conclusion) choice.append(el('span', 'status-pill evaluation-ai7-suggested', EVALUATION_AI7_SUGGESTED));
+      if (option.conclusion === 'recommend') choice.append(blocked);
       conclusion.append(choice);
     }
-    if (initial !== null) conclusion.append(el('p', 'field-note evaluation-ai7-conclusion', evaluationAi7ConclusionLine(record.profile, initial.suggestedConclusion)));
-    const blocked = el('p', 'field-note evaluation-recommend-blocked', EVALUATION_RECOMMEND_BLOCKED);
-    blocked.id = `evaluation-blocked-${record.recordId}`;
-    conclusion.append(blocked);
     node.append(conclusion);
     if (record.state !== 'finalized') {
       const row = el('div', 'button-row evaluation-actions');
@@ -1231,11 +1269,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       const finalize = action(EVALUATION_FINALIZE, 'primary', 'finalize', () => void save(record, true));
       saveButton.disabled = busy;
       finalize.disabled = busy;
-      const needsScore = el('p', 'field-note evaluation-finalize-blocked', EVALUATION_FINALIZE_NEEDS_SCORE);
+      const needsScore = el('span', 'evaluation-finalize-blocked', EVALUATION_FINALIZE_NEEDS_SCORE);
       needsScore.id = `evaluation-finalize-blocked-${record.recordId}`;
       needsScore.hidden = true;
-      row.append(saveButton, finalize);
-      node.append(row, needsScore);
+      row.append(saveButton, finalize, needsScore);
+      node.append(row);
     }
     node.append(technicalDetails('evaluation-facts',
       el('dt', undefined, '评估版本'), el('dd', 'technical-identity', record.recordId),

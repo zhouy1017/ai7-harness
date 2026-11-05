@@ -8,19 +8,16 @@ import {
 } from '../shared/protocol.js';
 import {
   CAPTURE_CLASSIFICATION_LEGEND,
-  CAPTURE_CLOSE_NOTE,
   CAPTURE_EXTRACT_HEADING,
   CAPTURE_NEW_PROCEDURE,
   CAPTURE_NOT_SAVED,
   CAPTURE_NOT_SAVED_HEADING,
-  CAPTURE_ORDER_NOTE,
   CAPTURE_PICK_STEP,
   CAPTURE_PICK_TITLE,
   CAPTURE_RESULT_CONSEQUENCES,
   CAPTURE_RESULT_LABELS,
   CAPTURE_SAVE,
   CAPTURE_SCOPE_LEGEND,
-  CAPTURE_SCOPE_NOTE,
   CAPTURE_SOURCE_LEGEND,
   CAPTURE_TARGET_LABEL,
   CAPTURE_TITLE,
@@ -60,6 +57,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -104,7 +102,8 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
   const heading = el('h3', undefined, CAPTURE_TITLE);
   heading.id = titleId;
   heading.tabIndex = -1;
-  form.append(heading, el('p', 'field-note', `${captureSourceLine(capture.runLabel, capture.sourceScopeLabel)}${CAPTURE_CLOSE_NOTE}`));
+  heading.append(' · ', captureSourceLine(capture.runLabel, capture.sourceScopeLabel));
+  form.append(heading);
 
   const state = {
     kept: new Set(capture.steps.filter((step) => step.eligible).map((step) => step.categoryId)),
@@ -115,7 +114,7 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
 
   // The source set (REUSE-011, REUSE-012, REUSE-019): remove, never reorder or add.
   const source = el('fieldset', 'procedure-capture-source');
-  source.append(el('legend', undefined, CAPTURE_SOURCE_LEGEND), el('p', 'field-note', CAPTURE_ORDER_NOTE));
+  source.append(el('legend', undefined, `${CAPTURE_SOURCE_LEGEND} · 按此顺序运行`));
   for (const step of capture.steps) {
     const label = el('label', 'procedure-capture-step');
     label.dataset['captureStep'] = step.categoryId;
@@ -129,10 +128,10 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
     const words = el('span', 'procedure-capture-step-text', captureStepLine(step));
     label.append(box, words);
     if (!step.eligible) {
-      const why = el('small', 'field-note', step.excludedReason ?? '');
+      const why = el('span', undefined, step.excludedReason ?? '');
       why.id = uid('excluded');
       box.setAttribute('aria-describedby', why.id);
-      label.append(why);
+      words.append(' · ', why);
     }
     box.addEventListener('change', () => {
       if (box.checked) state.kept.add(step.categoryId);
@@ -158,10 +157,9 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
       state.scope = slot;
       update();
     });
-    label.append(radio, el('span', undefined, CAPTURED_PROCEDURE_SCOPE_LABELS[slot]));
+    label.append(radio, el('span', undefined, slot === 'chapters' ? '选定章节 · 每次运行时选择' : CAPTURED_PROCEDURE_SCOPE_LABELS[slot]));
     scopes.append(label);
   }
-  scopes.append(el('p', 'field-note', CAPTURE_SCOPE_NOTE));
 
   // The Classification Preview (REUSE-002 to REUSE-009): one recommendation, why, and the other types with why not.
   const classification = el('fieldset', 'procedure-capture-classification');
@@ -179,11 +177,12 @@ export async function openProcedureCapture(options: ProcedureCaptureOptions): Pr
     radio.value = kind;
     radio.checked = kind === state.kind;
     radio.disabled = !available;
-    const consequence = el('small', 'field-note', CAPTURE_RESULT_CONSEQUENCES[kind]);
+    const consequence = el('span', undefined, CAPTURE_RESULT_CONSEQUENCES[kind]);
     consequence.id = uid('consequence');
     radio.setAttribute('aria-describedby', consequence.id);
-    const name = el('span', undefined, kind === capture.classification.recommended ? `${CAPTURE_RESULT_LABELS[kind]}（推荐）` : CAPTURE_RESULT_LABELS[kind]);
-    label.append(radio, name, consequence);
+    const name = el('span', undefined, kind === capture.classification.recommended ? `${CAPTURE_RESULT_LABELS[kind]} · 推荐` : CAPTURE_RESULT_LABELS[kind]);
+    name.append(' · ', consequence);
+    label.append(radio, name);
     radio.addEventListener('change', () => {
       if (!radio.checked) return;
       state.kind = kind;

@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import type { ProductionDocumentProjection } from './deliverables.js';
 import type {
   ReviewCategoryResultSetRevisionProjection,
@@ -39,6 +40,8 @@ export interface WritingPassageProjection {
 
 /** The document as the book-level synthesis wrote it: a title, then each section's heading and paragraphs. */
 export interface WritingDraftWordsProjection {
+  readonly usable?: boolean;
+  readonly withheld?: ReadonlyArray<{ readonly section: number; readonly paragraph: number | null; readonly reason: string }>;
   title: string;
   sections: ReadonlyArray<{ heading: string; paragraphs: ReadonlyArray<string> }>;
 }
@@ -62,6 +65,7 @@ export interface WritingRevisionUpdateProjection extends Omit<ReviewCategoryRevi
 
 export type WritingUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;

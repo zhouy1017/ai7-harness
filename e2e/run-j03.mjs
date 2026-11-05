@@ -4,7 +4,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
+import { MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, runJ14DarkPass, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -32,6 +32,94 @@ function requireJourney(condition, name, detail) {
   if (detail !== undefined) error.detail = detail;
   throw error;
 }
+// A5 checks painted container depth rather than semantic/list/grid ancestors.
+async function assertShellFrame(renderer, name) {
+  await assertRenderer(renderer, `(() => {
+    const header=document.querySelector('#context-header'), content=document.querySelector('.content');
+    if(!header || !content || header.getBoundingClientRect().height>48 || getComputedStyle(header).flexWrap!=='nowrap' || content.querySelector('.panel') || document.querySelector('[data-shell-book-switcher]')) return false;
+    const framed=(node)=>{const s=getComputedStyle(node); return s.display!=='none' && ((parseFloat(s.borderTopWidth)>0 && parseFloat(s.borderRightWidth)>0 && parseFloat(s.borderBottomWidth)>0 && parseFloat(s.borderLeftWidth)>0 && parseFloat(s.borderTopLeftRadius)>0) || s.boxShadow!=='none');};
+    const drawer=document.querySelector('#task-drawer');
+    for(const root of [content, ...(drawer && !drawer.hidden ? [drawer] : [])]) for(const card of root.querySelectorAll('section,article,fieldset,div,li')) {
+      if(!card.getClientRects().length || !framed(card) || !card.querySelector('button,input,select,textarea,a,summary,[contenteditable]')) continue;
+      let depth=0;
+      for(let node=card;node && node!==root;node=node.parentElement) if(framed(node)) depth++;
+      if(depth>2) return false;
+    }
+    const line=[...header.children].filter(n=>n.getClientRects().length && getComputedStyle(n).position!=='absolute');
+    return line.every(n=>{const r=n.getBoundingClientRect(),h=header.getBoundingClientRect();return r.top>=h.top-1 && r.bottom<=h.bottom+1;});
+  })()`, name);
+}
+
+// Mount the affected card shapes against the real renderer stylesheet. Their named
+// header/action/line parts are not nested page cards; genuine card groups still flatten.
+async function assertCardFrames(renderer) {
+  await assertRenderer(renderer, `(() => {
+    const content=document.querySelector('.content'), host=document.createElement('div');
+    if(!content) return false;
+    document.body.append(host);
+    try {
+      const cards=[['editorial-mark-card','editorial-mark-card-header'],['evidence-card','evidence-card-actions'],['production-document-card','document-card-line']].map(([name,part])=>{
+        const card=document.createElement('article'), child=document.createElement('div');
+        card.className=name; child.className=part; child.append(document.createElement('button')); card.append(child);
+        if(name==='editorial-mark-card') card.dataset.markKind='annotation';
+        if(name==='evidence-card') card.dataset.checkState='candidate';
+        host.append(card); return card;
+      });
+      const frame=(card)=>{const s=getComputedStyle(card);return [s.borderTopWidth,s.borderRightWidth,s.borderBottomWidth,s.borderLeftWidth,s.borderTopStyle,s.backgroundColor,s.paddingTop,s.paddingRight,s.paddingBottom,s.paddingLeft,s.boxShadow];};
+      const before=cards.map(frame);
+      content.append(host);
+      if(!cards.every((card,i)=>JSON.stringify(frame(card))===JSON.stringify(before[i]))) return false;
+      const group=document.createElement('section'); group.className='source-card';
+      host.append(group); group.append(cards[2]);
+      const s=getComputedStyle(group);
+      return s.borderTopWidth==='0px' && s.paddingTop==='0px' && s.backgroundColor==='rgba(0, 0, 0, 0)' && JSON.stringify(frame(cards[2]))===JSON.stringify(before[2]);
+    } finally { host.remove(); }
+  })()`, 'shell-card-frames-survive');
+}
+
+// #1325: actual shell layout, shortcut dispatch and menu; shared selectors cover all other Journeys.
+async function checkSidebarPrototype(renderer) {
+  await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await assertRenderer(renderer, `(() => {
+    const bar=document.querySelector('#app-sidebar'), books=bar.querySelector('.sidebar-books > div');
+    const row=books.querySelector('.sidebar-book-row'), copies=[];
+    try {
+      for(let i=0;i<28;i++){ const copy=row.cloneNode(true); books.append(copy); copies.push(copy); }
+      const groups=[...bar.querySelectorAll('[data-nav-book-group], .sidebar-foot')];
+      return document.documentElement.dataset.sidebar==='full' && bar.scrollHeight<=bar.clientHeight+2 && groups.every(group=>group.getBoundingClientRect().bottom<=1080)
+        && [...bar.querySelectorAll('[data-nav-book]')].every(link=>link.getBoundingClientRect().height<=30)
+        && bar.querySelector('.sidebar-current-book')?.textContent===document.querySelector('#context-title')?.textContent
+        && !bar.querySelector('.sidebar-book-title, [data-shell-book-switcher]');
+    } finally { copies.forEach(copy=>copy.remove()); }
+  })()`, 'sidebar-expanded-1080p');
+  const firstPin = await renderer.evaluate(`(() => { const pin=document.querySelector('[data-nav-pin]'); return { id:pin.dataset.navPin, pressed:pin.getAttribute('aria-pressed') }; })()`);
+  await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-nav-book-row]'); row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:300})); return document.querySelector('.sidebar-book-menu:popover-open [role="menuitem"]')?.textContent.includes('置顶'); })()`, 'sidebar-book-context-menu');
+  await clickSelector(renderer, '.sidebar-book-menu [role="menuitem"]', 'sidebar-context-pin');
+  await waitFor(renderer, `document.querySelector('[data-nav-pin="${firstPin.id}"]')?.getAttribute('aria-pressed')===${JSON.stringify(firstPin.pressed === 'true' ? 'false' : 'true')}`, 'sidebar-context-pin-saved');
+  await clickSelector(renderer, `[data-nav-pin="${firstPin.id}"]`, 'sidebar-context-pin-restore');
+  await waitFor(renderer, `document.querySelector('[data-nav-pin="${firstPin.id}"]')?.getAttribute('aria-pressed')===${JSON.stringify(firstPin.pressed)}`, 'sidebar-context-pin-restored');
+  await assertRenderer(renderer, `(() => { document.querySelector('[data-nav-book-row]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})); return document.querySelector('.sidebar-book-menu:popover-open')!==null; })()`, 'sidebar-context-reopen');
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...ESCAPE_KEY });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ESCAPE_KEY });
+  const chord = { key: '\\', code: 'Backslash', windowsVirtualKeyCode: 220, nativeVirtualKeyCode: 220, modifiers: 2 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...chord });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
+  await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-ctrl-backslash');
+  await waitFor(renderer, `(() => {
+    const bar=document.querySelector('#app-sidebar'), link=bar.querySelector('[data-nav-book]'), initial=link.querySelector('.nav-book-initial');
+    const badge=bar.querySelector('.task-navigation-badge'), hidden=badge.hidden, text=badge.textContent;
+    try { badge.hidden=false; badge.textContent='3'; const box=badge.getBoundingClientRect();
+      return initial.textContent===[...link.querySelector('.nav-label').textContent.trim()][0] && getComputedStyle(initial).opacity==='1'
+        && box.width>0 && box.right<=bar.getBoundingClientRect().right && getComputedStyle(link.querySelector('.nav-label')).opacity==='0'
+        && document.documentElement.dataset.sidebarCollapsed==='true' && getComputedStyle(bar).transitionDuration==='0.24s, 0.24s';
+    } finally { badge.hidden=hidden; badge.textContent=text; }
+  })()`, 'sidebar-initial-badges-motion-token');
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...chord });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
+  await waitFor(renderer, `document.documentElement.dataset.sidebar==='full' && document.documentElement.dataset.sidebarCollapsed==='false' && document.querySelector('#app-sidebar').getBoundingClientRect().width===224`, 'sidebar-shortcut-expand');
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -175,6 +263,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
     `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`,
@@ -206,7 +295,7 @@ async function runSettingsPages(renderer, cancellation) {
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key, code, modifiers, windowsVirtualKeyCode });
     await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, modifiers, windowsVirtualKeyCode });
   };
-  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent`;
+  const label = (id) => `document.querySelector('[data-keyboard-command="${id}"] kbd')?.textContent?.split(' · ')[0]`;
   const bindings = `window.ai7.getPreferences().then((preferences)=>JSON.stringify(preferences.values['keyboard.bindings']))`;
   const libraryDefault = darwin ? 'Command+Option+2' : 'Alt+2';
   const seriesDefault = darwin ? 'Command+Option+3' : 'Alt+3';
@@ -239,6 +328,12 @@ async function runSettingsPages(renderer, cancellation) {
   await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command="nav.series"]')`, 'keyboard-ready');
   await assertRenderer(renderer, `${label('nav.library')}===${JSON.stringify(libraryDefault)} && ${label('nav.series')}===${JSON.stringify(seriesDefault)} && document.querySelector('[data-shortcut-command="edit.save"]')?.textContent.startsWith(${JSON.stringify(darwin ? 'Command+S' : 'Ctrl+S')})`, 'keyboard-defaults');
   await assertRenderer(renderer, `document.querySelector('.keyboard-always-on')?.textContent.includes('始终有效')`, 'keyboard-always-on');
+
+  // Q1: the shared command registry is reachable from the palette, and its added shortcuts are listed here.
+  await assertRenderer(renderer, `['command.palette','book.switch','review.new','evaluation.start','nav.tasks'].every(id=>document.querySelector('[data-keyboard-command="'+id+'"]'))`, 'quick-shortcuts-listed');
+  await chord('KeyK', 'k', mod);
+  await waitFor(renderer, `document.querySelector('.command-palette')?.open===true && document.querySelector('.command-palette-results')?.textContent.includes('新建审阅') && document.querySelector('.command-palette-results')?.textContent.includes('发起任务')`, 'command-palette-open');
+  await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.command-palette'); sheet.close(); return !sheet.open; })()`, 'command-palette-close');
 
   at('keyboard-remap-refused');
   cancellation.throwIfRequested();
@@ -289,6 +384,8 @@ async function runSettingsPages(renderer, cancellation) {
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'series-back');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'series-back-library');
   await click(renderer, '键盘与无障碍', 'keyboard-reopen');
+  await waitFor(renderer, `document.querySelector('[data-screen="keyboard"]')`, 'keyboard-reopen-screen');
+  await waitForValue(renderer, `${bindings}.then((held)=>held==='{"nav.series":"Mod+Shift+U"}')`, 'keyboard-reopen-preference');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesRemapped)}`, 'keyboard-remap-persisted');
   await clickSelector(renderer, '[data-keyboard-reset="nav.series"]', 'keyboard-reset-one');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-one-restored');
@@ -310,6 +407,10 @@ async function runSettingsPages(renderer, cancellation) {
   await clickSelector(renderer, '[data-keyboard-reset-all]', 'keyboard-reset-all');
   await waitFor(renderer, `${label('nav.series')}===${JSON.stringify(seriesDefault)}`, 'keyboard-all-restored');
   await waitForValue(renderer, `${bindings}.then((held)=>held==='{}')`, 'keyboard-all-restored-kept');
+  // A4: a later successful reset leaves the earlier refusal visible until the editor acknowledges it.
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('「书库」') && document.querySelector('#persistence-status')?.hidden===false`, 'keyboard-error-retained-after-success');
+  await clickSelector(renderer, '#persistence-status .status-dismiss', 'keyboard-error-dismiss');
+  await assertRenderer(renderer, `document.querySelector('#persistence-status')?.hidden===true`, 'keyboard-error-dismissed');
   await click(renderer, '返回', 'keyboard-done');
   await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'keyboard-done-hub');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'keyboard-done-library');
@@ -356,7 +457,7 @@ async function readDrawer(renderer) {
   return renderer.evaluate(`(() => {
     const drawer=document.querySelector('#task-drawer');
     if(!(drawer instanceof HTMLElement))return null;
-    const pairs=(selector,key)=>Object.fromEntries(Array.from(drawer.querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
+    const pairs=(selector,key)=>Object.fromEntries(Array.from((selector.includes('technical') ? document : drawer).querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
     const texts=(selector)=>Array.from(drawer.querySelectorAll(selector)).map((node)=>node.textContent);
     const pill=drawer.querySelector('.task-drawer-pill');
     let stored;
@@ -375,7 +476,7 @@ async function readDrawer(renderer) {
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
       columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'),
-      controls:Object.fromEntries(Array.from(drawer.querySelectorAll('[data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
+      controls:Object.fromEntries(Array.from(document.querySelectorAll('#task-drawer [data-task-drawer-control], [data-technical-collection] [data-task-drawer-control]')).map((node)=>[node.dataset.taskDrawerControl,{text:node.dataset.taskDrawerControl==='close'?node.getAttribute('aria-label'):node.closest('.task-plan-unavailable')?(node.getAttribute('aria-label')??node.textContent):node.textContent,disabled:node instanceof HTMLButtonElement?node.disabled:null,pressed:node.getAttribute('aria-pressed')}])),
       footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       bar:(() => {
         const bar=drawer.querySelector('.task-drawer-bar');
@@ -387,7 +488,7 @@ async function readDrawer(renderer) {
           status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
           actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
             const described=node.getAttribute('aria-describedby');
-            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+            return { name:node.dataset.taskDrawerControl, text:node.getAttribute('aria-label')??node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
           }),
         };
       })(),
@@ -401,20 +502,21 @@ const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen
 
 async function importSample1(renderer, cancellation) {
   await click(renderer, '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'import-relationship-screen');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'import-title-screen');
   at('sample1-import-title');
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, 'import-exact-source');
   await fill(renderer, '#book-title', 'J-03 sample1 任务授权', 'import-title');
   cancellation.throwIfRequested();
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
+  await assertShellFrame(renderer, 'shell-frame-import');
   cancellation.throwIfRequested();
   // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are
   // retained with the file, so its review asks for no Import Degradation Decision.
@@ -458,12 +560,12 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
-  await click(renderer, '保存当前编辑', 'edit-save');
+  await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
-  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
+  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === ${expectedSequence}`, 'edit-sequence');
   await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'edit-return');
   await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'edit-returned');
 }
@@ -789,57 +891,52 @@ async function main() {
     await runSettingsPages(renderer, cancellation);
     const crossBookId = await createEmptyBook(renderer, cancellation);
     at('editorial-book-switcher');
-    // The catalog was empty at startup; opening now must re-read both newly created Books.
-    await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-switcher-pin');
-    await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-switcher-pinned');
-    await assertRenderer(renderer, `(() => { const trigger=document.querySelector('[data-shell-book-switcher]'); trigger.focus(); return document.activeElement===trigger; })()`, 'book-switcher-trigger-focus');
-    await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-current-catalog');
-    await assertRenderer(renderer, `(() => { const ids=Array.from(document.querySelectorAll('[data-shell-picker-book]')).map((n)=>n.dataset.shellPickerBook); return document.querySelector('[data-shell-picker-group="pinned"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(imported.bookId)} && document.querySelector('[data-shell-picker-group="recent"] [data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)} && new Set(ids).size===2 && ids.includes(${JSON.stringify(imported.bookId)}) && ids.includes(${JSON.stringify(crossBookId)}); })()`, 'book-switcher-unique-books');
-    await pressKey(renderer, { ...TAB_KEY, modifiers: 8 }); // CDP Shift
-    await assertRenderer(renderer, `document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-shift-tab-trigger');
-    await pressKey(renderer, ESCAPE_KEY);
-    await assertRenderer(renderer, `document.querySelector('[data-shell-book-picker="panel"]').hidden && document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-trigger-escape');
-    await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2 && document.activeElement?.matches('[data-shell-book-search]')`, 'book-switcher-trigger-reopen');
-    await fill(renderer, '[data-shell-book-search]', 'J-03 路由边界图书', 'book-switcher-filter');
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===1 && document.querySelector('[data-shell-picker-book]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-filtered');
-    await pressKey(renderer, ESCAPE_KEY);
-    await assertRenderer(renderer, `document.querySelector('[data-shell-book-picker="panel"]').hidden && document.activeElement?.matches('[data-shell-book-switcher]')`, 'book-switcher-escape-focus');
-    await pressKey(renderer, ENTER_KEY);
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-reopen-refresh');
-    await clickSelector(renderer, `[data-shell-picker-book="${crossBookId}"]`, 'book-switcher-open-book');
-    await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-switcher-book-route');
-    await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-current-open');
-    await waitFor(renderer, `document.querySelector('[data-shell-picker-book][aria-current="true"]')?.dataset.shellPickerBook===${JSON.stringify(crossBookId)}`, 'book-switcher-current-book');
-    await clickSelector(renderer, '[data-shell-book-library]', 'book-switcher-library');
-    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-switcher-library-route');
+    await assertRenderer(renderer, `(() => { const pin=document.querySelector('[data-nav-pin="${imported.bookId}"]'); if(!pin)return false; pin.focus(); return getComputedStyle(pin).opacity==='1'; })()`, 'book-row-pin-on-focus');
+    await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-row-pin');
+    await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-row-pinned');
+    await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
+    await assertRenderer(renderer, `(() => { const link=document.querySelector('[data-nav-book="${crossBookId}"]'); if(!(link instanceof HTMLAnchorElement))return false; link.click(); return true; })()`, 'book-row-open');
+    await waitFor(renderer, `document.querySelector('.book-overview')?.dataset.bookId===${JSON.stringify(crossBookId)}`, 'book-row-route');
+    await assertRenderer(renderer, `document.querySelector('[data-nav-book][aria-current="true"]')?.dataset.navBook===${JSON.stringify(crossBookId)}`, 'book-row-current');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'book-row-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'book-row-library-route');
 
     cancellation.throwIfRequested();
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'book-reopen');
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-manuscript');
+    await assertShellFrame(renderer, 'shell-frame-manuscript');
+    await assertCardFrames(renderer);
+    for (const section of ['overview', 'analysis', 'review', 'evaluation', 'deliverables']) {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section(section)), `shell-frame-open-${section}`);
+      await waitFor(renderer, `document.querySelector('[data-screen="book-${section}"]')`, `shell-frame-ready-${section}`);
+      await assertShellFrame(renderer, `shell-frame-${section}`);
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'shell-frame-open-knowledge');
+    await waitFor(renderer, `document.querySelector('[data-screen="knowledge-base"]')`, 'shell-frame-ready-knowledge');
+    await assertShellFrame(renderer, 'shell-frame-knowledge');
+    await assertRenderer(renderer, `document.querySelector('#context-title').dataset.contextBook==='false'`, 'shell-global-header-no-book');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'shell-frame-back-manuscript');
+    await waitFor(renderer, `document.querySelector('.editor-window')`, 'shell-frame-back-ready');
     at('editorial-disclosure-motion');
     // A closed native disclosure may hide its content by content-visibility rather than display, so ask checkVisibility().
-    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, closed: details?.open===false, journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: summary?.textContent==='查看技术详情', summaryFocused: summary!==undefined && document.activeElement===summary, persistenceShown: document.querySelector('#persistence-status')?.checkVisibility()===true }; })()`);
+    const closedDisclosure = await renderer.evaluate(`(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); const journal=details?.querySelector('[data-editor-technical]'); const summary=document.querySelector('[data-technical-collection] > summary') ?? details?.querySelector('summary'); summary?.focus(); return { details: details instanceof HTMLDetailsElement, outsideToolbar: details?.closest('.editor-toolbar')===null, closed: (details?.open===false || details?.hidden===true), journal: (journal?.textContent ?? '').startsWith('修订日志序号 ') && Number.isSafeInteger(Number(journal.textContent.slice(7))), journalHidden: journal?.checkVisibility()===false, summary: ['查看技术详情','记录信息'].includes(summary?.textContent), summaryFocused: summary!==undefined && document.activeElement===summary, singletonNotice: document.querySelectorAll('[data-toast]').length===1 }; })()`);
     requireJourney(Object.values(closedDisclosure ?? { missing: false }).every(Boolean), 'journal-disclosure-closed', closedDisclosure);
     await pressKey(renderer, ENTER_KEY);
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').checkVisibility(); })()`, 'journal-disclosure-keyboard-open');
+    await waitFor(renderer, `(() => { const details=document.querySelector('[data-editor-technical-disclosure="journal"]'); return details.open && details.querySelector('[data-editor-technical]').checkVisibility(); })()`, 'journal-disclosure-keyboard-open');
     await pressKey(renderer, ENTER_KEY);
-    await assertRenderer(renderer, `!document.querySelector('[data-editor-technical-disclosure="journal"]').open`, 'journal-disclosure-keyboard-close');
+    await waitFor(renderer, `document.querySelector('[data-editor-technical]')?.checkVisibility()===false`, 'journal-disclosure-keyboard-close');
     // A real width changes between endpoints; do not confuse a transition declaration with visible motion.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    await checkSidebarPrototype(renderer);
     await assertRenderer(renderer, `(async () => { const sidebar=document.querySelector('#app-sidebar'); const toggle=document.querySelector('#sidebar-toggle'); if(!toggle)return false; const before=sidebar.getBoundingClientRect().width; const mode=document.documentElement.dataset.sidebar; toggle.click(); const deadline=Date.now()+3000; while(document.documentElement.dataset.sidebar===mode && Date.now()<deadline)await new Promise((r)=>setTimeout(r,5)); const samples=[]; for(let i=0;i<24;i++){ await new Promise(requestAnimationFrame); samples.push(sidebar.getBoundingClientRect().width); } const after=sidebar.getBoundingClientRect().width; return Math.abs(before-after)>50 && samples.some((middle)=>middle>Math.min(before,after)+1 && middle<Math.max(before,after)-1); })()`, 'sidebar-visible-transition');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await assertRenderer(renderer, `getComputedStyle(document.querySelector('#app-sidebar')).transitionDuration.split(',').every((v)=>parseFloat(v)===0)`, 'sidebar-reduced-motion');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }, { name: 'prefers-reduced-motion', value: 'reduce' }] });
-    await clickSelector(renderer, '[data-shell-book-switcher]', 'book-switcher-narrow-open');
-    await waitFor(renderer, `document.querySelectorAll('[data-shell-picker-book]').length===2`, 'book-switcher-narrow-ready');
-    await assertRenderer(renderer, `(() => { const panel=document.querySelector('[data-shell-book-picker="panel"]'), trigger=document.querySelector('[data-shell-book-switcher]'), editor=document.querySelector('.editor-window'); const box=panel.getBoundingClientRect(); const style=getComputedStyle(panel); return Array.from(panel.querySelectorAll('.shell-book-picker-heading')).every((heading)=>getComputedStyle(heading).position==='static' && heading.getBoundingClientRect().height>5) && trigger.getClientRects().length>0 && box.left>=0 && box.right<=innerWidth+2 && panel.scrollWidth<=panel.clientWidth+2 && document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2 && style.borderStyle!=='none' && style.color!==style.backgroundColor; })()`, 'book-switcher-zoom-forced-colors');
-    await pressKey(renderer, ESCAPE_KEY);
+    await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-nav-book]'), editor=document.querySelector('.editor-window'); return row?.getClientRects().length>0 && document.documentElement.dataset.sidebar==='icons' && editor.clientHeight>120 && editor.scrollWidth<=editor.clientWidth+2; })()`, 'book-row-zoom-forced-colors');
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await renderer.send('Emulation.clearDeviceMetricsOverride');
     await renderer.send('Emulation.setEmulatedMedia', { features: [] });
@@ -911,6 +1008,7 @@ async function main() {
     at('drawer-plan-compact');
     // Preparing opened the plan it froze beside the card, in 精简, with focus on the drawer's title.
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanState==='ready' && document.activeElement?.id==='task-drawer-title'`, 'drawer-opened-on-prepare');
+    await assertShellFrame(renderer, 'shell-frame-task-plan');
     const compact = await readDrawer(renderer);
     const selectedCount = /^已选 ([\d,]+) 字$/u.exec(compact?.chips?.selected ?? '')?.[1];
     requireJourney(compact?.hidden === false && compact.open === 'open' && compact.shell === 'open' && compact.kind === 'fixed-task' &&
@@ -920,11 +1018,11 @@ async function main() {
       JSON.stringify(compact.chips) === JSON.stringify({ book: 'J-03 sample1 任务授权', position: '全书', selected: `已选 ${selectedCount} 字`, revision: '任务输入修订版 r2', procedure: '工序「固定任务」' }) &&
       compact.saved === '已为任务保存修订版 r2，之后的编辑不影响这项任务。' && compact.drift === null &&
       JSON.stringify(compact.rows) === JSON.stringify({
-        处理: `《J-03 sample1 任务授权》全书 · ${selectedCount} 字 · 任务输入修订版 r2`,
-        发送: '本环境不连接模型服务，不会发送任何内容 · 用量：不发送，没有模型用量 · 未设置任务预算上限',
-        会得到: '一条运行记录：只记录这次运行授权，不派发，不产出重点清单',
-        不会: '不会开始运行（只记录） · 不会直接修改稿件 · 不导出或发布 · 不存里程碑版本 · 不读这本书以外的内容',
-        中途: '预计无需中途参与',
+        处理: '只处理任务卡所列范围，不参考其他材料。',
+        发送: '不发送，无模型用量。',
+        会得到: '一条运行记录（不派发）。',
+        不会: '不运行、改稿、导出发布、存里程碑、读书外内容。',
+        中途: '只记录本次授权，无需中途参与。',
       }) &&
       compact.sections.length === 0 && Object.keys(compact.technical).length === 0 &&
       // Synchronized delta with Issue #423 (S77a): `← 任务` leads to the Book's 任务 panel.
@@ -935,6 +1033,15 @@ async function main() {
       compact.controls['full-link']?.text === '完整计划（6 段）' && compact.controls.close?.text === '关闭' &&
       compact.footer === '计划说明，不是运行授权', 'drawer-compact-plan', compact);
 
+    await assertRenderer(renderer, `(() => {
+      const drawer=document.querySelector('#task-drawer'), head=drawer?.querySelector('.task-drawer-head');
+      const rows=Array.from(drawer.querySelectorAll('[data-task-plan-row]'));
+      return head?.children.length===3 && head.children[0].contains(drawer.querySelector('h2')) && head.children[0].contains(drawer.querySelector('.task-drawer-pill')) &&
+        head.children[1].classList.contains('task-drawer-modes') && head.children[2].getAttribute('aria-label')==='关闭' && head.children[2].textContent==='' &&
+        rows.length===5 && rows.every(row=>[...row.textContent].length<=36 && (row.textContent.match(/[。！？]/gu)??[]).length===1) &&
+        [...drawer.querySelector('.task-bar-summary').textContent].length<=40;
+    })()`, 'drawer-prototype-density');
+
     at('drawer-bar-record-only');
     // Issue #420 (S74a): the footer is the authorization bar. It sums the plan up in one line, states what
     // starting decides (AUTH-003), and offers 开始任务 — which here only records, and says so (ADR 0055) —
@@ -942,7 +1049,7 @@ async function main() {
     // `missing`, and this Task's route sends nothing, so the start needs none: it is offered all the same.
     requireJourney(missingConnection?.credentialOperationState === 'missing' && compact.bar !== null &&
       compact.bar.state === 'record-only' && compact.bar.start === 'record-only' &&
-      compact.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
+      compact.bar.summary === '产出一条运行记录（不派发），不修改稿件。' &&
       compact.bar.statement === '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定' &&
       compact.bar.note === '此任务只记录运行，不会派发' && compact.bar.status === null && compact.bar.refusal === null &&
       JSON.stringify(compact.bar.actions) === JSON.stringify([
@@ -972,7 +1079,7 @@ async function main() {
     const full = await readDrawer(renderer);
     requireJourney(full?.stored === 'full' && full.controls['mode-full']?.pressed === 'true' && full.controls['mode-compact']?.pressed === 'false' &&
       JSON.stringify(full.sections) === JSON.stringify(['1要做什么 · 会得到什么', '2处理哪些内容 · 参考什么', '3怎么做', '4你会参与的地方', '5预计与限制', '6会得到 / 不会做']) &&
-      full.terms['做什么'] === TASK_GOAL && full.terms['要处理'] === compact.rows['处理'] && full.terms['允许参考'] === '不参考其他材料' &&
+      full.terms['做什么'] === TASK_GOAL && full.terms['要处理'] === `《J-03 sample1 任务授权》全书 · ${selectedCount} 字 · 任务输入修订版 r2` && full.terms['允许参考'] === '不参考其他材料' &&
       full.terms['可能发送'] === '不发送任何内容' && full.terms['不会读'] === '其他图书；来源材料（来源版本仅作血缘证据，不属于可读范围）' &&
       JSON.stringify(full.steps) === JSON.stringify(['准备任务输入 → 任务输入修订版 r2', '记录运行（不派发） → 运行记录']) &&
       JSON.stringify(full.participation) === JSON.stringify(['预计无需中途参与']) &&
@@ -987,7 +1094,7 @@ async function main() {
       JSON.stringify(full.adaptable) === JSON.stringify(['无']) &&
       JSON.stringify(full.askFirst) === JSON.stringify(['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作']) &&
       full.controls['default-rule']?.text === '设为快速开始默认…' && full.controls['default-rule'].disabled === true &&
-      full.controls.technical?.text === '查看技术详情' && full.footer === '计划说明，不是运行授权', 'drawer-full-plan', full);
+      ['查看技术详情', '记录信息'].includes(full.controls.technical?.text) && full.footer === '计划说明，不是运行授权', 'drawer-full-plan', full);
     const technical = full.technical;
     requireJourney(technical['task-intent'] === prepared.taskIntent.taskIntentId &&
       technical['task-input-revision'] === `r2 · ${prepared.checkpoint.revisionId} · ${prepared.checkpoint.revisionDigest}` &&
@@ -1029,7 +1136,7 @@ async function main() {
     // At 1120 px and wider the page makes room for the drawer, which is a column beside it; below, the
     // drawer lies over the page and the page keeps its width (editor-surfaces §0.3).
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1180, height: 820, deviceScaleFactor: 1, mobile: false });
-    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('#persistence-status'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && status.getBoundingClientRect().right<=box.left+0.5; })()`, 'drawer-push-column');
+    await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); const status=document.querySelector('[data-toast]'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page||!status)return false; const box=drawer.getBoundingClientRect(); const viewport=document.documentElement; return innerWidth===1180 && Math.abs(box.width-500)<=1 && Math.abs(box.right-viewport.clientWidth)<=1 && box.top<=0.5 && box.bottom>=viewport.clientHeight-0.5 && Math.abs(parseFloat(getComputedStyle(document.body).paddingRight)-box.width)<=1 && page.getBoundingClientRect().right<=box.left+0.5 && document.querySelectorAll('[data-toast]').length===1; })()`, 'drawer-push-column');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1000, height: 820, deviceScaleFactor: 1, mobile: false });
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const page=document.querySelector('#screen'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!page)return false; const box=drawer.getBoundingClientRect(); return innerWidth===1000 && getComputedStyle(document.body).paddingRight==='0px' && getComputedStyle(drawer).position==='fixed' && page.getBoundingClientRect().right>box.left+100 && box.width<=document.documentElement.clientWidth; })()`, 'drawer-overlay-below-1120');
     await renderer.send('Emulation.clearDeviceMetricsOverride');
@@ -1041,7 +1148,7 @@ async function main() {
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('#task-drawer details.task-plan-technical'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return true; })()`, 'drawer-technical-open');
+    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.task-plan-technical'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; const page=document.querySelector('[data-technical-collection]'); if(page)page.open=true; return true; })()`, 'drawer-technical-open');
     // Synchronized delta with Issue #420 (S74a): the authorization bar wraps inside the footer too.
     await waitFor(renderer, `(() => { const drawer=document.querySelector('#task-drawer'); const body=drawer?.querySelector('.task-drawer-body'); const head=drawer?.querySelector('.task-drawer-head'); const foot=drawer?.querySelector('.task-drawer-foot'); if(!(drawer instanceof HTMLElement)||drawer.hidden||!body||!head||!(foot instanceof HTMLElement)||!foot.querySelector('[data-task-drawer-control="start"]'))return false; const viewport=document.documentElement; return viewport.scrollWidth<=viewport.clientWidth+2 && body.scrollWidth<=body.clientWidth+2 && head.scrollWidth<=head.clientWidth+2 && foot.scrollWidth<=foot.clientWidth+2 && drawer.getBoundingClientRect().width<=viewport.clientWidth && getComputedStyle(document.body).paddingRight==='0px'; })()`, 'drawer-zoom-reflow');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
@@ -1118,7 +1225,7 @@ async function main() {
       recordedDrawer.technical['run-record']?.startsWith(`${authorized.runRecord.runRecordId} · recorded-not-dispatched · `) &&
       recordedDrawer.technical['plan-envelope'] === authorized.planEnvelope.digest && recordedDrawer.footer === '计划说明，不是运行授权' &&
       recordedDrawer.bar?.state === 'started' && recordedDrawer.bar.status === '已记录（不派发）' && recordedDrawer.bar.statement === null &&
-      recordedDrawer.bar.note === null && recordedDrawer.bar.summary === '《J-03 sample1 任务授权》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：一条运行记录（不派发） · 不改稿' &&
+      recordedDrawer.bar.note === null && recordedDrawer.bar.summary === '产出一条运行记录（不派发），不修改稿件。' &&
       JSON.stringify(recordedDrawer.bar.actions) === JSON.stringify([{ name: 'run-link', text: '查看运行记录', disabled: false, reason: null }]),
     'drawer-recorded-plan', recordedDrawer);
     await assertRenderer(renderer, `!document.querySelector('#task-drawer [data-task-authorization-action]') && Array.from(document.querySelectorAll('#task-drawer button')).filter((button)=>!button.disabled).map((button)=>button.dataset.taskDrawerControl).sort().join(',')==='close,mode-compact,mode-full,run-link,tasks' && document.activeElement?.dataset.taskDrawerControl==='run-link' && ${AUTHORIZE_LABELED_BUTTONS}===0`, 'drawer-records-nothing');

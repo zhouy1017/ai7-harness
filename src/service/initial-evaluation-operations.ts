@@ -143,17 +143,19 @@ export function startEvaluation(host: InitialEvaluationOperationsHost, bookId: s
 
 export function internalWithEvaluationMaterials(host: InitialEvaluationOperationsHost, page: EvaluationWorkspaceProjection): EvaluationWorkspaceProjection {
   // Only a plan not yet started can be refused for a reference that went away; a started one read it as it was.
-  const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean } => {
+  const frozenOf = (task: { taskIntentId: string; state: string } | null): { lines: string[]; blocked: boolean; materialIds: string[] } => {
     const frozen = task === null ? null : internalEvaluationMaterialPlan(host, task.taskIntentId);
-    if (frozen === null) return { lines: [], blocked: false };
+    if (frozen === null) return { lines: [], blocked: false, materialIds: [] };
     const readings = host.taskMaterialReadings(frozen.boundary, '评估')
       .map((reading) => task!.state === 'prepared' ? reading : taskMaterialSettled(reading));
-    return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null) };
+    return { lines: readings.map(taskMaterialReferenceLine), blocked: readings.some((reading) => reading.refusal !== null), materialIds: frozen.boundary.references.map((source) => source.materialId) };
   };
   const initial = frozenOf(page.initial.task);
   const readersReport = frozenOf(page.readersReport.task);
   return { ...page, materials: host.taskMaterialOffers(page.bookId, '评估'), materialReferences: {
     initial: initial.lines, readersReport: readersReport.lines, blocked: { initial: initial.blocked, readersReport: readersReport.blocked },
+    initialInput: { materialIds: initial.materialIds, seriesId: page.initial.task === null ? null : host.initialEvaluationLedgerForBook(page.bookId).definition.seriesScopes?.[0]?.seriesId ?? null },
+    readersReportInput: { materialIds: readersReport.materialIds },
   } };
 }
 

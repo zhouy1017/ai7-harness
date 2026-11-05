@@ -193,7 +193,7 @@ export const TYPOGRAPHY_BOUNDS = Object.freeze({
 
 /** The two presets' starting values (VIEW-005: a Chinese serif around 17 px, line height 1.9–2.0, 30–38 characters a line). */
 export const READING_PRESETS: Readonly<Record<ReadingPreset, Omit<ManuscriptTypography, 'preset'>>> = Object.freeze({
-  editing: Object.freeze({ fontFamily: 'serif', fontSize: 17, lineHeight: 1.9, columnWidth: 38, alignment: 'start' }),
+  editing: Object.freeze({ fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' }),
   reading: Object.freeze({ fontFamily: 'serif', fontSize: 18, lineHeight: 2, columnWidth: 32, alignment: 'justify' }),
 });
 
@@ -213,7 +213,7 @@ export interface LayoutRegions {
 /** Safe minimum and maximum of each resizable region (VIEW-007), the keyboard step, and the size a first drag starts from. */
 export const REGION_BOUNDS = Object.freeze({
   supportingWidth: Object.freeze({ min: 256, max: 560, step: 16, initial: 336 }),
-  drawerWidth: Object.freeze({ min: 320, max: 640, step: 16, initial: 416 }),
+  drawerWidth: Object.freeze({ min: 420, max: 600, step: 16, initial: 500 }),
 });
 
 export const DEFAULT_LAYOUT_REGIONS: LayoutRegions = Object.freeze({ supportingWidth: null, drawerWidth: null, hidden: Object.freeze([]) });
@@ -280,7 +280,39 @@ export async function readSampleGuidance(isSample: boolean, state: OnboardingSta
 }
 
 export type LearningAskFrequency = 'often' | 'occasionally' | 'off';
+/** Non-disposition input defaults only: these never authorize a task or retain editorial text. */
+export interface QuickActionDefaults {
+  importBookId: string | null;
+  importRelationship: 'first-manuscript' | 'source-only';
+  reviewCategories: string[];
+  reviewScope: 'whole' | 'chapters' | 'changed' | 'selection';
+  reviewFrom: string | null;
+  reviewTo: string | null;
+  taskBooks: string[];
+  taskProcedure: string;
+  exportFormat: 'docx' | 'pdf' | 'markdown';
+  includeAnnotations: boolean;
+  includeSuggestions: boolean;
+  includeEditorNotes: boolean;
+}
+export const DEFAULT_QUICK_ACTIONS: QuickActionDefaults = Object.freeze({
+  importBookId: null, importRelationship: 'first-manuscript', reviewCategories: ['typos-and-usage'],
+  reviewScope: 'whole', reviewFrom: null, reviewTo: null, taskBooks: [], taskProcedure: 'baseline-analysis',
+  exportFormat: 'docx', includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false,
+});
+function isQuickActionDefaults(value: unknown): value is QuickActionDefaults {
+  if (!isPlainObject(value) || Object.keys(value).sort().join() !== Object.keys(DEFAULT_QUICK_ACTIONS).sort().join()) return false;
+  const id = (item: unknown): item is string => typeof item === 'string' && /^[a-zA-Z0-9_.:@-]{1,160}$/u.test(item);
+  const optional = (item: unknown): boolean => item === null || id(item);
+  const ids = (items: unknown): boolean => Array.isArray(items) && items.length <= 100 && items.every(id);
+  return optional(value['importBookId']) && ['first-manuscript', 'source-only'].includes(String(value['importRelationship'])) &&
+    ids(value['reviewCategories']) && ['whole', 'chapters', 'changed', 'selection'].includes(String(value['reviewScope'])) &&
+    optional(value['reviewFrom']) && optional(value['reviewTo']) && ids(value['taskBooks']) && id(value['taskProcedure']) &&
+    ['docx', 'pdf', 'markdown'].includes(String(value['exportFormat'])) &&
+    ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes'].every((key) => typeof value[key] === 'boolean');
+}
 export const PREFERENCE_KEYS = Object.freeze({
+  'actions.defaults': preference(isQuickActionDefaults, DEFAULT_QUICK_ACTIONS),
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
   'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
   // 11a: the sidebar shows icons only while collapsed (IA-010); remembered across sessions.
@@ -381,7 +413,12 @@ export function readPreferenceEnvelope(stored: unknown): { values: PreferenceVal
   let damaged = Object.keys(held).some((key) => !isPreferenceKey(key));
   for (const [key, definition] of Object.entries(PREFERENCE_KEYS) as Array<[PreferenceKey, PreferenceDefinition<unknown>]>) {
     if (!Object.hasOwn(held, key)) continue;
-    if (definition.validate(held[key])) values[key] = held[key];
+    let value = held[key];
+    // Earlier releases admitted 320–640px. Preserve the rest of a saved layout when narrowing the drawer range.
+    if (key === 'layout.regions' && isPlainObject(value) && within(value['drawerWidth'], { min: 320, max: 640 }) && Number.isInteger(value['drawerWidth'])) {
+      value = { ...value, drawerWidth: Math.max(REGION_BOUNDS.drawerWidth.min, Math.min(REGION_BOUNDS.drawerWidth.max, value['drawerWidth'])) };
+    }
+    if (definition.validate(value)) values[key] = value;
     else damaged = true;
   }
   return { values: values as unknown as PreferenceValues, damaged };

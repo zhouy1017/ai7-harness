@@ -14,7 +14,7 @@ export interface SearchBackendConnectionProjection {
 }
 
 /** The closed candidate identifiers a probe request may name; anything else is refused at the frame. */
-export const SEARCH_CANDIDATE_IDS = ['deepseek-direct-search-v1'] as const;
+export const SEARCH_CANDIDATE_IDS = ['deepseek-direct-search-v1', 'openai-native-search-v1', 'anthropic-native-search-v1'] as const;
 export type SearchCandidateId = (typeof SEARCH_CANDIDATE_IDS)[number];
 
 export interface SearchBackendCandidateProjection {
@@ -24,11 +24,11 @@ export interface SearchBackendCandidateProjection {
   name: string;
   measurement: 'not-measured';
   endpoint: string;
-  protocol: 'deepseek-direct-search';
+  protocol: 'deepseek-direct-search' | 'openai-responses-web-search' | 'anthropic-messages-web-search';
   /** The candidate's own digest; the legacy backend's digest excludes its namespace. */
   configurationDigest: string;
   /** Declared, not measured: the vendor documents both; neither serves a Task in this build. */
-  capabilities: { search: true; fetch: true };
+  capabilities: { search: true; fetch: boolean };
   selectable: false;
   price: string;
   /** Plain-language disclosure lines, shown before the connection test. */
@@ -48,10 +48,12 @@ export interface FrozenWebToolsFallback {
 }
 
 /** Choose the default backend, or (Issue #1226) with `role: 'fallback'` the one 备用来源 — `null` clears it. */
-export type SearchBackendSelectionInput = { backendId: string; role?: undefined } | { backendId: string | null; role: 'fallback' };
+export type SearchBackendSelectionInput = { backendId: string; role?: undefined; alwaysUseSelectedBackend?: boolean } | { backendId: string | null; role: 'fallback'; alwaysUseSelectedBackend?: never };
 
 export interface SearchBackendSettingsProjection {
   selectedBackendId: string;
+  /** Default off: prefer the configured backend over a ready native model channel. */
+  alwaysUseSelectedBackend?: boolean;
   /** The one 备用来源 a Plan freezes beside the default (Issue #1226), or `null`; never the default itself. */
   fallbackBackendId: string | null;
   backends: ReadonlyArray<{
@@ -89,7 +91,7 @@ export interface SearchBackendProbeProjection {
   candidate?: {
     candidateId: SearchCandidateId;
     endpoint: string;
-    protocol: 'deepseek-direct-search';
+    protocol: SearchBackendCandidateProjection['protocol'];
     configurationDigest: string;
     outcome: SearchCandidateProbeOutcome;
     httpStatus: number | null;
@@ -107,9 +109,9 @@ export interface SearchConnectionTestPolicy {
   readonly candidateId: string;
   readonly endpoint: string;
   readonly method: 'POST';
-  readonly protocol: 'deepseek-direct-search';
+  readonly protocol: SearchBackendCandidateProjection['protocol'];
   readonly credentialSlot: string;
-  readonly headerForm: 'authorization-bearer';
+  readonly headerForm: 'authorization-bearer' | 'x-api-key' | 'x-subscription-token';
   readonly arguments: { readonly query: string; readonly count: number; readonly need_content: false };
   readonly argumentsCanonicalSha256: string;
   readonly maximumRequests: 1;

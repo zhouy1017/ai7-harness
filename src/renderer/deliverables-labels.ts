@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import { actualsLine } from './evaluation-calibration-labels.js';
 import {
   MAX_PUBLICATION_BASIS_CHARACTERS,
@@ -33,7 +34,7 @@ export const DELIVERABLES_UNAVAILABLE = '无法读取这本书的交付物。';
 export const DELIVERABLES_DESTINATION_ACTIONS = ['打开稿件', '工作概览'] as const;
 
 export const MILESTONE_LIST_HEADING = '里程碑版本';
-export const MILESTONE_LIST_EMPTY = '还没有里程碑版本。在稿件的导航面板里「保存为里程碑版本」后，会列在这里。';
+export const MILESTONE_LIST_EMPTY = '还没有里程碑版本，可在稿件导航面板中保存。';
 export const PUBLICATION_HISTORY_HEADING = '设为发稿版本的记录';
 export const PUBLICATION_HISTORY_EMPTY = '还没有设为发稿版本。';
 /** The newest designation in the history is the Book's current 发稿版本; the older ones stay as they were. */
@@ -124,17 +125,17 @@ export function publicationDesignateReason(blockers: ReadonlyArray<string>): str
 
 /** A milestone as the form offers it: its purpose, its exact version and when it was saved. */
 export function publicationMilestoneOptionLine(item: Pick<MilestoneListItemProjection, 'purposeLabel' | 'revisionLabel'>, savedAt: string): string {
-  return `用途：${item.purposeLabel} · 修订版 ${item.revisionLabel} · ${savedAt} 保存`;
+  return `用途：${item.purposeLabel} · 修订版${technicalWords(` ${item.revisionLabel}`)} · ${savedAt} 保存`;
 }
 
 /** 里程碑版本 in the summary: the exact label and version, and when it was saved. */
 export function publicationSummaryMilestone(item: Pick<MilestoneListItemProjection, 'label' | 'revisionLabel'>, savedAt: string): string {
-  return `「${item.label}」 · ${item.revisionLabel} · ${savedAt} 保存`;
+  return `「${item.label}」 · ${technicalWords(item.revisionLabel, '修订版')} · ${savedAt} 保存`;
 }
 
 /** 稿件 in the summary: the Deliverable is the Book's primary Manuscript, read as it stands now. */
 export function publicationSummaryManuscript(manuscript: NonNullable<DeliverablesProjection['manuscript']>): string {
-  return `${PUBLICATION_SUMMARY_DELIVERABLE} · 当前修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`;
+  return technicalWords(`${PUBLICATION_SUMMARY_DELIVERABLE} · 当前修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`, '主稿件');
 }
 
 /** 与当前稿件: the current-versus-selected relationship (PUB-004), in the milestone's own words when it changed. */
@@ -148,7 +149,7 @@ export function milestoneRelationLine(item: Pick<MilestoneListItemProjection, 'c
 export function deliverablesManuscriptLine(manuscript: DeliverablesProjection['manuscript']): string {
   return manuscript === null
     ? '这本书还没有稿件；导入稿件后才能保存里程碑版本。'
-    : `当前稿件：修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`;
+    : technicalWords(`当前稿件：修订版 ${manuscript.revisionLabel} · 修订日志序号 ${manuscript.journalSequence}`, '当前稿件');
 }
 
 export function milestoneLabelText(label: string): string {
@@ -157,7 +158,7 @@ export function milestoneLabelText(label: string): string {
 
 /** One listed milestone's purpose, exact version, actor and time (V2-UX-MILE-008). */
 export function milestoneMetaLine(item: Pick<MilestoneListItemProjection, 'purposeLabel' | 'revisionLabel' | 'actor'>, savedAt: string): string {
-  return `用途：${item.purposeLabel} · 修订版 ${item.revisionLabel} · ${item.actor} · ${savedAt}`;
+  return `用途：${item.purposeLabel}${technicalWords(` · 修订版 ${item.revisionLabel}`)} · ${item.actor} · ${savedAt}`;
 }
 
 export function milestoneNoteLine(note: string): string {
@@ -170,7 +171,7 @@ export function milestonesTruncatedLine(listed: number): string {
 
 /** 第 N 次 设为发稿版本: the exact milestone and version it designated, which never moves (PUB-007). */
 export function publicationVersionHeading(item: Pick<PublicationVersionProjection, 'ordinal' | 'milestoneLabel' | 'revisionLabel'>): string {
-  return `第 ${item.ordinal} 次设为发稿版本 · 「${item.milestoneLabel}」 · ${item.revisionLabel}`;
+  return `第 ${item.ordinal} 次设为发稿版本 · 「${item.milestoneLabel}」 · ${technicalWords(item.revisionLabel, '修订版')}`;
 }
 
 export function publicationScopeLine(scope: string): string {
@@ -194,7 +195,7 @@ export function publicationsTruncatedLine(listed: number): string {
  * designation keeps its version, and a newer one is a separate designation of a new milestone (PUB-007).
  */
 export function publicationChangeNoticeDetail(notice: NonNullable<DeliverablesProjection['publication']['changeNotice']>): string {
-  return `发稿版本定在 ${notice.revisionLabel}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`;
+  return `发稿版本定在 ${technicalWords(notice.revisionLabel, '修订版')}，稿件此后有修改。这一版保持不变；需要时先保存新的里程碑版本，再另设发稿版本。`;
 }
 
 /**
@@ -228,7 +229,7 @@ export function deliverablesOverviewLine(projection: Pick<DeliverablesProjection
   const current = publication.designations.find((designation) => designation.current) ?? null;
   const designation = current === null
     ? '还没有设为发稿版本'
-    : `发稿版本「${current.milestoneLabel}」 · ${current.revisionLabel} · ${current.scope}`;
+    : `发稿版本「${current.milestoneLabel}」${technicalWords(` · ${current.revisionLabel}`)} · ${current.scope}`;
   const notice = publication.changeNotice === null ? '' : ` · ${PUBLICATION_CHANGE_NOTICE}`;
   return `发稿 · ${milestones} · ${designation}${notice}`;
 }
@@ -281,11 +282,11 @@ export const MILESTONE_FORM_WORDS = {
   label: '标签',
   purpose: '用途',
   customPurpose: '自行输入的用途',
-  note: '说明（可选）',
+  note: '说明 · 可选',
   save: '保存里程碑版本',
 } as const;
 /** V2-UX-MILE-009: a purpose states the intended next use only and grants nothing. */
-export const MILESTONE_PURPOSE_NOTE = '用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。';
+export const MILESTONE_PURPOSE_NOTE = '说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。';
 
 /** What saving a milestone still needs: a label, a purpose, and the editor's words for 自行输入. */
 export function milestoneFormBlockers(state: { label: string; purposeKind: MilestonePurposeKind | null; customWords: string }): string[] {

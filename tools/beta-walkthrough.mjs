@@ -279,7 +279,7 @@ async function preparePortableCarry(executable,env,dataRoot,input){
   }
   if(!report.portableCarry?.restored){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.portablePriorBook.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'portable-prior-book-survives-upgrade');
-   check(await page.evaluate("window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))"),'portable-own-upgrade-history');
+   check(await page.evaluate("window.ai7.inspectDataVersion().then(v=>v.schemaRevision===108&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))"),'portable-own-upgrade-history');
    await select(page,'#app-sidebar [data-nav-settings]');await click(page,'数据与存储');
    await ready(page,"document.querySelector('.data-storage-summary')",'portable-initial-storage');
    check(await page.evaluate(`document.querySelector('[data-product-data-root]')?.textContent===${JSON.stringify(dataRoot)}`),'portable-separate-data-before-restore');
@@ -424,7 +424,7 @@ async function walk(executable,env,expectedChannel,expectedDataRoot,input,output
   }else{
   if(expectedChannel==='windows-installer'){
    check(await page.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(report.priorBook?.bookId)},historyCursor:null}).then(v=>v.manuscriptState.state==='populated')`),'prior-book-survives-upgrade');
-   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))`),'upgrade-history-and-schema');
+   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===108&&v.history.some(h=>h.softwareVersion==='0.4.1')&&v.history.some(h=>h.softwareVersion==='0.5.0'))`),'upgrade-history-and-schema');
   }
   // The application presents the real six channel choices; no synthetic credential is installed.
   await select(page,'#app-sidebar [data-nav-settings]');await ready(page,"document.querySelector('[data-screen=settings]')",'settings');
@@ -871,7 +871,7 @@ async function searchSmoke(){
     await ready(page,"(()=>{const expected=__ai7PackagedSearch.return,s=getSelection(),pane=document.querySelector('.editor-window'),block=document.querySelector('[data-block-id=\"'+expected.scrollBlockId+'\"]');return document.querySelector('.editor-meta').textContent===expected.meta&&s.anchorNode?.parentElement?.closest('[data-block-id]')?.dataset.blockId===expected.blockId&&s.anchorOffset===4&&s.focusOffset===1&&s.toString()===expected.text&&block&&Math.abs(block.getBoundingClientRect().top-pane.getBoundingClientRect().top-expected.scrollOffset)<=3})()",'search-exact-return');
     check(true,channel+'-search-exact-return-'+iteration);
    }
-   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===107&&v.dataVersion===1)`),channel+'-search-retained-store-readable');
+   check(await page.evaluate(`window.ai7.inspectDataVersion().then(v=>v.schemaRevision===108&&v.dataVersion===1)`),channel+'-search-retained-store-readable');
   }finally{await browser?.close();}
   const after=countAttempts();check(JSON.stringify(after)===JSON.stringify(before),channel+'-search-no-new-execution-attempts');report.channels.push({channel,bookId,iterations:3,executionAttemptsBefore:before,executionAttemptsAfter:after});checkpoint();
  }

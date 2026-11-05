@@ -3,7 +3,7 @@ import { CONTEXT_WINDOW_EXCEEDED_CODE, INVALID_CREDENTIAL_CODE, QUOTA_EXCEEDED_C
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BASELINE_PROMPT_CONTRACT_DIGEST } from '../../src/service/analysis/contract.js';
+import { BASELINE_PROMPT_CONTRACT_DIGEST, BASELINE_UNIT_RESULT_SCHEMA, parseUnitResult } from '../../src/service/analysis/contract.js';
 import { DIALOGUE_PROMPT_CONTRACT, DIALOGUE_PROMPT_CONTRACT_DIGEST, buildDialogueMessage } from '../../src/service/dialogue/contract.js';
 import { modelServiceChannels, productionBindingRefusal } from '../../src/service/launch-policy.js';
 import { AI7_FAILURE_CODES } from '../../src/service/provider/classification.js';
@@ -12,9 +12,10 @@ import { DeepSeekOpenAiCompatibleAdapter, PROVIDER_ROUTE_PROFILES, assembleProvi
 import { modelDisposition, providerPreflight, type ModelAspect } from '../../src/service/provider/family-dispositions.js';
 import { PROVIDER_MODEL_PROFILES, modelProfileFor, type ModelCapabilities, type ProviderModelProfile } from '../../src/service/provider/model-profile.js';
 import { GENERATED_FAMILY_DISPOSITIONS, GENERATED_ROUTE_DISPOSITIONS } from '../../src/service/provider/provider-profiles.generated.js';
-import { normalizeModelResponse } from '../../src/service/provider/response-normalization.js';
+import { normalizeModelResponse, withProviderResponseSalvage } from '../../src/service/provider/response-normalization.js';
 import { CONFIGURED_RUNTIME_MODEL_TABLE, type ConfiguredRouteId } from '../../src/shared/provider-configuration.generated.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { prepareExecution } from '../../src/service/harness/primary-agent-harness.js';
 
 /**
  * Capability dispositions and the named preflight refusal (Issue #1180), cancellation and the stream boundaries each family
@@ -187,7 +188,7 @@ describe('cancellation per family', () => {
         chunks.push(chunk);
         if (chunk.type === 'text-delta') controller.abort();
       }
-      expect(chunks.map((chunk) => chunk.type), row.family).toEqual(['block-start', 'text-delta', 'finish']);
+      expect(chunks.map((chunk) => chunk.type), row.family).toEqual(['block-start', 'text-delta', 'block-end', 'finish']);
       expect(failureOf(chunks)?.code, row.family).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
       expect(touched.transport, row.family).toBe(1);
       expect(adapter.lastRequestNotSent, row.family).toBe(false);
@@ -196,6 +197,42 @@ describe('cancellation per family', () => {
 });
 
 describe('stream boundaries per family', () => {
+  it('keeps a valid Messages tool call beside malformed content siblings (#1311)', () => {
+    const model = declared(ROWS[1]);
+    expect(normalizeModelResponse(model, { stop_reason: 'tool_use', content: [null, { type: 'tool_use', id: 'valid', name: TOOL.name, input: {} }] },
+      { toolCallsOffered: true, offeredToolNames: [TOOL.name] }))
+      .toMatchObject({ kind: 'tool-calls', calls: [{ id: 'valid', name: TOOL.name, arguments: '{}' }], salvaged: [{ section: 'content', index: 0, reason: 'content-block-rejected' }] });
+  });
+  const partial = `{"schema":"${BASELINE_UNIT_RESULT_SCHEMA}","unitOrdinal":1,"entities":[{"name":"合成实体","kind":"person"},{"name":"未完`;
+  const frame = (body: unknown): string => `data: ${JSON.stringify(body)}\n\n`;
+  const truncatedStreams = [
+    { route: 'deepseek-open-platform', family: 'chat-completions', frames: [frame({ choices: [{ delta: { content: partial }, finish_reason: 'length' }] }), 'data: [DONE]\n\n'] },
+    { route: ROWS[0].route, family: 'responses', frames: [frame({ type: 'response.output_text.delta', delta: partial }), frame({ type: 'response.incomplete', response: { status: 'incomplete', output_text: partial } })] },
+    { route: ROWS[1].route, family: 'messages', frames: [frame({ type: 'message_start', message: {} }), frame({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: partial } }), frame({ type: 'message_delta', delta: { stop_reason: 'max_tokens' } }), frame({ type: 'message_stop' })] },
+    { route: ROWS[2].route, family: 'gemini', frames: [frame({ candidates: [{ content: { parts: [{ text: partial }] }, finishReason: 'MAX_TOKENS' }] })] },
+  ] as const;
+  it.each(truncatedStreams)('passes truncated $family text through the real harness to partial parsing (#1311)', async (row) => {
+    const model = modelProfileFor(row.route, 'account-new-model')!;
+    const { adapter, touched } = harness(model, async () => sse(row.frames), true);
+    const handle = await prepareExecution({ sessionId: crypto.randomUUID(), route: row.route, model: model.model,
+      systemPrompt: DIALOGUE_PROMPT_CONTRACT.systemPrompt, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST,
+      adapterFactory: () => adapter, gate: () => ({ decision: 'transmit-local', payloadDigest: 'b'.repeat(64) }), onTransmitTicket: () => undefined });
+    try {
+      handle.bindExecution({ harnessSessionId: handle.sessionId, behaviorCompositionDigest: handle.composition.digest, promptContractDigest: DIALOGUE_PROMPT_CONTRACT_DIGEST });
+      const turn = await handle.submitUnit(buildDialogueMessage({ kind: 'ask', selection: '合成段落。', question: '合成问题？', kept: null }));
+      expect(turn.terminal, JSON.stringify(turn.signals)).toBe('completed');
+      const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
+      expect(candidate?.kind).toBe('contentCandidate');
+      if (candidate?.kind !== 'contentCandidate') throw new Error('No parser candidate');
+      const parsed = withProviderResponseSalvage(parseUnitResult(candidate.text, { unitOrdinal: 1, blockIds: [] }), adapter.lastCanonicalResult);
+      expect(parsed).toMatchObject({ ok: true, result: { entities: [{ name: '合成实体' }], salvaged: expect.arrayContaining([
+        { section: 'response', index: -1, reason: 'truncated-json' }, { section: 'response', index: 0, reason: 'truncated' },
+      ]) } });
+      expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', truncated: true, salvaged: expect.arrayContaining([{ section: 'response', index: 0, reason: 'truncated' }]) });
+      expect(touched.transport).toBe(1);
+    } finally { await handle.finish(); }
+  });
+
   it('reads a stream without its terminal proof as outcome-unknown, for every family', async () => {
     const truncated: Record<(typeof ROWS)[number]['family'], ReadonlyArray<string>> = {
       'openai-responses': frames('openai-responses', 'text-stream').slice(0, -1),
@@ -206,17 +243,20 @@ describe('stream boundaries per family', () => {
     for (const row of ROWS) {
       const { adapter } = harness(declared(row), async () => sse(truncated[row.family]), true);
       expect(failureOf(await collect(adapter.stream(dialogue(declared(row)))))?.code, row.family).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
-      expect(adapter.lastCanonicalResult, row.family).toBeNull();
+      expect(adapter.lastCanonicalResult, row.family).toMatchObject({ kind: 'answer', truncated: true });
     }
   });
 
-  it('refuses a Responses stream whose completed text differs from its deltas, and a Messages call whose arguments do not parse', async () => {
+  it('uses completed Responses text and rejects only unreadable Messages calls', async () => {
     const responses = frames('openai-responses', 'text-stream').map((frame) => frame.replace('"delta":"回答。"', '"delta":"别的。"'));
-    const messages = frames('anthropic-messages', 'tool-stream').map((frame) => frame.replace('"partial_json":"\\"合成\\"}"', '"partial_json":"\\"合成"'));
-    for (const [row, wire] of [[ROWS[0], responses], [ROWS[1], messages]] as const) {
-      const { adapter } = harness(declared(row), async () => sse(wire), true);
-      expect(failureOf(await collect(adapter.stream(dialogue(declared(row)))))?.code, row.family).toBe(AI7_FAILURE_CODES.OUTCOME_UNKNOWN);
-    }
+    const { adapter } = harness(declared(ROWS[0]), async () => sse(responses), true);
+    const chunks = await collect(adapter.stream(dialogue(declared(ROWS[0]))));
+    expect(failureOf(chunks)).toBeNull();
+    expect(adapter.lastCanonicalResult).toMatchObject({ kind: 'answer', text: '合成回答。', salvaged: [{ reason: 'completed-text-differs-from-stream' }] });
+    const messages = frames('anthropic-messages', 'tool-stream').map((frame) => frame.replace('"partial_json":"\\\"合成\\\"}"', '"partial_json":"\\\"合成"'));
+    const other = harness(declared(ROWS[1]), async () => sse(messages), true).adapter;
+    const result = await collect(other.stream(dialogue(declared(ROWS[1]))));
+    expect(result.some((chunk) => chunk.type === 'tool-call-delta')).toBe(false);
   });
 
   it('reads an in-stream account limit as the account limit, after text or before it, on every family that names one', async () => {
@@ -237,19 +277,15 @@ describe('Gemini function calls (Issue #1180)', () => {
   const offered = { toolCallsOffered: true, offeredToolNames: [TOOL.name], callIdSeed: '0123456789abcdef' };
   const body = (parts: unknown[], finishReason = 'STOP') => ({ candidates: [{ content: { role: 'model', parts }, finishReason }] });
 
-  it('refuses opaque reasoning, an unoffered name, a non-object argument and an unfinished turn as malformed', () => {
-    for (const parts of [
-      [{ functionCall: { name: TOOL.name, args: {} }, thoughtSignature: 'opaque' }],
-      [{ text: '合成推理', thought: true }, { functionCall: { name: TOOL.name, args: {} } }],
-      [{ functionCall: { name: 'unoffered', args: {} } }],
-      [{ functionCall: { name: TOOL.name, args: [] } }],
-      [{ functionCall: { name: TOOL.name, args: {} } }, { text: '调用之后的文字' }],
-    ]) expect(normalizeModelResponse(gemini, body(parts), offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    expect(normalizeModelResponse(gemini, body([{ functionCall: { name: TOOL.name } }], 'MAX_TOKENS'), offered)).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    // A call without the provider's id cannot be named without the request's seed.
-    expect(normalizeModelResponse(gemini, body([{ functionCall: { name: TOOL.name } }]), { toolCallsOffered: true, offeredToolNames: [TOOL.name] })).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
-    // And a call nobody offered is never read on a request that offered none.
-    expect(normalizeModelResponse(gemini, body([{ functionCall: { name: TOOL.name } }]))).toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  it('rejects opaque or unreadable calls individually and retains adjacent text', () => {
+    for (const bad of [
+      { functionCall: { id: 'bad', name: TOOL.name, args: [] } },
+      { functionCall: { id: 'bad', name: 'unoffered', args: {} } },
+    ]) expect(normalizeModelResponse(gemini, body([bad, { functionCall: { id: 'valid', name: TOOL.name, args: {} } }]), offered)).toMatchObject({ kind: 'tool-calls', calls: [{ id: 'valid' }], salvaged: [{ index: 0 }] });
+    const opaque = normalizeModelResponse(gemini, body([{ text: 'retained' }, { functionCall: { name: TOOL.name, args: {} }, thoughtSignature: 'opaque' }]), offered);
+    expect(opaque).toMatchObject({ kind: 'answer', text: 'retained', truncated: true });
+    expect(JSON.stringify(opaque)).not.toContain('opaque');
+    expect(normalizeModelResponse(gemini, body([{ text: 'partial' }, { functionCall: { name: TOOL.name } }], 'MAX_TOKENS'), offered)).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
   });
 
   it('names two id-less calls of one turn apart and refuses reasoning carried back with a call', () => {

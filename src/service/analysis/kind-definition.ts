@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, graphemeCount, canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_ANALYSIS_CONTRACT_VERSION,
   BASELINE_ANALYSIS_KIND,
@@ -38,7 +39,6 @@ import {
   type AssuranceSamplingCandidate,
   type AssuranceSamplingPromptContract,
 } from './assurance-sampling-contract.js';
-import { canonicalJson, sha256Hex } from './canonical.js';
 import {
   BASELINE_PROMPT_CONTRACT,
   BASELINE_PROMPT_CONTRACT_DIGEST,
@@ -166,7 +166,7 @@ export interface AnalysisReductionInput {
 }
 
 export type UnitResultParseOutcome =
-  | { readonly ok: true; readonly result: unknown; readonly canonicalJson: string; readonly digest: string }
+  | { readonly ok: true; readonly salvaged?: SalvagedModelResult['salvaged']; readonly result: unknown; readonly canonicalJson: string; readonly digest: string }
   | { readonly ok: false; readonly code: string; readonly detail: string };
 
 /** The cross-unit suboperation of a kind that declares one (ADR 0066); `null` for a kind that does not. */
@@ -321,7 +321,7 @@ export interface AnalysisKindDefinition {
   /** Recover the unit identity from a message this kind built; `null` for any other message. */
   parseUnitMessageHeader(text: string): { ordinal: number; total: number; unitDigest: string } | null;
   requestDigest(unitOrdinal: number, unitDigest: string): string;
-  parseUnitResult(text: string, unit: CoverageManifestUnitProjection): UnitResultParseOutcome;
+  parseUnitResult(text: string, unit: CoverageManifestUnitProjection, blocks?: ReadonlyMap<string, Pick<ManifestBlockInput, 'text'>>): UnitResultParseOutcome;
   reduce(input: AnalysisReductionInput): AnalysisReductionResult;
   /** The kind-specific keys one persisted unit result carries, beside the shared identity and lineage. */
   unitRecord(result: unknown): Record<string, unknown>;
@@ -554,7 +554,8 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
     buildUnitMessage,
     parseUnitMessageHeader,
     requestDigest: (unitOrdinal, unitDigest) => unitRequestDigest(promptContractDigest, unitOrdinal, unitDigest),
-    parseUnitResult: (text, unit) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds] }),
+    parseUnitResult: (text, unit, blocks) => parseUnitResult(text, { unitOrdinal: unit.ordinal, blockIds: [...unit.blockIds, ...unit.overlapBlockIds],
+      ...(blocks === undefined ? {} : { blockLengths: new Map([...unit.blockIds, ...unit.overlapBlockIds].map((id) => [id, graphemeCount(blocks.get(id)?.text ?? '')])) }) }),
     reduce: (input) => {
       const reduction = reduceBaselineAnalysis(
         input.manifest,
@@ -582,6 +583,7 @@ export function baselineAnalysisKindDefinition(promptContract: BaselinePromptCon
       return rest;
     },
     unitResultOfRecord: (record, unitOrdinal): BaselineUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<BaselineUnitResult['salvaged']> }),
       schema: BASELINE_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       synopsis: record.synopsis as string,
@@ -736,8 +738,9 @@ export function factualReviewKindDefinition(research: ResearchCapability = new F
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ assertions: (result as FactualReviewUnitResult).assertions }),
+    unitRecord: (result) => ({ assertions: (result as FactualReviewUnitResult).assertions, ...((result as FactualReviewUnitResult).salvaged === undefined ? {} : { salvaged: (result as FactualReviewUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): FactualReviewUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<FactualReviewUnitResult['salvaged']> }),
       schema: FACTUAL_REVIEW_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       assertions: record.assertions as FactualReviewUnitResult['assertions'],

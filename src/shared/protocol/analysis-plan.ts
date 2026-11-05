@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import type { FrozenWebToolsFallback } from './search-backends.js';
 import type { ProcedureDefinitionPin } from './procedures.js';
 import {
@@ -163,6 +164,7 @@ export type BaselineAnalysisRunState =
 
 export type BaselineAnalysisUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       /** The request digest of the model request that produced this result (the predecessor's for a reused unit). */
@@ -182,6 +184,7 @@ export type BaselineAnalysisUnitProjection =
   | {
       unitOrdinal: number;
       state: 'gap';
+      originalTextChanged?: boolean;
       requestDigest: string;
       lineage: AnalysisUnitLineage;
       gap: AnalysisGapProjection;
@@ -718,6 +721,10 @@ export interface BaselineAnalysisProjection {
     runRecordId: string;
     procedure?: ProcedureDefinitionPin | null;
     state: BaselineAnalysisRunState;
+    /** The editor-facing reason a resumable Run stopped, when recorded. */
+    stopReason?: import('../protocol.js').ResumableStopReason;
+    /** When this Run was explicitly resumed, if the current stop followed that resume. */
+    resumedAt?: string;
     stateLabel: string;
     recordedAt: string;
     transitions: ReadonlyArray<{ sequence: number; state: BaselineAnalysisRunState; recordedAt: string; detail: string | null }>;

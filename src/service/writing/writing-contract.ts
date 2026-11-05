@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, extractModelJson, normalizeLine, type ModelResultSalvage, AnalysisError, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 import {
   MAX_WRITING_MATERIALS,
   MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
@@ -8,7 +9,6 @@ import {
   type WritingDraftWordsProjection,
   type WritingPassageKind,
 } from '../../shared/protocol.js';
-import { AnalysisError, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 
@@ -209,13 +209,14 @@ export interface WritingPassage {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface WritingUnitResult {
+export interface WritingUnitResult extends SalvagedModelResult {
   readonly schema: typeof WRITING_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly passages: ReadonlyArray<WritingPassage>;
 }
 
-export interface WritingSynthesisResult extends WritingDraftWordsProjection {
+export interface WritingSynthesisResult extends WritingDraftWordsProjection, SalvagedModelResult {
+  readonly withheld?: ReadonlyArray<{ readonly section: number; readonly paragraph: number | null; readonly reason: string }>;
   readonly schema: typeof WRITING_SYNTHESIS_RESULT_SCHEMA;
 }
 
@@ -228,10 +229,10 @@ export type WritingUnitParseFailureCode = 'not-json' | 'schema-invalid' | 'unit-
 export type WritingSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'exemplar-copied' | 'material-copied';
 
 export type WritingUnitParse =
-  | { ok: true; result: WritingUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: WritingUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: WritingUnitParseFailureCode; detail: string };
 export type WritingSynthesisParse =
-  | { ok: true; result: WritingSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: WritingSynthesisResult }
   | { ok: false; code: WritingSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '写作单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -939,6 +940,7 @@ export type ExemplarCopy = (
 ) & {
   /** `material` when the text copied is a 资料库 item's (Issue #428), `exemplar` then its position among the items; absent for an exemplar. */
   source?: 'material';
+  position?: { section: number; paragraph: number | null };
 };
 
 /** One stream's sizes: the verbatim run within punctuation and across it, the shingle, the span. */
@@ -1133,7 +1135,7 @@ export function exemplarCopied(draft: WritingDraftWordsProjection, input: Writin
  * house-phrasing exemption, which is words two other Books' exemplars share, never comes from two items sharing them — with the
  * Book's own reference words exempted as they are for an exemplar. `null` when it copies none. No number of the rules changes.
  */
-export function referenceCopied(draft: WritingDraftWordsProjection, input: WritingContractInput, sizes: WritingCopySizes = WRITING_COPY_SIZES): ExemplarCopy | null {
+function referenceCopyMatch(draft: WritingDraftWordsProjection, input: WritingContractInput, sizes: WritingCopySizes): ExemplarCopy | null {
   const exemplar = exemplarCopied(draft, input, sizes);
   if (exemplar !== null || input.materials === undefined) return exemplar;
   for (const [index, material] of input.materials.entries()) {
@@ -1143,6 +1145,19 @@ export function referenceCopied(draft: WritingDraftWordsProjection, input: Writi
     if (copied !== null) return { ...copied, exemplar: index, source: 'material' };
   }
   return null;
+}
+
+/** Locate the passage responsible for a copy hit without changing the aggregate copy rules. */
+export function referenceCopied(draft: WritingDraftWordsProjection, input: WritingContractInput, sizes: WritingCopySizes = WRITING_COPY_SIZES): ExemplarCopy | null {
+  const copied = referenceCopyMatch(draft, input, sizes);
+  if (copied === null) return null;
+  for (const [section, entry] of draft.sections.entries()) {
+    for (const [paragraph, words] of entry.paragraphs.entries()) {
+      const hit = referenceCopyMatch({ title: '', sections: [{ heading: '', paragraphs: [words] }] }, input, sizes);
+      if (hit !== null && hit.exemplar === copied.exemplar && hit.source === copied.source) return { ...copied, position: { section, paragraph } };
+    }
+  }
+  return { ...copied, position: { section: -1, paragraph: null } };
 }
 
 // ---- the `/1` rules: #688's bound, kept for the Tasks recorded under it -----------------------------------------------
@@ -1230,51 +1245,37 @@ export function exemplarCopiedV1(draft: WritingDraftWordsProjection, input: Writ
 
 // ---- parsing ---------------------------------------------------------------------------------------------------------
 
-function parseJson(value: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(value);
-  try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? value) as unknown };
-  } catch {
-    return { ok: false };
-  }
-}
-
 /** Admit one unit result: exactly the contract's keys, kinds the contract lists, positions within the unit. */
-export function parseWritingUnitResult(value: string, expected: { unitOrdinal: number; blockCount: number }): WritingUnitParse {
-  const parsed = parseJson(value);
-  if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  const result = parsed.value;
-  const invalid = (detail: string): WritingUnitParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(result) || !hasExactKeys(result, ['schema', 'unitOrdinal', 'passages'])) return invalid('单元结果键集合不符合写作契约 v1。');
-  if (result.schema !== WRITING_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是写作契约 v1。');
-  if (!Number.isSafeInteger(result.unitOrdinal) || (result.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (result.unitOrdinal !== expected.unitOrdinal) {
-    return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(result.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
-  }
-  if (!Array.isArray(result.passages) || result.passages.length > MAX_UNIT_PASSAGES) return invalid('段落集合不符合写作契约 v1。');
+export function parseWritingUnitResult(text: string, expected: { unitOrdinal: number; blockCount: number }): WritingUnitParse {
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
+  const mark = (index: number, reason: string): void => { salvaged.push({ section: 'passages', index, reason }); };
+  try { JSON.parse(text); } catch { mark(-1, 'json-extracted-or-partial'); }
+  if (value.schema !== WRITING_UNIT_RESULT_SCHEMA || value.unitOrdinal !== expected.unitOrdinal) mark(-1, 'request-envelope');
+  if (!('passages' in value) && !('schema' in value)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  if (value.passages !== undefined && !Array.isArray(value.passages)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const candidates = Array.isArray(value.passages) ? value.passages : [];
   const passages: WritingPassage[] = [];
-  for (const [index, candidate] of (result.passages as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条段落`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['kind', 'note', 'blockOrdinals'])) return invalid(`${label}的键集合不符合写作契约 v1。`);
-    if (typeof candidate.kind !== 'string') return invalid(`${label}的类别无效。`);
-    if (!WRITING_PASSAGE_KINDS.includes(candidate.kind as WritingPassageKind)) {
-      return { ok: false, code: 'kind-unknown', detail: `${label}的类别 ${candidate.kind.slice(0, 32)} 不在写作契约内。` };
-    }
-    if (!line(candidate.note, MAX_PASSAGE_NOTE_GRAPHEMES)) return invalid(`${label}的说明缺失、含有控制字符或超出 200 字素边界。`);
-    const ordinals = candidate.blockOrdinals;
-    if (!Array.isArray(ordinals) || ordinals.length < 1 || ordinals.length > MAX_PASSAGE_BLOCKS ||
-        !ordinals.every((ordinal) => Number.isSafeInteger(ordinal) && (ordinal as number) >= 1) || new Set(ordinals).size !== ordinals.length) {
-      return invalid(`${label}的内容块序号无效。`);
-    }
-    const outside = (ordinals as number[]).find((ordinal) => ordinal > expected.blockCount);
-    if (outside !== undefined) {
-      return { ok: false, code: 'block-out-of-unit', detail: `${label}引用的内容块序号 ${outside} 不在本单元列出的 ${expected.blockCount} 个内容块内。` };
-    }
-    passages.push({ kind: candidate.kind as WritingPassageKind, note: candidate.note, blockOrdinals: [...(ordinals as number[])] });
+  for (const [index, candidate] of candidates.entries()) {
+    if (index >= MAX_UNIT_PASSAGES || !isRecord(candidate) || typeof candidate.note !== 'string' || !candidate.note.isWellFormed() || !candidate.note.trim()) { mark(index, 'schema-invalid'); continue; }
+    const key = typeof candidate.kind === 'string' ? candidate.kind.trim().toLowerCase() : '';
+    const aliases: Record<string, string> = { '亮点': 'highlight', '优点': 'highlight', '人物': 'character', '角色': 'character', '主题': 'theme' };
+    const kind = aliases[key] ?? key;
+    if (!WRITING_PASSAGE_KINDS.includes(kind as WritingPassageKind)) { mark(index, 'kind-unknown'); continue; }
+    if (kind !== candidate.kind) mark(index, 'kind-normalized');
+    const raw = Array.isArray(candidate.blockOrdinals) ? candidate.blockOrdinals : [];
+    const ordinals = [...new Set(raw.map((ordinal) => typeof ordinal === 'string' ? Number(ordinal) : ordinal).filter((ordinal): ordinal is number => typeof ordinal === 'number' && Number.isSafeInteger(ordinal) && ordinal >= 1 && ordinal <= expected.blockCount))].slice(0, MAX_PASSAGE_BLOCKS);
+    if (JSON.stringify(raw) !== JSON.stringify(ordinals)) mark(index, 'block-out-of-unit');
+    if (!ordinals.length) { mark(index, 'block-out-of-unit'); continue; }
+    const note = normalizeLine(candidate.note, MAX_PASSAGE_NOTE_GRAPHEMES);
+    if (note !== candidate.note) mark(index, 'note-normalized');
+    passages.push({ kind : kind as WritingPassageKind, note, blockOrdinals: ordinals });
   }
-  const unit: WritingUnitResult = { schema: WRITING_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, passages };
-  const canonical = canonicalJson(unit);
-  return { ok: true, result: unit, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  if (candidates.length > 0 && passages.length === 0) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const result: WritingUnitResult = { schema: WRITING_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, passages, ...(salvaged.length ? { salvaged } : {}) };
+  const canonical = canonicalJson(result);
+  return { ok: true, result, ...(salvaged.length ? { salvaged } : {}), canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
 /** A soft break as the refusal names it (#707). */
@@ -1311,38 +1312,66 @@ function copyHow(copied: ExemplarCopy, sizes: WritingCopySizes): string {
  * Admit the synthesis: a title and its sections, each within its bound, and nothing else — and a draft that copies none of the
  * contract's exemplars, since an exemplar is referenced and never copied (KB-004).
  */
-export function parseWritingSynthesis(value: string, contract: WritingPromptContract): WritingSynthesisParse {
-  const input = contract.input;
-  const sizes = writingCopySizes(contract);
-  const parsed = parseJson(value);
-  if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  const result = parsed.value;
-  const invalid = (detail: string): WritingSynthesisParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(result) || !hasExactKeys(result, ['schema', 'title', 'sections'])) return invalid('全书综合的键集合不符合写作契约 v1。');
-  if (result.schema !== WRITING_SYNTHESIS_RESULT_SCHEMA) return invalid('全书综合 schema 不是写作契约 v1。');
-  if (!line(result.title, MAX_TITLE_GRAPHEMES)) return invalid('文档标题缺失、含有控制字符或超出 60 字素边界。');
-  if (!Array.isArray(result.sections) || result.sections.length < 1 || result.sections.length > MAX_SECTIONS) {
-    return invalid('文档的部分不符合写作契约 v1：要有 1 到 8 个部分。');
-  }
+export function parseWritingSynthesis(text: string, contract: WritingPromptContract): WritingSynthesisParse {
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
+  const withheld: Array<{ section: number; paragraph: number | null; reason: string }> = [];
+  const mark = (section: string, index: number, reason: string): void => { salvaged.push({ section, index, reason }); };
+  try { JSON.parse(text); } catch { mark('envelope', -1, 'json-extracted-or-partial'); }
+  const clean = (raw: unknown, maximum: number): string => typeof raw === 'string' && raw.isWellFormed() ? normalizeLine(raw, maximum) : '';
+  const title = clean(value.title, MAX_TITLE_GRAPHEMES);
+  if (title !== value.title) mark('title', -1, 'text-normalized');
+  if (value.schema !== WRITING_SYNTHESIS_RESULT_SCHEMA) mark('schema', -1, 'request-envelope');
   const sections: Array<{ heading: string; paragraphs: string[] }> = [];
-  for (const [index, candidate] of (result.sections as unknown[]).entries()) {
-    const label = `第 ${index + 1} 部分`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['heading', 'paragraphs'])) return invalid(`${label}的键集合不符合写作契约 v1。`);
-    if (!line(candidate.heading, MAX_HEADING_GRAPHEMES)) return invalid(`${label}的小标题缺失、含有控制字符或超出 30 字素边界。`);
-    const paragraphs = candidate.paragraphs;
-    if (!Array.isArray(paragraphs) || paragraphs.length < 1 || paragraphs.length > MAX_SECTION_PARAGRAPHS ||
-        !paragraphs.every((paragraph) => line(paragraph, MAX_PARAGRAPH_GRAPHEMES))) {
-      return invalid(`${label}的段落不符合写作契约 v1：要有 1 到 6 段，每段只占一行、不超过 600 字素。`);
+  for (const [index, candidate] of (Array.isArray(value.sections) ? value.sections : []).entries()) {
+    if (index >= MAX_SECTIONS || !isRecord(candidate)) { mark('sections', index, 'section-invalid'); continue; }
+    const heading = clean(candidate.heading, MAX_HEADING_GRAPHEMES);
+    if (heading !== candidate.heading) mark('sections', index, 'heading-normalized');
+    const paragraphs: string[] = [];
+    for (const [at, raw] of (Array.isArray(candidate.paragraphs) ? candidate.paragraphs : []).entries()) {
+      if (typeof raw !== 'string' || !raw.isWellFormed()) { mark(`sections.${index}.paragraphs`, at, 'paragraph-invalid'); continue; }
+      if (/[\r\n]/u.test(raw)) mark(`sections.${index}.paragraphs`, at, 'paragraph-split');
+      for (const part of raw.split(/\r?\n/u)) {
+        const paragraph = clean(part, MAX_PARAGRAPH_GRAPHEMES);
+        if (!paragraph) continue;
+        if (paragraph !== part) mark(`sections.${index}.paragraphs`, at, 'paragraph-normalized');
+        if (paragraphs.length >= MAX_SECTION_PARAGRAPHS) { mark(`sections.${index}.paragraphs`, at, 'paragraph-limit'); continue; }
+        paragraphs.push(paragraph);
+      }
     }
-    sections.push({ heading: candidate.heading, paragraphs: [...(paragraphs as string[])] });
+    if (paragraphs.length) sections.push({ heading, paragraphs });
+    else mark('sections', index, 'empty-section');
   }
-  const draft: WritingSynthesisResult = { schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title: result.title, sections };
-  // Judged under the sizes the Task's own frozen contract carries (#704 P2-2); its 资料库 items under the same (Issue #428).
-  const copied = referenceCopied(draft, input, sizes);
-  if (copied !== null) {
-    return { ok: false, code: copied.source === 'material' ? 'material-copied' : 'exemplar-copied', detail: exemplarCopyDetail(copied, input, sizes) };
+  const draft = { schema: WRITING_SYNTHESIS_RESULT_SCHEMA, title, sections };
+  const sizes = writingCopySizes(contract);
+  let firstCopy: ExemplarCopy | null = null;
+  // Remove only the passage that independently hits the copy threshold, and recheck the remaining draft.
+  for (let section = 0; section < sections.length; section += 1) {
+    const entry = sections[section]!;
+    const kept: string[] = [];
+    for (const [paragraph, words] of entry.paragraphs.entries()) {
+      const copied = referenceCopied({ title: '', sections: [{ heading: '', paragraphs: [words] }] }, contract.input, sizes);
+      if (copied === null) { kept.push(words); continue; }
+      copied.position = { section, paragraph };
+      firstCopy ??= copied;
+      withheld.push({ section, paragraph, reason: exemplarCopyDetail(copied, contract.input, sizes).replace('这份草稿不予采用', '这一段没有采用') });
+      mark(`sections.${section}.paragraphs`, paragraph, 'reference-copied');
+    }
+    entry.paragraphs = kept;
   }
-  return { ok: true, result: draft };
+  for (let index = sections.length - 1; index >= 0; index -= 1) if (!sections[index]!.paragraphs.length) sections.splice(index, 1);
+  // A match spanning passages cannot safely be assigned to a single paragraph; retain it as an unusable draft.
+  const remaining = referenceCopied(draft, contract.input, sizes);
+  if (remaining !== null) {
+    withheld.push({ section: -1, paragraph: null, reason: exemplarCopyDetail(remaining, contract.input, sizes) });
+    mark('draft', -1, 'reference-copied');
+  }
+  if (!sections.some((section) => section.paragraphs.length > 0)) return firstCopy === null
+    ? { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' }
+    : { ok: false, code: firstCopy.source === 'material' ? 'material-copied' : 'exemplar-copied', detail: exemplarCopyDetail(firstCopy, contract.input, sizes) };
+  if (remaining !== null) return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { ...draft, withheld, salvaged, usable: false } };
+  return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { ...draft, ...(withheld.length ? { withheld } : {}), ...(salvaged.length ? { salvaged } : {}) } };
 }
 
 // ---- the unit message -----------------------------------------------------------------------------------------------

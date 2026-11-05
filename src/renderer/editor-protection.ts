@@ -155,6 +155,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -212,8 +213,9 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   dialogReason.hidden = true;
   const dialogState = el('p', 'editing-protection-state');
   const dialogReadOnly = el('p', 'editing-protection-read-only');
-  const dialogSalvage = el('p', 'field-note', PROTECTION_SALVAGE_UNAVAILABLE);
-  const dialogPromise = el('p', 'field-note', PROTECTION_RESTART_PROMISE);
+  const dialogSalvage = el('span', undefined, PROTECTION_SALVAGE_UNAVAILABLE.replace(/。$/u, '；'));
+  const dialogPromise = el('p', 'field-note');
+  dialogPromise.append(dialogSalvage, PROTECTION_RESTART_PROMISE);
   const retryButton = el('button', 'primary', PROTECTION_RETRY_ACTION);
   retryButton.type = 'button';
   retryButton.dataset['protectionAction'] = 'retry';
@@ -225,9 +227,7 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   closeButton.dataset['protectionAction'] = 'close';
   const actions = el('div', 'button-row');
   actions.append(retryButton, copyButton, closeButton);
-  const copied = el('p', 'field-note');
-  copied.setAttribute('role', 'status');
-  dialog.append(dialogTitle, dialogReason, dialogState, dialogReadOnly, actions, copied, dialogSalvage, dialogPromise);
+  dialog.append(dialogTitle, dialogReason, dialogState, dialogReadOnly, actions, dialogPromise);
   options.host.append(dialog);
 
   const blockNotes = new Set<HTMLElement>();
@@ -276,8 +276,8 @@ export function mountProtectionSurface(options: ProtectionSurfaceOptions): Prote
   copyButton.addEventListener('click', () => {
     const text = options.affectedContent();
     void options.writeClipboard(text).then(
-      () => { copied.textContent = PROTECTION_COPIED; options.setStatus(PROTECTION_COPIED); },
-      () => { copied.textContent = PROTECTION_COPY_FAILED; options.setStatus(PROTECTION_COPY_FAILED, 'error'); },
+      () => { options.setStatus(PROTECTION_COPIED); },
+      () => { options.setStatus(PROTECTION_COPY_FAILED, 'error'); },
     );
   });
   closeButton.addEventListener('click', () => {

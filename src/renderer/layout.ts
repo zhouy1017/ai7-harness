@@ -22,16 +22,13 @@ import {
   COLUMN_WIDTH_LABEL,
   DENSITY_CHOICES,
   DENSITY_LEGEND,
-  FONT_FALLBACK_NOTE,
   FONT_FAMILY_CHOICES,
   FONT_FAMILY_LABEL,
   FONT_SIZE_LABEL,
   LINE_HEIGHT_LABEL,
   PRESET_CHOICES,
   PRESET_LEGEND,
-  PRESET_NOTE,
   REGIONS_LEGEND,
-  REGIONS_NOTE,
   REGION_NAMES,
   RESTORED_DEFAULT_LAYOUT,
   RESTORE_DEFAULT_LAYOUT,
@@ -68,10 +65,10 @@ export const MANUSCRIPT_MIN_WIDTH_PX = 480;
 
 /** Each face with a stable CJK fallback chain, so a missing glyph is drawn by a face of the same kind (VIEW-004). */
 const FONT_STACKS: Readonly<Record<ManuscriptFontFamily, string>> = Object.freeze({
-  serif: '"Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif',
+  serif: '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", "SimSun", serif',
   kai: '"Kaiti SC", "STKaiti", "KaiTi", "Noto Serif CJK SC", "Songti SC", serif',
   fangsong: '"FangSong", "STFangsong", "Fangsong SC", "Noto Serif CJK SC", "Songti SC", serif',
-  sans: '"Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+  sans: '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
 });
 
 export interface ViewState {
@@ -236,6 +233,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -318,10 +316,8 @@ export function mountRegionSeparator(options: RegionSeparatorOptions): { element
 /** 设置 › 本机 › 外观's density, reading preset, typography and region controls, beside 11b's theme (VIEW-001 to VIEW-009). */
 export function renderViewSettings(view: ViewPreferences, setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void): { element: HTMLElement; destroy(): void } {
   const section = el('div', 'view-settings');
-  const message = el('p', 'field-note');
-  message.setAttribute('role', 'status');
   const saved = (write: Promise<void>, done = VIEW_SETTINGS_SAVED): void => {
-    void write.then(() => { message.textContent = done; }, () => { message.textContent = VIEW_SETTINGS_SAVE_FAILED; setStatus(VIEW_SETTINGS_SAVE_FAILED, 'error'); });
+    void write.then(() => setStatus(done, 'success'), () => setStatus(VIEW_SETTINGS_SAVE_FAILED, 'error'));
   };
   const radios = <Value extends string>(legend: string, name: string, choices: ReadonlyArray<{ value: Value; label: string; description?: string }>, choose: (value: Value) => void) => {
     const set = el('fieldset', 'appearance-choices');
@@ -336,14 +332,13 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
       input.dataset[name === 'view-density' ? 'viewDensity' : name === 'view-preset' ? 'viewPreset' : 'viewAlignment'] = choice.value;
       input.addEventListener('change', () => { if (input.checked) choose(choice.value); });
       inputs.push(input);
-      label.append(input, el('strong', undefined, choice.label), ...(choice.description === undefined ? [] : [el('span', 'field-note', choice.description)]));
+      label.append(input, el('strong', undefined, choice.label));
       set.append(label);
     }
     return { set, inputs };
   };
   const density = radios(DENSITY_LEGEND, 'view-density', DENSITY_CHOICES, (value) => saved(view.setDensity(value)));
-  const preset = radios(PRESET_LEGEND, 'view-preset', PRESET_CHOICES, (value) => saved(view.choosePreset(value)));
-  preset.set.append(el('p', 'field-note', PRESET_NOTE));
+  const preset = radios(`${PRESET_LEGEND} · 选择会重置排版`, 'view-preset', PRESET_CHOICES, (value) => saved(view.choosePreset(value)));
 
   const typography = el('fieldset', 'appearance-choices view-typography');
   typography.append(el('legend', undefined, TYPOGRAPHY_LEGEND));
@@ -380,10 +375,10 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
   resetTypography.type = 'button';
   resetTypography.dataset['viewAction'] = 'reset-typography';
   resetTypography.addEventListener('click', () => saved(view.resetTypography(), TYPOGRAPHY_RESET_DONE));
-  typography.append(familyLabel, el('p', 'field-note', FONT_FALLBACK_NOTE), fontSize.label, lineHeight.label, columnWidth.label, alignment.set, resetTypography);
+  typography.append(familyLabel, fontSize.label, lineHeight.label, columnWidth.label, alignment.set, resetTypography);
 
   const regions = el('fieldset', 'appearance-choices view-regions');
-  regions.append(el('legend', undefined, REGIONS_LEGEND), el('p', 'field-note', REGIONS_NOTE));
+  regions.append(el('legend', undefined, `${REGIONS_LEGEND} · 在稿件旁拖动或用方向键调整，正文保留可用宽度`));
   const regionRows = (Object.keys(REGION_NAMES) as RegionKey[]).map((region) => {
     const row = el('p', 'view-region-row');
     row.dataset['viewRegion'] = region;
@@ -414,6 +409,6 @@ export function renderViewSettings(view: ViewPreferences, setStatus: (message: s
   };
   paint(view.current);
   const unsubscribe = view.subscribe(paint);
-  section.append(el('p', 'field-note', VIEW_SETTINGS_PROMISE), density.set, preset.set, typography, regions, message);
+  section.append(el('p', 'field-note', VIEW_SETTINGS_PROMISE), density.set, preset.set, typography, regions);
   return { element: section, destroy: unsubscribe };
 }

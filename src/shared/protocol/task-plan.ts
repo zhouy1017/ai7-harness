@@ -38,7 +38,7 @@ export interface TaskPlanUnconfirmedProjection {
    * Each range by its ordinal in the latest revision that holds it, and, in a Review Run, its category; `earlierText` when that
    * revision read a manuscript revision other than the Book's latest, so the ordinal counts in the text as it was then.
    */
-  ranges: ReadonlyArray<{ unitOrdinal: number; category: string | null; recordedAt: string; earlierText: boolean }>;
+  ranges: ReadonlyArray<{ unitOrdinal: number; category: string | null; recordedAt: string; earlierText: boolean; rereadFailed?: boolean }>;
   /** Each step of the latest Run that reached its Task Outcome, and, in a Review Run, its category. */
   steps: ReadonlyArray<{ stage: UnconfirmedStageId; category: string | null; recordedAt: string }>;
   /** What 保留为缺口 settles: the service records exactly these, and refuses a list that changed since (`UNCONFIRMED_CHANGED`). */
@@ -140,6 +140,12 @@ export type TaskPlanStateKey =
 export interface TaskPlanRunControlProjection {
   /** The one Run every control names (CTRL-009). */
   runRecordId: string;
+  /** Number of durable Harness Execution Spans currently recorded for this Run. */
+  executionSpanCount?: number;
+  /** The editor-facing reason this Run stopped and may be resumed. */
+  stopReason?: import('../protocol.js').ResumableStopReason;
+  /** When that stop was recorded, used by the continuation note. */
+  stopAt?: string;
   /** 正在取消: the editor's cancellation is recorded and the Run is stopping; nothing more is offered. */
   cancelling: boolean;
   /** 正在暂停: the editor's pause is recorded and the Run stops at the next unit boundary; nothing more is offered. */
@@ -329,6 +335,15 @@ export interface TaskPlanDriftEntryProjection {
  * drawer's authorization bar offers, and only the bar's own activation records anything (Issue #420).
  */
 export interface TaskPlanProjection {
+  /** Transport-only composed fragments: source/editor text is always a string, metadata is explicitly marked. */
+  wording?: {
+    goal?: ReadonlyArray<string | { technical: string }>;
+    procedure?: ReadonlyArray<string | { technical: string }>;
+    reference?: ReadonlyArray<ReadonlyArray<string | { technical: string }>>;
+    scopeSend?: ReadonlyArray<string | { technical: string }>;
+    serviceSend?: ReadonlyArray<string | { technical: string }>;
+    outcomes?: ReadonlyArray<ReadonlyArray<string | { technical: string }>>;
+  };
   /** Transport-only pages; derivation and authority records remain complete. String cursors count Unicode code points. */
   listPages?: Readonly<Record<string, { shown: number; total: number; nextOrdinal: number | null; digest: string }>>;
   readonly seriesScopes?: ReadonlyArray<FrozenSeriesScope>;
@@ -337,6 +352,7 @@ export interface TaskPlanProjection {
   /** The Task Intent or the Review Run this plan belongs to. */
   ref: string;
   state: { key: TaskPlanStateKey; label: string };
+  runOutcome?: { label: string; reason: string | null; classification: 'failed' | 'completed-with-gaps' };
   /** The plan version shown; `null` for a kind that keeps no plan versions. */
   planVersion: number | null;
   goal: {

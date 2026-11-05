@@ -1,4 +1,9 @@
+import { prepareQuickTask } from './quick-tasks.js';
+import { controlOverviewTasks } from './task-overview.js';
+import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import { refreshModelServiceModels } from './provider/model-discovery.js';
+import { PROVIDER_ROUTE_PROFILES, providerModelsEndpoint } from './provider/deepseek-adapter.js';
+import type { ProxyProbeResult } from '../shared/protocol.js';
 import { randomUUID } from 'node:crypto';
 import { reviewFixtureContractVersion } from './provider/model-fixture.js';
 import { prepareGlobalAgentDisclosure, startGlobalAgentTurn } from './dialogue/global-agent-session.js';
@@ -65,7 +70,7 @@ import { ensureCanonicalDataDirectory } from '../shared/data-root.js';
 import { readBookTasks, readGlobalAttention } from './global-attention.js';
 import { reconnectPreflight } from './reconnect-preflight.js';
 import { LOCAL_DETERMINISTIC_ROUTE } from './provider/egress-gate.js';
-import { proxyAwareFetch } from './provider/proxy-setting.js';
+import { proxyAwareFetch, probeProxy } from './provider/proxy-setting.js';
 import type { DormantHarnessRuntime } from './runtime.js';
 import type { EditorialStore, WaitingTaskRun } from './store.js';
 import type { CooperativeJobOwner } from './cooperative-jobs.js';
@@ -74,6 +79,9 @@ import type { BaselineAnalysisExecutionOwner } from './analysis/execution.js';
 import type { LaunchBinding, OrdinaryProductionLaunchBinding } from './analysis/baseline-analysis-store.js';
 import type { ReviewRunDriver } from './review/review-run-driver.js';
 import type { BackgroundAnalysisDispatcher } from './background-analysis.js';
+
+// Session-only, scoped to the open store; never written into the device setting or database.
+const proxyProbes = new WeakMap<EditorialStore, ProxyProbeResult>();
 
 function failureResponse(
   requestId: string,
@@ -165,7 +173,7 @@ async function dispatch(
    */
   modelServiceChanged: () => Promise<LaunchPolicyProjection> = async () => launchPolicy,
   probeBackend: (input: Extract<ServiceRequest, { op: 'probeSearchBackend' }>['input']) => Promise<import('../shared/protocol.js').SearchBackendProbeProjection> = async () => { throw new Error('SEARCH_PROBE_UNAVAILABLE'); },
-  refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<void> = async () => undefined,
+  refreshModels: (route: import('../shared/protocol.js').ModelServiceRouteId) => Promise<import('../shared/protocol.js').ModelDiscoveryResult> = async () => ({ status: 'failure', code: 'MODEL_DISCOVERY_UNAVAILABLE', reason: '模型列表暂不可用' }),
 ): Promise<ServiceSuccessResponse> {
   const analysisProgress = (runRecordId: string) => analysisExecution.progressFor(runRecordId);
   // 替换本机全部数据 waits for AI7's next start (Issue #434 review): until then nothing is written, so no change made meanwhile
@@ -195,7 +203,7 @@ async function dispatch(
     case 'getSearchBackendSettings':
       return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
     case 'selectSearchBackend':
-      store.selectSearchBackend(request.input.backendId, request.input.role);
+      store.selectSearchBackend(request.input.backendId, request.input.role, request.input.alwaysUseSelectedBackend);
       return { id: request.id, ok: true, op: request.op, result: store.getSearchBackendSettings() };
     case 'saveSearchBackendCredential':
       return { id: request.id, ok: true, op: request.op, result: store.saveSearchBackendCredential(request.input.backendId, request.input.credentialReference, request.input.credentialOperationState) };
@@ -213,17 +221,22 @@ async function dispatch(
       await modelServiceChanged();
       return { id: request.id, ok: true, op: request.op, result: undefined };
     case 'refreshModelServiceModels':
-      await refreshModels(request.input.route);
-      return { id: request.id, ok: true, op: request.op, result: undefined };
+      return { id: request.id, ok: true, op: request.op, result: await refreshModels(request.input.route) };
     case 'getModelServiceStoredState':
       return {
         id: request.id,
         ok: true,
         op: request.op,
-        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
+        result: { connection: store.getModelServiceConnection(), connections: store.getModelServiceConnections(), launchPolicy, proxy: await store.getModelServiceProxy(), lastProxyProbe: proxyProbes.get(store) ?? null, channels: modelServiceChannels((route) => store.getModelServiceModels(route)) },
       };
-    case 'saveModelServiceProxy':
-      return { id: request.id, ok: true, op: request.op, result: await store.saveModelServiceProxy(request.input) };
+    case 'saveModelServiceProxy': {
+      const { probeRoute, ...input } = request.input;
+      const result = await store.saveModelServiceProxy(input);
+      if (result.mode === 'proxy' && probeRoute !== undefined) {
+        proxyProbes.set(store, await probeProxy(result, providerModelsEndpoint(PROVIDER_ROUTE_PROFILES[probeRoute])));
+      } else proxyProbes.delete(store);
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     case 'saveModelServiceConnection': {
       const result = store.saveModelServiceConnection(
         request.input.connectionName,
@@ -362,6 +375,10 @@ async function dispatch(
     // authorization bar (Issue #420, S74a) is route-aware: a plan whose route sends to a model service is
     // offered 开始任务 only while the credential that route resolves is present.
     case 'getTaskPlanPage': {
+      if (request.input.kind === 'book-tasks') {
+        const tasks = await readBookTasks(store, request.input.bookId, analysisProgress, () => connectivity.waitingFor(), (attemptId) => dialogues.liveText(attemptId));
+        return { id: request.id, ok: true, op: request.op, result: store.getTaskPlanPage(request.input, tasks) };
+      }
       const plan = request.input.path === 'scopeOptions.chapters.chapters' || request.input.kind === 'task-intent-drafts' ? undefined
         : await store.inspectTaskPlanWithConnection({ ...request.input, kind: request.input.kind }, (binding) => analysisExecution.liveCredentialReadiness(binding), connectivity.planConnectivity, analysisProgress);
       return { id: request.id, ok: true, op: request.op, result: store.getTaskPlanPage(request.input, plan) };
@@ -571,7 +588,7 @@ async function dispatch(
         else {
           // As 续行 of a baseline Run: a refusal from the owner reaches the drawer in its own words, the Run left as it was.
           try {
-            analysisExecution.admitAndDispatch(runRecordId, ledger, { resume: true });
+            analysisExecution.resumeOrQueue(runRecordId, ledger);
           } catch (error) {
             const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
             throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
@@ -640,7 +657,7 @@ async function dispatch(
       const reason = plan.runControl?.resume?.reason ?? '这项任务现在不能续行。';
       if (plan.runControl?.resume?.reason !== null) throw new StoreErrorClass('ANALYSIS_RESUME_BLOCKED', reason);
       try {
-        analysisExecution.admitAndDispatch(runRecordId, store.executionLedgerForRun(runRecordId), { resume: true });
+        analysisExecution.resumeOrQueue(runRecordId, store.executionLedgerForRun(runRecordId));
       } catch (error) {
         const code = error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'EXECUTION_ADMISSION_FAILED';
         throw new StoreErrorClass(code, error instanceof Error ? error.message : '续行未能进入调度。');
@@ -1567,6 +1584,43 @@ async function dispatch(
         id: request.id, ok: true, op: request.op,
         result: await readGlobalAttention(store, analysisProgress, analysisExecution.busy, () => connectivity.waitingFor(), analysisExecution.sendingRoutes),
       };
+    case 'inspectTaskOverview':
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity,
+        (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen, (id) => dialogues.liveText(id), await connectivity.waitingFor()) };
+    case 'reorderQueuedRun':
+      analysisExecution.reorderQueuedRun(request.input.runRecordId, request.input.position);
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity,
+        (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen) };
+    case 'controlAllTasks': {
+      await controlOverviewTasks(request.input.action, {
+        freeze: (value) => analysisExecution.freezeQueue(value),
+        items: () => store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), true)
+          .groups.find((group) => group.key === (request.input.action === 'pause' ? 'running' : 'paused'))!.items,
+        control: async (item) => {
+          if (item.target.kind === 'dialogue') {
+            const dialogue = store.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, (id) => dialogues.liveText(id));
+            const latest = dialogue.attempts.at(-1);
+            if (latest) await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace,
+              { id: request.id, op: request.input.action === 'pause' ? 'stopDialogueAnswer' : 'continueDialogueAnswer',
+                input: { bookId: item.target.bookId, dialogueId: item.target.dialogueId, attemptId: latest.attemptId } }, importControl, launchPolicy, connectivity, background);
+            return;
+          }
+          if (item.plan === null || item.plan.kind === 'fixed-task' || item.plan.ref === null || item.bookId === null) return;
+          const input = item.plan.kind === 'baseline-analysis'
+            ? { id: request.id, op: request.input.action === 'pause' ? 'pauseBaselineAnalysisRun' as const : 'resumeBaselineAnalysisRun' as const,
+              input: { bookId: item.bookId, taskIntentId: item.plan.ref } }
+            : { id: request.id, op: 'controlTaskRun' as const, input: { bookId: item.bookId, kind: item.plan.kind, ref: item.plan.ref, action: request.input.action } };
+          await dispatch(store, harness, jobs, analysisExecution, reviewRuns, dialogues, fastRole, agentWorkspace,
+            input, importControl, launchPolicy, connectivity, background);
+        },
+      }).catch((error: unknown) => { throw new StoreErrorClass('TASK_BULK_CONTROL_PARTIAL', error instanceof Error ? error.message : '部分任务未能处理，请查看任务列表。'); });
+      return { id: request.id, ok: true, op: request.op, result: store.inspectTaskOverview(analysisProgress, analysisExecution.capacity, (id) => analysisExecution.queuePosition(id), analysisExecution.queueFrozen) };
+    }
+    case 'startQuickTasks': {
+      if (request.input.tasks.length !== 1) throw new StoreErrorClass('QUICK_TASK_INVALID', '每次准备一项任务。');
+      const result = prepareQuickTask(request.input.tasks[0]!, { store, jobs, policy: launchPolicy });
+      return { id: request.id, ok: true, op: request.op, result };
+    }
     // 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014): no plan and no 开始任务 (the Owner, 2026-10-07) — asking records the
     // dialogue Task and starts its answer at once, and the answer streams into the owner's memory whether anyone watches or
     // not; a read joins the records to the Harness Session Ledger, and to what the answer in flight has streamed so far.
@@ -1583,7 +1637,7 @@ async function dispatch(
       };
     case 'stopDialogueAnswer': {
       const attemptId = store.answeringDialogueAttempt(request.input.bookId, request.input);
-      await dialogues.stop(attemptId);
+      await dialogues.stop(attemptId, request.input.cancel === true);
       return { id: request.id, ok: true, op: request.op, result: store.inspectDialogue(request.input.bookId, request.input.dialogueId, 0, (id) => dialogues.liveText(id)) };
     }
     case 'continueDialogueAnswer':
@@ -2139,11 +2193,16 @@ async function run(): Promise<void> {
       // The candidate connection test (Issue #1055): the selected policy's own purpose, refused by scope before anything is read.
       if (input.candidateId !== undefined) {
         return composeSearchCandidateProbe({ backendId: input.backendId, candidateId: input.candidateId, operationalScope: launchForm.trustedOperationalScope, launchPolicy,
+          modelConnection: (backendId) => {
+            const source = store!.getModelServiceConnections().find((entry) => entry.binding.providerId.startsWith(`${backendId.slice('search-'.length)}-`));
+            return source == null ? undefined : { ...source, modelId: source.binding.modelId, credentialSlot: source.binding.credentialSlot };
+          },
           connection: (backendId) => store!.getSearchBackendConnections().find((entry) => entry.backendId === backendId), broker: probeBroker, fetch: modelServiceFetch, admitHost: admitTicketHost,
         }).catch((error: unknown) => { throw error instanceof SearchCandidateProbeRefusal ? new StoreError(error.code, error.message) : error; });
       }
       const id = input.backendId;
       const adapter = searchBackend(id);
+      if (!SEARCH_BACKENDS.some((entry) => entry.id === id && entry.shipped)) throw new StoreError('SEARCH_BACKEND_NOT_SHIPPED', '候选接口请使用测试连接。');
       if (launchForm.trustedOperationalScope === 'development-ci') {
         // Provider-free settings probe: the same adapter reads a synthetic public title and URL; no credential, host or native fetch.
         const hit = { title: 'World Book and Copyright Day', name: 'World Book and Copyright Day', url: 'https://www.unesco.org/en/days/world-book-and-copyright' };
@@ -2183,7 +2242,7 @@ async function run(): Promise<void> {
           const result = await owner.ask(MATERIAL_TRANSLATION_KIND, buildMaterialTranslationMessage([text]), `evidence-translation-${randomUUID()}`);
           if (result.kind !== 'answered') return null;
           const translated = readMaterialTranslationAnswer(result.text, 1)?.[0];
-          return translated === undefined ? null : { text: translated, route: result.binding.route, model: result.binding.model };
+          return translated == null ? null : { text: translated, route: result.binding.route, model: result.binding.model };
         } catch { return null; }
       },
       // The level a 事实核查 Run executes under, decided once as it starts (Issue #901; EASSURE-002, D9).

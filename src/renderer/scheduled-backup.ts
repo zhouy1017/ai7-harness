@@ -29,6 +29,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -67,20 +68,21 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     input.dataset['scheduledBackupSwitch'] = 'on';
     input.addEventListener('change', () => void turn(input.checked));
     wrapper.append(input, el('span', undefined, SCHEDULED_BACKUP_SWITCH));
-    const state = el('p', 'field-note scheduled-backup-state', scheduledBackupStateLine(projection));
+    const state = el('span', 'scheduled-backup-state', scheduledBackupStateLine(projection));
     state.setAttribute('role', 'status');
+    if (projection.backingUp) state.append(' · ', el('span', 'scheduled-backup-running', SCHEDULED_BACKUP_RUNNING));
+    if (projection.total === 0) state.append('；', SCHEDULED_BACKUP_NONE);
     const where = el('dl');
     where.append(el('dt', undefined, SCHEDULED_BACKUP_LOCATION), el('dd', 'scheduled-backup-location', projection.location));
     const list = el('ol');
     for (const backup of projection.backups) list.append(el('li', 'scheduled-backup-record', scheduledBackupLine(backup, instant)));
     const kept = el('details', 'scheduled-backup-records');
-    kept.append(
-      el('summary', undefined, scheduledBackupsLabel(projection.backups.length, projection.total)),
-      projection.total === 0 ? el('p', 'field-note', SCHEDULED_BACKUP_NONE) : list,
-    );
-    const nodes: HTMLElement[] = [el('h3', undefined, SCHEDULED_BACKUP_HEADING), el('p', 'field-note', SCHEDULED_BACKUP_LEDE), wrapper, state];
+    kept.hidden = projection.total === 0;
+    kept.append(el('summary', undefined, scheduledBackupsLabel(projection.backups.length, projection.total)), ...(projection.total === 0 ? [] : [list]));
+    const heading = el('h3', undefined, SCHEDULED_BACKUP_HEADING);
+    heading.append(' · ', state);
+    const nodes: HTMLElement[] = [heading, el('p', 'field-note', SCHEDULED_BACKUP_LEDE), wrapper];
     root.dataset['backingUp'] = String(projection.backingUp);
-    if (projection.backingUp) nodes.push(el('p', 'field-note scheduled-backup-running', SCHEDULED_BACKUP_RUNNING));
     if (projection.lastFailure !== null) {
       nodes.push(el('p', 'attention-note scheduled-backup-failure', scheduledBackupFailureLine(projection.lastFailure, instant)));
     }
@@ -157,7 +159,7 @@ export function mountScheduledBackup(options: MountScheduledBackupOptions): void
     }
   };
 
-  root.replaceChildren(el('h3', undefined, SCHEDULED_BACKUP_HEADING), el('p', 'field-note', SCHEDULED_BACKUP_STATUS_LINES.loading));
+  root.replaceChildren(el('h3', undefined, `${SCHEDULED_BACKUP_HEADING} · ${SCHEDULED_BACKUP_STATUS_LINES.loading}`));
   void api.inspectScheduledBackups().then((loaded) => {
     if (!root.isConnected) return;
     projection = loaded;

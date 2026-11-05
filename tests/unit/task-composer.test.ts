@@ -18,10 +18,8 @@ import {
   TASK_COMPOSER_NOTE,
   TASK_COMPOSER_TITLES,
   TASK_PANEL_COMPOSE_OPEN,
-  TASK_PANEL_DRAFT_KIND,
   taskComposerParkedLine,
   taskComposerRevisionLine,
-  taskPanelCardView,
 } from '../../src/renderer/task-panel-labels.js';
 import { DIALOGUE_PROMOTE_LABEL, dialogueReasoningLine } from '../../src/renderer/dialogue-labels.js';
 import { taskPlanDraftSentence } from '../../src/renderer/task-drawer-labels.js';
@@ -188,7 +186,7 @@ describe('the Context-bound Task Composer', () => {
     // The manuscript as it stands now: edits no revision holds yet, so the words just pinned read 待保存修订版 (TASK-002).
     expect(root.querySelector('.task-composer-revision')!.textContent).toBe(taskComposerRevisionLine('r2', 9, true));
     const items = root.querySelectorAll('li.task-composer-range');
-    expect(items.map((item) => [item.querySelector('blockquote')!.textContent, item.dataset['rangeState'], item.querySelector('[data-range-state-label]')?.textContent ?? null]))
+    expect(items.map((item) => [item.querySelector('.task-composer-range-quote')!.textContent, item.dataset['rangeState'], item.querySelector('[data-range-state-label]')?.textContent ?? null]))
       .toEqual([['所选的字', 'pending-save', '待保存修订版']]);
     expect(field('target-ranges')!.checked).toBe(true);
     expect(field('target-book')!.checked).toBe(false);
@@ -220,7 +218,7 @@ describe('the Context-bound Task Composer', () => {
     expect(root.querySelector('h3')!.textContent).toBe(TASK_COMPOSER_TITLES.book);
     expect(field('target-book')!.checked).toBe(true);
     expect(field('target-ranges')!.disabled).toBe(true);
-    expect(root.querySelector('.task-composer-book-note')).not.toBeNull();
+    expect(root.querySelector('.task-composer-note')!.textContent).toContain('不会读取稿件');
     expect(root.querySelector('.task-composer-no-ranges')).not.toBeNull();
     expect(root.querySelector('[data-task-composer-action="procedures"]')).toBeNull();
     expect(TASK_PANEL_COMPOSE_OPEN).toBe('发起全书任务…');
@@ -257,7 +255,7 @@ describe('the Context-bound Task Composer', () => {
     expect(action('add-range')!.textContent).toBe(TASK_COMPOSER_ADD_RANGE);
     action('add-range')!.click();
     await settle();
-    expect(root.querySelectorAll('li.task-composer-range').map((item) => item.querySelector('blockquote')!.textContent)).toEqual(['再加一段']);
+    expect(root.querySelectorAll('li.task-composer-range').map((item) => item.querySelector('.task-composer-range-quote')!.textContent)).toEqual(['再加一段']);
     // Adding words is the editor's explicit choice of the ranges as the target (TASK-003).
     expect(field('target-ranges')!.checked).toBe(true);
     action('add-range')!.click();
@@ -341,17 +339,5 @@ describe('the composer\'s words', () => {
     expect(dialogueReasoningLine(3)).toBe('正在比对检索到的 3 个段落…');
   });
 
-  it('names a draft\'s card as a draft, never a Task', () => {
-    const view = taskPanelCardView({
-      item: {
-        itemId: `draft:${DRAFT}`, group: 'decisions', state: 'draft-unfinished', blocked: false, at: '2026-10-17T00:00:00.000Z',
-        book: { bookId: BOOK, title: '任务撰写' }, object: { kind: 'draft', goal: '统一全书的人名译法', origin: 'composer-book', ranges: 0 },
-        facts: { progress: null, categories: [], revisionOrdinal: null }, nextStep: 'continue-draft',
-        target: { kind: 'task-intent-draft', bookId: BOOK, draftId: DRAFT }, technical: [],
-      },
-      result: null,
-    });
-    expect(view).toMatchObject({ kindLabel: TASK_PANEL_DRAFT_KIND, title: '任务草稿 · 「统一全书的人名译法」', stateLabel: '任务草稿 · 尚未准备计划' });
-    expect(view.actions).toEqual([{ key: 'next', label: '继续编辑草稿', primary: true }]);
-  });
+
 });

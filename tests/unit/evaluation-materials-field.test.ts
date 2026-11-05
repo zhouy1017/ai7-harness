@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { evaluationMaterialsField, readersReportMaterialsFields } from '../../src/renderer/evaluation.js';
-import type { EvaluationWorkspaceProjection, ReadersReportTemplate, WritingTaskMaterialProjection } from '../../src/shared/protocol.js';
+import { installMiniDom, miniDocument, type MiniElement } from '../support/mini-dom.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { evaluationMaterialsField, evaluationPlanReferenceField } from '../../src/renderer/evaluation.js';
+import type { EvaluationWorkspaceProjection, WritingTaskMaterialProjection, RendererApi } from '../../src/shared/protocol.js';
 
-// The 允许参考 rows of 评估 (Issue #428, #795 item 7), run through the real renderer function on a small DOM stub: no Electron
+// The 允许参考 rows of the full evaluation plan (Issue #428, #795 item 7), run through the real renderer function on a small DOM stub: no Electron
 // and no new dependency. Which choices are on offer, what ticking one does, why a choice is off, and the frozen plan rows.
 
 class Node {
@@ -48,16 +49,15 @@ function mount(items: WritingTaskMaterialProjection[], options: { kind?: 'initia
   return { field, selected, repaints, box, texts: () => field.all().map((node) => node.textContent) };
 }
 
-describe('the 允许参考 rows of 评估', () => {
+describe('the 允许参考 rows inside the full evaluation plan', () => {
   it('lists one choice per offered item under its legend, statement and background note', () => {
     const view = mount([item('a', 1_234), item('b')], { more: 3 });
     expect(view.field.tag).toBe('fieldset');
     expect(view.field.dataset['evaluationMaterials']).toBe('initial');
     expect(view.texts()).toContain('允许参考 · 资料库');
-    expect(view.texts()).toContain('可以勾选资料库里这本书允许参考的资料');
     // 初评 has no 定稿 of its own: its row says references never override the 初评's scores, comments and conclusion (Issue #795 item 3).
-    expect(view.texts()).toContain('资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。');
-    expect(view.texts()).not.toContain('资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
+    expect(view.texts()).toContain('最多参考 4 份，每份不超过 3,000 字、合计不超过 6,000 字；只参照、不照抄，不改变评估方案或初评的分数、评语与结论。');
+    expect(view.texts()).not.toContain('最多参考 4 份，每份不超过 3,000 字、合计不超过 6,000 字；只参照、不照抄，不改变评估方案或定稿的分数、评语与结论。');
     expect(view.texts()).toContain('《资料a》 · 已提取 1,234 字');
     expect(view.texts()).toContain('另有 3 份资料未列出。');
     expect(view.field.all().filter((node) => node.type === 'checkbox')).toHaveLength(2);
@@ -125,8 +125,8 @@ describe('the 允许参考 rows of 评估', () => {
     expect(report.texts()).toContain(REFERENCES!.readersReport[0]);
     expect(report.texts()).not.toContain(REFERENCES!.initial[0]);
     // 审稿意见 drafts from a 定稿 record, so its row keeps the 定稿 wording (Issue #795 item 3).
-    expect(report.texts()).toContain('资料只提供背景，不改变本社评估方案，也不覆盖定稿的分数、评语与结论。');
-    expect(report.texts()).not.toContain('资料只提供背景，不改变本社评估方案，也不覆盖初评的分数、评语与结论。');
+    expect(report.texts()).toContain('最多参考 4 份，每份不超过 3,000 字、合计不超过 6,000 字；只参照、不照抄，不改变评估方案或定稿的分数、评语与结论。');
+    expect(report.texts()).not.toContain('最多参考 4 份，每份不超过 3,000 字、合计不超过 6,000 字；只参照、不照抄，不改变评估方案或初评的分数、评语与结论。');
   });
 });
 
@@ -135,8 +135,8 @@ describe('a choice that leaves the selection says so (Issue #759)', () => {
   it('names a ticked item that is no longer offered, and one now offered as damaged, and lists the damaged one without a size', () => {
     const view = mount([item('a'), damaged], { selected: ['a', 'gone', 'd'] });
     expect([...view.selected]).toEqual(['a']);
-    expect(view.texts()).toContain('已选的一份资料已不在可参考的清单中，已从所选中去掉。');
-    expect(view.texts()).toContain('《资料d》已从所选中去掉：索引记录已损坏 · 不可选');
+    expect(view.texts()).toContain('已选的一份资料已不在清单，已移除。');
+    expect(view.texts()).toContain('《资料d》已移除：索引记录已损坏 · 不可选');
     expect(view.texts()).toContain('《资料d》 · 字数未知');
     expect(view.texts()).toContain('索引记录已损坏 · 不可选');
     expect(view.box('d').disabled).toBe(true);
@@ -144,46 +144,40 @@ describe('a choice that leaves the selection says so (Issue #759)', () => {
   });
   it('stops repeating the removal once the editor changes a tick', () => {
     const view = mount([item('a'), item('b')], { selected: ['a', 'gone'] });
-    expect(view.texts()).toContain('已选的一份资料已不在可参考的清单中，已从所选中去掉。');
+    expect(view.texts()).toContain('已选的一份资料已不在清单，已移除。');
     const b = view.box('b');
     b.checked = true;
     b.listeners.get('change')!();
     globals.document = { createElement: (tag: string) => new Node(tag) };
     const again = evaluationMaterialsField({ materials: OFFERS([item('a'), item('b')]), materialReferences: REFERENCES }, 'initial', view.selected, true, false, () => undefined) as unknown as Node;
-    expect(again.all().map((node) => node.textContent)).not.toContain('已选的一份资料已不在可参考的清单中，已从所选中去掉。');
+    expect(again.all().map((node) => node.textContent)).not.toContain('已选的一份资料已不在清单，已移除。');
   });
 });
 
-describe('审稿意见 references per template (Issue #795 item 4)', () => {
-  const entry = (template: ReadersReportTemplate, label: string) => ({ template, label, prepare: { allowed: true, mode: 'readers-report-again' }, drafted: null, draft: null });
-  const page = (blocked: boolean) => ({ materials: OFFERS([item('a'), item('b')]), materialReferences: { ...REFERENCES, blocked: { initial: false, readersReport: blocked } },
-    readersReport: { basis: null, exemplars: { count: 0, statement: '' }, task: { taskIntentId: 'task', template: 'author', state: 'prepared', label: '' },
-      templates: [entry('author', '给作者的修改意见'), entry('editorial', '给编辑部 / 选题会的审读报告')] } }) as unknown as Parameters<typeof readersReportMaterialsFields>[0];
 
-  it('keeps one selection per template, locks the prepared one beside its frozen rows and leaves the other editable', () => {
-    globals.document = { createElement: (tag: string) => new Node(tag) };
-    const selections = new Map<ReadersReportTemplate, Set<string>>([['author', new Set(['a'])]]);
-    const repaints: string[] = [];
-    const fields = readersReportMaterialsFields(page(false), selections, false, (template, id) => { repaints.push(`${template}:${id}`); });
-    expect(fields.map((field) => [field.template, field.available])).toEqual([['author', false], ['editorial', true]]);
-    const [author, editorial] = fields.map((field) => field.field as unknown as Node);
-    const texts = (node: Node) => node.all().map((child) => child.textContent);
-    const box = (node: Node, id: string) => node.all().find((child) => child.dataset['evaluationMaterial'] === id)!;
-    expect([author!.dataset['template'], editorial!.dataset['template']]).toEqual(['author', 'editorial']);
-    expect(texts(author!)).toContain('允许参考 · 资料库 · 「给作者的修改意见」');
-    expect(texts(editorial!)).toContain('允许参考 · 资料库 · 「给编辑部 / 选题会的审读报告」');
-    // The prepared Task's frozen rows sit with its own template only.
-    expect(texts(author!)).toContain(REFERENCES.readersReport[0]);
-    expect(texts(editorial!)).not.toContain(REFERENCES.readersReport[0]);
-    expect([box(author!, 'a').checked, box(author!, 'a').disabled, box(author!, 'b').disabled]).toEqual([true, true, true]);
-    expect([box(editorial!, 'a').checked, box(editorial!, 'b').disabled]).toEqual([false, false]);
-    const b = box(editorial!, 'b');
-    b.checked = true;
-    b.listeners.get('change')!();
-    expect([...selections.get('editorial')!]).toEqual(['b']);
-    expect([...selections.get('author')!]).toEqual(['a']);
-    expect(repaints).toEqual(['editorial:b']);
-    // A prepared plan whose frozen reference went away can never start: its template's choices open again.
-    expect(readersReportMaterialsFields(page(true), selections, false, () => undefined).map((field) => field.available)).toEqual([true, true]);
-  });
+it('edits only the matching prepared report plan and retains its exact reference IDs', async () => {
+  const restore = installMiniDom();
+  vi.stubGlobal('window', { getSelection: () => null });
+  try {
+    const page = { bookId: 'book', materials: OFFERS([item('a'), item('b')]), materialReferences: { ...REFERENCES, readersReportInput: { materialIds: ['a'] } },
+      readersReport: { task: { taskIntentId: 'task', template: 'author', state: 'prepared' } } } as unknown as EvaluationWorkspaceProjection;
+    const prepare = vi.fn(async () => ({ state: 'completed', result: { initial: {}, readersReport: { task: { taskIntentId: 'new-task' } } } }));
+    const api = { inspectEvaluation: async () => page, prepareReadersReport: prepare, searchReferableMaterials: vi.fn() } as unknown as RendererApi;
+    let changed: Promise<string> | null = null;
+    const host = evaluationPlanReferenceField({ api, bookId: 'book', ref: 'task', kind: 'readers-report', editable: true, reference: ['定稿依据与本社范例', ...REFERENCES.readersReport],
+      awaitJob: async (job) => job, change: (operation) => { changed = operation(); } });
+    miniDocument.body.append(host as unknown as import('../support/mini-dom.js').MiniElement);
+    await Promise.resolve();
+    expect(host.textContent).toContain('定稿依据与本社范例');
+    expect(host.querySelector<HTMLInputElement>('[data-evaluation-material="a"]')?.checked).toBe(true);
+    const choice = (host as unknown as MiniElement).querySelector('[data-evaluation-material="b"]')!;
+    choice.checked = true; choice.dispatchEvent({ type: 'change' });
+    expect(prepare).toHaveBeenCalledWith({ template: 'author', materialIds: ['a', 'b'] });
+    await expect(changed).resolves.toBe('new-task');
+    const older = evaluationPlanReferenceField({ api, bookId: 'book', ref: 'older-task', kind: 'readers-report', editable: true, reference: REFERENCES.readersReport,
+      awaitJob: async (job) => job, change: vi.fn() });
+    miniDocument.body.append(older as unknown as import('../support/mini-dom.js').MiniElement);
+    await Promise.resolve();
+    expect(older.querySelector('input')).toBeNull();
+  } finally { vi.unstubAllGlobals(); restore(); }
 });

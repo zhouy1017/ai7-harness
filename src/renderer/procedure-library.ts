@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import { PROCEDURE_STAGE_LABELS, procedureStageUsesModel } from '../shared/protocol/procedures.js';
 import type { EditableProcedureProjection, ProcedureDefinitionPin, SaveProcedureDefinitionInput } from '../shared/protocol/procedures.js';
 import type { RendererApi, BookSummaryProjection, BookSummaryCursor } from '../shared/protocol.js';
@@ -7,10 +8,10 @@ import { mountProcedureRecommendation, ProcedureRecommendationSelection } from '
 export async function mountEditableProcedureLibrary(root: HTMLElement, api: RendererApi,
   openRun: (book: BookSummaryProjection, kind: string, procedure: ProcedureDefinitionPin) => Promise<void>, errorMessage: (error: unknown, fallback: string) => string, capturedCatalog?: HTMLElement): Promise<void> {
   const node = <K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] => {
-    const result = document.createElement(tag); if (text !== undefined) result.textContent = text; return result;
+    const result = document.createElement(tag); if (text !== undefined) result.textContent = text; if (tag === 'button') result.className = `${result.className} btn`.trim(); return result;
   };
   const action = (label: string, run: () => Promise<void> | void): HTMLButtonElement => {
-    const button = node('button', label); button.type = 'button'; button.className = 'secondary';
+    const button = node('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary');
     button.addEventListener('click', () => { button.disabled = true; void Promise.resolve().then(run).catch(showError).finally(() => { button.disabled = false; }); });
     return button;
   };
@@ -66,7 +67,7 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
       });
     };
     renderStages();
-    const save = node('button', '保存为新版本'); save.type = 'submit'; save.className = 'primary';
+    const save = node('button', '保存为新版本'); save.type = 'submit'; save.className = 'btn ' + ('primary');
     form.append(stageList, save, action('取消', () => formSlot.replaceChildren()));
     form.addEventListener('submit', (event) => {
       event.preventDefault(); save.disabled = true;
@@ -130,12 +131,12 @@ export async function mountEditableProcedureLibrary(root: HTMLElement, api: Rend
     for (const entry of projection.procedures) {
       const card = node('li'); card.dataset['procedureId'] = entry.procedureId; card.dataset['procedureVersion'] = String(entry.version);
       const versions = node('select');
-      for (const version of entry.versions) versions.append(new Option(`第 ${version.version} 版`, String(version.version)));
+      for (const version of entry.versions) versions.append(new Option(`${technicalWords(`第 ${version.version} 版`, '版本')}`, String(version.version)));
       card.dataset['procedureState'] = entry.stopped ? 'stopped' : 'enabled'; card.dataset['procedureRuns'] = String(entry.uses);
-      const pill = node('span', entry.stopped ? '已停用' : '已启用'); pill.className = `status-pill procedure-state-${entry.stopped ? 'stopped' : 'enabled'}`;
-      const stages = node('p', entry.document.stages.map((stage) => PROCEDURE_STAGE_LABELS[stage.stageType]).join(' → ')); stages.className = 'field-note procedure-stages';
-      card.append(pill, node('h4', `${entry.document.title} · 第 ${entry.version} 版${entry.stopped ? ' · 已停用' : ''}`),
-        node('p', `${entry.preInstalled ? '预装' : '本社工序'} · 已使用 ${entry.uses} 次`), stages,
+      const pill = node('span', entry.stopped ? '已停用' : '已启用'); pill.className = `state-term status-pill procedure-state-${entry.stopped ? 'stopped' : 'enabled'}`;
+      const stages = node('span', entry.document.stages.map((stage) => PROCEDURE_STAGE_LABELS[stage.stageType]).join(' → ')); stages.className = 'procedure-stages';
+      const context = node('p', `${entry.preInstalled ? '预装' : '本社工序'} · 已使用 ${entry.uses} 次 · `); context.append(stages);
+      card.append(pill, node('h4', `${entry.document.title} · ${technicalWords(`第 ${entry.version} 版`, '版本')}`), context,
         action('改写为新版本', () => edit(entry, false)), label('运行版本', versions),
         action('运行此工序…', () => chooseBook(entry, entry.versions.find((version) => version.version === Number(versions.value))!)),
         action('停用所选版本', async () => { await api.procedureLibrary({ action: 'stop', procedure: entry.versions.find((version) => version.version === Number(versions.value))! }); await load(); }));

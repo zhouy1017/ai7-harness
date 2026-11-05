@@ -1,3 +1,4 @@
+import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { GLOBAL_AGENT_TITLE, type GlobalAgentDialogueProjection, type GlobalAgentProcedure, type GlobalAgentProjection, type GlobalAgentRendererApi, type GlobalAgentScopeInput, type GlobalMemoryItem, type GlobalAgentSourceCandidate, type PrepareGlobalAgentTurnInput, type RecordLearningSupervisionInput } from '../shared/protocol.js';
 import { globalAgentAnswerStatus } from './shell-labels.js';
 import { CONFIGURED_RUNTIME_MODEL_LABELS } from '../shared/provider-configuration.generated.js';
@@ -6,6 +7,7 @@ import { MODEL_SERVICE_ROUTE_BINDINGS, modelServiceChannelOf } from '../shared/p
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 function field(label: string, input: HTMLElement): HTMLLabelElement {
@@ -18,7 +20,7 @@ function field(label: string, input: HTMLElement): HTMLLabelElement {
 function technical(...lines: string[]): HTMLDetailsElement {
   const details = el('details'); details.className = 'global-agent-technical';
   details.append(el('summary', '查看技术详情'), ...lines.map((line) => el('pre', line)));
-  return details;
+  return technicalDisclosure(details);
 }
 function providerLabel(provider: { route: string; model: string }): string {
   const channel = modelServiceChannelOf(provider.route);
@@ -92,12 +94,12 @@ export function mountGlobalAgent(options: {
   text.dataset['globalAgentText'] = 'input';
   const save = el('button', '新建记忆');
   save.type = 'submit';
-  save.className = 'secondary';
+  save.className = 'btn ' + ('secondary');
   save.dataset['globalAgentSave'] = 'submit';
   const effectField = field('监督作用', effect);
   const bookField = field('图书', book);
   form.append(el('h3', '管理所选记忆'), field('操作', operation), field('作用范围', scope), field('审阅类别', category), bookField,
-    field('记忆内容 / 监督指令（最多 200 字）', text), effectField,
+    field('记忆内容 / 监督指令 · 最多 200 字', text), effectField,
     el('p', '勾选上方记忆后管理；只有点击记录才会修改记忆，对话不会自动成为指令。'), save);
   const directives = el('section');
   directives.className = 'global-agent-directives';
@@ -136,7 +138,7 @@ export function mountGlobalAgent(options: {
   const answerButtons = new Map<'stop' | 'continue' | 'regenerate', HTMLButtonElement>();
   for (const [operation, label] of [['stop', '停止回答'], ['continue', '继续回答'], ['regenerate', '重新回答']] as const) {
     const button = el('button', label); button.type = 'button'; button.disabled = true;
-    button.className = 'quiet';
+    button.className = 'btn ' + ('quiet');
     button.addEventListener('click', () => {
       const last = latestDialogue?.attempts.at(-1);
       if (last === undefined || latestDialogue === null) return;
@@ -192,7 +194,7 @@ export function mountGlobalAgent(options: {
       for (const proposal of dialogue.supervisionProposals ?? []) {
         const key = `${proposal.attemptId}/${proposal.callId}`;
         const confirm = el('button', confirmed.has(key) ? '已记录' : '确认并记录为学习监督指令'); confirm.type = 'button'; confirm.disabled = confirmed.has(key);
-        confirm.className = 'secondary';
+        confirm.className = 'btn ' + ('secondary');
         confirm.dataset['globalAgentConfirmProposal'] = key;
         confirm.addEventListener('click', () => {
           confirm.disabled = true;
@@ -219,8 +221,8 @@ export function mountGlobalAgent(options: {
   questionForm.dataset['globalAgentQuestionForm'] = '';
   const question = el('textarea'); question.maxLength = 500; question.rows = 3;
   question.placeholder = '向全域智能体提问…'; question.dataset['globalAgentQuestion'] = '';
-  const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'primary'; ask.disabled = true; question.disabled = true;
-  const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'secondary'; previewButton.disabled = true;
+  const ask = el('button', '发送问题'); ask.type = 'submit'; ask.className = 'btn ' + ('primary'); ask.disabled = true; question.disabled = true;
+  const previewButton = el('button', '查看将发送的内容'); previewButton.type = 'button'; previewButton.className = 'btn ' + ('secondary'); previewButton.disabled = true;
   const scopeList = el('fieldset'); scopeList.className = 'global-agent-scope';
   scopeList.append(el('legend', '参考图书与工序'), el('p', '勾选后可检索与读取这些图书和工序；未选时只讨论问题与所选记忆。'));
   const scopeBooks = el('div'); scopeBooks.className = 'global-agent-choice-list';
@@ -228,7 +230,7 @@ export function mountGlobalAgent(options: {
   const scopedBooks = new Set<string>();
   const scopedProcedures = new Map<string, GlobalAgentProcedure>();
   const selectedSources = new Map<string, GlobalAgentSourceCandidate>();
-  const habits = el('button', '生成审阅习惯总结'); habits.type = 'button'; habits.className = 'quiet'; habits.disabled = true; habits.dataset['globalAgentHabits'] = 'summary';
+  const habits = el('button', '生成审阅习惯总结'); habits.type = 'button'; habits.className = 'btn ' + ('quiet'); habits.disabled = true; habits.dataset['globalAgentHabits'] = 'summary';
   const disclosure = el('section'); disclosure.className = 'global-agent-preview'; disclosure.hidden = true; disclosure.setAttribute('aria-label', '将发送的内容');
   let previewGeneration = 0;
   let sending = false;
@@ -291,11 +293,11 @@ export function mountGlobalAgent(options: {
       if (prepared.scope !== undefined) disclosure.append(
         el('p', `可用工具：${prepared.scope.tools.map((tool) => TOOL_LABELS[tool] ?? '本机工具').join('、')}`),
         el('p', `图书：${prepared.scope.books.map((entry) => entry.title).join('、') || '未选'}`),
-        el('p', `工序：${prepared.scope.procedures.map((entry) => `${entry.title} 第 ${entry.version} 版`).join('、') || '未选'}`));
+        el('p', `工序：${prepared.scope.procedures.map((entry) => `${entry.title} ${technicalWords(`第 ${entry.version} 版`, '版本')}`).join('、') || '未选'}`));
       if (prepared.sources.length === 0) disclosure.append(el('p', '本次没有选用记忆。'));
       for (const entry of prepared.sources) {
         const row = el('article'); row.className = 'global-agent-source-card';
-        const remove = el('button', '本次移除'); remove.type = 'button'; remove.className = 'quiet';
+        const remove = el('button', '本次移除'); remove.type = 'button'; remove.className = 'btn ' + ('quiet');
         remove.addEventListener('click', () => {
           selectedSources.delete(entry.itemId); selected.delete(entry.itemId);
           for (const checkbox of list.querySelectorAll<HTMLInputElement>('input')) if (checkbox.dataset['sourceItem'] === entry.itemId) checkbox.checked = false;
@@ -330,7 +332,7 @@ export function mountGlobalAgent(options: {
   const audit = el('button', '学习回溯 · 停止今后使用');
   audit.type = 'button';
   audit.addEventListener('click', options.openAudit);
-  audit.className = 'quiet';
+  audit.className = 'btn ' + ('quiet');
   root.append(state, conversation, questionForm, items, scopeList, form, directives, history, audit);
   let current: GlobalAgentProjection | null = null;
   let busy = false;
@@ -358,7 +360,7 @@ export function mountGlobalAgent(options: {
     // 工序与规则 inspected here; a version enters the turn only when explicitly checked.
     scopeProcedures.replaceChildren(...(projection.procedures ?? []).map((entry) => {
       const row = el('details'); row.className = 'global-agent-procedure'; row.dataset['globalAgentProcedure'] = entry.procedureId;
-      row.append(el('summary', `工序 · ${entry.title} · 第 ${entry.version} 版`), el('p', entry.editorInstruction || '没有编辑说明。'),
+      row.append(el('summary', `工序 · ${entry.title} · ${technicalWords(`第 ${entry.version} 版`, '版本')}`), el('p', entry.editorInstruction || '没有编辑说明。'),
         el('p', `阶段：${entry.stages.map((stage) => stage.label).join(' → ')}`));
       if (projection.scopedDialogueState === 'available') {
         const checkbox = el('input'); checkbox.type = 'checkbox'; checkbox.dataset['globalAgentScopeProcedure'] = entry.procedureId;
@@ -415,7 +417,7 @@ export function mountGlobalAgent(options: {
     for (const directive of projection.directives) directives.append(el('p', `${directive.ordinal} · ${directive.text || '停用所选记忆'} · ${directive.recordedAt}`));
     historyList.replaceChildren();
     for (const dialogue of projection.history) {
-      const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'quiet global-agent-history-entry';
+      const open = el('button', dialogue.question ?? '查看全域对话'); open.type = 'button'; open.className = 'btn ' + ('quiet global-agent-history-entry');
       open.addEventListener('click', () => {
         if (poll !== undefined) clearTimeout(poll);
         previousTurns.replaceChildren(); foreground = dialogue.dialogueId; void showDialogue();

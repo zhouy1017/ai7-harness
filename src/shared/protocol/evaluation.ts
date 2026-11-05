@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './analysis.js';
 import type { ProductionDocumentProjection } from './deliverables.js';
 import type {
   ReviewCategoryResultSetRevisionProjection,
@@ -111,6 +112,7 @@ export interface InitialEvaluationRevisionUpdateProjection extends Omit<ReviewCa
 
 export type InitialEvaluationUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;
@@ -202,6 +204,7 @@ export interface ReadersReportPassageProjection {
 
 /** The five sections as the book-level synthesis wrote them: two paragraphs and three lists. */
 export interface ReadersReportSectionsProjection {
+  readonly withheld?: ReadonlyArray<string>;
   overall: string;
   strengths: ReadonlyArray<string>;
   problems: ReadonlyArray<string>;
@@ -226,6 +229,7 @@ export interface ReadersReportRevisionUpdateProjection extends Omit<ReviewCatego
 
 export type ReadersReportUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;
@@ -334,6 +338,7 @@ export interface EvaluationRewriteRevisionUpdateProjection extends Omit<ReviewCa
 
 export type EvaluationRewriteUnitProjection =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       unitOrdinal: number;
       state: 'closed';
       requestDigest: string;
@@ -666,6 +671,9 @@ export interface EvaluationWorkspaceProjection {
   readonly materialReferences?: {
     readonly initial: ReadonlyArray<string>;
     readonly readersReport: ReadonlyArray<string>;
+    /** Exact choices for changing a not-yet-started plan in the full Task Drawer. */
+    readonly initialInput?: { readonly materialIds: ReadonlyArray<string>; readonly seriesId: string | null };
+    readonly readersReportInput?: { readonly materialIds: ReadonlyArray<string> };
     readonly blocked: { readonly initial: boolean; readonly readersReport: boolean };
   };
   readonly bookId: string;

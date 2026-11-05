@@ -43,27 +43,25 @@ describe('the 生成来源译文 contract', () => {
     expect(buildMaterialTranslationMessage(['The river rose.', 'Nobody\nslept.'])).toBe(message);
   });
 
-  it('reads only an answer aligned one for one with the batch', () => {
-    expect(readMaterialTranslationAnswer(answer(['河水上涨。', '无人入睡。']), 2)).toEqual(['河水上涨。', '无人入睡。']);
-    expect(readMaterialTranslationAnswer(`  ${answer(['河水上涨。'])}\n`, 1)).toEqual(['河水上涨。']);
-    for (const text of [
-      answer(['河水上涨。']),
-      answer(['河水上涨。', '']),
-      JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA, translations: [{ n: 2, text: '甲' }, { n: 1, text: '乙' }] }),
-      JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA, translations: [{ n: 1, text: '甲', note: '多' }, { n: 2, text: '乙' }] }),
-      JSON.stringify({ schema: 'other', translations: [{ n: 1, text: '甲' }, { n: 2, text: '乙' }] }),
-      JSON.stringify({ schema: MATERIAL_TRANSLATION_RESULT_SCHEMA, translations: [{ n: 1, text: '甲' }, { n: 2, text: '乙' }], extra: 1 }),
-      answer(['甲', '\uD800']),
-      answer(['甲', '字'.repeat(20_001)]),
-      '1. 河水上涨。\n2. 无人入睡。',
-    ]) expect(readMaterialTranslationAnswer(text, 2)).toBeNull();
+  it('keeps translations by n, never by position, and discards only bad paragraphs', () => {
+    const result = readMaterialTranslationAnswer('说明 '+JSON.stringify({ extra: true, translations: [{ n: 2, text: '乙', extra: 1 }, { n: 9, text: '坏' }, { n: 1, text: '甲' }, { n: 3, text: '' }] })+' 结束', 3);
+    expect(result).toEqual(['甲', '乙', null]);
+    expect(result?.salvaged).toEqual([{ section: 'translations', index: 1, reason: 'paragraph-not-aligned' }, { section: 'translations', index: 3, reason: 'paragraph-not-aligned' }, { section: 'paragraphs', index: 2, reason: 'paragraph-missing' }]);
+    expect(readMaterialTranslationAnswer('{"translations":[{"n":2,"text":"乙"},{"n":', 2)).toEqual([null, '乙']);
+    expect(readMaterialTranslationAnswer('{"translations":[{"n":1,"text":"甲"},{"n":1,"text":"重复"}]}', 2)).toEqual(['甲', null]);
+    expect(readMaterialTranslationAnswer('no JSON', 2)).toBeNull();
   });
 
   it('reads an aligned JSON answer wrapped in a Markdown code fence', () => {
     for (const fence of ['```json', '```', '```JSON']) {
       expect(readMaterialTranslationAnswer(`${fence}\n${answer(['河水上涨。'])}\n\`\`\``, 1)).toEqual(['河水上涨。']);
     }
-    expect(readMaterialTranslationAnswer(`解释\n\`\`\`json\n${answer(['河水上涨。'])}\n\`\`\``, 1)).toBeNull();
+    expect(readMaterialTranslationAnswer(`解释\n\`\`\`json\n${answer(['河水上涨。'])}\n\`\`\``, 1)).toEqual(['河水上涨。']);
+  });
+
+  it('skips a leading bracketed note before numbered translations (#1311)', () => {
+    expect(readMaterialTranslationAnswer(`[说明] ${answer(['甲'])}`, 1)).toEqual(['甲']);
+    expect(readMaterialTranslationAnswer('[说明] [{"n":1,"text":"甲"}]', 1)).toEqual(['甲']);
   });
 });
 
@@ -120,7 +118,7 @@ describe('who may ask for 来源译文', () => {
     expect(asked).toEqual([buildMaterialTranslationMessage(['The river rose.', 'Nobody slept.'])]);
     const { owner: short } = owner(null, answered(answer(['河水上涨。'])));
     expect(await materialTranslator(short, 'developer-live', () => 1).translate(PUBLIC, ['a', 'b'], 's'))
-      .toEqual({ kind: 'failed', message: '模型给出的来源译文没有与原文逐段对齐；这一批没有记录任何译文。' });
+      .toMatchObject({ kind: 'translated', texts: ['河水上涨。', null] });
     const { owner: unknown } = owner(null, { kind: 'failed', code: 'OUTCOME_UNKNOWN', message: '结果待确认', outcomeUnknown: true });
     expect(await materialTranslator(unknown, 'developer-live', () => 1).translate(PUBLIC, ['a'], 's')).toEqual({ kind: 'failed', message: '结果待确认' });
   });

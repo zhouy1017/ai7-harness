@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import * as labels from '../../src/renderer/dialogue-labels.js';
-import { taskPanelCardView } from '../../src/renderer/task-panel-labels.js';
 import {
   DIALOGUE_PROMPT_CONTRACT,
   DIALOGUE_PROMPT_CONTRACT_DIGEST,
@@ -51,8 +50,8 @@ describe('the words of 就这段提问…', () => {
     expect(labels.dialogueIncompleteLine({ state: 'interrupted', causeCode: 'AI7_CLOSED', fragmentTotal: 2 })).toBe('AI7 关闭时回答被中断；只保留了完整的句子。');
     expect(labels.dialogueIncompleteLine({ state: 'interrupted', causeCode: 'SERVICE_STOPPED', fragmentTotal: 2 })).toBe('AI7 关闭时回答被中断；只保留了完整的句子。');
     expect(labels.dialogueIncompleteLine({ state: 'interrupted', causeCode: 'ABORTED', fragmentTotal: 2 })).toBe('回答被中断；只保留了完整的句子。');
-    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: 'AI7_FIXTURE_MISMATCH', fragmentTotal: 0 })).toBe('回答没有完成（AI7_FIXTURE_MISMATCH）；没有留下完整的句子。');
-    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答没有完成（原因未知）；没有留下完整的句子。');
+    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: 'AI7_FIXTURE_MISMATCH', fragmentTotal: 0 })).toBe('回答未完成；没有收到可保留的文字。');
+    expect(labels.dialogueIncompleteLine({ state: 'failed', causeCode: null, fragmentTotal: 0 })).toBe('回答未完成；没有收到可保留的文字。');
     expect(labels.dialogueIncompleteLine({ state: 'completed', causeCode: null, fragmentTotal: 3 })).toBeNull();
     expect(labels.dialogueIncompleteLine({ state: 'answering', causeCode: null, fragmentTotal: 3 })).toBeNull();
     expect(labels.dialogueConvertedLine(1)).toBe('已从这次回答新建 1 条修改建议。');
@@ -61,37 +60,6 @@ describe('the words of 就这段提问…', () => {
     expect(labels.dialogueQuestionRefusal(501, 500)).toBe('问题最多 500 个字。');
     expect(labels.dialogueQuestionRefusal(500, 500)).toBeNull();
     expect(labels.dialogueQuestionLine(QUESTION)).toBe(`提问 · 「${QUESTION}」`);
-  });
-});
-
-describe('a dialogue Task in the 任务 panel', () => {
-  const card = (state: GlobalAttentionStateKey, result: BookTaskItemProjection['result']): ReturnType<typeof taskPanelCardView> => taskPanelCardView({
-    item: {
-      itemId: `dialogue:${DIALOGUE}`,
-      group: state === 'dialogue-answering' ? 'active' : 'recent',
-      state,
-      blocked: false,
-      at: '2026-10-07T04:05:06.000Z',
-      book: { bookId: BOOK, title: '对话旅程' },
-      object: { kind: 'dialogue', question: QUESTION },
-      facts: { progress: null, categories: [], revisionOrdinal: null },
-      nextStep: 'open-dialogue',
-      target: { kind: 'dialogue', bookId: BOOK, dialogueId: DIALOGUE },
-      technical: [],
-    },
-    result,
-  });
-
-  it('offers 回答 and 打开对话 (TASK-044), and only 打开对话 while it answers', () => {
-    const answering = card('dialogue-answering', null);
-    expect(answering).toMatchObject({ kindLabel: '对话任务 · 就所选文字提问', title: `提问 · 「${QUESTION}」`, stateLabel: '等待回答', pill: { tone: 'neutral', shape: 'ring' } });
-    expect(answering.actions.map((action) => [action.key, action.label, action.primary])).toEqual([['next', '打开对话', true]]);
-    const answered = card('dialogue-answered', { kind: 'dialogue', dialogueId: DIALOGUE });
-    expect(answered.stateLabel).toBe('已回答');
-    expect(answered.actions.map((action) => [action.key, action.label, action.primary])).toEqual([['answer', '回答', false], ['next', '打开对话', true]]);
-    expect(card('dialogue-stopped', { kind: 'dialogue', dialogueId: DIALOGUE }).stateLabel).toBe('回答已停止 · 内容不完整');
-    expect(card('dialogue-interrupted', null).actions.map((action) => action.key)).toEqual(['next']);
-    expect(answered.timeLine).toMatch(/^完成于 /u);
   });
 });
 
@@ -171,7 +139,7 @@ describe('a dialogue’s attempts and what each allows', () => {
     expect(project([attempt(1, 'ask', 'stopped')], { 1: '一句。半' }).actions).toEqual({ stop: false, continue: true, regenerate: true, convert: false });
     expect(project([attempt(1, 'ask', 'stopped')], { 1: '半句' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
     expect(project([attempt(1, 'ask', 'interrupted')], { 1: '一句。' }).actions).toEqual({ stop: false, continue: true, regenerate: true, convert: false });
-    expect(project([attempt(1, 'ask', 'failed')], { 1: '一句。' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
+    expect(project([attempt(1, 'ask', 'failed')], { 1: '一句。' }).actions).toEqual({ stop: false, continue: true, regenerate: true, convert: false });
     expect(project([attempt(1, 'ask', 'completed')], { 1: '一句。尾' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: true });
     expect(project([attempt(1, 'ask', 'completed')], { 1: '' }).actions).toEqual({ stop: false, continue: false, regenerate: true, convert: false });
     // A 继续回答 carries what the answer it went on from kept, then its own; the whole is what it converts.
@@ -186,6 +154,15 @@ describe('a dialogue’s attempts and what each allows', () => {
     const damaged = dialogueProjection(task, resolveAttempts([attempt(1, 'ask', 'stopped')], { turn: () => 'damaged' }, () => null), 0);
     expect(damaged.attempts[0]).toMatchObject({ source: 'damaged', fragmentTotal: 0 });
     expect(damaged.actions).toEqual({ stop: false, continue: false, regenerate: false, convert: false });
+  });
+
+  it('keeps a failed tail incomplete and permits conversion with an unverified citation warning (#1311)', () => {
+    const failed = project([attempt(1, 'ask', 'failed')], { 1: '未完的尾句' });
+    expect(failed.attempts[0]!.fragments).toEqual([{ text: '未完的尾句', breakAfter: false, incomplete: true }]);
+    expect(failed.actions.continue).toBe(true);
+    const completed = project([attempt(1, 'ask', 'completed')], { 1: '建议文字。[retrieval:missing]' });
+    expect(completed.actions.convert).toBe(true);
+    expect(completed.retrievalWarning).toBe('未经精确取文');
   });
 
   it('gives a reader the latest answer from the fragment it has shown, and every earlier one whole', () => {

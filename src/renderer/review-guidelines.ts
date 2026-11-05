@@ -1,3 +1,5 @@
+import { windowStep } from './components/controls.js';
+import { identityWords } from './technical-layer.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
   GUIDELINE_CANCEL,
@@ -10,7 +12,6 @@ import {
   guidelineFixedStatement,
   guidelineImported,
   guidelineMergedVersionLine,
-  guidelineMergedVersionsMore,
   guidelineMergedVersionsSummary,
   guidelineOlderBooks,
   guidelinePreviewChanges,
@@ -38,7 +39,8 @@ export interface MountReviewGuidelinesOptions {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -87,16 +89,19 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     const title = el('h3', undefined, document.title);
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill guideline-version-pill', guidelineVersionPill(document)));
-    node.append(heading, el('p', 'field-note guideline-applied', guidelineAppliedBy(document)));
+    heading.append(el('span', 'guideline-applied', guidelineAppliedBy(document)));
+    node.append(heading);
+    const more = el('details', 'knowledge-file-more');
+    more.append(el('summary', undefined, '查看文件'));
     const older = guidelineOlderBooks(document);
     if (older !== null) {
       const note = el('p', 'attention-note guideline-older', older);
       note.dataset['guidelineOlder'] = String(document.olderVersionBookCount);
-      node.append(note);
+      more.append(note);
     }
     // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
     const fixed = guidelineFixedStatement(document);
-    if (fixed !== null) node.append(el('p', 'field-note guideline-fixed', fixed));
+    if (fixed !== null) more.append(el('p', 'guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
     clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauseCount)));
@@ -133,12 +138,12 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       controls.append(latest, older);
       versions.append(controls);
     }
-    node.append(clauses, versions);
+    more.append(clauses, versions);
     // The versions merged Books were reviewed under and this data never had, each with its clauses: read-only (Issue #434
     // review; ADR 0079 §1.5).
     if (document.mergedVersionCount > 0) {
       const merged = el('details', 'guideline-merged-versions');
-      merged.append(el('summary', undefined, guidelineMergedVersionsSummary(document.mergedVersionCount)));
+      merged.append(el('summary', undefined, `${guidelineMergedVersionsSummary(document.mergedVersionCount)}${document.mergedVersionCount > document.mergedVersions.length ? ` · 已列 ${document.mergedVersions.length} 个` : ''}`));
       const mergedRows = el('ul', 'guideline-version-list');
       for (const version of document.mergedVersions) {
         const row = el('li', undefined, guidelineMergedVersionLine(version));
@@ -153,11 +158,10 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         row.append(mergedClauses);
         if (version.clausePages > 1) {
           const controls = el('div', 'button-row');
-          controls.append(el('span', 'field-note', `条款第 ${version.clausePage + 1} / ${version.clausePages} 页；较长条款分段显示。`));
           for (const [label, step] of [['上一页条款', -1], ['下一页条款', 1]] as const) {
             const name = `merged-clause-${version.digest}-${step}`;
-            const button = action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
-              { digest: version.digest, page: version.clausePage + step }, name));
+            const button = windowStep(action(label, 'quiet', name, () => void turnMerged(document, document.mergedVersionsBefore,
+              { digest: version.digest, page: version.clausePage + step }, name)), step < 0 ? 'before' : 'after', step < 0 ? '向前浏览条款' : '向后浏览条款');
             button.disabled = busy || preview !== null || version.clausePage + step < 0 || version.clausePage + step >= version.clausePages;
             controls.append(button);
           }
@@ -177,15 +181,12 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         }
         merged.append(controls);
       }
-      if (document.mergedVersionCount > document.mergedVersions.length) {
-        merged.append(el('p', 'field-note', guidelineMergedVersionsMore(document.mergedVersions.length, document.mergedVersionCount)));
-      }
-      node.append(merged);
+      more.append(merged);
     }
     if (refusal?.documentId === document.documentId) {
       const note = el('p', 'attention-note guideline-refusal', refusal.message);
       note.setAttribute('role', 'alert');
-      node.append(note);
+      more.append(note);
     }
     if (preview?.documentId === document.documentId) node.append(previewSection(preview));
     else if (fixed === null) {
@@ -193,8 +194,10 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       const start = action(GUIDELINE_IMPORT, 'secondary', 'import', () => void choose(document.documentId));
       start.disabled = busy || preview !== null;
       actions.append(start);
-      node.append(actions);
+      more.append(actions);
     }
+    if (preview?.documentId === document.documentId || refusal?.documentId === document.documentId) more.open = true;
+    node.append(more);
     return node;
   };
 
@@ -219,19 +222,19 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     confirm.disabled = busy;
     cancel.disabled = busy;
     actions.append(confirm, cancel);
-    section.append(heading, el('p', 'field-note guideline-preview-changes', guidelinePreviewChanges(shown)), list, actions);
+    heading.append(' · ', el('span', 'guideline-preview-changes', guidelinePreviewChanges(shown)));
+    section.append(heading, list, actions);
     if (shown.clausePages > 1) section.insertBefore(clauseControls(shown, true), actions);
     return section;
   };
 
   const clauseControls = (shown: ReviewGuidelineDocumentProjection | ReviewGuidelinePreviewProjection, isPreview: boolean): HTMLElement => {
     const row = el('div', 'button-row');
-    row.append(el('span', 'field-note', `第 ${shown.clausePage + 1} / ${shown.clausePages} 页；较长条款分段显示。`));
     for (const [step, label, name] of [[-1, '上一页', 'clauses-previous'], [1, '下一页', 'clauses-next']] as const) {
-      const button = action(label, 'secondary', name, () => {
+      const button = windowStep(action(label, 'secondary', name, () => {
         if (isPreview && 'previewId' in shown) void turnPreview(shown, shown.clausePage + step, name);
         else if ('versionsBefore' in shown) void turn(shown, shown.versionsBefore, shown.clausePage + step, name);
-      });
+      }), step < 0 ? 'before' : 'after', step < 0 ? '向前浏览条款' : '向后浏览条款');
       button.disabled = busy || (!isPreview && preview !== null) || shown.clausePage + step < 0 || shown.clausePage + step >= shown.clausePages;
       row.append(button);
     }

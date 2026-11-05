@@ -1,3 +1,5 @@
+import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
+import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
 import { hydrateAnalysisRevision, appendBaselineSummaryPage } from './analysis-paging.js';
 import {
@@ -34,6 +36,11 @@ import type { ReviewFocus } from './review-workspace.js';
 import { ANALYSIS_TAB_SHOWN_EVENT, mountCustomAnalysisTab } from './custom-analysis.js';
 import { CUSTOM_TAB_LABEL } from './custom-analysis-labels.js';
 import { taskPlanQuickStartFellBack, TASK_DRAWER_TITLE, taskPlanSummaryLine, TASK_PLAN_DRIFT_HEADING } from './task-drawer-labels.js';
+
+export const ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL = '查看任务抽屉';
+export function analysisUpdateBlockedDrawerAction(blockedReason: string | null): 'task-drawer' | null {
+  return blockedReason !== null && blockedReason.startsWith('有一项运行因') ? 'task-drawer' : null;
+}
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
 import {
   RUN_REPORT_CLASSIFICATION_LABELS,
@@ -45,7 +52,6 @@ import {
   analysisFourSentences,
   ANALYSIS_ENTITY_KIND_LABELS,
   analysisProvenanceSummary,
-  analysisKindSubtitle,
   ANALYSIS_EDITORIAL_NOT_DO,
   runStepIsStale,
   RUN_LIVENESS_STAGE_LABELS,
@@ -81,7 +87,8 @@ export const analysisTabChoice = new Map<string, AnalysisTabId>();
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -272,7 +279,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     disclosure.dataset['runReportDigest'] = report.reportDigest;
     disclosure.dataset['runReportRun'] = report.runRecordId;
     disclosure.dataset['runReportClassification'] = report.classification;
-    disclosure.append(element('summary', undefined, `查看运行报告 · ${RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
+    disclosure.append(element('summary', undefined, `查看运行报告 · ${report.classification === 'completed-with-gaps' ? completedWithGapsLabel(report.units.gaps, report.units.recomputed + report.units.reused) : RUN_REPORT_CLASSIFICATION_LABELS[report.classification]} · ${localInstantLabel(report.recordedAt)}`));
     disclosure.append(element('p', 'research-status', researchStatusLine(report)));
     if (report.factualAssurance?.disclosure != null) disclosure.append(element('p', 'fact-lens-disclosure', report.factualAssurance.disclosure));
     const stages = element('ul', 'analysis-list analysis-run-report-stages');
@@ -337,6 +344,12 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       technicalDetails(
         'analysis-facts',
         element('dt', undefined, '运行报告'), element('dd', 'technical-identity', `${report.schema} · 摘要 ${report.reportDigest} · 账目摘要 ${report.accountingDigest}`),
+        ...(report.ifRedone.state === 'closed' || report.ifRedone.parseFailure === undefined ? [] : [
+          element('dt', undefined, '反思解析诊断'), element('dd', 'technical-identity', `${report.ifRedone.parseFailure.code} · ${report.ifRedone.parseFailure.detail}`),
+        ]),
+        ...(report.ifRedone.state !== 'closed' ? [] : report.ifRedone.salvaged ?? []).flatMap((entry) => [
+          element('dt', undefined, '反思解析取舍'), element('dd', 'technical-identity', `${entry.section}[${entry.index}] ${entry.reason}`),
+        ]),
         element('dt', undefined, '绑定'), element('dd', 'technical-identity', `Run ${report.runRecordId} · Task Intent ${report.taskIntentId} · 执行尝试 ${report.attemptId ?? '无'} · 结果集修订版 ${report.resultSetRevisionId ?? '无'}`),
         element('dt', undefined, '记录时刻'), element('dd', 'technical-identity', report.recordedAt),
         element('dt', undefined, '阶段时刻'), element('dd', 'technical-identity', report.stages.map((stage) => `${stage.stage} ${stage.startedAt ?? '—'} → ${stage.settledAt ?? '—'} · ${stage.wallMs ?? '—'} ms`).join('；')),
@@ -421,10 +434,10 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const synopsis = panels.synopsis;
     if (view.historical) {
       synopsis.append(
-        element('h4', undefined, `历史修订版 Revision ${revision.ordinal}（只读）`),
+        element('h4', undefined, `历史分析结果${technicalWords(` · Revision ${revision.ordinal}`)} · 只读`),
         element('p', 'attention-note', view.current
-          ? `Revision ${revision.ordinal} 是当前最新的结果集修订版；此视图为只读。`
-          : `Revision ${revision.ordinal} 已被后续修订版取代；它按其原始稿件 pin ${revision.manuscriptPin.revisionLabel} 呈现，不是当前事实，也未被删除。`),
+          ? '这是最新的分析结果，此视图为只读。'
+          : technicalWords(`Revision ${revision.ordinal} 已被后续修订版取代；它按其原始稿件 pin ${revision.manuscriptPin.revisionLabel} 呈现，不是当前事实，也未被删除。`, '这份结果对应当时的稿件，已有更新，仍可查看。')),
       );
     }
 
@@ -436,14 +449,12 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         : reading.axis === 'freshness' ? revision.freshness : revision.assurance;
       section.dataset['analysisAxis'] = reading.axis;
       section.dataset['axisState'] = axis.state;
-      section.append(
-        element('h5', undefined, reading.heading),
-        element('p', 'analysis-axis-sentence', reading.sentence),
-        element('p', 'field-note analysis-axis-next', `下一步：${reading.nextAction}`),
-      );
+      const sentence = reading.target === null && reading.nextAction !== '无需处理。'
+        ? `${reading.sentence.replace(/。$/u, '')}；${reading.nextAction}` : reading.sentence;
+      section.append(element('h5', undefined, reading.heading), element('p', 'analysis-axis-sentence', sentence));
       if (reading.target !== null) {
         const target = reading.target;
-        const go = button(target === 'history' ? '去「历史与更新」' : '去「各章」', 'quiet', () => selectTab(target));
+        const go = button(reading.nextAction, 'quiet', () => selectTab(target));
         go.dataset['analysisAction'] = `go-${target}`;
         section.append(go);
       }
@@ -528,7 +539,15 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           element('dt', undefined, '分析单元'), element('dd', 'technical-identity', unit.state === 'closed'
             ? `单元 ${unit.unitOrdinal} · 已闭合 · 置信 ${unit.confidence} · ${lineage}`
             : `单元 ${unit.unitOrdinal} · 缺口 · ${unit.gap.code} · ${lineage}`),
+          ...(unit.state === 'gap' && unit.originalTextChanged ? [element('dt', undefined, '原请求'), element('dd', undefined, '原文已修改，原请求无法再核对')] : []),
+          ...(unit.state !== 'gap' || unit.gap.parseFailure === undefined ? [] : [
+            element('dt', undefined, '解析诊断'), element('dd', 'technical-identity', `${unit.gap.parseFailure.code} · ${unit.gap.parseFailure.detail}`),
+          ]),
           element('dt', undefined, '请求摘要'), element('dd', 'technical-identity', unit.requestDigest),
+          ...(unit.state !== 'closed' || !unit.salvaged?.length ? [] : [
+            element('dt', undefined, '解析取舍'), element('dd', 'technical-identity',
+              `丢弃引用 ${unit.salvaged.filter((entry) => entry.reason === 'range-out-of-unit' || entry.reason === 'retrieval-reference-not-exact-fetched').length} 条 · ${unit.salvaged.map((entry) => `${entry.section}[${entry.index}] ${entry.reason}`).join('；')}`),
+          ]),
           ...(unit.state !== 'closed' ? [] : [
             element('dt', undefined, '单元内计数'),
             element('dd', 'technical-identity', `实体 ${unit.entities.length} · 事件 ${unit.events.length} · 关系 ${unit.relationships.length} · 设定声明 ${unit.settingClaims.length} · 单元内冲突 ${unit.conflicts.length} · 未解决 ${unit.unresolved.length}${unit.usage === null ? '' : ` · 用量 ${unit.usage.inputTokens}/${unit.usage.outputTokens}`}`),
@@ -602,7 +621,16 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const technical = technicalDetails(
       'analysis-facts',
       element('dt', undefined, '分析契约'), element('dd', 'technical-identity', `${projection.kind} · ${revision.contractVersion}`),
-      element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${revision.manuscriptPin.revisionLabel} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
+      ...(revision.crossUnitReduction.parseFailure === undefined ? [] : [
+        element('dt', undefined, '归纳解析诊断'), element('dd', 'technical-identity', `${revision.crossUnitReduction.parseFailure.code} · ${revision.crossUnitReduction.parseFailure.detail}`),
+      ]),
+      ...(revision.assuranceSample.parseFailures ?? []).flatMap((failure) => [
+        element('dt', undefined, `抽检单元 ${failure.unitOrdinal} 解析诊断`), element('dd', 'technical-identity', `${failure.code} · ${failure.detail}`),
+      ]),
+      ...[...(revision.crossUnitReduction.salvaged ?? []), ...(revision.assuranceSample.salvaged ?? [])].flatMap((entry) => [
+        element('dt', undefined, '解析取舍'), element('dd', 'technical-identity', `${entry.section}[${entry.index}] ${entry.reason}`),
+      ]),
+      element('dt', undefined, '精确稿件 pin'), element('dd', 'technical-identity', `${technicalWords(revision.manuscriptPin.revisionLabel, '修订版')} · ${revision.manuscriptPin.revisionId} · ${revision.manuscriptPin.revisionDigest}`),
       element('dt', undefined, '结果集修订版'), element('dd', 'technical-identity', `Revision ${revision.ordinal} · ${revision.revisionId}`),
       element('dt', undefined, '修订版摘要'), element('dd', 'technical-identity', revision.digest),
       element('dt', undefined, '覆盖清单摘要'), element('dd', 'technical-identity', revision.coverageManifestDigest),
@@ -667,7 +695,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const versions = element('ol', 'analysis-list analysis-plan-version-list');
     for (const version of projection.planVersions) {
       const state = version.state === 'bound' ? '已被运行授权绑定' : version.state === 'current' ? '当前 · 尚未开始' : '已被取代';
-      const item = element('li', undefined, `版本 ${version.ordinal} · ${state} · 信封 ${version.planEnvelopeDigest}${version.planRevisionId === null ? '' : ` · 由计划修订 ${version.planRevisionId} 产生`}`);
+      const item = element('li', undefined, `${technicalWords(`版本 ${version.ordinal} · `)}${state}${technicalWords(` · 信封 ${version.planEnvelopeDigest}${version.planRevisionId === null ? '' : ` · 由计划修订 ${version.planRevisionId} 产生`}`)}`);
       item.dataset['planVersionOrdinal'] = String(version.ordinal);
       item.dataset['planVersionState'] = version.state;
       item.dataset['planVersionEnvelope'] = version.planEnvelopeDigest;
@@ -693,7 +721,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     }
     const disclosure = element('details', 'technical-details analysis-plan-versions-technical');
     disclosure.append(element('summary', undefined, '查看技术详情'), section);
-    card.append(disclosure);
+    card.append(technicalDisclosure(disclosure));
   }
 
   /** The Run's timeline: state transitions and in-envelope Plan Adaptations interleaved by record time. */
@@ -845,8 +873,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     // Freshness and the work an update would cover are what the editor weighs before issuing a Task, so
     // both readings stay at full rank; the digests that identify them go one step away.
     facts.append(
-      element('dt', undefined, '目标修订版'), element('dd', undefined, `Revision ${controls.target.ordinal} · 绑定 ${controls.target.manuscriptPin.revisionLabel} · 新鲜度 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
-      element('dt', undefined, '当前稿件'), element('dd', undefined, `${controls.working.revisionLabel} + 修订日志序号 ${controls.working.journalSequence} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
+      element('dt', undefined, '目标修订版'), element('dd', undefined, `${technicalWords(`Revision ${controls.target.ordinal} · `)}绑定 ${technicalWords(controls.target.manuscriptPin.revisionLabel, '修订版')} · 状态 ${controls.target.freshness === 'stale' ? '已过期' : '当前'}`),
+      element('dt', undefined, '当前稿件'), element('dd', undefined, `${technicalWords(controls.working.revisionLabel, '修订版')}${technicalWords(` + 修订日志序号 ${controls.working.journalSequence}`)} · ${controls.working.totalBlocks} 个段落 · 将派生 ${controls.working.unitCount} 个分析单元 / ${controls.working.sectionCount} 个结构段`),
       element('dt', undefined, '模型服务与用量'), element('dd', undefined, '沿用本次分析的模型服务、发送范围与预算；复用已有结果不调用模型。'),
       element('dt', undefined, '后继修订版'), element('dd', undefined, controls.successorBehavior),
     );
@@ -856,7 +884,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       element('dt', undefined, '目标修订版身份'), element('dd', 'technical-identity', `${controls.target.revisionId} · ${controls.target.digest}`),
       element('dt', undefined, '当前稿件摘要'), element('dd', 'technical-identity', controls.working.workingDigest),
     ));
-    if (controls.blockedReason !== null) section.append(element('p', 'attention-note', controls.blockedReason));
+    if (controls.blockedReason !== null) {
+      section.append(element('p', 'attention-note', controls.blockedReason));
+      if (analysisUpdateBlockedDrawerAction(controls.blockedReason) === 'task-drawer') {
+        const openDrawer = button(ANALYSIS_UPDATE_BLOCKED_DRAWER_LABEL, 'secondary', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent?.taskIntentId ?? null));
+        openDrawer.dataset['analysisUpdateBlockedLink'] = 'task-drawer';
+        section.append(openDrawer);
+      }
+    }
     const actionButtons: HTMLButtonElement[] = [];
     const cancel = analysisCancelButton();
     const modes: BaselineAnalysisUpdateMode[] = ['sync-current', 'reanalyze-range', 'reanalyze-book'];
@@ -873,17 +908,18 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       }
       // What each mode keeps and what it reads again is the decision (ADR 0076 §5): one sentence in the
       // editor's words at full rank, the four exact lineage counts and the fixed goal one step away.
-      block.append(element('h5', undefined, action.label), element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
+      block.append(element('h5', undefined, action.label));
+      if (technicalLayerVisible) block.append(element('p', undefined, action.meaning.replaceAll('内容块', '段落')));
       const expected = element('p', 'analysis-update-expected', updateReuseReading(action.expected, mode));
       const expectedExact = element('dd', 'technical-identity', action.expected === null ? '由所选范围决定' : reuseCountsText(action.expected));
-      block.append(expected, technicalDetails('analysis-facts',
+      if (technicalLayerVisible) block.append(expected, technicalDetails('analysis-facts',
         element('dt', undefined, '预期单元血缘'), expectedExact,
         element('dt', undefined, '固定任务目标'), element('dd', 'technical-identity', action.goal)));
       if (action.unavailableReason !== null) block.append(element('p', 'attention-note', action.unavailableReason));
       let selectedRange: BaselineAnalysisSelectedRange | null = null;
       if (mode === 'reanalyze-range') {
         const fieldset = element('fieldset', 'analysis-range-options');
-        fieldset.append(element('legend', undefined, '选择要重新分析的连续范围（未预选；按当前稿件将派生的结构单元列出）'));
+        fieldset.append(element('legend', undefined, '选择要重新分析的连续范围'));
         const appendOptions = (options: typeof controls.actions['reanalyze-range']['options']): void => {
           for (const option of options) {
             const row = element('div', 'analysis-range-option');
@@ -985,11 +1021,6 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       if (quickStart?.rule) quick.dataset['ruleVersionId'] = quickStart.rule.ruleVersionId;
       // Only a quick start on offer joins the actions a preparation holds and gives back.
       actionButtons.push(quick);
-      const quickNote = element('p', 'field-note analysis-quick-note', quickRule !== null
-        ? `按默认执行规则「${quickRule.name}」：先准备计划，与规则一致时直接开始；有任何不同都会停在计划上。`
-        : quickStart?.reason ?? '这种更新没有快速开始；请先看计划。');
-      quickNote.id = `analysis-quick-note-${mode}`;
-      quickNote.dataset['quickStart'] = quickRule !== null ? 'available' : 'unavailable';
       const choice = element('div', 'analysis-update-choice');
       choice.id = `analysis-update-choice-${mode}`;
       choice.hidden = true;
@@ -1016,17 +1047,18 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
 
   /** The Analysis Result Revision History: every revision in ordinal order, each openable read-only. */
   function renderAnalysisHistory(card: HTMLElement, projection: BaselineAnalysisProjection, host: HTMLElement, bookTitle: string): void {
+    if (!technicalLayerVisible) return;
     const history = projection.history;
     if (history === null) return;
     const section = element('section', 'analysis-history');
+    section.dataset['developerOnly'] = 'true';
     section.dataset['historyLatestOrdinal'] = String(history.latestOrdinal);
     section.dataset['historyCount'] = String(projection.listPages['history.entries']?.total ?? history.entries.length);
     section.dataset['historyResultSetId'] = history.resultSetId;
     // How many revisions there are and which one is latest are decisions, not identities: they stay at
     // full rank, and only the result set's own identity and kind step down into the disclosure.
     section.append(
-      element('h4', undefined, '历次分析'),
-      element('p', 'field-note', `共 ${projection.listPages['history.entries']?.total ?? history.entries.length} 份分析 · 最新的是第 ${history.latestOrdinal} 份`),
+      element('h4', undefined, `历次分析 · 共 ${projection.listPages['history.entries']?.total ?? history.entries.length} 份 · 最新第 ${history.latestOrdinal} 份`),
       technicalDetails('analysis-facts',
         element('dt', undefined, '结果集'), element('dd', 'technical-identity', `${history.resultSetId} · ${history.kind}`)),
     );
@@ -1039,7 +1071,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           setStatus(revisionId === null ? '已返回最新修订版。' : '历史修订版已只读打开。', 'success');
         }
       } catch (error) {
-        setStatus(rendererErrorMessage(error, '无法打开该结果集修订版。'), 'error');
+        setStatus(rendererErrorMessage(error, '无法打开该分析结果。'), 'error');
       }
     };
     const list = element('ol', 'analysis-history-list');
@@ -1056,8 +1088,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
         // the Run that produced it — travel together in the entry's one disclosure, in the order they read
         // in before (V2-UX-LAYER-001).
         item.append(
-          element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${entry.manuscriptPin.revisionLabel} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}`),
-          element('p', 'field-note', `沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个；读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
+          element('p', undefined, `第 ${entry.ordinal} 份 · ${entry.modeLabel} · 读的是 ${technicalWords(entry.manuscriptPin.revisionLabel, '当时的稿件')} · ${localInstantLabel(entry.createdAt)} · ${entry.current ? '当前最新' : '已被后来的分析取代 · 按原样保留'}；沿用上一份 ${entry.counts.reused} 个阅读范围，重新分析 ${entry.counts.recomputed} 个，读完 ${entry.unitsClosed} 个，${entry.gapCount} 个没有读成。`),
           technicalDetails('analysis-facts',
             element('dt', undefined, '修订版'),
             element('dd', 'technical-identity', `Revision ${entry.ordinal} · ${entry.freshnessLabel} · 前一修订版 ${entry.predecessor === null ? '无' : `Revision ${entry.predecessor.ordinal}`} · 创建于 ${entry.createdAt}`),
@@ -1070,7 +1101,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
           ),
         );
         item.append(runReportOrReason(entry.report, entry.reportAbsentReason));
-        const view = button('查看这一份（只读）', 'quiet', () => open(entry.revisionId));
+        const view = button('查看这一份 · 只读', 'quiet', () => open(entry.revisionId));
         view.dataset['analysisAction'] = 'open-revision';
         view.dataset['analysisRevisionId'] = entry.revisionId;
         view.dataset['analysisRevisionOrdinal'] = String(entry.ordinal);
@@ -1152,15 +1183,20 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     }
     const heading = element('div', 'baseline-analysis-heading');
     heading.append(
-      element('h3', undefined, '基线稿件分析'),
-      element('span', `status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
+      element('h3', undefined, '基线稿件分析 · 不修改稿件'),
+      element('span', `state-term status-pill analysis-state analysis-state-${projection.state}`, projection.stateLabel),
     );
     // The binding clause reads the launch this Book actually bound: the frozen plan's pin first, then the
     // pin the latest Revision recorded, and before either exists there is no launch to state.
-    card.append(heading, element('p', 'field-note', analysisKindSubtitle(
-      projection.providerResolutionPlan?.remoteBinding.providerProcessing ?? projection.resultSetRevision?.policyPin ?? null,
-    )));
+    card.append(heading);
     card.append(element('p', 'research-status', researchPlanLine(projection.providerResolutionPlan?.webToolsBackend)));
+    if (projection.taskOutcome?.report && ['failed', 'completed-with-gaps'].includes(projection.taskOutcome.classification)) {
+      const report = projection.taskOutcome.report;
+      const reason = report.classification === 'failed'
+        ? report.failures.find((failure) => failure.code === 'NO_CLOSED_UNITS')?.reason ?? analysisRunSummary(report).reason
+        : analysisRunSummary(report).reason;
+      card.append(element('p', 'attention-note', `${projection.taskOutcome.label}${reason === null ? '' : ` · ${reason}`}`));
+    }
 
     // One follow-up read per card at a time, of the revision the editor is looking at: a newer draw replaces the
     // pending one rather than adding another loop, and an answer that changed nothing draws nothing, so the editor's
@@ -1233,12 +1269,12 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     if (projection.checkpoint !== null) renderFrozenAnalysisPlan(records, projection);
 
     if (projection.taskOutcome) {
-      const outcome = element('section', 'success-note analysis-outcome');
+      const outcome = element('section', projection.taskOutcome.classification === 'completed' ? 'success-note analysis-outcome' : 'attention-note analysis-outcome');
       outcome.dataset['taskOutcomeId'] = projection.taskOutcome.outcomeId;
       outcome.dataset['taskOutcomeClassification'] = projection.taskOutcome.classification;
       outcome.append(
         element('h4', undefined, projection.taskOutcome.label),
-        element('p', undefined, `安全的下一步：${projection.taskOutcome.safeNextAction}`),
+        element('p', undefined, `${projection.taskOutcome.safeNextAction}`),
         runReportOrReason(projection.taskOutcome.report, projection.taskOutcome.reportAbsentReason),
         technicalDetails('analysis-facts',
           element('dt', undefined, '任务结果'),
@@ -1256,14 +1292,14 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       const restart = element('section', 'form-row analysis-form analysis-restart');
       const restartActions = element('div', 'button-row analysis-actions');
       const restartCancel = analysisCancelButton();
-      const restartStart = button('开始分析', 'primary', () =>
+      const restartStart = button('重新开始分析', 'primary', () =>
         startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartStart, cancel: restartCancel, others: [restartPreview] }));
       restartStart.dataset['analysisAction'] = 'start';
       const restartPreview = button('查看计划', 'secondary', () =>
         startAnalysisPreparation(host, bookTitle, { goal: BASELINE_ANALYSIS_TASK_GOAL, update: null, reconfirm: false }, { start: restartPreview, cancel: restartCancel, others: [restartStart] }, null, true));
       restartPreview.dataset['analysisAction'] = 'prepare';
       restartActions.append(restartStart, restartPreview, restartCancel);
-      restart.append(element('p', 'field-note', '上一次分析没有读完任何阅读范围，没有形成结果集修订版；可以直接重新开始，也可先查看计划。'), restartActions);
+      restart.append(restartActions);
       records.append(restart);
     }
 
@@ -1346,20 +1382,17 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
     const open = taskPlanOpenButton('baseline-analysis', () => openTaskPlan(projection.bookId, 'baseline-analysis', projection.taskIntent!.taskIntentId), startable);
     open.dataset['analysisAction'] = 'view-plan';
     const summary = element('section', 'task-plan-summary analysis-plan-summary');
-    summary.append(
-      element('h4', undefined, TASK_DRAWER_TITLE),
-      element('p', 'task-plan-summary-line', taskPlanSummaryLine([
+    const summaryLine = element('p', 'task-plan-summary-line', taskPlanSummaryLine([
         projection.taskIntent!.modeLabel,
         range === null ? '全书' : `第 ${range.startPosition}–${range.endPosition} 段`,
         counts === null ? `${projection.listPages['coverageManifest.units']?.total ?? manifest.units.length} 个阅读范围` : `重新分析 ${counts.recomputed} 个阅读范围，沿用 ${counts.reused} 个`,
-        `任务输入修订版 ${checkpoint.revisionLabel}`,
-        projection.planVersion === null ? '' : `计划版本 ${projection.planVersion.ordinal}`,
-      ])),
-    );
+        `任务输入修订版${technicalWords(` ${checkpoint.revisionLabel}`)}`,
+        projection.planVersion === null ? '' : technicalWords(`计划版本 ${projection.planVersion.ordinal}`),
+      ]));
+    summary.append(element('h4', undefined, TASK_DRAWER_TITLE), summaryLine);
     // A plan the 后台分析登记 dispatcher prepared and did not start (Issue #95, S39; #713 review, P2-2) says whose it is.
     if (projection.taskIntent?.preparedByEnrollmentVersionId !== undefined && projection.authorization === null) {
-      const note = element('p', 'field-note analysis-background-prepared-note', BACKGROUND_PREPARED_PLAN_NOTE);
-      summary.append(note);
+      summaryLine.append(' · ', element('span', 'analysis-background-prepared-note', BACKGROUND_PREPARED_PLAN_NOTE));
     }
     // AUTH-006: a plan whose key content changed cannot start; the card says so, and the drawer's bar holds
     // 查看计划修订 and 重新确认计划 (§10: 物质变化 · 计划已被取代 reads 计划的关键内容已变化).
@@ -1386,7 +1419,7 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       // Who authorized this Run, on whose authority and against which plan version, is the decision behind
       // it; only the identifiers and the envelope digest that name them go one step away.
       runFacts.append(
-        element('dt', undefined, '运行授权'), element('dd', undefined, `${projection.authorization!.origin} · ${projection.authorization!.authority} · 计划版本 ${projection.authorization!.planVersionOrdinal ?? '未记录'}`),
+        element('dt', undefined, '运行授权'), element('dd', undefined, `${projection.authorization!.origin} · ${projection.authorization!.authority}${technicalWords(` · 计划版本 ${projection.authorization!.planVersionOrdinal ?? '未记录'}`)}`),
         element('dt', undefined, '状态转换'), element('dd', undefined, run.transitions.map((transition) => `${transition.sequence}. ${transition.state}`).join(' → ')),
         element('dt', undefined, '计划内调整'), element('dd', undefined, run.adaptations.length === 0
           ? '无'

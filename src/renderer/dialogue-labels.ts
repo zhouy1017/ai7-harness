@@ -90,7 +90,7 @@ export function dialogueIncompleteLine(attempt: Pick<DialogueAttemptProjection, 
         ? `AI7 关闭时回答被中断；${kept}`
         : `回答被中断；${kept}`;
     case 'failed':
-      return `回答没有完成（${attempt.causeCode ?? '原因未知'}）；${kept}`;
+      return attempt.fragmentTotal > 0 ? '回答未完成；已收到的文字已保留，可以继续回答。' : '回答未完成；没有收到可保留的文字。';
     default:
       return null;
   }
@@ -107,7 +107,7 @@ export const DIALOGUE_CONVERT_PROPOSED = '建议改为';
 export const DIALOGUE_CONVERT_RATIONALE = '理由';
 /** The conversion is a separate governed object (DIALOG-016): nothing is applied until the editor decides it. */
 export const DIALOGUE_CONVERT_NOTE = '会在所选文字上新建一条 AI7 修改建议，依据这次回答；它不会自动应用，是否接受由你决定。';
-export const DIALOGUE_CONVERT_SUBMIT = '新建修改建议';
+export const DIALOGUE_CONVERT_SUBMIT = '新建修改建议，待你决定';
 export function dialogueConvertedLine(count: number): string {
   return `已从这次回答新建 ${count} 条修改建议。`;
 }

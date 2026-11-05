@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, boundedText, extractModelJson, normalizeLine, type ModelResultSalvage, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import {
   EDITORIAL_REVIEW_CONTRACT_VERSION,
   REVIEW_FINDING_SEVERITIES,
@@ -10,7 +11,6 @@ import {
   type ReviewCrossChapterResult,
 } from '../../shared/protocol.js';
 export type { ReviewCrossChapterResult } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 import type { ReviewDeliverableParticipant } from '../production-documents.js';
@@ -138,28 +138,35 @@ export function reviewUnitFixtureDigest(text: string): string | null {
 
 /** Invalid siblings remain visible; only service-authored evidence references can become anchors. */
 export function parseReviewCrossChapterResult(text: string, input: ReviewCrossChapterInput, clauseIds: readonly string[]):
-  { ok: true; result: ReviewCrossChapterResult } | { ok: false; code: string; detail: string } {
-  let value: unknown;
-  try { value = JSON.parse(text.replace(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u, '$1')) as unknown; }
-  catch { return { ok: false, code: 'not-json', detail: '跨章结果不是 JSON。' }; }
-  if (!isRecord(value) || !hasExactKeys(value, ['schema', 'findings']) || value.schema !== REVIEW_CROSS_CHAPTER_RESULT_SCHEMA || !Array.isArray(value.findings) || value.findings.length > 80) {
-    return { ok: false, code: 'schema-invalid', detail: '跨章结果的结构或数量不符合契约。' };
-  }
+  { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReviewCrossChapterResult } | { ok: false; code: string; detail: string } {
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
   const evidence = new Map(input.evidence.map((entry) => [entry.ref, entry]));
   const findings: ReviewCrossChapterResult['findings'][number][] = [];
   const rejected: ReviewCrossChapterResult['rejected'][number][] = [];
-  for (const [index, candidate] of (value.findings as unknown[]).entries()) {
-    const reject = (reason: ReviewCrossChapterResult['rejected'][number]['reason']): void => { rejected.push({ index, text: JSON.stringify(candidate), reason }); };
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['anchorRef', 'evidenceRefs', 'severity', 'note', 'clauseId']) ||
-        typeof candidate.anchorRef !== 'string' || !Array.isArray(candidate.evidenceRefs) || candidate.evidenceRefs.length < 1 || candidate.evidenceRefs.length > 16 ||
-        !candidate.evidenceRefs.every((ref): ref is string => typeof ref === 'string') || new Set(candidate.evidenceRefs).size !== candidate.evidenceRefs.length ||
-        !REVIEW_FINDING_SEVERITIES.includes(candidate.severity as ReviewFindingSeverity) || !boundedText(candidate.note, 200) ||
-        typeof candidate.clauseId !== 'string' || !clauseIds.includes(candidate.clauseId)) { reject('schema-invalid'); continue; }
+  const salvaged: ModelResultSalvage[] = [];
+  if (value.schema !== REVIEW_CROSS_CHAPTER_RESULT_SCHEMA) salvaged.push({ section: 'schema', index: -1, reason: 'request-envelope' });
+  try { JSON.parse(text); } catch { salvaged.push({ section: 'envelope', index: -1, reason: 'json-extracted-or-partial' }); }
+  if (!('findings' in value) && !('schema' in value)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  if (value.findings !== undefined && !Array.isArray(value.findings)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const candidates = Array.isArray(value.findings) ? value.findings : [];
+  for (const [index, candidate] of candidates.entries()) {
+    const mark = (reason: string): void => { salvaged.push({ section: 'findings', index, reason }); };
+    const reject = (reason: ReviewCrossChapterResult['rejected'][number]['reason']): void => { rejected.push({ index, text: JSON.stringify(candidate), reason }); mark(reason); };
+    if (index >= MAX_FINDINGS || !isRecord(candidate) || typeof candidate.anchorRef !== 'string' || typeof candidate.note !== 'string' || !candidate.note.isWellFormed() || !candidate.note.trim()) { reject('schema-invalid'); continue; }
     const anchor = evidence.get(candidate.anchorRef);
-    if (anchor === undefined || !candidate.evidenceRefs.includes(candidate.anchorRef) || candidate.evidenceRefs.some((ref) => !evidence.has(ref))) { reject('evidence-unknown'); continue; }
-    findings.push({ anchor, evidence: candidate.evidenceRefs.map((ref) => evidence.get(ref)!), severity: candidate.severity as ReviewFindingSeverity, note: candidate.note, clauseId: candidate.clauseId });
+    if (anchor === undefined) { reject('evidence-unknown'); continue; }
+    const refs = Array.isArray(candidate.evidenceRefs) ? candidate.evidenceRefs : [];
+    const kept = [...new Set([candidate.anchorRef, ...refs.filter((ref): ref is string => typeof ref === 'string' && evidence.has(ref))])].slice(0, 16);
+    if (refs.some((ref) => typeof ref !== 'string' || !evidence.has(ref)) || !refs.includes(candidate.anchorRef)) mark('evidence-normalized');
+    const severity = reviewSeverity(candidate.severity);
+    const clauseId = typeof candidate.clauseId === 'string' && clauseIds.some((id) => id === candidate.clauseId || id.startsWith(`${candidate.clauseId}.`)) ? candidate.clauseId : null;
+    if (severity !== candidate.severity) mark('severity-normalized');
+    if (clauseId !== (candidate.clauseId ?? null)) mark('clause-unknown');
+    findings.push({ anchor, evidence: kept.map((ref) => evidence.get(ref)!), severity, note: normalizeLine(candidate.note, 200), clauseId });
   }
-  return { ok: true, result: { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings, rejected, input } };
+  if (candidates.length > 0 && findings.length === 0) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { schema: REVIEW_CROSS_CHAPTER_RESULT_SCHEMA, findings, rejected, input, ...(salvaged.length ? { salvaged } : {}) } };
 }
 
 /** One finding exactly as the model listed it, before Reference Integrity has looked at it. */
@@ -169,12 +176,12 @@ export interface ReviewUnitFinding {
   readonly blockOrdinal: number;
   readonly severity: ReviewFindingSeverity;
   readonly note: string;
-  /** Present exactly for a 修改建议 category; an empty string proposes deleting the quotation. */
+  /** A usable replacement makes a 修改建议; otherwise the finding becomes an annotation. Empty text proposes deletion. */
   readonly replacement?: string;
-  readonly clauseId?: string;
+  readonly clauseId?: string | null;
 }
 
-export interface ReviewCategoryUnitResult {
+export interface ReviewCategoryUnitResult extends SalvagedModelResult {
   readonly schema: typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA | typeof REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1;
   readonly unitOrdinal: number;
   readonly findings: ReadonlyArray<ReviewUnitFinding>;
@@ -194,8 +201,8 @@ export interface RejectedReviewFinding {
  * Why a unit result did not parse. The first four are the factual parser's own codes and mean what
  * they mean there. The last three are this contract's: a 修改建议 category's finding without its
  * replacement, a 批注 category's finding with one, and a clause the category does not list. Each is a
- * unit-level failures in retained v1. V2 rejects those findings individually and keeps the original
- * text and code beside accepted siblings; only envelope errors refuse a whole unit.
+ * historical failure codes. Both versions now preserve usable siblings and downgrade replacement issues
+ * to annotations; an answer with no usable entry fails as a whole.
  */
 export type ReviewCategoryUnitResultParseFailureCode =
   | 'not-json'
@@ -207,7 +214,7 @@ export type ReviewCategoryUnitResultParseFailureCode =
   | 'clause-unknown';
 
 export type ReviewCategoryUnitResultParse =
-  | { ok: true; result: ReviewCategoryUnitResult; canonicalJson: string; digest: string; accepted?: ReadonlyArray<ReviewUnitFinding>; rejected?: ReadonlyArray<RejectedReviewFinding> }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReviewCategoryUnitResult; canonicalJson: string; digest: string; accepted?: ReadonlyArray<ReviewUnitFinding>; rejected?: ReadonlyArray<RejectedReviewFinding> }
   | { ok: false; code: ReviewCategoryUnitResultParseFailureCode; detail: string };
 
 function boundedLine(value: unknown, maximumGraphemes: number): value is string {
@@ -215,9 +222,6 @@ function boundedLine(value: unknown, maximumGraphemes: number): value is string 
     !CONTROL_CHARACTER.test(value) && graphemeCount(value) <= maximumGraphemes;
 }
 
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
-}
 
 /**
  * The category exactly as the contract freezes it: every key checked, nothing carried that is not
@@ -352,118 +356,61 @@ export function reviewCategoryContractDigest(contract: ReviewCategoryPromptContr
   return sha256Hex(canonicalJson(contract));
 }
 
-function parseReviewCategoryUnitResultV1(
-  text: string,
-  expected: { unitOrdinal: number; blockCount: number; output: ReviewCategoryOutputKind; clauseIds: ReadonlyArray<string>; deliverableRefs?: readonly string[] },
-): ReviewCategoryUnitResultParse {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): ReviewCategoryUnitResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'findings'])) {
-    return invalid('单元结果键集合不符合编辑审阅契约 v1。');
-  }
-  if (parsed.schema !== REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1) return invalid('单元结果 schema 不是编辑审阅契约 v1。');
-  if (!Number.isSafeInteger(parsed.unitOrdinal) || (parsed.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (parsed.unitOrdinal !== expected.unitOrdinal) {
-    return {
-      ok: false,
-      code: 'unit-mismatch',
-      detail: `单元结果声明的序号 ${String(parsed.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。`,
-    };
-  }
-  if (!Array.isArray(parsed.findings) || parsed.findings.length > MAX_FINDINGS) return invalid('发现集合不符合编辑审阅契约 v1。');
-  const findings: ReviewUnitFinding[] = [];
-  for (const [index, candidate] of (parsed.findings as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条发现`;
-    // The four keys every finding carries, plus whichever of the two optional ones this one names; an
-    // unknown key is refused, exactly as every other contract's parser refuses one.
-    if (!isRecord(candidate) || !hasExactKeys(candidate, [
-      'quote', 'blockOrdinal', 'severity', 'note',
-      ...(['replacement', 'clauseId'] as const).filter((key) => key in candidate),
-    ])) {
-      return invalid(`${label}的键集合不符合编辑审阅契约 v1。`);
-    }
-    if (!boundedText(candidate.quote, MAX_QUOTE_GRAPHEMES)) return invalid(`${label}的引文缺失或超出 80 字素边界。`);
-    if (!Number.isSafeInteger(candidate.blockOrdinal) || (candidate.blockOrdinal as number) < 1) return invalid(`${label}的内容块序号无效。`);
-    if (!REVIEW_FINDING_SEVERITIES.includes(candidate.severity as ReviewFindingSeverity)) return invalid(`${label}的严重度不在闭合集合内。`);
-    if (!boundedText(candidate.note, MAX_NOTE_GRAPHEMES)) return invalid(`${label}的说明缺失或超出 200 字素边界。`);
-    if ('replacement' in candidate) {
-      if (expected.output === 'annotation') {
-        return { ok: false, code: 'replacement-refused', detail: `${label}给出了替换文字，但本类别的产出是批注。` };
-      }
-      // A replacement may be empty — that proposes deleting the quotation — and is otherwise bounded
-      // like every other free text here. One equal to its own quotation proposes nothing at all.
-      if (typeof candidate.replacement !== 'string' || !candidate.replacement.isWellFormed() ||
-          graphemeCount(candidate.replacement) > MAX_REPLACEMENT_GRAPHEMES || candidate.replacement === candidate.quote) {
-        return invalid(`${label}的替换文字无效、超出 200 字素边界，或与引文相同。`);
-      }
-    } else if (expected.output === 'change-suggestion') {
-      return { ok: false, code: 'replacement-required', detail: `${label}没有给出替换文字，但本类别的产出是修改建议。` };
-    }
-    if ('clauseId' in candidate) {
-      if (typeof candidate.clauseId !== 'string' || !REFERENCE_ID_PATTERN.test(candidate.clauseId)) return invalid(`${label}的条款编号无效。`);
-      if (!expected.clauseIds.includes(candidate.clauseId)) {
-        return { ok: false, code: 'clause-unknown', detail: `${label}引用的条款 ${candidate.clauseId} 不在本类别列出的审阅依据内。` };
-      }
-    }
-    if (expected.deliverableRefs !== undefined && (typeof candidate.clauseId !== 'string' || !expected.deliverableRefs.includes(candidate.clauseId))) {
-      return { ok: false, code: 'clause-unknown', detail: `${label}没有引用参与比对的交付物定稿段落。` };
-    }
-    if ((candidate.blockOrdinal as number) > expected.blockCount) {
-      return {
-        ok: false,
-        code: 'quote-not-in-block',
-        detail: `${label}引用的内容块序号 ${String(candidate.blockOrdinal)} 不在本单元列出的 ${expected.blockCount} 个内容块内。`,
-      };
-    }
-    findings.push({
-      quote: candidate.quote,
-      blockOrdinal: candidate.blockOrdinal as number,
-      severity: candidate.severity as ReviewFindingSeverity,
-      note: candidate.note,
-      ...('replacement' in candidate ? { replacement: candidate.replacement as string } : {}),
-      ...('clauseId' in candidate ? { clauseId: candidate.clauseId as string } : {}),
-    });
-  }
-  const result: ReviewCategoryUnitResult = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1, unitOrdinal: expected.unitOrdinal, findings };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+/** Approximate severity is conservative; exact quotation and block bounds stay strict. */
+export function reviewSeverity(value: unknown): ReviewFindingSeverity {
+  const key = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (['must', 'critical', 'high', '必须', '严重', '必改'].includes(key)) return 'must';
+  if (['should', 'warning', 'medium', '建议', '应改'].includes(key)) return 'should';
+  return 'note';
 }
 
-/** Envelope errors lose the unit; finding errors lose only that finding, with its original text. */
 export function parseReviewCategoryUnitResult(
   text: string,
-  expected: Parameters<typeof parseReviewCategoryUnitResultV1>[1] & { version?: 1 | 2 },
+  expected: { unitOrdinal: number; blockCount: number; output: ReviewCategoryOutputKind; clauseIds: ReadonlyArray<string>; deliverableRefs?: readonly string[]; version?: 1 | 2 },
 ): ReviewCategoryUnitResultParse {
-  if (expected.version === 1) return parseReviewCategoryUnitResultV1(text, expected);
-  const body = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text)?.[1] ?? text;
-  let parsed: unknown;
-  try { parsed = JSON.parse(body) as unknown; } catch { return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' }; }
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ['schema', 'unitOrdinal', 'findings']) ||
-      parsed.schema !== REVIEW_CATEGORY_UNIT_RESULT_SCHEMA || !Number.isSafeInteger(parsed.unitOrdinal) ||
-      (parsed.unitOrdinal as number) < 1 || !Array.isArray(parsed.findings) || parsed.findings.length > MAX_FINDINGS) {
-    return { ok: false, code: 'schema-invalid', detail: '单元结果信封不符合编辑审阅契约 v2。' };
-  }
-  if (parsed.unitOrdinal !== expected.unitOrdinal) return { ok: false, code: 'unit-mismatch', detail: '单元结果序号与请求不一致。' };
+  const parsed = extractModelJson(text, { partial: true });
+  if (parsed === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
+  const mark = (index: number, reason: string): void => { salvaged.push({ section: 'findings', index, reason }); };
+  try { JSON.parse(text); } catch { mark(-1, 'json-extracted-or-partial'); }
+  const schema = expected.version === 1 ? REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1 : REVIEW_CATEGORY_UNIT_RESULT_SCHEMA;
+  if (parsed.schema !== schema || parsed.unitOrdinal !== expected.unitOrdinal) mark(-1, 'request-envelope');
+  if (parsed.findings !== undefined && !Array.isArray(parsed.findings)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  if (!('findings' in parsed) && !('schema' in parsed)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const candidates = Array.isArray(parsed.findings) ? parsed.findings : [];
   const accepted: ReviewUnitFinding[] = [];
   const acceptedIndexes: number[] = [];
   const rejected: RejectedReviewFinding[] = [];
-  parsed.findings.forEach((candidate: unknown, index: number) => {
-    const one = parseReviewCategoryUnitResultV1(JSON.stringify({ schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA_V1,
-      unitOrdinal: parsed.unitOrdinal, findings: [candidate] }), expected);
-    if (one.ok) { accepted.push(one.result.findings[0]!); acceptedIndexes.push(index); }
-    else rejected.push({ index, reasonCode: one.code, text: JSON.stringify(candidate) });
+  candidates.forEach((candidate: unknown, index: number) => {
+    const reject = (reasonCode: ReviewCategoryUnitResultParseFailureCode): void => {
+      rejected.push({ index, reasonCode, text: JSON.stringify(candidate) }); mark(index, reasonCode);
+    };
+    if (index >= MAX_FINDINGS || !isRecord(candidate) || !boundedText(candidate.quote, MAX_QUOTE_GRAPHEMES) ||
+        typeof candidate.note !== 'string' || !candidate.note.isWellFormed() || !candidate.note.trim()) { reject('schema-invalid'); return; }
+    const blockOrdinal = typeof candidate.blockOrdinal === 'string' ? Number(candidate.blockOrdinal) : candidate.blockOrdinal;
+    if (typeof blockOrdinal !== 'number' || !Number.isSafeInteger(blockOrdinal) || blockOrdinal < 1 || blockOrdinal > expected.blockCount) {
+      reject('quote-not-in-block'); return;
+    }
+    const severity = reviewSeverity(candidate.severity);
+    const note = normalizeLine(candidate.note, MAX_NOTE_GRAPHEMES);
+    let replacement: string | undefined;
+    if (expected.output === 'change-suggestion' && typeof candidate.replacement === 'string' && candidate.replacement.isWellFormed() &&
+        graphemeCount(candidate.replacement) <= MAX_REPLACEMENT_GRAPHEMES && candidate.replacement !== candidate.quote) replacement = candidate.replacement;
+    if ((expected.output === 'change-suggestion' && replacement === undefined) || (expected.output === 'annotation' && 'replacement' in candidate)) mark(index, 'replacement-annotation');
+    const clauseId = typeof candidate.clauseId === 'string' && expected.clauseIds.some((id) => id === candidate.clauseId || id.startsWith(`${candidate.clauseId}.`))
+      ? candidate.clauseId : undefined;
+    if (expected.deliverableRefs !== undefined && (clauseId === undefined || !expected.deliverableRefs.includes(clauseId))) { reject('clause-unknown'); return; }
+    if (candidate.blockOrdinal !== blockOrdinal) mark(index, 'numeric-string');
+    if (candidate.severity !== severity) mark(index, 'severity-normalized');
+    if (candidate.note !== note) mark(index, 'note-normalized');
+    if (candidate.clauseId != null && clauseId === undefined) mark(index, 'clause-unknown');
+    accepted.push({ quote: candidate.quote, blockOrdinal, severity, note, ...(replacement === undefined ? {} : { replacement }), ...(clauseId === undefined ? candidate.clauseId == null ? {} : { clauseId: null } : { clauseId }) });
+    acceptedIndexes.push(index);
   });
-  const result: ReviewCategoryUnitResult = { schema: REVIEW_CATEGORY_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal,
-    findings: accepted, rejected, acceptedIndexes };
+  // Parsed rejections are a complete review outcome and remain visible in the excluded appendix.
+  const result: ReviewCategoryUnitResult = { schema, unitOrdinal: expected.unitOrdinal, findings: accepted, rejected, acceptedIndexes, ...(salvaged.length ? { salvaged } : {}) };
   const canonical = canonicalJson(result);
-  return { ok: true, result, accepted, rejected, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  return { ok: true, result, accepted, rejected, ...(salvaged.length ? { salvaged } : {}), canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
 // ---- the unit message ------------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -205,6 +206,9 @@ describe('the words of 交付物', () => {
   it('read the manuscript and the chosen milestone into the form summary before commitment', () => {
     expect(deliverablesManuscriptLine(null)).toBe('这本书还没有稿件；导入稿件后才能保存里程碑版本。');
     expect(deliverablesManuscriptLine(manuscript)).toBe('当前稿件：修订版 r3 · 修订日志序号 4');
+    setTechnicalLayerVisible(false);
+    expect(deliverablesManuscriptLine(manuscript)).toBe('当前稿件');
+    setTechnicalLayerVisible(true);
     expect(publicationSummaryManuscript(manuscript)).toBe('主稿件 · 当前修订版 r3 · 修订日志序号 4');
     expect(publicationSummaryMilestone(milestone(), SAVED_AT)).toBe('「一审稿」 · r1 · 2026/09/22 10:00:00 保存');
     expect(publicationMilestoneOptionLine(milestone(), SAVED_AT)).toBe('用途：阶段留档 · 修订版 r1 · 2026/09/22 10:00:00 保存');
@@ -273,6 +277,9 @@ describe('where 发稿 stands, in the block and on 工作概览', () => {
     expect(deliverablesOverviewLine(truncated)).toBe('发稿 · 里程碑版本 2 个以上 · 还没有设为发稿版本');
     expect(deliverablesOverviewLine(designated)).toBe('发稿 · 里程碑版本 2 个 · 发稿版本「二审稿」 · r2 · 纸质版首印');
     expect(deliverablesOverviewLine(changed)).toBe('发稿 · 里程碑版本 2 个 · 发稿版本「二审稿」 · r2 · 纸质版首印 · 自发稿版本后有修改');
+    setTechnicalLayerVisible(false);
+    expect(deliverablesOverviewLine(designated)).toBe('发稿 · 里程碑版本 2 个 · 发稿版本「二审稿」 · 纸质版首印');
+    setTechnicalLayerVisible(true);
     expect(deliverablesOverviewLine(changed)).not.toMatch(/%/);
   });
 });
@@ -284,10 +291,10 @@ describe('the milestone form', () => {
       label: '标签',
       purpose: '用途',
       customPurpose: '自行输入的用途',
-      note: '说明（可选）',
+      note: '说明 · 可选',
       save: '保存里程碑版本',
     });
-    expect(MILESTONE_PURPOSE_NOTE).toBe('用途只说明这一版接下来打算做什么；选「交付候选」不会导出，也不会设为发稿版本。');
+    expect(MILESTONE_PURPOSE_NOTE).toBe('说明这一版的下一步；选「交付候选」不会导出，也不会设为发稿版本。');
   });
 
   it('keep 保存里程碑版本 unavailable until a label and a purpose are given, and say why', () => {

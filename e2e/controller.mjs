@@ -5,6 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { readReadinessTrace } from './readiness-trace.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
+
+// Manuscript control projections shared by the synchronized #1322 Journey delta.
+export const MANUSCRIPT_JOURNAL_SEQUENCE = `Number(document.querySelector('[data-editor-persistence]')?.dataset.journalSequence)`;
+// The loaded window's position, rather than a pointer's preview while its jump is still in flight.
+export const MANUSCRIPT_RAIL_POSITION = `Number(document.querySelector('#manuscript-position')?.dataset.windowPosition)`;
+export function manuscriptRailJump(proportionExpression) {
+  return `(() => { const rail = document.querySelector('#manuscript-position[role="slider"]'); if (!(rail instanceof HTMLElement)) return false; rail.setAttribute('aria-valuenow', String(Math.round((${proportionExpression}) * 1_000_000))); rail.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
+}
+export function manuscriptBoundary(label) {
+  return `(() => { const pane = document.querySelector('.editor-window'); const item = Array.from(document.querySelectorAll('.window-actions button')).find(button => button.textContent === ${JSON.stringify(label)}); if (!(pane instanceof HTMLElement) || !item || item.disabled) return false; if (pane.scrollHeight > pane.clientHeight) { pane.scrollTop = ${JSON.stringify(label)} === '向前浏览' ? 16 : pane.scrollHeight - pane.clientHeight - 16; pane.dispatchEvent(new Event('scroll')); } return !item.hidden; })()`;
+}
 const JOURNEY_RUNNER_ENTRY = resolve(ROOT, 'e2e', 'run.mjs');
 const MAX_CAPTURE_BYTES = 64 * 1024;
 const CANCELLATION_MESSAGE = 'ai7-e2e-cancel';
@@ -113,12 +124,12 @@ export const SIDEBAR = Object.freeze({
 
 /** An expression that follows one sidebar row, `false` while that row is missing, hidden or unavailable. */
 export function sidebarNavigate(selector) {
-  const labels = { attention: '待我处理', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', 'global-agent': '全域智能体（记忆与全局指导）', manuscript: '稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
+  const labels = { attention: '待我处理', tasks: '任务', library: '书库', series: '书系', knowledge: '知识库', quality: '质量与学习', 'global-agent': '全域智能体', manuscript: '稿件', review: '审阅', evaluation: '评估', deliverables: '交付物', findings: '发现', analysis: '分析', sources: '来源与证据', overview: '工作概览', history: '历史与恢复', hub: '设置' };
   return `(() => { const node=document.querySelector(${JSON.stringify(selector)}); if(!(node instanceof HTMLElement)||node.closest('[hidden]')||node.getAttribute('aria-disabled')==='true'||(node instanceof HTMLButtonElement&&node.disabled))return false; const key=node.dataset.navDestination??node.dataset.navBookSection??node.dataset.navSettings; const labels=${JSON.stringify(labels)}; if(key && (node.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')!==labels[key])return false; node.click(); return true; })()`;
 }
 
-/** The sidebar on the library: the six destinations in their order with their exact names, 书库 current, 设置 at the foot. */
-export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:全域智能体（记忆与全局指导）']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
+/** The sidebar on the library: the seven destinations in their order with their exact names, 书库 current, 设置 at the foot. */
+export const SIDEBAR_LIBRARY_READY = `(() => { const rows=Array.from(document.querySelectorAll('#app-sidebar .sidebar-destinations [data-nav-destination]')); const names=rows.map((row)=>row.dataset.navDestination+':'+(row.querySelector('.nav-label, .global-attention-entry-label')?.textContent??'')); return JSON.stringify(names)===${JSON.stringify(JSON.stringify(['attention:待我处理', 'tasks:任务', 'library:书库', 'series:书系', 'knowledge:知识库', 'quality:质量与学习', 'global-agent:全域智能体']))} && document.querySelector('#app-sidebar [data-nav-destination="library"]')?.getAttribute('aria-current')==='page' && document.querySelector('#app-sidebar [data-nav-settings]')?.textContent==='设置' && document.querySelector('#context-title')?.textContent==='书库'; })()`;
 
 /** The current Book's groups in the sidebar — for that Book, or any when `bookId` is null — with one section marked current. */
 export function sidebarBookCurrent(bookId, section) {
@@ -128,7 +139,7 @@ export function sidebarBookCurrent(bookId, section) {
 }
 
 /** At the 200% reflow width (640 CSS px) the sidebar shows icons only, every row keeping its name, and fits its column. */
-export const SIDEBAR_ICONS_ONLY = `(() => { const bar=document.querySelector('#app-sidebar'); if(!(bar instanceof HTMLElement)||document.documentElement.dataset.sidebar!=='icons')return false; const box=bar.getBoundingClientRect(); const rows=Array.from(bar.querySelectorAll('.sidebar-link')); return box.width<=64 && bar.scrollWidth<=bar.clientWidth+2 && rows.length>=6 && rows.every((row)=>(row.getAttribute('aria-label')??row.textContent??'').trim().length>0 && row.getBoundingClientRect().width<=box.width); })()`;
+export const SIDEBAR_ICONS_ONLY = `(() => { const bar=document.querySelector('#app-sidebar'); if(!(bar instanceof HTMLElement)||document.documentElement.dataset.sidebar!=='icons')return false; const box=bar.getBoundingClientRect(); const rows=Array.from(bar.querySelectorAll('.sidebar-link')); return Math.abs(box.width-56)<1 && bar.scrollWidth<=bar.clientWidth+2 && rows.length>=6 && rows.every((row)=>row.title.trim().length>0 && row.getBoundingClientRect().width<=box.width && (row.querySelector('[data-icon]') || row.querySelector('.nav-book-initial')?.textContent)); })()`;
 
 const J01_COMMON_COMPLETION_PHASES = Object.freeze([
   'imported-transition',
@@ -1177,6 +1188,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
   // behaviour that broke.
   'J-09': Object.freeze([
     ...J14_DARK_PASS_LOCATIONS,
+    'task-overview-continuous-enqueue',
     'entry',
     'controller-loopback-sentinel',
     'controller-imports',
@@ -1697,6 +1709,21 @@ export function collectJourneyDisclosures(result, journey) {
     .split(/\r?\n/u)
     .map((line) => (line.startsWith(prefix) ? line.slice(prefix.length) : null))
     .filter((disclosure) => disclosure !== null && isAdmittedDisclosure(journey, disclosure));
+}
+
+const J02_VIEWPORT_PREFIX = 'LOCAL_COMPLETION/J-02/disclosed/viewport-form/';
+
+/** Content-free geometry, so a passing J-02 also names the responsive form it exercised. */
+export function discloseJ02Viewport({ width, height, overlay }) {
+  if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0 || typeof overlay !== 'boolean') {
+    throw new TypeError('Invalid Journey viewport.');
+  }
+  console.log(`${J02_VIEWPORT_PREFIX}${overlay ? 'overlay' : 'separate'}-${width}x${height}`);
+}
+
+export function collectJ02ViewportDisclosures(result) {
+  return result.stdout.split(/\r?\n/u).filter((line) =>
+    line.startsWith(J02_VIEWPORT_PREFIX) && /^(?:separate|overlay)-[1-9][0-9]*x[1-9][0-9]*$/u.test(line.slice(J02_VIEWPORT_PREFIX.length)));
 }
 
 export function normalizePnpmArgs(args) {
@@ -2246,7 +2273,7 @@ export function classifyJourneyResult(result, journey) {
  * 跟随系统. `returnTo` is the sidebar row that leads back to that screen; a Journey whose screen no row reaches passes
  * `returnToScreen`. Neither touches a record: only the local appearance preference changes, and it ends at 跟随系统.
  */
-export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .panel', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
+export async function runJ14DarkPass({ renderer, journey, at, representative = '[data-screen="landing"] .page-content', returnTo = SIDEBAR.destination('library'), returnToScreen }) {
   // Which screen was showing, as a check label's word: its own `data-screen` when that is a code word, else `other`; `none`
   // before the renderer has painted its first screen or when it cannot be read.
   const SCREEN_WORD = `(() => { const state = document.querySelector('#screen')?.dataset.screen; return typeof state !== 'string' ? 'none' : /^[a-z][a-z0-9-]{0,39}$/u.test(state) ? state : 'other'; })()`;
@@ -2306,11 +2333,13 @@ export async function runJ14DarkPass({ renderer, journey, at, representative = '
     const style = getComputedStyle(screen);
     const rgb = (value) => (value.match(/[\\d.]+/g) ?? []).slice(0, 3).map(Number);
     const luminance = (values) => values.map((n) => { const s = n / 255; return s <= .04045 ? s / 12.92 : ((s + .055) / 1.055) ** 2.4; }).reduce((sum, n, i) => sum + n * [.2126, .7152, .0722][i], 0);
-    const color = rgb(style.color), background = rgb(style.backgroundColor);
+    let backdrop = screen;
+    while (backdrop.parentElement && getComputedStyle(backdrop).backgroundColor === 'rgba(0, 0, 0, 0)') backdrop = backdrop.parentElement;
+    const color = rgb(style.color), background = rgb(getComputedStyle(backdrop).backgroundColor);
     const l1 = luminance(color), l2 = luminance(background);
     const hex = (values) => '#' + values.map((v) => v.toString(16).padStart(2, '0')).join('');
     return hex(color) === root.getPropertyValue('--text').trim() &&
-      [root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
+      [root.getPropertyValue('--shell').trim(), root.getPropertyValue('--surface').trim(), root.getPropertyValue('--manuscript').trim()].includes(hex(background)) &&
       (Math.max(l1, l2) + .05) / (Math.min(l1, l2) + .05) >= 4.5;
   })()`, 'j14-dark-pass-theme-applied');
   at('j14-dark-pass-forced-colors-wins');

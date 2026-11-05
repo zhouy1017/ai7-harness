@@ -2,6 +2,7 @@ import { SEARCH_BACKENDS } from './provider/search-backends.js';
 import {
   readSearchBackendConnections,
   readSearchFallback,
+  readSearchOverride,
   searchBackendSettingsProjection,
   writeSearchFallback,
 } from './provider/search-backend-settings.js';
@@ -41,18 +42,19 @@ export interface ModelSearchSettingsHost {
 }
 
 export function getSearchBackendSettings(host: ModelSearchSettingsHost): import('../shared/protocol.js').SearchBackendSettingsProjection {
-  return searchBackendSettingsProjection(host.getSearchBackendConnections(), readSearchFallback(host.authority));
+  return searchBackendSettingsProjection(host.getSearchBackendConnections(), readSearchFallback(host.authority), readSearchOverride(host.authority));
 }
 
 export function getSearchBackendConnections(host: ModelSearchSettingsHost): import('../shared/protocol.js').SearchBackendConnectionProjection[] { return readSearchBackendConnections(host.authority); }
 
-export function selectSearchBackend(host: ModelSearchSettingsHost, backendId: string | null, role?: 'fallback'): void {
+export function selectSearchBackend(host: ModelSearchSettingsHost, backendId: string | null, role?: 'fallback', alwaysUseSelectedBackend?: boolean): void {
   requireStore(role === 'fallback' || SEARCH_BACKENDS.some((entry) => entry.shipped && entry.id === backendId), 'SEARCH_BACKEND_NOT_SHIPPED', '该联网检索后端未提供。');
+  const override = alwaysUseSelectedBackend ?? readSearchOverride(host.authority);
   host.authority.exec('BEGIN IMMEDIATE');
   try {
     if (role === 'fallback') writeSearchFallback(host.authority, backendId); else if (readSearchFallback(host.authority)?.backendId === backendId) writeSearchFallback(host.authority, null);
     if (role !== 'fallback') host.authority.prepare('UPDATE search_backend_connections SET selected = NULL WHERE selected = 1').run();
-    if (role !== 'fallback') host.authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ? WHERE backend_id = ?').run(new Date().toISOString(), backendId);
+    if (role !== 'fallback') host.authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ?, always_use_selected = ? WHERE backend_id = ?').run(new Date().toISOString(), Number(override), backendId);
     host.authority.exec('COMMIT');
   } catch (error) { host.authority.exec('ROLLBACK'); throw error; }
 }
@@ -63,13 +65,14 @@ export function saveSearchBackendCredential(host: ModelSearchSettingsHost, backe
   requireStore(reference === null || reference === current.credentialReference, 'SEARCH_CREDENTIAL_REFERENCE_INVALID', '联网检索凭据引用不属于该连接。');
   requireStore(['ready', 'missing', 'needs-attention'].includes(state), 'SEARCH_CREDENTIAL_STATE_INVALID', '联网检索凭据状态无效。');
   const credentialReference = current.credentialReference ?? randomUUID();
+  const override = readSearchOverride(host.authority);
   const firstReady = state === 'ready' && !host.getSearchBackendConnections().some((entry) => entry.credentialOperationState === 'ready');
   host.transaction(host.authority, () => {
     host.authority.prepare('UPDATE search_backend_connections SET credential_reference = ?, credential_operation_state = ? WHERE backend_id = ?').run(credentialReference, state, backendId);
     if (state !== 'ready' && readSearchFallback(host.authority)?.backendId === backendId) writeSearchFallback(host.authority, null);
     if (firstReady) {
       host.authority.prepare('UPDATE search_backend_connections SET selected = NULL WHERE selected = 1').run();
-      host.authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ? WHERE backend_id = ?').run(new Date().toISOString(), backendId);
+      host.authority.prepare('UPDATE search_backend_connections SET selected = 1, selected_at = ?, always_use_selected = ? WHERE backend_id = ?').run(new Date().toISOString(), Number(override), backendId);
     }
   });
   return host.getSearchBackendConnections().find((entry) => entry.backendId === backendId)!;
@@ -173,7 +176,7 @@ export function saveModelServiceConnection(host: ModelSearchSettingsHost, connec
       requireStore(
         host.authority.prepare(
             `UPDATE model_service_connections
-             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL, cached_models = '[]'
+             SET connection_name = ?, credential_operation_state = ?, updated_at = ?, credential_updated_at = ?, connection_test = NULL
              WHERE connection_id = ? AND credential_reference = ?`,
         ).run(connectionName, credentialOperationState, now, now, target.connectionId, current.credentialReference).changes === 1,
           'MODEL_SERVICE_CONNECTION_CONFLICT',
@@ -302,6 +305,7 @@ export function recordModelConnectionTest(host: ModelSearchSettingsHost, connect
   const sanitized: ModelConnectionTestStatus = {
     modelId: result.modelId, credentialUpdatedAt: result.credentialUpdatedAt, testedAt: result.testedAt,
     outcome: result.outcome, code: result.code, verified: 'buffered-text-only',
+    ...(typeof result.responseText === 'string' && result.responseText.isWellFormed() ? { responseText: result.responseText.slice(0, 4000).replace(/[\uD800-\uDBFF]$/u, '') } : {}),
     ...(facts === undefined ? {} : { provenance: {
       role: facts.role, route: facts.route, model: facts.model, endpoint: facts.endpoint, credentialSlot: facts.credentialSlot,
       credentialReference: facts.credentialReference, policyVersion: facts.policyVersion, bindingDigest: facts.bindingDigest,

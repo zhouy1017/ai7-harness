@@ -130,6 +130,7 @@ export function initialEvaluationKindDefinition(profile: InitialEvaluationProfil
       promptContractDigest,
       resultSchema: INITIAL_EVALUATION_SYNTHESIS_RESULT_SCHEMA,
       step: {
+        requiredForCompletion: true,
         label: SYNTHESIS_LABEL,
         minimumClosedUnits: 1,
         notEnoughReason: '没有读完的阅读范围，全书综合未发起，AI7 没有给出初评分数。',
@@ -174,8 +175,9 @@ export function initialEvaluationKindDefinition(profile: InitialEvaluationProfil
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ observations: (result as InitialEvaluationUnitResult).observations }),
+    unitRecord: (result) => ({ observations: (result as InitialEvaluationUnitResult).observations, ...((result as InitialEvaluationUnitResult).salvaged === undefined ? {} : { salvaged: (result as InitialEvaluationUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): InitialEvaluationUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<InitialEvaluationUnitResult['salvaged']> }),
       schema: INITIAL_EVALUATION_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       observations: record.observations as InitialEvaluationUnitResult['observations'],

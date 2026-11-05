@@ -1,9 +1,11 @@
+import { technicalWords, technicalLayerVisible } from './technical-layer.js';
 import type {
   RendererApi,
   RunBudgetCeilingState,
   TaskPlanKind,
   TaskPlanProjection,
   TaskPlanRunControlProjection,
+  ResumableStopReason,
   TaskPlanStartReadiness,
   TaskPlanStateKey,
   TaskPlanUnconfirmedProjection,
@@ -121,14 +123,14 @@ export function taskPlanChips(chips: TaskPlanProjection['goal']['chips']): Reado
     { key: 'book', text: chips.book },
     { key: 'position', text: chips.position },
     ...(chips.selectedGraphemes === null ? [] : [{ key: 'selected', text: `已选 ${groupedCount(chips.selectedGraphemes)} 字` }]),
-    { key: 'revision', text: `任务输入修订版 ${chips.taskInputRevision}` },
+    { key: 'revision', text: `任务输入修订版${technicalWords(` ${chips.taskInputRevision}`)}` },
     { key: 'procedure', text: `工序「${chips.procedure}」` },
   ];
 }
 
 /** TASK-039/040's one line: preparing the Task saved a revision, so later editing leaves the Task as it is. */
 export function taskPlanSavedLine(revisionLabel: string): string {
-  return `已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`;
+  return technicalWords(`已为任务保存修订版 ${revisionLabel}，之后的编辑不影响这项任务。`, '已为任务保存当前稿件，之后的编辑不影响这项任务。');
 }
 
 /** A count with its thousands grouped, the same text on every host. */
@@ -140,21 +142,49 @@ export function groupedCount(value: number): string {
 
 export const TASK_PLAN_COMPACT_TERMS = ['处理', '发送', '会得到', '不会', '中途'] as const;
 export const TASK_PLAN_FULL_LINK = '完整计划（6 段）';
-/** §6: the same link on a plan the editor can edit says so. */
-export const TASK_PLAN_FULL_LINK_EDITABLE = '完整计划（6 段）· 可以改步骤与限制';
 /** The usage figure is a ceiling the Run cannot pass, never a forecast of what it will use. */
 export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
 /** The five rows of 精简, each one line built from the projection's own sentences. */
 export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<readonly [string, string]> {
-  const usage = `用量：${plan.service.usage}${plan.service.usageIsCeiling ? `（${TASK_PLAN_CEILING_NOTE}）` : ''}`;
+  plan = taskPlanWording(plan);
+  const references = plan.listPages?.['scope.reference']?.total ?? plan.scope.reference.length;
+  const sends = !plan.service.send.includes('不发送') && !plan.service.send.includes('不会发送');
+  const ceiling = plan.service.usage.match(/[\d,]+(?= tokens)/u)?.[0];
+  const usage = ceiling === undefined ? sends ? '按用量计费，未设预算上限' : '无模型用量' : `达到 ${ceiling} tokens 后不再发送`;
+  const nonEffects = plan.notDo.editorial.map((fact) => fact.split('：')[0]!
+    .replace(/^不会开始运行（只记录）$/u, '不运行').replace('不会直接修改稿件', '不改稿')
+    .replace('不导出或发布', '不导出发布').replace('不存里程碑版本', '不存里程碑')
+    .replace('不替你打分', '不代评分').replace('不评风险项', '不评风险').replace('不联网检索', '不联网')
+    .replace('不读这本书以外的内容', '不读书外内容').replace('不读这本书以外的稿件', '不读书外稿')
+    .replace('不读允许参考以外的资料', '不读参考外资料')
+    .replace(/^不重新读取.+以外的正文$/u, '不重读范围外正文').replace(/^不读.+以外的正文$/u, '不读范围外正文')
+    .replace('不照抄范例', '不抄范例').replace('不照抄资料库资料', '不抄资料')
+    .replace('不改评估记录与基线分析', '不改评估分析').replace('不改评估记录', '不改评估')
+    .replace('不自动写入评估', '不自动记评估').replace('不改分数', '不改分').replace('不写营销要点', '不写营销')
+    .replace('不选结论，不评风险', '不定论评风险').replace('不交付、不发送', '不交付发送')
+    .replace(/^不在所选段落以外标出发现.*$/u, '不标选段外发现').replace('不给出合规、查重或政策结论', '不判合规查重政策')
+    .replace(/^不/u, '')).join('、').replace('抄范例、抄资料', '抄范例资料');
   return [
-    ['处理', plan.scope.reference.length === 0 ? plan.scope.process : `${plan.scope.process}；参考 ${plan.scope.reference.join('、')}`],
-    ['发送', `${plan.service.send} · ${usage} · ${plan.service.budgetCeiling}`],
-    ['会得到', plan.outcomes.join('；')],
-    ['不会', plan.notDo.editorial.join(' · ')],
-    ['中途', plan.participation.after === null ? plan.participation.during : `${plan.participation.during}；结束后：${plan.participation.after}`],
+    ['处理', references === 0 ? '只处理任务卡所列范围，不参考其他材料。' : `处理任务卡所列范围，参考 ${references} 项材料。`],
+    ['发送', `${sends ? '发往模型，' : '不发送，'}${usage}。`],
+    ['会得到', `${TASK_BAR_OUTCOMES[plan.kind]}。`],
+    ['不会', `不${nonEffects}。`],
+    ['中途', plan.kind === 'fixed-task' ? '只记录本次授权，无需中途参与。' : plan.participation.during === '预计无需中途参与' ? '预计无需参与，可随时暂停或取消。' : '需你决定时先询问，可随时暂停或取消。'],
   ];
+}
+
+/** Select composed metadata without interpreting any source sentence, title or quote. */
+export function taskPlanWording(plan: TaskPlanProjection): TaskPlanProjection {
+  if (technicalLayerVisible) return plan;
+  const words = (parts: ReadonlyArray<string | { technical: string }> | undefined, fallback: string): string =>
+    parts === undefined ? fallback : parts.map((part) => typeof part === 'string' ? part : technicalWords(part.technical)).join('');
+  return { ...plan, goal: { ...plan.goal, sentence: words(plan.wording?.goal, plan.goal.sentence),
+    chips: { ...plan.goal.chips, procedure: words(plan.wording?.procedure, plan.goal.chips.procedure) } },
+    scope: { ...plan.scope, reference: plan.wording?.reference?.map((parts) => words(parts, '')) ?? plan.scope.reference,
+      send: words(plan.wording?.scopeSend, plan.scope.send) },
+    service: { ...plan.service, send: words(plan.wording?.serviceSend, plan.service.send) },
+    outcomes: plan.wording?.outcomes?.map((parts) => words(parts, '')) ?? plan.outcomes };
 }
 
 // ---- 完整 (PLAN-002): the six sections, the two columns, the technical layer ---------------------------------
@@ -199,8 +229,8 @@ export function taskPlanDefaultRuleSet(name: string): string {
 }
 /** The Book's rule for this plan's pattern, beside the action. */
 export function taskPlanDefaultRuleCurrent(current: NonNullable<TaskPlanProjection['defaultRule']['current']>): string {
-  if (current.state === 'deactivated') return `这本书的默认执行规则：${current.name}（已停用）`;
-  return `这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`;
+  if (current.state === 'deactivated') return technicalWords(`这本书的默认执行规则：${current.name}（已停用）`, `这本书的默认规则：${current.name} · 已停用`);
+  return technicalWords(`这本书的默认执行规则：${current.name}（使用中${current.fromThisPlan ? '，由这份计划设定' : ''}）`, `这本书的默认规则：${current.name} · 使用中${current.fromThisPlan ? ' · 由这份计划设定' : ''}`);
 }
 /** 快速开始后 (S75 D5): the quiet notice on a Task quick start started, and the way to the rule. */
 export function taskPlanQuickStarted(name: string): string {
@@ -243,7 +273,7 @@ export const TASK_PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序�
  * 先问你 (Issue #422, S76d; PLAN-011, PLAN-012): an adaptation moved into the right column. The Run asks the editor
  * before it makes it, in a Clarification Request, and only the step that waits for the answer stops.
  */
-export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+export const TASK_PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
 export const TASK_PLAN_EDIT_ADAPTATION_ASK_FIRST = '先问你';
 /** The move's control, named for what it does. */
 export function taskPlanEditAskFirst(label: string): string {
@@ -253,7 +283,7 @@ export function taskPlanEditAskFirst(label: string): string {
 
 /** The selector's words: what a level is and is not, said beside the three options of a 事实核查 Task's plan. */
 export const TASK_PLAN_ASSURANCE_HEADING = '证据保证级别';
-export const TASK_PLAN_ASSURANCE_NOTE = '级别决定这次核查做多少证据工作、能记录什么结论；它不是模型、服务或权限的选择。开始任务时如果本机未联网，会自动降为快速整理并在结果里说明。';
+export const TASK_PLAN_ASSURANCE_NOTE = '级别决定核查深度，开始时未联网会自动改为快速整理并在结果中说明。';
 export function taskPlanAssuranceEdited(label: string): string {
   return `改成${label}`;
 }
@@ -264,7 +294,7 @@ export function taskPlanAssuranceEdited(label: string): string {
 export const TASK_PLAN_BUDGET_NOTE = '用量和费用仍受所选模型服务的账户控制与计费条款约束。';
 export const TASK_PLAN_BUDGET_SET = '设置上限…';
 export const TASK_PLAN_BUDGET_REMOVE = '去掉上限';
-export const TASK_PLAN_BUDGET_INPUT = '预算上限（tokens）';
+export const TASK_PLAN_BUDGET_INPUT = '预算上限 · 词元';
 export const TASK_PLAN_BUDGET_HINT = '这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。';
 export const TASK_PLAN_BUDGET_APPLY = '设定';
 export const TASK_PLAN_BUDGET_CANCEL = '取消';
@@ -290,7 +320,7 @@ export function taskPlanEditCountAfterDrift(count: number): string {
 /** The edit that made the version shown, with its time (PLAN-011: recorded with actor and time). */
 export function taskPlanLastEdit(edit: NonNullable<TaskPlanProjection['edit']['lastEdit']>): string {
   const changes = edit.entries.map((entry) => `${entry.label}：${entry.prior} → ${entry.proposed}`).join('；');
-  return `第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`;
+  return technicalWords(`第 ${edit.ordinal} 版由你修改（${localInstantLabel(edit.recordedAt)}）：${changes}`, `你修改了计划 · ${localInstantLabel(edit.recordedAt)}：${changes}`);
 }
 
 // ---- the authorization bar (Issue #420, S74a; §6 常驻授权条, V2-UX-AUTH-001 to 007, §10) --------------------
@@ -314,8 +344,34 @@ export const TASK_BAR_SAVE_DRAFT = '保存草稿';
 export const TASK_BAR_SAVED = '计划已保存，可稍后开始';
 /** AUTH-003 as ADR 0077 revised it: what starting decides, and everything it leaves to the editor. */
 export const TASK_BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
+export const TASK_BAR_PRODUCTION_STATEMENT = '仅执行本次计划，改稿、受控动作、里程碑与发稿另行决定。';
 /** §10: 凭据引用 readiness missing reads 未连接 · 缺少凭据 → 去设置连接, never 设置模型服务. */
 export const TASK_BAR_CONNECT = '去设置连接';
+/** Network remediation for a Run stopped by an unreachable proxy or model service. */
+export const TASK_BAR_PROXY_SETTINGS = '去设置 › 模型服务 › 网络代理';
+export const RESUMABLE_STOP_REASON_LABELS: Readonly<Record<ResumableStopReason, string>> = {
+  'proxy-unreachable': '代理不可达',
+  'model-service-unreachable': '模型服务不可达',
+  'outcome-unknown': '结果待确认',
+  shutdown: 'AI7 关闭时正在运行',
+};
+export function resumableStopReasonLabel(reason: ResumableStopReason): string {
+  return RESUMABLE_STOP_REASON_LABELS[reason];
+}
+export function taskBarResumableStatement(reason: ResumableStopReason): string {
+  if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后续行。';
+  if (reason === 'model-service-unreachable') return '模型服务不可达：去 设置 › 模型服务 › 网络代理 检查网络或代理后续行。';
+  if (reason === 'outcome-unknown') return '结果待确认：这次运行不能续行，请先查看未确认的部分。';
+  return 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+}
+export function taskBarResumableStatus(reason: ResumableStopReason): string {
+  return `任务已中断 · ${resumableStopReasonLabel(reason)}`;
+}
+export function taskBarResumeOutcome(reason: ResumableStopReason, repeated: boolean): { message: string; tone: 'success' | 'error' } {
+  return repeated
+    ? { message: `续行后仍然 ${resumableStopReasonLabel(reason)}；没有发送任何书稿内容`, tone: 'error' }
+    : { message: '已续行，从已保存的进度接着读。', tone: 'success' };
+}
 /** AUTH-006: a plan whose key content changed offers these two, and no start. */
 export const TASK_BAR_RECONFIRM = '重新确认计划';
 /**
@@ -434,8 +490,7 @@ export function taskBarAccountLimitNote(unitOrdinal: number | null, unitsSettled
 export const TASK_BAR_VIEW_UNCONFIRMED = '查看未确认的部分';
 export const TASK_BAR_UNCONFIRMED_HEADING = '该单元结果未知';
 export function taskBarOutcomeUnknownNote(unconfirmed: number, unitsSettled: number, unitsTotal: number): string {
-  return `${unconfirmed} 个阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；这次运行不会再发它。` +
-    `其余已读完的 ${unitsSettled - unconfirmed} / ${unitsTotal} 个阅读范围结果都已保存。取消任务会保留已读完的部分，这 ${unconfirmed} 个记为结果未知的单元缺口`;
+  return `${unconfirmed} 处回答未传全，处理与计费未知且不会重发，取消后保留其余 ${unitsSettled - unconfirmed}/${unitsTotal} 处结果。`;
 }
 /** One unconfirmed range in 查看未确认的部分's list: which range, and how often its request was sent. */
 export function taskBarUnconfirmedUnit(unitOrdinal: number, attempts: number): string {
@@ -475,19 +530,16 @@ export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<Unconfirmed
 }
 /** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
 export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rangesTotal = listed.ranges.length): string {
-  const what = unconfirmedWhat(rangesTotal, [...new Set(listed.steps.map((step) => step.stage))]);
-  // A step is never sent again by a later Task as the same request, so only ranges carry the re-send sentence (#763 review).
-  return `${what}的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为${rangesTotal > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。` +
-    `保留为缺口只记下你的确认：不发送任何内容，不改变结果${rangesTotal === 0 ? '。' : '；以后再读这些阅读范围的任务仍会在计划里说明会再发一次。'}`;
+  return `回答未传全，处理与计费未知，缺口未重发；保留只记确认${rangesTotal > 0 ? '；原文已改不再列出，上次重读失败仍待确认' : ''}。`;
 }
 /**
  * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
  * text the Book has moved on from says so: 「第 N 个阅读范围（当时的文字）」.
  */
-export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
+export function unconfirmedLine(entry: { unitOrdinal?: number; earlierText?: boolean; rereadFailed?: boolean; stage?: UnconfirmedStageId; category: string | null }): string {
   const what = entry.stage !== undefined ? UNCONFIRMED_STAGE_LABELS[entry.stage]
     : `第 ${entry.unitOrdinal} 个阅读范围${entry.earlierText === true ? '（当时的文字）' : ''}`;
-  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回`;
+  return `${entry.category === null ? '' : `「${entry.category}」`}${what} · 请求已发出 · 回答没有完整传回${entry.rereadFailed ? ' · 上次重读未成功' : ''}`;
 }
 
 /**
@@ -505,6 +557,10 @@ export function taskBarContinuationNote(unitsSettled: number | null, unitsTotal:
   return unitsSettled >= unitsTotal
     ? `已读完全部 ${unitsTotal} 个阅读范围，结果都已保存；续行时只处理尚未完成的步骤，已保存的步骤不会重做`
     : `已读完 ${unitsSettled} / ${unitsTotal} 个阅读范围，结果都已保存；续行时从第 ${unitsSettled + 1} 个接着读，不重复已读完的部分`;
+}
+
+export function taskBarStopReasonNote(reason: ResumableStopReason, at: string): string {
+  return `上次续行于 ${localInstantLabel(at)} 因 ${resumableStopReasonLabel(reason)} 停下`;
 }
 
 /**
@@ -634,15 +690,7 @@ export interface TaskBarView {
 
 /** AUTH-001 and §6: the bar's one summary line, from the plan it states. */
 export function taskBarSummary(plan: TaskPlanProjection): string {
-  return [
-    `《${plan.goal.chips.book}》`,
-    plan.goal.chips.position,
-    ...(plan.planVersion === null ? [] : [`计划版本 ${plan.planVersion}`]),
-    plan.service.role,
-    plan.service.budgetCeiling,
-    `产出：${TASK_BAR_OUTCOMES[plan.kind]}`,
-    '不改稿',
-  ].join(' · ');
+  return `产出${TASK_BAR_OUTCOMES[plan.kind]}，不修改稿件。`;
 }
 
 const SAVE_DRAFT: TaskBarAction = { name: 'save-draft', label: TASK_BAR_SAVE_DRAFT, tone: 'secondary', disabledReason: null };
@@ -837,14 +885,19 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
       // 取消任务, whose summary says what it kept; and the way to the Run.
       if (control.resume !== null) {
         const continuation = control.continuation;
+        const continuationNote = plan.state.label === TASK_BAR_YIELDED ? TASK_BAR_YIELDED_NOTE
+          : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
+            plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total);
+        const stopNote = control.stopReason === undefined || control.stopAt === undefined ? null : taskBarStopReasonNote(control.stopReason, control.stopAt);
         return {
           readiness,
           summary,
-          statement: null,
-          note: plan.state.label === TASK_BAR_YIELDED ? TASK_BAR_YIELDED_NOTE : continuation === null ? null : taskBarContinuationNote(continuation.unitsSettled, continuation.unitsTotal, continuation.pendingAnswerUnits,
-            plan.listPages?.['runControl.continuation.pendingAnswerUnits']?.total),
-          status: plan.state.label,
+          statement: control.stopReason === undefined ? null : taskBarResumableStatement(control.stopReason),
+          note: [continuationNote, stopNote].filter((entry): entry is string => entry !== null).join('；') || null,
+          status: control.stopReason === undefined ? plan.state.label : taskBarResumableStatus(control.stopReason),
           actions: [
+            ...(control.stopReason === 'proxy-unreachable' || control.stopReason === 'model-service-unreachable'
+              ? [{ name: 'connect', label: TASK_BAR_PROXY_SETTINGS, tone: 'secondary', disabledReason: null } as const] : []),
             { name: 'resume', label: TASK_BAR_RESUME, tone: 'primary', disabledReason: control.resume.reason },
             { name: 'cancel-run', label: TASK_BAR_CANCEL_RUN, tone: 'secondary', disabledReason: control.cancel.reason },
             { name: 'redo', label: TASK_BAR_REDO, tone: control.redo.reason === null ? 'secondary' : 'quiet', disabledReason: control.redo.reason },
@@ -1005,7 +1058,8 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
     readiness,
     summary,
     statement: TASK_BAR_STATEMENT,
-    note: readiness === 'ready' ? null : TASK_BAR_NOTES[readiness],
+    note: readiness === 'ready' ? null : readiness === 'no-route'
+      ? technicalWords(TASK_BAR_NOTES[readiness], '当前设置只能记录任务，暂时无法执行。') : TASK_BAR_NOTES[readiness],
     status: null,
     actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: null }, revise, SAVE_DRAFT],
   };
@@ -1015,7 +1069,7 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
 
 export const TASK_PLAN_ACTIVITY_TITLE = '运行动态';
 /** A Run no execution of this service holds: AI7 closed while it ran, so nothing reports where it is. */
-export const TASK_PLAN_ACTIVITY_UNREPORTED = '这项任务现在没有在运行：AI7 上次关闭时它没有结束。可以取消它，再准备新的任务。';
+export const TASK_PLAN_ACTIVITY_UNREPORTED = '任务在上次关闭时未结束，目前没有运行；可以取消并重新准备。';
 /** LIVE-003's words, kept as they are (ADR 0077): over this Run's own bar, the step says so and claims nothing more. */
 export const TASK_PLAN_ACTIVITY_STALE = '本步骤用时已超过通常水平';
 

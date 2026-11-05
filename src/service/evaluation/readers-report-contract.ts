@@ -1,3 +1,4 @@
+import { type SalvagedModelResult, extractModelJson, normalizeLine, type ModelResultSalvage, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import {
   READERS_REPORT_CONTRACT_VERSION,
   READERS_REPORT_NO_EXEMPLAR,
@@ -9,7 +10,6 @@ import {
   type ReadersReportPassageKind,
   type ReadersReportTemplate,
 } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 
@@ -105,13 +105,14 @@ export interface ReadersReportPassage {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface ReadersReportUnitResult {
+export interface ReadersReportUnitResult extends SalvagedModelResult {
   readonly schema: typeof READERS_REPORT_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly passages: ReadonlyArray<ReadersReportPassage>;
 }
 
-export interface ReadersReportSynthesisResult {
+export interface ReadersReportSynthesisResult extends SalvagedModelResult {
+  readonly withheld?: ReadonlyArray<string>;
   readonly schema: typeof READERS_REPORT_SYNTHESIS_RESULT_SCHEMA;
   readonly overall: string;
   readonly strengths: ReadonlyArray<string>;
@@ -129,10 +130,10 @@ export type ReadersReportUnitParseFailureCode = 'not-json' | 'schema-invalid' | 
 export type ReadersReportSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'conclusion-mismatch';
 
 export type ReadersReportUnitParse =
-  | { ok: true; result: ReadersReportUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReadersReportUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: ReadersReportUnitParseFailureCode; detail: string };
 export type ReadersReportSynthesisParse =
-  | { ok: true; result: ReadersReportSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: ReadersReportSynthesisResult }
   | { ok: false; code: ReadersReportSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '审稿意见单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -356,56 +357,37 @@ export function readersReportContractDigest(contract: ReadersReportPromptContrac
   return sha256Hex(canonicalJson(contract));
 }
 
-function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? text) as unknown };
-  } catch {
-    return { ok: false };
-  }
-}
-
 /** Admit one unit result: exactly the contract's keys, kinds the contract lists, positions within the unit. */
 export function parseReadersReportUnitResult(text: string, expected: { unitOrdinal: number; blockCount: number }): ReadersReportUnitParse {
-  const parsed = parseJson(text);
-  if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  const value = parsed.value;
-  const invalid = (detail: string): ReadersReportUnitParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(value) || !hasExactKeys(value, ['schema', 'unitOrdinal', 'passages'])) return invalid('单元结果键集合不符合审稿意见契约 v1。');
-  if (value.schema !== READERS_REPORT_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是审稿意见契约 v1。');
-  if (!Number.isSafeInteger(value.unitOrdinal) || (value.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (value.unitOrdinal !== expected.unitOrdinal) {
-    return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(value.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
-  }
-  if (!Array.isArray(value.passages) || value.passages.length > MAX_UNIT_PASSAGES) return invalid('段落集合不符合审稿意见契约 v1。');
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
+  const mark = (index: number, reason: string): void => { salvaged.push({ section: 'passages', index, reason }); };
+  try { JSON.parse(text); } catch { mark(-1, 'json-extracted-or-partial'); }
+  if (value.schema !== READERS_REPORT_UNIT_RESULT_SCHEMA || value.unitOrdinal !== expected.unitOrdinal) mark(-1, 'request-envelope');
+  if (!('passages' in value) && !('schema' in value)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  if (value.passages !== undefined && !Array.isArray(value.passages)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const candidates = Array.isArray(value.passages) ? value.passages : [];
   const passages: ReadersReportPassage[] = [];
-  for (const [index, candidate] of (value.passages as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条段落`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['kind', 'note', 'blockOrdinals'])) return invalid(`${label}的键集合不符合审稿意见契约 v1。`);
-    if (typeof candidate.kind !== 'string') return invalid(`${label}的类别无效。`);
-    if (!READERS_REPORT_PASSAGE_KINDS.includes(candidate.kind as ReadersReportPassageKind)) {
-      return { ok: false, code: 'kind-unknown', detail: `${label}的类别 ${candidate.kind.slice(0, 32)} 不在审稿意见契约内。` };
-    }
-    if (!line(candidate.note, MAX_PASSAGE_NOTE_GRAPHEMES)) return invalid(`${label}的说明缺失、含有控制字符或超出 200 字素边界。`);
-    const ordinals = candidate.blockOrdinals;
-    if (!Array.isArray(ordinals) || ordinals.length < 1 || ordinals.length > MAX_PASSAGE_BLOCKS ||
-        !ordinals.every((ordinal) => Number.isSafeInteger(ordinal) && (ordinal as number) >= 1) || new Set(ordinals).size !== ordinals.length) {
-      return invalid(`${label}的内容块序号无效。`);
-    }
-    const outside = (ordinals as number[]).find((ordinal) => ordinal > expected.blockCount);
-    if (outside !== undefined) {
-      return { ok: false, code: 'block-out-of-unit', detail: `${label}引用的内容块序号 ${outside} 不在本单元列出的 ${expected.blockCount} 个内容块内。` };
-    }
-    passages.push({ kind: candidate.kind as ReadersReportPassageKind, note: candidate.note, blockOrdinals: [...(ordinals as number[])] });
+  for (const [index, candidate] of candidates.entries()) {
+    if (index >= MAX_UNIT_PASSAGES || !isRecord(candidate) || typeof candidate.note !== 'string' || !candidate.note.isWellFormed() || !candidate.note.trim()) { mark(index, 'schema-invalid'); continue; }
+    const key = typeof candidate.kind === 'string' ? candidate.kind.trim().toLowerCase() : '';
+    const aliases: Record<string, string> = { '优点': 'strength', '优势': 'strength', '问题': 'problem', '缺点': 'problem', '建议': 'suggestion', '修改建议': 'suggestion' };
+    const kind = aliases[key] ?? key;
+    if (!READERS_REPORT_PASSAGE_KINDS.includes(kind as ReadersReportPassageKind)) { mark(index, 'kind-unknown'); continue; }
+    if (kind !== candidate.kind) mark(index, 'kind-normalized');
+    const raw = Array.isArray(candidate.blockOrdinals) ? candidate.blockOrdinals : [];
+    const ordinals = [...new Set(raw.map((ordinal) => typeof ordinal === 'string' ? Number(ordinal) : ordinal).filter((ordinal): ordinal is number => typeof ordinal === 'number' && Number.isSafeInteger(ordinal) && ordinal >= 1 && ordinal <= expected.blockCount))].slice(0, MAX_PASSAGE_BLOCKS);
+    if (JSON.stringify(raw) !== JSON.stringify(ordinals)) mark(index, 'block-out-of-unit');
+    if (!ordinals.length) { mark(index, 'block-out-of-unit'); continue; }
+    const note = normalizeLine(candidate.note, MAX_PASSAGE_NOTE_GRAPHEMES);
+    if (note !== candidate.note) mark(index, 'note-normalized');
+    passages.push({ kind : kind as ReadersReportPassageKind, note, blockOrdinals: ordinals });
   }
-  const result: ReadersReportUnitResult = { schema: READERS_REPORT_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, passages };
+  if (candidates.length > 0 && passages.length === 0) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const result: ReadersReportUnitResult = { schema: READERS_REPORT_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, passages, ...(salvaged.length ? { salvaged } : {}) };
   const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
-}
-
-function sectionLines(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length >= 1 && value.length <= MAX_SECTION_LINES &&
-    value.every((entry) => line(entry, MAX_SECTION_LINE_GRAPHEMES));
+  return { ok: true, result, ...(salvaged.length ? { salvaged } : {}), canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
 /**
@@ -413,33 +395,31 @@ function sectionLines(value: unknown): value is string[] {
  * editor chose (`conclusion`, its label), since the draft never changes it.
  */
 export function parseReadersReportSynthesis(text: string, conclusion: string): ReadersReportSynthesisParse {
-  const parsed = parseJson(text);
-  if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  const value = parsed.value;
-  const invalid = (detail: string): ReadersReportSynthesisParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(value) || !hasExactKeys(value, ['schema', 'overall', 'strengths', 'problems', 'suggestions', 'conclusion'])) {
-    return invalid('全书综合的键集合不符合审稿意见契约 v1。');
-  }
-  if (value.schema !== READERS_REPORT_SYNTHESIS_RESULT_SCHEMA) return invalid('全书综合 schema 不是审稿意见契约 v1。');
-  if (!line(value.overall, MAX_OVERALL_GRAPHEMES)) return invalid('总体评价缺失、含有控制字符或超出 600 字素边界。');
-  if (!sectionLines(value.strengths)) return invalid('主要优点不符合审稿意见契约 v1。');
-  if (!sectionLines(value.problems)) return invalid('主要问题不符合审稿意见契约 v1。');
-  if (!sectionLines(value.suggestions)) return invalid('修改建议不符合审稿意见契约 v1。');
-  if (!line(value.conclusion, MAX_CONCLUSION_GRAPHEMES)) return invalid('结论缺失、含有控制字符或超出 300 字素边界。');
-  if (!value.conclusion.includes(conclusion)) {
-    return { ok: false, code: 'conclusion-mismatch', detail: `结论没有写出编辑选定的结论「${conclusion}」。` };
-  }
-  return {
-    ok: true,
-    result: {
-      schema: READERS_REPORT_SYNTHESIS_RESULT_SCHEMA,
-      overall: value.overall,
-      strengths: [...value.strengths],
-      problems: [...value.problems],
-      suggestions: [...value.suggestions],
-      conclusion: value.conclusion,
-    },
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
+  try { JSON.parse(text); } catch { salvaged.push({ section: 'envelope', index: -1, reason: 'json-extracted-or-partial' }); }
+  const withheld: string[] = [];
+  const clean = (raw: unknown, section: string, index: number, maximum: number): string => {
+    const result = typeof raw === 'string' && raw.isWellFormed() ? normalizeLine(raw, maximum) : '';
+    if (result !== raw) { salvaged.push({ section, index, reason: result ? 'text-normalized' : 'text-missing' }); if (!result) withheld.push(`${({ overall: '总体评价', strengths: '主要优点', problems: '主要问题', suggestions: '修改建议', conclusion: '结论' } as Record<string, string>)[section] ?? '报告'}中有一条内容无法采用。`); }
+    return result;
   };
+  if (value.schema !== READERS_REPORT_SYNTHESIS_RESULT_SCHEMA) salvaged.push({ section: 'schema', index: -1, reason: 'request-envelope' });
+  const lines = (section: 'strengths' | 'problems' | 'suggestions'): string[] => (Array.isArray(value[section]) ? value[section] : []).flatMap((raw: unknown, index: number) => {
+    const line = clean(raw, section, index, MAX_SECTION_LINE_GRAPHEMES);
+    if (index >= MAX_SECTION_LINES) { salvaged.push({ section, index, reason: 'list-clipped' }); return []; }
+    return line ? [line] : [];
+  });
+  const overall = clean(value.overall, 'overall', -1, MAX_OVERALL_GRAPHEMES);
+  const strengths = lines('strengths'), problems = lines('problems'), suggestions = lines('suggestions');
+  let writtenConclusion = clean(value.conclusion, 'conclusion', -1, MAX_CONCLUSION_GRAPHEMES);
+  if (!overall && !strengths.length && !problems.length && !suggestions.length && !writtenConclusion) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  if (!writtenConclusion.includes(conclusion)) {
+    writtenConclusion = normalizeLine(`结论：${conclusion}。${writtenConclusion}`, MAX_CONCLUSION_GRAPHEMES);
+    salvaged.push({ section: 'conclusion', index: -1, reason: 'conclusion-prefixed' });
+  }
+  return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { schema: READERS_REPORT_SYNTHESIS_RESULT_SCHEMA, overall, strengths, problems, suggestions, conclusion: writtenConclusion, ...(withheld.length ? { withheld } : {}), ...(salvaged.length ? { salvaged } : {}) } };
 }
 
 // ---- the unit message ---------------------------------------------------------------------------------------------

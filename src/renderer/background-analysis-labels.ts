@@ -1,3 +1,5 @@
+export const BACKGROUND_SUMMARY = '登记后，仅在稿件有已确认改动且空闲时处理，每次不超过预算上限；暂停或撤销不开始新任务，未接入的工序不会运行。';
+import { technicalWords } from './technical-layer.js';
 import type { BackgroundAnalysisEnrollmentProjection } from '../shared/protocol.js';
 
 /**
@@ -15,7 +17,7 @@ export const BACKGROUND_SCOPE_LABEL = '范围';
 export const BACKGROUND_WHAT_LABEL = '分析';
 export const BACKGROUND_WHEN_LABEL = '何时开始';
 export const BACKGROUND_NOT_GRANTED_LABEL = '登记不会做';
-export const BACKGROUND_STARTING_POINT_LEGEND = '从哪里开始（请选一项）';
+export const BACKGROUND_STARTING_POINT_LEGEND = '从哪里开始';
 export const BACKGROUND_CONFIRM = '登记';
 export const BACKGROUND_REVOKE_CONFIRM = '撤销登记';
 export const BACKGROUND_CANCEL = '取消';
@@ -29,8 +31,8 @@ export const BACKGROUND_ENROLLED_STATUS = '已登记后台处理';
 export const BACKGROUND_REVOKED_STATUS = '已撤销后台处理登记';
 /** Issue #864: the scope, the required ceiling, and 暂停 / 续行. */
 export const BACKGROUND_SCOPE_LEGEND = '范围';
-export const BACKGROUND_CEILING_LABEL = '预算上限（tokens，必填）';
-export const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
+export const BACKGROUND_CEILING_LABEL = '预算上限 · tokens · 必填';
+export const BACKGROUND_CEILING_FIRST = '请先填写预算上限。';
 export const BACKGROUND_PAUSE = '暂停';
 export const BACKGROUND_RESUME = '续行';
 export const BACKGROUND_PAUSED_STATUS = '已暂停后台处理登记';
@@ -66,12 +68,12 @@ export function backgroundCeilingLine(enrollment: NonNullable<BackgroundAnalysis
   if (enrollment.ceilingTokens === null || enrollment.shareTokens === null) return `范围：${enrollment.scope.label} · 这份登记没有预算上限`;
   return enrollment.scope.kind === 'book'
     ? `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens`
-    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens（第 ${enrollment.scope.position} 本）`;
+    : `范围：${enrollment.scope.label} · 预算上限 ${enrollment.ceilingTokens} tokens，本书份额 ${enrollment.shareTokens} tokens · 第 ${enrollment.scope.position} 本`;
 }
 
 /** The Books of a Series or all-Books scope the dispatcher's latest look skipped: `这次跳过：《甲》（…）；《丙》（…）`. */
 export function backgroundSkippedLine(skipped: BackgroundAnalysisEnrollmentProjection['skipped']): string {
-  return `这次跳过：${skipped.map((entry) => `《${entry.title}》（${entry.reason}）`).join('；')}`;
+  return `这次跳过：${skipped.map((entry) => `《${entry.title}》：${entry.reason.replace(/。$/u, '')}`).join('；')}。`;
 }
 
 /**
@@ -109,7 +111,7 @@ export function backgroundHistoryLine(
   entry: BackgroundAnalysisEnrollmentProjection['history'][number],
   instant: (value: string) => string,
 ): string {
-  return `第 ${entry.ordinal} 版 · ${entry.stateLabel} · ${instant(entry.recordedAt)}`;
+  return `${technicalWords(`第 ${entry.ordinal} 版`, '版本')} · ${entry.stateLabel} · ${instant(entry.recordedAt)}`;
 }
 
 /** The dispatcher's latest look at the Book: `AI7 上次查看：… · <what it found>`. */
@@ -119,7 +121,7 @@ export function backgroundLookLine(look: NonNullable<BackgroundAnalysisEnrollmen
 
 /** Why the latest pass that began preparing did not start: the plan it may have left is the Enrollment's, never the editor's. */
 export function backgroundNotStartedLine(note: NonNullable<BackgroundAnalysisEnrollmentProjection['lastNotStarted']>, instant: (value: string) => string): string {
-  return `${note.reason}（${instant(note.at)}）`;
+  return `${note.reason.replace(/。$/u, '')} · ${instant(note.at)}`;
 }
 
 /** ②A's card beside a plan the Enrollment prepared and did not start (#713 review, P2-2). */

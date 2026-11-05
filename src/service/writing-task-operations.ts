@@ -114,7 +114,6 @@ import {
   QUICK_START_OFFLINE,
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   QUICK_START_RESEND,
   SET_RULE_DEVELOPER_LIVE,
   defaultExecutionRuleBindingOf,
@@ -589,7 +588,8 @@ export function internalWritingDrafted(host: WritingTaskOperationsHost, bookId: 
       const found = internalWritingTaskOf(host, revision.taskIntentId);
       if (found === null) continue;
       const inspected = host.analysisCall(() => found.ledger.inspect(bookId, undefined, revision.revisionId)) as WritingProjection;
-      known = { typeId: found.task.typeId, drafted: inspected.inspectedRevision?.revision.writing.draft != null };
+      const draft = inspected.inspectedRevision?.revision.writing.draft;
+      known = { typeId: found.task.typeId, drafted: draft != null && draft.usable !== false };
       if (host.writingRevisionDrafts.size >= 1024) host.writingRevisionDrafts.clear();
       host.writingRevisionDrafts.set(revision.revisionId, known);
     }
@@ -601,7 +601,8 @@ export function internalWritingDrafted(host: WritingTaskOperationsHost, bookId: 
 export function internalWritingRefusal(host: WritingTaskOperationsHost, projection: WritingProjection): string | null {
   const revision = projection.resultSetRevision;
   if (revision === null || projection.taskOutcome === null || projection.taskOutcome.resultSetRevisionId !== revision.revisionId ||
-      revision.writing.draft !== null) return null;
+      revision.writing.draft !== null && revision.writing.draft.usable !== false) return null;
+  if (revision.writing.draft?.usable === false) return '这份草稿与参考内容过于接近，不能采用。';
   return revision.writing.synthesis.reason;
 }
 
@@ -826,7 +827,6 @@ export async function quickStartWritingTask(host: WritingTaskOperationsHost, boo
     default:
       return fellBack(QUICK_START_NOT_READY);
   }
-  if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
   const authorized = host.analysisCall(() => latest.ledger.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
     { kind: 'default-execution-rule', ruleVersionId }));
   return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
@@ -841,7 +841,7 @@ export function createWritingDraft(host: WritingTaskOperationsHost, bookId: stri
   requireStore(found !== null, 'WRITING_RECORD_INVALID', '这一次起草没有记下它的类型与参考材料。');
   const inspected = host.analysisCall(() => found.ledger.inspect(bookId, undefined, revisionId)) as WritingProjection;
   const draft = inspected.inspectedRevision?.revision.writing.draft ?? null;
-  requireStore(draft !== null, 'WRITING_NOT_DRAFTED', '这一次起草没有写出文档草稿，不能打开草稿。');
+  requireStore(draft !== null && draft.usable !== false, 'WRITING_NOT_DRAFTED', '这一次起草没有写出文档草稿，不能打开草稿。');
   const type = productionDocumentType(found.task.typeId);
   requireStore(type !== undefined, 'WRITING_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
   // Every revision names a Source Version; a draft's names the manuscript file of the revision the Task read (its export is

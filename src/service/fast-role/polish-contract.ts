@@ -1,4 +1,4 @@
-import { DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
+import { extractModelJson, hasKeys, normalizeLine, type SalvagedModelResult, DIGEST_PATTERN, canonicalJson, sha256Hex } from '../analysis/canonical.js';
 import { graphemesOf } from '../../shared/mark-anchor.js';
 import { MAX_MARK_BODY_CODE_UNITS } from '../../shared/protocol.js';
 
@@ -128,17 +128,12 @@ export interface EditorialPolishWithheld {
 }
 
 export type EditorialPolishReading =
-  | { readonly kind: 'read'; readonly suggestions: ReadonlyArray<EditorialPolishSuggestion>; readonly withheld: ReadonlyArray<EditorialPolishWithheld> }
+  | { readonly kind: 'read'; readonly salvaged?: SalvagedModelResult['salvaged']; readonly suggestions: ReadonlyArray<EditorialPolishSuggestion>; readonly withheld: ReadonlyArray<EditorialPolishWithheld> }
   /** The answer as a whole is outside the contract: nothing of it is offered. */
   | { readonly kind: 'withheld'; readonly reason: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function sameKeys(value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean {
-  const own = Object.keys(value);
-  return own.length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 
 /** Where `original` stands in `selection`, in graphemes, when it occurs there exactly once on whole graphemes; else why not. */
@@ -154,44 +149,42 @@ function locate(selection: string, original: string): { from: number; to: number
 }
 
 /**
- * Read a polish answer against the selection it was asked about. The answer is one JSON object holding exactly `schema` and
- * `suggestions`; anything else withholds it whole. Each suggestion holds exactly `original`, `replacement` and `reason`, and is
+ * Read a polish answer from an object or array, including complete entries in truncated JSON. Each suggestion is
  * withheld with its reason when its words are not exactly one place of the selection, overlap a suggestion kept before it,
  * would not change anything, or exceed the bounds of a 修改建议. Nothing outside these anchored replacements is ever read.
  */
 export function readEditorialPolishAnswer(text: string, selection: string): EditorialPolishReading {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { kind: 'withheld', reason: '模型的回答不是约定格式的建议列表' };
-  }
-  if (!isRecord(parsed) || !sameKeys(parsed, ['schema', 'suggestions']) || parsed['schema'] !== EDITORIAL_POLISH_RESULT_SCHEMA ||
-      !Array.isArray(parsed['suggestions'])) {
-    return { kind: 'withheld', reason: '模型的回答不是约定格式的建议列表' };
-  }
+  const parsed = extractModelJson(text, { partial: true, arrayKey: 'suggestions' });
+  if (!Array.isArray(parsed?.suggestions)) return { kind: 'withheld', reason: '模型回答无法读出任何可用条目' };
   const suggestions: EditorialPolishSuggestion[] = [];
   const withheld: EditorialPolishWithheld[] = [];
   for (const [index, item] of (parsed['suggestions'] as unknown[]).entries()) {
     const ordinal = index + 1;
     const refuse = (reason: string): void => { withheld.push({ ordinal, reason }); };
     if (ordinal > MAX_EDITORIAL_POLISH_SUGGESTIONS) { refuse(`超过 ${MAX_EDITORIAL_POLISH_SUGGESTIONS} 条的建议不予提供`); continue; }
-    if (!isRecord(item) || !sameKeys(item, ['original', 'replacement', 'reason'])) { refuse('建议不是约定的格式'); continue; }
-    const { original, replacement, reason } = item;
+    if (!isRecord(item) || !hasKeys(item, ['original', 'replacement'])) { refuse('建议不是约定的格式'); continue; }
+    let { original } = item;
+    let replacement = item.replacement;
+    const reason = item.reason ?? '';
+    if (typeof original === 'string') {
+      const normalized = original.normalize('NFC');
+      original = selection.includes(normalized) ? normalized : normalized.replace(/^[\s\p{P}\x60]+|[\s\p{P}\x60]+$/gu, '');
+    }
+    if (typeof replacement === 'string') {
+      const normalized = replacement.normalize('NFC');
+      const quoted = /^\s*["'“‘「『«\x60]|["'”’」』»\x60][\s\p{P}\x60]*$/u.test(normalized);
+      replacement = selection.includes(normalized) || !quoted ? normalized : normalized.replace(/^[\s\p{P}\x60]+|[\s\p{P}\x60]+$/gu, '');
+    }
     if (typeof original !== 'string' || typeof replacement !== 'string' || typeof reason !== 'string' ||
         !original.isWellFormed() || !replacement.isWellFormed() || !reason.isWellFormed()) { refuse('建议不是约定的格式'); continue; }
     if (original.length === 0) { refuse('建议没有摘出要替换的文字'); continue; }
     if (replacement === original) { refuse('替换后的文字与原文相同'); continue; }
     if (replacement.length > MAX_MARK_BODY_CODE_UNITS) { refuse('替换后的文字超过修改建议的长度上限'); continue; }
-    const line = reason.trim();
-    if (line.length === 0 || /[\r\n]/u.test(line) || [...line].length > MAX_EDITORIAL_POLISH_REASON_CHARACTERS) {
-      refuse(`理由要是一行，最多 ${MAX_EDITORIAL_POLISH_REASON_CHARACTERS} 个字`);
-      continue;
-    }
-    const place = locate(selection, original);
+    const line = normalizeLine(reason, MAX_EDITORIAL_POLISH_REASON_CHARACTERS);
+    const place = locate(selection.normalize('NFC'), original);
     if (typeof place === 'string') { refuse(place); continue; }
     if (suggestions.some((kept) => place.from < kept.toGrapheme && kept.fromGrapheme < place.to)) { refuse('与前面的建议重叠'); continue; }
-    suggestions.push({ ordinal, original, replacement, reason: line, fromGrapheme: place.from, toGrapheme: place.to });
+    suggestions.push({ ordinal, original: graphemesOf(selection).slice(place.from, place.to).join(''), replacement, reason: line, fromGrapheme: place.from, toGrapheme: place.to });
   }
-  return { kind: 'read', suggestions, withheld };
+  return { kind: 'read', suggestions, withheld, ...(withheld.length > 0 ? { salvaged: withheld.map((entry) => ({ section: 'suggestions', index: entry.ordinal - 1, reason: entry.reason })) } : {}) };
 }

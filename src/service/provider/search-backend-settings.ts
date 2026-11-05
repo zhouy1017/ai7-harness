@@ -19,6 +19,16 @@ function priceLine(price: { readonly amount: number | null; readonly currency: s
 function candidateProjection(candidate: SearchBackendCandidate): SearchBackendCandidateProjection {
   const args = candidate.search.probeArguments;
   const readOn = candidate.priceSource.readOn ?? '未记录日期';
+  if (candidate.fetch === null) return {
+    backendId: candidate.backendId, candidateId: candidate.candidateId as SearchCandidateId, revision: candidate.revision, name: candidate.displayName,
+    measurement: 'not-measured', endpoint: candidate.search.endpoint, protocol: candidate.search.protocol,
+    configurationDigest: searchBackendCandidateConfigurationDigest(candidate.backendId, candidate.candidateId),
+    capabilities: { search: true, fetch: false }, selectable: false, price: priceLine(candidate.price, null),
+    disclosure: ['候选接口 · 未实测：尚未测量命中率、延迟与可达性，不能用于任务或设为默认后端、备用来源。',
+      `连接测试只发送固定的公开查询“${args.query}”，只取标题与网址，不发送书稿；复用对应模型渠道已保存的凭据与所选模型。`,
+      `计费：${priceLine(candidate.price, null)}${candidate.search.protocol === 'openai-responses-web-search' ? '，另计内容 token' : ''}；以服务商当前价格页为准。`,
+      '测试结果只在本页显示，不保存；离开设置或重启 AI7 后清除。'],
+  };
   return {
     backendId: candidate.backendId, candidateId: candidate.candidateId as SearchCandidateId, revision: candidate.revision, name: candidate.displayName,
     measurement: 'not-measured', endpoint: candidate.search.endpoint, protocol: candidate.search.protocol,
@@ -41,6 +51,10 @@ export function readSearchBackendConnections(db: DatabaseSync): SearchBackendCon
     credentialOperationState: String(row.credential_operation_state) as SearchBackendConnectionProjection['credentialOperationState'],
     selected: row.selected === 1, selectedAt: String(row.selected_at),
   }));
+}
+
+export function readSearchOverride(db: DatabaseSync): boolean {
+  return db.prepare('SELECT always_use_selected FROM search_backend_connections WHERE selected = 1').get()?.always_use_selected === 1;
 }
 
 /** Revision 104 (Issue #1226): the one 备用来源 row; an existing table is checked, never rebuilt; it starts empty. */
@@ -89,8 +103,8 @@ export function freezeSearchFallback(db: DatabaseSync, terms: SearchFallbackTerm
 }
 
 /** 设置 › 模型服务 › 联网检索: the shipped backends in rank order with the editor's connections, then the declared candidates. */
-export function searchBackendSettingsProjection(connections: readonly SearchBackendConnectionProjection[], fallback: { readonly backendId: string } | null = null): SearchBackendSettingsProjection {
-  return { selectedBackendId: connections.find((row) => row.selected)!.backendId, fallbackBackendId: fallback?.backendId ?? null,
+export function searchBackendSettingsProjection(connections: readonly SearchBackendConnectionProjection[], fallback: { readonly backendId: string } | null = null, alwaysUseSelectedBackend = false): SearchBackendSettingsProjection {
+  return { alwaysUseSelectedBackend, selectedBackendId: connections.find((row) => row.selected)!.backendId, fallbackBackendId: fallback?.backendId ?? null,
     backends: SEARCH_BACKENDS.filter((entry) => entry.shipped).map((entry) => ({
       backendId: entry.id, name: entry.displayName, rank: entry.rank!, host: entry.host!,
       reachable: connections.find((row) => row.backendId === entry.id)?.credentialOperationState === 'ready' && entry.profile?.verdict === 'measured', p50Ms: entry.profile?.latencyMs.p50 ?? null,

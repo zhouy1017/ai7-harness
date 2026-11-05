@@ -94,10 +94,9 @@ const OUTCOME_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-outcome-unknown';
 const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 /** The eighth Book's launch (Issue #757): every range is read, and the reduction's request is sent and never answers whole. */
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
-const UNCONFIRMED_REASON = '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
+const UNCONFIRMED_REASON = '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
 // Only a step is listed, so the statement names no later re-send (#763 review).
-const UNCONFIRMED_STATEMENT = '跨单元归纳的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
-  '保留为缺口只记下你的确认：不发送任何内容，不改变结果。';
+const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，缺口未重发；保留只记确认。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -120,6 +119,7 @@ const CANCELLING_NOTE = '已记下你的取消；正在进行的这一步会被�
 const PAUSING_NOTE = '已记下你的暂停；正在进行的这一步完成后停下，不再开始下一步，结果与用量都会保存';
 const PAUSED_NOTE = '已读完 3 / 8 个阅读范围，结果都已保存；续行时从第 4 个接着读，不重复已读完的部分';
 const RESUMABLE_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
+const SHUTDOWN_STATEMENT = 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
 const THIRD_PAUSED_NOTE = '已读完 2 / 8 个阅读范围，结果都已保存；续行时从第 3 个接着读，不重复已读完的部分';
 /** 改计划重做's summary on the third Book, paused with two ranges kept (Issue #422, S76c). */
 const REDO_SUMMARY = Object.freeze([
@@ -304,6 +304,7 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
@@ -342,15 +343,15 @@ async function importSample1(renderer, title, distinct, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, `${name}-exact-source`);
   await fill(renderer, '#book-title', title, `${name}-title`);
-  await click(renderer, '确认书名并复核', `${name}-review`);
+  await click(renderer, '查看导入详情', `${name}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
   // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are retained with
   // the file, so its review asks for no Import Degradation Decision.
@@ -432,7 +433,7 @@ const READ_QUESTIONS = `Array.from(document.querySelectorAll('#task-drawer .task
     option.dataset.clarificationOption, option.querySelector('.task-plan-choice-label')?.textContent ?? null,
     option.querySelector('.task-plan-choice-recommended')?.textContent ?? null, option.querySelector('input')?.checked === true,
   ]),
-  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.textContent, button.disabled]; })(),
+  submit: (() => { const button = card.querySelector('[data-task-drawer-control^="clarification-submit:"]'); return button === null ? null : [button.getAttribute('aria-label') ?? button.textContent, button.disabled]; })(),
   defer: card.querySelector('[data-task-drawer-control^="clarification-defer:"]')?.textContent ?? null,
   line: card.dataset.clarificationState === 'deferred' ? card.textContent : null,
 }))`;
@@ -456,10 +457,11 @@ const READ_DRAWER = `(() => {
     start: drawer.dataset.taskPlanStart ?? null,
     pill: text(drawer.querySelector('.task-drawer-pill')),
     status: text(drawer.querySelector('.task-bar-status')),
+    statement: text(drawer.querySelector('.task-bar-statement')),
     note: text(drawer.querySelector('.task-bar-note')),
     actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => {
       const described = button.getAttribute('aria-describedby');
-      return [button.dataset.taskDrawerControl, button.textContent, button.disabled ? 'disabled' : 'enabled', described === null ? null : text(document.getElementById(described))];
+      return [button.dataset.taskDrawerControl, button.getAttribute('aria-label') ?? button.textContent, button.disabled ? 'disabled' : 'enabled', described === null ? null : text(document.getElementById(described))];
     }),
     activity: activity === null ? null : {
       state: activity.dataset.taskPlanActivity ?? null,
@@ -467,7 +469,7 @@ const READ_DRAWER = `(() => {
       rows: Object.fromEntries(Array.from(activity.querySelectorAll('dd[data-task-plan-activity-row]')).map((cell) => [cell.dataset.taskPlanActivityRow, cell.textContent])),
     },
     impact: impact === null ? null : {
-      heading: text(impact.querySelector('h4')),
+      heading: impact.querySelector('h4')?.firstChild?.textContent ?? null,
       lines: Array.from(impact.querySelectorAll('li')).map((line) => line.textContent),
       confirm: text(impact.querySelector('[data-task-drawer-control="confirm-cancel-run"]')),
       keep: text(impact.querySelector('[data-task-drawer-control="keep-running"]')),
@@ -505,13 +507,15 @@ const STOPPED_ACTIONS = Object.freeze([
  * and fail with the last reading, since a bar that is a moment behind the Run settles on its next read.
  */
 async function waitForBar(renderer, expected, name, timeout = 60_000) {
-  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, note: drawer.note, actions: drawer.actions }); })()`;
-  const want = JSON.stringify({ state: expected.state, pill: expected.pill, status: expected.status, note: expected.note, actions: expected.actions });
+  const view = `(() => { const drawer=${READ_DRAWER}; return drawer === null ? null : JSON.stringify({ state: drawer.state, pill: drawer.pill, status: drawer.status, statement: drawer.statement, note: drawer.note, actions: drawer.actions }); })()`;
   const deadline = Date.now() + timeout;
   let last = null;
   while (Date.now() < deadline) {
     last = await renderer.evaluate(view).catch(() => null);
-    if (last === want) return;
+    const actual = last === null ? null : JSON.parse(last);
+    if (actual !== null && actual.state === expected.state && actual.pill === expected.pill && actual.status === expected.status && actual.note === expected.note &&
+      (expected.statement === undefined || actual.statement === expected.statement) &&
+      JSON.stringify(actual.actions) === JSON.stringify(expected.actions)) return;
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
   requireJourney(false, name, last);
@@ -827,7 +831,7 @@ async function main() {
     // 开始任务 from the drawer: the drawer follows the Run, two ranges settle, and the third stays in flight.
     await openAnalysisOf(renderer, bookId, 'analysis');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await runJ14DarkPass({ renderer, journey: 'J-10', at, representative: '#screen[data-screen="book-analysis"] > .page-content', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookId)}] .baseline-analysis-card')`, 'analysis-after-dark-pass');
     await startFirstBaseline(renderer, 'ready', 'baseline');
     await waitFor(renderer, runningWith(FIRST_HOLD), 'third-range-in-flight', 180_000);
@@ -857,6 +861,25 @@ async function main() {
     requireJourney(JSON.stringify(running.actions) === JSON.stringify(RUNNING_ACTIONS) && running.impact === null, 'run-controls', running.actions);
 
     // ---- 暂停 and 续行 (Issue #422, S76b; CTRL-001, CONT-015) ----------------------------------------------
+    await assertRenderer(renderer, `(() => {
+      const drawer=document.querySelector('#task-drawer'), progress=drawer.querySelector('[role="progressbar"]');
+      const elapsed=drawer.querySelector('[data-task-plan-activity-row="用时"]');
+      globalThis.b2Elapsed={node:elapsed, text:elapsed.textContent};
+      return drawer.querySelector('.state-term[data-busy="true"]') !== null &&
+        drawer.querySelector('[data-stage="units"][aria-current="step"]') !== null &&
+        progress?.getAttribute('aria-valuenow')==='2' && progress.getAttribute('aria-valuemax')==='8' &&
+        getComputedStyle(elapsed).fontVariantNumeric.includes('tabular-nums');
+    })()`, 'drawer-live-motion-state');
+    await waitFor(renderer, `(() => { const cell=document.querySelector('#task-drawer [data-task-plan-activity-row="用时"]'); return cell===globalThis.b2Elapsed.node && cell.textContent!==globalThis.b2Elapsed.text; })()`, 'drawer-elapsed-stable', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await assertRenderer(renderer, `(() => {
+      const drawer=document.querySelector('#task-drawer'), fill=drawer.querySelector('.task-plan-progress-fill');
+      return getComputedStyle(drawer).transitionDuration==='0s' && getComputedStyle(fill).transitionDuration==='0s' &&
+        getComputedStyle(drawer.querySelector('[data-busy="true"]'),'::before').animationName==='none' &&
+        getComputedStyle(drawer.querySelector('[aria-current="step"]'),'::before').animationName==='none';
+    })()`, 'drawer-reduced-motion');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+
     at('pause-requested');
     // CTRL-001: 暂停 is one click and asks nothing. 正在暂停 is recorded at once, and nothing more is offered while
     // the range in flight finishes.
@@ -885,7 +908,7 @@ async function main() {
     // 已暂停 with where 续行 will go on — and 续行 is offered, since a place of the governor is free.
     await writeFile(holdPath, String(FIRST_HOLD + 1), 'utf8');
     await waitForBar(renderer, { state: 'paused', pill: '已暂停', status: '已暂停', note: PAUSED_NOTE, actions: STOPPED_ACTIONS }, 'paused-bar');
-    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.field-note')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
+    await assertRenderer(renderer, `(() => { const activity=document.querySelector('#task-drawer .task-plan-activity'); return activity?.dataset.taskPlanActivity==='stopped' && activity.dataset.taskPlanActivityProgress===${JSON.stringify(`${FIRST_HOLD + 1}/${SAMPLE1_UNITS}`)} && activity.querySelector('.task-plan-activity-status')?.textContent===${JSON.stringify(PAUSED_NOTE)}; })()`, 'paused-activity');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='paused' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='已暂停'`, 'paused-card-label', 30_000);
     const paused = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const pausedAttempt = paused?.run?.attempt;
@@ -1107,7 +1130,8 @@ async function main() {
       (resumable.taskOutcome ?? null) === null,
     'resumable-record', { state: resumable?.state, run: resumable?.run?.state, transitions: resumable?.run?.transitions?.map((transition) => transition.state), spans: resumableAttempt?.spans?.map((span) => span.unitOrdinal) });
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'resumable-open-plan');
-    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行', note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
+    // This Run has never continued: explain shutdown without inventing a previous continuation time (#1309).
+    await waitForBar(renderer, { state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行', statement: SHUTDOWN_STATEMENT, note: RESUMABLE_NOTE, actions: STOPPED_ACTIONS }, 'resumable-bar', 30_000);
     // Nothing was sent since AI7 opened again.
     await new Promise((settle) => setTimeout(settle, 1_000));
     const stillStopped = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
@@ -1135,7 +1159,7 @@ async function main() {
     at('third-book-import');
     // A third Book, reached from the library by way of 工作概览.
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'third-overview');
-    await waitFor(renderer, `Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='返回图书列表'&&!button.disabled)`, 'third-overview-ready');
+    await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]') && document.querySelector('[data-nav-destination="library"]')?.getAttribute('aria-disabled')!=='true'`, 'third-overview-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'third-library');
     const thirdBookId = await importSample1(renderer, THIRD_BOOK.title, true, 'third-import');
     requireJourney(thirdBookId !== bookId && thirdBookId !== secondBookId, 'three-books');
@@ -1247,7 +1271,7 @@ async function main() {
     requireJourney(askedPlan?.taskIntent?.taskIntentId === fourthIntentId && askedPlan.planVersion?.ordinal === 2 &&
       JSON.stringify(askedPlan.planVersion.edits?.askFirstAdaptations) === JSON.stringify(['safe-retry']) &&
       JSON.stringify(askedPlan.planEnvelope?.boundary?.askFirst?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry']) &&
-      JSON.stringify(askedPlan.planEnvelope.boundary.adaptable) === '[]' && askedPlan.planEnvelope.boundary.participation?.expected === true,
+      JSON.stringify(askedPlan.planEnvelope.boundary.adaptable.map((entry) => entry.adaptationClass)) === JSON.stringify(['contract-retry']) && askedPlan.planEnvelope.boundary.participation?.expected === true,
     'ask-first-version', { edits: askedPlan?.planVersion?.edits ?? null, boundary: askedPlan?.planEnvelope?.boundary ?? null });
     await assertRenderer(renderer, `document.querySelector('#task-drawer .task-plan-participation li')?.textContent===${JSON.stringify(ASK_FIRST_STATEMENT)} && document.querySelector('#task-drawer [data-task-plan-boundary="ask-first"] [data-task-plan-item="safe-retry"] .task-plan-edit-tag')?.textContent==='你改的 · 先问你'`, 'ask-first-plan-words');
 
@@ -1383,10 +1407,11 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='resumable' && document.querySelector('.baseline-analysis-card .analysis-state')?.textContent==='任务已中断 · 可续行'`, 'answered-restart-card');
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'answered-restart-plan');
     await waitForBar(renderer, {
-      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · 可续行',
+      state: 'resumable', pill: '任务已中断 · 可续行', status: '任务已中断 · AI7 关闭时正在运行',
+      statement: SHUTDOWN_STATEMENT,
       note: '已读完 7 / 8 个阅读范围，结果都已保存；续行时先按你的回答处理第 5 个，再继续未完成的部分，不重复已读完的部分', actions: STOPPED_ACTIONS,
     }, 'answered-restart-bar');
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answered-restart-answer-shown');
     const answeredRestart = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const keptAnswer = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredRestart?.run?.state === 'resumable' && answeredRestart.run.runRecordId === queuedRun.run.runRecordId &&
@@ -1418,7 +1443,7 @@ async function main() {
     const answeredPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({ kind: 'baseline-analysis', ref: ${JSON.stringify(fourthIntentId)} })`);
     requireJourney(answeredPlan?.clarifications?.[0]?.state === 'answered' && answeredPlan.clarifications[0].answer?.optionId === 'retry' &&
       answeredPlan.clarifications[0].answer.note === QUESTION_NOTE, 'answer-record', answeredPlan?.clarifications ?? null);
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE}（`)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-clarification-record li[data-clarification-state="answered"] .task-plan-clarification-answer')?.textContent?.startsWith(${JSON.stringify(`你已回答：再试一次 · 说明：${QUESTION_NOTE} · `)}) === true && document.querySelector('#task-drawer .task-drawer-questions [data-task-plan-clarification]')===null`, 'answer-shown', 30_000);
 
     // ---- The Run Budget Ceiling (Issue #51, S16a; MODEL-013, MODEL-015 to MODEL-017) ----------------------------------
     at('relaunch-for-budget');
@@ -1446,7 +1471,7 @@ async function main() {
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="revise"]', 'fifth-revise');
     await waitFor(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='未设置任务预算上限' && section.querySelector('.task-plan-budget-note')?.textContent===${JSON.stringify(BUDGET_NOTE)} && section.querySelector('[data-task-plan-edit="budget"]')?.textContent==='设置上限…' && section.querySelector('[data-task-plan-edit="budget-remove"]')===null; })()`, 'budget-offered', 10_000);
     await clickSelector(renderer, '#task-drawer [data-task-plan-edit="budget"]', 'budget-open');
-    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && document.querySelector('#task-drawer label[for="'+input.id+'"]')?.textContent==='预算上限（tokens）' && document.querySelector('#task-drawer [data-task-plan-edit="budget"]')?.getAttribute('aria-expanded')==='true'; })()`, 'budget-input-focused', 10_000);
+    await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && document.querySelector('#task-drawer label[for="'+input.id+'"]')?.textContent==='预算上限 · 词元 · 这次运行用到这个数目就停下，不再让模型处理；读完的部分会保留。' && document.querySelector('#task-drawer [data-task-plan-edit="budget"]')?.getAttribute('aria-expanded')==='true'; })()`, 'budget-input-focused', 10_000);
     await renderer.send('Input.insertText', { text: '五千' });
     await pressEnter(renderer);
     await waitFor(renderer, `(() => { const input=document.activeElement; return input instanceof HTMLInputElement && input.dataset.taskDrawerControl==='budget-input' && input.value==='五千' && input.getAttribute('aria-invalid')==='true' && document.querySelector('#task-drawer .task-plan-budget-error')?.textContent===${JSON.stringify(BUDGET_INVALID)} && document.querySelector('#task-drawer .task-plan-budget-edited')===null; })()`, 'budget-refused', 10_000);
@@ -1463,7 +1488,7 @@ async function main() {
       JSON.stringify(budgetPlan.providerResolutionPlan?.runBudgetCeiling) === JSON.stringify(BUDGET) &&
       (budgetPlan.planRevision ?? null) === null && budgetPlan.planRevisions?.at(-1)?.trigger === 'plan-edit',
     'budget-version', { edits: budgetPlan?.planVersion?.edits ?? null, ceiling: budgetPlan?.providerResolutionPlan?.runBudgetCeiling ?? null, revision: budgetPlan?.planRevision ?? null });
-    await assertRenderer(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens' && section.querySelector('dd[data-task-plan-term="用量上限"]')?.textContent==='达到 5,000 tokens 后不再发送新的请求（8 个阅读范围）上限，不是预测' && section.querySelector('[data-task-plan-edit="budget-remove"]')?.textContent==='去掉上限' && document.querySelector('#task-drawer .task-plan-edit-record')?.textContent?.endsWith('：预算上限：未设置任务预算上限 → 任务运行预算上限：5,000 tokens')===true; })()`, 'budget-plan-words');
+    await assertRenderer(renderer, `(() => { const section=document.querySelector('#task-drawer [data-task-plan-section="5"]'); return section?.querySelector('dd[data-task-plan-term="预算上限"]')?.textContent==='任务运行预算上限：5,000 tokens' && section.querySelector('dd[data-task-plan-term="用量上限"]')?.textContent==='达到 5,000 tokens 后不再发送新的请求（8 个阅读范围） · 上限，不是预测' && section.querySelector('[data-task-plan-edit="budget-remove"]')?.textContent==='去掉上限' && document.querySelector('#task-drawer .task-plan-edit-record')?.textContent?.endsWith('：预算上限：未设置任务预算上限 → 任务运行预算上限：5,000 tokens')===true; })()`, 'budget-plan-words');
 
     at('budget-reached');
     // 开始任务: four ranges spend 6,620 tokens and the fifth would pass the ceiling, so it is never sent. The Run stops as
@@ -1536,11 +1561,11 @@ async function main() {
 
     at('budget-redo-completed');
     // The quiet completion notice (Issue #937; NOTIF-003): a focused window, and a probe that records each showing and hiding
-    // of the one notice, so its six seconds are read from the page and not raced by the steps below.
+    // of the one notice, so its 2.5 seconds are read from the page and not raced by the steps below.
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: true });
     const beforeQuietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => ({ count: projection.actionableCount, stop: projection.groups.some((group) => ['exceptions', 'decisions'].includes(group.key) && group.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-budget-reached')) }))`);
-    await waitFor(renderer, `document.querySelector('[data-quiet-completion-notice]')?.hidden === true`, 'quiet-completion-idle', 10_000);
-    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-quiet-completion-notice]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.noticeClass ?? null, text: notice.querySelector('[role="status"]')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
+    await waitFor(renderer, `document.querySelector('[data-toast]')?.hidden === true`, 'quiet-completion-idle', 10_000);
+    await assertRenderer(renderer, `(() => { const notice = document.querySelector('[data-toast]'); if (!notice || !notice.hidden) return false; const probe = { shown: [], hiddenAt: null }; const observer = new MutationObserver(() => { const visible = !notice.hidden && notice.dataset.tone === 'analysis-completed'; const last = probe.shown.at(-1); if (visible && (last === undefined || last.hiddenAt !== null)) probe.shown.push({ at: performance.now(), hiddenAt: null, noticeClass: notice.dataset.tone ?? null, text: notice.querySelector('span')?.textContent ?? null }); if (!visible && last !== undefined && last.hiddenAt === null) last.hiddenAt = performance.now(); }); observer.observe(notice, { attributes: true, childList: true, characterData: true, subtree: true }); globalThis.__j10QuietNotice = { probe, stop: () => observer.disconnect() }; return true; })()`, 'quiet-completion-probe');
     // 开始任务: the redo reads the four ranges left, and the reduction after them, under 20,000 tokens, to its end — the
     // Book's analysis whole again, and 待我处理 no longer naming the stop.
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'budget-redo-start');
@@ -1556,16 +1581,19 @@ async function main() {
     requireJourney(settledAttention?.groups?.every((group) => group.items.every((entry) => entry.state !== 'analysis-budget-reached')) === true, 'budget-left-attention', settledAttention?.groups ?? null);
 
     at('quiet-completion-notice');
-    // One notice, in Task Outcome words (never 任务已完成), dismissed by itself within its six seconds; the completion stays in
+    // One notice, in Task Outcome words (never 任务已完成), dismissed by itself after 2.5 seconds; the completion stays in
     // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
-    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-quiet-completion-notice]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
+    await waitFor(renderer, `document.querySelector('.task-result-window[data-task-result-kind="analysis"]')?.dataset.taskResult==='ready' && document.querySelectorAll('.task-result-window').length===1`, 'quiet-completion-notice', 10_000);
+    const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-toast]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
     const quietShown = quietCompletion.shown[0];
-    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === '任务结果已记录' &&
-      quietShown.ms >= 5_500 && quietShown.ms <= 8_000 && quietCompletion.recent === true &&
+    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === `《${FIFTH_BOOK.title}》分析完成` &&
+      quietShown.ms >= 2_200 && quietShown.ms <= 4_000 && quietCompletion.recent === true &&
       quietCompletion.count === beforeQuietCompletion.count - (beforeQuietCompletion.stop ? 1 : 0),
     'quiet-completion-notice', { before: beforeQuietCompletion, after: quietCompletion });
+    await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'quiet-completion-notice');
+    await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, 'quiet-completion-notice');
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 
     // ---- 模型服务账户限额 (Issue #51, S16b; MODEL-018, RUN-012) -------------------------------------------------------
@@ -1739,6 +1767,8 @@ async function main() {
       completedUnknown.run.adaptations.length === 0,
     'unknown-unit-gap-with-revision-and-outcome');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed h4')?.textContent==='该单元结果未知' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')===null`, 'unknown-unit-ui', 30_000);
+    // #1310: the range explanation separates changed text from a failed reread.
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent==='回答未传全，处理与计费未知，缺口未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。'`, 'unknown-unit-explanation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unknown-unit-view');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed li')?.textContent==='第 4 个阅读范围 · 请求已发出 · 回答没有完整传回'`, 'unknown-unit-listed', 30_000);
     const completedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);
@@ -1784,13 +1814,13 @@ async function main() {
       return {
         group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
         target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
       };
     })()`);
     requireJourney(unconfirmedRow?.group === 'exceptions' && unconfirmedRow.state === 'analysis-outcome-unconfirmed' && unconfirmedRow.blocked === 'false' &&
       unconfirmedRow.target === 'task-plan' && unconfirmedRow.pill === '结果待确认' && unconfirmedRow.object === '基线分析 · 跨单元归纳' &&
-      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '安全的下一步：查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
+      unconfirmedRow.reason === UNCONFIRMED_REASON && unconfirmedRow.next === '查看未确认的部分', 'unconfirmed-attention-row', unconfirmedRow);
 
     at('outcome-unconfirmed-kept');
     // The item opens ②A with the plan in the drawer, where 结果待确认 says what is known and what is missing. 查看未确认的部分 lists the
@@ -1828,7 +1858,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'review-controls-workspace');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'review-controls-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-controls-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-controls-drawer', 120_000);
     const reviewRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef`);
     requireJourney(UUID_PATTERN.test(reviewRef ?? ''), 'review-controls-ref');

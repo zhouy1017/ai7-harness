@@ -1,7 +1,10 @@
 import type { NativeFilePickers } from './file-pickers.js';
+import { enqueueQuickTasks } from './task-overview-quick-start.js';
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import {
   IPC_CHANNELS,
+  TASK_OVERVIEW_OPERATIONS,
+  type TaskOverviewCall,
   type DeliverablesProjection,
   type DesignatePublicationVersionInput,
   type RendererApi,
@@ -201,6 +204,7 @@ export function registerProductionAndPackageHandlers(context: {
     }),
   );
 
+  const overviewBooks = new WeakMap<OwnedRendererWindow, Set<string>>();
   // 图书交付包 (Issue #416, S67a): a read bound to the route's Book and its read epoch, and 准备图书交付包 serialized
   // like every other command. The service decides whether the content is still what the editor saw; nothing here
   // chooses a destination or writes a file.
@@ -507,6 +511,61 @@ export function registerProductionAndPackageHandlers(context: {
         }
       }
       return result;
+    }),
+  );
+
+  // Cross-Book task control preserves this window's manuscript and Book route.
+  ipcMain.handle(IPC_CHANNELS.taskOverviewCall, (event, request: TaskOverviewCall) => envelope(async () => {
+    const owned = requireSender(event);
+    requireAuthority();
+    if (!request || !TASK_OVERVIEW_OPERATIONS.includes(request.operation) || !UUID_PATTERN.test(request.bookId) || !overviewBooks.get(owned)?.has(request.bookId)) {
+      throw new ServiceCallError('TASK_OVERVIEW_INVALID', '无法打开这项任务。');
+    }
+    return serializeEffect(async () => {
+      const generation = owned.routeGeneration;
+      const result = await service.call(request.operation, { ...request.input, bookId: request.bookId });
+      requireCurrentRouteGeneration(owned, generation);
+      if (result && typeof result === 'object' && 'bookId' in result && result.bookId !== request.bookId) throw new ServiceCallError('TASK_OVERVIEW_INVALID', '任务结果不属于所选图书。');
+      // Preparation jobs stay owned here until terminal; the overview never borrows a Book-route job capability.
+      if (!['redoTaskPlan', 'prepareBaselineAnalysis', 'prepareCustomAnalysis', 'prepareReviewRun', 'promoteTaskIntentDraft'].includes(request.operation)) return result;
+      let job = result as ServiceJobProjection;
+      while (job.state === 'queued' || job.state === 'running') {
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+        job = await service.call('pollServiceJob', { jobId: job.jobId });
+      }
+      return job;
+    });
+  }));
+  ipcMain.handle(IPC_CHANNELS.controlAllTasks, (event, input: ServiceOperationMap['controlAllTasks']['input']) => envelope(async () => {
+    requireSender(event);
+    requireAuthority();
+    return serializeEffect(() => service.call('controlAllTasks', input));
+  }));
+
+  ipcMain.handle(IPC_CHANNELS.inspectTaskOverview, (event) =>
+    envelope(async () => {
+      const owned = requireSender(event);
+      requireAuthority();
+      const result = await service.call('inspectTaskOverview', {});
+      // Like Global Attention, this cross-Book read remains valid across Book navigation.
+      overviewBooks.set(owned, new Set(result.books.map((book) => book.bookId)));
+      return result;
+    }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.reorderQueuedRun, (event, input: ServiceOperationMap['reorderQueuedRun']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return service.call('reorderQueuedRun', input);
+    }),
+  );
+
+  ipcMain.handle(IPC_CHANNELS.startQuickTasks, (event, input: ServiceOperationMap['startQuickTasks']['input']) =>
+    envelope(async () => {
+      requireSender(event);
+      requireAuthority();
+      return enqueueQuickTasks(service, input, serializeEffect);
     }),
   );
 

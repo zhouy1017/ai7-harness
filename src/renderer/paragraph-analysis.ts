@@ -1,5 +1,7 @@
+import { createButton } from './components/controls.js';
 import type { ParagraphAnalysisProjection } from '../shared/protocol.js';
 import { PARAGRAPH_ANALYSIS_LABELS, PARAGRAPH_ANALYSIS_WORDS } from './paragraph-analysis-labels.js';
+import { technicalWords } from './technical-layer.js';
 
 const noticesByBook = new Map<string, Set<number>>();
 
@@ -43,7 +45,8 @@ export function mountParagraphAnalysis(options: {
     const revision = projection?.revision;
     if (revision == null) { root.append(words(PARAGRAPH_ANALYSIS_WORDS.none)); return; }
     root.dataset['analysisRevision'] = revision.revisionId;
-    root.append(words(PARAGRAPH_ANALYSIS_WORDS.revision(revision.ordinal, revision.freshness.label)));
+    const freshness = { current: '与当前稿件一致', stale: '稿件已更新，分析待更新', superseded: '已有更新结果' }[revision.freshness.state];
+    root.append(words(PARAGRAPH_ANALYSIS_WORDS.revision(revision.ordinal, technicalWords(revision.freshness.label, freshness))));
     if (projection!.total === 0) root.append(words(PARAGRAPH_ANALYSIS_WORDS.empty));
     if (projection!.total > projection!.items.length) root.append(words(PARAGRAPH_ANALYSIS_WORDS.truncated(projection!.total, projection!.items.length)));
     for (const kind of Object.keys(PARAGRAPH_ANALYSIS_LABELS) as Array<keyof typeof PARAGRAPH_ANALYSIS_LABELS>) {
@@ -51,7 +54,7 @@ export function mountParagraphAnalysis(options: {
       if (items.length === 0) continue;
       const section = document.createElement('section'); const heading = document.createElement('h4'); heading.textContent = PARAGRAPH_ANALYSIS_LABELS[kind]; section.append(heading);
       for (const item of items) {
-        const line = words(item.label); const link = document.createElement('button'); link.type = 'button'; link.textContent = PARAGRAPH_ANALYSIS_WORDS.open; link.addEventListener('click', () => options.openItem(item, revision.revisionId)); line.append(' ', link); section.append(line);
+        const line = words(item.label); const link = createButton(); link.type = 'button'; link.textContent = PARAGRAPH_ANALYSIS_WORDS.open; link.addEventListener('click', () => options.openItem(item, revision.revisionId)); line.append(' ', link); section.append(line);
       }
       root.append(section);
     }

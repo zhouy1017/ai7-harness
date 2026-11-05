@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   EVALUATION_ADJUSTMENT_LEGEND,
@@ -149,6 +150,9 @@ describe('评估 words', () => {
     expect(evaluationHeading({ ordinal: 2, state: 'editing' })).toBe('第 2 版 · 编辑评分中');
     expect(evaluationRevisionLine({ revisionLabel: 'r1', uncheckpointed: false })).toBe('评估的是修订版 r1');
     expect(evaluationRevisionLine({ revisionLabel: 'r1', uncheckpointed: true })).toBe('评估的是修订版 r1（当时另有写入修订日志、尚未保存为修订版的改动）');
+    setTechnicalLayerVisible(false);
+    expect(evaluationRevisionLine({ revisionLabel: 'r1', uncheckpointed: true })).toBe('评估包含当时尚未保存为版本的改动。');
+    setTechnicalLayerVisible(true);
     // The versions that cannot be read are named beside the list (Issue #702 review).
     expect(evaluationUnreadableLine([])).toBeNull();
     expect(evaluationUnreadableLine([1, 3])).toBe('第 1、3 版评估记录已损坏，无法显示；其他版本照常可用。');
@@ -212,15 +216,15 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
       .toBe('AI7 初评 没有给出分数 · 依据充分度 不足（没有引用段落）');
     expect(evaluationAi7SufficiencyLine({ sufficiency: 'fair', citedBlocks: 2, unitsCited: 1 })).toBe('依据充分度 一般（引用 2 个段落，分布在 1 个阅读范围）');
     expect(evaluationAi7RecordLine({ ordinal: 2, revisionLabel: 'r3' })).toBe('这一版从 AI7 第 2 次初评开始（读的是修订版 r3）：AI7 的分数列在每一项旁边，记录保存的是你的评分。');
-    expect(EVALUATION_AI7_LEDE).toContain('记录保存的是你的评分，结论由你选定');
+    expect(EVALUATION_AI7_LEDE).toContain('评分与结论由你决定');
     expect(EVALUATION_STATE_LABELS).toEqual({ draft: 'AI7 初稿', editing: '编辑评分中', finalized: '定稿' });
   });
 
   it('marks AI7\'s suggested conclusion as AI7\'s, and names the five adjustment reasons unticked', () => {
-    expect(evaluationAi7ConclusionLine(PROFILE, 'revise')).toBe('AI7 建议的结论：修改后再议（由你选定）');
+    expect(evaluationAi7ConclusionLine(PROFILE, 'revise')).toBe('AI7 建议的结论：修改后再议');
     expect(evaluationAi7ConclusionLine(PROFILE, null)).toBe('AI7 没有给出建议结论。');
     expect(Object.values(EVALUATION_ADJUSTMENT_REASON_LABELS)).toEqual(['打分偏高', '打分偏低', '依据不足', '未考虑某方面', '自行输入']);
-    expect(EVALUATION_ADJUSTMENT_LEGEND).toBe('调分原因（可多选，不预先勾选）');
+    expect(EVALUATION_ADJUSTMENT_LEGEND).toBe('调分原因 · 可多选');
   });
 
   it('says the Task and the latest 初评 in one line each, and when the manuscript moved past it', () => {
@@ -248,7 +252,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   });
 
   it('says the market section rests on the Book and house data, tags comparables, and says 暂无法预测 where AI7 could not tell (S81b2)', () => {
-    expect(EVALUATION_MARKET_OFFLINE).toBe('市场部分是否检索外网，以产生这一版的运行报告为准；没有检索记录时为「未联网核查」。市场判断仍需人工核对。');
+    expect(EVALUATION_MARKET_OFFLINE).toBe('联网情况以运行报告为准，无检索记录即未联网核查；市场判断仍需人工核对。');
     expect(EVALUATION_PREDICTION_HEADING).toBe('预测 · 低确定性');
     expect(evaluationComparableLine({ bookId: 'b', title: '星河之二', seriesTitle: '星河', published: true, source: 'series' })).toBe('《星河之二》 · 同书系「星河」 · 已发稿');
     expect(evaluationComparableLine({ bookId: 'b', title: '星河之三', seriesTitle: '星河', published: false, source: 'series' })).toBe('《星河之三》 · 同书系「星河」 · 尚未发稿');
@@ -288,7 +292,7 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
   });
 
   it('says what 按我的评分重写评语 does, waits for and decided (S81b2)', () => {
-    expect(EVALUATION_REWRITE_LEDE).toContain('分数一个也不改，重写的评语要你采用后才记入这一版');
+    expect(EVALUATION_REWRITE_LEDE).toContain('分数不变，评语经你采用后才记入这一版');
     expect(evaluationRewriteTaskLine({ taskIntentId: 't', recordId: 'r', recordOrdinal: 15, entryOrdinal: 2, state: 'settled', label: '已完成' }))
       .toBe('按我的评分重写评语 · 第 15 版 · 已完成');
     const reading = { unitsTotal: 8, unitsRead: 8 };
@@ -298,6 +302,9 @@ describe('AI7 初评 words (Issue #429, S81b1; EVAL-001, EVAL-005 to EVAL-007)',
     expect(evaluationRewriteReadingLine(reading)).toBe('AI7 这次重写读了全部 8 个阅读范围。');
     expect(evaluationRewriteReadingLine({ unitsTotal: 8, unitsRead: 6 })).toBe('AI7 这次重写只读到 6 / 8 个阅读范围：没读到的范围里的内容没有进入重写的评语。');
     expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上一次重写的评语已采用（记为第 3 次保存），分数没有改动。');
+    setTechnicalLayerVisible(false);
+    expect(evaluationRewriteDecidedLine({ decision: 'accepted', entryOrdinal: 3, decidedAt: 'x' })).toBe('上次重写已采用，分数不变。');
+    setTechnicalLayerVisible(true);
     expect(evaluationRewriteDecidedLine({ decision: 'discarded', entryOrdinal: null, decidedAt: 'x' })).toBe('上一次重写的评语已放弃，评语保持原样。');
   });
 

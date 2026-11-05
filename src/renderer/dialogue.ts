@@ -13,7 +13,6 @@ import {
   DIALOGUE_ANSWER_HEADING,
   DIALOGUE_AUTHORITY_NOTE,
   DIALOGUE_CONVERT_INCOMPLETE,
-  DIALOGUE_CONVERT_NOTE,
   DIALOGUE_CONVERT_ORIGINAL,
   DIALOGUE_CONVERT_PROPOSED,
   DIALOGUE_CONVERT_RATIONALE,
@@ -77,6 +76,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -151,7 +151,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     const heading = el('h4', 'dialogue-attempt-heading', dialogueAttemptHeading(attempt));
     heading.id = uid('attempt');
     section.setAttribute('aria-labelledby', heading.id);
-    const state = el('span', `status-pill review-pill dialogue-state dialogue-state-${attempt.state}`, DIALOGUE_STATE_LABELS[attempt.state]);
+    const state = el('span', `state-term status-pill review-pill dialogue-state dialogue-state-${attempt.state}`, DIALOGUE_STATE_LABELS[attempt.state]);
     state.dataset['dialogueStateLabel'] = attempt.state;
     const head = el('div', 'dialogue-attempt-head');
     head.append(heading, state);
@@ -160,14 +160,21 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     answer.setAttribute('aria-label', DIALOGUE_ANSWER_HEADING);
     if (latest && attempt.state === 'answering') answer.setAttribute('aria-busy', 'true');
     if (attempt.source === 'missing' || attempt.source === 'damaged') {
-      answer.append(el('p', 'field-note', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
+      head.append(el('span', 'dialogue-source-unavailable', attempt.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
     }
     for (const fragment of attempt.fragments) answer.append(fragmentNode(fragment.text, fragment.breakAfter));
     if (attempt.question !== undefined) section.append(el('p', 'dialogue-question', `追问：${attempt.question}`));
     section.append(head, answer);
     const incomplete = dialogueIncompleteLine(attempt);
-    if (incomplete !== null) section.append(el('p', 'field-note dialogue-incomplete', incomplete));
-    if (attempt.convertedMarkIds.length > 0) section.append(el('p', 'field-note dialogue-converted', dialogueConvertedLine(attempt.convertedMarkIds.length)));
+    if (incomplete !== null || attempt.convertedMarkIds.length > 0) {
+      const status = el('span');
+      if (incomplete !== null) status.append(el('span', 'dialogue-incomplete', incomplete));
+      if (attempt.convertedMarkIds.length > 0) {
+        if (incomplete !== null) status.append(' ');
+        status.append(el('span', 'dialogue-converted', dialogueConvertedLine(attempt.convertedMarkIds.length)));
+      }
+      head.append(status);
+    }
     return { section, answer };
   }
 
@@ -178,7 +185,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     element.dataset['dialogueId'] = next.dialogueId;
     const latest = next.attempts.at(-1) ?? null;
     if (next.origin === 'agent-workspace') {
-      context.replaceChildren(el('p', 'field-note', '这轮变更集在 Agent 工作区中查看和提交。'));
+      context.replaceChildren(el('p', 'field-note', '在工作区查看并提交本次修改。'));
       attemptsHost.replaceChildren();
       actions.replaceChildren();
       promoteRow.replaceChildren();
@@ -418,7 +425,7 @@ export function mountDialogue(options: DialogueSurfaceOptions): DialogueSurface 
     cancel.type = 'button';
     cancel.dataset['dialogueAction'] = 'convert-cancel';
     row.append(submit, cancel);
-    form.append(row, el('p', 'field-note', DIALOGUE_CONVERT_NOTE));
+    form.append(row);
     const closeForm = (focusConvert: boolean): void => {
       converting = false;
       form.remove();

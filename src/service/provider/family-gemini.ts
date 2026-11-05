@@ -123,29 +123,31 @@ export async function* generateContentSseEvents(response: DeepSeekTransportRespo
   let promptFeedback: unknown;
   let candidateSeen = false;
   try {
-    for await (const { data } of sseFrames(response)) {
-      const value: unknown = JSON.parse(data);
+    for await (const { event, data } of sseFrames(response)) {
+      if (event === 'ai7-buffered-response') { yield { kind: 'complete', response: JSON.parse(data) }; return; }
+      let value: unknown;
+      try { value = JSON.parse(data); } catch { continue; }
       if (!isRecord(value)) throw new Error('AI7_OUTCOME_UNKNOWN');
       if (isRecord(value.error)) {
         const status = Number.isSafeInteger(value.error.code) ? value.error.code as number : 500;
         yield { kind: 'error', status, body: { error: { status: value.error.status, message: value.error.message } } };
         return;
       }
-      if (finishReason !== null) throw new Error('AI7_OUTCOME_UNKNOWN');
       if (value.usageMetadata !== undefined) usageMetadata = value.usageMetadata;
       if (value.promptFeedback !== undefined) promptFeedback = value.promptFeedback;
+      if (finishReason !== null) continue;
       if (!Array.isArray(value.candidates) || value.candidates.length === 0) continue;
       const candidate: unknown = value.candidates[0];
-      if (value.candidates.length !== 1 || !isRecord(candidate)) throw new Error('AI7_OUTCOME_UNKNOWN');
+      if (!isRecord(candidate)) continue;
       candidateSeen = true;
       const incoming: unknown[] = isRecord(candidate.content) && Array.isArray(candidate.content.parts) ? candidate.content.parts : [];
       for (const part of incoming) {
         if (!isRecord(part)) throw new Error('AI7_OUTCOME_UNKNOWN');
         const last = parts[parts.length - 1];
         const keys = Object.keys(part).sort().join(',');
-        if (keys === 'text' && typeof part.text === 'string') {
-          if (last !== undefined && Object.keys(last).join(',') === 'text') last.text = `${last.text as string}${part.text}`;
-          else parts.push({ text: part.text });
+        if (part.thought !== true && typeof part.text === 'string' && part.functionCall === undefined) {
+          if (part.thoughtSignature === undefined && last !== undefined && Object.keys(last).join(',') === 'text') last.text = `${last.text as string}${part.text}`;
+          else parts.push({ text: part.text, ...(part.thoughtSignature === undefined ? {} : { thoughtSignature: true }) });
           if (part.text.length > 0) yield { kind: 'text', text: part.text };
         } else if (keys === 'text,thought' && part.thought === true) {
           // Presence only: the reasoning text is never kept.

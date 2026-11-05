@@ -126,6 +126,7 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
       promptContractDigest,
       resultSchema: READERS_REPORT_SYNTHESIS_RESULT_SCHEMA,
       step: {
+        requiredForCompletion: true,
         label: SYNTHESIS_LABEL,
         minimumClosedUnits: 1,
         notEnoughReason: '没有读完的阅读范围，全书综合未发起，AI7 没有写出审稿意见草稿。',
@@ -163,8 +164,9 @@ export function readersReportKindDefinition(input: ReadersReportContractInput): 
         conflictCount: 0,
       };
     },
-    unitRecord: (result) => ({ passages: (result as ReadersReportUnitResult).passages }),
+    unitRecord: (result) => ({ passages: (result as ReadersReportUnitResult).passages, ...((result as ReadersReportUnitResult).salvaged === undefined ? {} : { salvaged: (result as ReadersReportUnitResult).salvaged }) }),
     unitResultOfRecord: (record, unitOrdinal): ReadersReportUnitResult => ({
+      ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<ReadersReportUnitResult['salvaged']> }),
       schema: READERS_REPORT_UNIT_RESULT_SCHEMA,
       unitOrdinal,
       passages: record.passages as ReadersReportUnitResult['passages'],

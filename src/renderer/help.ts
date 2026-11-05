@@ -1,13 +1,15 @@
+import { tabButton } from './components/controls.js';
+import { technicalLayerVisible, technicalLayerReady, saveTechnicalLayerVisible } from './technical-layer.js';
 import type { DataVersionProjection } from '../shared/protocol.js';
 import { SERVICE_PROTOCOL_VERSION } from '../shared/protocol.js';
 import licensesDocument from './third-party-licenses.generated.json' with { type: 'json' };
 import {
   HELP_ABOUT_FAILED, HELP_ABOUT_HEADING, HELP_ABOUT_LOADING, HELP_BACK, HELP_BREADCRUMB, HELP_LICENSE_EMPTY,
   HELP_LICENSE_FIELD_LICENSE, HELP_LICENSE_FIELD_SOURCE, HELP_LICENSE_FILTER_LABEL, HELP_LICENSE_FILTER_PLACEHOLDER,
-  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LICENSE_TEXT_SUMMARY, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
+  HELP_LICENSE_NO_SOURCE, HELP_LICENSE_LOCAL_NOTE, HELP_LEDE, HELP_TABS, HELP_TABS_LABEL, HELP_TITLE, helpAboutLine,
   helpLicenseCount, type HelpTab,
 } from './help-labels.js';
-import { HELP_PRIVACY_SECTIONS, HELP_USAGE_SECTIONS, type HelpSection } from './help-text.js';
+import { HELP_PRIVACY_SECTIONS, helpUsageSections, type HelpSection } from './help-text.js';
 import { dataVersionStateLine } from './data-version-labels.js';
 import { buildIdentityLine, currentBuildIdentity, requireMatchingVersions } from '../shared/build-identity.js';
 
@@ -47,6 +49,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className !== undefined) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -67,12 +70,34 @@ export function mountHelp(options: HelpSurfaceOptions): void {
 
   // 关于: the same two versions 设置 › 数据与存储 shows, plus the service protocol this build speaks.
   const about = el('section', 'source-card help-about');
-  const aboutLine = el('p', 'help-about-line', HELP_ABOUT_LOADING);
+  const aboutLine = el('span', 'help-about-line', HELP_ABOUT_LOADING);
   // Whether the Data Version is frozen, in 设置 › 数据与存储's own words (Issue #967).
-  const stateLine = el('p', 'field-note help-data-version-state');
-  const buildLine = el('p', 'field-note help-build-identity');
-  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutLine, stateLine, buildLine);
-  root.append(about);
+  const buildContext = el('span');
+  const prefix = el('span', undefined, ' · ');
+  prefix.hidden = true;
+  const stateLine = el('span', 'help-data-version-state');
+  const separator = el('span', undefined, ' · ');
+  separator.hidden = true;
+  const buildLine = el('span', 'help-build-identity');
+  buildContext.append(prefix, stateLine, separator, buildLine);
+  const aboutDetails = el('p');
+  aboutDetails.append(aboutLine, buildContext);
+  about.append(el('h3', undefined, HELP_ABOUT_HEADING), aboutDetails);
+  if (technicalLayerVisible) root.append(about);
+  const developer = el('label', 'help-developer-mode');
+  const toggle = el('input');
+  toggle.type = 'checkbox';
+  toggle.checked = technicalLayerVisible;
+  toggle.disabled = !technicalLayerReady;
+  toggle.setAttribute('aria-label', '开发者模式');
+  toggle.addEventListener('change', () => {
+    saveTechnicalLayerVisible(toggle.checked, window.localStorage);
+    root.replaceChildren();
+    mountHelp(options);
+    root.querySelector<HTMLInputElement>('.help-developer-mode input')?.focus();
+  });
+  developer.append(toggle, el('span', undefined, '开发者模式'));
+  root.append(developer);
   void options.loadVersions().then(
     (versions) => {
       const identity = currentBuildIdentity();
@@ -80,6 +105,8 @@ export function mountHelp(options: HelpSurfaceOptions): void {
       aboutLine.textContent = helpAboutLine(versions.softwareVersion, versions.dataVersion, protocolVersion);
       stateLine.textContent = dataVersionStateLine(versions);
       buildLine.textContent = buildIdentityLine(identity);
+      prefix.hidden = false;
+      separator.hidden = false;
     },
   ).catch(() => { aboutLine.textContent = HELP_ABOUT_FAILED; stateLine.textContent = ''; buildLine.textContent = ''; });
 
@@ -95,7 +122,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   usagePanel.tabIndex = 0;
   usagePanel.setAttribute('aria-labelledby', 'help-tab-usage');
   usagePanel.append(el('h3', undefined, HELP_TABS[0]!.label));
-  for (const section of HELP_USAGE_SECTIONS) usagePanel.append(helpSection(section));
+  for (const section of helpUsageSections(technicalLayerVisible)) usagePanel.append(helpSection(section));
 
   const privacyPanel = el('section', 'help-panel');
   privacyPanel.id = 'help-panel-privacy';
@@ -110,17 +137,21 @@ export function mountHelp(options: HelpSurfaceOptions): void {
   licensesPanel.setAttribute('role', 'tabpanel');
   licensesPanel.tabIndex = 0;
   licensesPanel.setAttribute('aria-labelledby', 'help-tab-licenses');
-  licensesPanel.append(el('h3', undefined, HELP_TABS[2]!.label));
-  licensesPanel.append(el('p', 'field-note', HELP_LICENSE_LOCAL_NOTE));
+  const licensesHeading = el('h3', undefined, HELP_TABS[2]!.label);
+  licensesHeading.append(' · ', el('span', undefined, HELP_LICENSE_LOCAL_NOTE));
+  licensesPanel.append(licensesHeading);
   const filterLabel = el('label', 'field-note', HELP_LICENSE_FILTER_LABEL);
   filterLabel.htmlFor = 'help-license-filter';
   const filter = el('input');
   filter.id = 'help-license-filter';
   filter.type = 'search';
   filter.placeholder = HELP_LICENSE_FILTER_PLACEHOLDER;
-  const count = el('p', 'field-note help-license-count');
-  const empty = el('p', 'field-note help-license-empty', HELP_LICENSE_EMPTY);
+  const filterStatus = el('output', 'help-license-status');
+  filterStatus.setAttribute('aria-live', 'polite');
+  const count = el('span', 'help-license-count');
+  const empty = el('span', 'help-license-empty', ` · ${HELP_LICENSE_EMPTY}`);
   empty.hidden = true;
+  filterStatus.append(count, empty);
   const list = el('ul', 'help-license-list');
   const items = licenses.map((license) => {
     const item = el('li', 'help-license');
@@ -129,9 +160,8 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     const summary = el('summary');
     summary.append(
       el('span', 'help-license-name', license.name),
-      el('span', 'help-license-version', license.version),
+      el('span', 'help-license-version', technicalLayerVisible ? license.version : ''),
       el('span', 'help-license-id', `${HELP_LICENSE_FIELD_LICENSE} ${license.license}`),
-      el('span', 'field-note help-license-hint', HELP_LICENSE_TEXT_SUMMARY),
     );
     const source = [license.repository, license.homepage].filter((value): value is string => value !== null).join(' · ');
     details.append(
@@ -155,7 +185,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     empty.hidden = shown > 0;
   };
   filter.addEventListener('input', filterLicenses);
-  licensesPanel.append(filterLabel, filter, count, empty, list);
+  licensesPanel.append(filterLabel, filter, filterStatus, list);
 
   panels.set('usage', usagePanel);
   panels.set('privacy', privacyPanel);
@@ -165,7 +195,7 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     root.dataset['helpTab'] = tab;
     for (const [key, node] of buttons) {
       const current = key === tab;
-      node.className = current ? 'secondary' : 'quiet';
+      node.className = current ? 'btn tab secondary' : 'btn tab quiet';
       node.setAttribute('aria-selected', String(current));
       node.tabIndex = current ? 0 : -1;
     }
@@ -173,24 +203,9 @@ export function mountHelp(options: HelpSurfaceOptions): void {
     if (focus) buttons.get(tab)?.focus();
   };
 
-  HELP_TABS.forEach((entry, index) => {
-    const node = el('button', entry.tab === 'usage' ? 'secondary' : 'quiet', entry.label);
-    node.type = 'button';
-    node.id = `help-tab-${entry.tab}`;
+  HELP_TABS.forEach((entry) => {
+    const node = tabButton({ label: entry.label, id: `help-tab-${entry.tab}`, panel: `help-panel-${entry.tab}`, selected: entry.tab === 'usage', activate: () => select(entry.tab, true) });
     node.dataset['helpTab'] = entry.tab;
-    node.setAttribute('role', 'tab');
-    node.setAttribute('aria-selected', String(entry.tab === 'usage'));
-    node.setAttribute('aria-controls', `help-panel-${entry.tab}`);
-    node.tabIndex = entry.tab === 'usage' ? 0 : -1;
-    node.addEventListener('click', () => select(entry.tab, true));
-    node.addEventListener('keydown', (event) => {
-      const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-      const jump = event.key === 'Home' ? -index : event.key === 'End' ? HELP_TABS.length - 1 - index : 0;
-      if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
-      event.preventDefault();
-      const next = HELP_TABS[(index + (step !== 0 ? step : jump) + HELP_TABS.length) % HELP_TABS.length]!;
-      select(next.tab, true);
-    });
     buttons.set(entry.tab, node);
     tabs.append(node);
   });

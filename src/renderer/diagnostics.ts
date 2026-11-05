@@ -1,3 +1,4 @@
+import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import type { DiagnosticsApi } from '../main/diagnostics.js';
 import {
   CRASH_KIND_FALLBACK, CRASH_KIND_LABELS, CRASH_LIST_EMPTY, CRASH_LIST_FAILED, CRASH_LIST_HEADING, CRASH_LIST_LOADING,
@@ -9,6 +10,7 @@ import {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -21,7 +23,7 @@ export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: (
   function action(label: string, run: () => Promise<void> | void): HTMLButtonElement {
     const button = el('button', label);
     button.type = 'button';
-    button.className = 'secondary';
+    button.className = 'btn ' + ('secondary');
     button.addEventListener('click', () => {
       button.disabled = true;
       void Promise.resolve().then(run).catch(() => { status.textContent = DIAGNOSTICS_ACTION_FAILED; })
@@ -50,10 +52,10 @@ export function mountDiagnostics(root: HTMLElement, api: DiagnosticsApi, back: (
     for (const record of [...records].reverse()) {
       const item = el('section', '');
       item.className = 'source-card';
-      item.append(el('p', `${record.instant} · ${CRASH_KIND_LABELS[record.kind] ?? CRASH_KIND_FALLBACK} · ${record.reason}`));
+      item.append(el('p', `${technicalLayerVisible ? record.instant : record.instant.slice(0, 10)} · ${CRASH_KIND_LABELS[record.kind] ?? CRASH_KIND_FALLBACK}${technicalLayerVisible ? ` · ${record.reason}` : ''}`));
       const details = el('details', '');
       details.append(el('summary', CRASH_RECORD_VIEW), el('pre', JSON.stringify(record, null, 2)));
-      item.append(details);
+      item.append(technicalDisclosure(details));
       list.append(item);
     }
     root.dataset['crashListReady'] = 'true';

@@ -263,13 +263,16 @@ describe('live material references (#809)', () => {
     expect([...recorded.entries.values()].every((entry) => entry.capture?.model === DEVELOPER_LIVE_POLICY_BINDING.model && entry.capture.evidenceScope === 'namespaced')).toBe(true);
     if (kind === 'writing') {
       const revision = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions ORDER BY rowid DESC LIMIT 1').get()!.canonical_json)));
-      expect(revision.writing.draft).toBeNull();
-      expect(revision.writing.synthesis.reason.includes('material-copied')).toBe(true);
+      expect(revision.writing.synthesis.state).toBe('closed');
+      expect(revision.writing.draft.sections).toHaveLength(6);
+      expect(revision.writing.draft.withheld).toEqual([{ section: 1, paragraph: 0, reason: expect.stringContaining('资料只参照，不复制') }]);
     }
     if (kind === 'readers-report') {
       const revision = database((db) => JSON.parse(String(db.prepare('SELECT canonical_json FROM analysis_result_set_revisions ORDER BY rowid DESC LIMIT 1').get()!.canonical_json)));
-      expect(revision.readersReport.sections).toBeNull();
-      expect(revision.readersReport.synthesis.reason.includes('schema-invalid')).toBe(true);
+      expect(revision.readersReport.synthesis.state).toBe('closed');
+      expect(revision.readersReport.sections.conclusion).toContain('修改后再议');
+      expect(revision.readersReport.sections.strengths).toHaveLength(6);
+      expect(revision.readersReport.sections.problems).toHaveLength(6);
     }
   });
 

@@ -13,7 +13,7 @@ export const CALIBRATION_PAGE_GROUP = '编辑工作';
 export const CALIBRATION_PAGE_LEDE = '这里的两个开关只影响 AI7 的初评与预测，不改你的评分；定价与首印由你录入，AI7 默认不预测。';
 export const CALIBRATION_HEADING = '校准';
 /** What calibration touches, and what it never does (EVAL-011). */
-export const CALIBRATION_SCOPE = '校准只调整 AI7 给出的初评分数，不改你的评分，也不改风险项。';
+export const CALIBRATION_SCOPE = '仅调整 AI7 初评分数，不改你的评分和风险项。';
 /** Why there is nothing to count, for a service that gives no AI7 初评 scores to adjust (`initialScoresConnected` false). */
 export const CALIBRATION_WAITING = 'AI7 初评尚未接通：你改过 AI7 的初评分数后，调分记录才开始累积。';
 export const CALIBRATION_SWITCH = '启用校准';
@@ -24,13 +24,13 @@ export const CALIBRATION_METHOD = '校准偏移 = 各本书最新一次从 AI7 �
  * product, lower only under J-11's Journey-only control — so it never disagrees with the progress line above it.
  */
 export function calibrationOffsetWaiting(threshold: number): string {
-  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
+  return `校准偏移尚未计算：满 ${threshold} 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。`;
 }
 /** With the switch off: what a new version does instead, and that the switch can be turned on again. */
-export const CALIBRATION_OFF_EFFECT = '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。';
+export const CALIBRATION_OFF_EFFECT = '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。';
 /** The heading of the per-item offsets, with the Books they rest on. */
 export function calibrationBasisLine(offset: Pick<NonNullable<EvaluationCalibrationProjection['calibration']['offset']>, 'basisBooks'>): string {
-  return `校准依据：${offset.basisBooks} 本书的定稿评估；各评分项的偏移如下（正数表示你的定稿分数通常高于 AI7 初评）。`;
+  return `校准依据：${offset.basisBooks} 本书的定稿评估；正数表示你的定稿分数通常高于 AI7 初评。`;
 }
 /**
  * Why the basis may hold fewer Books than 调分记录 counts: a Book with a from-初评 version that cannot be read counts toward the
@@ -41,8 +41,8 @@ export function calibrationWithoutBasisLine(offset: Pick<NonNullable<EvaluationC
 }
 /** One item's offset: `+1.5`, `−0.5`, `0`, or that no Book gives it a value, with the Books it rests on. */
 export function calibrationOffsetLine(item: NonNullable<EvaluationCalibrationProjection['calibration']['offset']>['items'][number]): string {
-  if (item.offset === null) return `${item.label}：暂无数据（没有书同时有你的定稿分数和 AI7 初评分数）`;
-  return `${item.label}：${formatCalibrationOffset(item.offset)}（依据 ${item.books} 本书，满分 ${item.fullMarks}，调整后不超出 0 到 ${item.fullMarks}）`;
+  if (item.offset === null) return `${item.label}：暂无同时含定稿和初评分数的图书`;
+  return `${item.label}：${formatCalibrationOffset(item.offset)} · 依据 ${item.books} 本书 · 满分 ${item.fullMarks} · 调整范围 0–${item.fullMarks}`;
 }
 
 /** Books left out of the count because their evaluation records are damaged (Issue #702 review); `null` when none are. */
@@ -51,10 +51,10 @@ export function calibrationUnreadableLine(books: number): string | null {
 }
 export const PREDICTION_HEADING = '定价与首印预测';
 /** What turning it on would add (EVAL-014). */
-export const PREDICTION_ADDS = '打开后，评估的市场部分会给出定价与首印的预测区间，标注「预测 · 低确定性」；关闭时不预测。';
+export const PREDICTION_ADDS = '打开后在评估的市场部分显示预测区间并标注「预测 · 低确定性」；关闭时不预测。';
 export const PREDICTION_SWITCH = '启用定价与首印预测';
 export const ACTUALS_HEADING = '定价与首印实际数据';
-export const ACTUALS_EMPTY = '还没有已发稿的图书。设为发稿版本后，在这里录入它的定价与首印。';
+export const ACTUALS_EMPTY = '尚无已发稿图书，设为发稿版本后可在此录入定价和首印。';
 export const ACTUALS_ENTER = '录入…';
 export const ACTUALS_CHANGE = '修改…';
 export const ACTUALS_SAVE = '保存';

@@ -1,3 +1,4 @@
+import { createSheet, sheetContent } from './components/sheet.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
   DefaultExecutionRuleReference,
@@ -30,9 +31,7 @@ import {
   writingMaterialsMore,
   writingMaterialsOverTotalNote,
   WRITING_MATERIALS_AT_LIMIT,
-  WRITING_QUICK_PICK_TYPE,
   writingQuickFailed,
-  writingQuickNote,
   writingQuickStarted,
   writingQuickStarting,
   writingOpenTaskTone,
@@ -94,6 +93,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -163,21 +163,22 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     section.dataset['writingState'] = page.task?.state ?? 'none';
     const heading = el('h3', undefined, WRITING_HEADING);
     heading.tabIndex = -1;
-    section.append(heading, el('p', 'field-note', WRITING_LEDE));
-    if (page.unavailable !== null) section.append(el('p', 'field-note writing-unavailable', page.unavailable));
+    section.append(heading);
+    if (page.unavailable !== null) heading.append(' · ', el('span', 'writing-unavailable', page.unavailable));
+    else section.append(el('p', 'field-note', WRITING_LEDE));
     const task = page.task;
     if (task !== null) {
       const line = el('p', 'writing-task-line', writingTaskLine(task));
       line.dataset['writingTypeId'] = task.typeId;
       // Why the Task wrote no draft — a copy of an exemplar refused — said beside its line, with nothing offered to open.
-      const refusal = task.refusal === null ? null : el('p', 'field-note writing-task-refusal', task.refusal);
+      if (task.refusal !== null) line.append(' · ', el('span', 'writing-task-refusal', task.refusal));
       const row = el('div', 'button-row');
       // The next step only for a Task that can start: one whose 范例 is gone, or that wrote no draft, is looked at, not started (#698).
       const open = action(WRITING_ACTIONS.openTask, writingOpenTaskTone(task), 'open-task', () => options.openPlan(task.taskIntentId));
       open.setAttribute('aria-controls', 'task-drawer');
       open.disabled = busy;
       row.append(open);
-      section.append(line, ...(refusal === null ? [] : [refusal]), row);
+      section.append(line, row);
     }
     // Each drafted result not yet made its type's document.
     const drafted = page.types.filter((type): type is WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> } => type.drafted !== null);
@@ -234,14 +235,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         state.problem = null;
         paint(`input[name="writing-type"][value="${CSS.escape(type.typeId)}"]`);
       });
-      const label = el('label', undefined, type.label);
+      const label = el('label', undefined, type.label + (type.prepare.allowed ? '' : ' · '));
       label.htmlFor = id;
       wrapper.append(input, label);
       if (!type.prepare.allowed) {
-        const reason = el('span', 'field-note writing-type-reason', type.prepare.reason);
+        const reason = el('span', 'writing-type-reason', type.prepare.reason);
         reason.id = uid('reason');
         input.setAttribute('aria-describedby', reason.id);
-        wrapper.append(reason);
+        label.append(reason);
       }
       types.append(wrapper);
     }
@@ -300,21 +301,6 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     plan.disabled = busy || page.unavailable !== null;
     start.disabled = plan.disabled;
     plan.setAttribute('aria-controls', 'task-drawer');
-    // 快速开始 is the chosen type's writing 默认执行规则's to give (S84b): a rule covers only the type it was set from, so the
-    // type is chosen first; with that type's rule in force and matching, it prepares and starts under it.
-    const offer = chosen?.quickStart ?? null;
-    const rule = offer !== null && offer.available ? offer.rule : null;
-    const quick = action(WRITING_ACTIONS.quick, 'secondary', 'quick', () => {
-      if (rule !== null) void prepare(rule);
-    });
-    quick.disabled = busy || rule === null || page.unavailable !== null;
-    quick.setAttribute('aria-controls', 'task-drawer');
-    if (offer?.rule != null) quick.dataset['ruleVersionId'] = offer.rule.ruleVersionId;
-    const quickReason = el('p', 'field-note writing-quick-reason',
-      rule !== null ? writingQuickNote(rule.name) : offer === null ? WRITING_QUICK_PICK_TYPE : offer.reason ?? '');
-    quickReason.dataset['quickStart'] = rule !== null ? 'available' : 'unavailable';
-    quickReason.id = uid('quick');
-    quick.setAttribute('aria-describedby', quickReason.id);
     const cancel = action(WRITING_ACTIONS.cancel, 'quiet', 'cancel', () => {
       sheet = null;
       paint('[data-writing-action="new"]');
@@ -322,7 +308,15 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     cancel.disabled = busy;
     row.append(start, plan, cancel);
     form.append(row);
-    return form;
+    const surface = createSheet('writing-task-sheet');
+    const title = el('h3', undefined, '写作任务');
+    title.id = uid('sheet-title');
+    surface.setAttribute('aria-labelledby', title.id);
+    sheetContent(surface, title, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== row), row, form);
+    surface.addEventListener('cancel', (event) => { if (busy) event.preventDefault(); });
+    surface.addEventListener('close', () => { if (!busy) { sheet = null; paint('[data-writing-action="new"]'); } });
+    surface.open = true;
+    return surface;
   }
 
   /**
@@ -336,11 +330,17 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
     if (!busy && api.searchReferableMaterials !== undefined) node.append(similarMaterialsField({ searchReferableMaterials: api.searchReferableMaterials }, page.bookId, offer.items, new Set(state.materialIds), (id) => {
       state.materialIds.push(id); state.problem = null; paint(null);
     }));
-    node.append(el('p', 'writing-materials-statement', offer.statement));
+    const statement = el('p', 'writing-materials-statement', offer.statement.replace(/。$/u, offer.more > 0 ? '' : '。'));
+    if (offer.more > 0) statement.append(el('span', 'writing-materials-more', `；${writingMaterialsMore(offer.more)}`));
+    node.append(statement);
     // An item no longer offered, or no longer one that may be ticked, leaves the selection with its reason (Issue #759).
     const reconciled = reconcileTaskMaterialSelection(state, offer.items, new Set(state.materialIds));
     state.materialIds = reconciled.kept;
-    for (const note of reconciled.removals) node.append(el('p', 'field-note writing-material-removed', note));
+    if (reconciled.removals.length > 0) {
+      const removed = el('ul');
+      for (const note of reconciled.removals) removed.append(el('li', 'writing-material-removed', note));
+      node.append(removed);
+    }
     const selectedCharacters = offer.items.filter((item) => state.materialIds.includes(item.materialId))
       .reduce((total, item) => total + item.characters, 0);
     if (offer.items.length > 0) {
@@ -367,20 +367,19 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
           state.problem = null;
           paint(`[data-writing-material="${CSS.escape(item.materialId)}"]`);
         });
-        const label = el('label', undefined, writingMaterialLabel(item));
+        const label = el('label', undefined, writingMaterialLabel(item) + (reasonText === null ? '' : ' · '));
         label.htmlFor = id;
         row.append(box, label);
         if (reasonText !== null) {
-          const reason = el('span', 'field-note writing-material-reason', reasonText);
+          const reason = el('span', 'writing-material-reason', reasonText);
           reason.id = uid('material-reason');
           box.setAttribute('aria-describedby', reason.id);
-          row.append(reason);
+          label.append(reason);
         }
         list.append(row);
       }
       node.append(list);
     }
-    if (offer.more > 0) node.append(el('p', 'field-note writing-materials-more', writingMaterialsMore(offer.more)));
     return node;
   }
 

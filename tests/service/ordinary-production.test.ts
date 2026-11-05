@@ -1473,10 +1473,11 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
     const status = await testModelServiceConnection(store, roots.codeRoot,
       { scope: 'ordinary-production', nativeFetch: transport as unknown as typeof fetch },
       { route: 'openai-platform', modelId: 'gpt-5.6-luna' }, { resolve: async () => 'public-placeholder' }, { requestGovernor });
-    expect(status.outcome).toBe(failure === 'unknown' ? 'outcome-unknown' : 'failed');
+    expect(status.outcome).toBe(failure === 'unexpected-text' ? 'passed' : failure === 'unknown' ? 'outcome-unknown' : 'failed');
     expect(transport).toHaveBeenCalledTimes(1);
     if (failure === 'malformed' || failure === 'refusal' || failure === 'unexpected-text') expect(status.provenance?.usage).toMatchObject({ inputTokens: 12, outputTokens: failure === 'malformed' ? 0 : 1 });
     expect(status.provenance?.failureCode).toBe(status.code);
+    if (failure === 'unexpected-text') expect(status).toMatchObject({ code: null, responseText: 'unexpected public synthetic answer', provenance: { failureCode: null } });
     expect(store.getModelServiceRouteConnection('openai-platform')?.connectionTest).toEqual(status);
     expect(JSON.stringify(status)).not.toContain('synthetic provider body');
     expect(store.getConfiguredModelRoleBinding('fast-interaction')?.route).toBe('openai-platform');
@@ -1672,7 +1673,7 @@ describe('persisted OpenAI Fast text binding (Issue #1044)', () => {
         const prepared = await restarted.prepareDatabaseExport(destination, true);
         expect((await restarted.approveDatabaseExport(prepared.preparationId, true)).outcome).toBe('created');
         const preview = await restarted.inspectDatabaseImport(destination);
-        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 107, dataVersion: 1 });
+        expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 108, dataVersion: 1 });
         await restarted.prepareDatabaseReplacement(preview.previewId);
         restarted.close();
         const replaced = await EditorialStore.open(roots.dataRoot, roots.codeRoot); opened.push(replaced);

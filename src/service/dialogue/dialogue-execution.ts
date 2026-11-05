@@ -203,6 +203,7 @@ interface ActiveAnswer {
   readonly message: DialogueMessageInput;
   streamed: string;
   stopRequested: boolean;
+  cancelled?: boolean;
   harness: PrimaryAgentHarnessHandle | null;
   readonly done: Promise<void>;
 }
@@ -323,17 +324,18 @@ export class DialogueExecutionOwner {
   }
 
   /** 停止回答: interrupt the answer in flight and wait until it has settled as stopped. */
-  async stop(attemptId: string): Promise<void> {
+  async stop(attemptId: string, cancel = false): Promise<void> {
     const queued = this.#queued.findIndex((turn) => turn.attemptId === attemptId);
     if (queued !== -1) {
       // A queued attempt has neither a Harness span nor a sent request. Cancellation uses the existing stopped outcome.
-      this.#deps.records.settleDialogueAttempt(attemptId, 'stopped', null, null);
-      handOver(this.#queued.splice(queued, 1)[0]!, 'stopped', '');
+      this.#deps.records.settleDialogueAttempt(attemptId, cancel ? 'interrupted' : 'stopped', null, cancel ? 'TASK_CANCELLED' : null);
+      handOver(this.#queued.splice(queued, 1)[0]!, cancel ? 'interrupted' : 'stopped', '');
       return;
     }
     const active = this.#active;
     if (active === null || active.attemptId !== attemptId) return;
     active.stopRequested = true;
+    active.cancelled = cancel;
     active.requestAbort.abort();
     if (this.#deps.live === null) active.harness?.interrupt();
     await active.done;
@@ -380,7 +382,7 @@ export class DialogueExecutionOwner {
     let spanOpened = false;
     let outcome: HarnessTurnOutcome | null = null;
     let failure: string | null = null;
-    const transmission: { read: (() => number) | null } = { read: null };
+    const transmission: { read: (() => number) | null; text: (() => string | null) | null } = { read: null, text: null };
     // A stop or close that refuses the next request before it leaves — a tool gap, a capacity wait — still settles as that stop.
     let refusedForStop = false;
     const stopping = (): boolean => active.stopRequested || this.#disposed;
@@ -535,6 +537,10 @@ export class DialogueExecutionOwner {
             },
           });
           transmission.read = () => adapter.transmissions;
+          transmission.text = () => {
+            const result = adapter.lastCanonicalResult;
+            return result?.kind === 'answer' ? result.text : null;
+          };
           return adapter;
         },
         gate: (payload) => evaluateEgress(payload, bindingFacts, toolSession?.egressScope ?? scope),
@@ -631,14 +637,15 @@ export class DialogueExecutionOwner {
       cause = this.#disposed ? DIALOGUE_CLOSED_CAUSE : last?.kind === 'interrupted' ? last.failure.code : 'INTERRUPTED';
     } else {
       settled = 'failed';
-      cause = last?.kind === 'failed' ? last.failure.code : 'AMBIGUOUS';
+      cause = last?.kind === 'failed' || last?.kind === 'ambiguous' ? last.failure?.code ?? 'AMBIGUOUS' : 'AMBIGUOUS';
     }
     // A write the store refused once (a moment's lock, a busy disk) is tried once more; one refused twice leaves the attempt
     // unsettled, and the next start's reconciliation settles it 回答中断 from the ledger.
     for (let tries = 0; tries < 2; tries += 1) {
       try {
-        records.settleDialogueAttempt(turn.attemptId, settled, endSeq, cause);
-        handOver(turn, settled, active.streamed);
+        const cancelled = active.cancelled && settled === 'stopped';
+        records.settleDialogueAttempt(turn.attemptId, cancelled ? 'interrupted' : settled, endSeq, cancelled ? 'TASK_CANCELLED' : cause);
+        handOver(turn, cancelled ? 'interrupted' : settled, transmission.text?.() ?? active.streamed);
         return;
       } catch {
         if (tries === 0) await new Promise((resolve) => setTimeout(resolve, SETTLE_RETRY_MS));

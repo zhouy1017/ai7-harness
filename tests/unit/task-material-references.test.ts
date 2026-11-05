@@ -232,23 +232,23 @@ describe('the selection leaves no choice out silently (Issue #759)', () => {
     const owner = {};
     expect(reconcileTaskMaterialSelection(owner, items(), new Set(['a', 'c']))).toEqual({
       kept: ['a'],
-      removals: ['《c》已从所选中去掉：索引记录已损坏 · 不可选'],
+      removals: ['《c》已移除：索引记录已损坏 · 不可选'],
     });
     // The item then leaves the offers altogether: it is still named, from the offers it was last seen in.
     const gone = reconcileTaskMaterialSelection(owner, items().filter((entry) => entry.materialId !== 'b'), new Set(['a', 'b']));
     expect(gone.kept).toEqual(['a']);
-    expect(gone.removals).toEqual(['《c》已从所选中去掉：索引记录已损坏 · 不可选', '《b》已不在可参考的清单中，已从所选中去掉。']);
+    expect(gone.removals).toEqual(['《c》已移除：索引记录已损坏 · 不可选', '《b》已不在清单，已移除。']);
     acknowledgeTaskMaterialRemovals(owner);
     expect(reconcileTaskMaterialSelection(owner, items(), new Set(['a'])).removals).toEqual([]);
     // One never offered before can only be named as a choice.
-    expect(reconcileTaskMaterialSelection({}, items(), new Set(['zz'])).removals).toEqual(['已选的一份资料已不在可参考的清单中，已从所选中去掉。']);
+    expect(reconcileTaskMaterialSelection({}, items(), new Set(['zz'])).removals).toEqual(['已选的一份资料已不在清单，已移除。']);
   });
   it('names a choice the whole-item bounds took out, and forgets one that is back', () => {
     const owner = {};
     const big = [offer('x', 4000), offer('y', 3000)];
     const out = reconcileTaskMaterialSelection(owner, big, new Set(['x', 'y']));
     expect(out.kept).toEqual(['x']);
-    expect(out.removals).toEqual(['《y》已从所选中去掉：最多参考 4 份资料，合计不超过 6,000 字。']);
+    expect(out.removals).toEqual(['《y》已移除：最多参考 4 份资料，合计不超过 6,000 字。']);
     expect(reconcileTaskMaterialSelection(owner, big, new Set(['y'])).removals).toEqual([]);
   });
   it('states an item size, or that a damaged index gives none', () => {

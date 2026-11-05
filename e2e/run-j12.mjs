@@ -7,7 +7,7 @@ import { arch, platform, release, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
+import { manuscriptBoundary, attachProductOutput, awaitWithinDeadline, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, runJ14DarkPass } from './controller.mjs';
 import { CREDENTIAL_CLEANUP_SCHEMA_VERSION, assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 import { fixedArchiveTime } from './composed-docx.mjs';
 
@@ -339,7 +339,10 @@ async function tabUntil(renderer, expression, name, maximumTabs = 12) {
 }
 
 async function click(renderer, label, name) {
-  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
+  if (label === '向前浏览' || label === '向后浏览') await assertRenderer(renderer, manuscriptBoundary(label), name);
+  if (label === '预览替换') await renderer.evaluate(`Array.from(document.querySelectorAll('.navigation-modes button')).find(button => button.textContent === '替换')?.click()`);
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
+  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>(item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)})); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
 async function clickBook(renderer, bookId, name) {
@@ -365,11 +368,11 @@ async function createEmptyBook(renderer, title) {
 
 async function importBook(renderer, title, bundled = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 180_000);
@@ -383,9 +386,9 @@ async function importFirstManuscript(renderer, bookId) {
   await clickBook(renderer, bookId, 'existing-open-empty');
   await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookId)}][data-manuscript-state="empty"]')`, 'existing-empty-overview');
   await click(renderer, '导入首份稿件', 'existing-import-first');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'existing-relationship');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-relationship');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'existing-first-relationship');
-  await click(renderer, '复核导入到所选图书', 'existing-review');
+  await click(renderer, '查看导入详情', 'existing-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'existing-review-ready');
   await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='导入为首份稿件'||item.textContent==='按上述降级方式导入为首份稿件'); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, 'existing-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-book-id=${JSON.stringify(bookId)}][data-manuscript-state="populated"]')`, 'existing-imported', 180_000);
@@ -395,8 +398,8 @@ async function importFirstManuscript(renderer, bookId) {
 async function saveEdit(renderer, suffix) {
   const inserted = await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`);
   requireJourney(inserted === true, 'edit-inserted');
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
-  await click(renderer, '保存当前编辑', 'edit-save');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
+  await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
 }
 
@@ -409,7 +412,7 @@ async function saveMilestone(renderer) {
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('.milestone-section input[type="radio"][name="milestone-purpose"][value="stage-archive"]'); if(!(radio instanceof HTMLInputElement)||radio.disabled)return false; radio.click(); return radio.checked; })()`, 'milestone-purpose');
   await fill(renderer, '#milestone-note', '本地且离线。', 'milestone-note');
   await click(renderer, '保存里程碑版本', 'milestone-save');
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('.editor-meta')?.textContent.includes('当前修订版 r2')`, 'milestone-saved', 120_000);
+  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('.editor-meta')?.textContent.includes('修订版 2')`, 'milestone-saved', 120_000);
 }
 
 /**
@@ -742,16 +745,49 @@ async function main() {
     // The live processing indicator (ADR 0096 §3, #1177) replaces the static 「本地处理 · 未联网」: this launch sends nothing.
     await waitFor(primary, `(() => { const node=document.querySelector('#processing-indicator'); return node instanceof HTMLElement && !node.hidden && node.dataset.processingState==='local' && node.textContent==='本地处理' && node.getAttribute('aria-label')==='处理方式：本地处理' && !document.querySelector('#context-header').textContent.includes('未联网'); })()`, 'processing-indicator-local');
     await assertRenderer(primary, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
+    await assertRenderer(primary, `(() => { const links=Array.from(document.querySelectorAll('.sidebar-link')); return links.length>0 && links.every((link)=>link.querySelector('svg[data-icon] use') && link.title) && !document.querySelector('button:not([class]), button[class=""]') && Array.from(document.querySelectorAll('button')).every((button)=>button.classList.contains('btn')); })()`, 'shared-svg-and-buttons');
+    // #1315 synchronized delta: use the one Help switch, verify its persisted ordinary mode, then restore development mode.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-settings-ready');
+    await click(primary, '帮助', 'technical-mode-help');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'technical-mode-default-on');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-off');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && !document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'technical-mode-off-applied');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-settings-hub');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="settings"] [data-settings-entry]').length===6 && !document.querySelector('[data-settings-entry="usage"]') && !document.querySelector('[data-settings-entry="evaluation-calibration"]') && !document.querySelector('[data-settings-entry="diagnostics"]')`, 'ordinary-settings-six-rows');
+    await click(primary, '键盘与无障碍', 'ordinary-keyboard-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-keyboard-command]').length>0 && !document.querySelector('[data-keyboard-change]') && !document.querySelector('[data-keyboard-reset-all]') && document.querySelector('input[data-reduced-motion]')`, 'ordinary-keyboard-read-only');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion');
+    await waitFor(primary, `document.documentElement.dataset.reducedMotion==='true' && localStorage.getItem('ai7.reducedMotion')==='true'`, 'ordinary-reduced-motion-applied');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('input[data-reduced-motion]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'ordinary-reduced-motion-reset');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
+    await click(primary, '模型服务', 'ordinary-model-entry');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && !document.querySelector('[data-action="select-main-role-model"]') && !document.querySelector('[data-search-backend]') && !document.querySelector('.model-service-current-roles')`, 'ordinary-model-single-view');
+    await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const test=flow?.querySelector('[data-action="test-flow-connection"]'); return flow instanceof HTMLElement && test instanceof HTMLButtonElement && flow.getBoundingClientRect().top>=0 && test.getBoundingClientRect().bottom<=innerHeight; })()`, 'ordinary-model-one-screen');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-categories');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
+    await waitFor(primary, `document.querySelectorAll('[data-screen="quality-learning"] [role="tab"]').length===1 && document.querySelector('[data-screen="quality-learning"] [role="tab"]')?.textContent==='反馈历史'`, 'ordinary-quality-feedback-only');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.textContent==='反馈历史已打开'`, 'ordinary-quality-loaded');
+    await assertRenderer(primary, `!document.querySelector('#persistence-status')?.textContent.includes('该页在开发者模式下显示') && !document.body.textContent.includes('该页在开发者模式下显示')`, 'ordinary-quality-no-shelved-notice');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'ordinary-agent-entry');
+    await waitFor(primary, `document.querySelector('[data-screen="global-agent"]')`, 'ordinary-agent-ready');
+    await assertRenderer(primary, `!/查看技术详情|（第 \\d+ 版）|\\bv\\d{1,3}\\b|ordinary-production|developer-live|gpt-|claude-|deepseek-|gemini-|[0-9a-f]{8,}|主分支|\\d+\\.\\d{3}%/u.test(document.body.textContent)`, 'ordinary-agent-no-technical-text');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'technical-mode-restore-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'technical-mode-restore-settings-ready');
+    await click(primary, '帮助', 'technical-mode-restore-help');
+    await assertRenderer(primary, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'technical-mode-on');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('.help-about') && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'technical-mode-on-applied');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'developer-keyboard-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'developer-keyboard-settings-ready');
+    await click(primary, '键盘与无障碍', 'developer-keyboard-entry');
+    await waitFor(primary, `document.querySelector('[data-keyboard-change]') && Array.from(document.querySelectorAll('.keyboard-table th[data-developer-only="true"]')).some(node=>getComputedStyle(node,'::after').content.includes('开发者'))`, 'developer-keyboard-badge');
+
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('global-agent')), 'global-agent-entry');
     await waitFor(primary, `document.querySelector('[data-screen="global-agent"] [data-global-agent-policy]')?.textContent.includes('暂时无法提问')`, 'global-agent-policy-disclosed');
-    await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体（记忆与全局指导）'; })()`, 'global-agent-entry-no-work');
-    await waitFor(primary, `document.querySelector('.compact-model-selector')?.hidden === false`, 'global-agent-model-selector-visible');
-    await assertRenderer(primary, `(() => { const selector=document.querySelector('.compact-model-selector');
-      selector.open=true; document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-      if(selector.open)return false;
-      selector.open=true; document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}));
-      return !selector.open;
-    })()`, 'model-selector-outside-escape-dismissal');
+    await assertRenderer(primary, `(async () => { const state = await window.ai7.inspectGlobalAgent(); return state.history.length === 0 && state.directives.length === 0 && document.querySelector('#context-title')?.textContent === '全域智能体'; })()`, 'global-agent-entry-no-work');
+    await assertRenderer(primary, `document.querySelector('#context-title')?.textContent==='全域智能体' && document.querySelector('#processing-indicator')?.textContent==='本地处理' && !document.querySelector('#context-header').textContent.includes('模型')`, 'agent-header-title-and-processing');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('library')), 'global-agent-return-library');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'global-agent-library-ready');
     await primary.send('Page.setBypassCSP', { enabled: true });
@@ -785,14 +821,18 @@ async function main() {
     // Nothing has been remembered for 甲 yet, so the one transient notice says the manuscript opened at
     // its start instead of claiming a return. It floats rather than taking a row from the manuscript,
     // and both readings are taken in one pass because the notice is on its way out while they are read.
+    await assertRenderer(primary, `document.querySelector('[data-toast]') !== null`, 'entry-toast-exists');
+    await assertRenderer(primary, `document.querySelector('[data-toast]')?.hidden === false`, 'entry-toast-visible');
+    await assertRenderer(primary, `getComputedStyle(document.querySelector('[data-toast]')).position === 'fixed'`, 'entry-toast-fixed');
     await assertRenderer(primary, `(() => {
-      const notice=document.querySelector('[data-entry-notice]');
-      return notice instanceof HTMLElement &&
+      const toast=document.querySelector('[data-toast]');
+      const notice=toast?.querySelector('span');
+      return toast instanceof HTMLElement && !toast.hidden && notice instanceof HTMLElement &&
         notice.textContent==='从稿件开头打开；这本图书还没有记录上次位置。' &&
-        getComputedStyle(notice).position==='absolute';
+        getComputedStyle(toast).position==='fixed';
     })()`, 'entry-notice-without-remembered-position');
     // It goes without any editor action (V2-UX-COPY-015).
-    await waitFor(primary, `!document.querySelector('[data-entry-notice]')`, 'entry-notice-self-dismissed');
+    await waitFor(primary, `document.querySelector('[data-toast]')?.hidden === true`, 'entry-notice-self-dismissed');
     // Wave 23 #1286: entering the global destination closes the book-only drawer and releases its column.
     await assertRenderer(primary, `(() => { const entry=document.querySelector('[data-edge-entry="tasks"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return true; })()`, 'global-agent-book-drawer-open');
     await waitFor(primary, `document.querySelector('#task-drawer')?.hidden===false`, 'global-agent-book-drawer-ready');
@@ -859,7 +899,7 @@ async function main() {
     const routeRiskSuffix = '，J12 路由风险保护';
     const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
     requireJourney(riskyEditInserted === true, 'close-risk-edit-inserted');
-    await waitFor(primary, `document.documentElement.dataset.ai7CloseRisk==='true' && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'close-risk-advertised');
+    await waitFor(primary, `document.documentElement.dataset.ai7CloseRisk==='true' && !(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'close-risk-advertised');
     at('close-risk-same-window-request');
     const sameWindowRisk = await primary.evaluate(`(async()=>{ const active=document.activeElement; const result=await window.ai7.openBookWorkbench({kind:'revision',revisionId:${JSON.stringify(revisionOne)}}).then(value=>({accepted:true,value}),error=>({accepted:false,code:error?.code,message:error?.message})); return {result,route:await window.ai7.getBookWorkbenchRoute(),activePreserved:active===document.activeElement,dirty:document.documentElement.dataset.ai7CloseRisk==='true'&&document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.textContent.endsWith(${JSON.stringify(routeRiskSuffix)})}; })()`);
     requireJourney(
@@ -912,7 +952,7 @@ async function main() {
       'cross-window-risk-preserved-route-capability-content-and-focus',
     );
     at('background-journal-non-focus-steal');
-    await click(primary, '保存当前编辑', 'background-risk-edit-save');
+    await click(primary, '保存', 'background-risk-edit-save');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志') && document.documentElement.dataset.ai7CloseRisk==='false'`, 'background-risk-edit-durable', 120_000);
     await assertRenderer(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'background-journal-kept-book-b-focus');
     await assertRenderer(primary, `!document.hasFocus()`, 'background-journal-did-not-focus-book-a');
@@ -979,7 +1019,7 @@ async function main() {
         historicalRoute.revisionId === revisionOne,
       'historical-exact-route-owned',
     );
-    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存当前编辑','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.textContent.includes('不提供写入'); })()`, 'immutable-readonly-reconstruction');
+    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.textContent.includes('不提供写入'); })()`, 'immutable-readonly-reconstruction');
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && document.querySelector('[data-return-to-current-revision]')!==null`, 'j14-zoom-200-reflow');
@@ -1234,12 +1274,12 @@ async function main() {
     const registeredBookA = await findRenderer(manager, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'preflight-registered-a');
     const sourceRecordsBefore = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     await click(primary, '导入稿件', 'preflight-stage-source');
-    await waitFor(primary, `document.querySelector('[data-screen="target"]')`, 'preflight-source-target');
+    await waitFor(primary, `document.querySelector('[data-import-target-choices]')`, 'preflight-source-target');
     await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
     await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); if(!(reuse instanceof HTMLInputElement))return false; reuse.click(); return reuse.checked; })()`, 'preflight-reuse-source');
-    await click(primary, '复核来源材料导入', 'preflight-prepare-source');
+    await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('已显示这本图书现有的工作台') && document.querySelector('#persistence-status')?.textContent.includes('来源材料未提交') && !document.querySelector('[data-commit-source-import]')?.disabled`, 'preflight-duplicate-rejected');
@@ -1262,11 +1302,8 @@ async function main() {
     await waitFor(primary, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'restart-a-manuscript');
     await waitFor(primary, `document.querySelector('[data-testid="manuscript-editor"]')?.textContent.includes(${JSON.stringify(editSuffix)})`, 'restart-persisted-edit');
     await assertRenderer(primary, `(() => {
-      const notice=document.querySelector('[data-entry-notice]')?.textContent??'';
-      const place=/第 (\\d+) \\/ (\\d+) 个段落/.exec(notice);
-      return notice.startsWith('回到上次位置 · ') && place!==null &&
-        Number(place[1])===${JSON.stringify(pagedAwayPosition)} && Number(place[1])<=Number(place[2]) &&
-        !/blk_[0-9a-f]{24}/.test(notice);
+      const notice=document.querySelector('[data-toast]:not([hidden]) span')?.textContent??'';
+      return notice === '回到上次位置。';
     })()`, 'restart-entry-notice-returns-to-remembered-position');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.section('overview')), 'restart-back-overview');
     await waitFor(primary, `document.querySelector('[data-screen="book-overview"]')`, 'restart-overview');
@@ -1282,7 +1319,7 @@ async function main() {
       const readings=Array.from(anchorSection.querySelectorAll(':scope > dl > dd'),(node)=>node.textContent??'');
       return JSON.stringify(labels)===JSON.stringify(['修订版','上次位置','保存状态']) &&
         (anchorSection.compareDocumentPosition(records)&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
-        (anchorSection.compareDocumentPosition(overview.querySelector('.workbench-actions'))&Node.DOCUMENT_POSITION_FOLLOWING)!==0 &&
+        anchorSection.querySelector('.button-row button')?.textContent==='打开稿件' &&
         ['exact','nearest-anchor'].includes(anchorSection.dataset.manuscriptAnchor??'') &&
         readings[1].includes('个段落') && !readings.some((reading)=>/blk_[0-9a-f]{24}/.test(reading));
     })()`, 'overview-leads-with-the-manuscript-anchor');
@@ -1290,7 +1327,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'restart-library');
     // Identifiers in the technical layer (ADR 0096 §3, #1177): a 书库 card prints no Book identity inline; its 图书 ID and 稳定标识
     // sit behind a closed 查看技术详情.
-    await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=card.querySelector('details.technical-details'); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||details.open||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && details.querySelector('summary')?.textContent==='查看技术详情'; }); })()`, 'library-card-identity-disclosed');
+    await waitFor(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-screen="landing"] article.book-summary-item')); return cards.length>0 && cards.every((card)=>{ const details=Array.from(document.querySelectorAll('details[data-technical-layer]')).find(node=>node.textContent.includes(card.querySelector('button[data-book-id]')?.dataset.bookId)); const bookId=card.querySelector('button[data-book-id]')?.dataset.bookId; if(!(details instanceof HTMLDetailsElement)||(details.open&&!details.hidden)||!bookId||!details.textContent.includes(bookId))return false; const visible=Array.from(card.childNodes).filter((node)=>node!==details).map((node)=>node.textContent??'').join(''); return !/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(visible) && ['查看技术详情','记录信息'].includes(details.querySelector('summary')?.textContent); }); })()`, 'library-card-identity-disclosed');
     at('screen-return-origins');
     // Global destinations return to the exact Book subpage that opened them; settings children return to Settings.
     await clickBook(primary, bookA, 'return-book-open');
@@ -1363,7 +1400,7 @@ async function main() {
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
     const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v24.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
-    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 196 &&
+    requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 197 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
     requireJourney((await readFile(resolve(diagnosticsBundle, 'README.txt'), 'utf8')).includes('不含数据库、书稿'), 'diagnostics-exclusions');
     await click(primary, '查看诊断位置', 'diagnostics-reveal');
@@ -1377,7 +1414,7 @@ async function main() {
     await click(primary, '模型服务', 'model-service-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-service-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .panel', returnToScreen: async () => {
+    await runJ14DarkPass({ renderer: primary, journey: 'J-12', at, representative: '#screen[data-screen="model-service"] > .page-content', returnToScreen: async () => {
       await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'dark-pass-return-settings');
       await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'dark-pass-return-settings-hub');
       // 设置 paints its hub after the click, so the 模型服务 row is waited for and followed once it is there (#935).
@@ -1390,7 +1427,7 @@ async function main() {
       const technical=screen.querySelector('.model-service-technical');
       return roles.length===2 && roles.every(node=>['main-editorial','fast-interaction'].includes(node.dataset.modelRole)) &&
         !screen.querySelector('.model-role-grid') && screen.querySelectorAll('[data-model-route]').length===1 &&
-        technical instanceof HTMLDetailsElement && !technical.open && technical.querySelector('summary')?.textContent==='查看技术详情' &&
+        technical instanceof HTMLDetailsElement && (!technical.open || technical.hidden) && ['查看技术详情','记录信息'].includes(technical.querySelector('summary')?.textContent) &&
         technical.querySelector('[data-policy-integrity-state="verified"]') && screen.dataset.providerTransmissionCount==='0';
     })()`, 'inline-model-flow-no-legacy-cards');
     // ADR 0073 §3 and V2-UX-MSET-007 (Issue #435): a configured provider appears as a connection only when a Model Role
@@ -1417,6 +1454,8 @@ async function main() {
     })()`, 'model-service-unbound-provider-absent');
     await assertRenderer(primary, `(() => {
       const flow=document.querySelector('[data-model-service-flow]');
+      const badges=[flow?.querySelector('[data-action="select-main-role-model"]'),document.querySelector('[data-search-backends] h3')];
+      if(!badges.every(node=>node instanceof HTMLElement && getComputedStyle(node,'::after').content.includes('开发者')))return false;
       const channels=Array.from(flow?.querySelectorAll('[data-model-channel]')??[]).map((node)=>node.dataset.modelChannel);
       const zen=flow?.querySelector('[data-model-channel="opencode-zen"] input');
       if(JSON.stringify(channels)!==JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform','anthropic-claude','google-gemini','opencode-zen'])||!(zen instanceof HTMLInputElement))return false;
@@ -1442,6 +1481,8 @@ async function main() {
     credentialMutationReached = true;
     await click(primary, '保存并获取模型', 'model-credential-save');
     await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('[data-credential-state="ready"]')`, 'model-credential-ready');
+    // #1304: development-ci never performs account discovery; saving succeeds while discovery reports its failure.
+    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-save-discovery-failure-visible');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.type==='password' && input.autocomplete==='off' && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-secret-not-redisplayed');
     // The one flow (Issue #1215) offers the saved channel's model to both roles, already the choice both hold: nothing to apply.
     await assertRenderer(primary, `(() => {
@@ -1457,7 +1498,9 @@ async function main() {
     })()`, 'model-service-flow-current-choice');
     // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
     await assertRenderer(primary, `(async () => {
-      await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
+      const refreshed=await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});
+      if(refreshed.modelDiscovery?.status!=='failure'||refreshed.modelDiscovery.code!=='MODEL_SERVICE_UNREACHABLE'||
+        !refreshed.routeChoice.routes.find(route=>route.route==='deepseek-open-platform')?.models.some(model=>model.modelId==='deepseek-flash'))return false;
       let settings=await window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'j12-custom-main'});
       const binding=(id)=>settings.roles.find(role=>role.roleId===id)?.binding;
       if(binding('main-editorial')?.modelId!=='j12-custom-main'||binding('fast-interaction')?.modelId!=='deepseek-flash')return false;
@@ -1466,6 +1509,8 @@ async function main() {
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
     })()`, 'independent-role-models-without-test');
+    await assertRenderer(primary, `(() => { document.dispatchEvent(new Event('visibilitychange')); return true; })()`, 'model-refresh-click');
+    await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
     at('model-service-search-backends');
     const searchSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends)`);
@@ -1485,7 +1530,7 @@ async function main() {
     // candidate are refused, and clearing succeeds. Choosing a keyed fallback is composed service evidence (tests/service/search-fallback.test.ts).
     await assertRenderer(primary, `(() => { const cards=Array.from(document.querySelectorAll('[data-search-backend]'));
       return cards.length===5 && cards.every((card)=>{ const control=card.querySelector('[data-action="select-search-fallback"]'); return control instanceof HTMLButtonElement && control.textContent==='设为备用来源' && control.disabled && card.dataset.fallback==='false'; }) &&
-        document.querySelector('[data-search-backends]').textContent.includes('候选接口不能作为备用来源') &&
+        document.querySelector('[data-search-backends]').textContent.includes('未实测候选不可选') &&
         document.querySelector('[data-search-backends]').textContent.includes('设置备用来源后') &&
         document.querySelector('[data-search-backends]').textContent.includes('余额或套餐额度不足时，直接切换一次') &&
         document.querySelector('[data-search-backends]').textContent.includes('其他认证错误不会切换');
@@ -1502,8 +1547,15 @@ async function main() {
     // The DeepSeek direct-search candidate (Issue #1055 into W22-S10a #1181): disclosed as 未实测 beside the ranked backends, not
     // selectable, its one explicit 测试连接 refused under development-ci before any credential or transport; closed identifiers only.
     const candidateSettings = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.candidates)`);
-    requireJourney(candidateSettings.length === 1 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
+    requireJourney(candidateSettings.length === 3 && candidateSettings[0].candidateId === 'deepseek-direct-search-v1' && candidateSettings[0].backendId === 'search-deepseek' &&
       candidateSettings[0].measurement === 'not-measured' && candidateSettings[0].selectable === false && candidateSettings[0].endpoint === 'https://api.deepseek.com/v1/tools/search', 'search-candidate-declared');
+    requireJourney(candidateSettings.every((candidate) => candidate.measurement === 'not-measured' && candidate.selectable === false), 'search-native-candidates-unmeasured');
+    await assertRenderer(primary, `['openai-native-search-v1','anthropic-native-search-v1'].every(id => {
+      const card=document.querySelector('[data-search-candidate="'+id+'"]');
+      return card?.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
+    })`, 'search-native-candidates-disclosed');
+    await assertRenderer(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false`, 'search-native-follow-default');
+    requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave',alwaysUseSelectedBackend:true}).then(settings=>settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-source-override-saved');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-search-candidate="deepseek-direct-search-v1"]');
       const labels=Array.from(card?.querySelectorAll('button')??[]).map((node)=>node.textContent);
       return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.textContent.includes('USD 0.75') &&
@@ -1608,7 +1660,7 @@ async function main() {
     manager = await launch();
     [primary] = await waitForRendererCount(manager, 1, 'model-restart-window');
     await waitFor(primary, `document.querySelector('[data-screen="landing"]')`, 'model-restart-landing');
-    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave')`), 'search-backend-selection-survives-restart');
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.searchBackends.selectedBackendId==='search-brave'&&settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-backend-selection-survives-restart');
     const restartedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial'))`);
     requireJourney(
       restartedConnection?.status === 'available' &&
@@ -1630,9 +1682,11 @@ async function main() {
     await click(primary, '模型服务', 'model-replace-open');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"]')`, 'model-replace-ready');
     await assertRenderer(primary, `(() => { const input=document.querySelector('#main-editorial-credential'); return input instanceof HTMLInputElement && input.value==='' && !document.body.textContent.includes(${JSON.stringify(secretOne)}); })()`, 'model-restart-no-redisplay');
+    const replacementCatalogue = await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(','))`);
     await fill(primary, '#main-editorial-credential', secretTwo, 'model-credential-replacement');
     await click(primary, '保存并获取模型', 'model-credential-replace');
-    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存')`, 'model-replacement-ready');
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.dataset.modelRoleStatus==='available' && document.querySelector('#main-editorial-credential')?.value==='' && document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('凭据已保存，但无法获取模型列表：模型服务不可达，请检查网络或网络代理设置') && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]') && document.querySelector('.model-service-settings')?.dataset.providerTransmissionCount==='0'`, 'model-replacement-ready');
+    requireJourney(replacementCatalogue.split(',').includes('deepseek-flash') && await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings=>settings.routeChoice.routes.find(route=>route.route==='deepseek-open-platform').models.map(model=>model.modelId).sort().join(',')===${JSON.stringify(replacementCatalogue)})`), 'model-replacement-catalogue-retained');
     const replacedConnection = await primary.evaluate(`window.ai7.getModelServiceSettings().then((settings)=>settings.roles.find((role)=>role.roleId==='main-editorial')?.connection)`);
     requireJourney(
       replacedConnection?.credentialReference === firstConnection.connection.credentialReference &&
@@ -1762,10 +1816,9 @@ async function main() {
     await click(primary, '按所选方式导入', 'database-import-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.replacementId !== undefined && document.querySelector('.database-import')?.dataset.pending === 'true'`, 'database-import-pending');
     const pendingLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const replaceBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[1] ?? '' : '')?.[1];
+    const replaceBackup = /^已准备好用「AI7 数据库\.ai7db」替换本机全部数据；本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(pendingLines) ? pendingLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(pendingLines) && pendingLines.length === 3 && pendingLines[0] === '已准备好用「AI7 数据库.ai7db」替换本机全部数据。' &&
-        replaceBackup !== undefined && pendingLines[2] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
+      Array.isArray(pendingLines) && pendingLines.length === 2 && replaceBackup !== undefined && pendingLines[1] === 'AI7 下次启动时完成替换；在此之前不能再做修改，要继续修改请先取消替换。',
       'database-import-pending-words',
       pendingLines,
     );
@@ -1788,7 +1841,7 @@ async function main() {
       titlesReplaced.every((title) => titlesBeforeReplace.includes(title)), 'database-replaced-titles', titlesReplaced);
     await openDataAndStorage('database-replaced');
     await waitFor(primary, `document.querySelector('.database-import')?.dataset.replacements === '1' && document.querySelector('.database-import')?.dataset.rollBackOf === ${JSON.stringify(replacementId)}`, 'database-replaced-recorded');
-    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}) && document.querySelector('.database-import-roll-back p')?.textContent === ${JSON.stringify(`上次用「AI7 数据库.ai7db」替换了本机全部数据；替换前的数据在「${replaceBackup}」里。`)}; })()`, 'database-replaced-words');
+    await assertRenderer(primary, `(() => { const line = document.querySelector('.database-replacement-record')?.textContent ?? ''; return line.endsWith(${JSON.stringify(` · 已用「AI7 数据库.ai7db」替换本机全部数据 · 替换前备份「${replaceBackup}」`)}); })()`, 'database-replaced-words');
     await close();
 
     at('database-import-merge');
@@ -1817,10 +1870,10 @@ async function main() {
     await click(primary, '按所选方式导入', 'database-merge-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'merge'`, 'database-merge-pending');
     const mergeLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const mergeBackup = /^本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[1] ?? '' : '')?.[1];
+    const mergeBackup = /本机现在的数据已备份为「(AI7 合并前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(mergeLines) ? mergeLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(mergeLines) && mergeLines[0] === `已准备好把「${replaceBackup}」里的 1 本图书合并到本机。` && mergeBackup !== undefined &&
-        mergeLines[2] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
+      Array.isArray(mergeLines) && mergeLines[0]?.startsWith(`已准备好把「${replaceBackup}」里的 1 本图书合并到本机；`) && mergeBackup !== undefined &&
+        mergeLines[1] === 'AI7 下次启动时完成合并；在此之前做的修改都会保留。',
       'database-merge-pending-words',
       mergeLines,
     );
@@ -1855,10 +1908,10 @@ async function main() {
     await click(primary, '确认回退', 'database-roll-back-confirm');
     await waitFor(primary, `document.querySelector('.database-import-pending')?.dataset.kind === 'roll-back'`, 'database-roll-back-pending');
     const rollBackLines = await primary.evaluate(`Array.from(document.querySelectorAll('.database-import-pending p')).map((line) => line.textContent)`);
-    const rollBackBackup = /^本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[1] ?? '' : '')?.[1];
+    const rollBackBackup = /本机现在的数据已备份为「(AI7 替换前备份 \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}\.ai7db)」，放在备份位置。$/u.exec(Array.isArray(rollBackLines) ? rollBackLines[0] ?? '' : '')?.[1];
     requireJourney(
-      Array.isArray(rollBackLines) && rollBackLines[0] === `已准备好回退到「${replaceBackup}」。` && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
-        rollBackLines[2] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
+      Array.isArray(rollBackLines) && rollBackLines[0]?.startsWith(`已准备好回退到「${replaceBackup}」；`) && rollBackBackup !== undefined && rollBackBackup !== replaceBackup &&
+        rollBackLines[1] === 'AI7 下次启动时完成回退；在此之前不能再做修改，要继续修改请先取消回退。',
       'database-roll-back-pending-words',
       rollBackLines,
     );
@@ -1932,19 +1985,19 @@ async function main() {
     requireJourney(calibrationPage.calibration === '调分记录 0 / 10 本 · 满 10 本后生效' &&
       calibrationPage.waiting === null &&
       // The house offset (Issue #429, EVAL-011a): its method stated, waiting below ten 调分记录, nothing said of 停用 while on.
-      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按上述方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
+      calibrationPage.offset === 'waiting' && calibrationPage.offsetWaiting === '校准偏移尚未计算：满 10 本调分记录后，按校准方法得出，新版本从 AI7 初评开始时按偏移调整起始分数。' &&
       calibrationPage.method === '校准偏移 = 各本书最新一次从 AI7 初评开始并定稿的评估里，你的定稿分数减去 AI7 初评分数的平均值，取到半分；每次读取时重新计算，不另存。' &&
       calibrationPage.offEffect === null &&
       calibrationPage.prediction === '已录入实际数据的已发稿图书 0 / 30 本 · 满 30 本后才能打开' &&
       JSON.stringify(calibrationPage.switches) === JSON.stringify({ calibration: [true, false], prediction: [false, true] }) &&
-      calibrationPage.empty === '还没有已发稿的图书。设为发稿版本后，在这里录入它的定价与首印。' && calibrationPage.books.length === 0,
+      calibrationPage.empty === '尚无已发稿图书，设为发稿版本后可在此录入定价和首印。' && calibrationPage.books.length === 0,
     'calibration-page-words', calibrationPage);
     const toggle = (name) => primary.evaluate(`(() => { const input = document.querySelector('[data-calibration-switch="${name}"]'); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return true; })()`);
     requireJourney(await toggle('calibration'), 'calibration-off-click');
     const calibrationOff = await readCalibration(primary, (page) => page.calibration === '调分记录 0 / 10 本 · 已关闭', 'calibration-off');
     requireJourney(JSON.stringify(calibrationOff.switches.calibration) === JSON.stringify([false, false]) && calibrationOff.focus === 'calibration' &&
       // Off says what a new version does instead, and that the switch stays reversible (EVAL-011; EVAL-011a).
-      calibrationOff.offEffect === '校准已关闭：新版本从 AI7 初评开始时直接用 AI7 的原始分数；可以随时再打开，关闭和打开都有记录。' && calibrationOff.offset === 'waiting',
+      calibrationOff.offEffect === '新版本从 AI7 初评开始时直接用原始分数；随时可打开，开关都有记录。' && calibrationOff.offset === 'waiting',
     'calibration-off-words', calibrationOff);
     const offService = await primary.evaluate(`window.ai7.inspectEvaluationCalibration().then((answer) => [answer.calibration.enabled, answer.calibration.active, answer.preferenceEntries, answer.prediction.enabled])`);
     requireJourney(JSON.stringify(offService) === JSON.stringify([false, false, 1, false]), 'calibration-off-service', offService);

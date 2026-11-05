@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ACCOUNT_LIMIT_CANCELLED_UNREAD, BaselineAnalysisExecutionOwner, accountLimitDetail } from '../../src/service/analysis/execution.js';
 import { ORDINARY_PRODUCTION_ALLOWED_BINDINGS, resolveSourceCheckoutLaunchPolicy, resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { proxyAwareFetch } from '../../src/service/provider/proxy-setting.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { BASELINE_ANALYSIS_TASK_GOAL, type BaselineAnalysisProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { SAMPLE1_UNITS, importSample1Book, pinEditorialWorkspaceProfileRevision2, recordMissingCredentialConnection } from '../support/sample1-baseline.js';
@@ -202,6 +203,32 @@ async function retryableLaunch() {
 }
 
 describe('finite-ceiling serial backoff before the safe retry on the declared retryable route', () => {
+  it('records direct connection failures as resendable analysis gaps without billing uncertainty (#1305)', async () => {
+    const { store, bookId, policy, prepared } = await retryableLaunch();
+    const nativeFetch = proxyAwareFetch(globalThis.fetch, async () => ({ mode: 'direct' }), undefined, undefined,
+      (_options, callback) => callback(new Error('observed connection failure'), null));
+    const execution = new BaselineAnalysisExecutionOwner({ requestGovernor, ledger: store.baselineAnalysisLedger, launchPolicy: policy, fixture: null,
+      productionPolicyFor: (binding) => resolveSourceCheckoutLaunchPolicySync(roots.codeRoot, 'ordinary-production', binding),
+      secretResolver: { resolve: async () => 'public-placeholder' }, production: { scope: 'ordinary-production', nativeFetch } });
+    try {
+      const runId = store.authorizeBaselineAnalysis(bookId, prepared.taskIntent!.taskIntentId, prepared.planEnvelope!.digest).dispatchRunRecordId!;
+      execution.admitAndDispatch(runId);
+      await execution.whenIdle();
+      const result = store.inspectBaselineAnalysis(bookId, () => null);
+      // #1307 retains failed unit checkpoints without creating a result revision.
+      expect(result.resultSetRevision).toBeNull();
+      expect(result.taskOutcome?.classification).toBe('failed');
+      const gaps = store.baselineAnalysisLedger.unitCheckpoints(runId)
+        .flatMap(({ unit }) => unit.closed.state === 'gap' ? [unit.closed.gap] : []);
+      expect(gaps).toHaveLength(SAMPLE1_UNITS);
+      expect(gaps.every((gap) => gap.code === 'adapter-failure' && gap.reason.includes('模型服务不可达'))).toBe(true);
+      expect(result.run?.state).toBe('failed');
+      expect(store.baselineAnalysisLedger.latestUnconfirmedRangesOf(bookId)).toEqual([]);
+      expect(JSON.stringify([result.taskOutcome, gaps])).not.toMatch(/outcome-unknown|可能已计费|可能.*计费|结果待确认/u);
+      expect(store.baselineAnalysisLedger.adaptationsOf(runId).some((entry) => entry.failureCode === 'MODEL_SERVICE_UNREACHABLE')).toBe(true);
+    } finally { await execution.dispose(); store.close(); }
+  });
+
   it.each([{ status: 429, retryAfter: '1', minimum: 1_000 }, { status: 503, retryAfter: null, minimum: 5_000 }])
     ('waits before the single $status retry and repeats the exact request', async ({ status, retryAfter, minimum }) => {
       const { store, bookId, policy, prepared } = await retryableLaunch();

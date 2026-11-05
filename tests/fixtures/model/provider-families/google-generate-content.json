@@ -1190,18 +1190,32 @@
           "text": "合成"
         },
         {
+          "type": "block-end",
+          "index": 0,
+          "block": {
+            "type": "text",
+            "text": "合成"
+          }
+        },
+        {
           "type": "finish",
           "reason": {
             "kind": "error",
             "failure": {
-              "code": "AI7_OUTCOME_UNKNOWN",
-              "message": "模型服务已接受请求，但回答没有完整传回。",
-              "status": 200
+              "code": "PROVIDER_ERROR",
+              "message": "模型服务返回服务端错误。",
+              "status": 503
             }
           }
         }
       ],
-      "result": null,
+      "result": {
+        "kind": "answer",
+        "text": "合成",
+        "reasoningText": null,
+        "usage": null,
+        "truncated": true
+      },
       "usage": null
     }
   ]

@@ -94,6 +94,7 @@ export interface UnconfirmedOutcomeRecord {
   /** The manuscript revision the latest revision holding the range read — whose text `unitOrdinal` counts in; `null` for a step. */
   readonly heldAtRevisionId: string | null;
   readonly contentKey: string | null;
+  readonly rereadFailed?: boolean;
   readonly stage: UnconfirmedStage | null;
 }
 
@@ -587,6 +588,8 @@ export interface StageContinuation {
     nextTurn: number; ended: boolean;
     turns: Array<{ requestDigest: string; unitOrdinal: number; usage: { inputTokens: number; outputTokens: number } | null; state: 'closed' | 'gap' | 'outcome-unknown' }>;
     dispositions: AnalysisAssuranceSampleDispositionProjection[]; gapReasons: string[];
+    parseFailures?: import('../../shared/protocol.js').AnalysisAssuranceSampleProjection['parseFailures'];
+    salvaged?: import('../../shared/protocol.js').SalvagedModelResult['salvaged'];
     sampled: { inputTokens: number; outputTokens: number; turnsWithUsage: number };
   };
 }

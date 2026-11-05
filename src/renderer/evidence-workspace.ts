@@ -1,3 +1,4 @@
+import { technicalWords, identityWords } from './technical-layer.js';
 import {
   EVIDENCE_MATRIX_MAX_PINNED,
   type CorrectionProposalDraftProjection,
@@ -44,9 +45,7 @@ import {
   EVIDENCE_SOURCES_MORE,
   EVIDENCE_SOURCES_NONE,
   EVIDENCE_STATEMENT_LABEL,
-  EVIDENCE_STATEMENT_NOTE,
   EVIDENCE_SUMMARY_HEADING,
-  EVIDENCE_SUMMARY_NOT_EVIDENCE,
   EVIDENCE_UNPIN,
   EVIDENCE_WORDING_LABEL,
   EVIDENCE_WORKSPACE_HEADING,
@@ -110,7 +109,8 @@ interface CorrectionForm {
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -215,17 +215,18 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     element.dataset['anchor'] = result.anchor.state;
     const heading = el('h6', undefined, EVIDENCE_WORKSPACE_HEADING);
     heading.id = headingId;
+    heading.append(' · ', el('span', 'evidence-no-mutation', EVIDENCE_NO_MUTATION));
     const header = el('div', 'evidence-header');
     const wording = el('div', 'evidence-wording');
     wording.append(el('span', 'evidence-term', EVIDENCE_WORDING_LABEL), el('blockquote', 'evidence-quote', result.quote));
     const statement = el('div', 'evidence-statement');
-    statement.append(el('span', 'evidence-term', EVIDENCE_STATEMENT_LABEL), el('p', undefined, result.normalizedStatement), el('p', 'field-note', EVIDENCE_STATEMENT_NOTE));
+    statement.append(el('span', 'evidence-term', EVIDENCE_STATEMENT_LABEL), el('p', undefined, result.normalizedStatement));
     header.append(wording, statement);
     const states = el('div', 'evidence-states');
     for (const [term, value] of factStateLines(result)) {
       const state = el('span', 'evidence-state');
       state.dataset['stateTerm'] = term;
-      state.append(el('span', 'evidence-term', term), el('span', `status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
+      state.append(el('span', 'evidence-term', term), el('span', `state-term status-pill evidence-pill evidence-pill-${term === '事实核查' ? outcomeTone(result.states.factualVerification) : 'neutral'}`, value));
       states.append(state);
     }
     const children: HTMLElement[] = [heading, header, states, el('p', 'evidence-level', factLevelLine(result)), el('p', 'evidence-counts', factSourceCountsLine(result))];
@@ -241,7 +242,6 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     children.push(renderSources(), renderMatrix(), renderConflicts(current), renderSummary(current), renderHistory(current), renderDecision(current));
     const correctionSection = renderCorrection(current);
     if (correctionSection !== null) children.push(correctionSection);
-    children.push(el('p', 'field-note evidence-no-mutation', EVIDENCE_NO_MUTATION));
     element.replaceChildren(...children);
     restoreFocus(key);
   }
@@ -252,14 +252,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     article.dataset['checkState'] = card.checkState;
     article.dataset['relation'] = card.relation;
     article.tabIndex = -1;
-    article.append(el('h6', undefined, sourceCardTitle(card)));
+    const heading = el('h6', undefined, sourceCardTitle(card));
+    if (card.excluded) heading.append(' · 已排除，来源及核查历史保留');
+    article.append(heading);
     if (card.sourceKind === 'web') article.append(el('p', 'technical-identity evidence-card-url', card.sourceRef));
     // An excerpt is shown only when it was obtained exactly; a candidate is never quoted (EVID-004, EVID-005).
     if (card.excerpt !== null) article.append(el('blockquote', 'evidence-excerpt', card.excerpt));
     article.append(facts(sourceCardFacts(card, options.instant)));
     const actions = el('div', 'button-row evidence-card-actions');
-    if (card.excluded) article.append(el('p', 'field-note', '已排除；来源及核查历史保留。'));
-    else if (projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
+    if (!card.excluded && projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
       const exclude = el('input');
       exclude.type = 'checkbox'; exclude.checked = excludedSources.has(card.sourceRef); exclude.disabled = working;
       exclude.addEventListener('change', () => {
@@ -285,9 +286,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       render();
     });
     const pinLabel = el('label', 'evidence-pin');
-    pinLabel.append(pin, el('span', undefined, isPinned ? EVIDENCE_UNPIN : EVIDENCE_PIN));
+    pinLabel.append(pin, el('span', undefined, isPinned ? EVIDENCE_UNPIN : pinned.length >= EVIDENCE_MATRIX_MAX_PINNED ? `${EVIDENCE_PIN} · ${EVIDENCE_PIN_FULL}` : EVIDENCE_PIN));
     actions.append(pinLabel);
-    if (!isPinned && pinned.length >= EVIDENCE_MATRIX_MAX_PINNED) actions.append(el('span', 'field-note', EVIDENCE_PIN_FULL));
     if (card.evidenceId !== null) {
       const evidenceId = card.evidenceId;
       actions.append(button(EVIDENCE_OPEN_SOURCE, 'open-source', 'quiet', () => options.openSource(evidenceId)));
@@ -299,8 +299,9 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderSources(): HTMLElement {
     const section = el('section', 'evidence-sources');
     section.dataset['totalSources'] = String(projection?.totalSources ?? 0);
-    section.append(el('h6', undefined, EVIDENCE_SOURCES_HEADING));
-    if (sources.length === 0) section.append(el('p', 'field-note', EVIDENCE_SOURCES_NONE));
+    const heading = el('h6', undefined, EVIDENCE_SOURCES_HEADING);
+    if (sources.length === 0) heading.append(` · ${EVIDENCE_SOURCES_NONE}`);
+    section.append(heading);
     for (const card of sources) section.append(renderCard(card));
     if (nextCursor !== null) section.append(button(EVIDENCE_SOURCES_MORE, 'more-sources', 'secondary', () => void moreSources()));
     return section;
@@ -309,10 +310,11 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderMatrix(): HTMLElement {
     const section = el('section', 'evidence-matrix');
     section.dataset['pinnedCount'] = String(pinned.length);
-    section.append(el('h6', undefined, EVIDENCE_MATRIX_HEADING));
+    const heading = el('h6', undefined, EVIDENCE_MATRIX_HEADING);
+    section.append(heading);
     const cards = pinned.map((id) => sources.find((card) => card.cardId === id)).filter((card): card is EvidenceSourceCardProjection => card !== undefined);
     if (cards.length < 2) {
-      section.append(el('p', 'field-note', EVIDENCE_MATRIX_HINT));
+      heading.append(` · ${EVIDENCE_MATRIX_HINT}`);
       return section;
     }
     const table = el('table', 'evidence-matrix-table');
@@ -358,7 +360,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderSummary(current: EvidenceWorkspaceProjection): HTMLElement {
     const section = el('section', 'evidence-summary');
     section.dataset['label'] = current.summary.label;
-    section.append(el('h6', undefined, `${EVIDENCE_SUMMARY_HEADING} · ${current.summary.label}`), el('p', 'field-note', EVIDENCE_SUMMARY_NOT_EVIDENCE));
+    section.append(el('h6', undefined, `${EVIDENCE_SUMMARY_HEADING} · 非证据 · ${current.summary.label}`));
     const list = el('ul');
     for (const statement of current.summary.statements) {
       const item = el('li', undefined, statement.text);
@@ -380,7 +382,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     const list = el('ol');
     for (const entry of current.history) {
       list.append(el('li', entry.resultId === current.result.resultId ? 'evidence-history-current' : undefined,
-        `第 ${entry.version} 版 · ${entry.outcome} · ${options.instant(entry.recordedAt)}`));
+        `${technicalWords(`第 ${entry.version} 版`, '版本')} · ${entry.outcome} · ${options.instant(entry.recordedAt)}`));
     }
     section.append(list);
     return section;
@@ -391,15 +393,15 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
   function renderDecision(current: EvidenceWorkspaceProjection): HTMLElement {
     const section = el('section', 'evidence-decision');
     const titleId = uid('decision');
-    const title = el('h6', undefined, DECISION_HEADING);
+    const title = el('h6', undefined, `${DECISION_HEADING} · ${DECISION_NOTE}`);
     title.id = titleId;
-    section.append(title, el('p', 'field-note', DECISION_NOTE));
+    section.append(title);
     for (const recorded of current.decisions) {
       const line = el('p', 'evidence-decision-recorded', factDecisionLine(recorded));
       line.dataset['decisionId'] = recorded.decisionId;
       line.dataset['superseded'] = recorded.superseded ? 'true' : 'false';
+      if (recorded.superseded) line.append(` · ${DECISION_SUPERSEDED}`);
       section.append(line);
-      if (recorded.superseded) section.append(el('p', 'field-note', DECISION_SUPERSEDED));
     }
     const card = current.decisionCard;
     const latest = current.decisions.at(-1);
@@ -413,7 +415,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     }
     if (card.recommendation !== null) {
       section.append(el('p', 'evidence-decision-recommendation',
-        `AI7 建议「${current.decisionCard.choices.find((choice) => choice.disposition === card.recommendation!.disposition)?.label ?? ''}」：${card.recommendation.rationale}（未预选）`));
+        `AI7 建议「${current.decisionCard.choices.find((choice) => choice.disposition === card.recommendation!.disposition)?.label ?? ''}」：${card.recommendation.rationale}`));
     }
     if (card.drift !== null) {
       const drift = el('p', 'evidence-decision-drift', card.drift);
@@ -548,13 +550,12 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     if (draft.label !== null) {
       const label = el('p', 'correction-assurance-label', draft.label);
       label.dataset['assuranceIncomplete'] = 'true';
+      if (draft.missingChecks.length > 0) label.append(` · 尚缺：${draft.missingChecks.join('、')}`);
       section.append(label);
-      if (draft.missingChecks.length > 0) section.append(el('p', 'field-note', `尚缺：${draft.missingChecks.join('、')}`));
     }
-    section.append(el('p', 'field-note', draft.scopeStatement));
     const group = el('fieldset', 'correction-variants');
     const name = uid('variant');
-    if (draft.variants.length === 0) group.append(el('p', 'field-note', CORRECTION_NO_VARIANTS));
+    group.append(el('legend', undefined, `更正方案 · ${draft.variants.length === 0 ? `${draft.scopeStatement.replace(/。$/u, '')}；${CORRECTION_NO_VARIANTS}` : draft.scopeStatement}`));
     const choices: Array<{ id: string; label: string; text: string | null; rationale: string | null; lines: string[] }> = [
       ...draft.variants.map((variant, index) => ({ id: variant.variantId, label: `方案 ${index + 1}：${variant.text}`, text: variant.text, rationale: variant.rationale,
         lines: [variant.rationale, ...variant.unresolved.map((line) => `未解决：${line}`), ...variant.limitations.map((line) => `局限：${line}`)] })),
@@ -578,8 +579,8 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
         render();
       });
       const body = el('span', 'correction-variant-body');
-      body.append(el('span', undefined, choice.label));
-      for (const line of choice.lines) body.append(el('span', 'field-note', line));
+      const detail = choice.lines.length === 0 ? '' : ` · ${choice.lines.map((line) => line.replace(/。$/u, '')).join('；')}。`;
+      body.append(el('span', undefined, `${choice.label}${detail}`));
       label.append(input, body);
       group.append(label);
       const variant = draft.variants.find((entry) => entry.variantId === choice.id);
@@ -618,7 +619,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       section.append(field);
     }
     const ranges = el('fieldset', 'correction-ranges');
-    ranges.append(el('legend', undefined, CORRECTION_RANGES_HEADING), el('p', 'field-note', CORRECTION_RANGES_NOTE));
+    ranges.append(el('legend', undefined, `${CORRECTION_RANGES_HEADING} · ${CORRECTION_RANGES_NOTE}`));
     for (const range of draft.ranges) {
       const label = el('label', 'correction-range');
       const input = el('input');

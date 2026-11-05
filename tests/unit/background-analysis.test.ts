@@ -299,9 +299,9 @@ describe('the 后台分析 block words', () => {
     // Issue #864: the scope and the ceiling each Run is held to.
     expect(backgroundCeilingLine(enrollment)).toBe('范围：《甲》这一本书 · 预算上限 1000 tokens');
     expect(backgroundCeilingLine({ ...enrollment, shareTokens: 333, scope: { ...enrollment.scope, kind: 'series', label: '书系《乙》的 3 本书', position: 2 } }))
-      .toBe('范围：书系《乙》的 3 本书 · 预算上限 1000 tokens，本书份额 333 tokens（第 2 本）');
+      .toBe('范围：书系《乙》的 3 本书 · 预算上限 1000 tokens，本书份额 333 tokens · 第 2 本');
     expect(backgroundCeilingLine({ ...enrollment, ceilingTokens: null, shareTokens: null })).toBe('范围：《甲》这一本书 · 这份登记没有预算上限');
-    expect(backgroundSkippedLine([{ bookId: randomUUID(), title: '丙', reason: '登记之后稿件还没有改动。' }])).toBe('这次跳过：《丙》（登记之后稿件还没有改动。）');
+    expect(backgroundSkippedLine([{ bookId: randomUUID(), title: '丙', reason: '登记之后稿件还没有改动。' }])).toBe('这次跳过：《丙》：登记之后稿件还没有改动。');
     expect([BACKGROUND_PAUSE, BACKGROUND_RESUME]).toEqual(['暂停', '续行']);
     expect([backgroundCeilingOf('1000', 3, 10_000), backgroundCeilingOf(' 7 ', 1, 10), backgroundCeilingOf('2', 3, 10), backgroundCeilingOf('1e3', 1, 10_000),
       backgroundCeilingOf('', 1, 10), backgroundCeilingOf('11', 1, 10), backgroundCeilingOf('-5', 1, 10)]).toEqual([1000, 7, null, null, null, null, null]);
@@ -322,7 +322,7 @@ describe('the 后台分析 block words', () => {
     expect(backgroundChangeKey(changed)).not.toBe(backgroundChangeKey(projection));
     expect(backgroundChangeKey({ ...projection, lastLook: null } as BackgroundAnalysisEnrollmentProjection)).not.toBe(backgroundChangeKey(projection));
     expect(backgroundLookLine({ at: 'L', kind: 'wait', reason: BACKGROUND_PLACE_BUSY }, instant)).toBe(`AI7 上次查看：〈L〉 · ${BACKGROUND_PLACE_BUSY}`);
-    expect(backgroundNotStartedLine({ at: 'N', reason: '后台分析这次没有开始：已撤销' }, instant)).toBe('后台分析这次没有开始：已撤销（〈N〉）');
+    expect(backgroundNotStartedLine({ at: 'N', reason: '后台分析这次没有开始：已撤销' }, instant)).toBe('后台分析这次没有开始：已撤销 · 〈N〉');
   });
 
   it('admits the J-09 quiet period only as whole milliseconds from 1 s to 30 s', () => {

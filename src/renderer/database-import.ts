@@ -37,6 +37,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -73,7 +74,8 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
   const choose = action(DATABASE_IMPORT_ACTIONS.choose, 'secondary', 'choose', () => void chooseFile());
   const toolbar = el('div', 'button-row');
   toolbar.append(choose);
-  root.replaceChildren(el('h3', undefined, DATABASE_IMPORT_HEADING), el('p', 'field-note', DATABASE_IMPORT_LEDE), toolbar, preview, pending, rollBack, records);
+  const intro = el('p', 'field-note', DATABASE_IMPORT_LEDE);
+  root.replaceChildren(el('h3', undefined, DATABASE_IMPORT_HEADING), intro, toolbar, preview, pending, rollBack, records);
 
   const setBusy = (value: boolean): void => {
     busy = value;
@@ -111,7 +113,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       pending.dataset['replacementId'] = waiting.replacementId;
       pending.dataset['kind'] = waiting.kind;
       const lines = databasePendingLines(waiting);
-      const first = el('p', 'database-import-pending-state', lines[0]);
+      const first = el('p', 'database-import-pending-state', `${lines[0].replace(/。$/u, '')}；${lines[1]}`);
       first.setAttribute('role', 'status');
       const buttons = el('div', 'button-row');
       buttons.append(
@@ -120,7 +122,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
           : DATABASE_IMPORT_ACTIONS.cancelReplacement, 'quiet', 'cancel-replacement',
           () => void cancelReplacement(waiting.replacementId)),
       );
-      pending.replaceChildren(first, el('p', 'field-note', lines[1]), el('p', 'attention-note', lines[2]), buttons);
+      pending.replaceChildren(first, el('p', 'attention-note', lines[2]), buttons);
     }
 
     const target = projection.rollBackOf === null ? undefined : projection.replacements.find((record) => record.replacementId === projection.rollBackOf);
@@ -129,7 +131,7 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
       rollBack.replaceChildren();
     } else {
       rollBack.hidden = false;
-      const [offer, consequence] = databaseRollBackLines(target);
+      const [, consequence] = databaseRollBackLines(target);
       const open = action(DATABASE_IMPORT_ACTIONS.rollBack, 'secondary', 'roll-back', () => {
         const confirmation = el('div', 'database-import-roll-back-confirm');
         const confirm = action(DATABASE_IMPORT_ACTIONS.confirmRollBack, 'primary', 'confirm-roll-back', () => void rollBackTo(target.replacementId));
@@ -145,17 +147,16 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
         rollBack.append(confirmation);
         keep.focus();
       });
-      rollBack.replaceChildren(el('p', 'field-note', offer), open);
+      rollBack.replaceChildren(open);
     }
 
     const list = el('ol');
     for (const record of projection.replacements) {
       list.append(el('li', `database-replacement-record outcome-${record.outcome}`, databaseReplacementRecordLine(record, instant)));
     }
-    records.replaceChildren(
-      el('summary', undefined, databaseReplacementRecordsLabel(projection.replacements.length, projection.total)),
-      projection.total === 0 ? el('p', 'field-note', DATABASE_REPLACEMENT_NO_RECORDS) : list,
-    );
+    intro.textContent = projection.total === 0 ? `${DATABASE_IMPORT_LEDE.replace(/。$/u, '')}；${DATABASE_REPLACEMENT_NO_RECORDS}` : DATABASE_IMPORT_LEDE;
+    records.hidden = projection.total === 0;
+    records.replaceChildren(el('summary', undefined, databaseReplacementRecordsLabel(projection.replacements.length, projection.total)), ...(projection.total === 0 ? [] : [list]));
   };
 
   const showPreview = (file: DatabaseImportPreviewProjection): void => {
@@ -206,7 +207,8 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
         confirm.disabled = busy;
       });
       const label = el('label', 'database-import-choice');
-      label.append(radio, document.createTextNode(text));
+      label.append(radio, document.createTextNode(value === 'merge' && !mergeable && file.mergeRefusal === null
+        ? `${text} · ${DATABASE_MERGE_NOTHING}` : text));
       return label;
     };
     const replaceDetails = el('p', 'attention-note database-import-consequence', DATABASE_REPLACE_CONSEQUENCE);
@@ -223,15 +225,18 @@ export function mountDatabaseImport(options: MountDatabaseImportOptions): void {
     // A package of many Books lists its first ones and counts the rest (Issue #434 review).
     const more = databaseImportMoreBooksLine(file.books.length, file.bookCounts.new + file.bookCounts.present + file.bookCounts.sameTitle);
     if (more !== null) books.append(el('li', 'database-merge-books-more', more));
-    mergeDetails.append(el('p', 'attention-note', DATABASE_MERGE_CONSEQUENCE), books,
-      ...file.mergeNotices.map((notice) => el('p', 'field-note database-merge-notice', DATABASE_MERGE_NOTICE_LINES[notice])));
+    mergeDetails.append(el('p', 'attention-note', DATABASE_MERGE_CONSEQUENCE), books);
+    if (file.mergeNotices.length > 0) {
+      const notices = el('ul');
+      for (const notice of file.mergeNotices) notices.append(el('li', 'database-merge-notice', DATABASE_MERGE_NOTICE_LINES[notice]));
+      mergeDetails.append(notices);
+    }
     choices.append(
       el('legend', undefined, DATABASE_IMPORT_CHOICES_LEGEND),
       option('replace', DATABASE_IMPORT_CHOICES.replace, replaceDetails), replaceDetails,
       option('merge', DATABASE_IMPORT_CHOICES.merge, mergeDetails), mergeDetails,
     );
     if (file.mergeRefusal !== null) choices.append(el('p', 'attention-note database-merge-refusal', file.mergeRefusal));
-    else if (!mergeable) choices.append(el('p', 'field-note database-merge-nothing', DATABASE_MERGE_NOTHING));
     buttons.append(confirm, cancel);
     preview.replaceChildren(rows, choices, buttons);
     choices.querySelector<HTMLInputElement>('input[name="database-import-choice"]')?.focus();

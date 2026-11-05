@@ -1,5 +1,7 @@
 import { constructPre94PolicyEncoding } from '../support/analysis-ledger-revisions.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
+import { CooperativeJobOwner } from '../../src/service/cooperative-jobs.js';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,11 +10,12 @@ import { EditorialStore, StoreError } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy } from '../../src/service/launch-policy.js';
 import { BaselineAnalysisExecutionOwner } from '../../src/service/analysis/execution.js';
 import { sliceGraphemes } from '../../src/service/analysis/factual-review-contract.js';
+import { unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { ANALYSIS_RESULT_SET_REVISION_81_SQL, ANALYSIS_RESULT_SET_SCHEMA_SQL } from '../../src/service/analysis/result-set-schema.js';
 import { CUSTOM_ANALYSIS_DIMENSION_SCHEMA_SQL } from '../../src/service/custom-analysis-dimensions.js';
 import { MERGE_TABLE_POLICY } from '../../src/service/database-merge.js';
 import { CUSTOM_ANALYSIS_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION, LATEST_SCHEMA_VERSION, TASK_INTENT_DRAFT_SCHEMA_VERSION } from '../../src/service/task-authorization.js';
-import { loadModelFixture, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
+import { fixtureEntryKey, loadModelFixture, type ModelFixtureEntry, type ResolvedModelFixture } from '../../src/service/provider/model-fixture.js';
 import { CUSTOM_ANALYSIS_ASSURANCE_STATEMENT, type CustomAnalysisDimensionsProjection, type LaunchPolicyProjection } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { CUSTOM_DIMENSION_TEMPLATE, CUSTOM_DIMENSION_TITLE } from '../support/custom-analysis.js';
@@ -96,10 +99,17 @@ function defineDimension(book: Book, title = CUSTOM_DIMENSION_TITLE): { dimensio
 }
 
 /** ②A 自定义 › 运行 then the drawer's 开始任务: prepare, authorize, dispatch on the Task's own ledger, settle. */
-async function run(book: Book, dimensionId: string): Promise<string> {
+async function run(book: Book, dimensionId: string, fixtureBinding?: { entries: Map<string, ModelFixtureEntry>; promptContractDigest: string }): Promise<string> {
   const prepared = book.store.prepareCustomAnalysis({ bookId: book.bookId, dimensionId, update: null }, launchPolicy);
   const task = book.store.inspectAnalysisTask(book.bookId, prepared.taskIntentId);
   expect(task.state).toBe('prepared');
+  // A renamed dimension has its own document/contract digest; bind the authored answers to this exact request.
+  if (fixtureBinding !== undefined) for (const unit of task.coverageManifest!.units) {
+    const originalDigest = unitRequestDigest(fixtureBinding.promptContractDigest, unit.ordinal, unit.digest);
+    const entry = fixture.entries.get(fixtureEntryKey(unit.ordinal, originalDigest))!;
+    const requestDigest = unitRequestDigest(task.planEnvelope!.promptContractDigest, unit.ordinal, unit.digest);
+    fixtureBinding.entries.set(fixtureEntryKey(unit.ordinal, requestDigest, entry.attempt), { ...entry, requestDigest });
+  }
   const authorized = book.store.authorizeBaselineAnalysis(book.bookId, prepared.taskIntentId, task.planEnvelope!.digest);
   expect(authorized.dispatchRunRecordId).not.toBeNull();
   book.owner.admitAndDispatch(authorized.dispatchRunRecordId!, authorized.ledger);
@@ -170,6 +180,21 @@ describe('the dimension ledger (schema revision 82)', () => {
 });
 
 describe('a custom analysis Run over the real store on exact sample1', () => {
+  it('repeats a completed custom dimension on its own ledger (#1328)', async () => {
+    await withBook(async (book) => {
+      const { dimensionId, versionId } = defineDimension(book);
+      const original = await run(book, dimensionId);
+      await startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId: 'repeat', repeat: { kind: 'baseline-analysis', ref: original } }] }, {
+        store: book.store, jobs: new CooperativeJobOwner(book.store), policy: launchPolicy, execution: book.owner, driveReview: () => {}, credentialReadiness: async () => null,
+        connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => book.owner.busy },
+      });
+      await book.owner.whenIdle();
+      const latest = custom(book.store.inspectCustomAnalysisDimensions(book.bookId), dimensionId).book!.latest!;
+      expect(latest.dimensionVersion.versionId).toBe(versionId);
+      expect(book.store.inspectAnalysisTask(book.bookId, original).taskIntent!.taskIntentId).not.toBe(original);
+      expect(book.store.inspectBaselineAnalysis(book.bookId).resultSetRevision).toBeNull();
+    });
+  });
   it('finds a custom Connectivity Wait and reconnects on its exact version ledger', async () => {
     await withBook(async (book) => {
       const { dimensionId, versionId } = defineDimension(book);
@@ -272,14 +297,17 @@ describe('a custom analysis Run over the real store on exact sample1', () => {
   }, 180_000);
 
   it('keeps a second dimension\'s Result Set apart (ANALYSIS-009), and a stopped version refuses new Runs and keeps its history', async () => {
+    const entries = new Map(fixture.entries);
+    fixture = { ...fixture, entries };
     await withBook(async (book) => {
       const first = defineDimension(book);
-      // The same document under another dimension: the same contract, so the same fixture answers; its own kind and Result Set.
+      // The same question under a renamed dimension: its own contract, kind and Result Set.
       const second = defineDimension(book, '单元开篇（第二个维度）');
-      await run(book, first.dimensionId);
+      const firstTaskId = await run(book, first.dimensionId);
       expect(custom(book.store.inspectCustomAnalysisDimensions(book.bookId), second.dimensionId).book!.latest).toBeNull();
       const firstRevision = custom(book.store.inspectCustomAnalysisDimensions(book.bookId), first.dimensionId).book!.latest!.revisionId;
-      await run(book, second.dimensionId);
+      const promptContractDigest = book.store.inspectAnalysisTask(book.bookId, firstTaskId).planEnvelope!.promptContractDigest;
+      await run(book, second.dimensionId, { entries, promptContractDigest });
       const both = book.store.inspectCustomAnalysisDimensions(book.bookId);
       expect(custom(both, first.dimensionId).book!.latest!.revisionId).toBe(firstRevision);
       expect(custom(both, second.dimensionId).book!.latest!.ordinal).toBe(1);
@@ -406,7 +434,7 @@ describe('baseline and custom analysis on the same launch', () => {
 describe('schema revision 82', () => {
   it.each([TASK_INTENT_DRAFT_SCHEMA_VERSION, IMPORTED_SKILL_SCHEMA_VERSION])('rebuilds revision %i Result Set relations byte for byte, adds dimensions empty, and refuses a terminal store without them', async (predecessor) => {
     // Synchronized with #89: imported-Skill update ledgers follow revision 82 without rebuilding its relations.
-    expect(LATEST_SCHEMA_VERSION).toBe(107);
+    expect(LATEST_SCHEMA_VERSION).toBe(108);
     let bookId = '';
     await withBook(async (book) => {
       bookId = book.bookId;

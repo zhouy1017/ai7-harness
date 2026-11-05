@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { DiagnosticsApi } from './diagnostics.js';
 import {
   IPC_CHANNELS,
@@ -215,6 +215,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   getImportStartup: () =>
     invoke<ServiceOperationMap['getImportStartup']['output']>(IPC_CHANNELS.getImportStartup),
   selectAndStageManuscript: () => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript),
+  stageDroppedManuscript: (file: File) => invoke<PickerStageResult>(IPC_CHANNELS.selectAndStageManuscript, { droppedPath: webUtils.getPathForFile(file) }),
   continueImportDraft: (input: ServiceOperationMap['continueImportDraft']['input']) =>
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>
@@ -765,6 +766,14 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
   prepareGlobalAgentTurn: (input: ServiceOperationMap['prepareGlobalAgentTurn']['input']) => invoke<ServiceOperationMap['prepareGlobalAgentTurn']['output']>(IPC_CHANNELS.prepareGlobalAgentTurn, input),
   inspectGlobalAttention: () =>
     invoke<ServiceOperationMap['inspectGlobalAttention']['output']>(IPC_CHANNELS.inspectGlobalAttention, {}),
+  taskOverviewCall: (input: Parameters<RendererApi['taskOverviewCall']>[0]) => invoke<Awaited<ReturnType<RendererApi['taskOverviewCall']>>>(IPC_CHANNELS.taskOverviewCall, input),
+  controlAllTasks: (input: { action: 'pause' | 'resume' }) => invoke<ServiceOperationMap['controlAllTasks']['output']>(IPC_CHANNELS.controlAllTasks, input),
+  inspectTaskOverview: () =>
+    invoke<ServiceOperationMap['inspectTaskOverview']['output']>(IPC_CHANNELS.inspectTaskOverview, {}),
+  reorderQueuedRun: (input: ServiceOperationMap['reorderQueuedRun']['input']) =>
+    invoke<ServiceOperationMap['reorderQueuedRun']['output']>(IPC_CHANNELS.reorderQueuedRun, input),
+  startQuickTasks: (input: ServiceOperationMap['startQuickTasks']['input']) =>
+    invoke<import('../shared/protocol.js').StartQuickTasksResult>(IPC_CHANNELS.startQuickTasks, input),
   reviewManuscriptExport: (input: Parameters<RendererApi['reviewManuscriptExport']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['reviewManuscriptExport']>>>(IPC_CHANNELS.reviewManuscriptExport, input),
   chooseManuscriptExportDestination: (input: Parameters<RendererApi['chooseManuscriptExportDestination']>[0]) =>

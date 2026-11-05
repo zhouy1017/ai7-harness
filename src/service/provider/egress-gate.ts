@@ -292,10 +292,11 @@ export interface SearchCandidateProbeTicket {
   readonly endpoint: string;
   readonly host: string;
   readonly method: 'POST';
-  readonly protocol: 'deepseek-direct-search';
+  readonly protocol: SearchConnectionTestPolicy['protocol'];
   readonly configurationDigest: string;
   readonly arguments: SearchConnectionTestPolicy['arguments'];
   readonly argumentsDigest: string;
+  readonly model?: string;
   readonly credentialSlot: CredentialSlot;
   readonly credentialReference: string;
   readonly policy: { readonly operationalScope: 'ordinary-production'; readonly providerProcessingVersion: string };
@@ -316,8 +317,9 @@ export function evaluateSearchCandidateProbe(input: {
   readonly providerProcessingVersion: string | null;
   readonly policy: SearchConnectionTestPolicy | undefined;
   readonly candidate: { readonly backendId: string; readonly candidateId: string; readonly endpoint: string; readonly host: string; readonly method: 'POST';
-    readonly protocol: 'deepseek-direct-search'; readonly headerForm: 'authorization-bearer'; readonly credentialSlot: string; readonly arguments: SearchConnectionTestPolicy['arguments'] };
+    readonly protocol: SearchConnectionTestPolicy['protocol']; readonly headerForm: SearchConnectionTestPolicy['headerForm']; readonly credentialSlot: string; readonly arguments: SearchConnectionTestPolicy['arguments'] };
   readonly configurationDigest: string;
+  readonly model?: string;
   /** Read only after the scope and policy checks pass. */
   readonly connection: () => { readonly credentialReference: string | null; readonly credentialOperationState: string } | undefined;
   readonly developmentReference: (reference: string) => boolean;
@@ -336,11 +338,11 @@ export function evaluateSearchCandidateProbe(input: {
   const connection = input.connection();
   const reference = connection?.credentialOperationState === 'ready' ? connection.credentialReference : null;
   if (reference === null || !DIGEST_PATTERN.test(input.configurationDigest) || input.developmentReference(reference)) {
-    return refuse('SEARCH_CREDENTIAL_MISSING', '连接测试需要已保存的 DeepSeek 服务端搜索（官方）密钥；请先在本页保存。');
+    return refuse('SEARCH_CREDENTIAL_MISSING', '连接测试需要已保存的对应渠道凭据；请先在设置中保存。');
   }
   const pins = { actionId: randomUUID(), backendId: candidate.backendId, candidateId: candidate.candidateId, endpoint: candidate.endpoint, host: candidate.host,
     method: candidate.method, protocol: candidate.protocol, configurationDigest: input.configurationDigest, arguments: candidate.arguments,
-    argumentsDigest: policy.argumentsCanonicalSha256, credentialSlot: candidate.credentialSlot as CredentialSlot, credentialReference: reference,
+    argumentsDigest: policy.argumentsCanonicalSha256, ...(input.model === undefined ? {} : { model: input.model }), credentialSlot: candidate.credentialSlot as CredentialSlot, credentialReference: reference,
     policy: { operationalScope: 'ordinary-production' as const, providerProcessingVersion: input.providerProcessingVersion ?? '' } };
   const ticket: SearchCandidateProbeTicket = Object.freeze({ decision: 'call-search-candidate-probe' as const, ticketId: randomUUID(), bindingDigest: sha256Hex(canonicalJson(pins)), ...pins });
   outstandingCandidateProbes.add(ticket);

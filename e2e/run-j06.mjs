@@ -201,6 +201,7 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
@@ -345,11 +346,11 @@ async function importAndOpen(renderer, title) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', 'import-start');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
@@ -363,7 +364,7 @@ async function importAndOpen(renderer, title) {
 
 /** Wait until nothing typed is waiting for the journal, and no command is in flight. */
 async function settled(renderer, name) {
-  await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑')?.disabled === true && document.documentElement.dataset.ai7CloseRisk !== 'true'`, name);
+  await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed' && document.documentElement.dataset.ai7CloseRisk !== 'true'`, name);
 }
 
 /**
@@ -1031,14 +1032,14 @@ async function main() {
       return {
         group: item.closest('section.global-attention-group')?.dataset.attentionGroup ?? null, state: item.dataset.attentionState, blocked: item.dataset.attentionBlocked,
         target: item.dataset.attentionTarget, pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null, reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
       };
     })()`);
     requireJourney(conflictRow?.group === 'exceptions' && conflictRow.state === 'manuscript-conflict-deferred' && conflictRow.blocked === 'true' &&
       conflictRow.target === 'manuscript-conflict' && conflictRow.pill === '需要解决冲突 · 暂不处理' && conflictRow.object === '修改建议 · 稿件冲突' &&
-      conflictRow.reason === '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。已记下暂不处理，这处冲突仍未解决。' &&
-      conflictRow.next === '安全的下一步：解决冲突…', 'attention-conflict-row', conflictRow);
+      conflictRow.reason === '建议所依据的原文已有改动，解决冲突后才能应用建议。' &&
+      conflictRow.next === '解决冲突…', 'attention-conflict-row', conflictRow);
     await assertRenderer(renderer, `(() => { const open = document.querySelector('[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(`conflict:${secondId}`)}]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'attention-conflict-open');
     await waitFor(renderer, `window.__j06.conflict()?.dataset.conflictMarkId === ${JSON.stringify(secondId)} && window.__j06.conflict().dataset.conflictState === 'deferred' && window.__j06.units().length > 0`, 'attention-conflict-workspace');
     await returnToManuscript(renderer, secondId, 'attention-conflict-return');

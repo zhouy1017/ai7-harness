@@ -305,26 +305,45 @@ export function credentialHeaders(profile: ProviderRouteProfile, secret: string)
 }
 
 /** Metadata GET only: the configured channel owns the address and authentication, with no manuscript payload. */
-export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
-  const endpoint = profile.route.startsWith('opencode-zen') ? 'https://opencode.ai/inference/v1/models'
+export function providerModelsEndpoint(profile: ProviderRouteProfile): string {
+  return profile.route.startsWith('opencode-zen') ? 'https://opencode.ai/inference/v1/models'
     : profile.endpoint.replace(/\/(?:chat\/completions|responses|messages)\/?$/u, '/models');
-  const url = new URL(endpoint);
+}
+
+export async function listProviderModels(profile: ProviderRouteProfile, send: typeof fetch, secret: string): Promise<DiscoveredModel[]> {
+  const url = new URL(providerModelsEndpoint(profile));
   const result = new Map<string, DiscoveredModel>();
   const signal = AbortSignal.timeout(10_000);
   const pages = new Set<string>();
   for (;;) {
-    if (pages.has(url.href)) throw new Error('MODEL_DISCOVERY_PAGINATION_INVALID');
+    if (pages.has(url.href)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     pages.add(url.href);
-    const response = await send(url.href, { method: 'GET', redirect: 'error', signal, headers: {
+    const init: RequestInit = { method: 'GET', redirect: 'error', signal, headers: {
       accept: 'application/json', ...credentialHeaders(profile, secret),
       ...(profile.anthropicVersion === null ? {} : { 'anthropic-version': profile.anthropicVersion }),
-    } });
-    if (!response.ok) throw new Error('MODEL_DISCOVERY_UNAVAILABLE');
-    const body: unknown = await response.json();
-    if (!isRecord(body)) throw new Error('MODEL_DISCOVERY_INVALID');
+    } };
+    let response: Response;
+    try { response = await send(url.href, init); }
+    catch (error) {
+      const transport = classifyTransportError(error, false, init);
+      throw Object.assign(new Error(transport.message), { code: transport.code });
+    }
+    if (!response.ok) throw Object.assign(new Error('MODEL_DISCOVERY_UNAVAILABLE'), {
+      code: response.status === 401 || response.status === 403 ? 'MODEL_DISCOVERY_CREDENTIAL_REJECTED' : 'MODEL_DISCOVERY_UNAVAILABLE', status: response.status,
+    });
+    let rawBody: string;
+    try { rawBody = await response.text(); }
+    catch (error) {
+      const transport = classifyTransportError(error, false, init);
+      throw Object.assign(new Error(transport.message), { code: transport.code });
+    }
+    let body: unknown;
+    try { body = JSON.parse(rawBody) as unknown; }
+    catch { throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' }); }
+    if (!isRecord(body)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     const google = profile.credentialHeader === 'x-goog-api-key';
     const models = google ? body.models : body.data;
-    if (!Array.isArray(models)) throw new Error('MODEL_DISCOVERY_INVALID');
+    if (!Array.isArray(models)) throw Object.assign(new Error('MODEL_DISCOVERY_INVALID'), { code: 'MODEL_DISCOVERY_INVALID' });
     for (const model of models) {
       if (!isRecord(model) || (google && (!Array.isArray(model.supportedGenerationMethods) || !model.supportedGenerationMethods.includes('generateContent')))) continue;
       const id = google && typeof model.name === 'string' ? model.name.replace(/^models\//u, '') : model.id;
@@ -336,7 +355,7 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
     else if (profile.credentialHeader === 'x-api-key' && body.has_more === true && typeof body.last_id === 'string') url.searchParams.set('after_id', body.last_id);
     else break;
   }
-  if (result.size === 0) throw new Error('MODEL_DISCOVERY_EMPTY');
+  if (result.size === 0) throw Object.assign(new Error('MODEL_DISCOVERY_EMPTY'), { code: 'MODEL_DISCOVERY_EMPTY' });
   return [...result.values()];
 }
 
@@ -347,6 +366,8 @@ export async function listProviderModels(profile: ProviderRouteProfile, send: ty
  */
 export type ProviderResponseOutcome =
   | CanonicalModelResult
+  | { readonly kind: 'partial'; readonly text: string; readonly code: string; readonly message: string; readonly usage: ModelUsage | null; readonly status?: number;
+      readonly salvaged?: Extract<CanonicalModelResult, { kind: 'answer' }>['salvaged'] }
   | (Extract<CanonicalModelResult, { kind: 'malformed' }> & { readonly usage: ModelUsage | null })
   | { readonly kind: 'failure'; readonly code: string; readonly message: string; readonly status: number; readonly usage?: ModelUsage | null };
 
@@ -395,23 +416,26 @@ export function parseProviderResponse(
     return { kind: 'failure', code: codes.CONTEXT_WINDOW_EXCEEDED_CODE, message: '请求超出模型上下文窗口。', status };
   }
   if (status >= 500) return { kind: 'failure', code: AI7_FAILURE_CODES.PROVIDER_ERROR, message: '模型服务返回服务端错误。', status };
-  if (status !== 200) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
+  if (status < 200 || status >= 300) return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务返回了无法分类的状态。', status };
   const normalized = normalizeModelResponse(model, body, options);
   if (model.route === 'openai-platform' && model.capabilities.requestShape === 'openai-responses' && isRecord(body)) {
     // A malformed output may still report billed usage. Reuse the existing usage reader without retaining its body.
     const usageOnly = normalized.kind === 'malformed' ? normalizeModelResponse(model, { ...body, output: [] }, options) : normalized;
     const usage = 'usage' in usageOnly ? usageOnly.usage : null;
     const refusal = Array.isArray(body.output) && body.output.some((item) => isRecord(item) && Array.isArray(item.content) && item.content.some((part) => isRecord(part) && part.type === 'refusal'));
-    if (refusal) return { kind: 'failure', code: 'PROVIDER_REFUSAL', message: '模型拒绝了本次文本请求。', status, usage };
-    if (body.status !== undefined && body.status !== 'completed') return { kind: 'failure', code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务没有返回完整的文本结果。', status, usage };
+    if (refusal && normalized.kind !== 'answer' && normalized.kind !== 'tool-calls') return { kind: 'failure', code: 'PROVIDER_REFUSAL', message: '模型拒绝了本次文本请求。', status, usage };
     if (normalized.kind === 'malformed') return { ...normalized, usage };
   }
+  if (normalized.kind === 'answer' && normalized.truncated === true) return {
+    kind: 'partial', text: normalized.text, code: 'MAX_TOKENS', message: '回答未完成；已收到的文字已保留。', usage: normalized.usage, status,
+    ...(normalized.salvaged === undefined ? {} : { salvaged: normalized.salvaged }),
+  };
   return normalized;
 }
 
 const MODEL_REQUEST_NO_SEND = new WeakMap<Error, { readonly request: object; readonly cause: unknown }>();
 
-/** A trusted transport wrapper observed that this exact invocation never entered its native sender. */
+/** A trusted transport observed that this exact invocation never entered its sender or established a connection. */
 export function modelRequestNotSent(request: object, cause: unknown): Error {
   const refusal = new Error('AI7_MODEL_REQUEST_NOT_SENT');
   MODEL_REQUEST_NO_SEND.set(refusal, { request, cause });
@@ -428,6 +452,7 @@ export function classifyTransportError(error: unknown, sent = false, request?: o
   const timeoutCode = code ?? (typeof cause?.code === 'string' ? cause.code : null);
   const name = isRecord(error) && typeof error.name === 'string' ? error.name : null;
   if (code === 'AI7_PROXY_UNREACHABLE') return { code, message: '代理不可达：请检查网络代理设置。' };
+  if (code === AI7_FAILURE_CODES.MODEL_SERVICE_UNREACHABLE) return { code, message: '模型服务不可达：请检查网络或网络代理设置。' };
   if (code === AI7_FAILURE_CODES.NETWORK_DENIED) return { code, message: '出站网络在当前产品区间内被禁用。' };
   if (timeoutCode === 'UND_ERR_CONNECT_TIMEOUT') return { code: AI7_FAILURE_CODES.TRANSPORT_FAILED, message: '连接在发送请求前超时。' };
   if (name === 'AbortError' || name === 'TimeoutError' || timeoutCode === 'UND_ERR_HEADERS_TIMEOUT' || timeoutCode === 'UND_ERR_BODY_TIMEOUT' || timeoutCode === 'ETIMEDOUT') {
@@ -665,7 +690,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       // An in-stream account limit is read under the status its error names; every other response under its own.
       let bodyStatus = response.status;
       const dialogueStream = this.#deps.requestShape === 'editorial-dialogue-sse';
-      if (dialogueStream && response.status === 200 && response.replayed !== true) {
+      if (dialogueStream && response.status >= 200 && response.status < 300 && response.replayed !== true) {
         let completed = false;
         // Nothing is yielded before the stream reads: a stop that ends this turn at any chunk then ends a stream already
         // reading, so the transmission still records its possibly billed request as unknown.
@@ -677,7 +702,6 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
             yield { type: 'text-delta', index: 0, text: event.text };
           } else if (event.kind === 'error') {
             const refused = parseProviderResponse(event.status, event.body, this.#deps.codes, this.#profile, this.#modelProfile);
-            if (refused.kind !== 'failure' || refused.code !== this.#deps.codes.QUOTA_EXCEEDED_CODE) throw new Error('AI7_OUTCOME_UNKNOWN');
             bodyStatus = event.status;
             body = event.body;
             completed = true;
@@ -691,7 +715,7 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
           // 结果待确认 (Issue #51, S16c): the service accepted the request and its answer never came back whole — the
           // connection dropped mid-answer, or what arrived does not read — so whether it was processed and billed cannot be
           // known. It is no failure to retry and no answer to read. A refusal's unreadable body is still that refusal.
-          if (response.status === 200) {
+          if (response.status >= 200 && response.status < 300) {
             throw new Error('AI7_OUTCOME_UNKNOWN');
           }
           body = null;
@@ -701,11 +725,15 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       const shape = this.#modelProfile.capabilities.requestShape;
       const parsed = parseProviderResponse(bodyStatus, body, this.#deps.codes, this.#profile, this.#modelProfile,
         { toolCallsOffered: (options.tools ?? []).length > 0,
-          ...(shape === 'anthropic-messages' || shape === 'google-generate-content'
-            ? { offeredToolNames: (options.tools ?? []).map((tool) => tool.name) } : {}),
+          offeredToolNames: (options.tools ?? []).map((tool) => tool.name),
           ...(shape === 'google-generate-content' ? { callIdSeed: assembly.requestDigest.slice(0, 16) } : {}),
         });
       outcome = response.replayed === true ? withoutIncurredUsage(parsed) : parsed;
+      if ((outcome.kind === 'failure' || outcome.kind === 'malformed') && streamed.length > 0) {
+        outcome = { kind: 'partial', text: streamed, usage: 'usage' in outcome ? outcome.usage ?? null : null,
+          code: outcome.kind === 'failure' ? outcome.code : AI7_FAILURE_CODES.INVALID_RESPONSE,
+          message: outcome.kind === 'failure' ? outcome.message : '回答未能完整读出。', status: bodyStatus };
+      }
       if (outcome.kind === 'failure' && this.#profile.limitPolicy === 'rate-limit-retryable' &&
           (outcome.code === AI7_FAILURE_CODES.RATE_LIMIT || (outcome.code === AI7_FAILURE_CODES.PROVIDER_ERROR && outcome.status >= 500 && outcome.status <= 599))) {
         this.#lastRetryDelayMs = retryBackoffMs(response.headers?.get('retry-after') ?? null);
@@ -717,8 +745,12 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
         ? { code: AI7_FAILURE_CODES.OUTCOME_UNKNOWN, message: '模型服务已接受请求，但回答没有完整传回。' }
         : classifyTransportError(signal.aborted && !(error instanceof Error && MODEL_REQUEST_NO_SEND.get(error)?.request === transportRequest)
           ? new DOMException('请求已中止。', deadline.signal.aborted ? 'TimeoutError' : 'AbortError') : error, sent, transportRequest);
-      yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? responseStatus : undefined);
-      return;
+      if (streamed.length === 0) {
+        yield fail(classified.code, classified.message, classified.code === AI7_FAILURE_CODES.OUTCOME_UNKNOWN ? responseStatus : undefined);
+        return;
+      }
+      outcome = { kind: 'partial', text: streamed, code: classified.code, message: classified.message, usage: null,
+        ...(responseStatus === undefined ? {} : { status: responseStatus }) };
     } finally {
       clearTimeout(timer);
     }
@@ -727,7 +759,19 @@ export class DeepSeekOpenAiCompatibleAdapter implements LlmAdapter {
       yield fail(outcome.code, outcome.message, outcome.status);
       return;
     }
-    this.#lastResult = outcome;
+    this.#lastResult = outcome.kind === 'partial' ? { kind: 'answer', text: outcome.text, reasoningText: null, usage: outcome.usage, truncated: true,
+      ...(outcome.salvaged === undefined ? {} : { salvaged: outcome.salvaged }) } : outcome;
+    if (outcome.kind === 'partial') {
+      if (!blockStarted) yield { type: 'block-start', index: 0, blockType: 'text' };
+      if (streamed.length === 0) yield { type: 'text-delta', index: 0, text: outcome.text };
+      yield { type: 'block-end', index: 0, block: { type: 'text', text: outcome.text } };
+      if (outcome.usage !== null) yield { type: 'usage', usage: { ...outcome.usage } };
+      // A complete transport with truncated content still enters the contract parser's partial salvage path.
+      // Real transport/provider failures retain their failure finish and billing classification.
+      if (outcome.code === 'MAX_TOKENS') yield { type: 'finish', reason: { kind: 'stop' } };
+      else yield fail(outcome.code, outcome.message, outcome.status);
+      return;
+    }
     // A response that matched no declared channel is this route's `INVALID_RESPONSE`, exactly as it
     // was before the channels were declared; the canonical result records which channel was missing.
     if (outcome.kind === 'malformed') {

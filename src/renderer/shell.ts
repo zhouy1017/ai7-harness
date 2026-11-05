@@ -1,4 +1,4 @@
-import { MODEL_SERVICE_ROUTE_EFFECT_LABEL, type BookSummaryCursor, type ModelServiceSettingsProjection, type RendererApi } from '../shared/protocol.js';
+import { icon as svgIcon, navigationIcon } from './components/icon-sprite.js';
 import {
   MAX_RECENT_BOOKS,
   MAX_SHELL_BOOK_TITLE_CHARACTERS,
@@ -26,10 +26,9 @@ import {
   type ShellDestination,
 } from './shell-labels.js';
 import { HELP_ENTRY } from './help-labels.js';
-import { OPEN_MODEL_SERVICE_LABEL, USE_FOR_BOTH_ROLES_LABEL, currentModelServiceChoice, modelServiceChoices, useForBothRoles } from './model-service-flow.js';
 
 // The shell around every screen (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3; IA-006 to IA-013, ADR 0076, ADR 0092):
-// a two-level sidebar — the six global destinations, 置顶 and 最近打开 Books (with an inline searchable 切换书稿 ▾ list),
+// a two-level sidebar — the six global destinations, 置顶 and 最近打开 Books,
 // the current Book's three groups and 设置 — and a context header naming where the window is. The screens stay their own
 // owners: they still replace `#screen`, and they tell the shell which Book and section they show through `follow`. The
 // shell owns no record: pinning, recency and the collapsed state are preferences, written through the main process's file and nothing else.
@@ -63,6 +62,7 @@ const SCREEN_ACTIVE: Readonly<Record<string, ShellActive>> = Object.freeze({
   'book-findings': { kind: 'section', section: 'findings' },
   landing: { kind: 'destination', destination: 'library' },
   'global-attention': { kind: 'destination', destination: 'attention' },
+  'task-overview': { kind: 'destination', destination: 'tasks' },
   'series-list': { kind: 'destination', destination: 'series' },
   series: { kind: 'destination', destination: 'series' },
   'knowledge-base': { kind: 'destination', destination: 'knowledge' },
@@ -153,37 +153,9 @@ export function sidebarBookRows(
   return { pinned: pinnedRows, recent: recentRows };
 }
 
-/** Catalog identities and full titles are authoritative; preferences only order current entries. */
-export function bookPickerRows(
-  catalog: ReadonlyArray<ShellBookEntry>,
-  pinned: ReadonlyArray<ShellBookEntry>,
-  recent: ReadonlyArray<ShellRecentBookEntry>,
-  currentBookId: string | null,
-  query = '',
-): ReadonlyArray<SidebarBookRow & { readonly group: 'pinned' | 'recent' | 'remaining' }> {
-  const available = new Map(catalog.map((entry) => [entry.bookId, entry]));
-  const visits = new Map(recent.map((entry) => [entry.bookId, entry]));
-  const pinnedIds = new Set(pinned.map((entry) => entry.bookId));
-  const seen = new Set<string>();
-  const rows: Array<SidebarBookRow & { group: 'pinned' | 'recent' | 'remaining' }> = [];
-  const normalized = query.trim().toLowerCase();
-  for (const candidate of [...pinned, ...recent, ...catalog]) {
-    const entry = available.get(candidate.bookId);
-    if (entry === undefined || seen.has(entry.bookId)) continue;
-    seen.add(entry.bookId);
-    if (normalized && !entry.title.toLowerCase().includes(normalized) && !entry.bookId.toLowerCase().includes(normalized)) continue;
-    const visit = visits.get(entry.bookId);
-    const isPinned = pinnedIds.has(entry.bookId);
-    rows.push({ ...entry, pinned: isPinned, current: entry.bookId === currentBookId,
-      state: visit ? shellRecentStateLine(visit.section) : isPinned ? SHELL_LABELS.pinned : SHELL_LABELS.catalogBookState,
-      group: isPinned ? 'pinned' : visit ? 'recent' : 'remaining' });
-  }
-  return rows;
-}
-
 /** The first character a collapsed row shows for a Book: its title's, as the editor reads it. */
 export function bookIcon(title: string): string {
-  return [...title.trim()][0] ?? SHELL_LABELS.bookIcon;
+  return title.match(/[\p{L}\p{N}]/u)?.[0] ?? SHELL_LABELS.bookIcon;
 }
 
 /**
@@ -294,10 +266,6 @@ export interface MountShellOptions {
   readonly preferenceNotice: HTMLElement;
   readonly preferences: ShellPreferences;
   readonly pinLimit: number;
-  /** Read pages of the current Book catalog in the searchable 切换书稿 ▾ switcher (Issue #1002, ADR 0092). */
-  readonly listBooks?: (input: { after: BookSummaryCursor | null }) => Promise<{
-    items: ReadonlyArray<ShellBookEntry>; nextCursor: BookSummaryCursor | null;
-  }>;
   setStatus(message: string, tone?: 'busy' | 'success' | 'error'): void;
   errorMessage(error: unknown, fallback: string): string;
   openDestination(destination: Exclude<ShellDestination, 'attention'>): void;
@@ -306,137 +274,24 @@ export interface MountShellOptions {
   openAgentWorkspace(book: ShellBookEntry): void;
   openBook(bookId: string): void;
   openSettings(): void;
-  /** The header's compact channel / model selector on Book screens (Issue #1215); absent, the header has none. */
-  readonly modelSelector?: CompactModelSelectorOptions;
-}
 
-export interface CompactModelSelectorOptions {
-  readonly api: Pick<RendererApi, 'getModelServiceSettings' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels'>;
-  /** 设置 › 模型服务, through the window's own way off the screen on show. */
-  openModelService(): void;
-}
-
-/** The compact selector's words: the one choice both roles hold, or each role's when they differ. */
-export function compactModelSelectionLabel(projection: ModelServiceSettingsProjection): string {
-  const words = (roleId: string): string => {
-    const role = projection.roles.find((candidate) => candidate.roleId === roleId);
-    return role?.binding == null ? '需设置' : `${role.binding.providerLabel} / ${role.binding.modelLabel} · ${role.statusLabel}`;
-  };
-  if (currentModelServiceChoice(projection) !== null) return `模型 · ${words('fast-interaction')}`;
-  const mainInUse = projection.routeChoice.routes.some((option) => option.inUse);
-  return `主编辑 · ${mainInUse ? words('main-editorial') : '需设置'} · 快速交互 · ${words('fast-interaction')}`;
-}
-
-/** The shared header offers every configured channel's models for either role or both. */
-export function compactModelSelector(options: CompactModelSelectorOptions & Pick<MountShellOptions, 'setStatus' | 'errorMessage'>): {
-  readonly element: HTMLDetailsElement; follow(onBook: boolean): void; interrupt(): void;
-} {
-  const root = el('details', 'compact-model-selector');
-  root.hidden = true;
-  const summary = el('summary', undefined, '模型 · 查看设置');
-  summary.dataset['compactModelSelection'] = 'fast-interaction';
-  const body = el('div', 'compact-model-selector-body');
-  root.append(summary, body);
-  let interrupted = false;
-  let reading = 0;
-  const paint = (projection: ModelServiceSettingsProjection): void => {
-    summary.textContent = compactModelSelectionLabel(projection);
-    const current = currentModelServiceChoice(projection);
-    const choices = modelServiceChoices(projection);
-    const group = el('fieldset');
-    group.append(el('legend', undefined, '选择模型，再指定使用角色'));
-    let chosen = choices.find((choice) => choice.route === current?.route && choice.modelId === current.modelId) ?? null;
-    const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
-    use.type = 'button';
-    const refreshUse = (): void => { use.disabled = interrupted || chosen === null || (chosen.route === current?.route && chosen.modelId === current.modelId); };
-    for (const choice of choices) {
-      const label = el('label');
-      const radio = el('input');
-      radio.type = 'radio';
-      radio.name = 'compact-model-choice';
-      radio.value = `${choice.route}/${choice.modelId}`;
-      radio.checked = choice === chosen;
-      radio.addEventListener('change', () => { chosen = choice; refreshUse(); });
-      label.append(radio, ` ${choice.channelLabel} / ${choice.modelLabel}`);
-      group.append(label);
-    }
-    if (choices.length === 0) group.append(el('p', 'field-note', '还没有两个角色都可选且凭据已保存的模型。'));
-    use.addEventListener('click', () => void (async () => {
-      if (chosen === null) return;
-      use.disabled = true;
-      try {
-        paint(await useForBothRoles(options.api, chosen));
-        root.open = false;
-        options.setStatus(`之后开始的任务使用 ${chosen.channelLabel} / ${chosen.modelLabel}；已在进行的任务不受影响`, 'success');
-      } catch (error) { refreshUse(); options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
-    })());
-    refreshUse();
-    const open = el('button', 'quiet', OPEN_MODEL_SERVICE_LABEL);
-    open.type = 'button';
-    open.disabled = interrupted;
-    open.addEventListener('click', () => { root.open = false; options.openModelService(); });
-    const actions = el('div', 'button-row');
-    for (const [role, label, select] of [
-      ['main', '用于主编辑角色', options.api.selectMainRoleModel],
-      ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
-    ] as const) {
-      const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
-      button.disabled = interrupted || chosen === null;
-      group.addEventListener('change', () => { button.disabled = interrupted || chosen === null; });
-      button.addEventListener('click', () => void (async () => {
-        if (chosen === null) return;
-        button.disabled = true;
-        try { paint(await select({ route: chosen.route, modelId: chosen.modelId })); root.open = false; }
-        catch (error) { button.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
-      })());
-      actions.append(button);
-    }
-    actions.append(use, open);
-    body.replaceChildren(group, el('p', 'field-note', MODEL_SERVICE_ROUTE_EFFECT_LABEL), actions);
-  };
-  const outside = (event: PointerEvent): void => {
-    if (root.open && !root.contains(event.target as Node)) root.open = false;
-  };
-  const escape = (event: KeyboardEvent): void => { if (event.key === 'Escape') root.open = false; };
-  document.body.addEventListener('pointerdown', outside);
-  document.body.addEventListener('keydown', escape);
-  return {
-    element: root,
-    follow: (onBook) => {
-      const ticket = ++reading;
-      root.open = false;
-      root.hidden = !onBook;
-      body.replaceChildren();
-      if (!onBook) return;
-      options.api.getModelServiceSettings().then(
-        (projection) => { if (ticket === reading) paint(projection); },
-        () => { if (ticket === reading) summary.textContent = '模型 · 需处理'; },
-      );
-    },
-    interrupt: () => {
-      interrupted = true;
-      ++reading;
-      document.body.removeEventListener('pointerdown', outside);
-      document.body.removeEventListener('keydown', escape);
-      root.open = false;
-      body.replaceChildren();
-    },
-  };
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
-/** A sidebar row: a link whose text is exactly its label, its icon drawn from `data-nav-icon`, and never a page load. */
+/** A sidebar row with a fixed SVG symbol, accessible text and a hover name. */
 function navLink(label: string, icon: string, activate: () => void): HTMLAnchorElement {
   const link = el('a', 'sidebar-link');
   link.href = '#';
   link.dataset['navIcon'] = icon;
-  link.append(el('span', 'nav-label', label));
+  link.title = label;
+  link.append(navigationIcon(icon), el('span', 'nav-label', label));
   link.addEventListener('click', (event) => {
     event.preventDefault();
     if (link.getAttribute('aria-disabled') === 'true') return;
@@ -447,17 +302,11 @@ function navLink(label: string, icon: string, activate: () => void): HTMLAnchorE
 
 export function mountShell(options: MountShellOptions): ShellSurface {
   const { sidebar, preferences } = options;
-  const modelSelector = options.modelSelector === undefined ? null : compactModelSelector({ ...options.modelSelector, setStatus: options.setStatus, errorMessage: options.errorMessage });
-  if (modelSelector !== null) options.actions.after(modelSelector.element);
+  options.toggle.replaceChildren(svgIcon('i-menu'));
   let book: ShellBookEntry | null = null;
   let active: ShellActive = { kind: 'none' };
   let state = '';
   let interrupted = false;
-  let catalogBooks: ReadonlyArray<ShellBookEntry> = [];
-  let pickerOpen = false;
-  let pickerQuery = '';
-  let catalogState: 'loading' | 'ready' | 'failed' = 'loading';
-  let catalogRequest = 0;
   const narrowQuery = window.matchMedia(`(max-width: ${SIDEBAR_ICONS_ONLY_BELOW_PX - 0.02}px)`);
 
   sidebar.setAttribute('aria-label', SHELL_LABELS.navigation);
@@ -470,6 +319,9 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       node.dataset['navDestination'] = 'attention';
       node.dataset['navIcon'] = entry.icon;
       node.classList.add('sidebar-link');
+      node.title = entry.label;
+      if (node.children.length === 0) node.append(el('span', 'nav-label', entry.label));
+      node.append(navigationIcon(entry.icon));
       item.append(node);
       destinationLinks.set(entry.key, node);
     } else {
@@ -489,172 +341,14 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const books = el('section', 'sidebar-books');
   books.setAttribute('aria-label', SHELL_LABELS.books);
 
-  // One disclosure with ordinary buttons and grouped lists: native Tab/Enter behavior, no faux listbox.
-  const switcherHeader = el('div', 'sidebar-books-header');
-  const switcherToggle = el('button', 'sidebar-book-switcher-toggle', SHELL_LABELS.switchBookTrigger);
-  switcherToggle.type = 'button';
-  switcherToggle.dataset['shellBookSwitcher'] = 'toggle';
-  switcherToggle.dataset['navIcon'] = bookIcon(SHELL_LABELS.switchBook);
-  switcherToggle.setAttribute('aria-expanded', 'false');
-  switcherToggle.setAttribute('aria-controls', 'shell-book-picker');
-  switcherToggle.setAttribute('aria-label', SHELL_LABELS.switchBook);
-  switcherHeader.append(switcherToggle);
-  const pickerPopover = el('section', 'shell-book-picker-popover');
-  pickerPopover.id = 'shell-book-picker';
-  pickerPopover.setAttribute('aria-label', SHELL_LABELS.switchBook);
-  pickerPopover.dataset['shellBookPicker'] = 'panel';
-  pickerPopover.hidden = true;
-  const pickerSearch = el('input', 'shell-book-picker-search');
-  pickerSearch.type = 'search';
-  pickerSearch.placeholder = SHELL_LABELS.bookSearchPlaceholder;
-  pickerSearch.setAttribute('aria-label', SHELL_LABELS.bookSearchLabel);
-  pickerSearch.dataset['shellBookSearch'] = 'input';
-  const pickerStatus = el('p', 'field-note');
-  pickerStatus.setAttribute('role', 'status');
-  pickerStatus.dataset['shellBookPickerStatus'] = 'state';
-  const pickerList = el('div', 'shell-book-picker-list');
-  pickerList.dataset['shellBookPickerList'] = 'items';
-  const retry = el('button', 'quiet', SHELL_LABELS.retryCatalog);
-  retry.type = 'button';
-  retry.dataset['shellBookRetry'] = 'retry';
-  const pickerLibraryBtn = el('button', 'shell-book-picker-library quiet', SHELL_LABELS.openLibraryDirectory);
-  pickerLibraryBtn.type = 'button';
-  pickerLibraryBtn.dataset['shellBookLibrary'] = 'open';
-  pickerPopover.append(pickerSearch, pickerStatus, pickerList, retry, pickerLibraryBtn);
   const bookRows = el('div');
-  books.append(switcherHeader, pickerPopover, bookRows);
-
-  const closePicker = (restoreFocus: boolean): void => {
-    if (!pickerOpen) return;
-    pickerOpen = false;
-    catalogRequest += 1;
-    pickerPopover.hidden = true;
-    switcherToggle.setAttribute('aria-expanded', 'false');
-    if (restoreFocus) switcherToggle.focus({ preventScroll: true });
-  };
-  const renderPickerList = (): void => {
-    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusedId = focused?.dataset['shellPickerBook'];
-    pickerList.replaceChildren();
-    retry.hidden = catalogState !== 'failed';
-    pickerList.setAttribute('aria-busy', String(catalogState === 'loading'));
-    if (catalogState !== 'ready') {
-      pickerStatus.textContent = catalogState === 'loading' ? SHELL_LABELS.loadingCatalog : SHELL_LABELS.catalogFailed;
-    } else {
-      const entries = bookPickerRows(catalogBooks, preferences.current['shell.pinnedBooks'], preferences.current['shell.recentBooks'], book?.bookId ?? null, pickerQuery);
-      pickerStatus.textContent = entries.length ? SHELL_LABELS.catalogCount(entries.length) : catalogBooks.length ? SHELL_LABELS.noMatchingBooks : SHELL_LABELS.emptyCatalog;
-      for (const group of ['pinned', 'recent', 'remaining'] as const) {
-        const rows = entries.filter((entry) => entry.group === group);
-        if (!rows.length) continue;
-        const label = group === 'pinned' ? SHELL_LABELS.pinnedHeading : group === 'recent' ? SHELL_LABELS.recentHeading : SHELL_LABELS.remainingHeading;
-        const section = el('section');
-        section.dataset['shellPickerGroup'] = group;
-        section.setAttribute('aria-label', label);
-        section.append(el('h3', 'shell-book-picker-heading', label));
-        const list = el('ul');
-        for (const row of rows) {
-          const item = el('li');
-          const pick = el('button', 'shell-book-picker-option');
-          pick.type = 'button';
-          pick.dataset['shellPickerBook'] = row.bookId;
-          pick.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.current ? SHELL_LABELS.currentBook : row.state));
-          if (row.current) pick.setAttribute('aria-current', 'true');
-          const icon = el('span', 'shell-book-picker-icon', bookIcon(row.title));
-          icon.setAttribute('aria-hidden', 'true');
-          const text = el('span', 'shell-book-picker-meta');
-          text.append(el('span', 'shell-book-picker-title', row.title), el('span', 'shell-book-picker-state', row.current ? SHELL_LABELS.currentBook : row.state));
-          pick.append(icon, text);
-          pick.addEventListener('click', () => {
-            if (interrupted) return;
-            closePicker(true);
-            options.openBook(row.bookId);
-          });
-          item.append(pick);
-          list.append(item);
-        }
-        section.append(list);
-        pickerList.append(section);
-      }
-    }
-    if (focusedId !== undefined) {
-      const replacement = [...pickerList.querySelectorAll<HTMLElement>('[data-shell-picker-book]')].find((node) => node.dataset['shellPickerBook'] === focusedId);
-      (replacement ?? pickerSearch).focus({ preventScroll: true });
-    }
-  };
-  const refreshCatalog = async (): Promise<void> => {
-    const request = ++catalogRequest;
-    catalogState = 'loading';
-    renderPickerList();
-    try {
-      const fetched: ShellBookEntry[] = [];
-      const cursors = new Set<string>();
-      let after: BookSummaryCursor | null = null;
-      do {
-        const page: { items: ReadonlyArray<ShellBookEntry>; nextCursor: BookSummaryCursor | null } =
-          await options.listBooks?.({ after }) ?? { items: [], nextCursor: null };
-        if (!pickerOpen || interrupted || request !== catalogRequest) return;
-        fetched.push(...page.items);
-        after = page.nextCursor;
-        if (after !== null) {
-          const key = JSON.stringify([after.bookId, after.title]);
-          if (cursors.has(key)) throw new Error('Book catalog cursor did not advance');
-          cursors.add(key);
-        }
-      } while (after !== null);
-      catalogBooks = fetched;
-      catalogState = 'ready';
-    } catch {
-      if (!pickerOpen || interrupted || request !== catalogRequest) return;
-      catalogState = 'failed';
-    }
-    renderPickerList();
-  };
-  switcherToggle.addEventListener('click', () => {
-    if (interrupted) return;
-    if (pickerOpen) { closePicker(true); return; }
-    pickerOpen = true;
-    pickerQuery = '';
-    pickerSearch.value = '';
-    pickerPopover.hidden = false;
-    switcherToggle.setAttribute('aria-expanded', 'true');
-    pickerSearch.focus({ preventScroll: true });
-    void refreshCatalog();
-  });
-  retry.addEventListener('click', () => {
-    if (interrupted) return;
-    pickerSearch.focus({ preventScroll: true });
-    void refreshCatalog();
-  });
-  pickerLibraryBtn.addEventListener('click', () => {
-    if (interrupted) return;
-    closePicker(true);
-    options.openDestination('library');
-  });
-  pickerSearch.addEventListener('input', () => {
-    pickerQuery = pickerSearch.value;
-    renderPickerList();
-  });
-  books.addEventListener('keydown', (event) => {
-    if (!pickerOpen || event.key !== 'Escape' || event.isComposing || event.keyCode === 229) return;
-    event.preventDefault();
-    event.stopPropagation();
-    closePicker(true);
-  });
-  document.addEventListener('pointerdown', (event) => {
-    if (pickerOpen && !pickerPopover.contains(event.target as Node) && !switcherToggle.contains(event.target as Node)) {
-      // A pointer may target non-focusable text. Return to the trigger before the browser focuses a clicked control.
-      closePicker(pickerPopover.contains(document.activeElement));
-    }
-  });
-  document.addEventListener('focusin', (event) => {
-    if (pickerOpen && !pickerPopover.contains(event.target as Node) && !switcherToggle.contains(event.target as Node)) closePicker(false);
-  });
+  books.append(bookRows);
 
   const bookGroup = el('section', 'sidebar-book');
   bookGroup.setAttribute('aria-label', SHELL_LABELS.currentBook);
   bookGroup.hidden = true;
-  const bookTitle = el('p', 'sidebar-book-title');
-  bookGroup.append(bookTitle);
+  const bookHeading = el('p', 'sidebar-current-book sidebar-group-label');
+  bookGroup.append(bookHeading);
   const sectionLinks = new Map<ShellBookSection, HTMLAnchorElement>();
   let agentWorkspaceLink: HTMLAnchorElement | null = null;
   for (const group of SHELL_BOOK_GROUPS) {
@@ -697,13 +391,23 @@ export function mountShell(options: MountShellOptions): ShellSurface {
   const helpSlot = el('div', 'sidebar-help-slot');
   helpSlot.dataset['shellSlot'] = 'help';
   foot.append(settings, helpSlot);
-  sidebar.replaceChildren(destinations, books, bookGroup, foot);
+  const bookMenu = el('div', 'sidebar-book-menu');
+  bookMenu.setAttribute('popover', 'auto');
+  bookMenu.setAttribute('role', 'menu');
+  bookMenu.setAttribute('aria-label', '图书操作');
+  let bookMenuOpen = false;
+  bookMenu.addEventListener('toggle', (event) => { bookMenuOpen = (event as ToggleEvent).newState === 'open'; });
+  sidebar.replaceChildren(destinations, books, bookGroup, foot, bookMenu);
 
   const allLinks = (): ReadonlyArray<HTMLElement> => [
-    ...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin, button.sidebar-book-switcher-toggle, button.shell-book-picker-option, button.shell-book-picker-library, button[data-shell-book-retry]'),
+    ...sidebar.querySelectorAll<HTMLElement>('a.sidebar-link, button.sidebar-pin'),
   ];
 
   const paintBooks = (values: PreferenceValues): void => {
+    if (bookMenuOpen) {
+      bookMenu.hidePopover();
+      bookMenuOpen = false;
+    }
     const focused = document.activeElement instanceof HTMLElement && books.contains(document.activeElement) ? document.activeElement : null;
     const focusKind = focused?.dataset['navPin'] !== undefined ? 'navPin' : 'navBook';
     const focusBook = focused?.dataset[focusKind];
@@ -720,20 +424,43 @@ export function mountShell(options: MountShellOptions): ShellSurface {
         const item = el('li', 'sidebar-book-row');
         item.dataset['navBookRow'] = row.bookId;
         const link = navLink(row.title, bookIcon(row.title), () => options.openBook(row.bookId));
+        const initial = el('span', 'nav-book-initial', bookIcon(row.title));
+        initial.setAttribute('aria-hidden', 'true');
+        link.replaceChildren(initial, el('span', 'nav-label', row.title));
         link.dataset['navBook'] = row.bookId;
-        link.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.state));
-        link.append(el('span', 'nav-state', row.state));
+        link.setAttribute('aria-label', SHELL_LABELS.bookRowName(row.title, row.current ? '当前' : row.state));
+        if (row.current) link.append(el('span', 'nav-state', '当前'));
         if (row.current) link.setAttribute('aria-current', 'true');
         const pin = el('button', 'sidebar-pin', row.pinned ? '★' : '☆');
         pin.type = 'button';
         pin.dataset['navPin'] = row.bookId;
         pin.setAttribute('aria-pressed', String(row.pinned));
         pin.setAttribute('aria-label', row.pinned ? SHELL_LABELS.unpin(row.title) : SHELL_LABELS.pin(row.title));
+        pin.title = pin.getAttribute('aria-label') ?? '';
         pin.addEventListener('click', () => {
           if (interrupted) return;
           void preferences.togglePin({ bookId: row.bookId, title: row.title }, options.pinLimit).catch((error: unknown) => {
             options.setStatus(options.errorMessage(error, SHELL_LABELS.preferenceWriteFailed), 'error');
           });
+        });
+        item.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          if (interrupted) return;
+          const action = el('button', 'quiet', pin.title);
+          action.type = 'button';
+          action.setAttribute('role', 'menuitem');
+          action.addEventListener('click', () => {
+            bookMenu.hidePopover();
+            bookMenuOpen = false;
+            pin.focus();
+            pin.click();
+          });
+          bookMenu.replaceChildren(action);
+          bookMenu.style.left = `${Math.max(0, Math.min(event.clientX, window.innerWidth - 240))}px`;
+          bookMenu.style.top = `${Math.max(0, Math.min(event.clientY, window.innerHeight - 48))}px`;
+          bookMenu.showPopover();
+          bookMenuOpen = true;
+          action.focus();
         });
         item.append(link, pin);
         items.append(item);
@@ -744,7 +471,6 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     const blocks = [list(SHELL_LABELS.pinnedHeading, rows.pinned, 'pinned'), list(SHELL_LABELS.recentHeading, rows.recent, 'recent')].filter((node): node is HTMLElement => node !== null);
     if (blocks.length === 0) blocks.push(el('p', 'sidebar-empty field-note', SHELL_LABELS.noBooks));
     bookRows.replaceChildren(...blocks);
-    if (pickerOpen) renderPickerList();
     applyMode();
     // Pin/unpin moves the row between lists. Keep keyboard focus on that same control after painting it.
     if (focusBook !== undefined) {
@@ -767,8 +493,7 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     // A collapsed row says its name on hover too; a full row shows it already.
     for (const link of sidebar.querySelectorAll<HTMLElement>('.sidebar-link')) {
       const name = link.getAttribute('aria-label') ?? link.querySelector('.nav-label')?.textContent ?? '';
-      if (mode === 'icons') link.title = name;
-      else link.removeAttribute('title');
+      link.title = name;
     }
     if (interrupted) for (const link of allLinks()) disable(link);
   };
@@ -796,9 +521,9 @@ export function mountShell(options: MountShellOptions): ShellSurface {
     else helpLink?.removeAttribute('aria-current');
     bookGroup.hidden = book === null;
     if (book !== null) {
-      bookTitle.textContent = book.title;
-      bookTitle.dataset['navIcon'] = bookIcon(book.title);
       bookGroup.dataset['bookId'] = book.bookId;
+      bookHeading.textContent = book.title;
+      bookHeading.title = book.title;
     } else {
       delete bookGroup.dataset['bookId'];
     }
@@ -826,7 +551,6 @@ export function mountShell(options: MountShellOptions): ShellSurface {
 
   return {
     follow: (nextState, place) => {
-      closePicker(pickerPopover.contains(document.activeElement));
       state = nextState;
       if (place !== null) book = { bookId: place.bookId, title: place.title };
       active = screenActive(nextState, place);
@@ -834,7 +558,6 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       paintActive();
       paintBooks(preferences.current);
       if (place !== null) visit(place);
-      modelSelector?.follow(true);
     },
     markSection: (section) => {
       if (book === null) return;
@@ -843,17 +566,13 @@ export function mountShell(options: MountShellOptions): ShellSurface {
       visit({ ...book, section });
     },
     leaveBook: () => {
-      closePicker(pickerPopover.contains(document.activeElement));
       book = null;
       paintActive();
       paintBooks(preferences.current);
     },
     currentBook: () => book,
     interrupt: () => {
-      closePicker(pickerPopover.contains(document.activeElement));
       interrupted = true;
-      modelSelector?.interrupt();
-      pickerSearch.disabled = true;
       for (const link of allLinks()) disable(link);
     },
     setContextActions: (...nodes) => options.actions.replaceChildren(...nodes),

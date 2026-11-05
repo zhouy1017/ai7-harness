@@ -15,19 +15,16 @@ import { estimateUsageCost } from '../shared/usage.js';
 import {
   USAGE_EMPTY,
   USAGE_EXPORT,
-  USAGE_EXPORT_NOTE,
   USAGE_GROUPING_HEADING,
   USAGE_LEDE,
   USAGE_PRICES_HEADING,
   USAGE_PRICES_LEDE,
   USAGE_RANGE_HEADING,
   USAGE_MORE_RUNS,
-  USAGE_RUNS_SHOWN,
   USAGE_COLUMNS,
   USAGE_PRICE_FIELDS,
   USAGE_STATUS_LINES,
   USAGE_UNRECORDED_NOTE,
-  usagePriceNote,
   tokenText,
   usageCostLine,
   usageGroupingLabel,
@@ -51,6 +48,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -118,9 +116,11 @@ export function mountUsage(options: MountUsageOptions): void {
     root.dataset['usageRange'] = usage.range;
     root.dataset['usageGrouping'] = usage.groupBy;
     root.dataset['usageRuns'] = String(usage.totals.runCount);
+    let summary: HTMLElement;
     if (usage.emptyLabel !== null) {
       const empty = el('p', 'field-note usage-empty', USAGE_EMPTY);
       empty.dataset['usageEmpty'] = 'true';
+      summary = empty;
       table.append(empty);
     } else {
       delete root.dataset['usageEmpty'];
@@ -149,26 +149,30 @@ export function mountUsage(options: MountUsageOptions): void {
         const cell = el('td');
         cell.colSpan = 5;
         const details = el('details', 'usage-runs');
-        details.append(el('summary', undefined, usageRunsSummary(row.runCount)));
+        const summary = el('summary', undefined, usageRunsSummary(row.runCount));
+        details.append(summary);
         const list = el('ul');
         const appendRuns = (links: readonly UsageRunLinkProjection[]): void => {
           for (const run of links) {
             const item = el('li');
-            const open = el('button', 'quiet', usageRunLinkLabel(run, instant));
+            const open = el('button', 'quiet', `${usageRunLinkLabel(run, instant)} · ${usageRouteLabel(run.route)}`);
             open.type = 'button';
             open.dataset['usageRunRecord'] = run.runRecordId;
             open.addEventListener('click', () => {
               setStatus(USAGE_STATUS_LINES.opening, 'busy');
               openRun(run);
             });
-            item.append(open, el('span', 'field-note', ` · ${usageRouteLabel(run.route)}`));
+            item.append(open);
             list.append(item);
           }
         };
         appendRuns(row.runs);
         details.append(list);
         let shown = row.runs.length;
-        const count = el('p', 'field-note', USAGE_RUNS_SHOWN(shown, row.runCount));
+        const updateSummary = (total: number): void => {
+          summary.textContent = `${usageRunsSummary(total)}${list.children.length < total ? ` · 已列出 ${list.children.length} 次` : ''}`;
+        };
+        updateSummary(row.runCount);
         const more = el('button', 'secondary', USAGE_MORE_RUNS);
         more.type = 'button';
         more.dataset['usageMoreRuns'] = row.key;
@@ -185,12 +189,12 @@ export function mountUsage(options: MountUsageOptions): void {
             appendRuns(next?.runs.filter((run) => !known.has(run.runRecordId)) ?? []);
             shown += next?.runs.length ?? 0;
             const total = next?.runCount ?? row.runCount;
-            count.textContent = USAGE_RUNS_SHOWN(list.children.length, total);
+            updateSummary(total);
             more.hidden = shown >= total || (next?.runs.length ?? 0) < USAGE_ROW_RUN_LINKS;
           }).catch((error: unknown) => setStatus(errorMessage(error, USAGE_STATUS_LINES.moreFailed), 'error'))
             .finally(() => { more.disabled = false; });
         });
-        details.append(count, more);
+        details.append(more);
         cell.append(details);
         runs.append(cell);
         body.append(runs);
@@ -199,9 +203,10 @@ export function mountUsage(options: MountUsageOptions): void {
       const totalsCost = usageCostLine(estimateUsageCost(usage.totals.byRoute, prices));
       const foot = el('p', 'usage-totals', `${usageTotalsLine(usage)} · ${totalsCost}`);
       foot.dataset['usageTotals'] = 'true';
+      summary = foot;
       table.append(grid, foot);
     }
-    if (usage.unrecordedRuns > 0) table.append(el('p', 'field-note usage-unrecorded', USAGE_UNRECORDED_NOTE(usage.unrecordedRuns)));
+    if (usage.unrecordedRuns > 0) summary.append('；', el('span', 'usage-unrecorded', USAGE_UNRECORDED_NOTE(usage.unrecordedRuns)));
     exportRow.hidden = usage.emptyLabel !== null;
   };
 
@@ -253,8 +258,9 @@ export function mountUsage(options: MountUsageOptions): void {
       const input = field(USAGE_PRICE_FIELDS.input, 'inputPerMillion', held === undefined ? '' : String(held.inputPerMillion), 'decimal', 10);
       const output = field(USAGE_PRICE_FIELDS.output, 'outputPerMillion', held === undefined ? '' : String(held.outputPerMillion), 'decimal', 10);
       const currency = field(USAGE_PRICE_FIELDS.currency, 'currency', held?.currency ?? 'CNY', 'text', 5);
-      const note = el('p', 'field-note usage-price-note', held === undefined ? USAGE_PRICE_FIELDS.empty : usagePriceNote(held.currency, held.inputPerMillion, held.outputPerMillion, held.enteredAt));
+      const note = el('span', 'usage-price-note', held === undefined ? USAGE_PRICE_FIELDS.empty : `录入于 ${held.enteredAt}`);
       note.setAttribute('role', 'status');
+      title.append(' · ', note);
       const save = el('button', 'secondary', USAGE_PRICE_FIELDS.save);
       save.type = 'submit';
       const clear = el('button', 'quiet', USAGE_PRICE_FIELDS.clear);
@@ -265,7 +271,7 @@ export function mountUsage(options: MountUsageOptions): void {
       });
       const actions = el('div', 'button-row');
       actions.append(save, clear);
-      form.append(note, actions);
+      form.append(actions);
       form.addEventListener('submit', (event) => {
         event.preventDefault();
         const candidate = parseUnitPrices({
@@ -303,7 +309,7 @@ export function mountUsage(options: MountUsageOptions): void {
     }
   };
 
-  const exportButton = el('button', 'secondary', USAGE_EXPORT);
+  const exportButton = el('button', 'secondary', `${USAGE_EXPORT} · 仅数字和标识，无书名或文字`);
   exportButton.type = 'button';
   exportButton.dataset['usageExport'] = 'csv';
   exportButton.addEventListener('click', () => {
@@ -314,7 +320,7 @@ export function mountUsage(options: MountUsageOptions): void {
       .catch((error: unknown) => setStatus(errorMessage(error, USAGE_STATUS_LINES.exportFailed), 'error'))
       .finally(() => { exportButton.disabled = false; });
   });
-  exportRow.append(exportButton, el('span', 'field-note', USAGE_EXPORT_NOTE));
+  exportRow.append(exportButton);
 
   paintControls();
   root.append(el('p', 'field-note', USAGE_LEDE), controls, table, exportRow, pricesHost);

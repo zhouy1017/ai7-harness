@@ -1,8 +1,12 @@
+import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer/manuscript-screen.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
+import { readReturnPlace } from '../../src/renderer/reading-return.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
-import type { ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
+import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
 
 // The Manuscript screen's own lifecycle (Issue #1127, revision 3), on its actual mount with each child owner and the service
 // as a boundary double: a mount that throws after the shell attached it can still be read, settled and destroyed, once, and
@@ -16,8 +20,9 @@ const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn> }>,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
+  rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
 }));
 
 vi.mock('../../src/renderer/editor-modes.js', async (importOriginal) => ({
@@ -49,7 +54,10 @@ vi.mock('../../src/renderer/paragraph-analysis.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/renderer/position-rail.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/position-rail.js')>(),
-  mountPositionRail: () => ({ setPosition: vi.fn(), refresh: vi.fn(), destroy: () => children.destroyed.push('rail') }),
+  mountPositionRail: (options: { onRead?: (rail: ManuscriptRailProjection) => void }) => {
+    children.rails.push(options);
+    return { setPosition: vi.fn(), refresh: vi.fn(), destroy: () => children.destroyed.push('rail') };
+  },
 }));
 vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/editorial-marks.js')>(),
@@ -60,7 +68,7 @@ vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/reading-return.js')>(),
-  readReturnPlace: async () => null,
+  readReturnPlace: vi.fn(async () => null),
   preserveReturnPlace: async (place: unknown) => place,
   consumeReturnPlace: async () => null,
 }));
@@ -79,6 +87,7 @@ vi.mock('../../src/renderer/editor.js', async (importOriginal) => ({
       loadWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       loadNavigationWindow: vi.fn((next: ManuscriptWindowProjection) => { currentWindow = next; return true; }),
       selectRange: vi.fn((blockId: string) => currentWindow.blocks.some((block) => block.blockId === blockId)),
+      highlightJump: vi.fn(), highlightAppliedRange: vi.fn(),
       currentBlockStyle: () => ({ kind: 'paragraph', level: null }),
       setBlockStyle: vi.fn(),
       isComposing: () => false,
@@ -136,7 +145,7 @@ function shell(rendererApi = api) {
     taskDrawer: { close: vi.fn(), openPanel: vi.fn(), openDialogue: vi.fn(), openComposer: vi.fn() } as unknown as ScreenOptions['taskDrawer'],
     interrupted: () => false,
     attach: (content, surface) => { replace(content); showing = surface; },
-    setContextActions: vi.fn(), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
+    setContextActions: (...nodes) => contextView.replaceChildren(...nodes), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
     errorMessage: (_error, fallback) => fallback, recentlyActivatedControl: () => null, awaitServiceJob: async (job) => job,
     composerRangeOf: vi.fn(), selectionTaskOffer: vi.fn(), selectionProcedureOffer: vi.fn(), prepareSelectionTask: vi.fn(),
     renderEditorWindow: vi.fn(), renderBookAnalysis: vi.fn(),
@@ -144,7 +153,7 @@ function shell(rendererApi = api) {
     renderProposalConflict: vi.fn(), renderProposalWorkspace: vi.fn(), returnToRecoveryComparison: vi.fn(),
   });
   return {
-    persistenceStatus, screen, open,
+    persistenceStatus, screen, contextView, open,
     /** Another screen replaces this one without its leave guard (a recovery return, an owned workbench route) and says so. */
     leave: (status: string): void => { replace(document.createElement('section') as unknown as HTMLElement); setStatus(status); },
     get showing(): ManuscriptScreen | null { return showing; },
@@ -167,6 +176,7 @@ beforeEach(() => {
   children.editors.length = 0;
   children.editorSurfaces.length = 0;
   children.protections.length = 0;
+  children.rails.length = 0;
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); restore(); });
 
@@ -204,6 +214,25 @@ async function searchArrivalWithPendingWrite(jump = true) {
 }
 
 describe('the Manuscript screen lifecycle', () => {
+  it('returns through a reading chip without taking focus from an active input', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const initial = windowOf('book-one');
+    vi.mocked(readReturnPlace).mockResolvedValueOnce({ manuscriptId: initial.manuscriptId, branchId: initial.branchId,
+      blockId: 'blk_3', place: '第一章' });
+    const app = shell(new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? async () => initial : Reflect.get(target, key) }));
+    app.open(initial);
+    await vi.advanceTimersByTimeAsync(0);
+    const input = document.createElement('input'); document.body.append(input);
+    const editor = children.editorSurfaces.at(-1)!; editor.focus.mockClear();
+    app.contextView.querySelector<HTMLButtonElement>('[data-return-chip]')!.click();
+    input.focus();
+    await vi.advanceTimersByTimeAsync(80);
+    expect(app.contextView.querySelector('[data-return-chip]')).toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(editor.selectRange).not.toHaveBeenCalled();
+    expect(editor.focus).not.toHaveBeenCalled();
+    app.showing?.destroy();
+  });
   it('keeps the full long outline heading available to assistive tools and its title', async () => {
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
@@ -216,8 +245,8 @@ describe('the Manuscript screen lifecycle', () => {
       app.screen.querySelector<HTMLButtonElement>('[data-edge-entry="navigation"]')!.click();
       await vi.advanceTimersByTimeAsync(0);
       const headingButton = app.screen.querySelector('.outline-list button')!;
-      expect(headingButton.getAttribute('title')).toBe(`层级 2 · ${heading}`);
-      expect(headingButton.getAttribute('aria-label')).toBe(`层级 2 · ${heading}`);
+      expect(headingButton.getAttribute('title')).toBe(heading);
+      expect(headingButton.getAttribute('aria-label')).toBe(heading);
       app.showing?.destroy();
     } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
   });
@@ -228,9 +257,9 @@ describe('the Manuscript screen lifecycle', () => {
     const app = shell();
     const initial = windowOf('book-one');
     app.open({ ...initial, position: { ...initial.position, label: full, structureLabel: heading, proportion: 0.25 } });
-    const position = app.screen.querySelector('.editor-meta span')!;
-    expect(position.textContent).toBe('长标题长标题长标题长标题长标题长… · 全稿 25.000%');
-    expect(position.getAttribute('title')).toBe(full);
+    const position = app.screen.querySelector('.editor-position')!;
+    expect(position.textContent).toBe('长标题长标题长标题长标题长标题长…');
+    expect(position.getAttribute('title')).toBe(heading);
     app.showing?.destroy();
   });
 
@@ -309,10 +338,64 @@ describe('the Manuscript screen lifecycle', () => {
     const app = shell();
     app.open(windowOf('book-one'));
     const toolbar = app.screen.querySelector('.editor-toolbar')!;
+    expect(toolbar.textContent).toContain('修订版 2');
+    expect(toolbar.textContent).not.toMatch(/分支|%|查看技术详情|保存当前编辑/u);
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['撤销', '重做', '保存当前编辑', '重试权威刷新']);
+      .toEqual(['撤销', '重做', '重试权威刷新']);
     app.showing?.destroy();
+  });
+
+  it('reveals paging links only near their loaded window boundary', () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const app = shell();
+    app.open({ ...windowOf('book-one'), previousCursor: 'before', nextCursor: 'after' });
+    const pane = app.screen.querySelector('.editor-window')! as unknown as MiniElement;
+    const [previous, next] = app.screen.querySelectorAll<HTMLButtonElement>('.window-actions button');
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 1500, scrollTop: 500 });
+    pane.dispatchEvent({ type: 'scroll' });
+    expect([previous!.hidden, next!.hidden]).toEqual([true, true]);
+    Object.assign(pane, { scrollTop: 984 });
+    pane.dispatchEvent({ type: 'scroll' });
+    expect([previous!.hidden, next!.hidden]).toEqual([true, false]);
+    Object.assign(pane, { scrollTop: 16 });
+    pane.dispatchEvent({ type: 'scroll' });
+    expect([previous!.hidden, next!.hidden]).toEqual([false, true]);
+    app.showing?.destroy();
+  });
+
+  it('offers both available boundary links when a window fits without any scrolling', () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    let resize = (): void => {};
+    vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { resize = callback; } observe() {} disconnect() {} });
+    const app = shell();
+    app.open({ ...windowOf('book-one'), previousCursor: 'before', nextCursor: 'after' });
+    const pane = app.screen.querySelector('.editor-window')!;
+    Object.assign(pane, { clientWidth: 800, clientHeight: 500, scrollHeight: 500, scrollTop: 0 });
+    resize();
+    expect([...app.screen.querySelectorAll<HTMLButtonElement>('.window-actions button')].map((item) => [item.hidden, item.disabled]))
+      .toEqual([[false, false], [false, false]]);
+    app.showing?.destroy();
+  });
+
+  it('labels capped chapter counts as partial and omits counts for chapters outside the retained rail', async () => {
+    Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
+    try {
+      const entries = ['blk_3', 'omitted'].map((blockId) => ({ blockId, kind: 'heading', level: 1, text: blockId, displayTextTruncated: false }));
+      const rendererApi = new Proxy(api, { get: (target, key) => key === 'getOutline' ? async () => ({ entries, previousCursor: null, nextCursor: null }) : Reflect.get(target, key) });
+      const app = shell(rendererApi);
+      app.open(windowOf('book-one'));
+      children.rails.at(-1)!.onRead!({ manuscriptId: 'm', branchId: 'b', revisionId: 'r', journalSequence: 1, totalCharacters: 100,
+        chapters: [{ blockId: 'blk_3', title: '第一章', level: 1, proportion: .25, suggestions: 0, annotations: 1, notes: 0 }], chaptersTruncated: true,
+        marks: [], marksTruncated: false, uncovered: null });
+      await vi.advanceTimersByTimeAsync(0);
+      const rows = app.screen.querySelectorAll('.outline-list button');
+      expect(rows[0]!.querySelector('.outline-counts')?.textContent).toContain('批注 1');
+      expect(rows[1]!.querySelector('.outline-counts')).toBeNull();
+      expect(rows[1]!.querySelector('.outline-percent')).toBeNull();
+      expect(app.screen.querySelector('.navigation-footer')!.textContent).toContain('已显示 1 个章节 · 标记计数为已显示部分');
+      app.showing?.destroy();
+    } finally { Reflect.deleteProperty(MiniElement.prototype, 'style'); }
   });
 
   it.each(['modes', 'editor'] as const)(
@@ -362,3 +445,11 @@ describe('the Manuscript screen lifecycle', () => {
     expect(protection.update.mock.calls.length).toBe(updatesAtDeparture);
   });
 });
+
+it('scans the manuscript screen in ordinary mode (#1315)', () => {
+  setTechnicalLayerVisible(false);
+  try { const app = shell(); app.open(windowOf('book-one')); expectNoTechnicalText(app.screen); app.showing?.destroy(); }
+  finally { setTechnicalLayerVisible(true); }
+});
+
+vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));

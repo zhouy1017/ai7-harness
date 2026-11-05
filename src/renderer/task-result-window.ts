@@ -1,4 +1,5 @@
 import { hydrateAnalysisRevision } from './analysis-paging.js';
+import { stateTerm } from './components/controls.js';
 import { ANALYSIS_MORE_RANGES } from './analysis-paging-labels.js';
 import type {
   HydratedAnalysisRevisionProjection as BaselineAnalysisResultSetRevisionProjection,
@@ -8,14 +9,13 @@ import type {
   RendererApi,
   ReviewRunProjection,
 } from '../shared/protocol.js';
-import { GLOBAL_ATTENTION_STATE_LABELS, GLOBAL_ATTENTION_STATE_PILLS, globalAttentionObjectLabel } from './global-attention-labels.js';
+import { globalAttentionStateLabel, GLOBAL_ATTENTION_STATE_PILLS, globalAttentionObjectLabel } from './global-attention-labels.js';
 import {
   ANALYSIS_RESULT_NOT_DONE,
   REVIEW_RESULT_NONE,
   REVIEW_RESULT_NOT_DONE,
   TASK_RESULT_CLOSE,
   TASK_RESULT_COLUMNS,
-  TASK_RESULT_FOOT_NOTE,
   TASK_RESULT_JUMP,
   TASK_RESULT_KIND,
   TASK_RESULT_LOADING,
@@ -76,6 +76,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text !== undefined) node.textContent = text;
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -99,18 +100,22 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   const isReview = entry.item.object.kind === 'review';
   // A dialogue Task's 回答 (Issue #52, S17a; TASK-044): its question and latest answer, read from the Harness Session Ledger.
   const isDialogue = entry.item.object.kind === 'dialogue';
+  const isTask = entry.item.object.kind === 'task';
   const section = el('section', 'task-result-window');
   section.setAttribute('role', 'dialog');
   section.dataset['taskResult'] = 'loading';
-  section.dataset['taskResultKind'] = isDialogue ? 'dialogue' : isReview ? 'review' : 'analysis';
+  section.dataset['taskResultKind'] = isTask ? 'task' : isDialogue ? 'dialogue' : isReview ? 'review' : 'analysis';
   const bar = el('header', 'task-result-bar');
   const kind = el('span', 'task-result-kind', TASK_RESULT_KIND);
   const title = el('h3', 'task-result-title', globalAttentionObjectLabel(entry.item.object));
+  const loading = el('span', undefined, ` · ${TASK_RESULT_LOADING}`);
+  loading.setAttribute('role', 'status');
+  title.append(loading);
   title.id = uid('title');
   title.tabIndex = -1;
   section.setAttribute('aria-labelledby', title.id);
   const pillTone = GLOBAL_ATTENTION_STATE_PILLS[entry.item.state];
-  const pill = el('span', `status-pill review-pill review-pill-${pillTone.tone}`, GLOBAL_ATTENTION_STATE_LABELS[entry.item.state]);
+  const pill = el('span', `state-term status-pill review-pill review-pill-${pillTone.tone}`, globalAttentionStateLabel(entry.item));
   pill.dataset['pillTone'] = pillTone.tone;
   pill.dataset['pillShape'] = pillTone.shape;
   const close = el('button', 'quiet task-result-close', TASK_RESULT_CLOSE);
@@ -118,12 +123,13 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   close.dataset['taskResultAction'] = 'close';
   bar.append(kind, title, pill, close);
   const body = el('div', 'task-result-body');
-  body.append(el('p', 'field-note', TASK_RESULT_LOADING));
   const foot = el('footer', 'task-result-foot');
-  const open = el('button', 'secondary', isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
+  const open = el('button', 'secondary', isTask ? '查看任务' : isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
   open.type = 'button';
   open.dataset['taskResultAction'] = 'open';
-  foot.append(open, el('span', 'field-note task-result-note', TASK_RESULT_FOOT_NOTE));
+  const noFindings = el('span', 'task-result-no-findings', REVIEW_RESULT_NONE);
+  noFindings.hidden = true;
+  foot.append(noFindings, open);
   section.append(bar, body, foot);
 
   let closed = false;
@@ -176,7 +182,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   let manuscriptId: string | null = null;
 
   function jumpButton(blockId: string | null, markId: string | null): HTMLElement {
-    if (blockId === null) return el('span', 'field-note', '—');
+    if (blockId === null) return el('span', 'task-result-unlocated', '无位置');
     const button = el('button', 'quiet task-result-jump', TASK_RESULT_JUMP);
     button.type = 'button';
     button.dataset['taskResultJump'] = blockId;
@@ -210,21 +216,22 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   }
 
   function showAnalysis(revision: BaselineAnalysisResultSetRevisionProjection): void {
+    const list = el('ul', 'task-result-units');
     const rows = revision.units.map((unit) => {
       const heading = revision.sections.find((candidate) => candidate.unitOrdinals.includes(unit.unitOrdinal))?.headingText ?? null;
-      const row = el('tr');
+      const row = el('li', 'task-result-unit');
       row.dataset['taskResultUnit'] = String(unit.unitOrdinal);
-      const place = el('td', 'task-result-place');
+      const place = el('div', 'task-result-place');
       place.append(jumpButton(unitBlockOf(unit), null));
       row.append(
-        el('td', undefined, String(unit.unitOrdinal)),
-        el('td', undefined, taskResultRangeTitle(unit.unitOrdinal, heading)),
-        el('td', undefined, analysisResultUnitLine(unit.state === 'gap' ? unit.gap : null)),
+        el('h4', undefined, taskResultRangeTitle(unit.unitOrdinal, heading)),
+        stateTerm(analysisResultUnitLine(unit.state === 'gap' ? unit.gap : null), unit.state === 'gap' ? 'attention' : 'good'),
         place,
       );
       return row;
     });
-    body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), table(TASK_RESULT_COLUMNS.analysis, rows));
+    list.append(...rows);
+    body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), list);
     if (revision.unitPage.nextOrdinal !== null) {
       const more = el('button', 'secondary', ANALYSIS_MORE_RANGES);
       more.type = 'button';
@@ -236,7 +243,9 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
           if (page.revisionId !== revision.revisionId || page.next !== null && page.next <= revision.unitPage.nextOrdinal!) throw new Error(TASK_RESULT_UNAVAILABLE);
           showAnalysis({ ...revision, units: [...revision.units, ...page.units], unitPage: {
             ...revision.unitPage, shown: revision.units.length + page.units.length, nextOrdinal: page.next } });
-        } catch { if (!closed) body.replaceChildren(el('p', 'field-note', TASK_RESULT_UNAVAILABLE)); }
+        } catch {
+          if (!closed && more.isConnected) { more.textContent = '读取失败 · 重试'; more.disabled = false; }
+        }
       });
       body.append(more);
     }
@@ -247,18 +256,19 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     const read = `${run.scope.label} · ${reviewResultReadLine(run.categories.map((category) => category.label))}`;
     const parts: HTMLElement[] = [meta(read, REVIEW_RESULT_NOT_DONE)];
     if (findings.length === 0) {
-      parts.push(el('p', 'field-note', REVIEW_RESULT_NONE));
+      noFindings.hidden = false;
     } else {
-      parts.push(table(TASK_RESULT_COLUMNS.review, findings.map((finding) => {
+      const results = table(TASK_RESULT_COLUMNS.review, findings.map((finding) => {
         const row = el('tr');
         row.dataset['taskResultFinding'] = finding.findingId;
         const place = el('td', 'task-result-place');
-        place.append(el('span', 'field-note', reviewResultPlaceLine(finding)), ' ', jumpButton(finding.blockPosition === null ? null : finding.blockId, finding.markId));
+        place.append(reviewResultPlaceLine(finding), ' ', jumpButton(finding.blockPosition === null ? null : finding.blockId, finding.markId));
         row.append(el('td', undefined, String(finding.ordinal)), el('td', undefined, finding.categoryLabel), el('td', undefined, reviewResultFindingLine(finding)), place);
         return row;
-      })));
+      }));
       const more = reviewResultMoreLine(findings.length, run.findingsTotal);
-      if (more !== null) parts.push(el('p', 'field-note', more));
+      if (more !== null) results.prepend(el('caption', undefined, more));
+      parts.push(results);
     }
     body.replaceChildren(...parts);
   }
@@ -272,18 +282,20 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
     place.append(jumpButton(dialogue.range.blockId, null));
     parts.push(place);
     if (latest !== undefined) {
-      const state = el('p', 'task-result-dialogue-state', DIALOGUE_STATE_LABELS[latest.state]);
-      state.dataset['dialogueState'] = latest.state;
+      const state = el('p', 'task-result-dialogue-state');
+      const label = el('span', undefined, DIALOGUE_STATE_LABELS[latest.state]);
+      label.dataset['dialogueState'] = latest.state;
+      state.append(label);
+      const incomplete = dialogueIncompleteLine(latest);
+      if (incomplete !== null) state.append('；', incomplete);
+      if (latest.source === 'missing' || latest.source === 'damaged') {
+        state.append(' · ', latest.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING);
+      }
       parts.push(state);
       const answer = el('div', 'task-result-dialogue-answer');
       answer.dataset['dialogueAnswer'] = latest.attemptId;
-      if (latest.source === 'missing' || latest.source === 'damaged') {
-        answer.append(el('p', 'field-note', latest.source === 'damaged' ? DIALOGUE_HISTORY_DAMAGED : DIALOGUE_HISTORY_MISSING));
-      }
       for (const fragment of latest.fragments) answer.append(el('span', `dialogue-fragment${fragment.breakAfter ? ' dialogue-fragment-break' : ''}`, fragment.text));
       parts.push(answer);
-      const incomplete = dialogueIncompleteLine(latest);
-      if (incomplete !== null) parts.push(el('p', 'field-note', incomplete));
     }
     body.replaceChildren(...parts);
   }
@@ -291,8 +303,14 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   async function load(): Promise<void> {
     const result = entry.result;
     try {
-      if (result === null) throw new Error(TASK_RESULT_UNAVAILABLE);
-      if (result.kind === 'dialogue') {
+      if (result === null && isTask) {
+        const completion = entry.item.facts.completion;
+        body.replaceChildren(el('p', undefined, completion
+          ? `已完成 ${completion.total - completion.gaps} / ${completion.total} 个单元。`
+          : '在这项任务中查看已有结果与后续操作。'));
+        if (completion?.reason) body.append(el('p', undefined, completion.reason));
+      } else if (result === null) throw new Error(TASK_RESULT_UNAVAILABLE);
+      else if (result.kind === 'dialogue') {
         const dialogue = await options.api.inspectDialogue({ dialogueId: result.dialogueId, afterFragment: 0 });
         if (closed) return;
         if (dialogue.dialogueId !== result.dialogueId) throw new Error(TASK_RESULT_UNAVAILABLE);
@@ -314,9 +332,11 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
         manuscriptId = workspace.manuscript?.manuscriptId ?? null;
         showReview(workspace.run);
       }
+      loading.remove();
       section.dataset['taskResult'] = 'ready';
     } catch (error) {
       if (closed) return;
+      loading.remove();
       section.dataset['taskResult'] = 'unavailable';
       body.replaceChildren(el('p', 'attention-note', options.errorMessage(error, TASK_RESULT_UNAVAILABLE)));
     }

@@ -1,9 +1,9 @@
+import { type SalvagedModelResult, extractModelJson, normalizeLine, type ModelResultSalvage, DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import { EVALUATION_REWRITE_CONTRACT_VERSION, type CoverageManifestUnitProjection } from '../../shared/protocol.js';
-import { DIGEST_PATTERN, canonicalJson, hasExactKeys, isRecord, requireAnalysis, sha256Hex } from '../analysis/canonical.js';
 import type { ManifestBlockInput } from '../analysis/coverage-manifest.js';
 import { graphemeCount } from '../analysis/factual-review-contract.js';
 import { claimsConclusion, claimsScore, scoreDenominators } from './claim-guards.js';
-import { withinEvaluationBytes } from './initial-evaluation-contract.js';
+import { withinEvaluationBytes, normalizeEvaluationLine } from './initial-evaluation-contract.js';
 
 /**
  * Evaluation Rewrite Contract v1 (Issue #429, plan slice S81b2; V2-UX-EVAL-008): `按我的评分重写评语` — AI7 rewrites one
@@ -80,13 +80,13 @@ export interface EvaluationRewriteObservation {
   readonly blockOrdinals: ReadonlyArray<number>;
 }
 
-export interface EvaluationRewriteUnitResult {
+export interface EvaluationRewriteUnitResult extends SalvagedModelResult {
   readonly schema: typeof EVALUATION_REWRITE_UNIT_RESULT_SCHEMA;
   readonly unitOrdinal: number;
   readonly observations: ReadonlyArray<EvaluationRewriteObservation>;
 }
 
-export interface EvaluationRewriteSynthesisResult {
+export interface EvaluationRewriteSynthesisResult extends SalvagedModelResult {
   readonly schema: typeof EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA;
   /** Every item the editor scored whose 评语 may be offered, once each, in the profile's order once read. */
   readonly items: ReadonlyArray<{ readonly itemId: string; readonly comment: string }>;
@@ -105,10 +105,10 @@ export type EvaluationRewriteUnitParseFailureCode = 'not-json' | 'schema-invalid
 export type EvaluationRewriteSynthesisParseFailureCode = 'not-json' | 'schema-invalid' | 'item-unknown' | 'items-incomplete';
 
 export type EvaluationRewriteUnitParse =
-  | { ok: true; result: EvaluationRewriteUnitResult; canonicalJson: string; digest: string }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: EvaluationRewriteUnitResult; canonicalJson: string; digest: string }
   | { ok: false; code: EvaluationRewriteUnitParseFailureCode; detail: string };
 export type EvaluationRewriteSynthesisParse =
-  | { ok: true; result: EvaluationRewriteSynthesisResult }
+  | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: EvaluationRewriteSynthesisResult }
   | { ok: false; code: EvaluationRewriteSynthesisParseFailureCode; detail: string };
 
 const UNIT_MESSAGE_HEADER = '评语重写单元 {ordinal}/{total} · 单元摘要 {unitDigest}' as const;
@@ -287,103 +287,74 @@ export function evaluationRewriteContractDigest(contract: EvaluationRewritePromp
   return sha256Hex(canonicalJson(contract));
 }
 
-function parseJson(value: string): { ok: true; value: unknown } | { ok: false } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(value);
-  try {
-    return { ok: true, value: JSON.parse(fenced?.[1] ?? value) as unknown };
-  } catch {
-    return { ok: false };
-  }
-}
-
 /** Admit one unit result: exactly the contract's keys, items the editor scored, positions within the unit. */
-export function parseEvaluationRewriteUnitResult(
-  value: string,
-  expected: { unitOrdinal: number; blockCount: number; itemIds: ReadonlyArray<string> },
-): EvaluationRewriteUnitParse {
-  const parsed = parseJson(value);
-  if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  const result = parsed.value;
-  const invalid = (detail: string): EvaluationRewriteUnitParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(result) || !hasExactKeys(result, ['schema', 'unitOrdinal', 'observations'])) return invalid('单元结果键集合不符合评语重写契约 v1。');
-  if (result.schema !== EVALUATION_REWRITE_UNIT_RESULT_SCHEMA) return invalid('单元结果 schema 不是评语重写契约 v1。');
-  if (!Number.isSafeInteger(result.unitOrdinal) || (result.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (result.unitOrdinal !== expected.unitOrdinal) {
-    return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(result.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
-  }
-  if (!Array.isArray(result.observations) || result.observations.length > MAX_UNIT_OBSERVATIONS) return invalid('依据集合不符合评语重写契约 v1。');
+export function parseEvaluationRewriteUnitResult(text: string, expected: { unitOrdinal: number; blockCount: number; itemIds: ReadonlyArray<string> }): EvaluationRewriteUnitParse {
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
+  const mark = (index: number, reason: string): void => { salvaged.push({ section: 'observations', index, reason }); };
+  try { JSON.parse(text); } catch { mark(-1, 'json-extracted-or-partial'); }
+  if (value.schema !== EVALUATION_REWRITE_UNIT_RESULT_SCHEMA || value.unitOrdinal !== expected.unitOrdinal) mark(-1, 'request-envelope');
+  if (!('observations' in value) && !('schema' in value)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  if (value.observations !== undefined && !Array.isArray(value.observations)) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const candidates = Array.isArray(value.observations) ? value.observations : [];
   const observations: EvaluationRewriteObservation[] = [];
-  for (const [index, candidate] of (result.observations as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条依据`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['itemId', 'note', 'blockOrdinals'])) return invalid(`${label}的键集合不符合评语重写契约 v1。`);
-    if (typeof candidate.itemId !== 'string') return invalid(`${label}的评分项编号无效。`);
-    if (!expected.itemIds.includes(candidate.itemId)) {
-      return { ok: false, code: 'item-unknown', detail: `${label}的评分项 ${candidate.itemId.slice(0, 64)} 不是编辑已打分的评分项。` };
-    }
-    if (!line(candidate.note, MAX_OBSERVATION_NOTE_GRAPHEMES)) return invalid(`${label}的说明缺失、含有控制字符或超出 200 字素边界。`);
-    const ordinals = candidate.blockOrdinals;
-    if (!Array.isArray(ordinals) || ordinals.length < 1 || ordinals.length > MAX_OBSERVATION_BLOCKS ||
-        !ordinals.every((ordinal) => Number.isSafeInteger(ordinal) && (ordinal as number) >= 1) || new Set(ordinals).size !== ordinals.length) {
-      return invalid(`${label}的内容块序号无效。`);
-    }
-    const outside = (ordinals as number[]).find((ordinal) => ordinal > expected.blockCount);
-    if (outside !== undefined) {
-      return { ok: false, code: 'block-out-of-unit', detail: `${label}引用的内容块序号 ${outside} 不在本单元列出的 ${expected.blockCount} 个内容块内。` };
-    }
-    observations.push({ itemId: candidate.itemId, note: candidate.note, blockOrdinals: [...(ordinals as number[])] });
+  for (const [index, candidate] of candidates.entries()) {
+    if (index >= MAX_UNIT_OBSERVATIONS || !isRecord(candidate) || typeof candidate.note !== 'string' || !candidate.note.isWellFormed() || !candidate.note.trim()) { mark(index, 'schema-invalid'); continue; }
+    if (typeof candidate.itemId !== 'string' || !expected.itemIds.includes(candidate.itemId)) { mark(index, 'item-unknown'); continue; }
+    const itemId = candidate.itemId;
+    const raw = Array.isArray(candidate.blockOrdinals) ? candidate.blockOrdinals : [];
+    const ordinals = [...new Set(raw.map((ordinal) => typeof ordinal === 'string' ? Number(ordinal) : ordinal).filter((ordinal): ordinal is number => typeof ordinal === 'number' && Number.isSafeInteger(ordinal) && ordinal >= 1 && ordinal <= expected.blockCount))].slice(0, MAX_OBSERVATION_BLOCKS);
+    if (JSON.stringify(raw) !== JSON.stringify(ordinals)) mark(index, 'block-out-of-unit');
+    if (!ordinals.length) { mark(index, 'block-out-of-unit'); continue; }
+    const note = normalizeEvaluationLine(candidate.note, MAX_OBSERVATION_NOTE_GRAPHEMES);
+    if (note !== candidate.note) mark(index, 'note-normalized');
+    observations.push({ itemId, note, blockOrdinals: ordinals });
   }
-  const admitted: EvaluationRewriteUnitResult = { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, observations };
-  const canonical = canonicalJson(admitted);
-  return { ok: true, result: admitted, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  if (candidates.length > 0 && observations.length === 0) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  const result: EvaluationRewriteUnitResult = { schema: EVALUATION_REWRITE_UNIT_RESULT_SCHEMA, unitOrdinal: expected.unitOrdinal, observations, ...(salvaged.length ? { salvaged } : {}) };
+  const canonical = canonicalJson(result);
+  return { ok: true, result, ...(salvaged.length ? { salvaged } : {}), canonicalJson: canonical, digest: sha256Hex(canonical) };
 }
 
 /**
  * Admit the synthesis: one 评语 for every item the editor scored, none for another, and the 总评 — and no other key, so no
  * number can come back with them. The items are returned in the version's order whatever order the model wrote them in.
  */
-export function parseEvaluationRewriteSynthesis(value: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions'>): EvaluationRewriteSynthesisParse {
-  const parsed = parseJson(value);
-  if (!parsed.ok) return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  const result = parsed.value;
-  const invalid = (detail: string): EvaluationRewriteSynthesisParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(result) || !hasExactKeys(result, ['schema', 'items', 'verdict'])) return invalid('全书综合的键集合不符合评语重写契约 v1。');
-  if (result.schema !== EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA) return invalid('全书综合 schema 不是评语重写契约 v1。');
-  if (!Array.isArray(result.items)) return invalid('评语集合不符合评语重写契约 v1。');
-  const scored = evaluationRewriteScoredItems(input);
-  const byId = new Map<string, { itemId: string; comment: string }>();
-  for (const [index, candidate] of (result.items as unknown[]).entries()) {
-    const label = `第 ${index + 1} 条评语`;
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['itemId', 'comment']) || typeof candidate.itemId !== 'string') {
-      return invalid(`${label}的键集合不符合评语重写契约 v1。`);
-    }
-    const item = scored.find((entry) => entry.itemId === candidate.itemId);
-    if (item === undefined) return { ok: false, code: 'item-unknown', detail: `${label}的评分项 ${candidate.itemId.slice(0, 64)} 不是编辑已打分的评分项。` };
-    if (byId.has(item.itemId)) return { ok: false, code: 'items-incomplete', detail: `评分项 ${item.itemId} 的评语出现了不止一次。` };
-    if (!line(candidate.comment, MAX_REWRITTEN_COMMENT_GRAPHEMES)) return invalid(`评分项 ${item.itemId} 的评语缺失、含有控制字符或超出 300 字素边界。`);
-    byId.set(item.itemId, { itemId: item.itemId, comment: candidate.comment });
-  }
-  const missing = scored.find((item) => !byId.has(item.itemId));
-  if (missing !== undefined) return { ok: false, code: 'items-incomplete', detail: `没有给出评分项 ${missing.itemId} 的评语。` };
-  if (!line(result.verdict, MAX_REWRITTEN_VERDICT_GRAPHEMES)) return invalid('总评缺失、含有控制字符或超出 600 字素边界。');
-  // The numbers and the conclusion are the editor's: a 评语 or the 总评 that states either is set aside, alone, with why. A
-  // fraction reads as a score over a 满分, the total, the rated total, 10 or 100 — never as 「2/3」 (Issue #689).
-  const fullMarks = scoreDenominators(input.items);
-  const claim = (words: string): string | null =>
-    claimsScore(words, fullMarks) ? '写了分数，没有采用：分数只由你定。' : claimsConclusion(words, input.conclusions) ? '写出了结论，没有采用：结论由你选。' : null;
+export function parseEvaluationRewriteSynthesis(text: string, input: Pick<EvaluationRewriteContractInput, 'items' | 'conclusions'>): EvaluationRewriteSynthesisParse {
+  const value = extractModelJson(text, { partial: true });
+  if (value === null) return { ok: false, code: 'not-json', detail: '模型回答无法读出任何可用条目。' };
+  const salvaged: ModelResultSalvage[] = [];
   const withheld: Array<{ itemId: string | null; reason: string }> = [];
-  const items: Array<{ itemId: string; comment: string }> = [];
-  for (const item of scored) {
-    const written = byId.get(item.itemId)!;
-    const reason = claim(written.comment);
-    if (reason === null) items.push(written);
-    else withheld.push({ itemId: item.itemId, reason: `「${item.label}」的重写评语${reason}` });
-  }
-  const verdictReason = claim(result.verdict);
-  if (verdictReason !== null) withheld.push({ itemId: null, reason: `重写的总评${verdictReason}` });
-  return {
-    ok: true,
-    result: { schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, items, verdict: verdictReason === null ? result.verdict : null, withheld },
+  const mark = (section: string, index: number, reason: string): void => { salvaged.push({ section, index, reason }); };
+  try { JSON.parse(text); } catch { mark('envelope', -1, 'json-extracted-or-partial'); }
+  if (value.schema !== EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA) mark('schema', -1, 'request-envelope');
+  const scored = evaluationRewriteScoredItems(input);
+  const fullMarks = scoreDenominators(input.items);
+  const clean = (raw: unknown, itemId: string | null, index: number, maximum: number): string | null => {
+    const section = itemId === null ? 'verdict' : 'items';
+    if (typeof raw !== 'string' || !raw.isWellFormed() || !raw.trim()) {
+      withheld.push({ itemId, reason: '没有可采用的评语。' }); mark(section, index, 'text-missing'); return null;
+    }
+    // Decimal punctuation inside a number belongs to the sentence being checked, never a detachable prefix.
+    const sentences = raw.match(/(?:[^。！？.!?]|(?<=[0-9０-９])\.(?=[0-9０-９]))+[。！？.!?]*/gu) ?? [raw];
+    const kept = sentences.filter((sentence) => !claimsScore(sentence, fullMarks) && !claimsConclusion(sentence, input.conclusions));
+    if (kept.length !== sentences.length) { withheld.push({ itemId, reason: '含分数或结论的句子没有采用：分数与结论由你定。' }); mark(section, index, 'claim-withheld'); }
+    const result = normalizeEvaluationLine(kept.join(''), maximum);
+    if (result !== raw && kept.length === sentences.length) mark(section, index, 'text-normalized');
+    return result || null;
   };
+  const byId = new Map<string, { itemId: string; comment: string }>();
+  for (const [index, candidate] of (Array.isArray(value.items) ? value.items : []).entries()) {
+    if (!isRecord(candidate) || typeof candidate.itemId !== 'string' || !scored.some((item) => item.itemId === candidate.itemId) || byId.has(candidate.itemId)) { mark('items', index, 'item-unknown-or-duplicate'); continue; }
+    const comment = clean(candidate.comment, candidate.itemId, index, MAX_REWRITTEN_COMMENT_GRAPHEMES);
+    if (comment !== null) byId.set(candidate.itemId, { itemId: candidate.itemId, comment });
+  }
+  for (const [index, item] of scored.entries()) if (!byId.has(item.itemId)) { mark('items', index, 'item-missing'); withheld.push({ itemId: item.itemId, reason: '未写出可采用的评语。' }); }
+  const verdict = clean(value.verdict, null, -1, MAX_REWRITTEN_VERDICT_GRAPHEMES);
+  const items = scored.flatMap((item) => { const written = byId.get(item.itemId); return written === undefined ? [] : [written]; });
+  if (!items.length && verdict === null) return { ok: false, code: 'schema-invalid', detail: '模型回答无法读出任何可用条目。' };
+  return { ok: true, ...(salvaged.length ? { salvaged } : {}), result: { schema: EVALUATION_REWRITE_SYNTHESIS_RESULT_SCHEMA, items, verdict, withheld, ...(salvaged.length ? { salvaged } : {}) } };
 }
 
 // ---- the unit message ---------------------------------------------------------------------------------------------

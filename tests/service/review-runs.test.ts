@@ -1,5 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
+import { startQuickTasks } from '../support/quick-tasks.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
 import { BASELINE_PROMPT_CONTRACT_DIGEST, parseUnitMessageHeader, unitRequestDigest } from '../../src/service/analysis/contract.js';
 import { parseCrossUnitMessageHeader } from '../../src/service/analysis/cross-unit-contract.js';
@@ -429,6 +430,24 @@ function selectionAt(session: Session, book: Book, from: number, to = from): Rev
   };
 }
 
+it('repeats a completed selection review with its original categories and paragraphs (#1328)', async () => {
+  await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+    const scope = selectionAt(session, book, 1);
+    const original = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], scope));
+    expect(original.state).toBe('settled');
+    await startQuickTasks({ tasks: [{ bookId: book.bookId, procedureId: 'repeat', repeat: { kind: 'review-run', ref: original.reviewRunId } }] }, {
+      store: session.store, jobs: new CooperativeJobOwner(session.store), policy: launchPolicy, execution: session.owner,
+      credentialReadiness: async () => null, connectivity: { reading: () => 'online', reachesNetwork: () => false, slotBusy: () => session.owner.busy },
+      driveReview: (id) => { void session.driver.drive(id); },
+    });
+    const repeated = workspace(session, book).run!;
+    expect(repeated.reviewRunId).not.toBe(original.reviewRunId);
+    expect(repeated.categories.map((category) => category.categoryId)).toEqual([TYPOS]);
+    expect(repeated.scope).toEqual(original.scope);
+    expect(session.store.repeatTaskRequest(book.bookId, { kind: 'review-run', ref: repeated.reviewRunId })).toMatchObject({ scope });
+  });
+});
+
 function reviewMarkCount(session: Session, book: Book): number {
   const ids = new Set<string>();
   let cursor: string | null = null;
@@ -669,6 +688,41 @@ async function arrangePreferenceJudgments(session: Session, book: Book): Promise
 }
 
 describe('a Review Run over the real store on exact sample1', () => {
+  it('keeps change-plan redo independent of the previous series selection', async () => {
+    const session = await openLayeredSelection();
+    try {
+      const book = await importBook(session);
+      const seriesId = makeJ13Series(session.store, book.bookId);
+      let progress = session.store.createReviewRunPreparationWork(book.bookId, [TYPOS], WHOLE, launchPolicy,
+        null, [], null, null, seriesId);
+      while (!progress.done) progress = session.store.advanceReviewRunPreparationWork(progress.workId!);
+      const run = progress.projection!.run!;
+      expect(run.referenceInput?.seriesId).toBe(seriesId);
+      session.store.authorizeReviewRun(book.bookId, run.reviewRunId, approvals(run));
+      const handoff = session.store.reviewRunDriveSteps.start(run.reviewRunId, TYPOS)!;
+      session.store.reviewRunDriveSteps.recordDispatch(run.reviewRunId, TYPOS, handoff.runRecordId);
+      handoff.ledger.cancelWaiting(book.bookId, run.categories[0]!.taskIntentId!);
+      session.store.finishCancelledReviewRun(handoff.runRecordId);
+      const redo = session.store.redoTaskRequest({ bookId: book.bookId, kind: 'review-run', ref: run.reviewRunId });
+      expect(redo).toMatchObject({ redoOf: run.reviewRunId, categoryIds: [TYPOS], scope: WHOLE });
+      expect(redo).not.toHaveProperty('seriesId');
+    } finally { await close(session); }
+  });
+
+  it('projects current scope units and repeat inputs for references without preparing or authorizing work', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const before = workspace(session, book, null);
+      expect(before.scopeUnitCounts!.whole).toBeGreaterThan(0);
+      expect(before.scopeUnitCounts!.units).toHaveLength(before.scopeUnitCounts!.whole);
+      expect(before.categories.find((entry) => entry.categoryId === STYLE)?.crossChapter).toBe(true);
+      expect(before.runs).toHaveLength(0);
+      const prepared = prepare(session, book, [TYPOS], WHOLE);
+      const shown = workspace(session, book, prepared.reviewRunId);
+      expect(shown.run!.authorization).toBeNull();
+      expect(shown.run!.referenceInput).toMatchObject({ categoryIds: [TYPOS], scope: WHOLE, materialIds: [] });
+      expect(shown.scopeUnitCounts).toEqual(before.scopeUnitCounts);
+    });
+  });
   it('settles cancellation only in the Review that dispatched a shared prepared Task', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const first = prepare(session, book, [TYPOS], WHOLE);
@@ -731,12 +785,17 @@ describe('a Review Run over the real store on exact sample1', () => {
   it('widens a v1 revision-84 store without changing its recorded bytes (#1084)', async () => {
     const legacy = await open('review-overlap-authored');
     const book = await importBook(legacy);
-    try { await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE)); }
+    // This retained v1 fixture closes no units under the current outcome rule (#1307).
+    try { expect((await authorizeAndDrive(legacy, book, prepare(legacy, book, [TYPOS], WHOLE))).state).toBe('failed'); }
     finally { await close(legacy); }
     const before = revision84ReviewStore();
     const session = await open('review-overlap-authored');
     try {
-      expect(workspace(session, book).runs[0]!.state).toBe('settled');
+      // Inherited at integration-24: this two-paragraph synthetic fixture has no sample1 request entries.
+      expect(workspace(session, book).runs[0]!.state).toBe('failed');
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.resultSetRevision).toBeNull();
+      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
       withDatabase((after) => {
         for (const snapshot of before) expect(after.prepare(`SELECT canonical_json, sha256 FROM ${snapshot.table} ORDER BY rowid`).all()).toEqual(snapshot.rows);
         expect(after.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
@@ -773,31 +832,38 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('pages oversized rejected text without loss (#1084)', async () => {
+  it('closes a selection review with every finding rejected and visible in the appendix (#1311)', async () => {
+    await withCapturedReviewBook(async (session, book) => {
+      const entries = session.responseEntries!;
+      for (const [key, entry] of entries) if (entry.unitOrdinal > 0 && entry.response.kind === 'unit-result') {
+        entries.set(key, { ...entry, response: { ...entry.response, text: JSON.stringify({ schema: 'ai7.editorial-review.unit-result/2',
+          unitOrdinal: entry.unitOrdinal, findings: [null, { quote: '合成引文', blockOrdinal: 999, severity: 'should', note: '合成排除项' }] }) } });
+      }
+      const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], selectionAt(session, book, 92)));
+      expect(run.categories[0]!.state).toBe('settled');
+      expect(run.findings).toEqual([]);
+      const revision = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE)).resultSetRevision!;
+      expect(revision.units.filter((unit) => unit.state === 'closed')).toHaveLength(2);
+      expect(revision.gaps.every((gap) => gap.code === 'out-of-scope')).toBe(true);
+      expect(revision.excluded).toHaveLength(4);
+      expect(revision.excluded.map((finding) => finding.findingIndex)).toEqual([0, 1, 0, 1]);
+      expect(revision.excluded.every((finding) => finding.rawText !== undefined)).toBe(true);
+    });
+  }, 300_000);
+
+  it('clips oversized notes and retains the finding as a disclosed whole-block annotation', async () => {
     await withCapturedReviewBook(async (session, book) => {
       const entries = session.responseEntries!;
       if (!(entries instanceof Map)) throw new Error('Expected mutable authored control entries');
-      const longNote = '合成说明'.repeat(20_000);
-      for (const [key, entry] of [...session.responseEntries!]) {
+      for (const [key, entry] of [...entries]) {
         if (entry.unitOrdinal !== 1 || entry.attempt !== 2 || entry.response.kind !== 'unit-result') continue;
         const body = JSON.parse(entry.response.text) as { findings: Array<Record<string, unknown>> };
-        body.findings.at(-1)!.note = longNote;
+        body.findings.at(-1)!.note = '合成说明'.repeat(20_000);
         entries.set(key, { ...entry, response: { ...entry.response, text: JSON.stringify(body) } });
       }
       const run = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-      const chunks: string[] = [];
-      let page = workspace(session, book, run.reviewRunId).run!;
-      let pages = 0;
-      for (;;) {
-        expect(Buffer.byteLength(JSON.stringify(page), 'utf8')).toBeLessThan(512 * 1024);
-        chunks.push(...page.excluded!.filter((entry) => entry.reasonCode === 'contract-schema-invalid').map((entry) => entry.text));
-        if (page.excludedNextOrdinal == null) break;
-        if (++pages > 100) throw new Error('Excluded paging failed to advance');
-        page = session.store.inspectReviewWorkspace(book.bookId, run.reviewRunId, undefined,
-          { findingsAfterOrdinal: null, categoryId: null, severity: null, status: null, chapterBlockId: null, excludedAfterOrdinal: page.excludedNextOrdinal }).run!;
-      }
-      expect((JSON.parse(chunks.join('')) as { note: string }).note === longNote).toBe(true);
-      expect(pages).toBeGreaterThan(0);
+      expect(run.excludedTotal).toBe(0);
+      expect(run.findings.some((finding) => finding.quote === '合成的无效发现' && finding.output === 'annotation' && finding.note.includes('引文未逐字匹配'))).toBe(true);
     });
   }, 300_000);
 
@@ -819,8 +885,8 @@ describe('a Review Run over the real store on exact sample1', () => {
       // J-04's own suffixes, in its order (run-j04.mjs saveEditorSuffix): its Review Run reads unit 1 with all three in place.
       for (const suffix of [J04_EDIT_SUFFIX, '，J-04 计划版本形成后的确认编辑', '，J-04 快速开始前的确认编辑']) appendToBlockAt(session, book, 1, suffix);
       const settled = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
-      expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 3 });
-      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      expect(settled.categories[0]).toMatchObject({ state: 'settled', excludedCount: 0 });
+      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
       const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       expect(projection.run!.adaptations!.map((entry) => [entry.adaptationClass, entry.unitOrdinal])).toEqual([['contract-retry', 1]]);
       expect(projection.resultSetRevision!.gaps).toEqual([]);
@@ -837,7 +903,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       runId = settled.reviewRunId;
       expect(settled.categories[0]!.state).toBe('settled');
       expect(settled.findings.length).toBeGreaterThan(0);
-      expect(settled.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid' && entry.text.includes('合成的无效发现'))).toBe(true);
+      expect(settled.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true);
       const ledger = session.store.reviewCategoryLedger(reviewCategoryKindDefinition(TYPOS_AND_USAGE));
       const projection = ledger.inspect(book.bookId);
       expect(projection.run!.adaptations).toHaveLength(1);
@@ -850,10 +916,10 @@ describe('a Review Run over the real store on exact sample1', () => {
       expect(frozen.contractIdentity).toMatchObject({ contractId: 'ai7.editorial-review', version: 2 });
       expect(projection.planEnvelope!.procedure?.version).toBe(2);
       expect(settled.excluded).toHaveLength(settled.excludedTotal!);
-      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(false);
+      expect(settled.findings.some((finding) => finding.quote === '合成的无效发现')).toBe(true);
     } finally { await close(session); }
     const reopened = await open('sample1-review-contract-v2-controls');
-    try { expect(workspace(reopened, book, runId).run!.excluded!.some((entry) => entry.reasonCode === 'contract-schema-invalid')).toBe(true); }
+    try { expect(workspace(reopened, book, runId).run!.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation')).toBe(true); }
     finally { await close(reopened); }
   }, 300_000);
 
@@ -1008,9 +1074,9 @@ describe('a Review Run over the real store on exact sample1', () => {
         const category = settled.categories.find((candidate) => candidate.categoryId === input.categoryId)!;
         expect(category.findingsCount).toBe(revision.findings.length);
         expect(category.excludedCount).toBe(revision.excluded.length);
-        expect(category.excludedCount).toBeGreaterThan(0);
+        expect(category.excludedCount).toBe(0);
       }
-      expect(settled.categories[0]!.excludedCount).toBe(2);
+      expect(settled.categories[0]!.excludedCount).toBe(0);
       expect(settled.categories.find((category) => category.categoryId === PLOT)!.findingsCount).toBe(4);
       expect(settled.findings.length).toBe(settled.categories.reduce((sum, category) => sum + category.findingsCount, 0));
       expect(settled.findings.every((finding) => finding.markId !== null && finding.anchorState === 'exact' && finding.status === 'pending')).toBe(true);
@@ -1057,6 +1123,9 @@ describe('a Review Run over the real store on exact sample1', () => {
       const databaseBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
       const walBytes = readFileSync(join(roots.dataRoot, 'store', 'ai7.sqlite-wal'));
       const aggregateBefore = session.store.inspectBookFindings(book.bookId);
+      const direct = aggregateBefore.items.find((item) => item.suggestion !== undefined);
+      expect(direct?.suggestion).toMatchObject({ manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, batchAllowed: true });
+      expect(direct?.suggestion?.markId).toBeTruthy();
       expect(aggregateBefore.items.filter((item) => item.target.kind === 'review').length).toBe(run.findingCounts.pending);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${TYPOS}`)).toBe(true);
       expect(aggregateBefore.groups.some((group) => group.category === `review:${STYLE}`)).toBe(true);
@@ -1282,15 +1351,15 @@ describe('a Review Run over the real store on exact sample1', () => {
       const recomputed = revision.resultSetRevision!.lineage.filter((unit) => unit.kind === 'recomputed').map((unit) => revision.coverageManifest!.units[unit.unitOrdinal - 1]!);
       expect(recomputed.map((unit) => [unit.startPosition, unit.endPosition])).toEqual([[16, 25], [26, 43]]);
       expect(empty.findings).toEqual([]);
-      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 2 处，未标记。');
-      expect(selectionExcludedLine(2)).toBe('所读范围内另有 2 条未能定位引文，列在排除附录中');
+      expect(empty.categories[0]!.detail).toBe('已形成 0 条发现：0 条在稿件上；所选范围外另有 4 处，未标记。');
+      expect(selectionExcludedLine(2, ['检索引用未精确取文', '检索引用未精确取文'])).toBe('所读范围内另有 2 条发现未采用，列在排除附录中：检索引用未精确取文');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'never', lastRunOrdinal: null });
       expect(selectionOutsideLine(2)).toBe('所选范围外另有 2 处，未标记');
       expect(reviewCard(session, book, first.reviewRunId)!.item.object).toEqual({ kind: 'review', ordinal: 1, onSelection: true });
       expect(reviewMarkCount(session, book)).toBe(0);
       const second = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], on(twentyOne.blockId, twentyOne.blockId)));
       expect(second.findings.map((finding) => [finding.blockId, finding.blockPosition, finding.markId !== null])).toEqual([[twentyOne.blockId, 21, true]]);
-      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所读范围内另有 2 条未能定位引文，列在排除附录中；所选范围外另有 1 处，未标记。');
+      expect(second.categories[0]!.detail).toBe('已形成 1 条发现：1 条在稿件上；所选范围外另有 3 处，未标记。');
       expect(reviewMarkCount(session, book)).toBe(1);
     });
   }, 300_000);
@@ -1340,14 +1409,19 @@ describe('a Review Run over the real store on exact sample1', () => {
       // with every typo on the manuscript, each once.
       const whole = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
       expect(whole.findings.map((finding) => [finding.blockPosition, finding.markId !== null]).sort((left, right) => Number(left[0]) - Number(right[0])))
-        .toEqual([[10, true], [15, true], [21, true], [56, true], [64, true]]);
+        .toEqual(expect.arrayContaining([[10, true], [15, true], [21, true], [56, true], [64, true]]));
+      expect(whole.findings).toHaveLength(7);
+      expect(whole.findings.filter((finding) => finding.output === 'annotation')).toHaveLength(2);
+      expect(whole.findings.filter((finding) => finding.note.includes('锚点不唯一'))).toEqual([
+        expect.objectContaining({ output: 'annotation', replacement: null }),
+      ]);
       const firstMarks = new Map(chosen.findings.map((finding) => [finding.quote, finding.markId] as const));
       expect(whole.findings.filter((finding) => firstMarks.has(finding.quote)).every((finding) => finding.markId === firstMarks.get(finding.quote))).toBe(true);
       appendToFirstBlock(session, book);
       const synced = await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], CHANGED));
       expect(synced.state).toBe('settled');
       expect(workspace(session, book).coverage.find((row) => row.categoryId === TYPOS)).toMatchObject({ state: 'current', lastRunOrdinal: 4 });
-      expect(reviewMarkCount(session, book)).toBe(5);
+      expect(reviewMarkCount(session, book)).toBe(7);
     });
   }, 300_000);
 
@@ -1464,7 +1538,7 @@ describe('a Review Run over the real store on exact sample1', () => {
     });
   }, 300_000);
 
-  it('counts no read made under another category contract: a 选章 after a new 规范文件 version leaves the rest unread, not changed (#711 review P2-1)', async () => {
+  it('keeps completed coverage when a 选章 under a new 规范文件 contract closes no units (#711 review P2-1, #1307)', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const row = () => workspace(session, book).coverage.find((entry) => entry.categoryId === TYPOS)!;
       await authorizeAndDrive(session, book, prepare(session, book, [TYPOS], WHOLE));
@@ -1472,12 +1546,17 @@ describe('a Review Run over the real store on exact sample1', () => {
       await writeFile(path, ['本社文字规范', '', '1. 指出错字、别字、多字与漏字，给出改正后的文字。', '2. 指出成分残缺与搭配不当，给出通顺的改法。'].join('\n'));
       const preview = await session.store.previewReviewGuidelineVersion('ai7-builtin/typos-and-usage', path);
       session.store.importReviewGuidelineVersion(preview.previewId);
-      // The 选章 runs under the new contract: nothing the 全书 read under the old one is reused, so every other chapter is left
-      // unread — and none of them changed. The matrix reads 当前, and 只审改动过的章 is not offered.
+      // The new contract reuses none of the old reading. This fixture cannot answer it, so the failed Run must not
+      // replace completed coverage or count its unreviewed chapters as manuscript changes (#1307).
       const chosen = prepare(session, book, [TYPOS], chapterScope(session, book, 44));
       expect(chosen.categories[0]!.plan).toMatchObject({ reused: 0, unreviewed: 6 });
-      await authorizeAndDrive(session, book, chosen);
-      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 2, changedBlocks: 0 });
+      // Inherited at integration-24: no fixture response was authored for this new guideline contract.
+      const failed = await authorizeAndDrive(session, book, chosen);
+      expect(failed.state).toBe('failed');
+      expect(failed.categories[0]!.state).toBe('failed');
+      const projection = session.store.inspectReviewCategory(book.bookId, reviewCategoryKindDefinition(TYPOS_AND_USAGE));
+      expect(projection.run!.transitions.some((entry) => entry.detail?.includes('确定性夹具没有该单元与请求摘要对应的响应'))).toBe(true);
+      expect(row()).toMatchObject({ state: 'current', lastRunOrdinal: 1, changedBlocks: 0 });
       expect(workspace(session, book).categories.find((category) => category.categoryId === TYPOS)!.scopes.changed.available).toBe(false);
     });
   }, 300_000);
@@ -1928,7 +2007,7 @@ describe('a Review Run over the real store on exact sample1', () => {
       const before = workspace(session, book).categories.find((category) => category.categoryId === FACTUAL)!;
       expect(before.available).toBe(true);
       expect(before.scopes).toMatchObject({ whole: { available: true }, chapters: { available: false, unavailableReason: FACTUAL_CHAPTERS_REASON } });
-      expect(before.basisStatement).toContain('使用用户所选的联网检索后端');
+      expect(before.basis.searchEngine).toBe(true);
 
       const prepared = prepare(session, book, [FACTUAL], WHOLE);
       expect(prepared.categories[0]!.modeLabel).toBe('全书事实核查');

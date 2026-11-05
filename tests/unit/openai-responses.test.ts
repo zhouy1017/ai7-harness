@@ -241,7 +241,7 @@ describe('normalizeModelResponse · output-message-text', () => {
   const reasoningModel = responsesModel({ reasoningChannel: 'output-reasoning-items' });
 
   it('reads multiple calls in order using call_id, retaining text, usage and raw argument strings', () => {
-    const calls = [functionCall('raw_2', '{ invalid JSON'), functionCall('raw_1', '  {"query":"one"}  ')];
+    const calls = [functionCall('raw_2', '{ \"query\": \"two\" }'), functionCall('raw_1', '  {"query":"one"}  ')];
     expect(normalizeModelResponse(functionModel(), {
       status: 'completed', output: [message(outputText('before')), calls[0], message(outputText('after')), { ...calls[1], status: 'completed' }],
       usage: { input_tokens: 9, output_tokens: 4 },
@@ -251,13 +251,11 @@ describe('normalizeModelResponse · output-message-text', () => {
     });
   });
 
-  it.each([
-    { call_id: undefined }, { call_id: '' }, { call_id: 1 }, { name: undefined }, { name: '' }, { name: 1 },
-    { arguments: undefined }, { arguments: {} }, { arguments: null },
-    { status: 'in_progress' }, { status: 'incomplete' }, { status: 'failed' }, { status: null },
-  ])('rejects the whole batch for malformed call fields %j', (fields) => {
-    expect(normalizeModelResponse(functionModel(), { status: 'completed', output: [functionCall('valid'), { ...functionCall(), ...fields }] }, { toolCallsOffered: true }))
-      .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  it('rejects only a malformed call and preserves its valid neighbour', () => {
+    for (const fields of [{ call_id: '' }, { name: '' }, { arguments: '{bad JSON' }, { arguments: null }, { status: 'incomplete' }]) {
+      expect(normalizeModelResponse(functionModel(), { status: 'completed', output: [functionCall('valid'), { ...functionCall(), ...fields }] }, { toolCallsOffered: true }))
+        .toMatchObject({ kind: 'tool-calls', calls: [{ id: 'valid' }], salvaged: [{ section: 'calls', index: 1 }] });
+    }
   });
 
   it('rejects duplicate call IDs regardless of distinct item IDs, and never falls back to item id', () => {
@@ -270,9 +268,8 @@ describe('normalizeModelResponse · output-message-text', () => {
     }
   });
 
-  it.each([undefined, null, 'incomplete', 'failed', 'cancelled', 'queued', 'in_progress'])('refuses calls from response status %s', (status) => {
-    expect(normalizeModelResponse(functionModel(), { status, output: [functionCall(), message(outputText('partial'))] }, { toolCallsOffered: true }))
-      .toEqual({ kind: 'malformed', reason: 'tool-calls-malformed' });
+  it('returns text from incomplete Responses without executing its calls', () => {
+    for (const status of ['incomplete', 'failed', null]) expect(normalizeModelResponse(functionModel(), { status, output: [functionCall(), message(outputText('partial'))] }, { toolCallsOffered: true })).toMatchObject({ kind: 'answer', text: 'partial', truncated: true });
   });
 
   it('rejects reasoning beside calls whether or not the reasoning channel was declared', () => {
@@ -282,16 +279,9 @@ describe('normalizeModelResponse · output-message-text', () => {
     }
   });
 
-  it('ignores calls without both offered and admitted tools, preserving text and empty-answer semantics', () => {
-    for (const [profile, options] of [
-      [functionModel(), {}], [functionModel(), { toolCallsOffered: false }],
-      [responsesModel({ toolCalling: 'none' }), { toolCallsOffered: true }],
-    ] as const) {
-      expect(normalizeModelResponse(profile, { status: 'incomplete', output: [functionCall(), message(outputText('text'))] }, options))
-        .toEqual({ kind: 'answer', text: 'text', reasoningText: null, usage: null });
-      expect(normalizeModelResponse(profile, { output: [functionCall()] }, options))
-        .toEqual({ kind: 'empty-answer', reasoningPresent: false, usage: null });
-    }
+  it('keeps text from unsolicited calls with a truncation disclosure', () => {
+    expect(normalizeModelResponse(functionModel(), { status: 'completed', output: [functionCall(), message(outputText('text'))] })).toMatchObject({ kind: 'answer', text: 'text', truncated: true });
+    expect(normalizeModelResponse(functionModel(), { output: [functionCall()] }).kind).toBe('malformed');
   });
 
   it('reads the answer across every message item of the output, in order, with usage', () => {
@@ -344,7 +334,7 @@ describe('normalizeModelResponse · output-message-text', () => {
       .toEqual({ kind: 'malformed', reason: 'output-absent' });
     expect(normalizeModelResponse(model, { content: [{ type: 'text', text: '{"ok":true}' }] }))
       .toEqual({ kind: 'malformed', reason: 'output-absent' });
-    expect(normalizeModelResponse(model, { output_text: '{"ok":true}' })).toEqual({ kind: 'malformed', reason: 'output-absent' });
+    expect(normalizeModelResponse(model, { output_text: '{"ok":true}' })).toMatchObject({ kind: 'answer', text: '{"ok":true}' });
     // Declaring no answer channel still refuses first, whichever shape the model requests.
     expect(normalizeModelResponse(responsesModel({ answerChannel: 'none' }), { output: [message(outputText('答案'))] }))
       .toEqual({ kind: 'malformed', reason: 'answer-channel-not-declared' });
@@ -394,7 +384,7 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
 
   it.each([true, false])('round-trips canonical blocks and correlated outputs with tools retained: %s', async (retainTools) => {
     const bodies: Array<Record<string, unknown>> = [];
-    const calls = [functionCall('raw_first'), functionCall('raw_second', '{ invalid JSON')];
+    const calls = [functionCall('raw_first'), functionCall('raw_second', '{ \"query\": \"two\" }')];
     const instance = instanceFor(functionModel(), async (_url, init) => {
       bodies.push(JSON.parse(init.body));
       return { status: 200, json: async () => bodies.length === 1
@@ -444,24 +434,13 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
     expect(instance.transmissions).toBe(2);
   });
 
-  it('never emits unsolicited calls when tools are absent or empty, for either profile', async () => {
-    for (const model of [responsesModel(), functionModel()]) {
-      for (const tools of [undefined, []]) {
-        for (const text of ['', 'still an answer']) {
-          const instance = instanceFor(model, async () => ({ status: 200, json: async () => ({
-            status: 'incomplete', output: [functionCall(), message(outputText(text))],
-          }) }));
-          const chunks = await collect(instance.stream({ ...payload(), model: model.model, ...(tools === undefined ? {} : { tools }) }));
-          expect(chunks).toEqual([
-            { type: 'block-start', index: 0, blockType: 'text' },
-            { type: 'text-delta', index: 0, text },
-            { type: 'block-end', index: 0, block: { type: 'text', text } },
-            { type: 'finish', reason: { kind: 'stop' } },
-          ]);
-          expect(instance.lastCanonicalResult?.kind).toBe(text.length > 0 ? 'answer' : 'empty-answer');
-        }
-      }
-    }
+  it('emits text rather than unsolicited tool chunks', async () => {
+    const instance = instanceFor(functionModel(), async () => ({ status: 200, json: async () => ({ status: 'incomplete', output: [functionCall(), message(outputText('still an answer'))] }) }));
+    const chunks = await collect(instance.stream({ ...payload(), model: functionModel().model }));
+    expect(chunks.some((chunk) => chunk.type === 'tool-call-delta')).toBe(false);
+    expect(chunks).toContainEqual({ type: 'text-delta', index: 0, text: 'still an answer' });
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } });
+    expect(instance.lastCanonicalResult).toMatchObject({ kind: 'answer', truncated: true });
   });
 
   it('refuses capability-none requests before ticket, credential or transport access', async () => {
@@ -484,15 +463,10 @@ describe('DeepSeekOpenAiCompatibleAdapter · openai-responses', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { status: 'incomplete', output: [functionCall()] },
-    { status: 'completed', output: [functionCall(), { ...functionCall('second'), arguments: {} }] },
-    { status: 'completed', output: [functionCall(), REASONING_ITEM] },
-  ])('emits no partial tool chunks for rejected batches %j', async (body) => {
-    const instance = instanceFor(functionModel(), async () => ({ status: 200, json: async () => body }));
-    expect(await collect(instance.stream(toolPayload()))).toEqual([{
-      type: 'finish', reason: { kind: 'error', failure: { code: AI7_FAILURE_CODES.INVALID_RESPONSE, message: '模型服务响应不含可用内容。', status: 200 } },
-    }]);
+  it('emits only executable calls from a mixed batch', async () => {
+    const instance = instanceFor(functionModel(), async () => ({ status: 200, json: async () => ({ status: 'completed', output: [functionCall('valid'), functionCall('bad', '{unfinished')] }) }));
+    const chunks = await collect(instance.stream(toolPayload()));
+    expect(chunks.filter((chunk) => chunk.type === 'tool-call-delta').map((chunk) => chunk.id)).toEqual(['valid']);
   });
 
   it.each([

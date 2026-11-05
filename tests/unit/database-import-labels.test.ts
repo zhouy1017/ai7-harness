@@ -81,7 +81,7 @@ describe('导入数据库\'s words', () => {
       keep: '不回退',
     });
     expect(DATABASE_IMPORT_CHOICES_LEGEND).toBe('怎样使用这个文件');
-    expect(DATABASE_IMPORT_CHOICES).toEqual({ replace: '替换本机全部数据（先自动备份，可回退）', merge: '只导入其中的图书，与本机合并（重名的另存）' });
+    expect(DATABASE_IMPORT_CHOICES).toEqual({ replace: '替换本机全部数据 · 先自动备份，可回退', merge: '导入图书并与本机合并 · 重名的另存' });
     expect(DATABASE_REPLACE_CONSEQUENCE).toBe(
       '本机现在的全部图书、稿件与历史、知识库和设置都会换成这个文件里的内容。AI7 先把现在的数据备份成一个文件，放在备份位置，之后可以回退；替换在 AI7 下次启动时完成。模型服务凭据不在文件里，替换后可能需要重新填写。',
     );

@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   FidelityCategoryProjection,
   ImportFidelityOutcome,
@@ -15,7 +16,10 @@ import type {
  */
 
 /** #1287: frozen import reports retain their exact bytes; the editor reads natural paragraph wording. */
-export function fidelityDetailText(detail: string): string { return detail.replaceAll('内容块', '段落'); }
+export function fidelityDetailText(detail: string): string {
+  const words = detail.replaceAll('内容块', '段落');
+  return technicalWords(words, words.replaceAll('来源版本', '原文件'));
+}
 
 /** The class that closes the review as a card rather than a row (ADR 0086 §1). */
 export const ROUND_TRIP_KEY = 'round-trip-export';
@@ -23,8 +27,8 @@ export const ROUND_TRIP_KEY = 'round-trip-export';
 /** Current manuscript presentation, alongside immutable historical parser/fidelity records. */
 export function fidelitySurfaceDetail(category: FidelityCategoryProjection): string {
   if (category.count > 0 && category.status === 'retained') {
-    if (category.key === 'tables') return '表格单元格在稿件中只读显示；表格结构随来源版本保留，导出 DOCX 时从原文件完整恢复。';
-    if (category.key === 'images-captions') return '图片在稿件中只读预览，图注保留为文字；原图与关系随来源版本保留，导出 DOCX 时完整恢复。';
+    if (category.key === 'tables') return technicalWords('表格单元格在稿件中只读显示；表格结构随来源版本保留，导出 DOCX 时从原文件完整恢复。', '表格在稿件中只读，导出 DOCX 时恢复原表格。');
+    if (category.key === 'images-captions') return technicalWords('图片在稿件中只读预览，图注保留为文字；原图与关系随来源版本保留，导出 DOCX 时完整恢复。', '图片只读预览，导出 DOCX 时恢复原图。');
   }
   return fidelityDetailText(category.detail);
 }
@@ -45,12 +49,12 @@ export function wordIntakeRefusalLabel(code: WordIntakeRefusalCode): string { re
 /** ADR 0094 §5's two tracked-change import modes, by the names the import confirmation commits. */
 export const WORD_IMPORT_MODE_NAMES: Readonly<Record<WordTrackedChangesChoice['mode'], string>> = {
   suggestions: '转为 AI7 修订建议',
-  'accepted-baseline': '直接并入正文（作为定稿基线）',
+  'accepted-baseline': '直接并入正文 · 定稿基线',
 };
 
 /** The choice as offered before preparation: 转为 AI7 修订建议 is recommended and the default. */
 export function wordImportModeOption(mode: WordTrackedChangesChoice['mode']): string {
-  return mode === 'suggestions' ? `${WORD_IMPORT_MODE_NAMES.suggestions}（推荐）` : WORD_IMPORT_MODE_NAMES[mode];
+  return mode === 'suggestions' ? `${WORD_IMPORT_MODE_NAMES.suggestions} · 推荐` : WORD_IMPORT_MODE_NAMES[mode];
 }
 
 /** A status reads in text and in shape as well as in colour (V2-UX-IMP-003). */
@@ -146,16 +150,16 @@ export function conversionNoteText(conversion: ManuscriptConversionProjection): 
 // ---- the text-box choice (ADR 0086 §2) ---------------------------------------------------------------
 
 export const TEXT_BOX_CHOICE_LEGEND = '文本框怎样进来';
-export const TEXT_BOX_CHOICE_OPTIONS: ReadonlyArray<{ disposition: TextBoxDisposition; label: string; hint: string }> = [
+export const TEXT_BOX_CHOICE_OPTIONS: ReadonlyArray<{ disposition: TextBoxDisposition; label: string; controlLabel: string }> = [
   {
     disposition: 'retain',
-    label: '保留为文本框（默认）',
-    hint: '随来源版本保留，不显示在稿件中，导出时恢复。',
+    label: '保留为文本框',
+    controlLabel: '保留文本框，稿件中不显示，导出时恢复',
   },
   {
     disposition: 'merge',
     label: '并入正文',
-    hint: '文本框中的段落进入稿件，紧接在锚定它的段落之后；导出时不再写出原文本框。',
+    controlLabel: '并入正文，接在原位置后，导出不再保留文本框',
   },
 ];
 
@@ -178,13 +182,13 @@ export function offersTextBoxChoice(
 /** The commit bar's note: what the one commit links, and — true of every import — that the original stays. */
 export function commitNote(acceptedDegradation: boolean): string {
   return acceptedDegradation
-    ? '已接受的完整降级集合、保真审阅、降级决定和稿件导入记录会原子关联；原文件随来源版本完整保留，导入不修改它。'
-    : '本次导入不创建导入降级决定；原文件随来源版本完整保留，导入不修改它。';
+    ? '按已接受的格式处理导入，原文件保持不变。'
+    : '原文件保持不变。';
 }
 
 /** How a committed import's fidelity outcome reads on its record. */
 export function fidelityOutcomeLabel(outcome: ImportFidelityOutcome): string {
   return outcome === 'degraded-import-no-round-trip'
-    ? '含已接受的降级 · 原文件随来源版本保留'
-    : '完整保留 · 原文件随来源版本保留';
+    ? technicalWords('含已接受的降级 · 原文件随来源版本保留', '含已接受的格式变化，原文件已保留')
+    : technicalWords('完整保留 · 原文件随来源版本保留', '原文件完整保留');
 }

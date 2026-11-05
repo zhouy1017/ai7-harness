@@ -1,8 +1,10 @@
+import { majorityGapReason } from '../../shared/analysis-run-summary.js';
 import { procedureStageBudget } from '../procedures/execution.js';
 import { PlatformToolSession, bindSearchFallback, type SearchFallbackAttribution } from '../provider/platform-tool-session.js';
 import { excerptLocated, independenceGroups, mapVerificationOutcome, registrableDomain, type FactualClaimSession } from '../factual-verification.js';
 import { factualClaimVerificationInput, freezeFactualClaimLedger } from './factual-claim-ledger.js';
 import { parseFactualClaimVerification } from './factual-claim-contract.js';
+import { withProviderResponseSalvage } from '../provider/response-normalization.js';
 import type { FactualRecheckCandidate, FactualRecheckRun } from './factual-recheck.js';
 import { CURATION_CONTRACT, CURATION_CONTRACT_DIGEST, type CurationRun } from '../learning/curation.js';
 import { learningCurationRule } from './live-kind-admission.js';
@@ -63,7 +65,7 @@ import {
   parseAssuranceSamplingResult,
   type AssuranceSamplingParseFailureCode,
 } from './assurance-sampling-contract.js';
-import { canonicalRecord, sha256Hex } from './canonical.js';
+import { canonicalRecord, isRecord, sha256Hex } from './canonical.js';
 import { assuranceContractMoved, CARRIED_STAGES, OUTCOME_UNKNOWN_NO_RESUME, RUN_IDLE_YIELD_LABEL, type AnalysisRequestIdentity, type BaselineAnalysisStore, type CarriedStages, type StageContinuation, type ExecutionBindingRecord, type ExecutionPlanFacts, type PredecessorUnitResult, type RunProgress, type RunProgressStage, type UnitCheckpoint, type UnitResultRecord } from './baseline-analysis-store.js';
 import type { BaselineUnitResult } from './contract.js';
 import type { ManifestBlockInput } from './coverage-manifest.js';
@@ -468,11 +470,26 @@ export function emptyAnswerGapReason(reasoningPresent: boolean): string {
  * The reading for an answer that came back and did not parse. `answerText` is taken only to be
  * measured: its length is the whole of what an editor learns about it, because the answer is model
  * output over manuscript content and no part of it may reach a gap reason, a log, or a report.
- * Characters are counted as code points — `src/service/analysis/` exports no grapheme counter, and
- * UTF-16 units would report a number no reader could recognize as a count of characters.
+ * Counts retain the existing code-point reading. Parser codes/details stay in technical results;
+ * the editor sees the reason in ordinary language, without a contract version or field names.
  */
-export function unparsableAnswerGapReason(code: string, detail: string, answerText: string): string {
-  return `单元结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的单元结果。重新分析本单元可能有帮助。`;
+function modelResultGapReason(code: string): string {
+  switch (code) {
+    case 'not-json': return '模型回答无法读出任何可用条目。';
+    case 'unit-mismatch': return '模型回答对应的阅读范围与本次请求不一致。';
+    case 'range-out-of-unit':
+    case 'block-out-of-unit':
+    case 'unit-out-of-set': return '模型回答引用了本次阅读范围之外的内容。';
+    case 'quote-not-in-block': return '模型回答的引文无法对应到指定原文。';
+    case 'ref-out-of-sample': return '模型回答判定了本次抽检之外的发现。';
+    case 'disposition-missing': return '模型回答遗漏了需要判定的发现。';
+    case 'schema-invalid': return '模型回答无法读出任何可用条目。';
+    default: return '模型回答中的条目未能通过检查。';
+  }
+}
+
+export function unparsableAnswerGapReason(code: string, _detail: string, answerText: string): string {
+  return `${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。重新分析本单元可能有帮助。`;
 }
 
 /**
@@ -486,8 +503,8 @@ export function crossUnitEmptyAnswerGapReason(reasoningPresent: boolean): string
     : '跨单元归纳未闭合：模型的答案通道与推理通道都为空。各单元结果不受影响；如反复出现，请检查模型服务状态。';
 }
 
-export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode | string, detail: string, answerText: string): string {
-  return `跨单元归纳结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的跨单元结果。各单元结果不受影响。`;
+export function unparsableCrossUnitAnswerGapReason(code: CrossUnitResultParseFailureCode | string, _detail: string, answerText: string): string {
+  return `跨单元归纳未完成：${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。各单元结果不受影响。`;
 }
 
 /**
@@ -506,8 +523,8 @@ export function assuranceSamplingEmptyAnswerGapReason(reasoningPresent: boolean)
     : '模型的答案通道与推理通道都为空。';
 }
 
-export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSamplingParseFailureCode, detail: string, answerText: string): string {
-  return `判定结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的判定结果。`;
+export function unparsableAssuranceSamplingAnswerGapReason(code: AssuranceSamplingParseFailureCode, _detail: string, answerText: string): string {
+  return `抽检判定未完成：${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。`;
 }
 
 /**
@@ -630,6 +647,7 @@ export class BaselineAnalysisExecutionOwner {
     const owner = ledger.factualVerification;
     let run: FactualRecheckRun | null = null, harness: PrimaryAgentHarnessHandle | null = null, producer: ModelRequestProducer | null = null;
     let adapter: DeepSeekOpenAiCompatibleAdapter | null = null, usage: UsageFacts | null = null;
+    const canonicalResult = () => adapter?.lastCanonicalResult ?? null;
     try {
       const admitted = liveKindRule(this.#policy(), 'factual-recheck', [], 'background');
       const profile = productionModelProfile(candidate.binding.route, candidate.binding.model);
@@ -712,7 +730,7 @@ export class BaselineAnalysisExecutionOwner {
       usage = usageSignal?.kind === 'usage' ? usageSignal.usage : null;
       const claim = candidate.ledger.claims.find((entry) => entry.claimId === frozen.selection.claimId)!;
       const content = turn.signals.find((entry) => entry.kind === 'contentCandidate');
-      const parsed = turn.terminal === 'completed' && content?.kind === 'contentCandidate' ? parseFactualClaimVerification(content.text, { claimId: claim.claimId, assertion: claim.producers[0]!.assertion }) : null;
+      const parsed = turn.terminal === 'completed' && content?.kind === 'contentCandidate' ? withProviderResponseSalvage(parseFactualClaimVerification(content.text, { claimId: claim.claimId, assertion: claim.producers[0]!.assertion }), canonicalResult()) : null;
       const result = parsed?.ok === true ? parsed.result : null;
       const captures = platform.unitCaptures;
       const pages = new Map(captures.fetches.flatMap((snapshot) => { const page = retainedPageOf(snapshot); return page === null ? [] : [[page.url, page] as const]; }));
@@ -739,7 +757,7 @@ export class BaselineAnalysisExecutionOwner {
    * admitted, in its turn, as a place frees. Their ledger records them `authorized` until then, so a service that
    * stops leaves those records recoverable; restart blocks them before dispatch and requires a fresh explicit start.
    */
-  readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore }> = [];
+  readonly #queued: Array<{ runRecordId: string; ledger: BaselineAnalysisStore; resume?: true }> = [];
   #disposed = false;
   readonly #stateWaiters = new Set<() => void>();
   #backgroundIdle = true;
@@ -906,6 +924,7 @@ export class BaselineAnalysisExecutionOwner {
    * reasons.
    */
   get busy(): boolean {
+    if (this.#queueFrozen) return true;
     const occupying = this.#occupiedPlaces();
     return occupying.length + (this.#curation === null ? 0 : 1) >= this.#capacity || (this.#live() !== null &&
       occupying.filter((run) => !this.#backgroundActive.has(run.runRecordId)).length >= LIVE_FOREGROUND_PLACES);
@@ -969,6 +988,40 @@ export class BaselineAnalysisExecutionOwner {
     return index < 0 ? null : index + 1;
   }
 
+  #queueFrozen = false;
+  get queueFrozen(): boolean { return this.#queueFrozen; }
+  freezeQueue(frozen: boolean): void {
+    this.#queueFrozen = frozen;
+    if (!frozen) this.#drain();
+    this.#changed();
+  }
+
+  resumeOrQueue(runRecordId: string, ledger: BaselineAnalysisStore): void {
+    if (this.#active.has(runRecordId) || this.#queued.some((entry) => entry.runRecordId === runRecordId)) return;
+    if (!this.#queueFrozen && this.#placeForRun(runRecordId, ledger) && this.#queued.length === 0) {
+      this.admitAndDispatch(runRecordId, ledger, { resume: true });
+    } else {
+      this.#queued.push({ runRecordId, ledger, resume: true });
+      this.#changed();
+    }
+  }
+
+  /** Move one admitted-but-not-started Run inside the in-memory FIFO (Issue #1328). */
+  reorderQueuedRun(runRecordId: string, position: number): number {
+    if (!Number.isSafeInteger(position) || position < 1) {
+      throw new ExecutionAdmissionError('EXECUTION_QUEUE_POSITION_INVALID', '队列位置无效。');
+    }
+    const index = this.#queued.findIndex((entry) => entry.runRecordId === runRecordId);
+    if (index < 0) throw new ExecutionAdmissionError('EXECUTION_RUN_NOT_QUEUED', '这项任务已经开始或不在等待队列中。');
+    const target = Math.min(position, this.#queued.length) - 1;
+    if (target !== index) {
+      const [entry] = this.#queued.splice(index, 1);
+      this.#queued.splice(target, 0, entry!);
+      this.#changed();
+    }
+    return target + 1;
+  }
+
   /**
    * A start the editor just authorized (Issue #49, S14; CONC-007): admitted at once while the governor has a place and
    * no Run waits before it, else queued — `authorized` in its ledger, read as 等待运行名额 — and admitted in its turn.
@@ -985,7 +1038,7 @@ export class BaselineAnalysisExecutionOwner {
     if (this.#queued.some((entry) => entry.runRecordId === runRecordId)) return 'queued';
     // Read the persisted origin even when a caller supplies a scheduling hint: it cannot borrow the other origin's place.
     const placeFree = this.#blockOnRefusal(runRecordId, ledger, () => this.#placeForRun(runRecordId, ledger));
-    if (placeFree && (origin === 'background' || this.#queued.length === 0)) {
+    if (!this.#queueFrozen && placeFree && (origin === 'background' || this.#queued.length === 0)) {
       this.#admitInTurn(runRecordId, ledger);
       return 'admitted';
     }
@@ -1327,6 +1380,7 @@ export class BaselineAnalysisExecutionOwner {
         settleCancelWithoutRevision(next.ledger, next.runRecordId, CANCELLED_WITHOUT_REVISION);
       }
     }
+    if (this.#queueFrozen) return;
     // Then a Run the editor answered while every place was taken (Issue #422, S76d), if it still waits for that answer.
     for (let index = 0; !this.full && !this.#disposed && index < this.#pendingAnswers.length;) {
       const next = this.#pendingAnswers[index]!;
@@ -1349,16 +1403,24 @@ export class BaselineAnalysisExecutionOwner {
     for (let index = 0; !this.full && !this.#disposed && index < this.#queued.length;) {
       const next = this.#queued[index]!;
       try {
-        if (next.ledger.currentRunState(next.runRecordId) !== 'authorized') {
+        if (next.resume ? !['paused', 'resumable', 'awaiting-clarification'].includes(next.ledger.currentRunState(next.runRecordId)) : next.ledger.currentRunState(next.runRecordId) !== 'authorized') {
           this.#queued.splice(index, 1);
           continue;
         }
         const placeFree = this.#blockOnRefusal(next.runRecordId, next.ledger, () => this.#placeForRun(next.runRecordId, next.ledger));
         if (!placeFree) { index += 1; continue; }
         this.#queued.splice(index, 1);
-        this.#admitInTurn(next.runRecordId, next.ledger);
-      } catch {
+        if (next.resume) this.admitAndDispatch(next.runRecordId, next.ledger, { resume: true });
+        else this.#admitInTurn(next.runRecordId, next.ledger);
+      } catch (error) {
         if (this.#queued[index] === next) this.#queued.splice(index, 1);
+        if (next.resume) {
+          const state = next.ledger.currentRunState(next.runRecordId);
+          if (state === 'paused' || state === 'resumable' || state === 'awaiting-clarification') {
+            const reason = error instanceof Error ? error.message : '这项任务未能续行，请查看计划。';
+            next.ledger.recordRunState(next.runRecordId, state, { detail: reason, resumeFailure: reason });
+          }
+        }
         // Blocked before dispatch with its reason; the next start in the queue takes the place.
       }
     }
@@ -1369,7 +1431,7 @@ export class BaselineAnalysisExecutionOwner {
    * envelope — a new span of the same attempt, as 续行 is — at once when the governor has a place, or as soon as it has.
    */
   continueAnswered(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'continuing' | 'queued' {
-    if (!this.#disposed && !this.#active.has(runRecordId) && this.#placeForRun(runRecordId, ledger)) {
+    if (!this.#disposed && !this.#queueFrozen && !this.#active.has(runRecordId) && this.#placeForRun(runRecordId, ledger)) {
       this.admitAndDispatch(runRecordId, ledger, { resume: true });
       return 'continuing';
     }
@@ -1392,7 +1454,8 @@ export class BaselineAnalysisExecutionOwner {
     if (origin === 'foreground') this.#foregroundPlaceWaiters += 1;
     try {
       if (!this.#backgroundIdle) this.setBackgroundIdle(false);
-      while (this.busy && !this.#disposed) {
+      while ((this.busy || this.#queueFrozen) && !this.#disposed) {
+        if (this.#queueFrozen) { await new Promise<void>((resolve) => this.#stateWaiters.add(resolve)); continue; }
         await Promise.race([...this.#active.values()].map((active) => active.done));
       }
     } finally { if (origin === 'foreground') this.#foregroundPlaceWaiters -= 1; }
@@ -1416,6 +1479,7 @@ export class BaselineAnalysisExecutionOwner {
    * settled here at once.
    */
   cancelRun(runRecordId: string, ledger: BaselineAnalysisStore = this.#deps.ledger): 'stopping' | 'settled' {
+    this.dequeue(runRecordId);
     this.#yielded.delete(runRecordId);
     this.#changed();
     const active = this.#active.get(runRecordId);
@@ -1597,14 +1661,15 @@ export class BaselineAnalysisExecutionOwner {
       outputTokens: turnUsage?.outputTokens ?? 0,
     };
     active.progress.completedAttempts += 1;
-    const gap = (reason: string): RunReportReflectionOutcome => ({ ifRedone: { state: 'gap', items: [], reason }, usage });
+    const gap = (reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): RunReportReflectionOutcome =>
+      ({ ifRedone: { state: 'gap', items: [], reason, ...(parseFailure === undefined ? {} : { parseFailure }) }, usage });
     const candidate = result.signals.find((signal) => signal.kind === 'contentCandidate');
     if (result.terminal === 'completed' && candidate?.kind === 'contentCandidate') {
       context.acceptedOutputDigests.add(candidate.digest);
       if (canonical?.kind === 'empty-answer') return gap(runReportReflectionEmptyAnswerGapReason(canonical.reasoningPresent));
-      const parsed = parseRunReportReflectionResult(candidate.text);
-      if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text));
-      return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null }, usage };
+      const parsed = withProviderResponseSalvage(parseRunReportReflectionResult(candidate.text), canonical);
+      if (!parsed.ok) return gap(unparsableRunReportReflectionAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
+      return { ifRedone: { state: 'closed', items: parsed.result.items, reason: null, ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }, usage };
     }
     if (result.terminal === 'completed') return gap('运行反思的技术回合完成但没有模型输出。');
     if (result.terminal === 'failed') {
@@ -1970,7 +2035,7 @@ export class BaselineAnalysisExecutionOwner {
               const assurance = definition.assurance === null ? {} : { assurancePromptContractDigest: definition.assurance.promptContractDigest };
               const profile = localFixture === null ? {} : { localFixture: { catalog: facts.localFixtureRuntime!.catalog, execution: localFixture } };
               return new Ai7LocalDeterministicAdapter(fixture!, promptContractDigest, codes,
-                { ...assurance, ...profile, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
+                { ...assurance, ...profile, sourceDigest: facts.sourceDigest, ...(continuation === null ? {} : { attemptsBefore: ledger.unitAttemptsOf(facts.runRecordId) }) });
             }
             liveAdapter.instance = new DeepSeekOpenAiCompatibleAdapter({
               broker: broker,
@@ -2330,7 +2395,7 @@ export class BaselineAnalysisExecutionOwner {
       let spanOrdinal = stored?.spanCount ?? 0;
       let adaptationOrdinal = priorAdaptations.length;
       const contractRule = liveKindRule(policy, definition.kind, [], facts.origin === 'background-analysis-enrollment' ? 'background' : 'foreground');
-      const contractDeclared = definition.factualClaims === undefined && definition.contractIdentity?.version === 2 &&
+      const contractDeclared =
         (ledger.frozenPlan(facts.taskIntentId, facts.planEnvelopeDigest).components['plan-envelope'] as { boundary?: { adaptable?: ReadonlyArray<{ adaptationClass: string }> } })
           .boundary?.adaptable?.some((entry) => entry.adaptationClass === 'contract-retry') === true;
       const contractAllowed = live === null || contractRule?.plusDeclaredContractRetryAdaptations === true;
@@ -2532,14 +2597,15 @@ export class BaselineAnalysisExecutionOwner {
         if (live === null) active.progress.attemptState = null;
       };
       // A unit that settles as a gap, with what the Run Report records about it.
-      const settleGap = (unit: CoverageManifestUnitProjection, requestDigest: string, observation: RunReportUnitObservation, code: AnalysisGapProjection['code'], reason: string): void => {
+      const settleGap = (unit: CoverageManifestUnitProjection, requestDigest: string, observation: RunReportUnitObservation, code: AnalysisGapProjection['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): void => {
         unitObservations.set(unit.ordinal, observation);
         outcomes.push({ unitOrdinal: unit.ordinal, state: 'gap', code, reason });
         unitRecords.push({
           unitOrdinal: unit.ordinal,
           requestDigest,
           lineage: { kind: 'recomputed' },
-          closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds] } },
+          closed: { state: 'gap', gap: { unitOrdinal: unit.ordinal, code, reason, startPosition: unit.startPosition, endPosition: unit.endPosition, blockIds: [...unit.blockIds],
+            ...(parseFailure === undefined ? {} : { parseFailure }) } },
         });
       };
       /**
@@ -2563,7 +2629,7 @@ export class BaselineAnalysisExecutionOwner {
         const { turn, unitUsage } = s.attempt;
         const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
         const observation: RunReportUnitObservation = { unitOrdinal: unit.ordinal, attempts: s.attempts, wallMs: s.wallMs, usage: s.usage };
-        const gap = (code: AnalysisGapProjection['code'], reason: string): void => settleGap(unit, requestDigest, observation, code, reason);
+        const gap = (code: AnalysisGapProjection['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): void => settleGap(unit, requestDigest, observation, code, reason, parseFailure);
         if (turn.terminal === 'completed' && candidate?.kind === 'contentCandidate' && s.attempt.canonical?.kind === 'empty-answer') {
           // The model was reached and answered in the channel its profile declares, and the channel
           // was empty. That is not a contract the model broke — there is nothing to parse — so the
@@ -2597,14 +2663,11 @@ export class BaselineAnalysisExecutionOwner {
             return 'waiting';
           }
           const validated = prepareRetrievalResult(candidate.text, retrieval);
-          if (validated.rejected.some((entry) => entry.collection !== 'findings' && entry.collection !== 'assertions')) {
-            acceptedOutputDigests.add(candidate.digest);
-            gap('contract-invalid', '未经精确取文');
-            keepSettled(unit, s.wallMs);
-            return 'settled';
-          }
-          const parsed = definition.parseUnitResult(validated.text, unit);
+          const parsed = withProviderResponseSalvage(definition.parseUnitResult(validated.text, unit, blocksById), s.attempt.canonical);
           if (parsed.ok) {
+            if (parsed.salvaged !== undefined && isRecord(parsed.result)) {
+              parsed.result.salvaged = parsed.salvaged;
+            }
             markRetrievalResult(parsed.result, validated.rejected);
             // Factual Review Contract v2 (Issue #901): each in-Book relation's excerpt is sought by Exact Fetch now, while the
             // Run's retrieval index is open; one it does not find stays a candidate (EVID-004, EVID-005).
@@ -2622,7 +2685,7 @@ export class BaselineAnalysisExecutionOwner {
             });
           } else {
             acceptedOutputDigests.add(candidate.digest);
-            gap('contract-invalid', unparsableAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+            gap('contract-invalid', unparsableAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
           }
         } else if (turn.terminal === 'completed') {
           gap('contract-invalid', '技术回合完成但没有模型输出。');
@@ -3036,8 +3099,9 @@ export class BaselineAnalysisExecutionOwner {
             !priorAdaptations.some((entry) => entry.unitOrdinal === unit.ordinal && entry.adaptationClass === 'contract-retry') &&
             attempt.turn.terminal === 'completed' && contractCandidate?.kind === 'contentCandidate' &&
             contractCandidate.text.trim().length > 0 && attempt.canonical?.kind !== 'empty-answer' &&
+            !(attempt.canonical?.kind === 'answer' && attempt.canonical.truncated === true) &&
             parseModelClarification(contractCandidate.text) === null && contractParsed?.ok === false &&
-            (contractParsed.code === 'not-json' || contractParsed.code === 'schema-invalid') &&
+            contractParsed.code === 'not-json' &&
             !active.cancelRequested && !active.pauseRequested && !active.interrupted && liveInterruption === null && !scopeChanged() && ceilingState() !== 'reached') {
           const message = unitMessages.get(unit.ordinal)!;
           if (attempt.unitMessageDigest !== sha256Hex(message)) throw new ExecutionAdmissionError('CONTRACT_RETRY_MESSAGE_DRIFT', '契约重试的单元消息与首次请求不同。');
@@ -3051,7 +3115,20 @@ export class BaselineAnalysisExecutionOwner {
           adaptedUnitOrdinals.push(unit.ordinal);
           if (context.currentBindingDigest !== bindingDigest) throw new ExecutionAdmissionError('EXECUTION_BINDING_DIGEST_DRIFT', '契约重试期间执行绑定发生变化。');
           acceptedOutputDigests.add(contractCandidate.digest);
-          attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, context);
+          if (definition.factualClaims === undefined) {
+            attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, context);
+          } else {
+            // The extraction schema fixes each session to one send. A completed not-json answer alone
+            // admits this distinct, single-send retry session; neither reservation is refunded.
+            const retrySession = ledger.factualVerification.admitClaimSession({ sessionId: randomUUID(), runRecordId: facts.runRecordId,
+              stage: 'claim-extraction', scopeId: `${unit.ordinal}:contract-retry`, ledgerDigest: null,
+              sourceMessageDigest: sha256Hex(message), promptContractDigest, limits: { model: 1, tool: 0, search: 0 } });
+            const retryContext = await createContext(retrySession.sessionId, undefined, unit.ordinal, retrySession);
+            try {
+              await retryContext.bind(bindingDigest, bindingFactsForRun);
+              attempt = await submitAttempt(unit, contractAttemptIndex, 'retrying', adaptation.adaptationId, undefined, retryContext);
+            } finally { await retryContext.finish(); contexts.delete(retryContext); }
+          }
           if (attempt.turn.terminal === 'interrupted' && active.interrupted && active.resumableOnInterrupt) return;
           attempts = contractAttemptIndex;
           unitUsageTotal = addUsage(unitUsageTotal, attempt.unitUsage);
@@ -3196,7 +3273,8 @@ export class BaselineAnalysisExecutionOwner {
           ledger.recordRunState(facts.runRecordId, active.pauseRequested ? 'paused' : 'resumable', {
             ...(active.idleYieldRequested ? { idleYield: true } : {}),
             detail: active.idleYieldRequested ? RUN_IDLE_YIELD_LABEL : proxyFailure ?? (active.pauseRequested ? pausedDetail(settled, submittedUnits.length) : resumableDetail(settled, submittedUnits.length)),
-            ...(proxyFailure === null ? {} : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
+            ...(proxyFailure === null ? (active.pauseRequested ? {} : { stopReason: 'shutdown' })
+              : { connectivityClassification: 'proxy-unreachable', stopReason: 'proxy-unreachable' }),
             unitsSettled: settled,
             unitsTotal: submittedUnits.length,
             carriedUsage,
@@ -3333,7 +3411,7 @@ export class BaselineAnalysisExecutionOwner {
               active.progress.completedAttempts += 1;
               const candidate = turn.signals.find((signal) => signal.kind === 'contentCandidate');
               const parsed = turn.terminal === 'completed' && candidate?.kind === 'contentCandidate'
-                ? parseFactualClaimVerification(candidate.text, { claimId: claim.claimId, assertion: producer.assertion }) : null;
+                ? withProviderResponseSalvage(parseFactualClaimVerification(candidate.text, { claimId: claim.claimId, assertion: producer.assertion }), isolated.liveAdapter.instance?.lastCanonicalResult ?? null) : null;
               if (candidate?.kind === 'contentCandidate') isolated.acceptedOutputDigests.add(candidate.digest);
               const result = parsed?.ok === true ? parsed.result : null;
               const captures = isolated.platformSession!.unitCaptures;
@@ -3409,8 +3487,8 @@ export class BaselineAnalysisExecutionOwner {
         const requestDigest = step === null
           ? crossUnitRequestDigest(reductionContract, unitSetDigest(closedOutcomes))
           : step.requestDigest(closedOutcomes, crossUnitContext);
-        const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string): CrossUnitOutcome =>
-          ({ state: 'gap', code, reason, requestDigest });
+        const gap = (code: Extract<CrossUnitOutcome, { state: 'gap' }>['code'], reason: string, parseFailure?: AnalysisGapProjection['parseFailure']): CrossUnitOutcome =>
+          ({ state: 'gap', code, reason, requestDigest, ...(parseFailure === undefined ? {} : { parseFailure }) });
         if (live !== null && (step !== null ? admitted?.crossUnitSynthesisAllowed !== true : policy.providerProcessing.crossUnitReductionAllowed !== true)) {
           // The reduction is a transmission the active Provider Processing policy does not name, so it
           // never forms a request at all. The verified developer-live document names the baseline's reduction; a
@@ -3468,20 +3546,22 @@ export class BaselineAnalysisExecutionOwner {
               crossUnit = gap('contract-invalid', named(crossUnitEmptyAnswerGapReason(canonical.reasoningPresent)));
             } else if (step !== null) {
               const validated = prepareRetrievalResult(candidate.text, retrieval);
-              const parsed = validated.rejected.length > 0 ? { ok: false as const, code: 'not-exact-fetched', detail: '未经精确取文' }
-                : step.parse(validated.text, closedOutcomes, crossUnitContext);
+              const parsed = withProviderResponseSalvage(step.parse(validated.text, closedOutcomes, crossUnitContext), canonical);
+              if (parsed.ok) markRetrievalResult(parsed.result, validated.rejected);
               const refused = parsed.ok ? null : step.refusalReason?.(parsed.code, parsed.detail) ?? null;
               crossUnit = parsed.ok
                 ? { state: 'closed', findings: [], requestDigest, usage: crossUnitUsage, result: parsed.result }
-                : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)));
+                : gap('contract-invalid', parsed.code === 'not-exact-fetched' ? '未经精确取文' : refused ?? named(unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text)), { code: parsed.code, detail: parsed.detail });
             } else {
-              const parsed = parseCrossUnitResult(candidate.text, {
+              const parsed = withProviderResponseSalvage(parseCrossUnitResult(candidate.text, {
                 closedOrdinals: closedOutcomes.map((outcome) => outcome.unitOrdinal),
                 citedBlocksByUnit: citedBlocksByUnit(closedOutcomes),
-              });
+                blockLengths: new Map(blocks.map((block) => [block.blockId, block.graphemes])),
+              }), canonical);
               crossUnit = parsed.ok
-                ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage }
-                : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text));
+                ? { state: 'closed', findings: parsed.result.findings, requestDigest, usage: crossUnitUsage,
+                    ...(parsed.result.salvaged === undefined ? {} : { salvaged: parsed.result.salvaged }) }
+                : gap('contract-invalid', unparsableCrossUnitAnswerGapReason(parsed.code, parsed.detail, candidate.text), { code: parsed.code, detail: parsed.detail });
             }
           } else if (turn.terminal === 'completed') {
             crossUnit = gap('contract-invalid', named('跨单元归纳的技术回合完成但没有模型输出。'));
@@ -3526,13 +3606,19 @@ export class BaselineAnalysisExecutionOwner {
       // the four stage totals partition the Run's own work.
       clock.open('reduction');
       const reduced = definition.reduce({ manifest, outcomes, reusedUnitOrdinals: reusedOrdinals, blocks: blocksById, crossUnit });
+      const synthesisUnavailable = ['evaluation', 'evaluation-rewrite', 'readers-report'].includes(definition.kind) &&
+        definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed'
+        ? `未完成：没有形成可用的综合结果 · ${majorityGapReason([{ code: 'synthesis-unavailable', reason: crossUnit.reason }]) ?? '没有收到可用的模型回答。'}` : null;
+
       // A unit the plan left out of scope is a gap in the revision's coverage and not in the Run: a
       // range review that closed everything it was asked to read completed, without qualification.
       if (terminalClassification === 'completed' && reduced.gaps.some((gapEntry) => gapEntry.code !== 'out-of-scope')) {
-        terminalClassification = 'completed-with-gaps';
+        terminalClassification = reduced.coverage.unitsClosed === 0 ? 'failed' : 'completed-with-gaps';
       }
       // A kind whose book-level step is its result (Issue #432 review): no closed step, no complete Run.
-      if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
+      if ((terminalClassification === 'completed' || terminalClassification === 'completed-with-gaps') && synthesisUnavailable !== null) {
+        terminalClassification = 'failed';
+      } else if (terminalClassification === 'completed' && definition.crossUnit?.step?.requiredForCompletion === true && crossUnit.state !== 'closed') {
         terminalClassification = 'completed-with-gaps';
       }
       clock.close();
@@ -3553,7 +3639,7 @@ export class BaselineAnalysisExecutionOwner {
         acceptedOutputDigests, liveAdapter, countTurn, clock, ceilingState: () => ceilingState('assurance-sampling'), live, policy,
         beginTurn: context.beginTurn, checkpoint: () => checkpointStage('assurance-sampling'),
         validationStep: (step) => { context.validationStep = step; },
-        stopped: terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
+        stopped: terminalClassification === 'failed' || terminalClassification === 'interrupted' || terminalClassification === 'cancelled',
         stoppedReason: liveInterruption === 'run-budget-ceiling-reached' ? ASSURANCE_SAMPLING_BUDGET_REACHED : null,
         removedByEditor: !assuranceSamplingKept(facts.editorEdits),
         onCeilingReached: () => {
@@ -3572,7 +3658,11 @@ export class BaselineAnalysisExecutionOwner {
       // The second reducer pass: the sample joins the revision and re-labels the assurance axis, and
       // every finding component comes through byte for byte. The `reduction` stage resumes here.
       clock.open('reduction');
-      const reduction = applyAssuranceSample(reduced, sample);
+      const sampledReduction = applyAssuranceSample(reduced, sample);
+      const reduction = { ...sampledReduction, gaps: sampledReduction.gaps.map((gap) => {
+        const recorded = unitRecords.find((unit) => unit.unitOrdinal === gap.unitOrdinal)?.closed;
+        return recorded?.state === 'gap' && recorded.gap.parseFailure !== undefined ? { ...gap, parseFailure: recorded.gap.parseFailure } : gap;
+      }) };
       // Units the interrupted loop never reached are recorded as exact not-attempted gaps.
       for (const gapEntry of reduction.gaps) {
         if (!unitRecords.some((record) => record.unitOrdinal === gapEntry.unitOrdinal)) {
@@ -3590,7 +3680,10 @@ export class BaselineAnalysisExecutionOwner {
         usage.inputTokens += context.platformSession.usage.inputTokens;
         usage.outputTokens += context.platformSession.usage.outputTokens;
       }
-      const revision = ledger.persistRevision({
+      const noClosedReason = terminalClassification === 'failed'
+        ? synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? synthesisUnavailable
+          : `未完成：没有单元读成 · ${majorityGapReason(reduction.gaps) ?? '没有收到可用的模型回答。'}` : null;
+      const revision = noClosedReason !== null ? null : ledger.persistRevision({
         facts,
         attemptId,
         bindingDigest,
@@ -3615,15 +3708,15 @@ export class BaselineAnalysisExecutionOwner {
             safeNextAction: materialInterruptionNextAction(materialStop.code) ?? LIVE_INTERRUPTIONS[interruptionKey].safeNextAction }
         : LIVE_INTERRUPTIONS[interruptionKey];
       ledger.recordRunState(facts.runRecordId, terminalClassification, {
-        detail: terminalClassification === 'cancelled'
-          ? `运行终态：cancelled；按你的取消在阅读范围之间停止，已完成的结果与缺口均已保留，没有读到的阅读范围记为未尝试；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
+        detail: noClosedReason ?? (terminalClassification === 'cancelled'
+          ? `运行终态：cancelled；按你的取消在阅读范围之间停止，已完成的结果与缺口均已保留，没有读到的阅读范围记为未尝试；结果集修订版 ${revision?.revisionId ?? null}（Revision ${revision?.ordinal ?? null}）。`
           : interruptionKey === 'material-reference-changed' && materialStop !== null
             ? materialInterruptionMessage(materialStop)
           : interruption === null
-            ? `运行终态：${terminalClassification}；结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`
-            : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision.revisionId}（Revision ${revision.ordinal}）。`,
-        resultSetRevisionId: revision.revisionId,
-        resultSetRevisionOrdinal: revision.ordinal,
+            ? `运行终态：${terminalClassification}；结果集修订版 ${revision?.revisionId ?? null}（Revision ${revision?.ordinal ?? null}）。`
+            : `运行终态：${terminalClassification} · ${liveInterruption}；${interruption.detail}结果集修订版 ${revision?.revisionId ?? null}（Revision ${revision?.ordinal ?? null}）。`),
+        resultSetRevisionId: revision?.revisionId ?? null,
+        resultSetRevisionOrdinal: revision?.ordinal ?? null,
         unitsClosed: reduction.coverage.unitsClosed,
         unitsReused: reduction.coverage.unitsReused,
         unitsTotal: reduction.coverage.unitsTotal,
@@ -3637,7 +3730,7 @@ export class BaselineAnalysisExecutionOwner {
         runRecordId: facts.runRecordId,
         taskIntentId: facts.taskIntentId,
         attemptId,
-        resultSetRevisionId: revision.revisionId,
+        resultSetRevisionId: revision?.revisionId ?? null,
         classification: terminalClassification,
         recordedAt: new Date().toISOString(),
         spans: clock.spans(),
@@ -3663,18 +3756,18 @@ export class BaselineAnalysisExecutionOwner {
         crossUnit: { state: crossUnit.state, reason: crossUnit.state === 'closed' ? null : crossUnit.reason },
         sample,
         findingCounts: definition.findingCounts(reduction),
-        terminalFailure: null,
+        terminalFailure: noClosedReason === null ? null : { code: synthesisUnavailable !== null && reduction.coverage.unitsClosed > 0 ? 'SYNTHESIS_UNAVAILABLE' : 'NO_CLOSED_UNITS', reason: noClosedReason },
       };
       ledger.recordOutcome({
         taskIntentId: facts.taskIntentId,
         runRecordId: facts.runRecordId,
         classification: terminalClassification,
-        resultSetRevisionId: revision.revisionId,
-        summary: terminalClassification === 'cancelled'
+        resultSetRevisionId: revision?.revisionId ?? null,
+        summary: noClosedReason ?? (terminalClassification === 'cancelled'
           ? `已按你的要求取消：${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
           : interruption === null
             ? `${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`
-            : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`,
+            : `${interruption.summary}${reduction.coverage.label}；${reduction.reducerClosure.label}；${reduction.assurance.label}。`),
         safeNextAction: interruption === null
           ? (definition.safeNextActions ?? SAFE_NEXT_ACTIONS)[terminalClassification]
           : liveInterruption === 'run-budget-ceiling-reached' && (live === null || production !== null) ? BUDGET_REACHED_NEXT_ACTION : interruption.safeNextAction,
@@ -3696,7 +3789,7 @@ export class BaselineAnalysisExecutionOwner {
           beginTurn: context.beginTurn,
           validationStep: (step) => { context.validationStep = step; },
           // An exclusion recorded since the revision was persisted keeps the reflection back too (Issue #64, S29b).
-          stopped: definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
+          stopped: terminalClassification === 'failed' || definition.factualClaims !== undefined || terminalClassification === 'interrupted' || terminalClassification === 'cancelled' ||
             (!active.cancelRequested && (this.#deps.seriesScopeGuard?.(facts.runRecordId) != null || this.#deps.influenceGuard?.(facts.runRecordId) != null)),
         })), ...(factualAssurance === null ? {} : { factualAssurance }) },
       });
@@ -3729,7 +3822,7 @@ export class BaselineAnalysisExecutionOwner {
       const next = kept.ended ? undefined : assuranceSamplingTurns(kept.draw.sampled)[kept.nextTurn - 1];
       return assuranceSampleOutcome(kept.draw, kept.dispositions,
         kept.sampled.turnsWithUsage === 0 ? null : { inputTokens: kept.sampled.inputTokens, outputTokens: kept.sampled.outputTokens },
-        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')]);
+        next === undefined ? kept.gapReasons : [...kept.gapReasons, assuranceSamplingTurnGapReason(next.unitOrdinal, '运行已按你的要求取消，本轮未派发。')], kept.parseFailures, kept.salvaged);
     }
     if (context.stopped || active.interrupted) return assuranceSampleNotRun(context.stoppedReason ?? '运行在单元阶段结束前停止，保证抽样未发起。');
     if (context.removedByEditor) return assuranceSampleNotRun(ASSURANCE_SAMPLING_REMOVED);
@@ -3748,6 +3841,8 @@ export class BaselineAnalysisExecutionOwner {
     const draw = prior?.draw ?? drawn;
     const dispositions = [...(prior?.dispositions ?? [])];
     const gapReasons = [...(prior?.gapReasons ?? [])];
+    const parseFailures = [...(prior?.parseFailures ?? [])];
+    const salvaged = [...(prior?.salvaged ?? [])];
     const sampled = { ...(prior?.sampled ?? { inputTokens: 0, outputTokens: 0, turnsWithUsage: 0 }) };
     const turns = assuranceSamplingTurns(draw.sampled);
     const settledTurns = [...(prior?.turns ?? [])];
@@ -3758,7 +3853,9 @@ export class BaselineAnalysisExecutionOwner {
     }))) throw new ExecutionAdmissionError('EXECUTION_CHECKPOINT_INVALID', '已保存的抽样回合无法核对；未发送。');
     const save = (nextTurn: number, ended: boolean): void => {
       context.stages.sampling = { inputDigest, contractDigest, draw, nextTurn, ended,
-        turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled } };
+        turns: [...settledTurns], dispositions: [...dispositions], gapReasons: [...gapReasons], sampled: { ...sampled },
+        ...(parseFailures.length === 0 ? {} : { parseFailures: [...parseFailures] }),
+        ...(salvaged.length === 0 ? {} : { salvaged: [...salvaged] }) };
       context.checkpoint();
     };
     if (live !== null && policy.providerProcessing.assuranceSamplingAllowed !== true) {
@@ -3844,11 +3941,16 @@ export class BaselineAnalysisExecutionOwner {
             gap(assuranceSamplingEmptyAnswerGapReason(canonical.reasoningPresent));
             continue;
           }
-          const parsed = parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) });
+          const parsed = withProviderResponseSalvage(parseAssuranceSamplingResult(candidate.text, { refs: turn.findings.map((finding) => finding.ref) }), canonical);
           if (!parsed.ok) {
+            parseFailures.push({ unitOrdinal: turn.unitOrdinal, code: parsed.code, detail: parsed.detail });
             gap(unparsableAssuranceSamplingAnswerGapReason(parsed.code, parsed.detail, candidate.text));
             continue;
           }
+          salvaged.push(...(parsed.result.salvaged ?? []).map((entry) => ({ ...entry, section: `unit.${turn.unitOrdinal}.${entry.section}` })));
+          const answered = new Set(parsed.result.dispositions.map((entry) => entry.ref));
+          const missing = turn.findings.filter((entry) => !answered.has(entry.ref));
+          if (missing.length > 0) gap(`本次抽检仅缺少发现 ${missing.map((entry) => entry.ref).join('、')} 的判定。`);
           // The disposition names its finding by `ref`; the tier and the anchor unit are read back from
           // the candidate the Run itself drew, never from the model's answer.
           const byRef = new Map(turn.findings.map((finding) => [finding.ref, finding] as const));
@@ -3862,7 +3964,7 @@ export class BaselineAnalysisExecutionOwner {
               reason: entry.reason,
             });
           }
-          settledState = 'closed';
+          settledState = missing.length === 0 ? 'closed' : 'gap';
         } else if (result.terminal === 'completed') {
           gap('技术回合完成但没有模型输出。');
         } else if (result.terminal === 'failed') {
@@ -3899,7 +4001,7 @@ export class BaselineAnalysisExecutionOwner {
     }
     context.clock.close();
     const usage = sampled.turnsWithUsage === 0 ? null : { inputTokens: sampled.inputTokens, outputTokens: sampled.outputTokens };
-    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons);
+    return assuranceSampleOutcome(draw, dispositions, usage, gapReasons, parseFailures, salvaged);
   }
 }
 
@@ -4097,10 +4199,10 @@ export function runReportReflectionEmptyAnswerGapReason(reasoningPresent: boolea
 
 export function unparsableRunReportReflectionAnswerGapReason(
   code: RunReportReflectionParseFailureCode,
-  detail: string,
+  _detail: string,
   answerText: string,
 ): string {
-  return `运行反思结果不符合契约 v1（${code}）：${detail}模型返回了 ${[...answerText].length} 个字符，其中没有可解析的反思结果。本次运行的结果集修订版不受影响。`;
+  return `运行反思未完成：${modelResultGapReason(code)}模型返回了 ${[...answerText].length} 个字符。本次运行的结果集修订版不受影响。`;
 }
 
 /** Exactly what the reflection suboperation may read or move; no finding and no block is among them. */

@@ -23,6 +23,7 @@ const MARKED = Array.from({ length: MARKS }, (_, index) => ({ kind: KINDS[index 
 
 let uninstall: () => void;
 let created = 0;
+const surfaces: Array<ReturnType<typeof mountPositionRail>> = [];
 beforeEach(() => {
   uninstall = installMiniDom();
   // The rail draws positions and inserts in order: the two things the minimal DOM leaves out, here and nowhere else.
@@ -39,6 +40,8 @@ beforeEach(() => {
   vi.spyOn(miniDocument, 'createElement').mockImplementation((tag: string) => { created += 1; return create(tag); });
 });
 afterEach(() => {
+  vi.useRealTimers();
+  for (const surface of surfaces.splice(0)) surface.destroy();
   vi.restoreAllMocks();
   delete (MiniElement.prototype as unknown as Record<string, unknown>)['style'];
   delete (MiniElement.prototype as unknown as Record<string, unknown>)['insertBefore'];
@@ -52,6 +55,7 @@ async function mounted(first: ManuscriptRailProjection) {
   miniDocument.body.append(track);
   const surface = mountPositionRail({ track: track as unknown as HTMLElement, api: { getManuscriptRail: async () => next }, binding: () => ({ manuscriptId: 'm', branchId: 'b' }),
     jumpToBlock: (target) => jumps.push(target), onError: (error) => { throw error; } });
+  surfaces.push(surface);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   const markers = () => track.querySelectorAll('.rail-marker');
   /** One refresh to `rail`: the nodes it created and removed, and how long it took to draw. */
@@ -103,7 +107,51 @@ describe('the Position Rail at 1,200 marks', () => {
     expect(first.dataset['railCount']).toBe('2');
     expect(first.getAttribute('aria-label')).toBe('修改建议 2 处，跳到这里');
     expect(first.title).toBe('修改建议 2 处');
+    expect(first.className).not.toContain('rail-marker-new');
     first.click();
     expect(jumps).toEqual([blockId(9_999)]);
+    vi.useFakeTimers();
+    const growing = refresh(rail([...moved, { ...moved[0]!, blockId: blockId(10_000) }]));
+    await vi.advanceTimersByTimeAsync(0);
+    await growing;
+    expect(first.className).toContain('rail-marker-new');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(first.className).not.toContain('rail-marker-new');
+  });
+
+  it('restores the confirmed position when navigation refuses a keyboard preview', async () => {
+    const track = miniDocument.createElement('div');
+    const surface = mountPositionRail({ track: track as unknown as HTMLElement, api: { getManuscriptRail: vi.fn() },
+      binding: () => ({ manuscriptId: 'm', branchId: 'b' }), jumpToBlock: vi.fn(),
+      jumpToProportion: async () => false, onError: vi.fn() });
+    surface.setPosition(0.25);
+    track.dispatchEvent({ type: 'keydown', key: 'End', preventDefault: vi.fn() });
+    await Promise.resolve();
+    expect(track.getAttribute('aria-valuenow')).toBe('250000');
+    surface.destroy();
+  });
+
+  it('jumps with the drawn slider keyboard and keeps its accessible position in sync', () => {
+    const track = miniDocument.createElement('div');
+    const jump = vi.fn();
+    const surface = mountPositionRail({ track: track as unknown as HTMLElement, api: { getManuscriptRail: vi.fn() }, binding: () => ({ manuscriptId: 'm', branchId: 'b' }),
+      jumpToBlock: vi.fn(), jumpToProportion: jump, onError: vi.fn() });
+    surface.setPosition(0.25);
+    expect(track.getAttribute('role')).toBe('slider');
+    expect(track.querySelector('input')).toBeNull();
+    track.dispatchEvent({ type: 'keydown', key: 'ArrowDown', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenLastCalledWith(0.26);
+    expect(track.getAttribute('aria-valuenow')).toBe('260000');
+    track.dispatchEvent({ type: 'keydown', key: 'End', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenLastCalledWith(1);
+    track.setAttribute('aria-valuenow', '750013');
+    track.dispatchEvent({ type: 'change' });
+    expect(jump).toHaveBeenLastCalledWith(0.750013);
+    track.setAttribute('aria-disabled', 'true');
+    track.dispatchEvent({ type: 'keydown', key: 'Home', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenCalledTimes(3);
+    surface.destroy();
+    track.dispatchEvent({ type: 'keydown', key: 'ArrowUp', preventDefault: vi.fn() });
+    expect(jump).toHaveBeenCalledTimes(3);
   });
 });

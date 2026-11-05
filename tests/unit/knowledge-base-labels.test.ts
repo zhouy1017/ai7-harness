@@ -38,6 +38,7 @@ import {
   GUIDELINE_CONFIRM,
   GUIDELINE_IMPORT,
   KNOWLEDGE_BASE_TAB_VIEWS,
+  visibleKnowledgeBaseTabs,
   guidelineAppliedBy,
   guidelineCitations,
   guidelineFixedStatement,
@@ -66,12 +67,13 @@ describe('知识库', () => {
   it('names its seven classes in the specification\'s order, and says which arrive later', () => {
     expect(KNOWLEDGE_BASE_TAB_VIEWS.map((view) => view.label)).toEqual(['审阅规范文件', '评估方案', '工序与规则', '社级编辑记忆', '范例', '资料库', '外部来源留存']);
     expect(KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.pending === null).map((view) => view.tab)).toEqual(['guidelines', 'evaluation', 'rules', 'memory', 'exemplars', 'library']);
+    expect(visibleKnowledgeBaseTabs(false).map((view) => view.tab)).toEqual(['guidelines', 'exemplars', 'library']);
+    expect(visibleKnowledgeBaseTabs(true)).toEqual(KNOWLEDGE_BASE_TAB_VIEWS);
     for (const view of KNOWLEDGE_BASE_TAB_VIEWS) {
       expect(view.holds.length).toBeGreaterThan(0);
       if (view.pending !== null) expect(view.pending.startsWith('尚未提供')).toBe(true);
     }
     // 范例 keeps the Owner's default and 资料库 its gate, as the specification states them.
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')!.holds).toContain('学习准入默认「仅本社」');
     expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'library')!.holds).toContain('任务');
   });
 
@@ -166,7 +168,7 @@ describe('范例 (Issue #427, S79b)', () => {
       .toBe('审稿意见 · 给作者的修改意见 · 版本 2 · 保存于 t1 · 发稿版本设定后才起草，按现在的最新一版 · 学习准入：仅本社 · 已归入于 t2');
     expect(readersReportExemplarAdmission({ state: 'superseded', admittedAt: null, decisions: 1 }, (iso) => iso)).toBe('此前归入的是另一版；这一版尚未归入');
     expect(EXEMPLAR_READERS_REPORT_PINS).toEqual({ designation: '设为发稿版本时的最新一版', later: '发稿版本设定后才起草，按现在的最新一版' });
-    expect(EXEMPLAR_READERS_REPORT_ADMIT).toBe('归入范例（仅本社）');
+    expect(EXEMPLAR_READERS_REPORT_ADMIT).toBe('归入本社范例');
     expect(EXEMPLAR_READERS_REPORT_STATUS).toEqual({ admitting: '正在归入范例…', admitted: '审稿意见已归入范例', failed: '无法归入范例。' });
   });
 });
@@ -187,7 +189,7 @@ describe('工序与规则' + "'s expert 工序 (Issue #427, S79d)", () => {
     expect([libraryBytes(512), libraryBytes(29_550), libraryBytes(5 * 1024 * 1024), libraryBytes(3 * 1024 * 1024 * 1024)])
       .toEqual(['512 字节', '28.9 KB', '5.0 MB', '3.00 GB']);
     expect(libraryPreviewHeading({ source })).toBe('放入资料库：sample1.docx');
-    expect(libraryPreviewFacts({ source })).toBe('Word · 28.9 KB · 原件原样保存在本机，不会改动');
+    expect(libraryPreviewFacts({ source })).toBe('Word · 28.9 KB · 原文件保持不变');
     const pending: LibraryMaterialProjection = {
       materialId: 'm', title: '样书一', kind: 'book', source, recordedAt: '2026-09-25T01:00:00.000Z', digest: 'b'.repeat(64),
       attribution: null, eligibility: null, eligibilityReset: false, reference: { state: 'pending' }, decisionCount: 0, decisions: [],

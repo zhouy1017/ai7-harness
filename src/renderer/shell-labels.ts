@@ -1,3 +1,4 @@
+import type { IconId } from './components/icon-sprite.js';
 import type { ShellBookSection } from '../shared/preferences.js';
 import type { DialogueAttemptProjection } from '../shared/protocol.js';
 import { dialogueIncompleteLine } from './dialogue-labels.js';
@@ -9,42 +10,43 @@ export function globalAgentAnswerStatus(attempt: DialogueAttemptProjection | und
 }
 
 // The shell's words (Issue #934, wave 11 slice 11a; Issue #1002, wave 16 slice 16a; editor-surfaces §0.3, §8; IA-006 to IA-013, ADR 0092):
-// the two-level sidebar, the searchable multi-book switcher, the context header and the 设置 hub. Each row's icon is one
-// character of its own name, drawn by the stylesheet from a data attribute, so a row's text is exactly its label and a
+// the two-level sidebar, the searchable multi-book switcher, the context header and the 设置 hub. Each row uses an
+// SVG symbol from the fixed A4 sprite, so a row's text is exactly its label and a
 // collapsed row keeps that label as its accessible name.
 
-export type ShellDestination = 'attention' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
+export type ShellDestination = 'attention' | 'tasks' | 'library' | 'series' | 'knowledge' | 'quality' | 'global-agent';
 
-/** The six global destinations in their fixed order (IA-007): 待我处理 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
-export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: string }> = Object.freeze([
-  { key: 'attention', label: '待我处理', icon: '待' },
-  { key: 'library', label: '书库', icon: '库' },
-  { key: 'series', label: '书系', icon: '系' },
-  { key: 'knowledge', label: '知识库', icon: '知' },
-  { key: 'quality', label: '质量与学习', icon: '质' },
-  { key: 'global-agent', label: '全域智能体（记忆与全局指导）', icon: '智' },
+/** The seven global destinations in their fixed order (IA-007): 待我处理 · 任务 · 书库 · 书系 · 知识库 · 质量与学习 · 全域智能体（Issue #1083）. */
+export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination; readonly label: string; readonly icon: IconId }> = Object.freeze([
+  { key: 'attention', label: '待我处理', icon: 'i-inbox' },
+  { key: 'tasks', label: '任务', icon: 'i-task' },
+  { key: 'library', label: '书库', icon: 'i-library' },
+  { key: 'series', label: '书系', icon: 'i-series' },
+  { key: 'knowledge', label: '知识库', icon: 'i-kb' },
+  { key: 'quality', label: '质量与学习', icon: 'i-learn' },
+  { key: 'global-agent', label: '全域智能体', icon: 'i-learn' },
 ]);
 
 /** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */
 export const SHELL_BOOK_GROUPS: ReadonlyArray<{
   readonly key: 'work' | 'handling' | 'records';
   readonly label: string;
-  readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: string }>;
+  readonly sections: ReadonlyArray<{ readonly key: ShellBookSection; readonly label: string; readonly icon: IconId }>;
 }> = Object.freeze([
   { key: 'work', label: '工作', sections: [
-    { key: 'manuscript', label: '稿件', icon: '稿' },
-    { key: 'review', label: '审阅', icon: '审' },
-    { key: 'evaluation', label: '评估', icon: '评' },
-    { key: 'deliverables', label: '交付物', icon: '交' },
+    { key: 'manuscript', label: '稿件', icon: 'i-ms' },
+    { key: 'review', label: '审阅', icon: 'i-review' },
+    { key: 'evaluation', label: '评估', icon: 'i-star' },
+    { key: 'deliverables', label: '交付物', icon: 'i-box' },
   ] },
   { key: 'handling', label: '处理', sections: [
-    { key: 'findings', label: '发现', icon: '发' },
+    { key: 'findings', label: '发现', icon: 'i-flag' },
   ] },
   { key: 'records', label: '资料与记录', sections: [
-    { key: 'analysis', label: '分析', icon: '析' },
-    { key: 'sources', label: '来源与证据', icon: '源' },
-    { key: 'overview', label: '工作概览', icon: '概' },
-    { key: 'history', label: '历史与恢复', icon: '史' },
+    { key: 'analysis', label: '分析', icon: 'i-analysis' },
+    { key: 'sources', label: '来源与证据', icon: 'i-source' },
+    { key: 'overview', label: '工作概览', icon: 'i-overview' },
+    { key: 'history', label: '历史与恢复', icon: 'i-history' },
   ] },
 ]);
 
@@ -53,9 +55,9 @@ export const SHELL_BOOK_GROUPS: ReadonlyArray<{
  * It is an explicit choice of a work surface for the current Book, entered on the Book's own route; it records no recent
  * section, and nothing opens it on its own.
  */
-export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'A', state: 'agent-workspace' } as const);
+export const SHELL_AGENT_WORKSPACE_ROW = Object.freeze({ group: 'work', label: 'Agent 工作区', icon: 'i-ms', state: 'agent-workspace' } as const);
 
-export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: '设' });
+export const SHELL_SETTINGS = Object.freeze({ label: '设置', icon: 'i-settings' });
 
 export const SHELL_LABELS = Object.freeze({
   navigation: '主导航',
@@ -83,20 +85,6 @@ export const SHELL_LABELS = Object.freeze({
   library: '书库',
   libraryTitle: '图书与稿件',
   allBooks: '全部图书',
-  remainingHeading: '其余图书',
-  retryCatalog: '重试读取图书',
-  loadingCatalog: '正在读取图书目录…',
-  catalogFailed: '无法读取图书目录，请重试或打开完整书库。',
-  emptyCatalog: '书库里还没有图书。',
-  catalogCount: (count: number) => `共 ${count} 本图书`,
-  switchBook: '切换书稿',
-  switchBookTrigger: '切换书稿 ▾',
-  bookSearchPlaceholder: '搜索书名或编号…',
-  bookSearchLabel: '筛选图书列表',
-  allBooksHeading: '全部在编图书',
-  catalogBookState: '在编图书',
-  noMatchingBooks: '未找到匹配的图书。',
-  openLibraryDirectory: '打开完整书库目录',
 });
 
 export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.freeze({
@@ -132,7 +120,7 @@ export function shellDestinationLabel(destination: ShellDestination): string {
   return SHELL_DESTINATIONS.find((entry) => entry.key === destination)!.label;
 }
 
-export type SettingsRoute = 'model-service' | 'usage' | 'evaluation-calibration' | 'data-storage' | 'appearance' | 'keyboard' | 'notifications' | 'diagnostics';
+export type SettingsRoute = 'model-service' | 'usage' | 'evaluation-calibration' | 'data-storage' | 'appearance' | 'keyboard' | 'notifications' | 'diagnostics' | 'help';
 
 /**
  * 设置 (editor-surfaces §8.6; MSET, DSTO, VIEW, KEY, NOTIF): 服务 · 编辑工作 · 本机. A row whose page another slice of wave 11
@@ -141,21 +129,22 @@ export type SettingsRoute = 'model-service' | 'usage' | 'evaluation-calibration'
 export const SETTINGS_HUB_GROUPS: ReadonlyArray<{
   readonly key: 'service' | 'editorial' | 'local';
   readonly label: string;
-  readonly rows: ReadonlyArray<{ readonly route: SettingsRoute; readonly label: string; readonly note: string }>;
+  readonly rows: ReadonlyArray<{ readonly route: SettingsRoute; readonly label: string; readonly note: string; readonly developerOnly?: true }>;
 }> = Object.freeze([
   { key: 'service', label: '服务', rows: [
-    { route: 'model-service', label: '模型服务', note: '连接、四个角色与预算偏好；凭据只能重新输入或移除。' },
-    { route: 'usage', label: '用量', note: '按图书、任务与时间汇总的用量。' },
+    { route: 'model-service', label: '模型服务', note: '渠道、密钥、模型、网络代理与连接测试。' },
+    { route: 'usage', label: '用量', note: '按图书、任务与时间汇总的用量。', developerOnly: true },
   ] },
   { key: 'editorial', label: '编辑工作', rows: [
-    { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。' },
+    { route: 'evaluation-calibration', label: '评估校准与预测', note: '校准进度、预测开关与定价、首印实际数据。', developerOnly: true },
   ] },
   { key: 'local', label: '本机', rows: [
-    { route: 'data-storage', label: '数据与存储', note: '数据位置、版本、导出与导入数据库、定期自动备份。' },
+    { route: 'data-storage', label: '数据与存储', note: '数据位置、定期自动备份、导出与导入数据库。' },
     { route: 'appearance', label: '外观', note: '跟随系统、浅色或深色。' },
-    { route: 'keyboard', label: '键盘与无障碍', note: '快捷键与键盘操作。' },
+    { route: 'keyboard', label: '键盘与无障碍', note: '快捷键列表与减少动效。' },
     { route: 'notifications', label: '通知', note: '窗口不在前台时的系统通知。' },
-    { route: 'diagnostics', label: '诊断', note: '崩溃记录与诊断包。' },
+    { route: 'diagnostics', label: '诊断', note: '崩溃记录与诊断包。', developerOnly: true },
+    { route: 'help', label: '帮助', note: '使用说明、隐私与开发者模式。' },
   ] },
 ]);
 

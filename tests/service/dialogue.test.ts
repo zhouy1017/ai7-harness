@@ -148,8 +148,11 @@ describe('就这段提问… over the real store and harness', () => {
     try {
       const first = store.askAboutSelection(book.bookId, { selection: selectionOf(store, book), question: QUESTION });
       dialogues.begin(first);
+      expect(store.inspectGlobalAttention(() => null, false).running).toBe(true);
       const read = () => store.inspectDialogue(book.bookId, first.dialogueId, 0, (id) => dialogues.liveText(id));
       await waitFor(read, (value) => value.attempts.at(-1)?.state === 'completed', 'first answer');
+      expect(store.inspectGlobalAttention(() => null, false).groups.find((group) => group.key === 'recent')!.items)
+        .toContainEqual(expect.objectContaining({ itemId: `dialogue:${first.dialogueId}`, state: 'dialogue-answered' }));
       const second = store.nextDialogueAttempt(book.bookId, { dialogueId: first.dialogueId, attemptId: first.attemptId, question: QUESTION }, 'continue');
       expect(second.message.kept).toContain(FIRST_SENTENCE);
       dialogues.begin(second);
@@ -254,12 +257,16 @@ describe('就这段提问… over the real store and harness', () => {
       dialogues.begin(second);
       const read = () => store.inspectDialogue(book.bookId, second.dialogueId, 0, (id) => dialogues.liveText(id));
       expect(read().attempts[0]).toMatchObject({ state: 'answering', queued: true, fragmentTotal: 0 });
-      await dialogues.stop(second.attemptId);
-      expect(read().attempts[0]).toMatchObject({ state: 'stopped', source: 'missing', fragmentTotal: 0 });
+      await dialogues.stop(second.attemptId, true);
+      expect(read().attempts[0]).toMatchObject({ state: 'interrupted', source: 'missing', fragmentTotal: 0 });
+      expect(store.inspectTaskOverview(() => null, 2, () => null, false).groups.find((group) => group.key === 'recent')!.items)
+        .toContainEqual(expect.objectContaining({ itemId: `dialogue:${second.dialogueId}`, state: 'cancelled' }));
       expect(dialogues.liveText(second.attemptId)).toBeNull();
       expect(dialogues.liveText(first.attemptId)).not.toBeNull();
       expect(dialogues.answering).toBe(true);
       await dialogues.stop(first.attemptId);
+      expect(store.inspectTaskOverview(() => null, 2, () => null, false).groups.find((group) => group.key === 'paused')!.items)
+        .toContainEqual(expect.objectContaining({ itemId: `dialogue:${first.dialogueId}`, state: 'paused' }));
       store.markCleanShutdown();
     } finally {
       await dialogues.dispose();

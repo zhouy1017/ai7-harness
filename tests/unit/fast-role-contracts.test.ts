@@ -70,7 +70,7 @@ describe('Editorial Polish Contract v1', () => {
       { original: '慢慢的', replacement: '慢慢地', reason: '状语后用「地」。' },
       { original: '房间里面', replacement: '房间', reason: '「里面」与「走进」重复。' },
     ]), SELECTION);
-    expect(reading).toEqual({
+    expect(reading).toMatchObject({
       kind: 'read',
       suggestions: [
         { ordinal: 1, original: '慢慢的', replacement: '慢慢地', reason: '状语后用「地」。', fromGrapheme: 1, toGrapheme: 4 },
@@ -97,32 +97,50 @@ describe('Editorial Polish Contract v1', () => {
     ]), SELECTION);
     expect(reading.kind).toBe('read');
     if (reading.kind !== 'read') return;
-    expect(reading.suggestions.map((suggestion) => suggestion.ordinal)).toEqual([8]);
+    expect(reading.suggestions.map((suggestion) => suggestion.ordinal)).toEqual([4]);
     expect(reading.withheld).toEqual([
       { ordinal: 1, reason: '摘出的文字不在所选文字中' },
       { ordinal: 2, reason: '摘出的文字在所选文字中不止一处，无法确定位置' },
       { ordinal: 3, reason: '替换后的文字与原文相同' },
-      { ordinal: 4, reason: '理由要是一行，最多 120 个字' },
-      { ordinal: 5, reason: '建议不是约定的格式' },
+      { ordinal: 5, reason: '与前面的建议重叠' },
       { ordinal: 6, reason: '建议没有摘出要替换的文字' },
       { ordinal: 7, reason: '替换后的文字超过修改建议的长度上限' },
+      { ordinal: 8, reason: '与前面的建议重叠' },
       { ordinal: 9, reason: '与前面的建议重叠' },
       { ordinal: 10, reason: '建议不是约定的格式' },
     ]);
   });
 
-  it('withholds a suggestion past the limit and an answer outside the contract whole', () => {
-    const many = Array.from({ length: MAX_EDITORIAL_POLISH_SUGGESTIONS + 1 }, () => ({ original: '不存在', replacement: '别的', reason: '理由。' }));
-    const reading = readEditorialPolishAnswer(polish(many), SELECTION);
-    expect(reading.kind === 'read' && reading.withheld.at(-1)).toEqual({ ordinal: 21, reason: '超过 20 条的建议不予提供' });
-    for (const answer of [
-      '这一段可以这样改：……',
-      JSON.stringify({ schema: 'ai7.editorial-polish.result/2', suggestions: [] }),
-      JSON.stringify({ schema: EDITORIAL_POLISH_RESULT_SCHEMA, suggestions: [], summary: '整体不错。' }),
-      JSON.stringify({ schema: EDITORIAL_POLISH_RESULT_SCHEMA, suggestions: {} }),
-      JSON.stringify([]),
-    ]) {
-      expect(readEditorialPolishAnswer(answer, SELECTION)).toEqual({ kind: 'withheld', reason: '模型的回答不是约定格式的建议列表' });
+  it('normalizes quoted NFC anchors without splitting source graphemes (#1311)', () => {
+    const reading = readEditorialPolishAnswer(JSON.stringify([{ original: '“é”！', replacement: '字', reason: '理由\n'.repeat(100) }, { original: 'missing', replacement: '坏' }]), 'e\u0301');
+    expect(reading).toMatchObject({ kind: 'read', suggestions: [{ original: 'e\u0301', fromGrapheme: 0, toGrapheme: 1 }], salvaged: [{ section: 'suggestions', index: 1 }] });
+    if (reading.kind === 'read') expect([...reading.suggestions[0]!.reason].length).toBeLessThanOrEqual(120);
+  });
+
+  it('caps suggestions and reads arrays, fences, extra keys and partial JSON', () => {
+    const valid = { original: '慢慢的', replacement: '慢慢地', extra: true };
+    for (const answer of [JSON.stringify([valid]), '说明 '+JSON.stringify({ schema: 'other', suggestions: [valid], extra: true })+' 结束', '{"suggestions":['+JSON.stringify(valid)+',{"original":']) {
+      expect(readEditorialPolishAnswer(answer, SELECTION)).toMatchObject({ kind: 'read', suggestions: [{ original: '慢慢的', reason: '' }] });
+    }
+    expect(readEditorialPolishAnswer('no JSON', SELECTION).kind).toBe('withheld');
+    const many = readEditorialPolishAnswer(polish(Array.from({ length: MAX_EDITORIAL_POLISH_SUGGESTIONS + 1 }, () => valid)), SELECTION);
+    expect(many.kind === 'read' && many.withheld.at(-1)?.ordinal).toBe(21);
+  });
+
+  it('normalizes quoted replacements just like original text (#1311)', () => {
+    expect(readEditorialPolishAnswer(polish([{ original: '“慢慢的”', replacement: '“慢慢地”' }]), SELECTION))
+      .toMatchObject({ kind: 'read', suggestions: [{ original: '慢慢的', replacement: '慢慢地' }] });
+    expect(readEditorialPolishAnswer(polish([{ original: '“慢慢的”', replacement: '“慢慢的”' }]), SELECTION))
+      .toMatchObject({ kind: 'read', suggestions: [], withheld: [{ reason: '替换后的文字与原文相同' }] });
+    expect(readEditorialPolishAnswer(polish([{ original: '慢慢的', replacement: '〔改〕。' }]), SELECTION))
+      .toMatchObject({ kind: 'read', suggestions: [{ replacement: '〔改〕。' }] });
+  });
+
+  it('skips a leading bracketed note before the real object or array (#1311)', () => {
+    const item = { original: '慢慢的', replacement: '慢慢地' };
+    for (const text of [polish([item]), JSON.stringify([item])]) {
+      expect(readEditorialPolishAnswer(`[说明] ${text}`, SELECTION))
+        .toMatchObject({ kind: 'read', suggestions: [{ original: '慢慢的', replacement: '慢慢地' }] });
     }
   });
 });
@@ -150,21 +168,10 @@ describe('Conflict Regeneration Contract v1', () => {
       .toBe(sha256Hex(`ai7.conflict-regenerate/1\u0000${CONFLICT_REGENERATE_PROMPT_CONTRACT_DIGEST}\u0000${'a'.repeat(64)}`));
   });
 
-  it('offers exactly one text and withholds anything else', () => {
-    expect(readConflictRegenerateAnswer(JSON.stringify({ schema: CONFLICT_REGENERATE_RESULT_SCHEMA, text: '走进了屋子，' })))
-      .toEqual({ kind: 'read', text: '走进了屋子，' });
-    for (const answer of [
-      '走进了屋子，',
-      JSON.stringify({ schema: CONFLICT_REGENERATE_RESULT_SCHEMA, text: '走进了屋子，', reason: '多出的字段' }),
-      JSON.stringify({ schema: CONFLICT_REGENERATE_RESULT_SCHEMA, texts: ['走进了屋子，'] }),
-      JSON.stringify({ schema: 'ai7.conflict-regenerate.result/2', text: '走进了屋子，' }),
-      JSON.stringify(['走进了屋子，']),
-    ]) {
-      expect(readConflictRegenerateAnswer(answer)).toEqual({ kind: 'withheld', reason: '模型的回答不是约定格式的建议文字' });
-    }
-    expect(readConflictRegenerateAnswer(JSON.stringify({ schema: CONFLICT_REGENERATE_RESULT_SCHEMA, text: '  ' })))
-      .toEqual({ kind: 'withheld', reason: '模型没有给出新的建议文字' });
-    expect(readConflictRegenerateAnswer(JSON.stringify({ schema: CONFLICT_REGENERATE_RESULT_SCHEMA, text: 'x'.repeat(MAX_MARK_BODY_CODE_UNITS + 1) })))
-      .toEqual({ kind: 'withheld', reason: '模型给出的文字超过修改建议的长度上限' });
+  it('reads text from a loose object or a plain answer while keeping storage bounds', () => {
+    for (const answer of ['走进了屋子，', JSON.stringify({ schema: 'other', text: '走进了屋子，', extra: true }), '说明 '+JSON.stringify({ text: '走进了屋子，' })]) expect(readConflictRegenerateAnswer(answer)).toEqual({ kind: 'read', text: '走进了屋子，' });
+    expect(readConflictRegenerateAnswer('{"texts":[]}').kind).toBe('withheld');
+    expect(readConflictRegenerateAnswer('  ').kind).toBe('withheld');
+    expect(readConflictRegenerateAnswer('x'.repeat(MAX_MARK_BODY_CODE_UNITS + 1)).kind).toBe('withheld');
   });
 });

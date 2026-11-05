@@ -7,6 +7,7 @@ import type {
   ModelServiceBindingProjection,
   ModelServiceChannelProjection,
   ModelServiceConnectionId,
+  ModelDiscoveryResult,
   ModelServiceRouteId,
   OrdinaryProductionRouteId,
 } from './protocol/model-service.js';
@@ -317,11 +318,13 @@ export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
 
-export const SERVICE_PROTOCOL_VERSION = 196 as const;
+export const SERVICE_PROTOCOL_VERSION = 197 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
 export interface BookFindingProjection {
+  /** Exact open suggestion offered by the owning review; Apply still revalidates this binding. */
+  suggestion?: { manuscriptId: string; branchId: string; markId: string; blockId: string; batchAllowed: boolean; quote: string; replacement: string };
   id: string;
   category: string;
   categoryLabel: string;
@@ -748,6 +751,11 @@ export const IPC_CHANNELS = {
   askGlobalAgent: 'ai7:global-agent:ask',
   prepareGlobalAgentTurn: 'ai7:global-agent:prepare',
   inspectGlobalAttention: 'ai7:j09:inspect-global-attention',
+  inspectTaskOverview: 'ai7:tasks:inspect-overview',
+  reorderQueuedRun: 'ai7:tasks:reorder-queued-run',
+  startQuickTasks: 'ai7:tasks:start-quick-tasks',
+  taskOverviewCall: 'ai7:tasks:call',
+  controlAllTasks: 'ai7:tasks:control-all',
   inspectBookTasks: 'ai7:j16:inspect-book-tasks',
   askAboutSelection: 'ai7:j16:ask-about-selection',
   inspectDialogue: 'ai7:j16:inspect-dialogue',
@@ -2639,8 +2647,9 @@ export interface ModelServiceConnectionProjection {
   connectionTest?: ModelConnectionTestStatus | null;
 }
 
-/** Sanitized exact-binding text-probe result. No response, error body or credential value. */
+/** Exact-binding public text-probe result; only its bounded reply and provenance are retained. */
 export interface ModelConnectionTestStatus {
+  responseText?: string;
   modelId: string;
   credentialUpdatedAt: string;
   testedAt: string;
@@ -3436,6 +3445,7 @@ export interface LaunchPolicyProjection {
 
 export interface ModelServiceStoredStateProjection {
   proxy: ModelServiceProxySetting;
+  lastProxyProbe?: ProxyProbeResult | null;
   /** The DeepSeek 开放平台（官方） connection, as Issue #712 has always read it; `connections` holds every route's. */
   connection: ModelServiceConnectionProjection | null;
   /** Every route's connection (Issue #811), Go first; at most one is `selected`. */
@@ -3486,10 +3496,18 @@ export interface ModelRoleCardProjection {
 }
 
 export type ModelServiceProxySetting = { mode: 'direct' } | { mode: 'proxy'; protocol: 'http' | 'https'; hostPort: string };
+export interface ProxyProbeResult {
+  status: 'available' | 'https-rejected' | 'connection-refused' | 'authentication-required' | 'unreachable';
+  checkedAt: string;
+}
+export type SaveModelServiceProxyInput = ModelServiceProxySetting & { probeRoute?: ModelServiceRouteId };
 
 export interface ModelServiceSettingsProjection {
+  /** Present on a save-and-discover or explicit refresh response; discovery failures never invalidate stored models. */
+  modelDiscovery?: ModelDiscoveryResult;
   searchBackends: SearchBackendSettingsProjection;
   proxy: ModelServiceProxySetting;
+  lastProxyProbe?: ProxyProbeResult | null;
   roles: readonly ModelRoleCardProjection[];
   /** The two routes and the providers not yet supported (Issue #811). */
   routeChoice: {
@@ -3512,6 +3530,9 @@ export interface FrozenWebToolsBackend {
   host: string;
   configurationDigest: string;
   selectedAt: string;
+  /** The Main channel's own provider search, when a measured native adapter is selected. */
+  selectionSource?: 'model-channel' | 'configured-backend';
+  sourceLabel?: string;
 }
 
 /** What the renderer sends to save or choose a route (Issue #811); the value of `secret` never comes back. */
@@ -4297,6 +4318,9 @@ export interface SetEvaluationPreferencesInput {
  */
 export type GlobalAttentionGroupKey = 'exceptions' | 'decisions' | 'active' | 'recent';
 
+/** Why a resumable Run stopped, as shown to editors (Issue #1309). */
+export type ResumableStopReason = 'proxy-unreachable' | 'model-service-unreachable' | 'outcome-unknown' | 'shutdown';
+
 export const GLOBAL_ATTENTION_GROUP_KEYS: readonly GlobalAttentionGroupKey[] = ['exceptions', 'decisions', 'active', 'recent'];
 
 /** Only these two count toward the entry's number (V2-UX-ATTN-006); the other two stay visible without an alert. */
@@ -4415,6 +4439,7 @@ export type GlobalAttentionNextStep =
   | 'answer-clarification'
   | 'adjust-budget-redo'
   | 'resolve-model-service'
+  | 'open-network-proxy'
   // 结果待确认's 查看未确认的部分 (Issue #51, S16c): which reading ranges are unconfirmed, in the drawer.
   | 'view-unconfirmed'
   | 'reprepare'
@@ -4441,7 +4466,7 @@ export type GlobalAttentionNextStep =
 
 export const GLOBAL_ATTENTION_NEXT_STEPS: readonly GlobalAttentionNextStep[] = [
   'view-run', 'view-review', 'reconfirm-plan', 'continue-review', 'return-to-recovery', 'retry-abandon-cleanup', 'await-local-check',
-  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'reprepare', 'redo', 'view-plan',
+  'resolve-conflict', 'answer-clarification', 'adjust-budget-redo', 'resolve-model-service', 'open-network-proxy', 'reprepare', 'redo', 'view-plan',
   'maintenance-link-proposal', 'maintenance-link-publication', 'maintenance-write-errata', 'maintenance-conclude',
   'set-library-attribution', 'set-learning-eligibility', 'decide-learning-materials', 'open-dialogue', 'view-material-index',
   'view-unconfirmed', 'view-apply-receipt', 'continue-draft',
@@ -4505,7 +4530,10 @@ export type GlobalAttentionObjectProjection =
 
 /** The record facts an item's reason is told from: identities, counts and states, never manuscript text. */
 export interface GlobalAttentionFactsProjection {
+  dialogueCancelled?: boolean;
+  resumeFailure?: string;
   clarificationOrigin?: 'model';
+  stopReason?: ResumableStopReason;
   /** The Run in flight: its declared step and its Measured Run Progress (V2-UX-ATTN-004). */
   progress: null | { stage: RunReportUsageStageId; unitsSettled: number; unitsTotal: number };
   /**
@@ -4516,6 +4544,7 @@ export interface GlobalAttentionFactsProjection {
   categories: ReadonlyArray<{ label: string; state: ReviewRunCategoryState; stateLabel: string; detail: string | null }>;
   /** The ordinal of the Result Set Revision a completed analysis formed. */
   revisionOrdinal: number | null;
+  completion?: { gaps: number; total: number; reason: string | null };
 }
 
 /** One Attention Projection Item (V2-UX-ATTN-007): a pointer to its record, never an authority of its own. */
@@ -4596,6 +4625,87 @@ export interface BookTasksProjection {
   groups: ReadonlyArray<BookTaskGroupProjection>;
   /** A Run of this Book is in flight, a Review Run is being driven, or a Run waits to start: the panel follows it. */
   running: boolean;
+  /** Snapshot-pinned pages retain every card field when a group exceeds the reply budget. */
+  readonly listPages?: TaskPlanProjection['listPages'];
+}
+
+// ---- 任务总览 (Issue #1328, T1 rev 2) ---------------------------------------------------------------
+
+export type TaskOverviewGroupKey = 'running' | 'queued' | 'waiting' | 'paused' | 'recent';
+
+export interface TaskOverviewProgressProjection {
+  readonly done: number;
+  readonly total: number;
+  readonly currentUnitLabel: string | null;
+  readonly elapsedMs: number | null;
+  readonly modelWaiting: boolean;
+}
+
+export interface TaskOverviewItemProjection {
+  readonly itemId: string;
+  readonly bookId: string | null;
+  readonly bookTitle: string | null;
+  readonly taskKind: string;
+  readonly label: string;
+  readonly at: string;
+  readonly detail: string | null;
+  readonly attention: GlobalAttentionItemProjection;
+  readonly selection: BookTaskItemProjection['selection'] | null;
+  readonly plan: { readonly kind: TaskPlanKind; readonly ref: string | null } | null;
+  readonly result: BookTaskResultRef | null;
+  readonly state: 'running' | 'queued' | 'waiting' | 'paused' | 'completed' | 'cancelled' | 'stopped';
+  readonly progress: TaskOverviewProgressProjection | null;
+  readonly queuePosition: number | null;
+  /** An estimate is deliberately absent until an owner can provide authoritative timing data. */
+  readonly eta: number | null;
+  readonly usage: { readonly calls: number; readonly elapsed: number } | null;
+  readonly nextAction: GlobalAttentionNextStep;
+  readonly runRecordId: string | null;
+  readonly target: GlobalAttentionTarget;
+}
+
+export interface TaskOverviewGroupProjection {
+  readonly key: TaskOverviewGroupKey;
+  readonly items: ReadonlyArray<TaskOverviewItemProjection>;
+  readonly total: number;
+}
+
+export interface TaskOverviewProjection {
+  readonly quickStarts?: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string; readonly label: string }>;
+  readonly groups: ReadonlyArray<TaskOverviewGroupProjection>;
+  readonly capacity: number;
+  readonly queueFrozen: boolean;
+  readonly books: ReadonlyArray<{ readonly bookId: string; readonly title: string }>;
+  readonly runningCount: number;
+  readonly queuedCount: number;
+  readonly actionableCount: number;
+}
+
+/** Existing Book-owned drawer commands reachable from the cross-Book task page. */
+export const TASK_OVERVIEW_OPERATIONS = ['inspectTaskPlan', 'getTaskPlanPage', 'controlTaskRun', 'redoTaskPlan',
+  'cancelWaitingTask', 'cancelWaitingBaselineAnalysis', 'answerBaselineAnalysisClarification',
+  'inspectDialogue', 'stopDialogueAnswer', 'continueDialogueAnswer', 'regenerateDialogueAnswer',
+  'convertDialogueToChangeSuggestion', 'authorizeBaselineAnalysis', 'authorizeReviewRun', 'authorizeInitialEvaluation',
+  'authorizeReadersReport', 'authorizeEvaluationRewrite', 'authorizeWritingTask', 'authorizeTaskAuthorization',
+  'editTaskPlan', 'editBaselineAnalysisPlan', 'resolveUnconfirmedOutcomes', 'startTaskWhenOnline', 'startTaskWhenIdle',
+  'startBaselineAnalysisWhenOnline', 'setDefaultExecutionRule', 'inspectBookTasks', 'inspectBaselineAnalysis',
+  'pauseBaselineAnalysisRun', 'resumeBaselineAnalysisRun', 'cancelBaselineAnalysisRun',
+  'getAnalysisRevisionUnits', 'getAnalysisRevisionOverview', 'inspectReviewWorkspace', 'prepareBaselineAnalysis', 'prepareCustomAnalysis',
+  'inspectTaskIntentDrafts', 'saveTaskIntentDraft', 'promoteTaskIntentDraft', 'promoteAnswerToTaskIntentDraft',
+  'prepareReviewRun', 'searchReferableMaterials', 'inspectBookSeries'] as const;
+export type TaskOverviewOperation = (typeof TASK_OVERVIEW_OPERATIONS)[number];
+export type TaskOverviewCall = { [K in TaskOverviewOperation]: { operation: K; bookId: string; input: Omit<ServiceOperationMap[K]['input'], 'bookId'> } }[TaskOverviewOperation];
+export type TaskOverviewCallResult = ServiceOperationMap[TaskOverviewOperation]['output'];
+
+export interface StartQuickTasksInput {
+  readonly tasks: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string;
+    readonly repeat?: { readonly kind: Exclude<TaskPlanKind, 'fixed-task'>; readonly ref: string } }>;
+}
+
+export interface StartQuickTasksResult {
+  readonly started: number;
+  readonly queued: number;
+  readonly results: ReadonlyArray<{ readonly bookId: string; readonly procedureId: string; readonly state: 'started' | 'queued' | 'prepared' }>;
 }
 
 // ---- 就这段提问… (Issue #52, plan slice S17a; UI ADR 0014; V2-UX-DIALOG-001 to 016, TASK-044, TASK-046) ---------------
@@ -4646,6 +4756,7 @@ export type DialogueAnswerState = 'answering' | 'completed' | 'stopped' | 'inter
 /** One complete semantic fragment of an answer (DIALOG-006): a whole sentence, list item or row, never a broken tail. */
 export interface DialogueFragmentProjection {
   readonly text: string;
+  readonly incomplete?: boolean;
   /** A line break follows it: the next fragment starts a new paragraph, item or row. */
   readonly breakAfter: boolean;
 }
@@ -5670,7 +5781,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    */
   inspectTaskPlan: { input: InspectTaskPlanInput; output: TaskPlanProjection };
   getTaskPlanPage: {
-    input: Omit<InspectTaskPlanInput, 'kind'> & { kind: TaskPlanKind | 'task-intent-drafts'; path: string; afterOrdinal: number; digest: string };
+    input: Omit<InspectTaskPlanInput, 'kind'> & { kind: TaskPlanKind | 'task-intent-drafts' | 'book-tasks'; path: string; afterOrdinal: number; digest: string };
     output: { path: string; items: ReadonlyArray<unknown> | string; nextOrdinal: number | null; digest: string };
   };
   /**
@@ -6530,6 +6641,10 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
    * no Book, because it reads across them; it is a read and records nothing.
    */
   inspectGlobalAttention: { input: Record<string, never>; output: GlobalAttentionProjection };
+  controlAllTasks: { input: { action: 'pause' | 'resume' }; output: TaskOverviewProjection };
+  inspectTaskOverview: { input: Record<string, never>; output: TaskOverviewProjection };
+  reorderQueuedRun: { input: { runRecordId: string; position: number }; output: TaskOverviewProjection };
+  startQuickTasks: { input: StartQuickTasksInput; output: { kind: TaskPlanKind; job: ServiceJobProjection; ruleVersionId: string | null } };
   /** The Book's 任务 panel (Issue #423, plan slice S77a): a read of that Book's Tasks in the three groups. */
   inspectBookTasks: { input: { bookId: string }; output: BookTasksProjection };
   /**
@@ -6540,7 +6655,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   /** The dialogue as it stands: a read, the latest answer's fragments from `afterFragment` on. */
   inspectDialogue: { input: InspectDialogueInput & { bookId: string }; output: DialogueProjection };
   /** 停止回答: the answer in flight keeps only its complete fragments, labelled incomplete. */
-  stopDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
+  stopDialogueAnswer: { input: DialogueAttemptInput & { bookId: string; cancel?: boolean }; output: DialogueProjection };
   /** 继续回答: a new attempt going on from what a stopped or interrupted answer kept. */
   continueDialogueAnswer: { input: DialogueAttemptInput & { bookId: string }; output: DialogueProjection };
   /** 重新回答: a new attempt asking the same question about the same words again. */
@@ -6594,14 +6709,14 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   selectFastRoleModel: { input: FastModelSelectionInput; output: void };
   selectMainRoleModel: { input: FastModelSelectionInput; output: void };
   selectBothRoleModels: { input: FastModelSelectionInput; output: void };
-  refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: void };
+  refreshModelServiceModels: { input: { route: ModelServiceRouteId }; output: ModelDiscoveryResult };
   testModelServiceConnection: { input: FastModelSelectionInput; output: ModelConnectionTestStatus };
   getModelServiceStoredState: {
     input: Record<string, never>;
     output: ModelServiceStoredStateProjection;
   };
   saveModelServiceProxy: {
-    input: ModelServiceProxySetting;
+    input: SaveModelServiceProxyInput;
     output: ModelServiceProxySetting;
   };
   /**
@@ -6673,7 +6788,7 @@ export type PickerReselectResult =
 export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   selectSearchBackend(input: SearchBackendSelectionInput): Promise<ModelServiceSettingsProjection>;
   probeSearchBackend(input: { backendId: string; candidateId?: SearchCandidateId }): Promise<SearchBackendProbeProjection>;
-  saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: 'search-deepseek'; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
+  saveSearchBackendCredential(input: { backendId: string; secret: string } | { backendId: string; reuseModelCredential: true }): Promise<ModelServiceSettingsProjection>;
   removeSearchBackendCredential(input: { backendId: string }): Promise<ModelServiceSettingsProjection>;
   readonly platform: 'win32' | 'darwin';
   getStartup(): Promise<StartupProjection>;
@@ -6683,6 +6798,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   restoreRecovery(input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>): Promise<RecoveryRestorationProjection>;
   getImportStartup(): Promise<ImportStartupProjection>;
   selectAndStageManuscript(): Promise<PickerStageResult>;
+  stageDroppedManuscript(file: File): Promise<PickerStageResult>;
   importBundledSampleBook(): Promise<PickerStageResult>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {
@@ -7080,6 +7196,11 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   transitionProductionDocumentPhase(input: Omit<TransitionProductionDocumentPhaseInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 待我处理 across every Book (Issue #424): a read in any window, whatever it shows; it holds and grants nothing. */
   inspectGlobalAttention(): Promise<GlobalAttentionProjection>;
+  taskOverviewCall(input: TaskOverviewCall): Promise<ServiceWireOutput<TaskOverviewCallResult>>;
+  controlAllTasks(input: { action: 'pause' | 'resume' }): Promise<TaskOverviewProjection>;
+  inspectTaskOverview(): Promise<TaskOverviewProjection>;
+  reorderQueuedRun(input: { runRecordId: string; position: number }): Promise<TaskOverviewProjection>;
+  startQuickTasks(input: StartQuickTasksInput): Promise<StartQuickTasksResult>;
   /** The 任务 panel of the Book this window shows (Issue #423, S77a): a read; it holds and grants nothing. */
   inspectBookTasks(): Promise<BookTasksProjection>;
   /** 就这段提问… on the Book this window shows (Issue #52, S17a): only the selected words and the question are sent. */
@@ -7136,7 +7257,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   refreshModelServiceModels(input: { route: ModelServiceRouteId }): Promise<ModelServiceSettingsProjection>;
   testModelServiceConnection(input: FastModelSelectionInput): Promise<ModelServiceSettingsProjection>;
   getModelServiceSettings(): Promise<ModelServiceSettingsProjection>;
-  saveModelServiceProxy(input: ModelServiceProxySetting): Promise<ModelServiceSettingsProjection>;
+  saveModelServiceProxy(input: SaveModelServiceProxyInput): Promise<ModelServiceSettingsProjection>;
   /**
    * Save a route's connection name and credential — the DeepSeek 开放平台（官方） route when `route` is absent, as Issue #712 has
    * always saved it — or, given only `{ route, select: true }`, make that saved route the one new Tasks use (Issue #811).

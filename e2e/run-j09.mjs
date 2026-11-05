@@ -63,12 +63,12 @@ const APPLIED_TEXT = '〔并行应用〕';
 const GROUP_ORDER = Object.freeze(['exceptions', 'decisions', 'active', 'recent']);
 const GROUP_LABELS = Object.freeze(['异常与结果待确认', '等待你的决定', '运行中与已暂停', '最近完成']);
 // The screen's own words (`src/renderer/global-attention-labels.ts`), pinned there by its unit suite.
-const REASON_BLOCKED = '授权已记录，派发前阻止：当前启动没有可执行的路由。';
-const REASON_PLAN_REVISION = '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
+const REASON_BLOCKED = '模型服务当前不可用，任务尚未开始。';
+const REASON_PLAN_REVISION = '计划依据已有变化，请确认新计划后再开始。';
 const ACTIVE_EMPTY = '没有正在运行或中途停止的任务。';
 // A start waiting on the instance's concurrency governor (Issue #49, S14; CONC-007), in 待我处理's words and the bar's
 // (`src/renderer/task-drawer-labels.ts`), pinned there by their unit suites.
-const REASON_WAITING_CAPACITY = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
+const REASON_WAITING_CAPACITY = '正在等运行名额，轮到后自动开始。';
 const QUEUED_NOTE = '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送，也不产生用量';
 // 后台处理登记's words (`src/service/background-analysis-enrollments.ts`, `src/renderer/background-analysis-labels.ts`), pinned
 // there by `tests/unit/background-analysis.test.ts`.
@@ -76,8 +76,8 @@ const BACKGROUND_CURRENT_LINE = '现在：分析结果与当前稿件一致，�
 const BACKGROUND_REVOKED_LINE = '现在：已撤销：不会再开始新的后台分析。';
 /** Issue #864: the ceiling 登记 requires in this Journey, its words before and after, and 暂停's line. */
 const BACKGROUND_CEILING_TOKENS = 300000;
-const BACKGROUND_CEILING_REQUIRED = '登记时由你设定（必填）；书系或全部图书按书平分';
-const BACKGROUND_CEILING_FIRST = '请先填写预算上限（tokens）。';
+const BACKGROUND_CEILING_REQUIRED = '登记时由你设定 · 必填；书系或全部图书按书平分';
+const BACKGROUND_CEILING_FIRST = '请先填写预算上限。';
 const BACKGROUND_PAUSED_LINE = '现在：已暂停：续行之前不会开始新的后台分析；已经开始的运行照常进行。';
 const BACKGROUND_AUTHORIZED_DETAIL = '后台分析按登记记录了运行授权。';
 /**
@@ -268,7 +268,7 @@ async function attachRenderer(browser, existingTargetId = null) {
     send,
     evaluate: async (expression) => {
       const response = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
-      requireJourney(!response.exceptionDetails, `renderer-evaluate-${location}`);
+      requireJourney(!response.exceptionDetails, `renderer-evaluate-${location}`, localDebugEnabled() ? response.exceptionDetails : undefined);
       return response.result.value;
     },
   };
@@ -286,6 +286,7 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
@@ -384,7 +385,7 @@ const MARK_HELPERS = `(() => {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     },
-    status: () => document.querySelector('#persistence-status')?.textContent ?? '',
+    status: () => document.querySelector('[data-toast]')?.textContent ?? '',
   };
   return true;
 })()`;
@@ -440,15 +441,15 @@ async function importSample1(renderer, title, distinct, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, `${name}-exact-source`);
   await fill(renderer, '#book-title', title, `${name}-title`);
-  await click(renderer, '确认书名并复核', `${name}-review`);
+  await click(renderer, '查看导入详情', `${name}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
   // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are retained with
   // the file, so its review asks for no Import Degradation Decision.
@@ -533,9 +534,9 @@ async function runHeldAt(renderer, bookId, settled, name) {
 async function editAndSave(renderer, suffix, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="editor"] [data-testid="manuscript-editor"] [data-block-id]')`, `${name}-editor-ready`);
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, `${name}-inserted`);
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, `${name}-dirty`);
-  await click(renderer, '保存当前编辑', `${name}-save`);
-  await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, `${name}-durable`, 120_000);
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, `${name}-dirty`);
+  await click(renderer, '保存', `${name}-save`);
+  await waitFor(renderer, `document.querySelector('[data-toast]')?.dataset.tone==='success' && document.querySelector('[data-toast]')?.textContent.includes('修订日志')`, `${name}-durable`, 120_000);
   await assertRenderer(renderer, `(() => { const text=document.querySelector('[data-screen="editor"] .ProseMirror'); if(!(text instanceof HTMLElement))return false; text.focus(); return document.activeElement===text; })()`, `${name}-caret-back`);
 }
 
@@ -586,7 +587,7 @@ const READ_BAR = `(() => {
     pill: text(drawer.querySelector('.task-drawer-pill')),
     status: text(drawer.querySelector('.task-bar-status')),
     note: text(drawer.querySelector('.task-bar-note')),
-    actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => [button.dataset.taskDrawerControl, button.textContent, button.disabled ? 'disabled' : 'enabled']),
+    actions: Array.from(drawer.querySelectorAll('.task-bar-actions button[data-task-drawer-control]')).map((button) => [button.dataset.taskDrawerControl, button.getAttribute('aria-label') ?? button.textContent, button.disabled ? 'disabled' : 'enabled']),
   });
 })()`;
 async function waitForBar(renderer, expected, name, timeout = 60_000) {
@@ -646,14 +647,14 @@ const READ_PAGE = `(() => {
         target: item.dataset.attentionTarget,
         bookId: item.dataset.bookId ?? null,
         book: item.querySelector('.global-attention-book')?.textContent ?? null,
-        object: item.querySelector('button.global-attention-open')?.textContent ?? null,
+        object: item.querySelector('.global-attention-object-name')?.textContent ?? null,
         openName: item.querySelector('button.global-attention-open')?.getAttribute('aria-label') ?? null,
         pill: item.querySelector('.global-attention-pill')?.textContent ?? null,
         shape: item.querySelector('.global-attention-pill')?.dataset.pillShape ?? null,
         reason: item.querySelector('.global-attention-reason')?.textContent ?? null,
         next: item.querySelector('.global-attention-next')?.textContent ?? null,
-        time: item.querySelector('.global-attention-time')?.textContent ?? null,
-        technical: item.querySelector('details.technical-details')?.open ?? null,
+        time: item.querySelector('.global-attention-open')?.title ?? null,
+        technical: (() => { const layer=item.querySelector('details.technical-details'); return layer === null ? null : layer.hidden ? false : layer.open; })(),
       })),
     })),
   };
@@ -699,6 +700,12 @@ async function openItem(renderer, itemId, name) {
   const selector = `[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(itemId)}]`;
   await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.disabled===false`, `${name}-listed`, 30_000);
   await clickSelector(renderer, selector, `${name}-open`);
+}
+
+/** Continue the detailed record checks through the result window's own link. */
+async function openResultRecord(renderer, name) {
+  await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult==='ready'`, `${name}-result`, 30_000);
+  await clickSelector(renderer, '.task-result-window [data-task-result-action="open"]', `${name}-record`);
 }
 
 async function main() {
@@ -1031,7 +1038,7 @@ async function main() {
     at('attention-groups');
     await openAttention(renderer, 'attention');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-09', at, representative: '#screen[data-screen="global-attention"] > .panel', returnTo: SIDEBAR.destination('attention') });
+    await runJ14DarkPass({ renderer, journey: 'J-09', at, representative: '#screen[data-screen="global-attention"] > .page-content', returnTo: SIDEBAR.destination('attention') });
     await waitAttentionPainted(renderer, 'attention-after-dark-pass');
     // The service's answer once nothing is in flight, and the page come to say exactly it: the screen paints
     // the reader's last answer at once and the fresh one as soon as it arrives.
@@ -1053,25 +1060,34 @@ async function main() {
     'four-groups-in-order', pageGroups.map((group) => ({ key: group.key, heading: group.heading, items: group.items.length, empty: group.empty })));
     // 异常与结果待确认: the first Book's Run, blocked before dispatch — its Book, object, exact state, reason and step.
     const blockedItem = exceptions[0];
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.global-attention-item')).every((item) => {
+      const body = item.querySelector('.global-attention-body');
+      const title = body?.querySelector('.global-attention-object');
+      const reason = body?.querySelector('.global-attention-reason');
+      return body?.children.length === 2 && title?.querySelector('.global-attention-pill') !== null &&
+        [...(reason?.textContent ?? '')].length <= 60 && !item.textContent.includes('安全的下一步：') &&
+        getComputedStyle(title).whiteSpace === 'nowrap' && getComputedStyle(reason).whiteSpace === 'nowrap' &&
+        getComputedStyle(title.querySelector('.global-attention-book')).fontFamily.includes('Noto Serif SC');
+    })`, 'attention-two-line-copy');
     requireJourney(exceptions.length === 1 && blockedItem?.itemId === `analysis:${blockedA.taskIntent.taskIntentId}` && blockedItem.state === 'analysis-blocked' &&
       blockedItem.blocked === 'true' && blockedItem.target === 'analysis' && blockedItem.bookId === bookA && blockedItem.book === `《${FIRST.title}》` &&
-      blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
+      blockedItem.object === '基线分析 · 首次基线分析' && blockedItem.openName === `查看运行 · 《${FIRST.title}》 · 基线分析 · 首次基线分析` &&
       blockedItem.pill === '派发前已阻止' && blockedItem.shape === 'diamond' && blockedItem.reason === REASON_BLOCKED &&
-      blockedItem.next === '安全的下一步：查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
+      blockedItem.next === '查看运行' && (blockedItem.time ?? '').startsWith('记录于 ') && blockedItem.technical === false,
     'blocked-run-item', blockedItem);
     // 等待你的决定: the second Book's Plan Revision, named as itself, with 重新确认计划 as its step.
     const decisionItem = decisions[0];
     requireJourney(decisions.length === 1 && decisionItem?.itemId === `analysis:${pendingB.taskIntent.taskIntentId}` && decisionItem.state === 'analysis-plan-revision' &&
       decisionItem.target === 'analysis-plan' && decisionItem.bookId === bookB && decisionItem.book === `《${SECOND.title}》` &&
       decisionItem.object === '基线分析 · 重新分析所选范围' && decisionItem.pill === '计划修订' && decisionItem.reason === REASON_PLAN_REVISION &&
-      decisionItem.next === '安全的下一步：重新确认计划',
+      decisionItem.next === '重新确认计划',
     'plan-revision-item', decisionItem);
     // 最近完成: the second Book's completed analysis, newest first, its time a completion.
     const completionItem = recent[0];
     requireJourney(recent.length === 1 && completionItem?.itemId === `analysis-outcome:${settledB.taskOutcome.outcomeId}` &&
       ['analysis-completed', 'analysis-completed-with-gaps'].includes(completionItem.state) && completionItem.bookId === bookB &&
       completionItem.target === 'analysis' && completionItem.reason?.startsWith('已形成第 1 份基线分析') === true &&
-      completionItem.next === '安全的下一步：查看运行' && (completionItem.time ?? '').startsWith('完成于 '),
+      completionItem.next === '查看运行' && (completionItem.time ?? '').startsWith('完成于 '),
     'completion-item', completionItem);
     // The page is the service's answer, item for item.
     requireJourney(service?.count === 2 && service.running === false &&
@@ -1104,25 +1120,25 @@ async function main() {
     requireJourney(JSON.stringify(again) === JSON.stringify(service), 'reading-again-answers-the-same');
 
     at('open-blocked-run');
-    // An item opens its own record in the window that asked: the first Book's 分析 with the blocked Run.
+    // Q1: the card opens its exact Book-owned task in place, without navigating or rebinding the workbench.
+    const routeBeforeCard = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
     await openItem(renderer, blockedItem.itemId, 'blocked');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='authorized-blocked'`, 'blocked-record', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(blockedA.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='blocked'`, 'blocked-record', 30_000);
     const routeA = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
-    requireJourney(routeA?.bookId === bookA, 'blocked-record-route', routeA);
+    requireJourney((routeA?.bookId ?? null) === (routeBeforeCard?.bookId ?? null), 'blocked-record-route', routeA);
 
     at('open-plan-revision');
-    // The Plan Revision opens ②A of its Book with the plan in the Task Drawer, where 重新确认计划 is: the view
-    // decides nothing itself.
+    // The Plan Revision opens in the drawer, where 重新确认计划 is; opening decides nothing.
     await openAttention(renderer, 'plan-revision');
     await openItem(renderer, decisionItem.itemId, 'plan-revision');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]') && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.textContent==='重新确认计划'`, 'plan-revision-record', 30_000);
-    const stillPending = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.textContent==='重新确认计划'`, 'plan-revision-record', 30_000);
+    const stillPending = await renderer.evaluate(`window.ai7.taskOverviewCall({ operation: 'inspectBaselineAnalysis', bookId: ${JSON.stringify(bookB)}, input: { revisionId: null } })`);
     requireJourney(stillPending?.planRevision?.state === 'pending' && stillPending.taskIntent?.taskIntentId === pendingB.taskIntent.taskIntentId, 'plan-revision-untouched');
 
     at('open-completion');
     await openAttention(renderer, 'completion');
     await openItem(renderer, completionItem.itemId, 'completion');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'completion-record', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('.task-result-window[data-task-result-kind="analysis"]')?.dataset.taskResult==='ready'`, 'completion-record', 30_000);
 
     at('j14-attention-keyboard');
     // Without a pointer: Enter on the header's 待我处理 opens the screen with its heading focused, Tab reaches the
@@ -1134,7 +1150,7 @@ async function main() {
     await pressTab(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.attentionOpen === ${JSON.stringify(blockedItem.itemId)} && document.activeElement.matches(':focus-visible')`, 'keyboard-first-item-reached', 10_000);
     await pressEnter(renderer);
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}]')`, 'keyboard-item-opened', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(blockedA.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='blocked'`, 'keyboard-item-opened', 30_000);
 
     at('j14-attention-zoom-200-reflow');
     // At 200% the header, the four groups and every item reflow into the width: nothing scrolls sideways.
@@ -1214,6 +1230,9 @@ async function main() {
     // place — 等待运行名额 in the bar, with why and its 取消, and on ②A — and nothing of it is sent.
     await openAttention(renderer, 'concurrent-b');
     await openItem(renderer, decisionItem.itemId, 'concurrent-b-revision');
+    // The card was checked in place above; continue the concurrency exercise on the Book's analysis surface.
+    await openAnalysisOf(renderer, bookB, 'concurrent-b-workspace');
+    await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-b-workspace-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.disabled===false`, 'concurrent-b-reconfirm-ready', 30_000);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="reconfirm-plan"]', 'concurrent-b-reconfirm');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planVersion==='2' && document.querySelector('#task-drawer')?.dataset.taskPlanStart==='ready' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')?.disabled===false`, 'concurrent-b-start-ready', 120_000);
@@ -1253,7 +1272,7 @@ async function main() {
       itemOf(bookC)?.state === 'analysis-running' && itemOf(bookC).book === `《${THIRD.title}》` &&
       queuedItem?.state === 'analysis-waiting-capacity' && queuedItem.book === `《${SECOND.title}》` && queuedItem.itemId === `analysis:${pendingB.taskIntent.taskIntentId}` &&
       queuedItem.pill === '等待运行名额' && queuedItem.shape === 'ring' && queuedItem.reason === REASON_WAITING_CAPACITY && queuedItem.blocked === 'false' &&
-      queuedItem.next === '安全的下一步：查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
+      queuedItem.next === '查看运行' && concurrentPage.groups[0].items.length === 0 && concurrentPage.groups[1].items.length === 0,
     'concurrent-attention-by-book', concurrentPage?.groups?.map((group) => ({ key: group.key, items: group.items.map((item) => [item.book, item.state, item.pill]) })));
     await waitFor(renderer, `document.querySelector('#global-attention-entry')?.dataset.attentionCount==='0' && document.querySelector('#global-attention-entry .global-attention-badge')?.hidden===true`, 'concurrent-count-zero', 30_000);
 
@@ -1261,6 +1280,7 @@ async function main() {
     const secondWindowStarted = performance.now();
     // Use the existing product chooser, as J-12 does, rather than a test hook that creates a window.
     await openItem(renderer, queuedItem.itemId, 'second-window-b');
+    await openAnalysisOf(renderer, bookB, 'second-window-b-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-b-analysis', 30_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'second-window-overview');
     await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookB)}]')`, 'second-window-overview-ready', 30_000);
@@ -1294,6 +1314,7 @@ async function main() {
     at('concurrent-pause');
     // 暂停 on 甲, from its own plan: 正在暂停 while its range in flight finishes.
     await openItem(renderer, `analysis:${taskA}`, 'concurrent-a-item');
+    await openAnalysisOf(renderer, bookA, 'concurrent-a-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='executing'`, 'concurrent-a-record', 30_000);
     await clickSelector(renderer, '.baseline-analysis-card [data-task-plan-open="baseline-analysis"]', 'concurrent-a-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(taskA)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='running' && document.querySelector('#task-drawer [data-task-drawer-control="pause"]')?.disabled===false`, 'concurrent-a-pause-ready', 30_000);
@@ -1411,6 +1432,7 @@ async function main() {
     const completionB = settledAll.items.find((item) => item.group === 'recent' && item.bookId === bookB && item.itemId !== completionItem.itemId);
     await openAttention(renderer, 'isolation-b');
     await openItem(renderer, completionB.itemId, 'isolation-b');
+    await openResultRecord(renderer, 'isolation-b');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'isolation-b-record', 30_000);
     const settledB2 = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     const transitionsB = settledB2?.run?.transitions ?? [];
@@ -1422,6 +1444,7 @@ async function main() {
     'concurrent-b-own-revision', { state: settledB2?.state, run: settledB2?.run?.state, transitions: transitionsB.map((transition) => transition.state), ordinal: settledB2?.resultSetRevision?.ordinal });
     await openAttention(renderer, 'isolation-a');
     await openItem(renderer, `analysis:${taskA}`, 'isolation-a');
+    await openAnalysisOf(renderer, bookA, 'isolation-a-workspace');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='paused'`, 'isolation-a-record', 30_000);
     const pausedA = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(pausedA?.bookId === bookA && pausedA.state === 'paused' && pausedA.run?.runRecordId === runA && (pausedA.resultSetRevision ?? null) === null &&
@@ -1513,6 +1536,7 @@ async function main() {
     // its revision 乙's third. ②A names it among the Runs the Enrollment started.
     await openAttention(renderer, 'background-run');
     await openItem(renderer, backgroundCompletion.itemId, 'background-run');
+    await openResultRecord(renderer, 'background-run');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')?.dataset.analysisState==='settled'`, 'background-run-card', 30_000);
     const backgroundRun = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
     requireJourney(backgroundRun?.bookId === bookB && backgroundRun.taskIntent?.mode === 'sync-current' &&
@@ -1682,6 +1706,71 @@ async function main() {
       new Set(finishedUnits).size === finishedUnits.length, 'idle-same-run-no-resend',
     { admitted: idleFinished.run?.transitions?.filter((transition)=>transition.state==='admitted').length, yielded: yieldedUnits, finished: finishedUnits });
 
+    // #1328 rev 2: the same governor, exercised through the task overview and its continuous multi-Book sheet.
+    at('task-overview-continuous-enqueue');
+    const overviewBooks = [];
+    for (const title of ['任务总览甲', '任务总览乙', '任务总览丙', '任务总览丁']) {
+      // The existing picker control is consumed once per launch.
+      await closeOwnedBrowser();
+      await launchForCleanup();
+      await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'overview-import-launch');
+      overviewBooks.push(await importSample1(renderer, title, true, 'overview-import'));
+    }
+    await writeFile(holdPath, '1', 'utf8');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
+    await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
+    await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
+    const selectOverviewBooks = async (ids) => assertRenderer(renderer, `(() => { const ids=${JSON.stringify(ids)}; const sheet=document.querySelector('.task-overview-sheet'); for(const input of sheet.querySelectorAll('input[type="checkbox"][value]')) input.checked=ids.includes(input.value); return ids.every(id=>sheet.querySelector('input[value="'+id+'"]')?.checked); })()`, 'overview-sheet-books');
+    await selectOverviewBooks(overviewBooks.slice(0, 2));
+    await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-two');
+    await waitFor(renderer, `document.querySelector('.task-overview-sheet')?.open === true && document.querySelector('[data-task-overview-added]')?.textContent === '已加入 2 项'`, 'overview-sheet-stays-open', 60000);
+    await selectOverviewBooks([overviewBooks[2]]);
+    await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-third');
+    const overviewReading = () => renderer.evaluate('window.ai7.inspectTaskOverview()');
+    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); const ids=${JSON.stringify(overviewBooks)}; return p.capacity===2 && p.groups.find(g=>g.key==='running').items.filter(i=>ids.includes(i.bookId)).length===2 && p.groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[2])} && i.queuePosition===1); })()`, 'overview-two-running-one-first', 60000);
+    await clickSelector(renderer, '.task-overview-sheet .sheet-foot button:last-child', 'overview-sheet-close');
+    let overview = await overviewReading();
+    const overviewItem = (book) => overview.groups.flatMap(group=>group.items).find(item=>item.bookId===book && !['completed','cancelled','stopped'].includes(item.state));
+    const overviewIds = overviewBooks.slice(0, 3).map(book=>overviewItem(book).itemId);
+    const overviewAction = async (id, action) => {
+      const selector = `.task-overview-card[data-task-item="${id}"] [data-task-action="${action}"]`;
+      await waitFor(renderer, `document.querySelector(${JSON.stringify(selector)})?.disabled===false`, `overview-${action}-ready`);
+      await clickSelector(renderer, selector, `overview-${action}`);
+    };
+    const overviewPauseRecorded = async (id) => waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.flatMap(g=>g.items).some(i=>i.itemId===${JSON.stringify(id)} && ['analysis-pausing','analysis-paused'].includes(i.attention.state)))()`, 'overview-pause-recorded');
+    await waitFor(renderer, `document.querySelector('.task-overview-card[data-task-item="${overviewIds[2]}"] .task-overview-card-line')?.textContent.startsWith('第 1 位')`, 'overview-first-position-visible');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
+    await overviewAction(overviewIds[0], 'pause');
+    await overviewPauseRecorded(overviewIds[0]);
+    await writeFile(holdPath, '2', 'utf8');
+    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])} && i.attention.state==='analysis-paused') && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000);
+    // Put the same third task back in the queue before adding the fourth, then prove 置顶 wins the next release.
+    await overviewAction(overviewIds[2], 'pause');
+    await overviewPauseRecorded(overviewIds[2]);
+    await writeFile(holdPath, '3', 'utf8');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}))()`, 'overview-third-paused', 60000);
+    await overviewAction(overviewIds[0], 'resume');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}))()`, 'overview-first-resumed');
+    await overviewAction(overviewIds[2], 'resume');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1))()`, 'overview-third-requeued');
+    await clickSelector(renderer, '[data-task-overview-start]', 'overview-fourth-sheet');
+    await selectOverviewBooks([overviewBooks[3]]);
+    await clickSelector(renderer, '[data-task-overview-enqueue]', 'overview-add-fourth');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items.some(i=>i.bookId===${JSON.stringify(overviewBooks[3])} && i.queuePosition===2))()`, 'overview-fourth-second', 60000);
+    await clickSelector(renderer, '.task-overview-sheet .sheet-foot button:last-child', 'overview-fourth-sheet-close');
+    overview = await overviewReading(); const fourth = overviewItem(overviewBooks[3]);
+    await overviewAction(fourth.itemId, 'top');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items[0]?.itemId===${JSON.stringify(fourth.itemId)})()`, 'overview-fourth-top');
+    await overviewAction(overviewIds[0], 'pause');
+    await overviewPauseRecorded(overviewIds[0]);
+    await writeFile(holdPath, '4', 'utf8');
+    await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
+    await overviewAction(fourth.itemId, 'run');
+    await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
+    await press(renderer, 'Escape');
+    await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
+    await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
+
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');
     await closeOwnedBrowser();
@@ -1712,15 +1801,16 @@ async function main() {
       JSON.stringify(questionAttention.groups.find((group) => group.key === 'recent').items.map((item) => item.itemId)) === JSON.stringify(recentBeforeQuestion), 'model-question-decision-and-completed-counts');
     await openItem(renderer, questionItem.itemId, 'model-question-open');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('.task-plan-clarification-question')?.textContent==='本范围按哪个阅读重点处理？'`, 'model-question-drawer', 30_000);
-    const questionPlan = await renderer.evaluate(`window.ai7.inspectTaskPlan({kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}})`);
+    const questionPlan = await renderer.evaluate(`window.ai7.taskOverviewCall({operation:'inspectTaskPlan',bookId:${JSON.stringify(questionBook)},input:{kind:'baseline-analysis',ref:${JSON.stringify(questionTask)}}})`);
     const questionCard = questionPlan.clarifications.find((card) => card.origin === 'model' && card.state === 'open');
     requireJourney(questionCard?.options.filter((option) => option.id.startsWith('model-option-')).length === 2 && questionCard.freeTextAllowed === true, 'model-question-options');
 
     at('model-question-answer-turn');
     await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(`[data-task-drawer-control="clarification-option:${questionCard.requestId}:model-option-0"]`)}); if (!(input instanceof HTMLInputElement) || input.disabled) return false; input.click(); return input.checked; })()`, 'model-question-choose');
     await clickSelector(renderer, `[data-task-drawer-control="clarification-submit:${questionCard.requestId}"]`, 'model-question-submit');
-    await waitFor(renderer, `window.ai7.inspectBaselineAnalysis().then((p)=>p.taskIntent?.taskIntentId===${JSON.stringify(questionTask)} && ['completed','completed-with-gaps'].includes(p.run?.state))`, 'model-question-completes', 120_000);
-    const questionDone = await renderer.evaluate('window.ai7.inspectBaselineAnalysis()');
+    const questionReading = `window.ai7.taskOverviewCall({operation:'inspectBaselineAnalysis',bookId:${JSON.stringify(questionBook)},input:{revisionId:null}})`;
+    await waitFor(renderer, `${questionReading}.then((p)=>p.taskIntent?.taskIntentId===${JSON.stringify(questionTask)} && ['completed','completed-with-gaps'].includes(p.run?.state))`, 'model-question-completes', 120_000);
+    const questionDone = await renderer.evaluate(questionReading);
     requireJourney(questionDone.resultSetRevision?.units.filter((unit) => unit.state === 'closed').length === SAMPLE1_UNITS && questionDone.run?.attempt?.spans.length === SAMPLE1_UNITS + 1, 'model-question-one-follow-up');
     await openAttention(renderer, 'model-question-answered-attention');
     const answeredAttention = await readSettledAttention(renderer);

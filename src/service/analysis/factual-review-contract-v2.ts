@@ -1,21 +1,15 @@
+import { type SalvagedModelResult, boundedText, ModelResultReader, NO_USABLE_MODEL_ENTRIES, canonicalJson, hasKeys, modelNumber, sha256Hex } from './canonical.js';
 import {
   EVIDENCE_LINEAGE_CLASSES,
   EVIDENCE_RELATIONS,
-  FACTUAL_ASSERTION_CATEGORIES,
-  FACTUAL_ASSERTION_CLASSES,
   FACTUAL_REVIEW_CONTRACT_VERSION,
-  FACTUAL_SEVERITY_TIERS,
   MAX_CORRECTION_RATIONALE_GRAPHEMES,
   MAX_CORRECTION_TEXT_GRAPHEMES,
   type EvidenceAssuranceLevel,
   type EvidenceLineageClass,
   type EvidenceRelation,
-  type FactualAssertionCategory,
-  type FactualAssertionClass,
-  type FactualSeverityTier,
 } from '../../shared/protocol.js';
-import { canonicalJson, hasExactKeys, isRecord, sha256Hex } from './canonical.js';
-import { graphemeCount, type FactualUnitAssertion, type FactualUnitResultParse } from './factual-review-contract.js';
+import { parseFactualAssertion, type FactualUnitAssertion, type FactualUnitResultParse } from './factual-review-contract.js';
 
 /**
  * Factual Review Contract v2 (Issue #901): the successor unit result of 事实核查 under 标准核查 and 严格核查. It is additive:
@@ -33,9 +27,6 @@ export const FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA = 'ai7.factual-review.unit-res
 export const FACTUAL_REVIEW_PROMPT_CONTRACT_V2_SCHEMA = 'ai7.factual-review.prompt-contract/2' as const;
 
 const MAX_ASSERTIONS = 200;
-const MAX_QUOTE_GRAPHEMES = 80;
-const MAX_QUESTION_GRAPHEMES = 120;
-const MAX_BASIS_GRAPHEMES = 200;
 const MAX_EXCERPT_GRAPHEMES = 200;
 const MAX_RELATIONS_PER_ASSERTION = 8;
 const MAX_VARIANTS = 3;
@@ -49,7 +40,7 @@ export interface FactualEvidenceRelation {
   readonly excerptRef: string | null;
   readonly lineage: EvidenceLineageClass | null;
   /**
-   * Set by the execution owner, never by the model (the parser refuses the key): the exact in-Book source an excerpt of a
+   * Set by the execution owner, never by the model (the parser ignores the model key): the exact in-Book source an excerpt of a
    * `retrieval:` relation was found in, or `null` when Exact Fetch did not find it there.
    */
   readonly exactFetch?: { readonly sourceKind: string; readonly sourceId: string; readonly digest: string } | null;
@@ -65,114 +56,84 @@ export interface FactualCorrectionEntry {
   readonly variants: ReadonlyArray<{ readonly text: string; readonly rationale: string }>;
 }
 
-export interface FactualReviewUnitResultV2 {
+export interface FactualReviewUnitResultV2 extends SalvagedModelResult {
   readonly schema: typeof FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA;
   readonly unitOrdinal: number;
   readonly assertions: ReadonlyArray<FactualUnitAssertionV2>;
+  /** Original zero-based positions, used by retrieval validation after per-entry filtering. */
+  readonly acceptedIndexes?: ReadonlyArray<number>;
   readonly corrections: ReadonlyArray<FactualCorrectionEntry>;
 }
 
-function boundedText(value: unknown, maximumGraphemes: number): value is string {
-  return typeof value === 'string' && value.isWellFormed() && value.trim().length > 0 && graphemeCount(value) <= maximumGraphemes;
+const RELATION_ALIASES: Readonly<Record<string, EvidenceRelation>> = {
+  support: '支持', supports: '支持', supported: '支持', 确证: '支持', 部分成立: '部分支持', 'partial-support': '部分支持',
+  contradict: '反驳', contradicts: '反驳', refutes: '反驳', background: '仅提供背景', 背景: '仅提供背景', unknown: '关系待判断',
+};
+const LINEAGE_ALIASES: Readonly<Record<string, EvidenceLineageClass>> = {
+  原始来源: 'original', 原文: 'original', 转引: 'quoted', 转载: 'syndicated', 译介: 'translated', 翻译: 'translated', 摘述: 'summarized', 摘要: 'summarized',
+};
+
+export function parseFactualEvidenceRelations(value: unknown, reader: ModelResultReader, section: string, httpsOnly = false): FactualEvidenceRelation[] {
+  return reader.array(value, section, MAX_RELATIONS_PER_ASSERTION).flatMap((entry, index) => {
+    if (!hasKeys(entry, ['sourceRef']) || typeof entry.sourceRef !== 'string' || !entry.sourceRef.isWellFormed() ||
+      !(HTTPS_SOURCE.test(entry.sourceRef) || !httpsOnly && RETRIEVAL_SOURCE.test(entry.sourceRef))) {
+      reader.drop(section, index, 'sourceRef-invalid'); return [];
+    }
+    let excerptRef = entry.excerptRef ?? null;
+    if (excerptRef !== null && !boundedText(excerptRef, MAX_EXCERPT_GRAPHEMES)) {
+      reader.drop(section, index, 'excerpt-invalid'); excerptRef = null;
+    }
+    const rawLineage = entry.lineage;
+    const lineage = rawLineage === undefined || rawLineage === null ? null : reader.enum(rawLineage, [...EVIDENCE_LINEAGE_CLASSES, 'unknown'],
+      LINEAGE_ALIASES, 'unknown', section, index);
+    return [{ sourceRef: entry.sourceRef, relation: reader.enum(entry.relation, EVIDENCE_RELATIONS, RELATION_ALIASES, '关系待判断', section, index),
+      excerptRef: excerptRef as string | null, lineage: lineage === 'unknown' ? null : lineage }];
+  });
 }
 
-function parseRelation(value: unknown): FactualEvidenceRelation | null {
-  if (!isRecord(value) || !hasExactKeys(value, ['sourceRef', 'relation', 'excerptRef', 'lineage'])) return null;
-  if (typeof value.sourceRef !== 'string' || !(HTTPS_SOURCE.test(value.sourceRef) || RETRIEVAL_SOURCE.test(value.sourceRef))) return null;
-  if (!EVIDENCE_RELATIONS.includes(value.relation as EvidenceRelation)) return null;
-  if (value.excerptRef !== null && !boundedText(value.excerptRef, MAX_EXCERPT_GRAPHEMES)) return null;
-  if (value.lineage !== null && !EVIDENCE_LINEAGE_CLASSES.includes(value.lineage as EvidenceLineageClass)) return null;
-  return {
-    sourceRef: value.sourceRef,
-    relation: value.relation as EvidenceRelation,
-    excerptRef: value.excerptRef as string | null,
-    lineage: value.lineage as EvidenceLineageClass | null,
-  };
+export function parseFactualCorrectionVariants(value: unknown, reader: ModelResultReader, section: string): FactualCorrectionEntry['variants'] {
+  return reader.array(value, section, MAX_VARIANTS).flatMap((entry, index) => {
+    if (!hasKeys(entry, ['text'])) { reader.drop(section, index, 'variant-invalid'); return []; }
+    const text = reader.text(entry.text, MAX_CORRECTION_TEXT_GRAPHEMES, section, index);
+    const rationale = reader.text(entry.rationale, MAX_CORRECTION_RATIONALE_GRAPHEMES, section, index, true);
+    if (text === null || rationale === null) { reader.drop(section, index, 'variant-invalid'); return []; }
+    return [{ text, rationale }];
+  });
 }
 
-/** Parse one v2 unit result. The parse failure codes are v1's; a valid v1 answer is not a valid v2 answer. */
+/** Bad relations/corrections never remove their surviving assertion siblings. */
 export function parseFactualReviewUnitResultV2(
   text: string,
   expected: { unitOrdinal: number; blockCount: number },
-): FactualUnitResultParse | { ok: true; result: FactualReviewUnitResultV2; canonicalJson: string; digest: string } {
-  const fenced = /^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/u.exec(text);
-  const body = fenced?.[1] ?? text;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body) as unknown;
-  } catch {
-    return { ok: false, code: 'not-json', detail: '模型输出不是 JSON。' };
-  }
-  const invalid = (detail: string): FactualUnitResultParse => ({ ok: false, code: 'schema-invalid', detail });
-  if (!isRecord(parsed) || !(hasExactKeys(parsed, ['schema', 'unitOrdinal', 'assertions']) || hasExactKeys(parsed, ['schema', 'unitOrdinal', 'assertions', 'corrections']))) {
-    return invalid('单元结果键集合不符合事实核查契约 v2。');
-  }
-  if (parsed.schema !== FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA) return invalid('单元结果 schema 不是事实核查契约 v2。');
-  if (!Number.isSafeInteger(parsed.unitOrdinal) || (parsed.unitOrdinal as number) < 1) return invalid('单元序号无效。');
-  if (parsed.unitOrdinal !== expected.unitOrdinal) {
-    return { ok: false, code: 'unit-mismatch', detail: `单元结果声明的序号 ${String(parsed.unitOrdinal)} 与请求单元 ${expected.unitOrdinal} 不一致。` };
-  }
-  if (!Array.isArray(parsed.assertions) || parsed.assertions.length > MAX_ASSERTIONS) return invalid('断言集合不符合事实核查契约 v2。');
+): FactualUnitResultParse | { ok: true; salvaged?: SalvagedModelResult['salvaged']; result: FactualReviewUnitResultV2; canonicalJson: string; digest: string } {
+  const reader = ModelResultReader.read(text, FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, expected.unitOrdinal);
+  if (reader === null) return ModelResultReader.failure(text);
   const assertions: FactualUnitAssertionV2[] = [];
-  for (const candidate of parsed.assertions) {
-    if (!isRecord(candidate) || !hasExactKeys(candidate, ['quote', 'blockOrdinal', 'assertionClass', 'category', 'severity', 'question', 'basis', 'evidenceRelations'])) {
-      return invalid('断言键集合不符合事实核查契约 v2。');
-    }
-    if (!boundedText(candidate.quote, MAX_QUOTE_GRAPHEMES)) return invalid('引文缺失或超出 80 字素边界。');
-    if (!Number.isSafeInteger(candidate.blockOrdinal) || (candidate.blockOrdinal as number) < 1) return invalid('断言的内容块序号无效。');
-    if (!FACTUAL_ASSERTION_CLASSES.includes(candidate.assertionClass as FactualAssertionClass)) return invalid('断言类别不在闭合集合内。');
-    if (!FACTUAL_ASSERTION_CATEGORIES.includes(candidate.category as FactualAssertionCategory)) return invalid('断言主题不在闭合集合内。');
-    if (!FACTUAL_SEVERITY_TIERS.includes(candidate.severity as FactualSeverityTier)) return invalid('断言分级不在闭合集合内。');
-    if (!boundedText(candidate.question, MAX_QUESTION_GRAPHEMES)) return invalid('核查问题缺失或超出 120 字素边界。');
-    if (!boundedText(candidate.basis, MAX_BASIS_GRAPHEMES)) return invalid('依据缺失或超出 200 字素边界。');
-    if (!Array.isArray(candidate.evidenceRelations) || candidate.evidenceRelations.length > MAX_RELATIONS_PER_ASSERTION) return invalid('证据关系集合不符合事实核查契约 v2。');
-    const relations: FactualEvidenceRelation[] = [];
-    for (const entry of candidate.evidenceRelations) {
-      const relation = parseRelation(entry);
-      if (relation === null) return invalid('证据关系不符合事实核查契约 v2。');
-      relations.push(relation);
-    }
-    if ((candidate.blockOrdinal as number) > expected.blockCount) {
-      return {
-        ok: false,
-        code: 'quote-not-in-block',
-        detail: `断言引用的内容块序号 ${String(candidate.blockOrdinal)} 不在本单元列出的 ${expected.blockCount} 个内容块内。`,
-      };
-    }
-    assertions.push({
-      quote: candidate.quote,
-      blockOrdinal: candidate.blockOrdinal as number,
-      assertionClass: candidate.assertionClass as FactualAssertionClass,
-      category: candidate.category as FactualAssertionCategory,
-      severity: candidate.severity as FactualSeverityTier,
-      question: candidate.question,
-      basis: candidate.basis,
-      evidenceRelations: relations,
-    });
+  const remap = new Map<number, number>();
+  for (const [index, candidate] of reader.array(reader.value.assertions, 'assertions', MAX_ASSERTIONS).entries()) {
+    const assertion = parseFactualAssertion(candidate, expected, reader, index);
+    if (assertion === null || !hasKeys(candidate, ['quote'])) continue;
+    remap.set(index + 1, assertions.length + 1);
+    assertions.push({ ...assertion, evidenceRelations: parseFactualEvidenceRelations(candidate.evidenceRelations, reader, `assertions.${index}.evidenceRelations`) });
   }
   const corrections: FactualCorrectionEntry[] = [];
-  if (Object.hasOwn(parsed, 'corrections')) {
-    if (!Array.isArray(parsed.corrections) || parsed.corrections.length > assertions.length) return invalid('更正集合不符合事实核查契约 v2。');
-    const seen = new Set<number>();
-    for (const entry of parsed.corrections) {
-      if (!isRecord(entry) || !hasExactKeys(entry, ['assertionRef', 'variants'])) return invalid('更正键集合不符合事实核查契约 v2。');
-      const ref = entry.assertionRef;
-      if (!Number.isSafeInteger(ref) || (ref as number) < 1 || (ref as number) > assertions.length || seen.has(ref as number)) return invalid('更正指向的断言无效。');
-      seen.add(ref as number);
-      if (!Array.isArray(entry.variants) || entry.variants.length < 1 || entry.variants.length > MAX_VARIANTS) return invalid('更正方案须为 1 至 3 项。');
-      const variants: Array<{ text: string; rationale: string }> = [];
-      for (const variant of entry.variants) {
-        if (!isRecord(variant) || !hasExactKeys(variant, ['text', 'rationale'])) return invalid('更正方案键集合不符合事实核查契约 v2。');
-        if (!boundedText(variant.text, MAX_CORRECTION_TEXT_GRAPHEMES)) return invalid('更正文字缺失或超出 200 字素边界。');
-        if (!boundedText(variant.rationale, MAX_CORRECTION_RATIONALE_GRAPHEMES)) return invalid('更正理由缺失或超出 120 字素边界。');
-        variants.push({ text: variant.text, rationale: variant.rationale });
-      }
-      corrections.push({ assertionRef: ref as number, variants });
+  const seen = new Set<number>();
+  for (const [index, entry] of reader.array(reader.value.corrections, 'corrections', MAX_ASSERTIONS).entries()) {
+    const ref = hasKeys(entry, ['assertionRef']) ? modelNumber(entry.assertionRef) : NaN;
+    const mapped = remap.get(ref);
+    if (!hasKeys(entry, ['assertionRef']) || !Number.isSafeInteger(ref) || mapped === undefined || seen.has(mapped)) {
+      reader.drop('corrections', index, 'assertionRef-invalid'); continue;
     }
+    const variants = parseFactualCorrectionVariants(entry.variants, reader, `corrections.${index}.variants`);
+    if (variants.length === 0) { reader.drop('corrections', index, 'variants-empty'); continue; }
+    seen.add(mapped);
+    if (mapped !== entry.assertionRef) reader.drop('corrections', index, 'assertionRef-remapped');
+    corrections.push({ assertionRef: mapped, variants });
   }
-  const result: FactualReviewUnitResultV2 = { schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions, corrections };
-  const canonical = canonicalJson(result);
-  return { ok: true, result, canonicalJson: canonical, digest: sha256Hex(canonical) };
+  if (assertions.length === 0 && !reader.empty('assertions')) return { ok: false, code: 'schema-invalid', detail: NO_USABLE_MODEL_ENTRIES };
+  const acceptedIndexes = [...remap.keys()].map((ref) => ref - 1);
+  return reader.finish<FactualReviewUnitResultV2>({ schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA, unitOrdinal: expected.unitOrdinal, assertions, corrections,
+    ...(acceptedIndexes.some((original, index) => original !== index) ? { acceptedIndexes } : {}) });
 }
 
 /** The system lines v2 shares at both levels it serves. Every one is model-facing text or a fixed format. */
@@ -225,7 +186,7 @@ export const FACTUAL_REVIEW_PROMPT_CONTRACT_V2_STRICT_DIGEST = sha256Hex(canonic
 
 /** A v2 unit record as the ledger keeps it: the assertions with their relations, and the corrections. */
 export function factualReviewUnitRecordV2(result: FactualReviewUnitResultV2): Record<string, unknown> {
-  return { assertions: result.assertions, corrections: result.corrections };
+  return { assertions: result.assertions, corrections: result.corrections, ...(result.salvaged === undefined ? {} : { salvaged: result.salvaged }) };
 }
 
 export function factualReviewUnitResultOfRecordV2(record: Readonly<Record<string, unknown>>, unitOrdinal: number): FactualReviewUnitResultV2 {
@@ -233,6 +194,7 @@ export function factualReviewUnitResultOfRecordV2(record: Readonly<Record<string
     schema: FACTUAL_REVIEW_UNIT_RESULT_V2_SCHEMA,
     unitOrdinal,
     assertions: record.assertions as FactualReviewUnitResultV2['assertions'],
+    ...(record.salvaged === undefined ? {} : { salvaged: record.salvaged as NonNullable<FactualReviewUnitResultV2['salvaged']> }),
     corrections: (record.corrections ?? []) as FactualReviewUnitResultV2['corrections'],
   };
 }

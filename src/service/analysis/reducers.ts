@@ -1,3 +1,4 @@
+import type { SalvagedModelResult } from './canonical.js';
 import type {
   AnalysisAssuranceAxis,
   AnalysisAssuranceSampleDispositionProjection,
@@ -125,6 +126,7 @@ export type CrossUnitGapCode =
 /** What the reduction did, as the execution owner observed it. `not-run` is fewer than two closed units. */
 export type CrossUnitOutcome =
   | {
+      readonly salvaged?: SalvagedModelResult['salvaged'];
       readonly state: 'closed';
       readonly findings: ReadonlyArray<CrossUnitFinding>;
       readonly requestDigest: string;
@@ -132,7 +134,7 @@ export type CrossUnitOutcome =
       /** The parsed answer of a kind whose book-level step is not the baseline reduction (Issue #429, S81b1). */
       readonly result?: unknown;
     }
-  | { readonly state: 'gap'; readonly code: CrossUnitGapCode; readonly reason: string; readonly requestDigest: string }
+  | { readonly state: 'gap'; readonly code: CrossUnitGapCode; readonly reason: string; readonly requestDigest: string; readonly parseFailure?: AnalysisGapProjection['parseFailure'] }
   | { readonly state: 'not-run'; readonly reason: string };
 
 /** The outcome of a reduction that was never asked for: the default for every caller without one. */
@@ -205,10 +207,14 @@ export function assuranceSampleOutcome(
   dispositions: ReadonlyArray<AnalysisAssuranceSampleDispositionProjection>,
   usage: { inputTokens: number; outputTokens: number } | null,
   gapReasons: ReadonlyArray<string>,
+  parseFailures: AnalysisAssuranceSampleProjection['parseFailures'] = [],
+  salvaged: SalvagedModelResult['salvaged'] = [],
 ): AssuranceSampleOutcome {
   const state = gapReasons.length === 0 ? 'closed' : dispositions.length === 0 ? 'gap' : 'closed-with-gaps';
   return {
     state,
+    ...(parseFailures.length === 0 ? {} : { parseFailures }),
+    ...(salvaged.length === 0 ? {} : { salvaged }),
     seed: draw.seed,
     size: draw.size,
     candidateCount: draw.candidateCount,
@@ -554,6 +560,8 @@ export function reduceBaselineAnalysis(
     requestDigest: crossUnit.state === 'not-run' ? null : crossUnit.requestDigest,
     usage: crossUnit.state === 'closed' ? crossUnit.usage : null,
     findingCount: crossUnitFindings.length,
+    ...(crossUnit.state !== 'closed' || crossUnit.salvaged === undefined ? {} : { salvaged: crossUnit.salvaged }),
+    ...(crossUnit.state !== 'gap' || crossUnit.parseFailure === undefined ? {} : { parseFailure: crossUnit.parseFailure }),
   };
   const stages: AnalysisReducerStageProjection[] = [
     stage('unit-validation', ordered.length, gaps.length),

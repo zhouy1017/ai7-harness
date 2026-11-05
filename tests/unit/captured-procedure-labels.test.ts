@@ -1,3 +1,4 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { describe, expect, it } from 'vitest';
 import {
   CAPTURE_NOT_SAVED,
@@ -128,8 +129,8 @@ describe('知识库 and the Run', () => {
   it('names the pin a Run keeps, stopped or not', () => {
     const pin = { procedureId: 'p', versionId: 'v', version: 1, title: '体例复核', documentSha256: 'd', stopped: false, missing: false, leftOut: [] };
     expect(runProcedureLine(pin)).toBe('按可复用工序《体例复核》第 1 版');
-    expect(runProcedureLine({ ...pin, stopped: true })).toBe('按可复用工序《体例复核》第 1 版（这一版已停用；这次审阅仍记着它）');
-    expect(runProcedureLine({ ...pin, missing: true })).toBe('按可复用工序《体例复核》第 1 版（本机没有这一版；这次审阅仍记着它）');
+    expect(runProcedureLine({ ...pin, stopped: true })).toBe('按可复用工序《体例复核》第 1 版 · 已停用，审阅记录保留');
+    expect(runProcedureLine({ ...pin, missing: true })).toBe('按可复用工序《体例复核》第 1 版 · 本机缺少此版本，审阅记录保留');
     expect(runProcedureLeftOutLine({ categoryId: 'plot-consistency', label: '情节逻辑与前后一致', reason: '还没有基线分析。', byChoice: false })).toBe('未运行「情节逻辑与前后一致」：还没有基线分析。');
     // A Series step the editor did not choose is told apart from one the Book could not take (Issue #66, S31b; REUSE-050).
     expect(runProcedureLeftOutLine({ categoryId: 'series-consistency', label: '书系一致性', reason: '书系资料要在每次运行时另行选择，这次你没有选它。', byChoice: true }))
@@ -176,6 +177,10 @@ describe('Series material chosen apart, applicability and linked packages (Issue
       '不运行「书系一致性」：这本书不在任何书系中。',
     ]);
     expect(sheetChosenApartLine('书系一致性')).toBe('「书系一致性」要读这本书所在书系的资料，不会替你选上：要用就勾选它；不选，这次审阅会记下是你没有选。');
+    setTechnicalLayerVisible(false);
+    expect(sheetProcedureLines(run)).toEqual([sheetChosenApartLine('书系一致性')]);
+    expect(sheetProcedureLines(outside)).toEqual(['不运行「书系一致性」：这本书不在任何书系中。']);
+    setTechnicalLayerVisible(true);
   });
 
   it('says what a Book must have for a version to run there (REUSE-048)', () => {

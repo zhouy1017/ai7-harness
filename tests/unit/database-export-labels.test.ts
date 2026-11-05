@@ -47,7 +47,7 @@ const receipt: DatabaseExportReceiptProjection = {
 describe('导出数据库\'s words', () => {
   it('says what the one file holds and never does, and names the actions as every export does', () => {
     expect(DATABASE_EXPORT_HEADING).toBe('导出数据库');
-    expect(DATABASE_EXPORT_LEDE).toBe('把全部图书、稿件与历史、知识库和设置打包成一个文件。文件不含模型服务凭据，也不加密；包里记录数据版本和导出时间。');
+    expect(DATABASE_EXPORT_LEDE).toBe('全部图书、稿件与历史、知识库和设置打包为未加密文件，不含模型服务凭据。');
     expect(DATABASE_EXPORT_ACTIONS).toEqual({ choose: '导出数据库…', approve: '按上述方式导出', cancel: '取消', stop: '取消导出' });
     expect(DATABASE_EXPORT_STATUS_LINES.cancelled).toBe('已取消选择保存位置，没有写入任何文件。');
     expect(DATABASE_EXPORT_STATUS_LINES.closed).toBe('已取消这次导出，没有写入任何文件。');

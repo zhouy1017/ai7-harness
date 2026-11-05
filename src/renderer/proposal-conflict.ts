@@ -1,3 +1,4 @@
+import { identityWords } from './technical-layer.js';
 import {
   draftText,
   hasNonConflictingChanges,
@@ -110,7 +111,8 @@ type SaveState = { kind: 'none' } | { kind: 'saving' } | { kind: 'saved' } | { k
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) node.textContent = identityWords(text, className);
+  if (tag === 'button') node.className = `${node.className} btn`.trim();
   return node;
 }
 
@@ -164,6 +166,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
   let draftTextNode: HTMLElement | undefined;
   let saveButton: HTMLButtonElement | undefined;
   let saveReason: HTMLElement | undefined;
+  let saveReasonLabel: HTMLElement | undefined;
+  let saveReasonPrefix: HTMLElement | undefined;
 
   const button = (action: string, label: string, tone: 'primary' | 'secondary' | 'quiet', run: () => void): HTMLButtonElement => {
     const control = el('button', tone, label);
@@ -354,6 +358,8 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     if (saveReason !== undefined) {
       saveReason.textContent = reason ?? '';
       saveReason.hidden = reason === null;
+      if (saveReasonLabel !== undefined) saveReasonLabel.hidden = reason === null;
+      if (saveReasonPrefix !== undefined) saveReasonPrefix.textContent = reason === null ? '' : ' · ';
     }
     paintSaveState();
   }
@@ -665,12 +671,17 @@ export function mountProposalConflict(options: MountProposalConflictOptions): Pr
     draftStatus.dataset['conflictDraftStatus'] = 'true';
     const saveRow = el('div', 'button-row');
     saveButton = button('save-version', CONFLICT_QUICK_ACTIONS.saveVersion, 'primary', () => void saveVersion());
-    saveReason = el('small', 'field-note proposal-conflict-save-reason');
+    saveReason = el('span', 'proposal-conflict-save-reason');
     saveReason.id = uid('save-reason');
     saveReason.dataset['conflictSaveReason'] = 'true';
+    saveButton.setAttribute('aria-label', saveButton.textContent ?? '');
     saveButton.setAttribute('aria-describedby', saveReason.id);
+    saveReasonLabel = el('span');
+    saveReasonPrefix = el('span');
+    saveReasonLabel.append(saveReasonPrefix, saveReason);
+    saveButton.append(saveReasonLabel);
     saveRow.append(saveButton);
-    section.append(whole, draftStatus, saveRow, saveReason);
+    section.append(whole, draftStatus, saveRow);
 
     if (draftHost.isConnected) draftHost.replaceWith(section);
     else pathDetail?.replaceChildren(section);

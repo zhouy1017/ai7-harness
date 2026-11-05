@@ -1,3 +1,4 @@
+import { technicalWords } from './technical-layer.js';
 import type {
   LearningEligibilityChoice,
   LibraryMaterialDecisionProjection,
@@ -30,6 +31,7 @@ export type KnowledgeBaseTab = 'guidelines' | 'evaluation' | 'rules' | 'memory' 
 export interface KnowledgeBaseTabView {
   readonly tab: KnowledgeBaseTab;
   readonly label: string;
+  readonly developerOnly?: true;
   /** What the class holds, said once at the top of its panel. */
   readonly holds: string;
   /** Why it shows nothing yet, for the classes a later slice brings; `null` for the classes that work now. */
@@ -37,51 +39,57 @@ export interface KnowledgeBaseTabView {
 }
 
 export const KNOWLEDGE_BASE_TITLE = '知识库';
-export const KNOWLEDGE_BASE_LEDE = '社里管理的专业资料。图书与任务只选用这里的条目、记下用的版本，从不就地改动。';
 export const KNOWLEDGE_BASE_TABS_LABEL = '知识库分类';
 
 export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'guidelines',
     label: '审阅规范文件',
-    holds: '审阅按这些文件的编号条款找问题，每次审阅记下它用的版本。导入新版本后，新准备的审阅按新版本；已准备或做过的审阅仍用当时的版本。',
+    holds: '审阅依据的规范文件与编号条款。',
     pending: null,
   },
   {
     tab: 'evaluation',
     label: '评估方案',
-    holds: '评估按这里的评分项、满分、档位、风险项与结论打分；每一版评估都记下它用的方案版本。',
+    developerOnly: true,
+    holds: '评估采用的评分项、档位与结论。',
     pending: null,
   },
-  { tab: 'rules', label: '工序与规则', holds: '专家经验工序与「快速开始」的默认执行规则。', pending: null },
+  { tab: 'rules', label: '工序与规则', developerOnly: true, holds: '专家经验工序与「快速开始」的默认执行规则。', pending: null },
   {
     tab: 'memory',
     label: '社级编辑记忆',
+    developerOnly: true,
     holds: '社里沉淀下来的编辑经验，供审阅与写作参考。',
     pending: null,
   },
   {
     tab: 'exemplars',
     label: '范例',
-    holds: '按已出版图书组织的审稿意见、新闻稿、宣传文章与评论文章；本社的书设为发稿版本后，交付过的文档自动归入，学习准入默认「仅本社」。',
+    holds: '按已出版图书整理的审稿意见与写作范例。',
     pending: null,
   },
   {
     tab: 'library',
     label: '资料库',
-    holds: '编辑收集的图书、资料、论文与网页；放入后立即可供任务参考，可随时调整归属与使用范围。',
+    holds: '收集图书、论文与网页，供任务参考。',
     pending: null,
   },
   {
     tab: 'external',
     label: '外部来源留存',
-    holds: '审查时留存的外部资料的跨书索引；归属仍在各书的来源与证据。',
+    developerOnly: true,
+    holds: '各书审查时留存的外部资料索引。',
     pending: '尚未提供：外部来源留存随外部核查的留存一起到来。',
   },
 ];
 
 export function knowledgeBaseTabView(tab: KnowledgeBaseTab): KnowledgeBaseTabView {
   return KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === tab)!;
+}
+
+export function visibleKnowledgeBaseTabs(developerMode: boolean): ReadonlyArray<KnowledgeBaseTabView> {
+  return developerMode ? KNOWLEDGE_BASE_TAB_VIEWS : KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.developerOnly !== true);
 }
 
 // ---- 审阅规范文件 ----------------------------------------------------------------------------------------------------
@@ -102,7 +110,7 @@ export const GUIDELINE_STATUS = {
 
 /** The pill of a document: the version that applies now, and who issued it. */
 export function guidelineVersionPill(document: Pick<ReviewGuidelineDocumentProjection, 'currentOrdinal' | 'issuer'>): string {
-  return `第 ${document.currentOrdinal} 版 · ${document.issuer}`;
+  return `${technicalWords(`第 ${document.currentOrdinal} 版`, '版本')} · ${document.issuer}`;
 }
 
 /** Which review categories apply a document. */
@@ -129,7 +137,7 @@ export function guidelineOlderBooks(document: Pick<ReviewGuidelineDocumentProjec
   // A Book whose version came with it when it was merged here says so (Issue #434 review).
   const books = document.olderVersionBooks.map((book) => `《${book.bookTitle}》${book.merged ? '随图书带来的' : ''}第 ${book.ordinal} 版`).join('、');
   const more = document.olderVersionBookCount > document.olderVersionBooks.length ? ` 等 ${document.olderVersionBookCount} 本书` : '';
-  return `还在用旧版：${books}${more}；这些书新准备的审阅会按第 ${document.currentOrdinal} 版；已准备的审阅仍用原版本。`;
+  return `还在用旧版：${books}${more}；这些书新准备的审阅会按${technicalWords(`第 ${document.currentOrdinal} 版`, '版本')}；已准备的审阅仍用原版本。`;
 }
 
 export function guidelineClausesSummary(count: number): string {
@@ -154,7 +162,7 @@ export function guidelineVersionLine(version: ReviewGuidelineVersionProjection, 
   const used = version.usedByCount === 0
     ? GUIDELINE_UNUSED
     : version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
-  return `第 ${version.ordinal} 版 · ${version.issuer} · ${origin} · ${version.clauseCount} 条 · ${used}`;
+  return `${technicalWords(`第 ${version.ordinal} 版`, '版本')} · ${version.issuer} · ${origin} · ${version.clauseCount} 条 · ${used}`;
 }
 
 /** The versions merged Books were reviewed under and this data never had (Issue #434 review): read-only, and how many. */
@@ -166,7 +174,7 @@ export function guidelineMergedVersionsSummary(count: number): string {
 export function guidelineMergedVersionLine(version: ReviewGuidelineMergedVersionProjection): string {
   const named = version.usedBy.map((run) => `《${run.bookTitle}》第 ${run.reviewOrdinal} 次审阅`).join('、');
   const used = version.usedByCount > version.usedBy.length ? `用于 ${version.usedByCount} 次审阅，最近：${named}` : `用于 ${named}`;
-  return `第 ${version.ordinal} 版 · ${version.issuer} · ${version.clauseCount} 条 · 随图书带来 · ${used}`;
+  return `${technicalWords(`第 ${version.ordinal} 版`, '版本')} · ${version.issuer} · ${version.clauseCount} 条 · 随图书带来 · ${used}`;
 }
 
 /** When more such versions exist than are named. */
@@ -175,22 +183,22 @@ export function guidelineMergedVersionsMore(shown: number, total: number): strin
 }
 
 export function guidelinePreviewHeading(preview: Pick<ReviewGuidelinePreviewProjection, 'ordinal' | 'title'>): string {
-  return `将导入为《${preview.title}》第 ${preview.ordinal} 版`;
+  return `将导入为《${preview.title}》${technicalWords(`第 ${preview.ordinal} 版`, '版本')}`;
 }
 
 /** How the file's clauses differ from the version that applies now. */
 export function guidelinePreviewChanges(preview: Pick<ReviewGuidelinePreviewProjection, 'source' | 'currentOrdinal' | 'changes' | 'clauseCount'>): string {
   const { changed, added, removed } = preview.changes;
-  return `${preview.source.displayName} · ${preview.clauseCount} 条 · 与第 ${preview.currentOrdinal} 版相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
+  return `${preview.source.displayName} · ${preview.clauseCount} 条 · 与${technicalWords(`第 ${preview.currentOrdinal} 版`, '版本')}相比：改动 ${changed} 条，新增 ${added} 条，删去 ${removed} 条`;
 }
 
 export function guidelineImported(title: string, ordinal: number): string {
-  return `已导入《${title}》第 ${ordinal} 版；新准备的审阅按第 ${ordinal} 版；已准备的审阅仍用原版本。`;
+  return `已导入《${title}》${technicalWords(`第 ${ordinal} 版`, '版本')}；新准备的审阅按${technicalWords(`第 ${ordinal} 版`, '版本')}；已准备的审阅仍用原版本。`;
 }
 
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
 
-export const EXEMPLARS_EMPTY = '还没有范例。本社的书设为发稿版本后，交付过的文档自动归入；以前出版的书可由你导入范例。';
+export const EXEMPLARS_EMPTY = '暂无范例，已发稿并交付的本社文档会自动加入。';
 export const EXEMPLARS_NONE_DELIVERED = '还没有交付过的文档；交付后自动归入。';
 /** Reads the next page of published Books (Issue #427 review). */
 export const EXEMPLARS_MORE = '更多已出版的书…';
@@ -212,7 +220,7 @@ export const EXEMPLAR_READERS_REPORT_PINS: Readonly<Record<ReadersReportExemplar
   later: '发稿版本设定后才起草，按现在的最新一版',
 };
 /** The one action on an offered 审稿意见: the editor admits it, under the eligibility it comes with. */
-export const EXEMPLAR_READERS_REPORT_ADMIT = '归入范例（仅本社）';
+export const EXEMPLAR_READERS_REPORT_ADMIT = '归入本社范例';
 export const EXEMPLAR_READERS_REPORT_STATUS = {
   admitting: '正在归入范例…',
   admitted: '审稿意见已归入范例',
@@ -231,7 +239,7 @@ export function readersReportExemplarAdmission(admission: ReadersReportExemplarP
  * eligibility, and where its admission stands.
  */
 export function readersReportExemplarLine(entry: ReadersReportExemplarProjection, instant: (iso: string) => string): string {
-  return `${entry.typeLabel} · 版本 ${entry.version} · 保存于 ${instant(entry.savedAt)} · ${EXEMPLAR_READERS_REPORT_PINS[entry.pin]}` +
+  return `${entry.typeLabel}${technicalWords(` · 版本 ${entry.version}`)} · 保存于 ${instant(entry.savedAt)} · ${EXEMPLAR_READERS_REPORT_PINS[entry.pin]}` +
     ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]} · ${readersReportExemplarAdmission(entry.admission, instant)}`;
 }
 
@@ -257,7 +265,7 @@ export function exemplarDesignation(book: Pick<ExemplarBookProjection, 'designat
  * versions delivered before it — every one while they are few, and past that how many, with the latest named.
  */
 export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string) => string): string {
-  if (exemplar.imported) return `${exemplar.typeLabel} · 版本 ${exemplar.version} · 导入于 ${instant(exemplar.archivedAt)} · 原件：${exemplar.imported.sourceName} · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}` +
+  if (exemplar.imported) return `${exemplar.typeLabel}${technicalWords(` · 版本 ${exemplar.version}`)} · 导入于 ${instant(exemplar.archivedAt)} · 原件：${exemplar.imported.sourceName} · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}` +
     (exemplar.earlierVersionCount > 0 ? ` · 此前导入过 ${exemplar.earlierVersionCount} 个版本` : '');
   const named = exemplar.earlierVersions.join('、');
   const earlier = exemplar.earlierVersionCount === 0
@@ -265,7 +273,7 @@ export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string
     : exemplar.earlierVersionCount > exemplar.earlierVersions.length
       ? ` · 此前还交付过 ${exemplar.earlierVersionCount} 个版本，最近的是版本 ${named}`
       : ` · 此前还交付过版本 ${named}`;
-  return `${exemplar.typeLabel} · 版本 ${exemplar.version} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}` +
+  return `${exemplar.typeLabel}${technicalWords(` · 版本 ${exemplar.version}`)} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}` +
     ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}${earlier}`;
 }
 
@@ -302,7 +310,7 @@ export const LIBRARY_ATTRIBUTE = '定归属…';
 export const LIBRARY_ATTRIBUTE_CONFIRM = '确定归属';
 export const LIBRARY_ELIGIBILITY = '定学习准入…';
 export const LIBRARY_ELIGIBILITY_CONFIRM = '记录决定';
-export const LIBRARY_EMPTY = '资料库里还没有资料。放入后默认归属当前图书，没有当前图书时归属本社，任务即可参考。';
+export const LIBRARY_EMPTY = '暂无资料，放入后可供任务参考。';
 export const LIBRARY_TITLE_LABEL = '标题';
 export const LIBRARY_KIND_LEGEND = '这是什么';
 export const LIBRARY_ATTRIBUTION_TERM = '归属';
@@ -318,7 +326,7 @@ export const LIBRARY_NO_ELIGIBILITY = '尚未定';
 export const LIBRARY_ELIGIBILITY_NEEDS_ATTRIBUTION = '先定归属，再定学习准入。';
 export const LIBRARY_ELIGIBILITY_RESET = '归属改了：学习准入要按新的归属重新定，之前的决定仍留在记录里。';
 export const LIBRARY_RECOMMENDED = '建议';
-export const LIBRARY_REASON_LABEL = '补充说明（可不填）';
+export const LIBRARY_REASON_LABEL = '补充说明 · 可不填';
 /** What eligibility does and does not do (LEARN-009, LEARN-010), said once beside the choice. */
 export const LIBRARY_ELIGIBILITY_BOUNDARY = '学习准入只决定它能不能在所选范围内形成学习信号：不会启用记忆，不会扩大任务的读取范围，也不允许把它发送出去。';
 /** The wider choice's consequence, shown inline when it is chosen (LEARN-005, LEARN-012). */
@@ -368,12 +376,12 @@ export function libraryPreviewHeading(preview: Pick<LibraryMaterialPreviewProjec
 }
 
 export function libraryPreviewFacts(preview: Pick<LibraryMaterialPreviewProjection, 'source'>): string {
-  return `${LIBRARY_FORMAT_LABELS[preview.source.format]} · ${libraryBytes(preview.source.bytes)} · 原件原样保存在本机，不会改动`;
+  return `${LIBRARY_FORMAT_LABELS[preview.source.format]}${technicalWords(` · ${libraryBytes(preview.source.bytes)}`)} · 原文件保持不变`;
 }
 
 /** What arrived, how big it is, and when. */
 export function librarySourceLine(material: Pick<LibraryMaterialProjection, 'source' | 'recordedAt'>, instant: (iso: string) => string): string {
-  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]} · ${libraryBytes(material.source.bytes)} · 放入于 ${instant(material.recordedAt)}`;
+  return `${material.source.displayName} · ${LIBRARY_FORMAT_LABELS[material.source.format]}${technicalWords(` · ${libraryBytes(material.source.bytes)}`)} · 放入于 ${instant(material.recordedAt)}`;
 }
 
 /** One Learning Eligibility choice as the chooser offers it and the card states it (LEARN-004 to LEARN-006). */
@@ -461,7 +469,7 @@ export const MATERIAL_INDEX_NEEDS_DEPENDENCY = '未提供（需要本地依赖�
 export const MATERIAL_VECTORS_BUILD = '构建相似索引';
 export const MATERIAL_VECTORS_SEARCH_LABEL = '相似段落检索';
 export const MATERIAL_VECTORS_SEARCH = '检索';
-export const MATERIAL_VECTORS_SEARCH_NOTE = '在本机按已建的相似索引找出与这段文字相近的段落；结果只是线索，原文以分段为准。';
+export const MATERIAL_VECTORS_SEARCH_NOTE = '本机相似搜索仅供参考，原文以分段为准。';
 export const MATERIAL_VECTORS_SEARCH_FAILED = '暂时无法检索，请重试。';
 export const MATERIAL_VECTORS_BUILD_FAILED = '暂时无法构建相似索引，请重试。';
 /** 生成来源译文 (Issue #892): a non-Chinese item's machine translation, asked for under the selected policy's rule. */
@@ -470,7 +478,7 @@ export const MATERIAL_TRANSLATION_FAILED = '暂时无法生成来源译文，请
 /** What a translation shown beside its paragraph is called: the machine's, never the original. */
 export const MATERIAL_TRANSLATION_TERM = '来源译文';
 /** What the index is and is not, said once on the card (KB-009). */
-export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立：它不授予任务读取范围；任务只读计划列进「允许参考」的资料，发送什么仍由任务计划决定。';
+export const MATERIAL_INDEX_BOUNDARY = '索引只在本机建立，任务的读取和发送范围以计划为准。';
 export const MATERIAL_SEGMENTS_OPEN = '查看分段';
 export const MATERIAL_SEGMENTS_CLOSE = '收起分段';
 export const MATERIAL_SEGMENTS_PREVIOUS = '上一页';
@@ -611,7 +619,7 @@ export function materialIndexCompletedReason(outcome: 'complete' | 'unsupported'
 
 export const CUSTOM_DIMENSIONS_HEADING = '自定义分析维度';
 export const CUSTOM_DIMENSIONS_NOTE =
-  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文。名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
+  '为每个阅读单元写一个提问，AI7 在「分析 › 自定义」里逐单元回答并定位所依据的原文；名称只在本机显示，不会发送；提问模板不能包含稿件正文。';
 export const CUSTOM_DIMENSIONS_EMPTY = '还没有自定义分析维度。';
 export const CUSTOM_DIMENSION_NEW = '新建维度…';
 export const CUSTOM_DIMENSION_REVISE = '修改为新版本…';
@@ -630,7 +638,7 @@ export const CUSTOM_DIMENSION_FIXED_LINES = [
 export const CUSTOM_DIMENSION_STOP_NOTE = '停用后这个版本不能再运行；已经用它完成的分析仍然保留，并一直标明所用的版本。';
 
 export function customDimensionVersionLine(version: { version: number; stateLabel: string; taskCount: number }): string {
-  return `第 ${version.version} 版 · ${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
+  return `${technicalWords(`第 ${version.version} 版`, '版本')} · ${version.stateLabel} · ${version.taskCount === 0 ? '还没有运行过' : `用于 ${version.taskCount} 项任务`}`;
 }
 
 export function customDimensionSavedLine(title: string): string {
@@ -638,9 +646,9 @@ export function customDimensionSavedLine(title: string): string {
 }
 
 export function customDimensionEnabledLine(title: string, version: number): string {
-  return `已启用「${title}」第 ${version} 版；可以在书的「分析 › 自定义」中运行。`;
+  return `已启用「${title}」${technicalWords(`第 ${version} 版`, '版本')}；可以在书的「分析 › 自定义」中运行。`;
 }
 
 export function customDimensionStoppedLine(title: string, version: number): string {
-  return `已停用「${title}」第 ${version} 版；已完成的分析仍保留。`;
+  return `已停用「${title}」${technicalWords(`第 ${version} 版`, '版本')}；已完成的分析仍保留。`;
 }

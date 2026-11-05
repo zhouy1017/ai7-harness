@@ -30,6 +30,7 @@ declare module 'electron' {
       paste(): void;
       pasteAndMatchStyle(): void;
       /** The PDF export's print of a staged page (Issue #500, S64b). */
+      executeJavaScript<T = unknown>(code: string): Promise<T>;
       printToPDF(options: { pageSize: 'A4'; printBackground: boolean; preferCSSPageSize: boolean }): Promise<Uint8Array>;
     };
     destroy(): void;
@@ -63,6 +64,7 @@ declare module 'electron' {
     quit(): void;
   };
   export const contextBridge: { exposeInMainWorld(name: string, api: unknown): void };
+  export const webUtils: { getPathForFile(file: File): string };
   export const dialog: {
     showMessageBox(options: Record<string, unknown>): Promise<{ response: number }>;
     showOpenDialog(options: Record<string, unknown>): Promise<{ canceled: boolean; filePaths: string[] }>;

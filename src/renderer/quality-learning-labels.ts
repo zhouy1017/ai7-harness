@@ -15,7 +15,7 @@ import type {
 export const QUALITY_LEARNING_TITLE = '质量与学习';
 export const QUALITY_LEARNING_LEDE = '你的反馈与改动里，哪些可以用来学习、在多大范围里学习，都由你决定；这里只是记录，不催你处理。';
 export const LEARNING_HEADING = '学习准入';
-export const LEARNING_EMPTY = '还没有可以用来学习的材料。你在修改建议、分析结果和审阅里写下的原因与改动，会在这里等你决定。';
+export const LEARNING_EMPTY = '还没有待决定的学习材料；你在修改建议、分析和审阅中写下的原因与改动会列在这里。';
 export const LEARNING_OPEN = '查看…';
 export const LEARNING_RECOMMENDED = '建议';
 export const LEARNING_CHOICE_LEGEND = '这条材料可以用来学习吗';
@@ -119,16 +119,19 @@ export function learningDecisionLine(material: Pick<LearningMaterialProjection, 
 
 /** 质量与学习's tabs: the passive history, the decisions waiting, and the audit of what was decided (Issue #62, S27a). */
 export type QualityLearningTab = 'feedback' | 'learning' | 'audit';
-export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearningTab; readonly label: string }> = [
+export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearningTab; readonly label: string; readonly developerOnly?: true }> = [
   { tab: 'feedback', label: '反馈历史' },
-  { tab: 'learning', label: '学习准入' },
-  { tab: 'audit', label: '学习回溯' },
+  { tab: 'learning', label: '学习准入', developerOnly: true },
+  { tab: 'audit', label: '学习回溯', developerOnly: true },
 ];
+export function visibleQualityLearningTabs(developerMode: boolean): ReadonlyArray<(typeof QUALITY_LEARNING_TABS)[number]> {
+  return developerMode ? QUALITY_LEARNING_TABS : QUALITY_LEARNING_TABS.filter((entry) => entry.developerOnly !== true);
+}
 export const QUALITY_LEARNING_TABS_LABEL = '质量与学习的内容';
 export const FEEDBACK_HISTORY_HEADING = '反馈历史';
 /** What the history is and is not (FDBK-007, FDBK-010), said once above it. */
 export const FEEDBACK_HISTORY_NOTE = '这里只是记录你给过的反馈：不会催你补充原因，也不会把没有说明当作认可。';
-export const FEEDBACK_HISTORY_EMPTY = '还没有反馈记录。你对修改建议、分析结果和审阅发现的处理与原因，会记在这里。';
+export const FEEDBACK_HISTORY_EMPTY = '还没有反馈记录；你对修改建议、分析结果和审阅发现的处理与原因会记在这里。';
 export const FEEDBACK_HISTORY_NONE_MATCH = '没有符合的反馈记录。';
 export const FEEDBACK_HISTORY_TRUNCATED = '还有更早的记录，可继续查看。';
 export const FEEDBACK_HISTORY_OPEN = '打开…';

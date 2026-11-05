@@ -1,3 +1,5 @@
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mountGlobalAgent } from '../../src/renderer/global-agent.js';
 import type { GlobalAgentDialogueProjection, GlobalAgentProjection, GlobalAgentRendererApi } from '../../src/shared/protocol.js';
@@ -134,4 +136,10 @@ it('regenerates in one action without opening the optional preview', async () =>
   expect(api.prepareGlobalAgentTurn).toHaveBeenCalledWith({ kind: 'regenerate', dialogueId: 'dialogue-1', attemptId: 'internal-attempt-id' });
   expect(api.regenerateGlobalAgentAnswer).toHaveBeenCalledWith({ dialogueId: 'dialogue-1', attemptId: 'internal-attempt-id', sources: [PIN], disclosureSha256: 'prepared' });
   expect(find('.global-agent-preview').hidden).toBe(true);
+});
+
+it('scans the Global Agent dialogue in ordinary mode (#1315)', async () => {
+  setTechnicalLayerVisible(false);
+  try { const view = harness(dialogue(), true); await settle(); expectNoTechnicalText(view.root); }
+  finally { setTechnicalLayerVisible(true); }
 });

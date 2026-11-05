@@ -5,7 +5,7 @@ import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
+import { MANUSCRIPT_JOURNAL_SEQUENCE, attachProductOutput, installJourneyCancellationCleanup, journeyCheckFailure, localDebugEnabled, recordDebugDetail, reportJourneyFailure, settleOnBrowserDisconnect, SIDEBAR, sidebarNavigate, SIDEBAR_LIBRARY_READY, SIDEBAR_ICONS_ONLY, runJ14DarkPass } from './controller.mjs';
 import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState, removeSyntheticCredentialWithElectron } from './credential-cleanup.mjs';
 
 // Supported-journey scenario: J-04 covered baseline manuscript analysis (Issue #92, bounded S36 slice)
@@ -18,7 +18,7 @@ import { assertSecretsAbsentFromDataRoot, recoverSyntheticCredentialCleanupState
 // superseded by a Plan Revision, refuses its stale version, takes the way back to the version it froze,
 // and is reconfirmed as version 2.
 // Issue #387 adds a separate fresh Book replaying the reviewed 2026-10-12 V4.1 capture, including its
-// truthful schema-invalid unit 1 gap, under the retained prompt contract /1 it was asked under. Issue #826 then
+// seven recovered string notes in unit 1 under the retained prompt contract /1 it was asked under. Issue #826 then
 // relaunches that Book under the current contracts and replays the reviewed 2026-10-13 range recomputation of units
 // 1 and 2: eight units closed, six of them reused from the /1 revision. Existing authored/synthetic retry and
 // incremental scenarios remain intact.
@@ -361,6 +361,22 @@ async function readBaseline(renderer, revisionId = null) {
     const { digest, ...body } = projection.coverageManifest;
     requireJourney(sha256Hex(canonicalJson(body)) === digest, 'coverage-manifest-page-digest');
   }
+  for (const key of ['resultSetRevision', 'inspectedRevision']) {
+    const revision = projection[key];
+    if (revision?.overviewPage === undefined || revision.synthesis !== undefined) continue;
+    const chunks = [];
+    let cursor = 0;
+    do {
+      const page = await renderer.evaluate(`window.ai7.getAnalysisRevisionOverview(${JSON.stringify({ revisionId: revision.revisionId, afterIndex: cursor })})`);
+      requireJourney(page.revisionId === revision.revisionId && (page.next === null || page.next > cursor), 'analysis-overview-page');
+      chunks.push(page.text);
+      cursor = page.next;
+    } while (cursor !== null && chunks.length < revision.overviewPage.chunkCount);
+    const text = chunks.join('');
+    requireJourney(cursor === null && chunks.length === revision.overviewPage.chunkCount && [...text].length === revision.overviewPage.totalLength &&
+      sha256Hex(text) === revision.overviewPage.sha256, 'analysis-overview-digest');
+    projection[key] = { ...revision, ...JSON.parse(text) };
+  }
   return projection;
 }
 
@@ -483,7 +499,7 @@ async function readDrawer(renderer) {
   return renderer.evaluate(`(() => {
     const drawer=document.querySelector('#task-drawer');
     if(!(drawer instanceof HTMLElement))return null;
-    const pairs=(selector,key)=>Object.fromEntries(Array.from(drawer.querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
+    const pairs=(selector,key)=>Object.fromEntries(Array.from((selector.includes('technical') ? document : drawer).querySelectorAll(selector)).map((node)=>[node.dataset[key],node.textContent]));
     const texts=(selector)=>Array.from(drawer.querySelectorAll(selector)).map((node)=>node.textContent);
     const pill=drawer.querySelector('.task-drawer-pill');
     const drift=drawer.querySelector('[data-task-plan-drift]');
@@ -504,7 +520,7 @@ async function readDrawer(renderer) {
       references:texts('[data-task-plan-term="允许参考"] li'), sections:texts('[data-task-plan-section] > h3'),
       steps:Array.from(drawer.querySelectorAll('.task-plan-steps > li')).map((item)=>item.querySelector('.task-plan-step')?.textContent+' '+item.querySelector('.task-plan-step-result')?.textContent),
       participation:texts('.task-plan-participation > li'), outcomes:texts('[data-task-plan-term="可能产生"] li'), notDo:texts('.task-plan-not-do > li'),
-      columns:texts('.task-plan-boundary h4'), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
+      columns:Array.from(drawer.querySelectorAll('.task-plan-boundary h4'), (node) => node.firstChild?.textContent ?? ''), adaptable:texts('[data-task-plan-boundary="adaptable"] li'), askFirst:texts('[data-task-plan-boundary="ask-first"] li'),
       technical:pairs('[data-task-plan-technical]','taskPlanTechnical'), footer:drawer.querySelector('.task-drawer-footer')?.textContent,
       actions:drawer.querySelectorAll('[data-analysis-action], [data-review-action], [data-task-authorization-action]').length,
       bar:(() => {
@@ -517,7 +533,7 @@ async function readDrawer(renderer) {
           status:text('.task-bar-status'), refusal:text('.task-bar-refusal'),
           actions:Array.from(bar.querySelectorAll('button[data-task-drawer-control]')).map((node)=>{
             const described=node.getAttribute('aria-describedby');
-            return { name:node.dataset.taskDrawerControl, text:node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
+            return { name:node.dataset.taskDrawerControl, text:node.getAttribute('aria-label')??node.textContent, disabled:node.disabled, reason:described===null?null:(document.getElementById(described)?.textContent??null) };
           }),
         };
       })(),
@@ -618,7 +634,7 @@ const SAFE_RETRY_ADAPTATION = '模型服务暂时出错时，同一个阅读范�
 // leaves out 核对与抽检 says instead of a sample (`src/service/analysis/plan-edits.ts`), each pinned by its unit suite.
 const PLAN_EDIT_STEPS_NOTE = '这项分析的步骤由分析工序决定：可以去掉「核对与抽检」，不能改写、增加或调换顺序。';
 // Issue #422 (S76d): the move into 先问你 is offered, and the note says what it means for the Run.
-const PLAN_EDIT_ASK_FIRST_NOTE = '「先问你」：运行中遇到这种情况，AI7 先停下这一步来问你，其余阅读范围照常进行。';
+const PLAN_EDIT_ASK_FIRST_NOTE = '这一步暂停等你回答，其他阅读范围继续。';
 const ASSURANCE_SAMPLING_REMOVED = '按你修改的计划，这次运行不做核对与抽检；保证抽样未发起。';
 const LOCKED_BOUNDARY = ['固定要做的事、处理范围、参考范围与所用工序', '固定模型服务、发送内容类别、预算上限', '固定结果类型、受控动作'];
 
@@ -627,9 +643,10 @@ async function clickSelector(renderer, selector, name) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
-    `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`,
+    `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>(item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)})); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`,
     name,
   );
 }
@@ -654,18 +671,18 @@ async function waitFor(renderer, expression, name, timeout = 60_000) {
 
 async function importSample1(renderer, cancellation, distinct = false) {
   await click(renderer, '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'import-relationship-screen');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector(${JSON.stringify(`input[aria-label="${distinct ? '新建图书（作为不同作品）' : '新建图书'}"]`)}); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'import-title-screen');
   at('sample1-import-title');
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, 'import-exact-source');
   await fill(renderer, '#book-title', J04_BOOK_TITLE, 'import-title');
   cancellation.throwIfRequested();
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
   cancellation.throwIfRequested();
@@ -693,12 +710,12 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
-  await click(renderer, '保存当前编辑', 'edit-save');
+  await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
-  await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');
+  await assertRenderer(renderer, `${MANUSCRIPT_JOURNAL_SEQUENCE} === ${expectedSequence}`, 'edit-sequence');
   await openAnalysisDestination(renderer, 'edit-return');
 }
 
@@ -1215,7 +1232,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('analysis')), 'book-reopened-open-analysis');
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
-    await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .panel', returnTo: SIDEBAR.section('analysis') });
+    await runJ14DarkPass({ renderer, journey: 'J-04', at, representative: '#screen[data-screen="book-analysis"] > .page-content', returnTo: SIDEBAR.section('analysis') });
     await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'book-reopened-analysis-after-dark-pass');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card[data-analysis-state="available"]')`, 'analysis-available');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const goal=card?.querySelector('#j04-analysis-goal'); const start=card?.querySelector('[data-analysis-action="prepare"]'); return goal instanceof HTMLInputElement && goal.readOnly && goal.value===${JSON.stringify(TASK_GOAL)} && start instanceof HTMLButtonElement && !start.disabled && start.textContent==='查看计划' && !card.querySelector('[data-analysis-action="authorize"]'); })()`, 'analysis-available-surface');
@@ -1282,7 +1299,7 @@ async function main() {
     // Drawer the preparation opened, asserted in the next stage. Synchronized delta with Issue #420 (S74a
     // A5): the start left the card for the drawer's bar, so the card's one action reads 查看计划并开始, and
     // the plan versions are its closed technical layer.
-    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); const versions=card?.querySelector('details.analysis-plan-versions-technical'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]') && versions instanceof HTMLDetailsElement && !versions.open && versions.querySelector('.analysis-plan-versions [data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null && ${AUTHORIZE_LABELED_BUTTONS}===0; })()`, 'prepared-preview');
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.baseline-analysis-card'); const open=card?.querySelector('.analysis-plan-summary [data-analysis-action="view-plan"]'); const versions=card?.querySelector('details.analysis-plan-versions-technical'); return card?.dataset.coverageManifestDigest===${JSON.stringify(manifest.digest)} && card.dataset.analysisUnits===${JSON.stringify(String(SAMPLE1_UNITS))} && card.dataset.planEnvelopeDigest===${JSON.stringify(prepared.planEnvelope.digest)} && card.querySelector('.analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：首次基线分析 · 全书 · ${SAMPLE1_UNITS} 个阅读范围 · 任务输入修订版 r1 · 计划版本 1`)} && open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始' && open.dataset.taskPlanOpen==='baseline-analysis' && !card.querySelector('[data-manifest-unit], [data-reuse-plan-unit], .analysis-plan-boundary') && !card.querySelector('[data-analysis-action="authorize"], [data-analysis-action="prepare"]') && versions instanceof HTMLDetailsElement && (!versions.open || versions.hidden) && versions.querySelector('.analysis-plan-versions [data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null && ${AUTHORIZE_LABELED_BUTTONS}===0; })()`, 'prepared-preview');
 
     at('analysis-plan-drawer');
     // The plan the preparation froze, in the drawer beside ②A: 精简 first, then 完整, whose 查看技术详情
@@ -1295,11 +1312,11 @@ async function main() {
       JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
       firstDrawer.saved === null && firstDrawer.drift === null &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({
-        处理: `《${bookName}》全书 · ${wholeCount} 字 · ${SAMPLE1_UNITS} 个阅读范围`,
-        发送: '本环境不连接模型服务，不会发送任何内容 · 用量：不发送，没有模型用量 · 未设置任务预算上限',
-        会得到: '一份基线分析：梗概、人物与名称、事件、关系、设定和各章；这次运行的运行报告',
-        不会: '不会直接修改稿件 · 不导出或发布 · 不存里程碑版本 · 不读这本书以外的内容 · 不作事实判定',
-        中途: '预计无需中途参与',
+        处理: '只处理任务卡所列范围，不参考其他材料。',
+        发送: '不发送，无模型用量。',
+        会得到: '一份基线分析。',
+        不会: '不改稿、导出发布、存里程碑、读书外内容、作事实判定。',
+        中途: '预计无需参与，可随时暂停或取消。',
       }) && firstDrawer.actions === 0 && firstDrawer.footer === '计划说明，不是运行授权', 'analysis-drawer-compact', firstDrawer);
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'analysis-drawer-full');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.querySelectorAll('#task-drawer [data-task-plan-section]').length===6`, 'analysis-drawer-full-mode');
@@ -1330,9 +1347,9 @@ async function main() {
     at('analysis-bar-ready');
     // Issue #420 (S74a): the drawer's footer is the authorization bar. The deterministic route sends nothing,
     // so the credential this Book holds — `missing` since the model setup above — is not needed: 开始任务 is
-    // offered. The summary names the plan version, and the word 授权 is on no button anywhere.
+    // offered. The summary names the output; the version stays in drawer state, and no button says 授权.
     requireJourney(missingConnection?.credentialOperationState === 'missing' && firstFull?.bar?.state === 'ready' && firstFull.bar.start === 'ready' &&
-      firstFull.bar.summary === `《${bookName}》 · 全书 · 计划版本 1 · 主编辑角色 · 未设置任务预算上限 · 产出：一份基线分析 · 不改稿` &&
+      firstFull.bar.summary === '产出一份基线分析，不修改稿件。' &&
       firstFull.bar.statement === BAR_STATEMENT && firstFull.bar.note === null && firstFull.bar.status === null && firstFull.bar.refusal === null &&
       // Synchronized delta with Issue #419 (S73): 返回修改 opens the editing of a plan that takes edits.
       barActions(firstFull) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
@@ -1354,7 +1371,7 @@ async function main() {
       settled.checkpoint?.revisionId === prepared.checkpoint.revisionId && settled.planEnvelope?.digest === prepared.planEnvelope.digest &&
       UUID_PATTERN.test(settled.authorization?.authorizationId) && settled.authorization?.origin === 'standard-direct' &&
       settled.authorization?.authority === 'standard-direct-dispatch' && settled.authorization?.planEnvelopeDigest === prepared.planEnvelope.digest &&
-      UUID_PATTERN.test(settled.run?.runRecordId) && settled.run?.state === 'completed-with-gaps' && settled.run?.stateLabel === '已完成 · 保留缺口' &&
+      UUID_PATTERN.test(settled.run?.runRecordId) && settled.run?.state === 'completed-with-gaps' && settled.run?.stateLabel === '已完成 · 1/8 个单元未读成' &&
       JSON.stringify(settled.run?.transitions?.map((transition) => transition.state)) === JSON.stringify(['authorized', 'admitted', 'executing', 'completed-with-gaps']) &&
       settled.run?.blockedReasons === null && settled.actions?.canPrepare === false && settled.actions?.canAuthorize === false,
     'settled-run-record', { state: settled?.state, stateLabel: settled?.stateLabel, authorization: settled?.authorization, run: settled?.run, actions: settled?.actions });
@@ -1377,12 +1394,12 @@ async function main() {
     requireJourney(revision.freshness.state === 'current' && revision.freshness.currentRevisionId === prepared.checkpoint.revisionId &&
       revision.freshness.currentJournalSequence === 0 && revision.provenance.runRecordId === settled.run.runRecordId, 'revision-current');
     requireJourney(UUID_PATTERN.test(settled.taskOutcome?.outcomeId) && settled.taskOutcome?.classification === 'completed-with-gaps' &&
-      settled.taskOutcome?.label === '任务结果：已完成（保留缺口）' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
+      settled.taskOutcome?.label === '已完成 · 1/8 个单元未读成' && settled.taskOutcome?.resultSetRevisionId === revision.revisionId &&
       typeof settled.taskOutcome?.safeNextAction === 'string' && settled.taskOutcome.safeNextAction.length > 0, 'settled-task-outcome', settled.taskOutcome);
     // Synchronized delta with Issue #418: the drawer beside ②A followed the Task to its end, reading the
     // plan again as the Run moved, and now states the authorization and the Run it bound.
     const settledDrawer = await drawerShowing(renderer, prepared.taskIntent.taskIntentId, 'settled', 'analysis-drawer-settled');
-    requireJourney(settledDrawer?.pill === '已完成' && settledDrawer.version === '1' &&
+    requireJourney(settledDrawer?.pill === '已完成 · 1/8 个单元未读成' && settledDrawer.version === '1' &&
       settledDrawer.technical.authorization?.startsWith(`${settled.authorization.authorizationId} · standard-direct · standard-direct-dispatch · `) &&
       settledDrawer.technical['run-record']?.startsWith(`${settled.run.runRecordId} · completed-with-gaps · `) &&
       settledDrawer.technical['plan-versions'] === `版本 1 · bound · ${prepared.planEnvelope.digest}`, 'analysis-drawer-settled-plan', settledDrawer);
@@ -1402,7 +1419,7 @@ async function main() {
         card.querySelectorAll('[data-analysis-unit]').length===${SAMPLE1_UNITS} && card.querySelector('[data-analysis-unit="2"][data-analysis-unit-state="gap"]')!==null &&
         card.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===${SAMPLE1_UNITS - 1} &&
         card.textContent.includes(${JSON.stringify(ASSURANCE_STATEMENT)}) && card.textContent.includes(${JSON.stringify(revision.revisionId)}) &&
-        card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('任务结果：已完成（保留缺口）') &&
+        card.textContent.includes(${JSON.stringify(revision.digest)}) && card.textContent.includes('已完成 · 1/8 个单元未读成') &&
         buttons.length>0 && buttons.some((button)=>button.dataset.analysisAction==='return-to-range') && ${ONLY_ANALYSIS_ACTIONS} &&
         card.querySelector('[data-update-action="sync-current"][data-update-available="false"]')!==null &&
         card.querySelector('[data-update-action="reanalyze-book"][data-update-available="true"]')!==null &&
@@ -1432,7 +1449,7 @@ async function main() {
       if(JSON.stringify(axes.map((axis)=>axis.querySelector('h5')?.textContent))!==${JSON.stringify(JSON.stringify(ANALYSIS_SENTENCE_HEADINGS))}) return false;
       const sentence=(axis)=>axes.find((item)=>item.dataset.analysisAxis===axis)?.querySelector('.analysis-axis-sentence')?.textContent??'';
       const technical=synopsis.querySelector('details.analysis-revision-technical');
-      if(!(technical instanceof HTMLDetailsElement) || technical.open) return false;
+      if(!(technical instanceof HTMLDetailsElement) || (technical.open && !technical.hidden)) return false;
       const decision=synopsis.cloneNode(true);
       for(const details of decision.querySelectorAll('details')) details.remove();
       return sentence('coverage')===${JSON.stringify(`全稿分成 ${revision.coverage.unitsTotal} 个阅读范围，已读完 ${revision.coverage.unitsClosed} 个；还有 ${revision.coverage.gapCount} 个没有读成，在「各章」里标为尚未分析。`)} &&
@@ -1440,7 +1457,7 @@ async function main() {
         sentence('reducer-closure').includes('没有读成的范围不在其中') &&
         sentence('assurance').startsWith(${JSON.stringify(ASSURANCE_STATEMENT)}) &&
         sentence('assurance').includes(${JSON.stringify(`另有 ${leads} 处前后不一致的线索、${revision.assurance.unresolvedItemCount} 项未决事项，归入审阅的「情节逻辑与前后一致」`)}) &&
-        axes.every((axis)=>axis.querySelector('.analysis-axis-next')?.textContent.startsWith('下一步：')) &&
+        axes.every((axis)=>!axis.querySelector('.analysis-axis-next')) &&
         decision.querySelector('.analysis-synopsis')?.textContent===${JSON.stringify(revision.synthesis.synopsis)} &&
         !/blk_|[0-9a-f]{64}/u.test(decision.textContent) && !/单元|Revision|归约|reducer|摘要/u.test(axes.map((axis)=>axis.textContent).join('')) &&
         !decision.querySelector('.analysis-conflict-list, .analysis-unresolved-list, [data-analysis-conflict-kind]') &&
@@ -1491,24 +1508,13 @@ async function main() {
       if(!(entity instanceof HTMLElement) || !(entityExact instanceof HTMLDetailsElement)) return false;
       return entity.querySelector('span')?.textContent.trimEnd().endsWith(${JSON.stringify(`）· 来自单元 ${provenanceUnits} · ${provenanceBlocks} 个段落`)}) &&
         !entity.textContent.includes('person') && entity.textContent.includes('（') &&
-        !entityList.textContent.includes('blk_') && !entityExact.open &&
+        !entityList.textContent.includes('blk_') && (!entityExact.open || entityExact.hidden) &&
         entityExact.querySelector('dl > dd.technical-identity')!==null &&
         entityExact.textContent.includes(${JSON.stringify(provenanceBlockId)}) &&
         !card.querySelector('.analysis-conflict-list, [data-analysis-conflict-kind]');
     })()`, 'analysis-provenance-surface');
 
-    // V2-UX-LAYER-005, asserted where the rule is hardest to keep: the settled result set is the
-    // longest thing this workbench ever renders, and the workbench's own way out must survive it. The
-    // three actions are read by label, enabled state and container — never by document position — and
-    // the region is asserted to be genuinely sticky rather than merely to carry the class.
-    await assertRenderer(renderer, `(() => {
-      const region=document.querySelector('.book-analysis .workbench-actions');
-      if(!region) return false;
-      const buttons=Array.from(region.querySelectorAll(':scope > button'));
-      return JSON.stringify(buttons.map((button)=>button.textContent))===JSON.stringify(${JSON.stringify(ANALYSIS_DESTINATION_ACTIONS)}) &&
-        buttons.every((button)=>!button.disabled) &&
-        getComputedStyle(region).position==='sticky';
-    })()`, 'workbench-actions-persistent');
+    await assertRenderer(renderer, `!document.querySelector('.book-analysis .workbench-actions') && !!document.querySelector('[data-nav-book-section="manuscript"]') && !!document.querySelector('[data-nav-book-section="overview"]')`, 'workbench-sidebar-navigation');
 
     // The Run Liveness Signal, asserted where this Journey is deterministic: after settlement. While
     // the card is `executing` the runner may see the signal line, but a deterministic Run settles too
@@ -1775,13 +1781,13 @@ async function main() {
       const opened=outcome?.querySelector(':scope > details.analysis-run-report');
       if(!(opened instanceof HTMLDetailsElement) || opened.open) return false;
       const exact=opened.querySelector(':scope > details.technical-details');
-      if(!(exact instanceof HTMLDetailsElement) || exact.open) return false;
+      if(!(exact instanceof HTMLDetailsElement) || (exact.open && !exact.hidden)) return false;
       const decision=opened.cloneNode(true);
       for(const details of decision.querySelectorAll('details')) details.remove();
       const stages=Array.from(opened.querySelectorAll('[data-run-report-stage]'));
       return opened.dataset.runReportDigest===${JSON.stringify(reportDigest)} && opened.dataset.runReportRun===${JSON.stringify(report.runRecordId)} &&
         opened.dataset.runReportClassification==='completed-with-gaps' &&
-        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成，保留了没读成的部分 · ') &&
+        opened.querySelector(':scope > summary')?.textContent.startsWith('查看运行报告 · 已完成 · 1/8 个单元未读成 · ') &&
         JSON.stringify(stages.map((stage)=>[stage.dataset.runReportStage, stage.dataset.runReportStageState]))===${JSON.stringify(JSON.stringify(report.stages.map((stage) => [stage.stage, stage.state])))} &&
         stages[0].textContent.startsWith('逐个阅读范围分析：完成，有没读成的部分') && stages[1].textContent.startsWith('跨范围比对：完成') &&
         opened.querySelector('.analysis-run-report-units')?.textContent===${JSON.stringify(`共 ${report.units.submitted} 个阅读范围：沿用上一份 ${report.units.reused} 个，重新分析 ${report.units.recomputed} 个，其中 ${report.units.gaps} 个没有读成，${report.units.retried} 个安全重试过。`)} &&
@@ -2184,13 +2190,13 @@ async function main() {
       const firstExact=first.querySelector('details.technical-details');
       if(!(firstExact instanceof HTMLDetailsElement)) return false;
       return !section.querySelector('.field-note.technical-identity') &&
-        section.querySelectorAll(':scope > details.technical-details').length===1 && !setExact.open &&
+        section.querySelectorAll(':scope > details.technical-details').length===1 && (!setExact.open || setExact.hidden) &&
         setExact.textContent.includes(${JSON.stringify(revision.resultSetId)}) && setExact.textContent.includes('baseline-manuscript-analysis') &&
-        Array.from(section.querySelectorAll(':scope > p')).some((line)=>line.textContent==='共 4 份分析 · 最新的是第 4 份') &&
+        section.querySelector(':scope > h4')?.textContent==='历次分析 · 共 4 份 · 最新第 4 份' &&
         // Synchronized delta (#406): an entry's two readings speak of 份 and 阅读范围; Revision ordinals,
         // lineage counts and the exact creation instant are in the entry's own disclosure.
-        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent+lines[1].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
-        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===2) &&
+        entries.every((entry)=>{ const lines=Array.from(entry.querySelectorAll(':scope > p')); const exact=entry.querySelector(':scope > details.technical-details'); return lines[0].textContent.startsWith('第 '+entry.dataset.historyOrdinal+' 份 · ') && !/Revision|单元|pin/u.test(lines[0].textContent) && exact.textContent.includes('Revision '+entry.dataset.historyOrdinal+' · ') && exact.textContent.includes('复用 '); }) &&
+        entries.every((entry)=>entry.querySelectorAll(':scope > details.technical-details').length===1 && entry.querySelectorAll(':scope > p').length===1) &&
         // Synchronized delta (#406): each entry also opens the report of the Run that produced it — its
         // own Run's, bound to its own revision, closed by default — so the entry's own identity
         // disclosure is counted as a direct child and the report's is its own.
@@ -2218,7 +2224,7 @@ async function main() {
         card.querySelectorAll('[data-analysis-axis]').length===4 && axis('freshness')==='superseded' && axis('coverage')==='partial' && axis('reducer-closure')==='closed-with-gaps' && axis('assurance')==='qualified-with-open-conflicts' &&
         card.querySelectorAll('[data-analysis-unit]').length===8 && card.querySelectorAll('[data-analysis-unit-lineage="recomputed"]').length===8 &&
         card.querySelector('[data-analysis-gap-unit="2"] [data-analysis-action="return-to-range"]') instanceof HTMLButtonElement &&
-        card.textContent.includes('历史修订版 Revision 1（只读）') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
+        card.textContent.includes('历史分析结果 · Revision 1 · 只读') && card.textContent.includes('已被后续修订版取代') && card.textContent.includes(${JSON.stringify(revision.digest)}) &&
         card.querySelector('[data-analysis-action="close-revision"]') instanceof HTMLButtonElement &&
         card.querySelector('[data-analysis-action="open-revision"][data-analysis-revision-ordinal="1"]')?.disabled===true && ${ONLY_ANALYSIS_ACTIONS};
     })()`, 'history-open-surface');
@@ -2286,18 +2292,19 @@ async function main() {
     requireJourney(retryOption?.unitOrdinal === 5 && retryOption.startPosition === SAMPLE1_UNIT_RANGES[4][0] && retryOption.endPosition === SAMPLE1_UNIT_RANGES[4][1] &&
       sameRecord(retryOption.expected, { reused: 5, recomputed: 3, invalidated: 1, bypassed: 2 }), 'safe-retry-option', settledBook.updateControls);
     const retryRange = { startPosition: retryOption.startPosition, endPosition: retryOption.endPosition };
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-5'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'safe-retry-range-select');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'safe-retry-range-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared'`, 'safe-retry-prepared', 120_000);
     const preparedRetry = await readBaseline(renderer);
     const retryBoundary = preparedRetry?.planEnvelope?.boundary;
+    // #1311 H1 synchronized delta: every kind declares a separate completed-not-json retry.
     requireJourney(preparedRetry?.state === 'prepared' && preparedRetry.taskIntent?.mode === 'reanalyze-range' && sameRecord(preparedRetry.update?.selectedRange, retryRange) &&
       preparedRetry.update?.predecessor?.revisionId === revision4.revisionId && sameRecord(preparedRetry.update?.reusePlan?.counts, retryOption.expected) &&
       preparedRetry.providerResolutionPlan?.executionRoute?.fixtureIdentity === RETRY_FIXTURE_IDENTITY && preparedRetry.providerResolutionPlan?.executionRoute?.fixtureSha256 === retryFixtureDigest &&
       JSON.stringify(preparedRetry.providerResolutionPlan?.executionRoute?.fixtureLineage?.map((link) => link.identity)) === JSON.stringify([RETRY_FIXTURE_IDENTITY, FIXTURE_IDENTITY, FIXTURE_BASE_IDENTITY]) &&
       preparedRetry.planEnvelope?.planVersion === 1 && preparedRetry.planVersion?.ordinal === 1 && preparedRetry.planVersion?.state === 'current' && preparedRetry.planVersion?.planRevisionId === null &&
       preparedRetry.planVersion?.planEnvelopeDigest === preparedRetry.planEnvelope.digest && preparedRetry.planVersions?.length === 1 && preparedRetry.planRevisions?.length === 0 && preparedRetry.planRevision === null &&
-      JSON.stringify(retryBoundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry']) &&
+      JSON.stringify(retryBoundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['safe-retry', 'contract-retry']) &&
       JSON.stringify(retryBoundary?.material?.map((entry) => entry.field)) === JSON.stringify(PLAN_MATERIAL_FIELDS) &&
       retryBoundary?.participation?.expected === false && retryBoundary.participation.statement === '预计无需中途参与' &&
       sameRecord(preparedRetry.planVersion?.materialInputs?.selectedRange, retryRange) && preparedRetry.planVersion?.materialInputs?.predecessorRevision?.revisionId === revision4.revisionId &&
@@ -2315,7 +2322,7 @@ async function main() {
       const open=card?.querySelector('[data-task-plan-open="baseline-analysis"]');
       const versions=card?.querySelector('details.analysis-plan-versions-technical');
       return card?.dataset.planVersion==='1' && card.dataset.planVersionCount==='1' && card.dataset.planRevisionPending==='false' &&
-        !card.querySelector('.analysis-plan-boundary') && versions instanceof HTMLDetailsElement && !versions.open &&
+        !card.querySelector('.analysis-plan-boundary') && versions instanceof HTMLDetailsElement && (!versions.open || versions.hidden) &&
         versions.querySelector('.analysis-plan-versions')?.dataset.planVersionCount==='1' && card.querySelector('[data-plan-version-ordinal="1"][data-plan-version-state="current"]')!==null &&
         !card.querySelector('.analysis-plan-drift-note') && !card.querySelector('[data-analysis-action="view-plan-revision"], [data-analysis-action="reconfirm-plan"], [data-analysis-action="authorize"]') &&
         open instanceof HTMLButtonElement && !open.disabled && open.textContent==='查看计划并开始';
@@ -2390,7 +2397,7 @@ async function main() {
       driftOptionB?.unitOrdinal === 8 && sameRecord(driftOptionB.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'plan-revision-options', settledRetry.updateControls);
     const rangeA = { startPosition: driftOptionA.startPosition, endPosition: driftOptionA.endPosition };
     const rangeB = { startPosition: driftOptionB.startPosition, endPosition: driftOptionB.endPosition };
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-prepare-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.analysisState==='prepared' && document.querySelector('.baseline-analysis-card')?.dataset.taskIntentId!==${JSON.stringify(preparedRetry.taskIntent.taskIntentId)}`, 'plan-revision-prepared', 120_000);
     const preparedDrift = await readBaseline(renderer);
@@ -2405,7 +2412,7 @@ async function main() {
     at('plan-revision-drift');
     cancellation.throwIfRequested();
     // The material change before authorization: the selected range moves to unit 8 and the same prepared Task is prepared again.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-drift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-pending', 120_000);
     const drifted = await readBaseline(renderer);
@@ -2485,7 +2492,7 @@ async function main() {
     // (iv) The way back (Issue #281). Preparing again at the range version 1 froze records the revert
     // as its own append-only revision, settles the pending one, and returns 开始任务 to the version that was
     // never replaced: the same envelope digest, still one plan version, nothing rewritten.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-3'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-a');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-revert-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='false'`, 'plan-revision-reverted', 120_000);
     const reverted = await readBaseline(renderer);
@@ -2530,7 +2537,7 @@ async function main() {
       revertedDrawer.bar?.state === 'ready' && barActions(revertedDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'plan-revision-revert-drawer-plan', revertedDrawer);
     // Back to the change this Task means to confirm: the same range drift, pending on its own again.
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
+    await assertRenderer(renderer, `(() => { const radio=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"] #analysis-range-8'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'plan-revision-revert-select-b');
     await startUpdate(renderer, 'reanalyze-range', '重新分析所选范围', 'plan-revision-redrift-click');
     await waitFor(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.planRevisionPending==='true'`, 'plan-revision-redrift-pending', 120_000);
     const redrifted = await readBaseline(renderer);
@@ -2577,8 +2584,8 @@ async function main() {
       v2Drawer.technical['selected-range'] === `段落 ${rangeB.startPosition}–${rangeB.endPosition}` &&
       v2Drawer.technical['plan-versions'] === `版本 1 · superseded · ${v1Digest}；版本 2 · current · ${v2Digest}` &&
       v2Drawer.technical['plan-envelope'] === v2Digest &&
-      // Issue #420 (S74a): version 2 is startable from the bar, whose summary names it.
-      v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary?.includes(' · 计划版本 2 · ') === true &&
+      // Issue #420 (S74a): version 2 is startable from the bar; its identity stays in the drawer state above.
+      v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary === '产出一份基线分析，不修改稿件。' &&
       barActions(v2Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'plan-revision-drawer-range', v2Drawer);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个 · 任务输入修订版 ${reconfirmed.checkpoint.revisionLabel} · 计划版本 2`)}`, 'plan-revision-summary-range');
@@ -2597,7 +2604,7 @@ async function main() {
       { id: 'reduction', removed: false, tag: null, control: null, name: null },
       { id: 'assurance-sampling', removed: false, tag: null, control: 'remove', name: '去掉这一步：核对与抽检' },
       { id: 'safe-retry', removed: false, tag: null, control: 'remove', name: `不允许：${SAFE_RETRY_ADAPTATION}` },
-    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_STEPS_NOTE, PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
+    ]) && JSON.stringify(editable.notes) === JSON.stringify([PLAN_EDIT_ASK_FIRST_NOTE]) && editable.record === null,
     'plan-edit-controls', editable);
     // The glyph is the style sheet's: the column still reads as the adaptation's words alone.
     const openDrawer = await readDrawer(renderer);
@@ -2652,11 +2659,12 @@ async function main() {
     const v3Digest = edited?.planEnvelope?.digest;
     const editRevision = edited?.planRevisions?.at(-1);
     const PLAN_EDITS = { removedSteps: ['assurance-sampling'], disallowedAdaptations: ['safe-retry'] };
+    // Withdrawing the transient-failure retry leaves the distinct contract retry declared.
     requireJourney(edited?.taskIntent?.taskIntentId === preparedDrift.taskIntent.taskIntentId && edited.state === 'prepared' && DIGEST_PATTERN.test(v3Digest) && v3Digest !== v2Digest &&
       edited.planVersion?.ordinal === 3 && edited.planVersion.state === 'current' && sameValue(edited.planVersion.edits, PLAN_EDITS) &&
       JSON.stringify(edited.planVersions?.map((version) => [version.ordinal, version.state])) === JSON.stringify([[1, 'superseded'], [2, 'superseded'], [3, 'current']]) &&
       sameValue(edited.planVersion.materialInputs, reconfirmed.planVersion.materialInputs) && sameValue(edited.executionPlan?.editorEdits, PLAN_EDITS) &&
-      JSON.stringify(edited.planEnvelope?.boundary?.adaptable) === '[]' && edited.planRevisions?.length === 4 && edited.planRevision === null &&
+      JSON.stringify(edited.planEnvelope?.boundary?.adaptable?.map((entry) => entry.adaptationClass)) === JSON.stringify(['contract-retry']) && edited.planRevisions?.length === 4 && edited.planRevision === null &&
       editRevision?.trigger === 'plan-edit' && editRevision.state === 'resolved' && editRevision.priorOrdinal === 2 && editRevision.nextOrdinal === 3 &&
       // The stored diff reads back in its canonical key order, so it is compared entry by entry, not as one string.
       JSON.stringify(editRevision.diff?.map((entry) => [entry.field, entry.label, entry.prior, entry.proposed, entry.materiality])) === JSON.stringify([
@@ -2666,7 +2674,7 @@ async function main() {
     'plan-edit-version', { planVersion: edited?.planVersion, planRevision: editRevision, boundary: edited?.planEnvelope?.boundary });
     const v3Drawer = await readDrawer(renderer);
     const v3Items = await readEditable(renderer);
-    requireJourney(v3Drawer?.version === '3' && v3Drawer.bar?.summary?.includes(' · 计划版本 3 · ') === true &&
+    requireJourney(v3Drawer?.version === '3' && v3Drawer.bar?.summary === '产出一份基线分析，不修改稿件。' &&
       barActions(v3Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
       v3Items?.record?.startsWith('第 3 版由你修改（') === true && v3Items.record.endsWith('）：步骤 · 核对与抽检：要做 → 不做；可以自己调整 · 安全地再试一次：允许 → 不允许') &&
       JSON.stringify(v3Items.items.slice(2).map((item) => [item.id, item.removed, item.tag, item.control])) === JSON.stringify([
@@ -2921,16 +2929,20 @@ async function main() {
 
     at('review-destination');
     await openReviewDestination(renderer, 'review-destination');
-    // Nothing reviewed yet: every category the model reads is 未审阅, and the two whose basis does not exist
-    // yet are 不可用 with their reason (V2-UX-REV-007, REV-013).
-    await assertRenderer(renderer, `(() => { const rows=Array.from(document.querySelectorAll('table.review-coverage tbody tr[data-review-category]')); const state=Object.fromEntries(rows.map((row)=>[row.dataset.reviewCategory, row.dataset.coverage])); return rows.length===9 && document.querySelector('.review-workspace-card')?.dataset.reviewState==='empty' && state['series-consistency']==='unavailable' && state['cross-deliverable-consistency']==='unavailable' && ['typos-and-usage','style-and-format','academic-integrity','publication-risk','literary-expression'].every((id)=>state[id]==='never'); })()`, 'review-coverage-never');
+    // C1: no coverage, records or bare controls before the first review.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewState==='empty' && card.classList.contains('surface-empty') && card.querySelector('h2')?.textContent==='审阅' && card.querySelector('.state-term')?.textContent==='尚未审阅' && card.querySelector('.lede')?.textContent==='按类别审读稿件，发现会同步到原文。' && card.querySelector('[data-review-action="new-review"]') && !card.querySelector('table, select, .review-coverage, .review-runs-section, [data-list-position]'); })()`, 'review-empty-card');
 
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-open');
-    // Nine categories and none preselected, the unavailable two saying why; four scopes and none
-    // preselected; the four consequence lines; the quick start waits for a Default Execution Rule.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===10 && boxes.every(box=>!box.checked) && boxes.some(box=>box.value==='local-text-check'&&!box.disabled) && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences').length===0 && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='查看计划'; })()`, 'review-sheet-contract');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].review-sheet'); return sheet.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot') && !document.querySelector('.review-filters select'); })()`, 'review-shared-nonmodal-sheet');
+    // Nine review categories, remembered defaults, four pill scopes and reactive consequences (#1320).
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const boxes=Array.from(sheet.querySelectorAll('input[name="review-category"]')); const scopes=Array.from(sheet.querySelectorAll('input[name="review-scope"]')); const disabled=boxes.filter(box=>box.disabled); const start=sheet.querySelector('[data-review-action="start"]'); return boxes.length===9 && boxes.filter(box=>box.checked).map(box=>box.value).join(',')==='typos-and-usage' && !boxes.some(box=>box.value==='local-text-check') && JSON.stringify(disabled.map(box=>box.value).sort())===JSON.stringify(['cross-deliverable-consistency','series-consistency']) && scopes.length===4 && scopes.find(scope=>scope.value==='whole')?.checked===true && sheet.querySelector('[data-review-action="quick-start"]')===null && sheet.querySelectorAll('dl.review-consequences dt').length===4 && sheet.querySelector('[data-consequence="cost"]')?.textContent.match(/约 [0-9]+ 次模型调用/u) && start instanceof HTMLButtonElement && start.textContent==='开始审阅' && sheet.querySelector('[data-review-action="prepare"]')?.textContent==='先看计划'; })()`, 'review-sheet-contract');
+
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const before=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); const after=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); return before!==after && sheet.querySelector('.sheet-foot .review-sheet-procedure') && !sheet.querySelector('.review-materials') && !sheet.querySelector('.similar-materials') && [...sheet.querySelectorAll('.review-category-basis')].every(node=>!/第\s*[0-9]+\s*版|\bv[0-9]+|version/iu.test(node.textContent)); })()`, 'review-reactive-consequences');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'review-sheet-reopen');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-reopened');
 
     at('review-prepare');
     // F-05 part 2a (Issue #1109 revisions 6-7): a real governed house rule for this category exists before the review, made through
@@ -2941,7 +2953,7 @@ async function main() {
     requireJourney(governedPreference?.current?.lines?.some((line) => line.categoryId === 'typos-and-usage' && line.bookId === null && line.text === '统一编辑用语，保留有意的节奏。') === true,
       'review-governed-preference-exists', governedPreference?.current?.lines);
     await renderer.evaluate(`window.ai7.savePreference({key:'learning.askFrequency',value:'often'})`);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format','plot-consistency']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-prepare-start');
     // Synchronized delta with Issue #418 (S72 D4): the prepared Run is one line on ②B; its plan opens in the
     // Task Drawer. Synchronized delta with Issue #420 (S74a A5): the Run's one approval left ②B for the
     // drawer's bar, so ②B offers 查看计划并开始 beside 返回修改 and no authorization button.
@@ -2967,7 +2979,7 @@ async function main() {
     // Issue #420 (S74a): the Run's one approval is the bar's 开始任务; the categories' deterministic route
     // needs no credential, so it is offered while the Book's credential stays `missing`.
     requireJourney(reviewDrawer.bar?.state === 'ready' && reviewDrawer.bar.start === 'ready' &&
-      reviewDrawer.bar.summary === `《${bookName}》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿` &&
+      reviewDrawer.bar.summary === '产出审阅发现与审阅报告，不修改稿件。' &&
       reviewDrawer.bar.statement === BAR_STATEMENT && reviewDrawer.bar.note === null &&
       barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'review-bar-ready', reviewDrawer.bar);
@@ -3027,17 +3039,16 @@ async function main() {
     // every other finding of a model-read category became a mark on the manuscript (V2-UX-REV-008, MARK-010).
     requireJourney(reviewed?.run?.state === 'settled' &&
       reviewedCategories.map((category) => `${category.categoryId}:${category.state}`).join('|') === 'typos-and-usage:settled|style-and-format:settled|plot-consistency:settled' &&
-      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 3 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 1 &&
+      reviewedCategories[0].findingsCount > 0 && reviewedCategories[0].excludedCount === 0 && reviewedCategories[1].findingsCount > 0 && reviewedCategories[1].excludedCount === 0 &&
       reviewed.run.findings.filter((finding) => finding.categoryId !== 'plot-consistency').every((finding) => finding.markId !== null && finding.status === 'pending') &&
-      reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null),
+      reviewed.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage').every((finding) => finding.output === 'change-suggestion' && finding.replacement !== null || finding.output === 'annotation' && finding.replacement === null),
     'review-run-settled', { state: reviewed?.run?.state, categories: reviewedCategories.map((category) => [category.categoryId, category.state, category.findingsCount, category.excludedCount]) });
-    // #1084: this v2 fixture first returns an invalid envelope, then valid siblings and one invalid finding.
-    // The declared retry closes the unit; its rejected finding is readable and never becomes a mark.
-    requireJourney(reviewed.run.excluded.some((entry) => entry.reasonCode === 'contract-schema-invalid') &&
-      reviewed.run.findings.every((entry) => entry.quote !== '合成的无效发现') &&
+    // H3: the retry still closes the unit; unknown severity and an unmatched quotation become a disclosed annotation.
+    requireJourney(reviewed.run.excluded.length === 0 &&
+      reviewed.run.findings.some((entry) => entry.quote === '合成的无效发现' && entry.output === 'annotation' && entry.replacement === null && entry.note.includes('引文未逐字匹配')) &&
       reviewed.run.findings.some((entry) => entry.categoryId === 'typos-and-usage' && entry.blockPosition !== null && entry.blockPosition <= SAMPLE1_UNIT_RANGES[0][1]),
     'review-v2-rejected-sibling');
-    await assertRenderer(renderer, `(() => { const details=document.querySelector('details.review-excluded'); if(!(details instanceof HTMLDetailsElement))return false; details.open=true; return details.querySelector('summary')?.textContent==='未列为发现的 4 条' && details.textContent.includes('contract-schema-invalid') && details.textContent.includes('合成的无效发现'); })()`, 'review-v2-visible-excluded');
+    await assertRenderer(renderer, `document.querySelector('details.review-excluded')===null && document.querySelectorAll('article.review-finding').length>0`, 'review-v2-visible-excluded');
     await assertRenderer(renderer, `document.querySelectorAll('ol.review-progress > li[data-category-state="settled"]').length===3 && document.querySelectorAll('section.review-group[data-review-category]').length>=2`, 'review-groups');
     // The drawer beside ②B read the plan again as the Run moved; it now states the Run's end.
     const settledReviewDrawer = await drawerShowing(renderer, preparedReview.reviewRunId, 'settled', 'review-drawer-settled');
@@ -3051,6 +3062,7 @@ async function main() {
     requireJourney(centerBeforeDisposition.total > 0 && centerReview !== undefined && centerBeforeDisposition.groups.some((group) => group.category.startsWith('review:')), 'book-findings-source-counts');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-open');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-ready');
+    await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll('[data-findings-filter]').length===3 && !root.querySelector('select') && root.querySelector('.finding-row .finding-body .finding-why') && root.querySelector('.finding-row .finding-location'); })()`, 'findings-filter-row-layout');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); const row=root?.querySelector('[data-finding-id='+CSS.escape(${JSON.stringify(centerReview.id)})+']'); const open=row?.querySelector('button'); if(root?.dataset.findingsTotal!==${JSON.stringify(String(centerBeforeDisposition.total))} || !(open instanceof HTMLButtonElement))return false; open.click(); return true; })()`, 'book-findings-record-link');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${centerReview.target.findingId}"]')`, 'book-findings-exact-review');
 
@@ -3077,7 +3089,7 @@ async function main() {
     // 错别字与规范用语 in one confirmation: the strip states the exact write scope before 确认应用, and one
     // Effect writes every listed suggestion (V2-UX-REV-006, PDEC-012, EAPP-003).
     const beforeBatch = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
-    const batchable = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.status === 'pending' && finding.markStatus === 'open' && finding.anchorState === 'exact');
+    const batchable = beforeBatch.run.findings.filter((finding) => finding.categoryId === 'typos-and-usage' && finding.output === 'change-suggestion' && finding.status === 'pending' && finding.markStatus === 'open' && finding.anchorState === 'exact');
     requireJourney(batchable.length > 1, 'review-batch-candidates', { count: batchable.length });
     await reviewAction(renderer, 'section.review-group[data-review-category="typos-and-usage"] [data-review-action="batch-prepare"]', 'review-batch-prepare');
     await waitFor(renderer, `document.querySelector('section.review-batch-strip[data-review-category="typos-and-usage"]')?.dataset.reviewBatchState==='ready'`, 'review-batch-ready');
@@ -3088,6 +3100,8 @@ async function main() {
     requireJourney(afterBatch?.manuscript?.journalSequence === beforeBatch.manuscript.journalSequence + 1 &&
       batchable.every((finding) => afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus === 'applied'),
     'review-batch-one-effect', { before: beforeBatch.manuscript.journalSequence, after: afterBatch?.manuscript?.journalSequence });
+    requireJourney(beforeBatch.run.findings.filter((finding) => finding.output === 'annotation').every((finding) =>
+      afterBatch.run.findings.find((after) => after.findingId === finding.findingId)?.markStatus !== 'applied'), 'review-batch-preserves-annotations');
 
     at('review-ignore-with-reason');
     // 忽略并说明 needs a reason, recorded as a Quality Signal, and the finding reads 已忽略 (V2-UX-REV-004).
@@ -3123,7 +3137,7 @@ async function main() {
     // Issue #1174 (ADR 0095 §5): a /2 record adds 章节与类别统计 and 发现详单 between 必须处理的事项 and 各类别摘要.
     await reviewAction(renderer, '[data-review-action="generate-report"]', 'review-report-generate');
     await waitFor(renderer, `document.querySelector('section.review-report')?.dataset.reportVersion==='1'`, 'review-report-version');
-    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLButtonElement && !exporter.disabled && exporter.textContent==='导出…' && exporter.dataset.reportVersion==='1'; })()`, 'review-report-parts');
+    await assertRenderer(renderer, `(() => { const report=document.querySelector('section.review-report'); const parts=Array.from(report.querySelectorAll('section.review-report-part[data-report-part] > h6')).map((heading)=>heading.firstChild?.textContent); const exporter=report.querySelector('[data-review-action="export"]'); return JSON.stringify(parts)===JSON.stringify(['概览表','必须处理的事项','章节与类别统计','发现详单','各类别摘要','附录']) && report.querySelector('table.review-report-statistics tbody tr:last-child th')?.textContent==='合计' && exporter instanceof HTMLElement && exporter.tagName==='SUMMARY' && exporter.textContent==='导出 ▾' && exporter.dataset.reportVersion==='1' && report.querySelector('[data-export-format-action="markdown"]')?.disabled===false; })()`, 'review-report-parts');
 
     at('review-report-export');
     // Issue #500 (S64b part 2; ADR 0079 §3.4): 导出… opens ④ 导出's own card in the report — the report's own review of
@@ -3136,8 +3150,8 @@ async function main() {
     requireJourney(/^第 \d+ 次审阅$/u.test(runHeading ?? ''), 'report-export-run-heading', runHeading);
     const reportLabel = `审阅报告 · ${runHeading} · 第 1 版`;
     await assertRenderer(renderer, `document.querySelector('section.review-report [data-review-action="export"]')?.getAttribute('aria-label')===${JSON.stringify(`导出「${reportLabel}」…`)} && ${reportCard}===null`, 'report-export-named');
-    await assertRenderer(renderer, `(() => { const radio=document.querySelector('section.review-report .review-report-export-slot input[value="markdown"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'report-inline-markdown');
-    await reviewAction(renderer, 'section.review-report [data-review-action="export"]', 'report-export-open');
+    await assertRenderer(renderer, `(() => { const menu=document.querySelector('section.review-report [data-export-menu]'); menu.querySelector('summary').click(); return menu.open; })()`, 'report-format-menu');
+    await reviewAction(renderer, 'section.review-report [data-export-format-action="markdown"]', 'report-export-open');
     await waitFor(renderer, `${reportCard}?.dataset.exportPhase==='done' && ${reportCard}.querySelector('.export-receipt')?.dataset.exportOutcome==='created'`, 'report-export-written', 60_000);
     const reportMarkdown = await readFile(reportExportPath, 'utf8');
     const reportBlocks = reportMarkdown.slice(0, -1).split('\n\n');
@@ -3161,7 +3175,7 @@ async function main() {
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
     // both need review; the row offers only what changed (V2-UX-REV-007).
-    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('table.review-coverage tbody tr[data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
+    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('.review-coverage-card[data-review-category="'+id+'"]'); const grid=document.querySelector('ul.review-coverage'); return grid!==null && getComputedStyle(grid).display==='grid' && grid.children.length===9 && Array.from(grid.children).every((card)=>card.querySelector('.state-term') && card.querySelector('.review-coverage-counts')) && row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
 
     // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, IA-012) ----
     // Synchronized delta with Issue #425: 资料与记录 gains 来源与证据 between 分析 and 工作概览. This Book's Runs read on the
@@ -3178,7 +3192,7 @@ async function main() {
     requireJourney(sources?.bookId === imported.bookId && sources.staleAfterDays === 90 && sources.records.length === 0 && sources.next === null &&
       sources.units.length === 0 && sources.findings.length === 0 && sources.statement === '这本书还没有留存的外部来源：外部来源只在联网核查的运行中留存。',
     'sources-provider-free-reading', sources);
-    await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && JSON.stringify(Array.from(view.querySelectorAll('.workbench-actions button')).map((item)=>item.textContent))===JSON.stringify(['打开稿件','工作概览']); })()`, 'sources-nothing-to-save');
+    await assertRenderer(renderer, `(() => { const view=document.querySelector('[data-screen="book-sources"]'); return view?.querySelector('.research-evidence-statement')?.textContent===${JSON.stringify(sources.statement)} && view.querySelectorAll('.research-evidence-card, [data-evidence-action="save-as-material"]').length===0 && !view.querySelector('.workbench-actions') && !!document.querySelector('[data-nav-book-section="manuscript"]'); })()`, 'sources-nothing-to-save');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'sources-back-to-manuscript');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'sources-back-manuscript');
     await openReviewDestination(renderer, 'sources-back-to-review');
@@ -3243,10 +3257,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'overlap-sheet');
     // 开始审阅 (ADR 0096 §3, #1177): one action prepares the plan and, while it is ready, records its Run Authorization; the drawer
     // stays optional while the visible Run settles; nothing waits on the drawer's 开始任务.
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const start=sheet.querySelector('[data-review-action="start"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='开始审阅'||!start.classList.contains('primary'))return false; start.click(); return true; })()`, 'overlap-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); const start=sheet.querySelector('[data-review-action="start"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='开始审阅'||!start.classList.contains('primary'))return false; start.click(); return true; })()`, 'overlap-prepare');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open!==true && ['running','settled'].includes(document.querySelector('.review-workspace-card')?.dataset.reviewState)`, 'overlap-prepared', 120_000);
     const overlapPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
-    requireJourney(overlapPrepared.authorization !== null, 'overlap-one-action-authorized', overlapPrepared.authorization);
+    requireJourney(overlapPrepared.authorization !== null && overlapPrepared.categories.length === 1 && overlapPrepared.categories[0].categoryId === 'typos-and-usage', 'overlap-one-action-authorized', { authorization: overlapPrepared.authorization, categories: overlapPrepared.categories.map((category) => category.categoryId) });
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'overlap-settled', 180_000);
     const overlapReviewed = await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`);
     const overlapFinding = overlapReviewed.run.findings[0];
@@ -3296,7 +3310,7 @@ async function main() {
     await openReviewDestination(renderer, 'factual-review-destination');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'factual-review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'factual-sheet-open');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled||box.checked)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'factual-prepare-start');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='factual-review'`, 'factual-prepared', 120_000);
     const factualPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(factualPrepared?.state === 'prepared' && UUID_PATTERN.test(factualPrepared.reviewRunId), 'factual-prepared-run');
@@ -3308,7 +3322,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('#task-drawer fieldset.task-plan-assurance') !== null`, 'factual-selector-shown');
     // One compact selector: three levels, 标准核查 by default, each with its consequence, none disabled while the policy names no
     // minimum (EASSURE-001, EASSURE-008); it names no model, provider or quality ladder (EASSURE-013).
-    const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.field-note')?.textContent ?? '' })) }; })()`);
+    const selector = await renderer.evaluate(`(() => { const box=document.querySelector('#task-drawer fieldset.task-plan-assurance'); if(!(box instanceof HTMLElement))return null; return { shown:box.dataset.taskPlanAssurance, options:Array.from(box.querySelectorAll('input[type=radio]')).map((input)=>({ level:input.value, checked:input.checked, disabled:input.disabled, label:input.closest('label')?.querySelector('strong')?.textContent, consequence:input.closest('label')?.querySelector('.task-plan-assurance-consequence')?.textContent ?? '' })) }; })()`);
     requireJourney(selector?.shown === 'standard' && JSON.stringify(selector.options.map((option) => [option.level, option.label, option.checked, option.disabled])) ===
       JSON.stringify([['quick', '快速整理', false, false], ['standard', '标准核查', true, false], ['strict', '严格核查', false, false]]) &&
       selector.options.every((option) => option.consequence.length > 0 && !/更正确|模型/u.test(option.consequence)), 'factual-level-selector', selector);
@@ -3392,7 +3406,7 @@ async function main() {
     // EASSURE-012).
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="prepare-correction"]`, 'factual-correction-prepare');
     await waitFor(renderer, `document.querySelectorAll('${workspaceSelector} [data-correction-variant]').length===3`, 'factual-correction-draft');
-    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent==='证据核查未完成' && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
+    await assertRenderer(renderer, `(() => { const ws=document.querySelector(${JSON.stringify(workspaceSelector)}); const variants=Array.from(ws.querySelectorAll('[data-correction-variant]')); const ranges=Array.from(ws.querySelectorAll('[data-correction-range]')); return JSON.stringify(variants.map((input)=>input.dataset.correctionVariant))===JSON.stringify(['v1','v2','own-edit']) && variants.every((input)=>!input.checked) && ws.querySelector('.correction-assurance-label')?.textContent.startsWith('证据核查未完成 · 尚缺：') && ranges.some((input)=>input.dataset.primary==='true' && input.checked) && ranges.filter((input)=>input.checked).length===1 && ws.querySelector('[data-evidence-action="save-correction"]')?.disabled===true; })()`, 'factual-correction-unselected');
     await assertRenderer(renderer, `(() => { const input=document.querySelector('${workspaceSelector} [data-correction-variant="v1"]'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'factual-correction-choose');
     await waitFor(renderer, `document.querySelector('${workspaceSelector} [data-evidence-action="save-correction"]')?.disabled===false`, 'factual-correction-ready');
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="save-correction"]`, 'factual-correction-save');
@@ -3474,8 +3488,8 @@ async function main() {
         coverage:section?.dataset.coverage, freshness:section?.dataset.freshness,
         anchors:Array.from(card?.querySelectorAll('.custom-row') ?? [], (row)=>[row.dataset.unitOrdinal, row.dataset.anchorState]),
         links:card?.querySelectorAll('.custom-row [data-analysis-action="custom-jump"]').length ?? 0,
-        counts:section?.querySelector('.custom-counts')?.textContent ?? null,
-        feedback:section?.querySelector('.custom-feedback-note')?.textContent ?? null,
+        counts:section?.querySelector('.custom-counts')?.firstChild?.textContent ?? null,
+        feedback:document.querySelector('.custom-feedback-note')?.textContent ?? null,
         judged:card?.querySelectorAll('[data-analysis-action="open-feedback"]').length ?? 0,
         state:card?.querySelector('.custom-task-state')?.dataset.taskState ?? null,
       };
@@ -3533,15 +3547,13 @@ async function main() {
     const recorded = await readBaseline(renderer);
     const realRevision = recorded?.resultSetRevision;
     const realReport = recorded?.taskOutcome?.report;
-    requireJourney(recorded?.run?.state === 'completed-with-gaps' && recorded.taskOutcome?.classification === 'completed-with-gaps' &&
-      realRevision?.ordinal === 1 && realRevision.units.filter((unit) => unit.state === 'closed').length === 7 &&
-      realRevision.units[0].state === 'gap' && realRevision.gaps.length === 1 &&
-      realRevision.gaps[0].unitOrdinal === 1 && realRevision.gaps[0].code === 'contract-invalid' &&
-      realRevision.gaps[0].reason.includes('schema-invalid') && realRevision.coverage.state === 'partial' &&
-      realRevision.coverage.unitsClosed === 7 && realRevision.coverage.unitsTotal === 8, 'recorded-truthful-schema-gap');
-    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 84 &&
-      realRevision.synthesis.events.length === 64 && realRevision.synthesis.relationships.length === 55 &&
-      realRevision.synthesis.settingClaims.length === 70 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
+    requireJourney(recorded?.run?.state === 'completed' && recorded.taskOutcome?.classification === 'completed' &&
+      realRevision?.ordinal === 1 && realRevision.units.every((unit) => unit.state === 'closed') && realRevision.gaps.length === 0 &&
+      realRevision.units[0].unresolved.length === 7 && realRevision.units[0].salvaged?.filter((entry) => entry.reason === 'string-note-wrapped').length === 7 &&
+      realRevision.coverage.state === 'complete' && realRevision.coverage.unitsClosed === 8 && realRevision.coverage.unitsTotal === 8, 'recorded-salvaged-unit-closure');
+    requireJourney(realRevision.synthesis?.synopsis?.includes('曾本之') && realRevision.synthesis.entities.length === 93 &&
+      realRevision.synthesis.events.length === 69 && realRevision.synthesis.relationships.length === 60 &&
+      realRevision.synthesis.settingClaims.length === 76 && realRevision.synthesis.entities.some((entity) => entity.name === '郑雄') &&
       realRevision.synthesis.relationships.some((relationship) => relationship.subject === '郑雄' && relationship.object === '曾本之') &&
       realRevision.crossUnitFindings.length === 3 && realRevision.crossUnitReduction?.state === 'closed' &&
       realRevision.assuranceSample?.state === 'closed' && realRevision.assuranceSample.dispositions.length === 3 &&
@@ -3566,7 +3578,7 @@ async function main() {
       realRevision.adapterPin.fixtureSha256 === recordedFixtureDigest &&
       recorded.run.attempt.credentialReadinessCheck?.valueReleased === false && loopback.observedRequests() === 0,
     'recorded-zero-new-incurred-transmissions');
-    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed-with-gaps' && document.querySelector('[data-analysis-unit="1"][data-analysis-unit-state="gap"]') && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===7`, 'recorded-visible-gap');
+    await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card')?.dataset.runState==='completed' && document.querySelectorAll('[data-analysis-unit][data-analysis-unit-state="closed"]').length===8 && document.querySelector('[data-analysis-unit="1"]')?.textContent.includes('string-note-wrapped')`, 'recorded-visible-salvage');
     at('restart-immutable');
     await closeOwnedBrowser();
     await launchForCleanup();
@@ -3580,7 +3592,7 @@ async function main() {
       'recorded-restart-preserves-result-and-report');
 
     // #1161 rev6: a separate, unedited sample1 Book owns the genuine paused-/1 execution formerly simulated in L2.
-    // Keep the completed recorded Book above intact. This replay truthfully keeps unit1's schema gap and units2/3 closed.
+    // Keep the completed recorded Book above intact. This replay keeps all three units closed and unit 1's salvage metadata.
     at('recorded-retained-pause');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'recorded-paused-return-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'recorded-paused-library');
@@ -3618,8 +3630,7 @@ async function main() {
         recordedPaused.run.attempt.executionBinding.fixtureSha256 === recordedFixtureDigest &&
         sameRecord(recordedPaused.run.attempt.spans.map((span) => span.unitOrdinal), [1, 2, 3]) &&
         sameRecord(kept.map((unit) => unit.unitOrdinal), [1, 2, 3]) &&
-        kept[0].closed.state === 'gap' && kept[0].closed.gap.code === 'contract-invalid' &&
-        kept[0].closed.gap.reason.includes('schema-invalid') && kept.slice(1).every((unit) => unit.closed.state === 'closed') &&
+        kept.every((unit) => unit.closed.state === 'closed') && kept[0].closed.result.salvaged?.length === 7 &&
         recordedPaused.resultSetRevision === null && recordedPaused.taskOutcome === null,
       'recorded-paused-authentic-retained-checkpoints');
     } finally { await writeFile(unitHoldPath, 'release'); }
@@ -3627,7 +3638,7 @@ async function main() {
     // Issue #826: the same Book under the current contracts. 重新分析所选范围 over unit 1 recomputes its closure, units 1
     // and 2 (unit 2 reads unit 1's last block as overlap), and reuses the other six /1 results by lineage. The six entries
     // replayed are the reviewed real captures of that recomputation — units 1 and 2 and the reduction from the first
-    // repair, the three sampling /2 turns from the second — so unit 1, schema-invalid under /1, now closes. No recorded
+    // repair, the three sampling /2 turns from the second — so unit 1 closes under /2 with six typed notes. No recorded
     // reflection was ever asked with this replay's accounting (the real Run replayed its units from the development cache
     // and recorded no usage for them), so the reflection settles as the disclosed fixture mismatch it is.
     at('reanalyze-range-select');
@@ -3687,7 +3698,7 @@ async function main() {
     requireJourney(JSON.stringify(rangeBefore?.resultSetRevision) === JSON.stringify(realRevision) &&
       rangeBefore.updateControls?.target?.revisionId === realRevision.revisionId && recordedRangeOption?.unitOrdinal === 1 &&
       recordedRangeOption.startPosition === SAMPLE1_UNIT_RANGES[0][0] && recordedRangeOption.endPosition === SAMPLE1_UNIT_RANGES[0][1] &&
-      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }), 'range-recorded-predecessor-readable');
+      sameRecord(recordedRangeOption.expected, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }), 'range-recorded-predecessor-readable');
     const recordedSelectedRange = { startPosition: recordedRangeOption.startPosition, endPosition: recordedRangeOption.endPosition };
     await assertRenderer(renderer, `(() => {
       const block=document.querySelector('.baseline-analysis-card [data-update-action="reanalyze-range"]');
@@ -3711,7 +3722,7 @@ async function main() {
       sameRecord(rangeRecordedPrepared.update?.selectedRange, recordedSelectedRange) &&
       rangeRecordedPrepared.update.predecessor?.revisionId === realRevision.revisionId && rangeRecordedPrepared.update.predecessorCurrent === true &&
       JSON.stringify(rangeRecordedPlan?.recomputeClosure) === JSON.stringify([1, 2]) &&
-      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 1, bypassed: 1 }) &&
+      sameRecord(rangeRecordedPlan.counts, { reused: 6, recomputed: 2, invalidated: 0, bypassed: 2 }) &&
       JSON.stringify(rangeRecordedPlan.units.map((unit) => unit.disposition)) ===
         JSON.stringify(['recomputed', 'recomputed', 'reused', 'reused', 'reused', 'reused', 'reused', 'reused']) &&
       rangeRecordedPrepared.providerResolutionPlan?.executionRoute?.fixtureIdentity === RECORDED_RANGE_FIXTURE_IDENTITY &&
@@ -3786,7 +3797,7 @@ async function main() {
     await openReviewDestination(renderer, 'stock-leaf-review-destination');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'stock-leaf-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'stock-leaf-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); sheet.querySelector('input[name="review-category"][value="typos-and-usage"]').click(); sheet.querySelector('input[name="review-scope"][value="whole"]').click(); sheet.querySelector('[data-review-action="prepare"]').click(); return true; })()`, 'stock-leaf-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'stock-leaf-prepared', 120_000);
     const leafPrepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`)).run;
     requireJourney(leafPrepared.categories.length === 1 && leafPrepared.categories[0].plan.units === SAMPLE1_UNITS &&

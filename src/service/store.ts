@@ -1,3 +1,5 @@
+import { composeTaskOverview, estimateTaskStarts } from './task-overview.js';
+import { customAnalysisModeGoal } from '../shared/protocol.js';
 import * as modelSearchSettings from './model-search-settings.js';
 import * as materialIndexOperations from './material-index-operations.js';
 import * as globalAgentOperations from './global-agent-operations.js';
@@ -760,12 +762,12 @@ import {
   RESUME_BLOCKED_OFFLINE,
   ANSWER_BLOCKED_CONNECTION,
   ANSWER_BLOCKED_OFFLINE,
-  RESUME_BLOCKED_SLOT,
   type BaselineStoppedRunFacts,
   type BaselineCancellationRanges,
   assuranceSelector,
   taskPlanPage,
   taskDraftsPage,
+  bookTasksPage,
   reviewWorkspacePage,
   REVIEW_CHAPTER_PAGE_PATH,
 } from './task-plan.js';
@@ -850,7 +852,6 @@ import {
   QUICK_START_PLAN_CHANGED,
   QUICK_START_RANGE_REASON,
   QUICK_START_RULE_CHANGED,
-  QUICK_START_SLOT_BUSY,
   QUICK_START_RESEND,
   RULE_STATE_LABELS,
   SET_RULE_BUDGET,
@@ -3465,6 +3466,10 @@ export class EditorialStore {
             { findingsAfterOrdinal: after, categoryId: null, severity: null, status: null, chapterBlockId: null }).run!;
           for (const finding of run.findings) if (finding.status === 'pending') {
             yield { id: finding.findingId, category: `review:${finding.categoryId}`, categoryLabel: finding.categoryLabel, severity: finding.severityLabel, status: finding.statusLabel, summary: finding.note,
+              ...(finding.output === 'change-suggestion' && finding.markId !== null && finding.markStatus === 'open' && finding.anchorState === 'exact' && finding.replacement !== null ? {
+                suggestion: { manuscriptId: run.manuscript.manuscriptId, branchId: run.manuscript.branchId, markId: finding.markId, blockId: finding.blockId,
+                  batchAllowed: run.categories.some((category) => category.categoryId === finding.categoryId && category.batchApply), quote: finding.quote, replacement: finding.replacement },
+              } : {}),
               target: { kind: 'review', reviewRunId, findingId: finding.findingId, blockId: finding.blockId } };
           }
           if (!run.findingsTruncated || run.findings.length === 0) break;
@@ -4072,9 +4077,14 @@ export class EditorialStore {
     return this.#taskPlanWithRoute(input, progress).plan;
   }
 
-  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection) {
+  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection | BookTasksProjection) {
     return this.#analysisCall(() => {
       requireStore(Number.isSafeInteger(input.afterOrdinal) && input.afterOrdinal >= 0, 'TASK_PLAN_PAGE_INVALID', '任务计划读取位置无效。');
+      if (input.kind === 'book-tasks') {
+        requireStore(input.ref === null, 'TASK_PLAN_PAGE_INVALID', '任务列表读取范围无效。');
+        const projection = connectedPlan && 'groups' in connectedPlan ? connectedPlan : this.inspectBookTasks(input.bookId, () => null);
+        return bookTasksPage(projection, input.path, input.afterOrdinal, input.digest);
+      }
       if (input.kind === 'task-intent-drafts') {
         requireStore(input.path === 'drafts', 'TASK_PLAN_PAGE_INVALID', '任务草稿读取范围无效。');
         return taskDraftsPage(this.inspectTaskIntentDrafts({ bookId: input.bookId, draftId: input.ref }), input.afterOrdinal, input.digest);
@@ -4084,7 +4094,7 @@ export class EditorialStore {
         return reviewWorkspacePage(this.inspectReviewWorkspace(input.bookId, input.ref), input.afterOrdinal, input.digest);
       }
       requireStore(input.ref !== null, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
-      const plan = connectedPlan ?? this.inspectTaskPlan({ ...input, kind: input.kind });
+      const plan = connectedPlan && !('groups' in connectedPlan) ? connectedPlan : this.inspectTaskPlan({ ...input, kind: input.kind });
       requireStore(plan.bookId === input.bookId && plan.kind === input.kind && plan.ref === input.ref, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
       return taskPlanPage(plan, input.path, input.afterOrdinal, input.digest);
     });
@@ -4349,7 +4359,6 @@ export class EditorialStore {
     // either — and the device online when the route reaches its model over the network.
     if (plan.runControl?.resume != null) {
       const blockers: string[] = [];
-      if (connectivity.slotBusy()) blockers.push(RESUME_BLOCKED_SLOT);
       if (plan.start.needsModelConnection && (await credentialReadiness(binding)) === 'missing') blockers.push(RESUME_BLOCKED_CONNECTION);
       if (reaches && connectivity.reading() === 'offline') blockers.push(RESUME_BLOCKED_OFFLINE);
       plan = withResumeBlockers(plan, blockers);
@@ -4529,6 +4538,55 @@ export class EditorialStore {
   }
 
   /** Redo prepares the same kind and request through its ordinary, cancellable preparation owner. */
+  repeatTaskRequest(bookId: string, source: NonNullable<import('../shared/protocol.js').StartQuickTasksInput['tasks'][number]['repeat']>) {
+    if (source.kind === 'review-run') return { kind: source.kind, ...this.#reviewCall(() => this.#reviewRuns.repeatRequest(bookId, source.ref)) };
+    const row = this.#authority.prepare(`SELECT r.run_record_id, t.kind FROM analysis_run_records r
+      JOIN analysis_task_intents t ON t.task_intent_id = r.task_intent_id
+      WHERE t.book_id = ? AND t.task_intent_id = ? ORDER BY r.rowid DESC LIMIT 1`).get(bookId, source.ref) as SqlRow | undefined;
+    requireStore(row !== undefined, 'TASK_REPEAT_UNAVAILABLE', '原任务的运行记录不存在。');
+    const expected = source.kind === 'baseline-analysis' ? BASELINE_ANALYSIS_KIND : source.kind === 'writing' ? WRITING_KIND
+      : source.kind === 'initial-evaluation' ? INITIAL_EVALUATION_KIND : source.kind === 'readers-report' ? READERS_REPORT_KIND : EVALUATION_REWRITE_KIND;
+    requireStore(asString(row.kind) === expected || source.kind === 'baseline-analysis' && isCustomAnalysisKindId(row.kind), 'TASK_REPEAT_UNAVAILABLE', '原任务类型不一致。');
+    if (source.kind === 'baseline-analysis') {
+      const ledger = this.#analysisLedgerOfTask(bookId, source.ref);
+      const facts = ledger.loadExecutionPlan(asString(row.run_record_id));
+      const mode = facts.update?.mode;
+      const update = mode === 'sync-current' || mode === 'reanalyze-range' || mode === 'reanalyze-book' ? { mode, selectedRange: facts.update!.selectedRange }
+        : ledger.inspect(bookId).resultSetRevision === null ? null : { mode: 'reanalyze-book' as const, selectedRange: null };
+      return { kind: source.kind, update, customRef: isCustomAnalysisKindId(row.kind) ? source.ref : null };
+    }
+    const materialIds = this.#evaluationMaterialPlan(source.ref)?.boundary.references.map((entry) => entry.materialId) ?? [];
+    if (source.kind === 'initial-evaluation') return { kind: source.kind, materialIds };
+    if (source.kind === 'readers-report') {
+      const task = this.#readersReportCall(() => this.#readersReports.task(source.ref));
+      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原审稿意见任务不存在。');
+      return { kind: source.kind, template: task.template, materialIds };
+    }
+    if (source.kind === 'evaluation-rewrite') {
+      const task = this.#evaluationRewriteCall(() => this.#evaluationRewrites.task(source.ref));
+      requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原评估重写任务不存在。');
+      return { kind: source.kind, recordId: task.recordId };
+    }
+    const task = this.#writingCall(() => this.#writingTasks.task(source.ref));
+    requireStore(task !== null && task.bookId === bookId, 'TASK_REPEAT_UNAVAILABLE', '原写作任务不存在。');
+    return { kind: source.kind, request: { typeId: task.typeId, audience: task.input.audience, channel: task.input.channel,
+      requirements: task.input.requirements, materialIds: task.materials.map((material) => material.source.materialId) } };
+  }
+
+  quickTaskRule(bookId: string, ruleId: string) {
+    const rule = this.#ruleCall(() => this.#rules.list().find((rule) => (rule.ruleId === ruleId || rule.pattern === ruleId) && rule.bookId === bookId && rule.state === 'active'));
+    requireStore(rule !== undefined, 'QUICK_TASK_RULE_UNAVAILABLE', '这条快速开始规则已停用或不属于本书。');
+    return rule;
+  }
+
+  prepareRepeatedCustomAnalysis(bookId: string, ref: string, update: BaselineAnalysisUpdateRequest | null, policy: LaunchPolicyProjection): BaselineAnalysisProjection {
+    const ledger = this.#analysisLedgerOfTask(bookId, ref);
+    this.#requireCustomAnalysisStartable(ledger, ref);
+    let work = this.#analysisCall(() => ledger.prepare({ phase: 'start', bookId, goal: customAnalysisModeGoal(update?.mode ?? 'first-baseline'), update, reconfirm: false, launchPolicy: policy }));
+    while (!work.done) work = this.#analysisCall(() => ledger.prepare({ phase: 'advance', workId: work.workId! }));
+    return work.projection as BaselineAnalysisProjection;
+  }
+
   redoTaskRequest(input: Pick<ControlTaskRunInput, 'bookId' | 'kind' | 'ref'>) {
     if (input.kind === 'review-run') return { kind: input.kind, ...this.#reviewCall(() => this.#reviewRuns.redoRequest(input.bookId, input.ref)) };
     const ledger = this.taskRunLedger(input);
@@ -4821,7 +4879,11 @@ export class EditorialStore {
       const unconfirmed = stopped ? ledger.unconfirmedRangesOf(run.runRecordId) : [];
       const outcomeUnknown = unconfirmed.length === 0 ? null
         : { units: unconfirmed, stopped: run.state === 'resumable' && ledger.outcomeUnknownOf(run.runRecordId) !== null };
-      return { unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown };
+      return {
+        unitsSettled, unitsClosed, unitsTotal, blockers, bindingHolds, waiting, accountLimit, outcomeUnknown,
+        ...(run.stopReason === undefined ? {} : { stopReason: run.stopReason }),
+        ...(run.stopReason === undefined || run.resumedAt === undefined ? {} : { stopAt: run.resumedAt }),
+      };
     });
   }
 
@@ -5423,7 +5485,6 @@ export class EditorialStore {
     const plan = await this.inspectTaskPlanWithConnection({ bookId: input.bookId, kind: 'review-run', ref: input.reviewRunId },
       runtime.credentialReadiness, runtime.connectivity, progress);
     if (plan.start.readiness !== 'ready') return fallBack(plan.start.readiness === 'offline' ? QUICK_START_OFFLINE : QUICK_START_NOT_READY);
-    if (runtime.connectivity.slotBusy()) return fallBack(QUICK_START_SLOT_BUSY);
     // Re-read every match after asynchronous credential readiness, before recording the one approval.
     const now = this.#reviewRuleFacts(input.bookId, input.reviewRunId);
     const active = this.#ruleCall(() => this.#rules.activeFor(input.bookId, now.pattern));
@@ -5491,7 +5552,6 @@ export class EditorialStore {
       default:
         return fellBack(QUICK_START_NOT_READY);
     }
-    if (envelope.dispatchAllowed && runtime.connectivity.slotBusy()) return fellBack(QUICK_START_SLOT_BUSY);
     const authorized = this.#analysisCall(() => this.#baselineAnalysis.authorize(bookId, taskIntentId, planEnvelopeDigest, 'now',
       { kind: 'default-execution-rule', ruleVersionId }));
     return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId };
@@ -13347,8 +13407,8 @@ export class EditorialStore {
   }
 
   /** The default backend, or (#1226) with `role: 'fallback'` the one 备用来源 — `null` clears it; a new default never stays the fallback. */
-  selectSearchBackend(backendId: string | null, role?: 'fallback'): void {
-    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role);
+  selectSearchBackend(backendId: string | null, role?: 'fallback', alwaysUseSelectedBackend?: boolean): void {
+    return modelSearchSettings.selectSearchBackend(this.#modelSearchSettingsHost, backendId, role, alwaysUseSelectedBackend);
   }
 
   saveSearchBackendCredential(backendId: string, reference: string | null, state: import('../shared/protocol.js').ModelCredentialOperationState): import('../shared/protocol.js').SearchBackendConnectionProjection {
@@ -14762,7 +14822,8 @@ export class EditorialStore {
          WHERE instr(r.canonical_json, '"outcome-unknown"') > 0
          UNION
          SELECT t.book_id, t.kind FROM analysis_task_outcomes o JOIN analysis_task_intents t ON t.task_intent_id = o.task_intent_id
-         WHERE o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0
+         WHERE (o.classification IN ('completed', 'completed-with-gaps') AND instr(o.canonical_json, ?) > 0)
+            OR (o.classification = 'failed' AND o.result_set_revision_id IS NULL AND instr(o.canonical_json, '"outcome-unknown"') > 0)
        ) ORDER BY book_id, kind`,
     ).all(OUTCOME_UNKNOWN_NOT_RESENT) as SqlRow[];
   }
@@ -14784,7 +14845,11 @@ export class EditorialStore {
     const resolvedDigest = sha256(canonicalJson([...resolved].sort()));
     const cached = this.#unconfirmedLists.get(cacheKey);
     if (cached !== undefined && cached.resolved === resolvedDigest) return cached.listed;
-    const kinds = (this.#authority.prepare('SELECT DISTINCT kind FROM analysis_result_sets WHERE book_id = ? ORDER BY kind').all(bookId) as SqlRow[])
+    const kinds = (this.#authority.prepare(
+      `SELECT kind FROM analysis_result_sets WHERE book_id = ?
+       UNION SELECT t.kind FROM analysis_task_intents t JOIN analysis_task_outcomes o ON o.task_intent_id = t.task_intent_id
+       WHERE t.book_id = ? AND o.classification = 'failed' AND o.result_set_revision_id IS NULL ORDER BY kind`,
+    ).all(bookId, bookId) as SqlRow[])
       .map((row) => asString(row.kind)).filter((kind) => unconfirmedSurfaceOf(kind) === surface);
     const ranges: UnconfirmedOutcomeRecord[] = [];
     const steps: UnconfirmedOutcomeRecord[] = [];
@@ -14822,6 +14887,7 @@ export class EditorialStore {
       ranges: listed.ranges.map((range) => ({
         unitOrdinal: range.unitOrdinal!, category: this.#unconfirmedCategory(range.kind), recordedAt: range.recordedAt,
         earlierText: range.heldAtRevisionId !== null && range.heldAtRevisionId !== current,
+        ...(range.rereadFailed ? { rereadFailed: true } : {}),
       })),
       steps: listed.steps.map((step) => ({ stage: step.stage!, category: this.#unconfirmedCategory(step.kind), recordedAt: step.recordedAt })),
       digest: unconfirmedDigest(listed),
@@ -14918,6 +14984,9 @@ export class EditorialStore {
         const baseline = this.#baselineAnalysis.attentionReadings(progress, since, limit);
         const review = this.#reviewRuns.attentionReadings(progress, since, limit);
         return composeGlobalAttention({
+          bookTasks: (this.#authority.prepare('SELECT book_id FROM books').all() as SqlRow[]).flatMap((book) =>
+            this.inspectBookTasks(asString(book.book_id), progress, waitingFor, () => null, limit).groups.flatMap((group) => group.items)
+              .map((entry) => entry.item).filter((item) => item.target.kind === 'dialogue' || item.group === 'recent' && item.target.kind === 'task-plan')),
           globalDialogues: this.#globalAgentHistory(() => null),
           applyOutcomes: readApplyOutcomeAttention(this.#authority, limit),
           imports: readImportAttention(this.#authority, limit),
@@ -14949,13 +15018,43 @@ export class EditorialStore {
     });
   }
 
+  inspectTaskOverview(progress: ProgressReader, capacity: number, queuePosition: (id: string) => number | null, queueFrozen: boolean,
+    dialogueLive: (id: string) => LiveAnswer | null = () => null, waitingFor: WaitingFor = 'slot'): import('../shared/protocol.js').TaskOverviewProjection {
+    const books = (this.#authority.prepare('SELECT book_id, title FROM books ORDER BY title').all() as SqlRow[])
+      .map((row) => ({ bookId: asString(row.book_id), title: asString(row.title) }));
+    const entries = books.flatMap((book) => this.inspectBookTasks(book.bookId, progress, waitingFor, dialogueLive, GLOBAL_ATTENTION_READ_LIMIT).groups.flatMap((group) => group.items));
+    const attention: GlobalAttentionProjection = { groups: [], actionableCount: 0, running: false, processing: { state: 'local' } };
+    const overview = composeTaskOverview(attention, capacity, queuePosition, entries, books, queueFrozen, (item) => {
+      if (!['completed', 'cancelled', 'stopped'].includes(item.state)) return null;
+      if (item.runRecordId !== null) return this.#usage.taskSummary({ runRecordId: item.runRecordId });
+      if (item.target.kind === 'review' || item.target.kind === 'review-plan') {
+        return this.#usage.taskSummary({ taskIntentIds: this.#reviewRuns.controlTasks(item.target.bookId, item.target.reviewRunId).map((task) => task.taskIntentId) });
+      }
+      if (item.target.kind === 'dialogue') {
+        const dialogue = this.inspectDialogue(item.target.bookId, item.target.dialogueId, 0, () => null);
+        return { calls: dialogue.attempts.length, elapsed: dialogue.attempts.reduce((sum, attempt) => sum + (attempt.settledAt === null ? 0 : Math.max(0, Date.parse(attempt.settledAt) - Date.parse(attempt.startedAt))), 0) };
+      }
+      return null;
+    });
+    const quickStarts = this.inspectDefaultExecutionRules().rules.filter((rule) => rule.state === 'active').map((rule) => ({ bookId: rule.bookId, procedureId: `rule:${rule.pattern}`, label: rule.name }));
+    return estimateTaskStarts({ ...overview, quickStarts, groups: overview.groups.map((group) => ({ ...group, items: group.items.map((item) => {
+      if (item.runRecordId === null || !['running', 'queued'].includes(item.state)) return item;
+      const facts = this.executionLedgerForRun(item.runRecordId).loadExecutionPlan(item.runRecordId);
+      const current = progress(item.runRecordId);
+      const unit = facts.manifest.units.find((unit) => unit.ordinal === current?.currentUnitOrdinal);
+      return { ...item, progress: { done: current?.unitsSettled ?? 0, total: facts.manifest.units.length,
+        currentUnitLabel: unit?.headingText ?? null, elapsedMs: current === null ? null : Math.max(0, Date.now() - Date.parse(item.at)),
+        modelWaiting: current?.attemptState === 'awaiting-response' } };
+    }) })) });
+  }
+
   /**
    * The Book's 任务 panel (Issue #423, plan slice S77a; editor-surfaces §1 任务面, V2-UX-TASK-044): 待我处理's readings of this
    * Book's Tasks alone — its latest baseline Task and Review Run, prepared ones included, and every finished one, the
    * cancelled included — composed into 等你处理, 进行中 and 最近完成 by `global-attention.ts`. A read: nothing is written,
    * claimed or terminalized.
    */
-  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null): BookTasksProjection {
+  inspectBookTasks(bookId: string, progress: ProgressReader, waitingFor: WaitingFor = 'admitting', dialogueLive: (attemptId: string) => LiveAnswer | null = () => null, recentLimit?: number): BookTasksProjection {
     this.#assertAvailable();
     requireStore(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     one(this.#authority.prepare('SELECT 1 FROM books WHERE book_id = ?').all(bookId) as SqlRow[], 'BOOK_NOT_FOUND', '图书不存在。');
@@ -14964,8 +15063,12 @@ export class EditorialStore {
       try {
         const baseline = this.#baselineAnalysis.attentionReadings(progress, '', limit, { bookId, cancelled: true });
         const review = this.#reviewRuns.attentionReadings(progress, '', limit, { bookId, prepared: true });
+        const otherOutcomes = (['initial-evaluation', 'readers-report', 'evaluation-rewrite', 'writing'] as const).flatMap((kind) => {
+          const ledger = kind === 'initial-evaluation' ? this.#initialEvaluation : this.#anyLedgerOfKind(kind);
+          return ledger === null ? [] : ledger.attentionReadings(progress, '', limit, { bookId, cancelled: true }).outcomes.map((outcome) => ({ kind, outcome }));
+        });
         return composeBookTasks({
-          bookId,
+          bookId, otherOutcomes, ...(recentLimit === undefined ? {} : { recentLimit }),
           analysisTasks: baseline.tasks,
           analysisOutcomes: baseline.outcomes,
           waitingTasks: this.#waitingTaskAttention(bookId, limit, progress),
@@ -15582,6 +15685,7 @@ export class EditorialStore {
         dialogueId: task.dialogueId,
         question: resolved.first?.question ?? null,
         state: latest.state,
+        cancelled: latest.attempt.outcome?.causeCode === 'TASK_CANCELLED',
         answered: latest.fragments.length > 0,
         attempts: resolved.attempts.length,
         at: latest.attempt.outcome?.settledAt ?? latest.attempt.createdAt,
