@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, createStatusSurface, mountQuietNotice } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../../src/shared/protocol.js';
+import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 
 const START = Date.parse('2026-10-17T10:00:00Z');
 function item(overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -39,6 +40,22 @@ function setup() {
   return { notifier, notices, navigate, prefs: (change: Partial<typeof prefs>) => { prefs = { ...prefs, ...change }; }, focus: (value: boolean) => { focused = value; } };
 }
 afterEach(() => vi.restoreAllMocks());
+
+it('keeps a delayed completion on its Book and opens only while that Book is still current', async () => {
+  const event = item({ group: 'recent', state: 'analysis-completed' });
+  const overview = composeTaskOverview(projection([event]), 2, () => null);
+  let currentBookId = event.book.bookId;
+  let release!: (value: TaskOverviewProjection) => void;
+  const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+  const open = vi.fn();
+  const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
+  const pending = openCurrentBookCompletion(event, options);
+  currentBookId = 'another-book'; release(overview); await pending;
+  expect(open).not.toHaveBeenCalled();
+  currentBookId = event.book.bookId;
+  await openCurrentBookCompletion(event, options);
+  expect(open).toHaveBeenCalledExactlyOnceWith(overview.groups.find((group) => group.key === 'recent')!.items[0]);
+});
 
 describe('privacy-safe main notifications', () => {
   it('shows generic silent actionable text when unfocused, and only navigates on click', () => {

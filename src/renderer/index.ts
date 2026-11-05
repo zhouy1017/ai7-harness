@@ -77,7 +77,7 @@ import type {
   TaskPlanKind,
   TaskPlanProjection,
 } from '../shared/protocol.js';
-import { createNotificationObserver, mountQuietNotice } from './notifications.js';
+import { createNotificationObserver, mountQuietNotice, openCurrentBookCompletion } from './notifications.js';
 import { NOTIFICATION_BOOK_LIST_LINE, NOTIFICATION_SETTINGS_WORDS } from './notification-labels.js';
 import {
   GLOBAL_ATTENTION_COUNTED_GROUPS,
@@ -787,10 +787,11 @@ const observeNotifications = createNotificationObserver({
   focused: () => document.hasFocus(),
   completed: (item) => {
     showQuietNotice(item);
-    const currentBookId = (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'];
-    if (currentBookId === item.book.bookId && localStorage.getItem('ai7.task-overview.auto-result') !== 'off') {
-      void window.ai7.inspectTaskOverview().then((tasks) => { const entry = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId); if (entry) void openOverviewResult(entry); });
-    }
+    void openCurrentBookCompletion(item, {
+      currentBookId: () => (screen.firstElementChild as HTMLElement | null)?.dataset['bookId'] ?? null,
+      enabled: () => localStorage.getItem('ai7.task-overview.auto-result') !== 'off',
+      read: () => window.ai7.inspectTaskOverview(), open: (entry) => void openOverviewResult(entry),
+    }).catch(() => undefined);
   },
 });
 globalAttentionReader.subscribe((reading) => {
