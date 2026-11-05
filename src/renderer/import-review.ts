@@ -449,7 +449,6 @@ export function createImportReview(options: ImportReviewOptions) {
       const sameBookMatches = [...new Set(staged.identityFindings
         .filter((finding) => finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')
         .map((finding) => finding.sourceVersionId))];
-      reuseSourceVersionId ??= sameBookMatches[0] ?? null;
       if (sameBookMatches.length > 0) {
         const reuseChoices = element('fieldset');
         reuseChoices.setAttribute('role', 'radiogroup');
