@@ -67,6 +67,7 @@ Wave 23 remains integrated at `dev@41036654` through [PR #1302](https://github.c
 | C2 import/overview/knowledge home | [#1363](https://github.com/zhouy1017/ai7-harness/pull/1363) | `a8cc8dc4` |
 | C1 review/evaluation/findings | [#1364](https://github.com/zhouy1017/ai7-harness/pull/1364) | `a483342e` |
 | P2/P3 bounded review scope and surface follow-ups | [#1365](https://github.com/zhouy1017/ai7-harness/pull/1365) | `0df3d830` |
+| J-02 hosted-display synchronization | [#1368](https://github.com/zhouy1017/ai7-harness/pull/1368) | `pending` |
 
 ## Runtime and evidence
 
