@@ -1019,9 +1019,9 @@ async function main() {
       compact.saved === '已为任务保存修订版 r2，之后的编辑不影响这项任务。' && compact.drift === null &&
       JSON.stringify(compact.rows) === JSON.stringify({
         处理: '只处理任务卡所列范围，不参考其他材料。',
-        发送: '不发送内容，无模型用量，未设预算上限。',
+        发送: '不发送，无模型用量。',
         会得到: '一条运行记录（不派发）。',
-        不会: '不运行、改稿、导出发布、存里程碑或越界阅读。',
+        不会: '不运行、改稿、导出发布、存里程碑、读书外内容。',
         中途: '只记录本次授权，无需中途参与。',
       }) &&
       compact.sections.length === 0 && Object.keys(compact.technical).length === 0 &&

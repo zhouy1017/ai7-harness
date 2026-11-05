@@ -1313,9 +1313,9 @@ async function main() {
       firstDrawer.saved === null && firstDrawer.drift === null &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({
         处理: '只处理任务卡所列范围，不参考其他材料。',
-        发送: '不发送内容，无模型用量，未设预算上限。',
+        发送: '不发送，无模型用量。',
         会得到: '一份基线分析。',
-        不会: '不改稿、导出发布、存里程碑、越界阅读或作事实判定。',
+        不会: '不改稿、导出发布、存里程碑、读书外内容、作事实判定。',
         中途: '预计无需参与，可随时暂停或取消。',
       }) && firstDrawer.actions === 0 && firstDrawer.footer === '计划说明，不是运行授权', 'analysis-drawer-compact', firstDrawer);
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'analysis-drawer-full');
