@@ -1176,6 +1176,7 @@ export class ReviewRunStore {
   /** The Review Runs being driven in this service lifetime, with the Book each belongs to. */
   readonly #driving = new Map<string, string>();
   readonly #placeWaits = new Map<string, string>();
+  #scopeUnits: { key: string; counts: NonNullable<ReviewWorkspaceProjection['scopeUnitCounts']> } | null = null;
   /**
    * The waiting Runs Reconnect Preflight is handing to the drive loop now (Issue #760, S74c): the one way a Run approved with
    * 联网后开始任务 begins, and only for the moment of that hand-off. In memory only.
@@ -1967,7 +1968,8 @@ export class ReviewRunStore {
   redoRequest(bookId: string, reviewRunId: string) {
     requireReview(!this.#driving.has(reviewRunId) && this.#stoppedFor(reviewRunId) === 'cancelled',
       'ANALYSIS_REDO_STALE', '这次审阅需要先取消，才能改计划重做。');
-    return { ...this.repeatRequest(bookId, reviewRunId), redoOf: reviewRunId };
+    const { seriesId: _seriesId, ...request } = this.repeatRequest(bookId, reviewRunId);
+    return { ...request, redoOf: reviewRunId };
   }
 
   repeatRequest(bookId: string, reviewRunId: string) {
@@ -3524,10 +3526,14 @@ export class ReviewRunStore {
       ...(this.#ledgers.materialOffers === undefined ? {} : { materials: this.#ledgers.materialOffers(bookId) }),
       manuscript: head,
       scopeUnitCounts: head === null || head.totalBlocks === 0 ? { whole: 0, units: [] } : (() => {
+        const key = `${head.branchId}:${head.revisionId}:${head.workingDigest}`;
+        if (this.#scopeUnits?.key === key) return this.#scopeUnits.counts;
         const manifest = deriveCoverageManifest({ bookId, manuscriptId: head.manuscriptId, branchId: head.branchId,
           revisionId: head.revisionId, revisionLabel: head.revisionLabel, revisionDigest: head.workingDigest,
           blocks: this.#ledgers.baseline().readWorkingBlocks(head.branchId) });
-        return { whole: manifest.units.length, units: manifest.units.map(({ startPosition, endPosition }) => ({ startPosition, endPosition })) };
+        const counts = { whole: manifest.units.length, units: manifest.units.map(({ startPosition, endPosition }) => ({ startPosition, endPosition })) };
+        this.#scopeUnits = { key, counts };
+        return counts;
       })(),
       configuration: this.#configurationPin(house),
       categories: readings.map((reading) => this.#workspaceCategory(reading, chapters)),
