@@ -146,7 +146,6 @@ import {
   REVIEW_PICK_CHAPTERS,
   REVIEW_PICK_SCOPE,
   REVIEW_PLAN_HEADING,
-  REVIEW_PREPARING_ESCAPE,
   REVIEW_PROGRESS_HEADING,
   REVIEW_REPORT_HEADING,
   REVIEW_REPORT_NO_MUST_ITEMS,
@@ -330,6 +329,7 @@ interface BatchStrip {
 type SheetSelection = { readonly fromBlockId: string; readonly toBlockId: string };
 
 interface SheetState {
+  dismissed: boolean;
   localOptions: import('../shared/protocol/procedures.js').LocalCheckOptions;
   seriesId: string | null;
   readonly seriesChoices: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
@@ -2227,6 +2227,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetOpening = false;
     if (destroyed || projection === null || sheet.open) return;
     sheetState = {
+      dismissed: false,
       localOptions: { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
         tables: { characters: true, variantWords: true, bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
       seriesId: null,
@@ -2521,7 +2522,6 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         name.append(why);
       }
       if (kind === 'changed') {
-        scopes.append(changedNote);
         input.setAttribute('aria-describedby', [input.getAttribute('aria-describedby'), changedNote.id].filter((id) => id !== null).join(' '));
       }
       input.addEventListener('change', () => {
@@ -2533,6 +2533,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       scopes.append(label);
       scopeInputs.set(kind, input);
     }
+    scopes.append(changedNote);
     const chapterOptions = workspace.scopeOptions.chapters.chapters;
     const range = el('div', 'review-chapter-range');
     const chapterSelect = (which: 'from' | 'to'): HTMLSelectElement => {
@@ -2762,6 +2763,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       });
       if (destroyed) return;
       state.job = null;
+      if (state.dismissed) {
+        options.setStatus(completed.state === 'cancelled' ? REVIEW_STATUS_LINES.preparationCancelled : '已关闭审阅配置。', 'success');
+        return;
+      }
       if (completed.state === 'cancelled') {
         sheetUpdate();
         options.setStatus(REVIEW_STATUS_LINES.preparationCancelled, 'success');
@@ -2820,6 +2825,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     } catch (error) {
       if (destroyed) return;
       state.job = null;
+      if (state.dismissed) {
+        options.setStatus(completed.state === 'cancelled' ? REVIEW_STATUS_LINES.preparationCancelled : '已关闭审阅配置。', 'success');
+        return;
+      }
       announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
       sheetUpdate();
     }
@@ -2837,17 +2846,8 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
   }
 
-  // Escape closes the sheet as a native dialog does — except while a plan is being prepared, when the way
-  // out is 取消准备, so a preparation never runs on with nobody watching it.
-  sheet.addEventListener('cancel', (event) => {
-    if (sheetState !== null && sheetState.job !== null) {
-      event.preventDefault();
-      options.setStatus(REVIEW_PREPARING_ESCAPE, 'busy');
-    }
-  });
   const escapeFromPage = (event: KeyboardEvent): void => {
     if (event.key === 'Escape' && !event.isComposing && sheet.open && !sheet.contains(event.target as Node)) {
-      if (sheetState?.job) return;
       event.preventDefault(); sheet.close();
     }
   };
@@ -2855,6 +2855,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   sheet.addEventListener('close', () => {
     const state = sheetState;
     sheetState = null;
+    if (state) {
+      state.dismissed = true;
+      if (state.job) void api.cancelServiceJob({ jobId: state.job.jobId }).catch((error: unknown) => options.setStatus(options.errorMessage(error, '取消准备未完成。'), 'error'));
+    }
     sheet.replaceChildren();
     sheetUpdate = () => undefined;
     if (destroyed || state === null) return;

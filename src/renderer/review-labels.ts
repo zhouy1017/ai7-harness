@@ -269,7 +269,6 @@ export const REVIEW_PICK_CATEGORY = '请至少选择一个审阅类别。';
 export const REVIEW_PICK_SCOPE = '请选择审阅范围。';
 export const REVIEW_PICK_CHAPTERS = '请选择起止的章。';
 export const REVIEW_CHAPTERS_REVERSED = '结束的章不能在开始的章之前。';
-export const REVIEW_PREPARING_ESCAPE = '正在准备审阅计划；要停止，请点「取消准备」。';
 
 export function reviewChapterOptionLabel(chapter: Pick<ReviewChapterOptionProjection, 'title' | 'position' | 'endPosition'>): string {
   return `${chapter.title}（段落 ${chapter.position}–${chapter.endPosition}）`;
