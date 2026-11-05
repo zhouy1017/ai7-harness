@@ -16,7 +16,7 @@ import type { ReviewPill } from './review-labels.js';
 import { REVIEW_ACTION_LABELS } from './review-labels.js';
 import { RESUMABLE_STOP_REASON_LABELS, TASK_BAR_RECONFIRM, TASK_BAR_REDO, TASK_BAR_REPREPARE, TASK_BAR_RUN_LINKS, TASK_PLAN_OPEN_START, UNCONFIRMED_TASK_KIND_LABELS, unconfirmedWhat } from './task-drawer-labels.js';
 import { RESOLVE_CONFLICT_LABEL } from './editorial-mark-labels.js';
-import { PROPOSAL_CONFLICT_CLASSIFICATION, REVERSAL_CONFLICT_LINE } from './proposal-conflict-labels.js';
+import { PROPOSAL_CONFLICT_CLASSIFICATION } from './proposal-conflict-labels.js';
 import { MAINTENANCE_CLASSIFICATION_LABELS, MAINTENANCE_NEXT_STEP_LABELS } from '../shared/maintenance-wording.js';
 import { LIBRARY_ATTRIBUTE, LIBRARY_ELIGIBILITY, LIBRARY_HOUSE, LIBRARY_KIND_LABELS, LIBRARY_NO_ATTRIBUTION, materialIndexCompletedReason } from './knowledge-base-labels.js';
 import { DIALOGUE_CARD_REASONS, DIALOGUE_OPEN_LABEL, DIALOGUE_STATE_LABELS, DIALOGUE_WAITING_LABEL, dialogueQuestionLine } from './dialogue-labels.js';
@@ -109,7 +109,6 @@ export function globalAttentionTruncatedLine(group: GlobalAttentionGroupKey, sho
  */
 export const TASK_INTENT_DRAFT_STATE_LABEL = '任务草稿 · 尚未准备计划';
 export const TASK_INTENT_DRAFT_CONTINUE = '继续编辑草稿';
-export const TASK_INTENT_DRAFT_REASON = '还没有准备计划：继续编辑，或在草稿里准备计划后它才成为任务；它不会自己开始，也不会发送任何内容。';
 /** The most characters of a draft's sentence a card names before it is cut short. */
 export const TASK_INTENT_DRAFT_TITLE_CHARACTERS = 24;
 export function taskIntentDraftTitle(goal: string): string {
@@ -317,10 +316,7 @@ export const GLOBAL_ATTENTION_NEXT_STEP_LABELS: Readonly<Record<GlobalAttentionN
  * paragraph as context and puts findings on that paragraph alone — the paragraph, not the words, so the card names it so.
  */
 export const REVIEW_ON_SELECTION = '所选段落';
-/** The two scopes a question can have (CLAR-004), in the card's own words. */
-export const GLOBAL_ATTENTION_CLARIFICATION_WAITING = '任务等待你的说明';
-export const GLOBAL_ATTENTION_CLARIFICATION_CONTINUING = '该步骤等待说明 · 其他步骤仍在继续';
-/** The prefix the product already puts before a record's safe next action. */
+/** The item's action label; no separate next-step narration. */
 export function globalAttentionNextStepLine(step: GlobalAttentionNextStep): string {
   return GLOBAL_ATTENTION_NEXT_STEP_LABELS[step];
 }
@@ -397,33 +393,37 @@ export function globalAttentionObjectLabel(object: GlobalAttentionObjectProjecti
   }
 }
 
-function quoted(labels: ReadonlyArray<string>): string {
-  return labels.map((label) => `「${label}」`).join('');
-}
-
 /**
- * Why the item is here (V2-UX-ATTN-007), from the record's own facts: the sentences the record's own screen
- * already says, a Run's declared step and progress, or the Review Run's categories with their states. Never
- * a manuscript excerpt.
+ * One why-sentence, at most 60 characters (Owner #1324). Record details remain at the destination.
+ * Completion reasons can come from a model or service, so keep their first sentence bounded too.
  */
 export function globalAttentionReason(item: GlobalAttentionItemProjection): string {
+  return attentionSentence(attentionReason(item));
+}
+
+export function attentionSentence(text: string): string {
+  const sentence = text.replace(/\s+/gu, ' ').trim().match(/^[^。！？]*[。！？]?/u)?.[0] ?? '';
+  const characters = [...sentence];
+  return characters.length > 60 ? `${characters.slice(0, 59).join('')}…` : sentence;
+}
+
+function attentionReason(item: GlobalAttentionItemProjection): string {
   const { facts } = item;
   switch (item.state) {
-    case 'apply-outcome-unresolved': return '本地权威记录尚不能证明本次应用结果；禁止自动重试、重做或重复应用。';
+    case 'apply-outcome-unresolved': return '这次修改是否已应用尚未确认，请先查看结果。';
     case 'import-outcome-uncertain':
-      return '本地证据目前无法证明这次原子提交已经完成或确定未提交；已阻止重试、放弃和清理。';
+      return '这次导入是否已完成尚未确认，请等待本机核对。';
     case 'import-cleanup-pending':
-      return '放弃意图已经持久化，安全清理尚未完成；已阻止继续导入和新权威引用。';
+      return '已放弃导入，剩余文件尚未清理完成。';
     case 'recovery-pending':
       return '中断后的稿件状态需要你确认；系统不会替你选择恢复来源。';
     case 'recovery-deferred':
-      return '该分支已稍后处理，普通编辑保持只读；请返回恢复比较作出决定。';
+      return '稿件恢复已留待稍后处理，确认前只能阅读。';
     case 'manuscript-conflict':
     case 'manuscript-conflict-deferred': {
-      const why = item.object.kind === 'manuscript-conflict' && item.object.conflictKind === 'reversal'
-        ? `${REVERSAL_CONFLICT_LINE}；在解决之前不能撤销这次应用。`
-        : '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。';
-      return item.state === 'manuscript-conflict-deferred' ? `${why}已记下暂不处理，这处冲突仍未解决。` : why;
+      return item.object.kind === 'manuscript-conflict' && item.object.conflictKind === 'reversal'
+        ? '应用后的文字已有改动，解决冲突后才能撤销应用。'
+        : '建议所依据的原文已有改动，解决冲突后才能应用建议。';
     }
     case 'analysis-failed':
       return '运行失败，没有形成新的分析结果。';
@@ -432,54 +432,51 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     // Issue #541: under developer-live the launch set the ceiling, and the plan cannot raise it.
     case 'analysis-budget-reached':
       return item.nextStep === 'redo'
-        ? '运行用到了这次启动的预算上限，已停止；读完的部分已保留。要接着读，请以更高的预算上限重新启动，再改计划重做。'
-        : '运行用到了你设的预算上限，已停止；读完的部分已保留。要接着读，请调整预算并重做。';
+        ? '已到本次启动的预算上限，保留结果后停下；提高启动预算后可重做。'
+        : '已到你设的预算上限，保留结果后停下；调整预算后可重做。';
     case 'analysis-account-limit':
-      return '模型服务按账户限额拒绝了请求，这项任务已停下，读完的部分都已保存；处理好模型服务、限额解除后续行。';
+      return '模型服务的账户限额已用尽，处理后可从已保存的进度续行。';
     case 'analysis-outcome-unknown':
-      return '有阅读范围的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；AI7 没有自动再发，读完的部分都已保存。';
     case 'analysis-outcome-unconfirmed':
-      return `运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为${item.object.kind === 'unconfirmed' && item.object.ranges > 0 ? '结果未知的单元缺口' : '结果待确认的缺口'}，AI7 没有自动再发。${item.object.kind === 'unconfirmed' && item.object.ranges > 0 ? '后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。' : ''}`;
+      return '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
     case 'analysis-blocked':
-      return '授权已记录，派发前阻止：当前启动没有可执行的路由。';
+      return '模型服务当前不可用，任务尚未开始。';
     case 'analysis-orphaned':
-      return '服务在这次运行期间停止，运行已中断；已完成单元的结果与缺口保留在分析账本中。';
+      return 'AI7 在运行时关闭，已完成的结果与未完成的范围均已保留。';
     case 'review-failed':
     case 'review-stopped':
-      return facts.categories.length === 0
-        ? '有类别没有写到稿件上。'
-        : facts.categories.map((category) => `「${category.label}」${category.stateLabel}`).join('；');
+      return '部分审阅未完成，已完成的发现仍保留在稿件上。';
     case 'analysis-plan-revision':
-      return '计划冻结之后，它的关键内容已经变化；原计划不能再开始。';
+      return '计划依据已有变化，请确认新计划后再开始。';
     case 'analysis-plan-moved':
-      return '它等待联网时，计划依据的内容已经变化；这次授权不再对应当前的情况，它不会开始。';
+      return '等待联网期间计划依据已有变化，需要重新准备任务。';
     // Issue #422 (S76d; CLAR-004): whether only that step waits, or the whole Task.
     case 'analysis-clarification':
-      if (item.facts.clarificationOrigin === 'model') return '模型有一个需要你决定的问题；回答后接着处理这个阅读范围。24 小时未回答将按「不回答」接着做。';
+      if (item.facts.clarificationOrigin === 'model') return '模型有一个需要你决定的问题，回答后或等待 24 小时后接着处理。';
       return item.blocked
-        ? `${GLOBAL_ATTENTION_CLARIFICATION_WAITING}：它想知道要不要把一个阅读范围安全地再试一次。`
-        : `${GLOBAL_ATTENTION_CLARIFICATION_CONTINUING}：它想知道要不要把一个阅读范围安全地再试一次。`;
+        ? '任务正在等你决定是否重试这个阅读范围。'
+        : '这个阅读范围正在等你决定是否重试，其他步骤继续处理。';
     case 'analysis-queued':
-      return '已进入 AI7 调度器。';
+      return '任务已排队，轮到后自动开始。';
     case 'analysis-waiting-network':
       return '联网后开始任务：恢复联网后，AI7 先核对计划再开始；现在什么都没有运行。';
     case 'analysis-waiting-connection':
       return '模型连接缺少凭据：到设置连接模型服务后，任务会在联网时开始。';
     case 'analysis-waiting-slot':
       // It holds no place in the queue of starts waiting for one, and says so (Issue #632).
-      return '已经联网，但运行名额已满：有名额空出时，AI7 先核对计划再开始；之后开始的任务可能先开始。现在什么都没有运行。';
+      return '已联网，正在等运行名额，尚未开始且不占队列位次。';
     case 'analysis-waiting-idle': return '已记录本次运行授权；停下编辑 30 秒且没有编辑操作运行后开始，可以取消任务。';
     case 'analysis-yielded': return '让位给你的任务：已完成的部分都已保存，下次空闲后接着处理；预算上限不变。';
     case 'analysis-waiting-capacity':
-      return '运行名额已满：正在运行的任务结束后，这项任务自动开始；在此之前什么都没有发送。';
+      return '正在等运行名额，轮到后自动开始。';
     case 'analysis-waiting-admission':
       return '已经联网：AI7 先核对计划，没有变化就开始；现在什么都没有运行。';
     case 'analysis-running':
       return runningReason(facts.progress);
     case 'analysis-cancelling':
-      return `你取消了这项任务；正在进行的这一步会被中止，此后不再发送任何内容 · ${runningReason(facts.progress)}`;
+      return '正在停止当前步骤，随后不再发送内容，已完成的结果会保留。';
     case 'analysis-pausing':
-      return `你暂停了这项任务；正在进行的这一步完成后停下，已完成的部分都会保存 · ${runningReason(facts.progress)}`;
+      return '当前步骤完成后暂停，已完成的结果会保留。';
     case 'analysis-paused':
       return '已暂停：已读完的阅读范围都已保存；续行时从下一个接着读，也可以取消它。';
     case 'analysis-resumable': {
@@ -487,32 +484,22 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
       if (reason === 'proxy-unreachable') return '代理不可达：去 设置 › 模型服务 › 网络代理 检查代理后续行。';
       if (reason === 'model-service-unreachable') return '模型服务不可达：去 设置 › 模型服务 › 网络代理 检查网络或代理后续行。';
       if (reason === 'outcome-unknown') return '结果待确认：这次运行不能续行，请先查看未确认的部分。';
-      return 'AI7 关闭时正在运行；已读完的阅读范围都已保存。续行时从下一个接着读，在此之前不会发送任何内容。';
+      return 'AI7 关闭时任务尚未完成，续行时从下一个阅读范围接着读。';
     }
-    case 'review-running': {
-      const current = facts.categories[0];
-      if (current === undefined) return '正在审阅';
-      const progress = facts.progress === null ? '' : ` · ${runningReason(facts.progress)}`;
-      return `${current.stateLabel}「${current.label}」${progress}`;
-    }
-    case 'review-continuable': {
-      const next = facts.categories[0];
-      return next === undefined ? '继续审阅时从没有完成的类别接着审。' : `「${next.label}」${next.detail ?? next.stateLabel}`;
-    }
+    case 'review-running': return facts.progress === null ? '正在审阅稿件。' : runningReason(facts.progress);
+    case 'review-continuable': return '继续审阅时从未完成的类别接着审。';
     case 'analysis-completed':
       return facts.revisionOrdinal === null ? '分析结果已生成。' : `已形成第 ${facts.revisionOrdinal} 份基线分析。`;
     case 'analysis-completed-with-gaps':
       if (facts.completion?.reason) return facts.completion.reason;
       return facts.revisionOrdinal === null ? '分析结果已生成，部分内容尚未完成。' : `已形成第 ${facts.revisionOrdinal} 份基线分析，保留缺口单元。`;
     case 'review-completed':
-      return facts.categories.length === 0 ? '审阅发现已标到稿件上。' : `已审：${quoted(facts.categories.map((category) => category.label))}；发现已标到稿件上。`;
+      return '审阅发现已标到稿件上。';
     // The 任务 panel's own three (Issue #423, S77a): nothing starts by itself, and a cancellation keeps what was read.
     case 'analysis-prepared':
-      return '计划已准备好，还没有开始；查看计划后开始任务。它不会自己开始。';
+      return '计划已准备好，等待你开始任务。';
     case 'review-prepared':
-      return facts.categories.length === 0
-        ? '审阅计划已准备好，还没有开始；查看计划后开始审阅。它不会自己开始。'
-        : `审阅计划已准备好，还没有开始：${quoted(facts.categories.map((category) => category.label))}；查看计划后开始审阅。它不会自己开始。`;
+      return '审阅计划已准备好，等待你开始审阅。';
     case 'analysis-cancelled':
       return facts.revisionOrdinal === null
         ? '你取消了这项任务；它还没有读完任何阅读范围，没有形成结果。'
@@ -556,7 +543,7 @@ export function globalAttentionReason(item: GlobalAttentionItemProjection): stri
     case 'dialogue-failed':
       return DIALOGUE_CARD_REASONS[item.state];
     case 'draft-unfinished':
-      return TASK_INTENT_DRAFT_REASON;
+      return '任务草稿尚未开始，可以继续编辑。';
   }
 }
 

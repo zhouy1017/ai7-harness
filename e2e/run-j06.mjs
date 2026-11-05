@@ -1038,7 +1038,7 @@ async function main() {
     })()`);
     requireJourney(conflictRow?.group === 'exceptions' && conflictRow.state === 'manuscript-conflict-deferred' && conflictRow.blocked === 'true' &&
       conflictRow.target === 'manuscript-conflict' && conflictRow.pill === '需要解决冲突 · 暂不处理' && conflictRow.object === '修改建议 · 稿件冲突' &&
-      conflictRow.reason === '建议所依据的原文已经改过；在解决之前不能接受或应用这条建议。已记下暂不处理，这处冲突仍未解决。' &&
+      conflictRow.reason === '建议所依据的原文已有改动，解决冲突后才能应用建议。' &&
       conflictRow.next === '解决冲突…', 'attention-conflict-row', conflictRow);
     await assertRenderer(renderer, `(() => { const open = document.querySelector('[data-screen="global-attention"] button.global-attention-open[data-attention-open=${JSON.stringify(`conflict:${secondId}`)}]'); if (!(open instanceof HTMLButtonElement) || open.disabled) return false; open.click(); return true; })()`, 'attention-conflict-open');
     await waitFor(renderer, `window.__j06.conflict()?.dataset.conflictMarkId === ${JSON.stringify(secondId)} && window.__j06.conflict().dataset.conflictState === 'deferred' && window.__j06.units().length > 0`, 'attention-conflict-workspace');

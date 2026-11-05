@@ -3,6 +3,7 @@ import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { showToast } from './components/toast.js';
 import type { TaskPlanProjection, ClarificationOptionId } from '../shared/protocol.js';
+import { attentionSentence, globalAttentionReason, globalAttentionTimeLine } from './global-attention-labels.js';
 const GROUP_LABELS: Record<TaskOverviewGroupProjection['key'], string> = { running: '正在运行', queued: '排队等待', waiting: '等你处理', paused: '已暂停', recent: '最近完成' };
 const STATE_LABELS: Record<TaskOverviewItemProjection['state'], string> = { running: '运行中', queued: '排队中', waiting: '等你处理', paused: '已暂停', completed: '已完成', cancelled: '已取消', stopped: '已停止' };
 const PROCEDURES = [['baseline-analysis', '基线分析'], ['initial-evaluation', '评估']] as const;
@@ -13,12 +14,12 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: st
 function progressLine(item: TaskOverviewItemProjection): string {
   const usage = item.usage === null ? '' : ` · 用时 ${Math.max(1, Math.round(item.usage.elapsed / 60000))} 分钟 · 约 ${item.usage.calls} 次调用`;
   if (item.state === 'queued') return item.attention.state === 'analysis-waiting-network' ? '等待联网' : item.attention.state === 'analysis-waiting-connection' ? '等待模型连接' : item.attention.state === 'analysis-waiting-admission' ? '等待开始前检查' : item.queuePosition === null ? '等待运行名额' : `第 ${item.queuePosition} 位 · 前面 ${item.queuePosition - 1} 项${item.eta === null ? '' : ` · 预计 ≈ ${Math.ceil(item.eta / 60000)} 分钟后开始`}`;
-  if (item.state === 'waiting') return item.detail ?? (item.nextAction === 'answer-clarification' ? 'AI7 有问题等你回答' : '有一项处理需要你的决定');
+  if (item.state === 'waiting') return globalAttentionReason(item.attention);
   if (item.state === 'paused') return item.attention.facts.resumeFailure ?? `你 ${new Date(item.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 暂停${item.progress ? ` · 已完成 ${item.progress.done} / ${item.progress.total}` : ''} · 可续行`;
   if (item.state === 'completed') return `已有结果${usage}`;
   if (item.state === 'cancelled') return `已取消 · ${item.result ? '保留已有结果' : '没有形成结果'}${usage}`;
   if (item.state === 'stopped') return `已停止 · 可查看运行${usage}`;
-  return item.progress === null ? '正在处理' : `第 ${item.progress.done} / ${item.progress.total} 个单元${item.progress.currentUnitLabel ? ` · ${item.progress.currentUnitLabel}` : ''}${item.progress.elapsedMs === null ? '' : ` · 已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? ' · 等待模型响应' : ''}`;
+  return item.progress === null ? '正在处理稿件。' : `已完成 ${item.progress.done} / ${item.progress.total} 个阅读范围${item.progress.elapsedMs === null ? '' : `，已用时 ${Math.floor(item.progress.elapsedMs / 60000)} 分钟`}${item.progress.modelWaiting ? '，等待模型回答' : ''}。`;
 }
 export type TaskCardAction = 'open' | 'plan' | 'run' | 'book' | 'pause' | 'resume' | 'cancel' | 'up' | 'top' | 'answer' | 'redo' | 'result' | 'again' | 'jump';
 /** Both the global page and the in-Book pane render this exact card. */
@@ -26,8 +27,9 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   const node = el('article', 'task-overview-card'); node.dataset['taskItem'] = item.itemId; node.dataset['taskItemId'] = item.itemId; node.dataset['taskState'] = item.attention.state; node.tabIndex = 0;
   const title = el('div', 'task-overview-card-title'); title.append(el('span', 'task-overview-book', item.bookTitle ?? '全局'), el('span', undefined, ' · '), el('strong', undefined, item.label), el('span', `state-term task-overview-state task-overview-state-${item.state}`, item.attention.state === 'analysis-pausing' ? '正在暂停' : STATE_LABELS[item.state]));
   node.dataset['taskKind'] = item.taskKind;
-  const line = el('div', 'task-overview-card-line', progressLine(item)); line.title = line.textContent ?? '';
-  const body = el('div', 'task-overview-card-body'); body.append(title, line);
+  const line = el('div', 'task-overview-card-line', attentionSentence(progressLine(item))); line.title = line.textContent ?? '';
+  const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at)); time.dateTime = item.at;
+  const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
   if (item.state === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');
   const add = (label: string, action: TaskCardAction): void => { const button = el('button', 'quiet', label); button.dataset['taskAction'] = action; button.addEventListener('click', (event) => { event.stopPropagation(); act(item, action); }); actions.append(button); };
