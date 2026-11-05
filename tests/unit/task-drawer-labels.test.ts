@@ -303,6 +303,13 @@ describe('精简 and 完整 (D6)', () => {
     expect(rowsFor('不重新读取所选范围以外的正文')['不会']).toBe('不改稿、导出发布、重读范围外正文。');
     expect(rowsFor('不读允许参考以外的资料')['不会']).toBe('不改稿、导出发布、读参考外资料。');
     expect(rowsFor('不作事实判定')['发送']).toBe('发往模型，达到 80,000 tokens 后不再发送。');
+    for (const facts of [
+      ['不照抄范例：与范例比较', '不照抄资料库资料：逐份比较', '不交付、不发送：草稿由你修改', '不改评估记录与基线分析', '不读这本书以外的稿件'],
+      ['不读所选范围以外的正文', '不在所选段落以外标出发现：只计数', '不给出合规、查重或政策结论'],
+    ]) {
+      const compact = Object.fromEntries(taskPlanCompactRows(plan({ notDo: { editorial: [...original.notDo.editorial, '不存里程碑版本', ...facts], technical: [] } })));
+      expect([...compact['不会']!].length).toBeLessThanOrEqual(36);
+    }
   });
 
   it('labels a usage ceiling as a ceiling, never a prediction, and names what is referred to and what follows the Run', () => {
