@@ -422,6 +422,12 @@ describe('the authorization bar (S74a)', () => {
     const noRoute = taskBarView(barOf({ readiness: 'no-route' }));
     expect(noRoute.note).toBe(TASK_BAR_NOTES['no-route']);
     expect(action(noRoute, 'start')?.disabledReason).toBeNull();
+    setTechnicalLayerVisible(false);
+    try {
+      const ordinary = taskBarView(barOf({ readiness: 'no-route' }));
+      expect(ordinary.note).toBe('当前设置只能记录任务，暂时无法执行。');
+      expect(ordinary.actions).toEqual(noRoute.actions);
+    } finally { setTechnicalLayerVisible(true); }
   });
 
   it('says why a plan can never be started, beside a disabled 开始任务, and offers nothing that starts it (Issue #432 re-review)', () => {

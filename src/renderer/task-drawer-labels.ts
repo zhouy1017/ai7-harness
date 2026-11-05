@@ -1055,7 +1055,8 @@ export function taskBarView(plan: TaskPlanProjection, pendingEdits = 0): TaskBar
     readiness,
     summary,
     statement: TASK_BAR_STATEMENT,
-    note: readiness === 'ready' ? null : TASK_BAR_NOTES[readiness],
+    note: readiness === 'ready' ? null : readiness === 'no-route'
+      ? technicalWords(TASK_BAR_NOTES[readiness], '当前设置只能记录任务，暂时无法执行。') : TASK_BAR_NOTES[readiness],
     status: null,
     actions: [{ name: 'start', label: TASK_BAR_START, tone: 'primary', disabledReason: null }, revise, SAVE_DRAFT],
   };
