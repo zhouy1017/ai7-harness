@@ -42,19 +42,49 @@ function setup() {
 afterEach(() => vi.restoreAllMocks());
 
 it('keeps a delayed completion on its Book and opens only while that Book is still current', async () => {
-  const event = item({ group: 'recent', state: 'analysis-completed' });
-  const overview = composeTaskOverview(projection([event]), 2, () => null);
-  let currentBookId = event.book.bookId;
-  let release!: (value: TaskOverviewProjection) => void;
-  const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
-  const open = vi.fn();
-  const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
-  const pending = openCurrentBookCompletion(event, options);
-  currentBookId = 'another-book'; release(overview); await pending;
-  expect(open).not.toHaveBeenCalled();
-  currentBookId = event.book.bookId;
-  await openCurrentBookCompletion(event, options);
-  expect(open).toHaveBeenCalledExactlyOnceWith(overview.groups.find((group) => group.key === 'recent')!.items[0]);
+  const restore = installMiniDom();
+  try {
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let currentBookId = event.book.bookId;
+    let release!: (value: TaskOverviewProjection) => void;
+    const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+    const open = vi.fn();
+    const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
+    const pending = openCurrentBookCompletion(event, options);
+    currentBookId = 'another-book'; release(overview); await pending;
+    expect(open).not.toHaveBeenCalled();
+    currentBookId = event.book.bookId;
+    await openCurrentBookCompletion(event, options);
+    expect(open).toHaveBeenCalledExactlyOnceWith(overview.groups.find((group) => group.key === 'recent')!.items[0]);
+  } finally { restore(); }
+});
+
+it('keeps manuscript focus when a current-Book completion arrives or finishes reading', async () => {
+  const restore = installMiniDom();
+  try {
+    const editor = miniDocument.createElement('div'); editor.dataset['testid'] = 'manuscript-editor';
+    const text = miniDocument.createElement('span'); editor.append(text);
+    const elsewhere = miniDocument.createElement('button'); miniDocument.body.append(editor, elsewhere);
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let release!: (value: TaskOverviewProjection) => void;
+    const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+    const read = vi.fn(() => reading); const open = vi.fn();
+    const options = { currentBookId: () => event.book.bookId, enabled: () => true, read, open };
+    text.focus();
+    await openCurrentBookCompletion(event, { ...options, read: async () => overview });
+    expect(open).not.toHaveBeenCalled();
+    elsewhere.focus();
+    const pending = openCurrentBookCompletion(event, options);
+    text.focus(); release(overview); await pending;
+    expect(read).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+    expect(miniDocument.activeElement).toBe(text);
+    elsewhere.focus();
+    await openCurrentBookCompletion(event, options);
+    expect(open).toHaveBeenCalledOnce();
+  } finally { restore(); }
 });
 
 describe('privacy-safe main notifications', () => {
