@@ -318,7 +318,7 @@ export * from './protocol/knowledge-base.js';
 export * from './protocol/captured-procedures.js';
 export * from './protocol/library-materials.js';
 
-export const SERVICE_PROTOCOL_VERSION = 196 as const;
+export const SERVICE_PROTOCOL_VERSION = 197 as const;
 
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
