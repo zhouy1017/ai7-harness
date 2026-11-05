@@ -555,7 +555,7 @@ async function clickVisibleControl(renderer, selector, name) {
   const point = await renderer.evaluate(`(() => {
     ${localDebugEnabled() ? `if (!globalThis.__ai7OverlayDebug) {
       const trace = globalThis.__ai7OverlayDebug = [];
-      const state = () => ({ width: innerWidth, panel: document.querySelector('#manuscript-navigation-panel')?.hidden, expanded: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded'), rect: document.querySelector('[data-edge-entry="navigation"]')?.getBoundingClientRect().toJSON(), animations: document.getAnimations().map(item => ({ target: item.effect?.target?.tagName, state: item.playState, progress: item.effect?.getComputedTiming().progress })) });
+      const state = () => ({ width: innerWidth, panel: document.querySelector('#manuscript-navigation-panel')?.hidden, expanded: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded') });
       for (const name of ['mousedown', 'mouseup', 'click']) document.addEventListener(name, event => trace.push({ name, tag: event.target?.tagName, id: event.target?.id, entry: event.target?.closest?.('[data-edge-entry]')?.dataset.edgeEntry, x: event.clientX, y: event.clientY, ...state() }), true);
       new MutationObserver(() => trace.push({ name: 'mutate', ...state() })).observe(document.querySelector('#manuscript-navigation-panel'), { attributes: true, attributeFilter: ['hidden'] });
     }` : ''}
@@ -563,7 +563,7 @@ async function clickVisibleControl(renderer, selector, name) {
     if(!(node instanceof HTMLElement)) return null;
     node.scrollIntoView({block:'nearest'});
     const r=node.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
-    ${localDebugEnabled() ? `globalThis.__ai7OverlayDebug.push({ name: 'measure', selector: ${JSON.stringify(selector)}, rect: r.toJSON() });` : ''}
+    ${localDebugEnabled() ? `globalThis.__ai7OverlayDebug.push({ name: 'measure', selector: ${JSON.stringify(selector)}, rect: r.toJSON(), animations: document.body.getAnimations().map(item => ({ state: item.playState, progress: item.effect?.getComputedTiming().progress })) });` : ''}
     return r.width>0 && r.height>0 && node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
   })()`);
   requireJourney(point !== null, name);
@@ -587,6 +587,7 @@ async function assertSupportingOverlays(renderer) {
           painted:panel.contains(document.elementFromPoint(box.left+20,box.top+20)) };
       })()`, `overlay-${width}-${entry}-bounds`); }
       catch (error) { if (localDebugEnabled()) recordDebugDetail('J-02', '[DEBUG-q1-overlay] ' + JSON.stringify(await renderer.evaluate('globalThis.__ai7OverlayDebug'))); throw error; }
+      if (localDebugEnabled()) recordDebugDetail('J-02', '[DEBUG-q1-overlay-pass] ' + JSON.stringify(await renderer.evaluate('globalThis.__ai7OverlayDebug')));
       if (entry === 'navigation') {
         await clickVisibleControl(renderer, '#manuscript-search', `overlay-${width}-search-click`);
         await assertRenderer(renderer, `document.activeElement?.id==='manuscript-search'`, `overlay-${width}-search-focused`);
