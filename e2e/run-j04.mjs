@@ -2929,8 +2929,8 @@ async function main() {
 
     at('review-destination');
     await openReviewDestination(renderer, 'review-destination');
-    // B4: before any review runs, the destination has no coverage grid or empty state table.
-    await assertRenderer(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='empty' && document.querySelector('.review-coverage-section')===null && document.querySelector('.review-workspace-card table')===null`, 'review-coverage-never');
+    // C1: no coverage, records or bare controls before the first review.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewState==='empty' && card.classList.contains('surface-empty') && card.querySelector('h2')?.textContent==='审阅' && card.querySelector('.state-term')?.textContent==='尚未审阅' && card.querySelector('.lede')?.textContent==='按类别审读稿件，发现会同步到原文。' && card.querySelector('[data-review-action="new-review"]') && !card.querySelector('table, select, .review-coverage, .review-runs-section, [data-list-position]'); })()`, 'review-empty-card');
 
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
@@ -3062,6 +3062,7 @@ async function main() {
     requireJourney(centerBeforeDisposition.total > 0 && centerReview !== undefined && centerBeforeDisposition.groups.some((group) => group.category.startsWith('review:')), 'book-findings-source-counts');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-open');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-ready');
+    await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll('[data-findings-filter]').length===3 && !root.querySelector('select') && root.querySelector('.finding-row .finding-body .finding-why') && root.querySelector('.finding-row .finding-location'); })()`, 'findings-filter-row-layout');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); const row=root?.querySelector('[data-finding-id='+CSS.escape(${JSON.stringify(centerReview.id)})+']'); const open=row?.querySelector('button'); if(root?.dataset.findingsTotal!==${JSON.stringify(String(centerBeforeDisposition.total))} || !(open instanceof HTMLButtonElement))return false; open.click(); return true; })()`, 'book-findings-record-link');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${centerReview.target.findingId}"]')`, 'book-findings-exact-review');
 

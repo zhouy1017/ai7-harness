@@ -1,4 +1,5 @@
 import { reviewPlanReferenceField } from './task-material-selection.js';
+import { evaluationPlanReferenceField } from './evaluation.js';
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import { taskPlanWording } from './task-drawer-labels.js';
@@ -220,6 +221,9 @@ export interface TaskDrawerSurface {
 
 type DrawerApi = Pick<
   RendererApi,
+  | 'inspectEvaluation'
+  | 'prepareInitialEvaluation'
+  | 'prepareReadersReport'
   | 'inspectReviewWorkspace'
   | 'prepareReviewRun'
   | 'searchReferableMaterials'
@@ -1075,8 +1079,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     usage.append(next.service.usage);
     if (next.service.usageIsCeiling) usage.append(` · ${TASK_PLAN_CEILING_NOTE}`);
     const participation = [next.participation.during, ...(next.participation.after === null ? [] : [`${TASK_PLAN_AFTERWARDS}：${next.participation.after}`])];
-    const references = next.kind === 'review-run' ? reviewPlanReferenceField({ api, bookId: next.bookId, reviewRunId: next.ref, reference: next.scope.reference,
-      awaitJob: (job) => options.awaitServiceJob(job, () => undefined), change: (operation) => {
+    const changeReferences = (operation: () => Promise<string>): void => {
       if (plan?.ref !== next.ref || !beginWork()) return;
       const asked = request;
       for (const input of whole.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button, select')) input.disabled = true;
@@ -1084,8 +1087,12 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
         if (request?.ref === next.ref && request.bookId === next.bookId) request = { ...request, ref };
       }).catch((error: unknown) => {
         refusal = options.errorMessage(error, '未能更新参考资料。');
-      }).finally(() => { options.onRecorded('review-run', next.bookId, request?.ref ?? undefined); endWork(asked); });
-    } }) : null;
+      }).finally(() => { options.onRecorded(next.kind, next.bookId, request?.ref ?? undefined); endWork(asked); });
+    };
+    const references = next.kind === 'review-run' ? reviewPlanReferenceField({ api, bookId: next.bookId, reviewRunId: next.ref, reference: next.scope.reference,
+      awaitJob: (job) => options.awaitServiceJob(job, () => undefined), change: changeReferences })
+      : next.kind === 'initial-evaluation' || next.kind === 'readers-report' ? evaluationPlanReferenceField({ api, bookId: next.bookId, ref: next.ref, kind: next.kind,
+        reference: next.scope.reference, editable: next.state.key === 'ready', awaitJob: (job) => options.awaitServiceJob(job, () => undefined), change: changeReferences }) : null;
     whole.append(
       planSection(0, facts([[TASK_PLAN_GOAL_TERMS[0], next.goal.sentence], [TASK_PLAN_GOAL_TERMS[1], listOf(next.outcomes, 'task-plan-list')]])),
       planSection(1, facts([

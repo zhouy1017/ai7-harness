@@ -157,7 +157,6 @@ import {
   REVIEW_RUNS_HEADING,
   REVIEW_RUN_STATE_PILLS,
   REVIEW_SCOPE_LEGEND,
-  REVIEW_SECTION_LABEL,
   REVIEW_SEVERITY_PILLS,
   REVIEW_SHEET_TITLE,
   REVIEW_STATUS_LINES,
@@ -477,11 +476,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   const sheetTitleId = uid('sheet-title');
   sheet.setAttribute('aria-labelledby', sheetTitleId);
   host.append(live, sheet);
-  options.root.append(
-    el('h2', undefined, REVIEW_SECTION_LABEL),
-    el('p', 'lede', REVIEW_LEDE),
-    host,
-  );
+  options.root.append(host);
 
   // The 审阅报告's export (Issue #500, S64b part 2; ADR 0079 §3.4): ④ 导出's own card, drawn into one slot that every
   // render of the report section takes back under its actions, so a card open across a redraw keeps its state. It
@@ -792,15 +787,26 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     }
     node.setAttribute('aria-busy', run?.state === 'running' ? 'true' : 'false');
     const heading = el('div', 'review-workspace-heading');
-    heading.append(el('h3', undefined, REVIEW_CARD_HEADING));
+    heading.append(el('h2', undefined, REVIEW_CARD_HEADING));
     if (run !== null) heading.append(pillElement(run.stateLabel, REVIEW_RUN_STATE_PILLS[run.state]));
-    heading.append(el('span', 'review-manuscript-line', reviewManuscriptLine(next.manuscript)));
-    node.append(heading);
+    const hasReviews = next.runs.length > 0 || next.coverage.some((row) => row.lastRunOrdinal !== null);
+    if (!hasReviews) {
+      node.classList.add('surface-empty');
+      heading.append(pillElement('尚未审阅', { tone: 'neutral', shape: 'circle' }));
+      node.append(heading, el('p', 'lede', REVIEW_LEDE));
+    } else node.append(heading);
     const newReviewReasonId = uid('new-review-reason');
-    if (next.coverage.some((row) => row.lastRunOrdinal !== null) || next.runs.some((run) => ['running', 'settled', 'partial', 'failed'].includes(run.state))) {
-      node.append(renderCoverage(next, newReviewReasonId));
+    const actions = renderNewReview(next, newReviewReasonId);
+    if (hasReviews) heading.append(actions);
+    else node.append(actions);
+    if (hasReviews) {
+      const changed = next.coverage.filter((row) => row.state === 'needs-review').length;
+      if (changed > 0) node.append(el('p', 'attention-note review-coverage-warning', `稿件有改动，${changed} 类审阅需要复审。`));
+      if (next.coverage.some((row) => row.lastRunOrdinal !== null) || next.runs.some((summary) => ['running', 'settled', 'partial', 'failed'].includes(summary.state))) {
+        node.append(renderCoverage(next, newReviewReasonId));
+      }
+      node.append(renderRuns(next));
     }
-    node.append(renderRuns(next), renderNewReview(next, newReviewReasonId));
     if (run !== null) node.append(renderRun(next, run));
     swapCard(node);
     if (restore !== null) {
@@ -922,7 +928,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     repeat.type = 'button'; repeat.dataset['reviewRepeat'] = '';
     repeat.disabled = !next.newReview.available || working;
     repeat.addEventListener('click', () => void openSheet(null, repeat, null, true));
-    row.append(start, repeat, local);
+    const more = el('details', 'review-more');
+    more.append(el('summary', undefined, '更多 ▾'), repeat, local);
+    row.append(start, more);
     if (!next.newReview.available) {
       start.disabled = true;
       const why = el('span', 'review-unavailable-reason', next.newReview.unavailableReason ?? '');
