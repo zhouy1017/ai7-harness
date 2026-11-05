@@ -66,6 +66,7 @@ Wave 23 remains integrated at `dev@41036654` through [PR #1302](https://github.c
 | B4 state cards | [#1362](https://github.com/zhouy1017/ai7-harness/pull/1362) | `8abb2d5c` |
 | C2 import/overview/knowledge home | [#1363](https://github.com/zhouy1017/ai7-harness/pull/1363) | `a8cc8dc4` |
 | C1 review/evaluation/findings | [#1364](https://github.com/zhouy1017/ai7-harness/pull/1364) | `a483342e` |
+| P2/P3 bounded review scope and surface follow-ups | [#1365](https://github.com/zhouy1017/ai7-harness/pull/1365) | `0df3d830` |
 
 ## Runtime and evidence
 
@@ -93,25 +94,14 @@ The five [Public SampleBooks](SampleBooks/README.md) are exact `sample1` plus th
 
 ## In flight and remaining risks
 
-The P2/P3 handoff below is the review follow-up list minus repairs already in the slice PRs and the bounded #1365 sweep. Each line names a remaining outcome; the next wave must verify its current owner before implementation.
+The Commander's post-sweep handoff is #1365's explicitly unhandled labels plus the C1/C2 leftovers below. Each line names a remaining outcome; the next wave must verify its current owner before implementation.
 
-- #1355 Q1: consolidate the four 2s polls and visibility-triggered model discovery.
-- #1355 / #1364: remove the remaining unused evaluation labels and findings refresh label under the C1 labels owner.
-- #1357 B5: remove the unused task-overview `detail` field.
-- #1360 B3: refresh the navigation footer percentage after a jump.
-- #1360 B3: finish the swatch selector behavior.
-- #1360 / #1329 M1: move the two 1.2s manuscript highlights to opacity layers.
-- #1360 B3: define and synchronize empty-range `selectRange` behavior.
-- #1361 B1: remove the redundant `seriesChoices` membership read.
-- #1361 B1: close the review sheet when its basis link navigates.
-- #1361 B1: strengthen J-04's page-scrollability assertion.
-- #1361 B1: refine 「只审改动过的章的正文…」 wording.
+- #1355 / #1364: remove the unused evaluation labels and findings refresh label retained for the C1 labels owner, including C1's five dead labels and `_pageSize`.
 - #1363 C2: make shared-page import pills reflect 保真与结构 and their navigation.
 - #1363 C2: retain one collapsed-card warning line for 旧版在用 / 索引 and review internal-number presentation.
 - #1364 C1: findings filters currently act within the 40-item window although pills and batch counts are Book-wide; filter server-side or navigate to the first matching window.
 - #1364 C1: remove the evaluation empty-state pill's duplication of the task line.
 - #1364 C1: restore a mounted heading as the focus target and a page h2 outside the empty state.
-- #1364 C1: remove the five dead labels and `_pageSize`.
 - #1364 C1: resolve or document removal of `aria-controls="task-drawer"`.
 
 Owner work: Provider Processing v34 admission of the OpenAI/Claude native-search backends' connection tests and `webToolsBackend` remains pending. Live measurement is the Owner's human-phase task, together with packaged direct/proxy/discovery acceptance and editorial usefulness; provider-free tests establish neither live provider access nor human-gold precision/recall.
