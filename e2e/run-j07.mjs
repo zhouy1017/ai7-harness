@@ -1309,7 +1309,7 @@ async function main() {
         reason instanceof HTMLElement && !reason.hidden && (reason.textContent ?? '').startsWith('还需要选择一个里程碑版本');
     })()`, 'designate-form-states-everything-and-preselects-nothing');
     await chooseDesignation(renderer, second, 'designate-choose-second');
-    await assertRenderer(renderer, `(() => { const values = window.__j07.summary(); return values[0] === ${JSON.stringify(EXCERPT.title)} && values[1].startsWith('主稿件 · 修订版 2') && values[2].startsWith(${JSON.stringify(`「${SECOND.label}」 · r2 · `)}) && values[3] === '与当前稿件一致' && values[4] === '本机编辑' && values[5] === '确认时记录'; })()`, 'designate-summary-names-the-exact-version');
+    await assertRenderer(renderer, `(() => { const values = window.__j07.summary(); return values[0] === ${JSON.stringify(EXCERPT.title)} && values[1].startsWith('主稿件 · 当前修订版 r2') && values[2].startsWith(${JSON.stringify(`「${SECOND.label}」 · r2 · `)}) && values[3] === '与当前稿件一致' && values[4] === '本机编辑' && values[5] === '确认时记录'; })()`, 'designate-summary-names-the-exact-version');
     // 发稿范围 counts characters as the service does: 81 CJK characters are too many, while 80 characters
     // outside the Basic Multilingual Plane — 160 UTF-16 units, past any HTML maxLength of 80 — are not.
     await fill(renderer, 'form.publication-designate [data-publication-field="scope"]', '范'.repeat(81), 'designate-scope-too-long');
