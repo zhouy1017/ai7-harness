@@ -553,10 +553,17 @@ async function openNavigation(renderer, location) {
 
 async function clickVisibleControl(renderer, selector, name) {
   const point = await renderer.evaluate(`(() => {
+    ${localDebugEnabled() ? `if (!globalThis.__ai7OverlayDebug) {
+      const trace = globalThis.__ai7OverlayDebug = [];
+      const state = () => ({ width: innerWidth, panel: document.querySelector('#manuscript-navigation-panel')?.hidden, expanded: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded'), rect: document.querySelector('[data-edge-entry="navigation"]')?.getBoundingClientRect().toJSON(), animations: document.getAnimations().map(item => ({ target: item.effect?.target?.tagName, state: item.playState, progress: item.effect?.getComputedTiming().progress })) });
+      for (const name of ['mousedown', 'mouseup', 'click']) document.addEventListener(name, event => trace.push({ name, tag: event.target?.tagName, id: event.target?.id, entry: event.target?.closest?.('[data-edge-entry]')?.dataset.edgeEntry, x: event.clientX, y: event.clientY, ...state() }), true);
+      new MutationObserver(() => trace.push({ name: 'mutate', ...state() })).observe(document.querySelector('#manuscript-navigation-panel'), { attributes: true, attributeFilter: ['hidden'] });
+    }` : ''}
     const node=document.querySelector(${JSON.stringify(selector)});
     if(!(node instanceof HTMLElement)) return null;
     node.scrollIntoView({block:'nearest'});
     const r=node.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
+    ${localDebugEnabled() ? `globalThis.__ai7OverlayDebug.push({ name: 'measure', selector: ${JSON.stringify(selector)}, rect: r.toJSON() });` : ''}
     return r.width>0 && r.height>0 && node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
   })()`);
   requireJourney(point !== null, name);
@@ -565,12 +572,6 @@ async function clickVisibleControl(renderer, selector, name) {
 }
 
 async function assertSupportingOverlays(renderer) {
-  if (localDebugEnabled()) await renderer.evaluate(`(() => {
-    const trace = globalThis.__ai7OverlayDebug = [];
-    const state = () => ({ width: innerWidth, panel: document.querySelector('#manuscript-navigation-panel')?.hidden, expanded: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded'), connected: document.querySelector('.editor-workspace')?.isConnected });
-    for (const name of ['mousedown', 'mouseup', 'click']) document.addEventListener(name, event => trace.push({ name, tag: event.target?.tagName, id: event.target?.id, entry: event.target?.closest?.('[data-edge-entry]')?.dataset.edgeEntry, x: event.clientX, y: event.clientY, ...state() }), true);
-    new MutationObserver(() => trace.push({ name: 'mutate', ...state() })).observe(document.querySelector('#manuscript-navigation-panel'), { attributes: true, attributeFilter: ['hidden'] });
-  })()`);
   // Cover both the narrow container's former second row and the wider second column.
   for (const width of [640, 1100]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
