@@ -23,6 +23,7 @@ const MARKED = Array.from({ length: MARKS }, (_, index) => ({ kind: KINDS[index 
 
 let uninstall: () => void;
 let created = 0;
+const surfaces: Array<ReturnType<typeof mountPositionRail>> = [];
 beforeEach(() => {
   uninstall = installMiniDom();
   // The rail draws positions and inserts in order: the two things the minimal DOM leaves out, here and nowhere else.
@@ -39,6 +40,8 @@ beforeEach(() => {
   vi.spyOn(miniDocument, 'createElement').mockImplementation((tag: string) => { created += 1; return create(tag); });
 });
 afterEach(() => {
+  vi.useRealTimers();
+  for (const surface of surfaces.splice(0)) surface.destroy();
   vi.restoreAllMocks();
   delete (MiniElement.prototype as unknown as Record<string, unknown>)['style'];
   delete (MiniElement.prototype as unknown as Record<string, unknown>)['insertBefore'];
@@ -52,6 +55,7 @@ async function mounted(first: ManuscriptRailProjection) {
   miniDocument.body.append(track);
   const surface = mountPositionRail({ track: track as unknown as HTMLElement, api: { getManuscriptRail: async () => next }, binding: () => ({ manuscriptId: 'm', branchId: 'b' }),
     jumpToBlock: (target) => jumps.push(target), onError: (error) => { throw error; } });
+  surfaces.push(surface);
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   const markers = () => track.querySelectorAll('.rail-marker');
   /** One refresh to `rail`: the nodes it created and removed, and how long it took to draw. */
@@ -106,8 +110,13 @@ describe('the Position Rail at 1,200 marks', () => {
     expect(first.className).not.toContain('rail-marker-new');
     first.click();
     expect(jumps).toEqual([blockId(9_999)]);
-    await refresh(rail([...moved, { ...moved[0]!, blockId: blockId(10_000) }]));
+    vi.useFakeTimers();
+    const growing = refresh(rail([...moved, { ...moved[0]!, blockId: blockId(10_000) }]));
+    await vi.advanceTimersByTimeAsync(0);
+    await growing;
     expect(first.className).toContain('rail-marker-new');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(first.className).not.toContain('rail-marker-new');
   });
 
   it('restores the confirmed position when navigation refuses a keyboard preview', async () => {
