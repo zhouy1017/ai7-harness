@@ -118,6 +118,26 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1, proc
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
+  it('keeps the reopened sheet choices when the previous native close event arrives asynchronously', async () => {
+    const view = mount(); const next = workspace(); const available = { available: true, unavailableReason: null };
+    next.newReview = available; next.scopeOptions.whole = available;
+    next.categories = ['typos-and-usage', 'style-and-format', 'plot-consistency'].map((categoryId) => ({
+      categoryId, label: categoryId, description: '提供审阅发现。', output: 'annotation', riskPointsOnly: false,
+      batchApply: false, searchEngine: false, modelFree: false, available: true, unavailableReason: null,
+      basis: { categoryId, executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅工序', version: '1' } },
+      guidelineDocuments: [], procedure: { title: '审阅工序', version: '1' }, scopes: { whole: available, chapters: available, changed: unavailable, selection: available },
+    }));
+    view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+    view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    const sheet = view.root.querySelector('dialog')!;
+    // HTMLDialogElement.close clears open synchronously and queues its close event as a task.
+    sheet.close = () => { sheet.open = false; setTimeout(() => sheet.dispatchEvent({ type: 'close' }), 0); };
+    sheet.close(); view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+    await new Promise((resolve) => setTimeout(resolve, 0)); await flush();
+    expect(sheet.open).toBe(true);
+    expect(sheet.querySelectorAll('input').filter((input) => input.name === 'review-category')).toHaveLength(3);
+    expect(sheet.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
+  });
   it('retains custom local procedure identity beside the selected local check on its sheet', async () => {
     const procedureId = 'ai7-procedure/local-custom';
     const view = mount('failed', 1, `${procedureId}@1`);

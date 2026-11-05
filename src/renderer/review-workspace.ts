@@ -2213,6 +2213,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
   ): Promise<void> {
     if (destroyed || projection === null || sheet.open || working || sheetOpening) return;
     sheetOpening = true;
+    // Native close clears `open` before its queued close event cleans up the old form.
+    // Preserve a quick reopen instead of letting that event clear the new form.
+    if (sheetState !== null) await new Promise<void>((resolve) => sheet.addEventListener('close', () => resolve(), { once: true }));
+    if (destroyed || projection === null) { sheetOpening = false; return; }
     const defaults = await readActionDefaults();
     // 按已保存的工序 (Issue #65, S30): the house's enabled Captured Procedures, each as it applies to this Book (Issue #66,
     // S31b), read as the sheet opens. A sheet that cannot read them still opens, offering none.
