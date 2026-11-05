@@ -2929,9 +2929,8 @@ async function main() {
 
     at('review-destination');
     await openReviewDestination(renderer, 'review-destination');
-    // Nothing reviewed yet: every category the model reads is 未审阅, and the two whose basis does not exist
-    // yet are 不可用 with their reason (V2-UX-REV-007, REV-013).
-    await assertRenderer(renderer, `(() => { const rows=Array.from(document.querySelectorAll('table.review-coverage tbody tr[data-review-category]')); const state=Object.fromEntries(rows.map((row)=>[row.dataset.reviewCategory, row.dataset.coverage])); return rows.length===9 && document.querySelector('.review-workspace-card')?.dataset.reviewState==='empty' && state['series-consistency']==='unavailable' && state['cross-deliverable-consistency']==='unavailable' && ['typos-and-usage','style-and-format','academic-integrity','publication-risk','literary-expression'].every((id)=>state[id]==='never'); })()`, 'review-coverage-never');
+    // B4: before any review runs, the destination has no coverage grid or empty state table.
+    await assertRenderer(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='empty' && document.querySelector('.review-coverage-section')===null && document.querySelector('.review-workspace-card table')===null`, 'review-coverage-never');
 
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
@@ -3175,7 +3174,7 @@ async function main() {
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
     // both need review; the row offers only what changed (V2-UX-REV-007).
-    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('table.review-coverage tbody tr[data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
+    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('.review-coverage-card[data-review-category="'+id+'"]'); const grid=document.querySelector('ul.review-coverage'); return grid!==null && getComputedStyle(grid).display==='grid' && grid.children.length===9 && Array.from(grid.children).every((card)=>card.querySelector('.state-term') && card.querySelector('.review-coverage-counts')) && row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
 
     // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, IA-012) ----
     // Synchronized delta with Issue #425: 资料与记录 gains 来源与证据 between 分析 and 工作概览. This Book's Runs read on the

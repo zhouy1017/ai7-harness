@@ -1081,7 +1081,7 @@ async function main() {
       rows: Array.from(win.querySelectorAll('.task-result-meta dt'), (dt) => dt.textContent),
       read: /^全书 8 个阅读范围 · 稿件修订版 /u.test(cells[1] ?? ''),
       notDone: cells[2] ?? null,
-      units: Array.from(win.querySelectorAll('tr[data-task-result-unit]'), (row) => [row.dataset.taskResultUnit, row.querySelector('[data-task-result-jump]')?.dataset.taskResultJump ?? null]),
+      units: Array.from(win.querySelectorAll('li[data-task-result-unit]'), (row) => [row.dataset.taskResultUnit, row.querySelector('[data-task-result-jump]')?.dataset.taskResultJump ?? null]),
       open: win.querySelector('[data-task-result-action="open"]')?.textContent ?? null,
       focused: document.activeElement === win.querySelector('.task-result-title'),
     }; })()`);
@@ -1429,7 +1429,7 @@ async function main() {
     requireJourney(typeof tasksBefore === 'string' && tasksAfter === tasksBefore, 'restart-tasks-unmoved');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'dialogue-answered,analysis-cancelled,analysis-completed', 'restart-panel');
     await cardAction(renderer, 'analysis-completed', 'result', 'restart-result-open');
-    await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult === 'ready' && document.querySelectorAll('.task-result-window tr[data-task-result-unit]').length === ${SAMPLE1_UNITS}`, 'restart-result', 30_000);
+    await waitFor(renderer, `document.querySelector('.task-result-window')?.dataset.taskResult === 'ready' && document.querySelectorAll('.task-result-window li[data-task-result-unit]').length === ${SAMPLE1_UNITS}`, 'restart-result', 30_000);
     await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'restart-result-close');
 
     at('dialogue-history-recovered');

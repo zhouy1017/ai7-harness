@@ -100,7 +100,7 @@ describe('查看结果 and 回到<位置>', () => {
     expect(labels.TASK_RESULT_ROWS).toEqual({ task: '任务', read: '读取了', notDone: '没有做' });
     expect(labels.TASK_RESULT_OPEN).toEqual({ analysis: '在分析中打开', review: '在审阅中打开' });
     expect(labels.TASK_RESULT_FOOT_NOTE).toBe('浮窗不改变你在稿件中的位置；跳过去后，稿件顶部会有「回到…」，一键回来。');
-    expect(labels.TASK_RESULT_COLUMNS).toEqual({ analysis: ['#', '阅读范围', '结果', '位置'], review: ['#', '类别', '发现', '位置'] });
+    expect(labels.TASK_RESULT_COLUMNS).toEqual({ review: ['#', '类别', '发现', '位置'] });
     expect(labels.taskResultTaskLine(entry('analysis-completed', { group: 'recent' }))).toMatch(/^基线分析 · 首次基线分析 · 完成于 /u);
     expect(labels.analysisResultReadLine({ units: new Array(8).fill(null), manuscriptPin: { revisionLabel: 'r2' } } as never)).toBe('全书 8 个阅读范围 · 稿件修订版 r2');
     expect(labels.ANALYSIS_RESULT_NOT_DONE).toBe('没有修改稿件：分析只读稿件。');
