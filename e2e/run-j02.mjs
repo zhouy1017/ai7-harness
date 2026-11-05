@@ -108,6 +108,7 @@ function parseJourney() {
 
 function productEnvironment(executable) {
   const selected = { AI7_E2E_JOURNEY: 'J-02' };
+  if (process.env.AI7_E2E_WINDOW !== undefined) selected.AI7_E2E_WINDOW = process.env.AI7_E2E_WINDOW;
   const names = process.platform === 'win32'
     ? ['SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'PATHEXT', 'ComSpec', 'APPDATA', 'LOCALAPPDATA', 'USERPROFILE']
     : ['HOME', 'TMPDIR', 'LANG', 'LC_ALL'];
@@ -1733,16 +1734,46 @@ async function runEditorModesJourney(renderer) {
   await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
   await renderer.send('Emulation.clearDeviceMetricsOverride');
   await renderer.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
-  // #1287: the viewport owns the editor height; navigation/analysis never cover text or its mark cards.
+  // #1287 owns viewport height; A5 #1319 overlays supporting panes below 1120px.
   await waitForChecks(renderer, `(() => { const toolbar=document.querySelector('.editor-toolbar'); const actions=Array.from(toolbar.querySelectorAll('button')).filter(button=>!button.hidden); const notice=document.querySelector('[data-toast]'); const footer=document.querySelector('.window-actions').getBoundingClientRect(); return { sidebarNavigation:!toolbar.querySelector('nav'), actionsVisible:actions.every(button=>{ const box=button.getBoundingClientRect(); return box.width>0 && box.height>0 && box.left>=0 && box.right<=innerWidth && box.top>=0 && box.bottom<=innerHeight; }), oneActionRow:new Set(actions.map(button=>{ const box=button.getBoundingClientRect(); return Math.round(box.top+box.height/2); })).size===1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2, footerClear:footer.bottom<=innerHeight+1, singletonNotice:document.querySelectorAll('[data-toast]').length===1, statusOnScreen:notice.hidden || notice.getBoundingClientRect().bottom<=innerHeight }; })()`, 'editor-viewport-and-toolbar', 10_000);
   await assertRenderer(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); if(panel.hidden)document.querySelector('[data-edge-entry="navigation"]').click(); return !panel.hidden; })()`, 'editor-navigation-layout-open');
-  await waitForChecks(renderer, `(() => { const panel=document.querySelector('#manuscript-navigation-panel'); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); const box=panel.getBoundingClientRect(); const width=document.querySelector('.editor-workspace').clientWidth; return { visible:!panel.hidden && box.width>0 && box.height>0, separate:box.left>=text.right-1 || box.top>=text.bottom-1, readable:width<864 || text.width>=480, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-navigation-no-overlap');
+  await waitForChecks(renderer, `(() => {
+    const panel=document.querySelector('#manuscript-navigation-panel'), box=panel.getBoundingClientRect();
+    const text=document.querySelector('.manuscript-surface').getBoundingClientRect();
+    const workspace=document.querySelector('.editor-workspace'), bounds=workspace.getBoundingClientRect();
+    const edge=document.querySelector('.editor-edge').getBoundingClientRect();
+    const form=innerWidth>=1120?'separate':'overlay';
+    const checks=form==='separate'
+      ? { visible:!panel.hidden && box.width>0 && box.height>0,
+          separate:box.left>=text.right-1 || box.top>=text.bottom-1,
+          readable:workspace.clientWidth<864 || text.width>=480 }
+      : { visible:!panel.hidden, absolute:getComputedStyle(panel).position==='absolute',
+          readable:box.width>=240 && box.height>=100,
+          inside:box.top>=bounds.top-1 && box.bottom<=bounds.bottom+1 && box.left>=bounds.left-1 && box.right<=edge.left+1,
+          painted:panel.contains(document.elementFromPoint(box.left+20,box.top+20)) };
+    checks.noPageScroll=document.documentElement.scrollHeight<=innerHeight+2;
+    return { viewport:true, ...Object.fromEntries(Object.entries(checks).map(([key,passed])=>[form+'-'+innerWidth+'-'+key,passed])) };
+  })()`, 'editor-navigation-no-overlap');
   await assertRenderer(renderer, `(() => { const entry=document.querySelector('[data-edge-entry="navigation"]'); if(!(entry instanceof HTMLButtonElement)||entry.disabled)return false; entry.click(); return document.querySelector('#manuscript-navigation-panel').hidden; })()`, 'editor-navigation-layout-close');
   at('typography-defaults');
   await waitForChecks(renderer, `(() => { const text = document.querySelector('[data-testid="manuscript-editor"]'); const style = text ? getComputedStyle(text) : null; return { fontSize: style?.fontSize === '17px', lineHeight: Math.abs(parseFloat(style?.lineHeight ?? '0') - 17 * 1.95) < 0.6, column: Math.abs(parseFloat(style?.maxWidth ?? '0') - (36 * 17)) < 1.5, preset: document.documentElement.dataset.readingPreset === 'editing', density: document.documentElement.dataset.density === 'standard' }; })()`, 'typography-defaults', 15_000);
   at('focus-mode-enter');
-  await assertRenderer(renderer, `(() => { document.querySelector('[data-edge-entry="analysis"]')?.click(); const panel = document.querySelector('#paragraph-analysis-panel'); const separator = document.querySelector('.editor-workspace > .region-separator'); return panel instanceof HTMLElement && !panel.hidden && panel.getBoundingClientRect().width > 0 && separator instanceof HTMLElement && getComputedStyle(separator).display !== 'none'; })()`, 'analysis-region-open');
-  await waitForChecks(renderer, `(() => { const panel=document.querySelector('#paragraph-analysis-panel').getBoundingClientRect(); const text=document.querySelector('.manuscript-surface').getBoundingClientRect(); return { separate:panel.left>=text.right-1 || panel.top>=text.bottom-1, noPageScroll:document.documentElement.scrollHeight<=innerHeight+2 }; })()`, 'editor-analysis-no-overlap');
+  await assertRenderer(renderer, `(() => { document.querySelector('[data-edge-entry="analysis"]')?.click(); const panel = document.querySelector('#paragraph-analysis-panel'); const separator = document.querySelector('.editor-workspace > .region-separator'); return panel instanceof HTMLElement && !panel.hidden && panel.getBoundingClientRect().width > 0 && separator instanceof HTMLElement && (innerWidth>=1120 ? getComputedStyle(separator).display !== 'none' : getComputedStyle(separator).display === 'none'); })()`, 'analysis-region-open');
+  await waitForChecks(renderer, `(() => {
+    const panel=document.querySelector('#paragraph-analysis-panel'), box=panel.getBoundingClientRect();
+    const text=document.querySelector('.manuscript-surface').getBoundingClientRect();
+    const workspace=document.querySelector('.editor-workspace').getBoundingClientRect();
+    const edge=document.querySelector('.editor-edge').getBoundingClientRect();
+    const form=innerWidth>=1120?'separate':'overlay';
+    const checks=form==='separate'
+      ? { separate:box.left>=text.right-1 || box.top>=text.bottom-1 }
+      : { visible:!panel.hidden, absolute:getComputedStyle(panel).position==='absolute',
+          readable:box.width>=240 && box.height>=100,
+          inside:box.top>=workspace.top-1 && box.bottom<=workspace.bottom+1 && box.left>=workspace.left-1 && box.right<=edge.left+1,
+          painted:panel.contains(document.elementFromPoint(box.left+20,box.top+20)) };
+    checks.noPageScroll=document.documentElement.scrollHeight<=innerHeight+2;
+    return { viewport:true, ...Object.fromEntries(Object.entries(checks).map(([key,passed])=>[form+'-'+innerWidth+'-'+key,passed])) };
+  })()`, 'editor-analysis-no-overlap');
   await assertRenderer(renderer, `(() => { const toggle = document.querySelector('[data-view-command="focus-mode"]'); if (!(toggle instanceof HTMLButtonElement) || toggle.getAttribute('aria-pressed') !== 'false') return false; toggle.focus(); toggle.click(); return true; })()`, 'focus-mode-toggle');
   await waitForChecks(renderer, `(() => { const hidden = (selector) => { const node = document.querySelector(selector); return node === null || getComputedStyle(node).display === 'none'; }; const status = document.querySelector('[data-toast]'); const toggle = document.querySelector('[data-view-command="focus-mode"]'); return { modeOn: document.documentElement.dataset.focusMode === 'on', sidebarHidden: hidden('#app-sidebar'), navigationHidden: hidden('#manuscript-navigation-panel'), analysisHidden: hidden('#paragraph-analysis-panel'), saveMenuShown: !hidden('#manuscript-save-menu') && document.querySelector('#context-actions #manuscript-save-menu') !== null, edgeEntriesHidden: hidden('.edge-entries'), drawerHidden: hidden('#task-drawer'), manuscriptShown: (document.querySelector('[data-testid="manuscript-editor"]')?.getBoundingClientRect().width ?? 0) > 0, statusAvailable: status instanceof HTMLElement && document.querySelectorAll('[data-toast]').length === 1, restoreControl: toggle?.getAttribute('aria-pressed') === 'true' && toggle.textContent === '退出专注（Esc）' && toggle.getBoundingClientRect().width > 0 }; })()`, 'focus-mode-entered', 15_000);
   at('focus-mode-esc');
