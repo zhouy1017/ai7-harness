@@ -586,7 +586,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       asked = null;
       refusal = null;
       chooser = null;
-      paint(kind === 'remove' && bookId !== undefined ? `tr[data-book-id="${bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
+      paint(kind === 'remove' && bookId !== undefined ? `.series-member-card[data-book-id="${bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
     });
     cancel.disabled = busy;
     buttons.append(cancel);
@@ -641,7 +641,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       projection = { ...shown, members: added, membersNext: page.nextCursor };
       membersLater = !fresh;
       busy = false;
-      paint(added[0] === undefined ? '[data-series-action="members-first"]' : `tr[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
+      paint(added[0] === undefined ? '[data-series-action="members-first"]' : `.series-member-card[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
@@ -711,7 +711,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       busy = false;
       preview = null;
       asked = null;
-      paint(shown.kind === 'add' ? `tr[data-book-id="${shown.bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
+      paint(shown.kind === 'add' ? `.series-member-card[data-book-id="${shown.bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
       setStatus(result.completionLabel, 'success');
     } catch (error) {
       busy = false;

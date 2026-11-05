@@ -994,7 +994,7 @@ async function main() {
     at('membership-remove');
     // 移出书系… from the member's row: its own preview, prospective, then exactly `移出书系`; focus returns to 加入书系….
     await openSeries(renderer, seriesId, 'remove-series');
-    await clickSelector(renderer, `tr[data-book-id="${first}"] [data-series-action="remove-open"]`, 'remove-open');
+    await clickSelector(renderer, `.series-member-card[data-book-id="${first}"] [data-series-action="remove-open"]`, 'remove-open');
     const leave = await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.focus === 'preview-heading', 'remove-preview');
     requireJourney(leave.preview.heading === '移出书系的影响' && leave.preview.identity === `图书《${FIRST}》 · 书系「${SERIES}」` &&
       JSON.stringify(leave.preview.groups.map(([key, title]) => [key, title])) === JSON.stringify(GROUPS) &&
@@ -1052,7 +1052,7 @@ async function main() {
     at('j14-series-reflow-forced-colors');
     // At 200% the member table stacks and the preview's groups wrap within the width; under forced colours the preview keeps
     // its border.
-    await clickSelector(renderer, `tr[data-book-id="${second}"] [data-series-action="remove-open"]`, 'reflow-preview-open');
+    await clickSelector(renderer, `.series-member-card[data-book-id="${second}"] [data-series-action="remove-open"]`, 'reflow-preview-open');
     await readSeries(renderer, (read) => read.preview?.kind === 'remove' && read.preview.heading !== null, 'reflow-preview');
     await renderer.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
