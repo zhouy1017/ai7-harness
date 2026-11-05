@@ -1,3 +1,4 @@
+import { mountKnowledgeBaseHome } from './knowledge-base-home.js';
 import { technicalLayerVisible, technicalWords } from './technical-layer.js';
 import { mountEditableProcedureLibrary } from './procedure-library.js';
 import { renderHouseReviewPreference, mountEditorialMemory } from './knowledge-base-memory.js';
@@ -12,7 +13,7 @@ import { mountFeedbackHistory } from './feedback-history.js';
 import { mountLearningAudit } from './learning-audit.js';
 import { LEARNING_AUDIT_HEADING, LEARNING_AUDIT_STATUS } from './learning-audit-labels.js';
 import { FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS, LEARNING_HEADING, LEARNING_STATUS, QUALITY_LEARNING_LEDE, QUALITY_LEARNING_TABS, QUALITY_LEARNING_TABS_LABEL, QUALITY_LEARNING_TITLE, visibleQualityLearningTabs, type QualityLearningTab } from './quality-learning-labels.js';
-import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_LEDE, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
+import { PROCEDURES_HEADING, RULES_HEADING, artifactLine, EXEMPLARS_EMPTY, EXEMPLARS_MORE, EXEMPLARS_NONE_DELIVERED, EXEMPLARS_STATUS, EXEMPLAR_READERS_REPORT_ADMIT, EXEMPLAR_READERS_REPORT_STATUS, readersReportExemplarLine, exemplarAttribution, exemplarDesignation, exemplarLine, exemplarSkippedNote, GUIDELINE_STATUS, LIBRARY_STATUS, KNOWLEDGE_BASE_TABS_LABEL, KNOWLEDGE_BASE_TAB_VIEWS, KNOWLEDGE_BASE_TITLE, knowledgeBaseTabView, visibleKnowledgeBaseTabs, type KnowledgeBaseTab } from './knowledge-base-labels.js';
 import { mountCapturedProcedures } from './captured-procedures.js';
 import { mountCustomAnalysisDimensions } from './custom-analysis.js';
 import { mountImportedSkills } from './imported-skills.js';
@@ -57,9 +58,23 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
    * chosen class below them. `tabFocused` keeps the keyboard on the tab list when a class was chosen from it; `materialId` is
    * the 资料库 item 待我处理 opened (Issue #427, S79c), shown with the decision it waits for in focus.
    */
-  async function renderKnowledgeBase(tab: KnowledgeBaseTab = 'guidelines', tabFocused = false, materialId: string | null = null): Promise<void> {
+  async function renderKnowledgeBase(tab: KnowledgeBaseTab | 'home' = 'home', tabFocused = false, materialId: string | null = null): Promise<void> {
+    if (tab === 'home') {
+      const content = panel();
+      content.classList.add('knowledge-base');
+      content.dataset['knowledgeTab'] = 'home';
+      const home = element('div', 'knowledge-home');
+      const back = element('div', 'button-row');
+      back.append(button('返回', 'quiet', () => void returnToOrigin()));
+      content.append(element('h2', undefined, KNOWLEDGE_BASE_TITLE), home, back);
+      replaceScreen('knowledge-base', content);
+      options.rememberReturn(content, () => renderKnowledgeBase());
+      await mountKnowledgeBaseHome(home, window.ai7, technicalLayerVisible, (category) => void renderKnowledgeBase(category, true));
+      if (content.isConnected) setStatus('知识库已打开');
+      return;
+    }
     if (!technicalLayerVisible && knowledgeBaseTabView(tab).developerOnly === true) {
-      await renderKnowledgeBase('guidelines');
+      await renderKnowledgeBase();
       setStatus('该页在开发者模式下显示');
       return;
     }
@@ -179,6 +194,8 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         if (book.exemplars.length === 0 && skipped.length === 0) context.append(`；${EXEMPLARS_NONE_DELIVERED}`);
         if (skipped.length > 0) context.append('；', element('span', 'exemplars-skipped', exemplarSkippedNote(skipped)));
         card.append(heading, context);
+        const more = element('details', 'knowledge-file-more');
+        more.append(element('summary', undefined, '查看范例'));
         const items = element('ul', 'exemplar-items');
         for (const exemplar of book.exemplars) {
           const item = element('li', undefined, exemplarLine(exemplar, localInstantLabel));
@@ -188,10 +205,11 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
           if (exemplar.imported) item.append(exemplarEligibility(surface, exemplar));
           items.append(item);
         }
-        if (book.exemplars.length > 0) card.append(items);
+        if (book.exemplars.length > 0) more.append(items);
         // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
-        card.append(readersReportExemplars(book));
-        if (book.imported) card.append(exemplarImportButton(surface, book));
+        more.append(readersReportExemplars(book));
+        if (book.imported) more.append(exemplarImportButton(surface, book));
+        card.append(more);
         list.append(card);
       }
       root.dataset['exemplarBooks'] = String(list.children.length);
@@ -340,7 +358,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
       back.append(all);
     }
     back.append(button('全域对话历史', 'quiet', () => void leaveThen(() => renderGlobalAgent())));
-    back.append(button('返回', 'quiet', () => void returnToOrigin()));
+    back.append(button('返回知识库', 'quiet', () => void renderKnowledgeBase()));
     if (returnToReview !== null) back.prepend(button('返回原审阅', 'quiet', returnToReview));
     content.append(
       element('p', 'section-label', `${QUALITY_LEARNING_TITLE} · ${heading}`),
@@ -411,12 +429,11 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     panelNode.setAttribute('role', 'tabpanel');
     panelNode.setAttribute('aria-labelledby', `knowledge-tab-${tab}`);
     const back = element('div', 'button-row');
-    back.append(button('返回', 'quiet', () => void returnToOrigin()));
+    back.append(button('返回知识库', 'quiet', () => void renderKnowledgeBase()));
     const holds = element('p', 'lede knowledge-holds', view.holds);
     content.append(
       element('p', 'section-label', `${KNOWLEDGE_BASE_TITLE} · ${view.label}`),
-      element('h2', undefined, KNOWLEDGE_BASE_TITLE),
-      element('p', 'field-note', KNOWLEDGE_BASE_LEDE),
+      element('h2', undefined, view.label),
       tabs,
       holds,
     );

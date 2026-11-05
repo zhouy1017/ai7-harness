@@ -2498,3 +2498,39 @@ body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:ca
 .global-attention-item[data-read="true"] .global-attention-object { font-weight: 400; }
 .task-card-answer { grid-column: 1 / -1; padding: .75rem; }
 .task-card-answer textarea { width: 100%; }
+
+/* C2: intake progress, manuscript anchor and knowledge category destinations. */
+.import-steps { display: flex; flex-wrap: wrap; gap: .5rem; list-style: none; margin: .75rem 0 1rem; padding: 0; }
+.import-steps .state-term { padding: .35rem .85rem; border: 1px solid var(--boundary); border-radius: 999px; }
+.import-steps [aria-current="step"] { color: var(--action-text); border-color: currentColor; font-weight: 700; }
+.import-steps [data-complete="true"] { background: var(--surface); }
+.import-file-card { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; padding: .75rem; }
+.import-file-card strong { overflow-wrap: anywhere; }
+.manuscript-anchor { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; }
+.manuscript-anchor h3 { width: 100%; margin: 0; }
+.manuscript-anchor dl { display: flex; flex-wrap: wrap; gap: .35rem .6rem; flex: 1 1 24rem; margin: 0; }
+.manuscript-anchor dd { margin: 0 1rem 0 0; }
+.manuscript-anchor .button-row { margin: 0; }
+.book-overview :is(.book-deliverables-summary, .overview-line, .book-review-summary, .book-evaluation-summary, .book-analysis-summary) { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem; padding: .65rem 0; border-bottom: 1px solid var(--boundary); }
+.book-overview :is(.book-deliverables-summary, .overview-line, .book-review-summary, .book-evaluation-summary, .book-analysis-summary) :is(h3, p) { margin: 0; }
+.book-overview :is(.overview-line, .book-deliverables-summary) p { flex: 1; }
+.book-people-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem; }
+.book-people-line .button-row { display: inline-flex; margin: 0 0 0 .5rem; }
+.knowledge-category-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 1rem; margin: 1rem 0 1.5rem; }
+.knowledge-category.btn { display: grid; grid-template-columns: 1fr auto; gap: .5rem; min-width: 0; white-space: normal; text-align: start; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
+.knowledge-category > span:not(.knowledge-category-count) { grid-column: 1 / -1; }
+.knowledge-category-latest { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-subdued); }
+.knowledge-recent ul { list-style: none; padding: 0; }
+.knowledge-recent .btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-file-more > summary { cursor: pointer; width: fit-content; padding: .3rem .65rem; border: 1px solid var(--boundary); border-radius: 999px; }
+.knowledge-file-more[open] { padding-top: .4rem; }
+.knowledge-file-more[open] > summary { margin-bottom: .75rem; }
+.guideline-card > .guideline-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem .75rem; }
+.guideline-heading > h3, .guideline-heading > .guideline-applied { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guideline-heading > .guideline-applied { grid-column: 1 / -1; }
+.guideline-card > .knowledge-file-more { margin-top: .35rem; }
+.library-material > .library-heading { display: flex; flex-wrap: nowrap; min-width: 0; }
+.library-material > .library-heading h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-material > .library-heading .library-source { display: none; }
+.library-material > .knowledge-file-summary { margin: .25rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exemplar-book > :is(h3, .field-note) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: .25rem 0; }

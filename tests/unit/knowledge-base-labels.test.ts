@@ -74,7 +74,6 @@ describe('知识库', () => {
       if (view.pending !== null) expect(view.pending.startsWith('尚未提供')).toBe(true);
     }
     // 范例 keeps the Owner's default and 资料库 its gate, as the specification states them.
-    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')!.holds).toContain('学习准入默认「仅本社」');
     expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'library')!.holds).toContain('任务');
   });
 

@@ -91,15 +91,17 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     heading.append(title, el('span', 'status-pill guideline-version-pill', guidelineVersionPill(document)));
     heading.append(el('span', 'guideline-applied', guidelineAppliedBy(document)));
     node.append(heading);
+    const more = el('details', 'knowledge-file-more');
+    more.append(el('summary', undefined, '查看文件'));
     const older = guidelineOlderBooks(document);
     if (older !== null) {
       const note = el('p', 'attention-note guideline-older', older);
       note.dataset['guidelineOlder'] = String(document.olderVersionBookCount);
-      node.append(note);
+      more.append(note);
     }
     // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
     const fixed = guidelineFixedStatement(document);
-    if (fixed !== null) heading.append(el('span', 'guideline-fixed', fixed));
+    if (fixed !== null) more.append(el('p', 'guideline-fixed', fixed));
     // The clauses of the version that applies now, each with how often findings cite it.
     const clauses = el('details', 'guideline-clauses');
     clauses.append(el('summary', undefined, guidelineClausesSummary(document.clauseCount)));
@@ -136,7 +138,7 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       controls.append(latest, older);
       versions.append(controls);
     }
-    node.append(clauses, versions);
+    more.append(clauses, versions);
     // The versions merged Books were reviewed under and this data never had, each with its clauses: read-only (Issue #434
     // review; ADR 0079 §1.5).
     if (document.mergedVersionCount > 0) {
@@ -179,12 +181,12 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
         }
         merged.append(controls);
       }
-      node.append(merged);
+      more.append(merged);
     }
     if (refusal?.documentId === document.documentId) {
       const note = el('p', 'attention-note guideline-refusal', refusal.message);
       note.setAttribute('role', 'alert');
-      node.append(note);
+      more.append(note);
     }
     if (preview?.documentId === document.documentId) node.append(previewSection(preview));
     else if (fixed === null) {
@@ -192,8 +194,10 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
       const start = action(GUIDELINE_IMPORT, 'secondary', 'import', () => void choose(document.documentId));
       start.disabled = busy || preview !== null;
       actions.append(start);
-      node.append(actions);
+      more.append(actions);
     }
+    if (preview?.documentId === document.documentId || refusal?.documentId === document.documentId) more.open = true;
+    node.append(more);
     return node;
   };
 

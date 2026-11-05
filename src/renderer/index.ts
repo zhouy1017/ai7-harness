@@ -1,3 +1,4 @@
+import { importSteps } from './components/import-steps.js';
 import { icon } from './components/icon-sprite.js';
 import { createStatusSurface } from './notifications.js';
 import { technicalWords, identityWords, technicalLayerVisible, collectTechnicalDisclosures, initializeTechnicalLayer, resetTechnicalLayer, technicalDisclosure } from './technical-layer.js';
@@ -858,7 +859,7 @@ const shell = mountShell({
     else if (destination === 'tasks') void leaveThen(async () => { renderTaskOverview(); });
     else if (destination === 'series') void leaveThen(() => renderSeriesList(null));
     else if (destination === 'global-agent') void leaveThen(() => renderGlobalAgent());
-    else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase('guidelines'));
+    else if (destination === 'knowledge') void leaveThen(() => renderKnowledgeBase());
     else void leaveThen(() => renderQualityLearning());
   },
   openSection: (book, section) => {
@@ -1573,32 +1574,19 @@ async function returnToLibrary(): Promise<void> {
 }
 
 function sourceCard(staged: StagedImportProjection): HTMLElement {
-  const card = element('section', 'source-card');
-  card.append(element('p', 'section-label', '已完成本地暂存'));
-  const heading = element('h3', undefined, staged.source.displayName);
-  card.append(heading);
-  const details = element('dl');
-  const sourceBytes = element('dd', undefined, technicalLayerVisible ? String(staged.source.sourceBytes) : '');
-  sourceBytes.setAttribute('data-source-bytes', '');
-  const sourceDigest = element('dd', 'technical-identity', staged.source.sourceSha256);
-  sourceDigest.setAttribute('data-source-sha256', '');
-  const sourceFormat = element('dd', undefined, staged.source.format);
-  sourceFormat.setAttribute('data-source-format', staged.source.format);
-  details.append(
-    element('dt', undefined, '格式'),
-    sourceFormat,
-    element('dt', undefined, '来源'),
-    element('dd', undefined, technicalWords(staged.source.provenanceLabel, '已选择文件')),
-    element('dt', undefined, technicalLayerVisible ? '来源字节数' : ''),
-    sourceBytes,
-    // A file the product did not parse detected no blocks, so it says what it retained instead of
-    // reporting a count of nothing.
-    element('dt', undefined, '检测结果'),
-    element('dd', undefined, staged.editableImport.available
-      ? `${staged.detectedBlockCount} 个可编辑段落`
-      : '未进行本地解析；仅保留原始文件'),
-  );
-  card.append(details, technicalDetails(undefined, element('dt', undefined, '来源 SHA-256'), sourceDigest));
+  const card = element('section', 'source-card import-file-card');
+  card.setAttribute('aria-label', '已选择文件');
+  const format = element('span', undefined, staged.source.format);
+  format.dataset['sourceFormat'] = staged.source.format;
+  card.append(element('strong', undefined, staged.source.displayName), ' · ', format, ' · ',
+    element('span', undefined, staged.editableImport.available
+      ? `${staged.detectedBlockCount} 个段落` : '保留原始文件'));
+  const bytes = element('dd', 'technical-identity', String(staged.source.sourceBytes));
+  bytes.dataset['sourceBytes'] = '';
+  const digest = element('dd', 'technical-identity', staged.source.sourceSha256);
+  digest.dataset['sourceSha256'] = '';
+  card.append(technicalDetails(undefined, element('dt', undefined, '文件大小'), bytes,
+    element('dt', undefined, '来源 SHA-256'), digest));
   return card;
 }
 
@@ -1608,6 +1596,12 @@ function identityFindingDisclosure(
 ): HTMLElement {
   const disclosure = element('section', 'source-card identity-finding-disclosure');
   if (reviewTarget) disclosure.classList.add('review-identity-finding-summary');
+  if (!technicalLayerVisible) {
+    const books = [...new Set(findings.map((finding) => `《${finding.bookTitle}》`))];
+    disclosure.append(element('h3', undefined, '这个文件已有导入记录'),
+      element('p', undefined, `已在${books.join('、')}中导入，请确认本次图书与导入方式。`));
+    return disclosure;
+  }
   disclosure.append(
     element('p', 'section-label', reviewTarget ? '导入身份提示与本次关系' : '发现已有导入身份提示'),
     element('h3', undefined, reviewTarget ? '复核身份提示记录与不同作品后果' : '已有导入与当前文件的身份提示'),
@@ -3062,7 +3056,6 @@ function renderBookOverview(
   // A reimport lands in the manuscript instead (renderImported; Issue #412).
   completion?: Exclude<ImportCommitProjection, ManuscriptReimportCommitProjection>,
   recoveryReturn?: RecoveryReturnContext,
-  emptyBookCreated = false,
 ): void {
   const sourceCompletion: SourceImportCommitProjection | undefined =
     completion && 'sourceImportRecordId' in completion ? completion : undefined;
@@ -3075,18 +3068,12 @@ function renderBookOverview(
     element('h2', undefined, '工作概览'),
     element('p', 'lede', overview.manuscriptState.label),
   );
-  if (sourceCompletion) {
-    content.append(element('p', 'success-note', '来源材料已导入。'));
-  } else if (completion) {
-    content.append(element('p', 'success-note', '稿件已导入。'));
-  }
-  else if (emptyBookCreated) content.append(element('p', 'success-note', '图书已创建；尚未创建任何稿件或导入记录。'));
   // V2-UX-BOOK-001: with a primary Manuscript the overview leads with it — the Revision, where the
   // editor last was, and whether the edits are in the journal — above the Book's own identity and
   // every record below. Its continuation action sits with these manuscript readings.
   const anchor = overview.manuscriptAnchor;
   const guidance = element('section', 'onboarding-guidance');
-  content.append(guidance);
+
   const isSample = overview.records.some((record) => record.kind === 'source' && record.sourceDigest ===
     'b8a3dbde0aa8a1ec7265f9ae3fe47877759e7947c5ab69682cd0a8f424a8d483');
   if (isSample && anchor !== null) {
@@ -3111,7 +3098,7 @@ function renderBookOverview(
     anchorSection.dataset['manuscriptAnchor'] = anchor.entry === null ? 'no-entry-position' : anchor.entry.state;
     const anchorValues = element('dl');
     anchorValues.append(
-      element('dt', undefined, '稿件'), element('dd', undefined, technicalWords(anchor.revisionLabel, '当前稿件')),
+      element('dt', undefined, '修订版'), element('dd', undefined, anchor.revisionLabel),
       element('dt', undefined, '上次位置'),
       element('dd', undefined, anchor.entry === null
         ? '尚未记录；打开稿件时从稿件开头开始'
@@ -3132,6 +3119,7 @@ function renderBookOverview(
       element('dd', 'technical-identity', anchor.entry === null ? '—' : String(anchor.entry.grapheme)),
     ));
     content.append(anchorSection);
+    content.append(guidance);
   }
   const identity = element('section', 'source-card');
   const identityValues = element('dl');
@@ -3143,10 +3131,9 @@ function renderBookOverview(
     element('dt', undefined, '图书 ID'), element('dd', 'technical-identity', overview.book.bookId),
     element('dt', undefined, '稳定标识'), element('dd', 'technical-identity', overview.book.stableIdentity),
   ));
-  content.append(identity);
   // 人员 (Issue #431, S83; BOOK-006): the Book's 作者, 责编 and 相关人, and 编辑人员….
   const peopleSlot = element('div', 'book-people-slot');
-  content.append(peopleSlot);
+
   mountBookPeople({
     root: peopleSlot,
     bookId: overview.book.bookId,
@@ -3157,7 +3144,7 @@ function renderBookOverview(
   });
   // 书系 (Issue #63, S28a; SER-009): the Series the Book is in, and its membership change records.
   const seriesSlot = element('section');
-  content.append(seriesSlot);
+
   mountBookSeries({ root: seriesSlot, bookId: overview.book.bookId, api: window.ai7 });
 
   const agentEntry = element('div', 'agent-workspace-entry');
@@ -3168,7 +3155,7 @@ function renderBookOverview(
   });
   openAgent.dataset['agentWorkspaceAction'] = 'open';
   agentEntry.append(openAgent);
-  content.append(agentEntry);
+
 
   const taskHost = element('div');
   taskHost.dataset['taskAuthorizationBookId'] = overview.book.bookId;
@@ -3318,7 +3305,16 @@ function renderBookOverview(
     );
   };
   if (overview.manuscriptState.state === 'populated') {
-    content.append(taskHost, reviewHost, evaluationHost, deliverablesHost, analysisHost);
+    content.append(deliverablesHost);
+    const sources = element('section', 'overview-line book-sources-summary');
+    sources.append(element('h3', undefined, '来源与证据'),
+      element('p', undefined, '导入文件与审查时留存的证据。'),
+      button('查看来源与证据', 'secondary', () => renderBookSources(overview.book.bookId, overview.book.title)));
+    const recent = element('section', 'overview-recent');
+    recent.append(element('h3', undefined, '最近发生'));
+    recent.append(reviewHost, evaluationHost, analysisHost);
+    content.append(sources, recent);
+    if (technicalLayerVisible) content.append(taskHost);
   }
 
   const detailHost = element('div');
@@ -3340,7 +3336,8 @@ function renderBookOverview(
     viewImportRecord.disabled = true;
     completionActionButtons.push(viewSource, viewImportRecord);
     actions.append(viewSource, viewImportRecord);
-  } else if (overview.primaryAction.kind === 'import-first-manuscript') {
+  }
+  if (overview.primaryAction.kind === 'import-first-manuscript' && !sourceCompletion) {
     const importFirst = button('导入首份稿件', 'primary', async () => {
       importFirst.disabled = true;
       setStatus('正在本地解析 DOCX…', 'busy');
@@ -3382,16 +3379,11 @@ function renderBookOverview(
       importFirst.disabled = true;
       completionActionButtons.push(importFirst);
     }
-  } else {
-    const manuscriptAction = overview.primaryAction;
+  } else if (overview.primaryAction.kind === 'open-manuscript') {
     const primaryActionButton = button('打开稿件', 'primary', async () => {
       setStatus('正在打开稿件…', 'busy');
       try {
-        await openEditorWindow(await window.ai7.getManuscriptWindow({
-          manuscriptId: manuscriptAction.manuscriptId,
-          branchId: manuscriptAction.branchId,
-          cursor: null,
-        }), overview.book.title, recoveryReturn?.attentionId);
+        await renderResolvedBookWorkbenchRoute({ kind: 'book', bookId: overview.book.bookId, bookTitle: overview.book.title }, recoveryReturn);
       } catch (error) {
         setStatus(rendererErrorMessage(error, '无法打开稿件。'), 'error');
       }
@@ -3443,8 +3435,17 @@ function renderBookOverview(
     historyNavigation.append(next);
   }
   records.append(historyNavigation);
-  content.append(records);
+  content.append(records, peopleSlot, seriesSlot, agentEntry);
+  if (technicalLayerVisible) content.append(identity);
+  if (sourceCompletion) {
+    const receiptActions = element('div', 'button-row');
+    for (const action of Array.from(actions.children)) receiptActions.append(action);
+    records.prepend(receiptActions);
+    const open = Array.from(receiptActions.querySelectorAll('button')).find((action) => action.textContent === '打开稿件');
+    if (open) actions.append(open);
+  }
   (content.querySelector('.manuscript-anchor') ?? content).append(actions);
+  if (completion) content.prepend(importSteps('complete'));
   appendRecoveryReturnAction(content, recoveryReturn);
   replaceScreen(completion ? 'imported' : 'book-overview', content, { bookId: overview.book.bookId, title: overview.book.title, section: 'overview' });
   shell.setContextActions(button('打开另一本图书', 'quiet', () => renderBookWorkbenchChooser(overview)));
@@ -3669,7 +3670,7 @@ function renderBookCreationReview(review: BookCreationReviewProjection): void {
     try {
       const result = await window.ai7.commitBookCreation({ ...review.proposed, reviewDigest: review.reviewDigest });
       setStatus(result.completionLabel, 'success');
-      renderBookOverview(result.overview, undefined, undefined, true);
+      renderBookOverview(result.overview);
     } catch (error) {
       commit.disabled = false;
       setStatus(rendererErrorMessage(error, '图书未创建。'), 'error');

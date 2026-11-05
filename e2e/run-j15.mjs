@@ -176,7 +176,7 @@ async function assertRenderer(renderer, expression, name) {
 
 async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
-  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>(item.textContent===${JSON.stringify(label)}||item.getAttribute('aria-label')===${JSON.stringify(label)})); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
 async function clickBook(renderer, bookId, name) {
@@ -528,10 +528,16 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'knowledge-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'knowledge-landing');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'knowledge-open');
+    await waitFor(renderer, `document.querySelector('[data-knowledge-home-ready=true]') && document.querySelectorAll('[data-knowledge-category]').length===7`, 'knowledge-category-home');
+    await assertRenderer(renderer, `document.querySelectorAll('.guideline-card, .library-material').length===0 && document.querySelector('.knowledge-recent') !== null`, 'knowledge-home-has-no-files');
+    await click(renderer, '审阅规范文件', 'knowledge-open-category');
     const opened = await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready');
     // J-14 dark pass (#935): 深色 through 设置 › 外观, this screen checked, then 跟随系统 again; back through the sidebar.
     await runJ14DarkPass({ renderer, journey: 'J-15', at, representative: '#screen[data-screen="knowledge-base"] > .page-content', returnTo: SIDEBAR.destination('knowledge') });
+    await waitFor(renderer, `document.querySelector('[data-knowledge-category=guidelines]')`, 'knowledge-home-after-dark-pass');
+    await click(renderer, '审阅规范文件', 'knowledge-category-after-dark-pass');
     await readKnowledge(renderer, (page) => page.guidelines === 'ready', 'knowledge-guidelines-ready-after-dark-pass');
+    await assertRenderer(renderer, `Array.from(document.querySelectorAll('.guideline-card')).every((card)=>card.querySelector('.knowledge-file-more') instanceof HTMLDetailsElement && !card.querySelector('.knowledge-file-more').open)`, 'knowledge-file-details-collapsed');
     requireJourney(opened.tab === 'guidelines' && JSON.stringify(opened.tabs) === JSON.stringify(KNOWLEDGE_TABS.map((label, index) => [label, String(index === 0)])) &&
       JSON.stringify(opened.cards.map((card) => card.title)) === JSON.stringify(GUIDELINE_TITLES) && opened.cards.every((card) => card.pill === '第 1 版 · AI7 内置默认') &&
       opened.cards[0].applied === '用于：错别字与规范用语' && opened.cards[0].clauses.length === 4 &&
@@ -548,6 +554,7 @@ async function main() {
     await readKnowledge(renderer, (page) => page.tab === 'guidelines' && page.guidelines === 'ready', 'knowledge-guidelines-again');
 
     at('knowledge-guideline-import');
+    await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
     // 导入新版本… on 文字规范条款: the picker's file is read as the next version would read it — five clauses, how they differ —
     // and 确认导入 records 第 2 版, issued by the house; version 1 stays listed beneath it.
     await assertRenderer(renderer, `(() => { const start=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] [data-guideline-action="import"]'); if(!(start instanceof HTMLButtonElement)||start.disabled||start.textContent!=='导入新版本…')return false; start.click(); return true; })()`, 'knowledge-import-start');
@@ -608,6 +615,7 @@ async function main() {
     requireJourney(restarted.cards[0].pill === '第 2 版 · 本社' && restarted.cards[0].versions.length === 2 && restarted.cards[0].clauses.length === 5, 'knowledge-restart-kept', restarted.cards[0]);
 
     at('knowledge-guideline-import');
+    await assertRenderer(renderer, `(() => { const summary=document.querySelector('[data-guideline-document="ai7-builtin/typos-and-usage"] .knowledge-file-more > summary'); if(!summary)return false; summary.click(); return true; })()`, 'knowledge-file-open');
     // Real picker/service/UI pages: later clauses remain reachable in preview and after import; history reaches version 1.
     const cardSelector = '[data-guideline-document="ai7-builtin/typos-and-usage"]';
     const activateGuideline = async (selector, name) => assertRenderer(renderer, `(() => {
