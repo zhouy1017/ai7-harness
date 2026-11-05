@@ -1567,12 +1567,15 @@ async function main() {
     // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
+    await waitFor(renderer, `document.querySelector('.task-result-window[data-task-result-kind="analysis"]')?.dataset.taskResult==='ready' && document.querySelectorAll('.task-result-window').length===1`, 'quiet-completion-notice', 10_000);
     const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-toast]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
     const quietShown = quietCompletion.shown[0];
-    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === '任务结果已记录' &&
+    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === `《${FIFTH_BOOK.title}》分析完成` &&
       quietShown.ms >= 2_200 && quietShown.ms <= 4_000 && quietCompletion.recent === true &&
       quietCompletion.count === beforeQuietCompletion.count - (beforeQuietCompletion.stop ? 1 : 0),
     'quiet-completion-notice', { before: beforeQuietCompletion, after: quietCompletion });
+    await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'quiet-completion-notice');
+    await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, 'quiet-completion-notice');
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 
     // ---- 模型服务账户限额 (Issue #51, S16b; MODEL-018, RUN-012) -------------------------------------------------------
