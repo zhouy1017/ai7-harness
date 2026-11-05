@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { reviewPlanReferences } from '../../src/renderer/task-material-selection.js';
+import { reviewPlanReferences, reviewPlanReferenceField } from '../../src/renderer/task-material-selection.js';
 import type { WritingTaskMaterialProjection } from '../../src/shared/protocol.js';
 
 class Node {
@@ -7,6 +7,7 @@ class Node {
   dataset: Record<string, string> = {};
   attributes: Record<string, string> = {};
   listeners = new Map<string, () => void>();
+  isConnected = true;
   className = ''; textContent = ''; checked = false; disabled = false; type = ''; title = '';
   classList = { add: (..._names: string[]) => undefined };
   constructor(readonly tag: string) {}
@@ -28,6 +29,21 @@ function mount(items: WritingTaskMaterialProjection[], selected = new Set<string
   return { field, changes, box: (id: string) => field.all().find((node) => node.dataset['reviewMaterial'] === id)! };
 }
 describe('review references in full-plan segment 2', () => {
+  it('keeps frozen reference statements beside the editable material selector in a prepared plan', async () => {
+    mount([]);
+    const reference = ['本社审阅偏好', '资料库索引', '书系知识条目', '本地检查选项'];
+    const api = {
+      inspectReviewWorkspace: async () => ({ run: { referenceInput: { categoryIds: ['typos'], materialIds: ['a'] } },
+        categories: [{ categoryId: 'typos', materialReferencesAllowed: true }], materials: { items: [item('a')] } }),
+      inspectBookSeries: async () => ({ memberships: [] }), searchReferableMaterials: async () => ({ candidates: [] }),
+    } as unknown as Parameters<typeof reviewPlanReferenceField>[0]['api'];
+    const field = reviewPlanReferenceField({ api, bookId: 'book', reviewRunId: 'run', reference,
+      awaitJob: async (job) => job, change: () => undefined }) as unknown as Node;
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    const texts = field.all().map((node) => node.textContent);
+    for (const statement of reference) expect(texts).toContain(statement);
+    expect(texts).toContain('资料a ×'); expect(texts).toContain('+ 添加参考…');
+  });
   it('shows selected chips and optional local discovery under 添加参考', () => {
     const { field } = mount([item('a'), item('b')], new Set(['a']));
     const texts = field.all().map((node) => node.textContent);

@@ -135,7 +135,7 @@ export function reviewPlanReferenceField(options: {
       if (completed.kind !== 'review-run-preparation' || completed.state !== 'completed' || !result || !('scopeOptions' in result) || !result.run) throw new Error('未能更新参考资料。');
       return result.run.reviewRunId;
     });
-    host.replaceChildren(reviewPlanReferences({ api: options.api, bookId: options.bookId, items: workspace.materials?.items ?? [], selected, change: update }));
+    host.append(reviewPlanReferences({ api: options.api, bookId: options.bookId, items: workspace.materials?.items ?? [], selected, change: update }));
     if (input.capturedProcedure != null) return;
     const page = await options.api.inspectBookSeries({ bookId: options.bookId, membershipsAfter: null });
     if (!host.isConnected || page.memberships.length === 0) return;

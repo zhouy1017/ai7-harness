@@ -485,6 +485,8 @@ export interface ReviewAvailabilityProjection {
 
 /** One category of the configuration as the 新建审阅 sheet shows it, its basis stated once (REV-010). */
 export interface ReviewWorkspaceCategoryProjection {
+  /** This category's research backend cannot currently run. */
+  networkUnavailable?: boolean;
   /** Scope-derived estimates only; not a usage or billing promise (#1320). */
   crossChapter?: boolean;
   changedUnits?: number;

@@ -107,14 +107,14 @@ function mount(state: ReviewRunCategoryState = 'failed', findingsCount = 1) {
   const unexpected = vi.fn(async () => { throw new Error('unexpected API operation'); });
   const calls = { inspectReviewWorkspace, inspectFactualVerification, inspectEvidenceWorkspace };
   const api = new Proxy(calls, { get: (target, key) => Reflect.get(target, key) ?? unexpected }) as unknown as MountReviewWorkspaceOptions['api'];
-  const status = vi.fn();
+  const status = vi.fn(); const searchSettings = vi.fn();
   const surface = mountReviewWorkspace({ root: root as unknown as HTMLElement, bookId: BOOK, bookTitle: '公开合成图书', focus: null, api,
     awaitServiceJob: async (initial) => initial, technicalDetails: (_className, ...rows) => { const node = new MiniElement('dl'); node.append(...rows as unknown as MiniElement[]); return technicalDisclosure(node as unknown as HTMLElement); },
     setStatus: status, errorMessage: (_error, fallback) => fallback, errorCode: () => null, openManuscript: async () => undefined,
-    goToText: async () => undefined, openPlan: () => undefined, planChanged: () => undefined });
+    goToText: async () => undefined, openPlan: () => undefined, openSearchSettings: searchSettings, planChanged: () => undefined });
   surfaces.push(surface);
   surface.start();
-  return { root, surface, status, unexpected, api, ...calls };
+  return { root, surface, status, unexpected, api, searchSettings, ...calls };
 }
 
 describe('terminal factual results through the mounted review workspace (#1058 / J04)', () => {
@@ -146,7 +146,7 @@ describe('terminal factual results through the mounted review workspace (#1058 /
       batchApply: false, searchEngine: true, modelFree: false, materialReferencesAllowed: false,
       basis: { categoryId: 'factual-review', executor: 'factual-review-kind', searchEngine: true, guidelineDocuments: [], procedure: { title: '事实核查', version: '1' },
         ...(admitted ? { modelChannelSearchLabel: 'DeepSeek 开放平台（官方）' } : {}) },
-      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, available: admitted, unavailableReason: admitted ? null : reason,
+      guidelineDocuments: [], procedure: { title: '事实核查', version: '1' }, available: admitted, unavailableReason: admitted ? null : reason, networkUnavailable: !admitted,
       scopes: { whole: available, chapters: available, changed: unavailable, selection: available } }];
     view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
     Object.assign(view.root.querySelector('dialog')!, { showModal: vi.fn(), close: vi.fn() });
@@ -160,6 +160,8 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     if (!admitted) {
       expect(view.root.querySelector('.review-network-notice')!.textContent).toBe('联网检索尚未就绪，请到设置中配置后再开始。');
       expect(view.root.querySelector('[data-review-action="start"]')!.disabled).toBe(true);
+      const settings = view.root.querySelector('[data-review-action="open-search-settings"]')!;
+      expect(settings.hidden).toBe(false); settings.click(); expect(view.searchSettings).toHaveBeenCalledOnce();
     }
 
   });

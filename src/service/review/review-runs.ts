@@ -848,6 +848,7 @@ interface BaselineReading {
 
 /** What one category of the configuration can do now, read once per projection or preparation. */
 interface CategoryReading {
+  readonly networkUnavailable?: boolean;
   readonly modelChannelSearchLabel?: string;
   readonly entry: ReviewCategoryConfigurationEntry;
   /** Why the category cannot run at all now; `null` when it can. */
@@ -4274,6 +4275,7 @@ export class ReviewRunStore {
     return {
       entry,
       unavailableReason: researchUnavailableReason ?? (entry.executor === 'factual-review-kind' && revision !== null && !facts.factualUpdates ? FACTUAL_AGAIN_REASON : null),
+      networkUnavailable: researchUnavailableReason !== null,
       facts,
       projection,
       ...(modelChannelSearchLabel === undefined ? {} : { modelChannelSearchLabel }),
@@ -4304,6 +4306,7 @@ export class ReviewRunStore {
       searchEngine: entry.searchEngine,
       modelFree: entry.executor === 'baseline-leads' || entry.executor === 'local-text-check',
       materialReferencesAllowed: entry.executor === 'review-category-contract',
+      networkUnavailable: reading.networkUnavailable === true,
       crossChapter: entry.crossChapter !== undefined,
       changedUnits: reading.unread?.units ?? 0,
       basis: { ...reviewCategoryBasis(entry), ...(reading.modelChannelSearchLabel === undefined ? {} : { modelChannelSearchLabel: reading.modelChannelSearchLabel }) },

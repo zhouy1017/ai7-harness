@@ -2586,6 +2586,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
 
     const networkNotice = el('p', 'review-network-notice');
     networkNotice.setAttribute('role', 'status');
+    const networkSettings = actionButton('open-search-settings', 'quiet', () => { sheet.close(); options.openSearchSettings?.(); });
     const consequences = el('dl', 'review-consequences');
     const consequenceValues = REVIEW_CONSEQUENCE_TERMS.map((term) => {
       const value = el('dd');
@@ -2612,7 +2613,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const primaryActions = el('div', 'button-row'); primaryActions.append(start, prepare, cancelPreparation);
     actions.append(procedureField, primaryActions, el('small', 'review-management-note', '规范文件与工序在知识库里管理；这里只选用'));
     const bar = el('div', 'review-sheet-bar'); bar.append(title, close);
-    form.append(...(localMode && state.categories.size === 1 ? [localOptions] : [categories, localOptions]), scopes, consequences, networkNotice, problem, progress, actions);
+    form.append(...(localMode && state.categories.size === 1 ? [localOptions] : [categories, localOptions]), scopes, consequences, networkNotice, networkSettings, problem, progress, actions);
     form.addEventListener('submit', (event) => event.preventDefault());
 
     // Everything that follows from the choices, redrawn in place so a choice never moves the focus.
@@ -2630,7 +2631,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           : step !== null && !step.available
             ? step.unavailableReason
             : !entry.available ? entry.unavailableReason : scopeAvailability !== null && !scopeAvailability.available ? scopeAvailability.unavailableReason : null;
-        const networkUnavailable = entry.searchEngine && why !== null && /检索|密钥|后端|Search/u.test(why);
+        const networkUnavailable = entry.networkUnavailable === true;
         if (why !== null && input.checked && !networkUnavailable) {
           input.checked = false;
           state.categories.delete(entry.categoryId);
@@ -2676,8 +2677,9 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const estimate = reviewConsequenceEstimate(selected, state.scope, workspace, { from, to });
       readValue.textContent = estimate.read; sendValue.textContent = estimate.send;
       notDoValue.textContent = estimate.notDo; costValue.textContent = estimate.cost;
-      const networkBlocked = selected.some((entry) => entry.searchEngine && !entry.available && /检索|密钥|后端|Search/u.test(entry.unavailableReason ?? ''));
+      const networkBlocked = selected.some((entry) => entry.networkUnavailable === true);
       networkNotice.hidden = !networkBlocked;
+      networkSettings.hidden = !networkBlocked || options.openSearchSettings === undefined;
       networkNotice.textContent = networkBlocked ? '联网检索尚未就绪，请到设置中配置后再开始。' : '';
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;
