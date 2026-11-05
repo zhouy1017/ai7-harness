@@ -1105,25 +1105,25 @@ async function main() {
     requireJourney(JSON.stringify(again) === JSON.stringify(service), 'reading-again-answers-the-same');
 
     at('open-blocked-run');
-    // An item opens its own record in the window that asked: the first Book's 分析 with the blocked Run.
+    // Q1: the card opens its exact Book-owned task in place, without navigating or rebinding the workbench.
+    const routeBeforeCard = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
     await openItem(renderer, blockedItem.itemId, 'blocked');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}] .baseline-analysis-card')?.dataset.analysisState==='authorized-blocked'`, 'blocked-record', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(blockedA.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='blocked'`, 'blocked-record', 30_000);
     const routeA = await renderer.evaluate(`window.ai7.getBookWorkbenchRoute()`);
-    requireJourney(routeA?.bookId === bookA, 'blocked-record-route', routeA);
+    requireJourney((routeA?.bookId ?? null) === (routeBeforeCard?.bookId ?? null), 'blocked-record-route', routeA);
 
     at('open-plan-revision');
-    // The Plan Revision opens ②A of its Book with the plan in the Task Drawer, where 重新确认计划 is: the view
-    // decides nothing itself.
+    // The Plan Revision opens in the drawer, where 重新确认计划 is; opening decides nothing.
     await openAttention(renderer, 'plan-revision');
     await openItem(renderer, decisionItem.itemId, 'plan-revision');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}]') && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.textContent==='重新确认计划'`, 'plan-revision-record', 30_000);
-    const stillPending = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskDrawer==='open' && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(pendingB.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='changed' && document.querySelector('#task-drawer [data-task-drawer-control="reconfirm-plan"]')?.textContent==='重新确认计划'`, 'plan-revision-record', 30_000);
+    const stillPending = await renderer.evaluate(`window.ai7.taskOverviewCall({ operation: 'inspectBaselineAnalysis', bookId: ${JSON.stringify(bookB)}, input: { revisionId: null } })`);
     requireJourney(stillPending?.planRevision?.state === 'pending' && stillPending.taskIntent?.taskIntentId === pendingB.taskIntent.taskIntentId, 'plan-revision-untouched');
 
     at('open-completion');
     await openAttention(renderer, 'completion');
     await openItem(renderer, completionItem.itemId, 'completion');
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookB)}] .baseline-analysis-card')`, 'completion-record', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('.task-result-window[data-task-result-kind="analysis"]')?.dataset.taskResult==='ready'`, 'completion-record', 30_000);
 
     at('j14-attention-keyboard');
     // Without a pointer: Enter on the header's 待我处理 opens the screen with its heading focused, Tab reaches the
@@ -1135,7 +1135,7 @@ async function main() {
     await pressTab(renderer);
     await waitFor(renderer, `document.activeElement?.dataset?.attentionOpen === ${JSON.stringify(blockedItem.itemId)} && document.activeElement.matches(':focus-visible')`, 'keyboard-first-item-reached', 10_000);
     await pressEnter(renderer);
-    await waitFor(renderer, `document.querySelector('[data-screen="book-analysis"] .book-analysis[data-book-id=${JSON.stringify(bookA)}]')`, 'keyboard-item-opened', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"]') && document.querySelector('#task-drawer')?.dataset.taskPlanRef===${JSON.stringify(blockedA.taskIntent.taskIntentId)} && document.querySelector('#task-drawer')?.dataset.taskPlanState==='blocked'`, 'keyboard-item-opened', 30_000);
 
     at('j14-attention-zoom-200-reflow');
     // At 200% the header, the four groups and every item reflow into the width: nothing scrolls sideways.
