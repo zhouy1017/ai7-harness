@@ -767,6 +767,7 @@ import {
   assuranceSelector,
   taskPlanPage,
   taskDraftsPage,
+  bookTasksPage,
   reviewWorkspacePage,
   REVIEW_CHAPTER_PAGE_PATH,
 } from './task-plan.js';
@@ -4076,9 +4077,14 @@ export class EditorialStore {
     return this.#taskPlanWithRoute(input, progress).plan;
   }
 
-  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection) {
+  getTaskPlanPage(input: import('../shared/protocol.js').ServiceOperationMap['getTaskPlanPage']['input'], connectedPlan?: TaskPlanProjection | BookTasksProjection) {
     return this.#analysisCall(() => {
       requireStore(Number.isSafeInteger(input.afterOrdinal) && input.afterOrdinal >= 0, 'TASK_PLAN_PAGE_INVALID', '任务计划读取位置无效。');
+      if (input.kind === 'book-tasks') {
+        requireStore(input.ref === null, 'TASK_PLAN_PAGE_INVALID', '任务列表读取范围无效。');
+        const projection = connectedPlan && 'groups' in connectedPlan ? connectedPlan : this.inspectBookTasks(input.bookId, () => null);
+        return bookTasksPage(projection, input.path, input.afterOrdinal, input.digest);
+      }
       if (input.kind === 'task-intent-drafts') {
         requireStore(input.path === 'drafts', 'TASK_PLAN_PAGE_INVALID', '任务草稿读取范围无效。');
         return taskDraftsPage(this.inspectTaskIntentDrafts({ bookId: input.bookId, draftId: input.ref }), input.afterOrdinal, input.digest);
@@ -4088,7 +4094,7 @@ export class EditorialStore {
         return reviewWorkspacePage(this.inspectReviewWorkspace(input.bookId, input.ref), input.afterOrdinal, input.digest);
       }
       requireStore(input.ref !== null, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
-      const plan = connectedPlan ?? this.inspectTaskPlan({ ...input, kind: input.kind });
+      const plan = connectedPlan && !('groups' in connectedPlan) ? connectedPlan : this.inspectTaskPlan({ ...input, kind: input.kind });
       requireStore(plan.bookId === input.bookId && plan.kind === input.kind && plan.ref === input.ref, 'TASK_PLAN_PAGE_INVALID', '任务计划读取范围无效。');
       return taskPlanPage(plan, input.path, input.afterOrdinal, input.digest);
     });
