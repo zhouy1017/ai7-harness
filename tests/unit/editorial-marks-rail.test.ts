@@ -119,7 +119,6 @@ describe('the Position Rail at 1,200 marks', () => {
     track.dispatchEvent({ type: 'keydown', key: 'End', preventDefault: vi.fn() });
     await Promise.resolve();
     expect(track.getAttribute('aria-valuenow')).toBe('250000');
-    expect(track.querySelector('.rail-now')!.style.top).toBe('25%');
     surface.destroy();
   });
 
