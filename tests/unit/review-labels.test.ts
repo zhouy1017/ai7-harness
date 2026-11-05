@@ -8,7 +8,6 @@ import {
   REVIEW_CAPABILITY_REASON,
   REVIEW_CATEGORY_STATE_PILLS,
   REVIEW_CONSEQUENCE_TERMS,
-  REVIEW_COST_BEFORE_PLAN,
   REVIEW_COVERAGE_PILLS,
   REVIEW_DESTINATION_ACTIONS,
   REVIEW_EXPORT_NEEDS_REPORT,
@@ -112,7 +111,7 @@ describe('the words of the 审阅 destination', () => {
       'rereview-changed': '只审改动过的章',
       'open-run': '查看这次审阅',
       start: '开始审阅',
-      prepare: '查看计划',
+      prepare: '先看计划',
       'quick-start': '快速开始',
       'cancel-preparation': '取消准备',
       'close-sheet': '取消',
@@ -181,7 +180,6 @@ describe('the words of the 审阅 destination', () => {
 
   it('states the four consequences of 新建审阅 before any plan exists', () => {
     expect(REVIEW_CONSEQUENCE_TERMS).toEqual(['会读取', '会发送', '不会做', '费用']);
-    expect(REVIEW_COST_BEFORE_PLAN).toBe('先看计划后显示');
     expect(REVIEW_NOT_DO).toBe('不会直接修改稿件；不读范围外正文；不导出或发布；不存里程碑。');
     // A Review Run never takes a 默认执行规则: there is nothing to set first, so nothing says it is not set yet.
     expect(REVIEW_QUICK_START_REASON).toBe('快速开始先准备所选类别的计划；只有匹配这本书的默认执行规则才会开始，否则先看计划。');

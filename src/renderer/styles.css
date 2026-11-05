@@ -440,18 +440,38 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .book-review-summary { margin-top: 1.3rem; padding: 1rem 1.15rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
 .book-review-summary h3 { margin: 0; }
 .book-review-summary p { margin: .45rem 0 .7rem; overflow-wrap: anywhere; }
-/* 新建审阅: a native modal sheet, so the page behind it is inert and focus stays inside until it closes. */
-.review-sheet { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; padding: 1.2rem 1.4rem; border: 1px solid var(--boundary); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 18px 50px var(--shadow); overflow-wrap: anywhere; }
-.review-sheet::backdrop { background: var(--backdrop); }
+/* 新建审阅 uses the shared non-modal sheet. */
+
+
 .review-sheet h3 { margin: 0 0 .4rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
 .review-sheet fieldset { margin-top: 1rem; }
-.review-category-options, .review-scope-options { display: grid; gap: .5rem; min-width: 0; }
-.review-category-option, .review-scope-option { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); cursor: pointer; }
+.review-category-options { display: grid; gap: 0; min-width: 0; border: 0; padding: 0; }
+.review-scope-options { display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; border: 0; padding: 0; }
+.review-category-option { display: grid; grid-template-columns: 18px minmax(0, 1.25fr) minmax(0, 1fr) max-content; align-items: start; gap: .65rem; padding: .7rem 0; border-bottom: 1px solid var(--boundary); cursor: pointer; }
+.review-category-option[data-unavailable-reason] { opacity: .55; }
+.review-category-description, .review-category-reason { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; }
+.review-category-calls { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.review-category-basis { align-self: center; -webkit-line-clamp: 1; display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.review-scope-option { position: relative; display: inline-flex; align-items: center; padding: .3rem .65rem; border: 1px solid var(--boundary); border-radius: 999px; cursor: pointer; }
+.review-scope-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.review-scope-option:focus-within { outline: 2px solid var(--selection-boundary); outline-offset: 2px; }
+.review-scope-options > .review-chapter-range, .review-scope-options > .review-changed-scope-note { flex-basis: 100%; }
+.review-sheet-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.review-sheet .review-sheet-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .5rem 1rem; }
+.review-sheet .review-sheet-procedure { padding: 0; margin: 0; border: 0; background: none; }
+.review-sheet .review-sheet-procedure label { font-size: .85rem; }
+.review-management-note { grid-column: 1 / -1; color: var(--text-subdued); }
+.task-reference-chips { display: flex; flex-wrap: wrap; gap: .4rem; }
+.task-reference-chips > button { border-radius: 999px; }
+.task-reference-chips details { flex-basis: 100%; }
+.task-reference-chips details > label { display: flex; gap: .5rem; margin: .4rem 0; }
+@media (max-width: 620px) { .review-category-option { grid-template-columns: 18px minmax(0, 1fr) max-content; } .review-category-basis { grid-column: 2; } .review-category-calls { grid-column: 3; grid-row: 1; } }
 .review-category-option:has(input:checked), .review-scope-option:has(input:checked) { border-color: var(--selection-boundary); box-shadow: inset 0 0 0 1px var(--selection-boundary); background: var(--surface-subdued); }
 .review-category-option:has(input:disabled), .review-scope-option:has(input:disabled) { background: var(--surface-subdued); cursor: not-allowed; }
-.review-category-option input, .review-scope-option input { flex: none; width: 18px; height: 18px; margin-top: .25rem; }
+.review-category-option input { flex: none; width: 18px; height: 18px; margin-top: .25rem; }
 .review-scope-option small { display: block; }
 .review-category-text { display: grid; gap: .2rem; min-width: 0; }
+.review-category-description[hidden] { display: none; }
 .review-category-description { color: var(--text-subdued); font-size: .9rem; }
 .review-category-option .review-category-basis { margin: 0; font-size: .86rem; }
 .review-category-reason { color: var(--status-attention); font-size: .86rem; font-weight: 700; }

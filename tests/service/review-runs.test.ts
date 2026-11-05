@@ -688,6 +688,20 @@ async function arrangePreferenceJudgments(session: Session, book: Book): Promise
 }
 
 describe('a Review Run over the real store on exact sample1', () => {
+  it('projects current scope units and repeat inputs for references without preparing or authorizing work', async () => {
+    await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
+      const before = workspace(session, book, null);
+      expect(before.scopeUnitCounts!.whole).toBeGreaterThan(0);
+      expect(before.scopeUnitCounts!.units).toHaveLength(before.scopeUnitCounts!.whole);
+      expect(before.categories.find((entry) => entry.categoryId === STYLE)?.crossChapter).toBe(true);
+      expect(before.runs).toHaveLength(0);
+      const prepared = prepare(session, book, [TYPOS], WHOLE);
+      const shown = workspace(session, book, prepared.reviewRunId);
+      expect(shown.run!.authorization).toBeNull();
+      expect(shown.run!.referenceInput).toMatchObject({ categoryIds: [TYPOS], scope: WHOLE, materialIds: [] });
+      expect(shown.scopeUnitCounts).toEqual(before.scopeUnitCounts);
+    });
+  });
   it('settles cancellation only in the Review that dispatched a shared prepared Task', async () => {
     await withBook('sample1-review-cross-chapter-authored', async (session, book) => {
       const first = prepare(session, book, [TYPOS], WHOLE);

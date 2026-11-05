@@ -51,7 +51,7 @@ it('scans the Journey import review, prepared review plan and populated Series u
       { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [] });
     while (!prepared.done) prepared = store.advanceReviewRunPreparationWork(prepared.workId!);
     const plan = store.inspectTaskPlan({ bookId: book.bookId, kind: 'review-run', ref: prepared.projection!.run!.reviewRunId });
-    const drawer = mountTaskDrawer({ root, shell: document.body, api: { inspectTaskPlan: async () => plan }, technicalDetails,
+    const drawer = mountTaskDrawer({ root, shell: document.body, api: { inspectTaskPlan: async () => plan, inspectReviewWorkspace: async () => prepared.projection! }, technicalDetails,
       errorMessage, errorCode: () => null, setStatus: vi.fn(), onOpen: vi.fn(), onRecorded: vi.fn() } as unknown as MountTaskDrawerOptions);
     drawer.open({ bookId: book.bookId, kind: 'review-run', ref: plan.ref }, () => null); await settle();
     expect(root.querySelector('.task-plan-full')).not.toBeNull();
