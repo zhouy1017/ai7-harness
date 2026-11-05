@@ -1177,6 +1177,7 @@ export class ReviewRunStore {
   readonly #driving = new Map<string, string>();
   readonly #placeWaits = new Map<string, string>();
   #scopeUnits: { key: string; counts: NonNullable<ReviewWorkspaceProjection['scopeUnitCounts']> } | null = null;
+  #chapterManifest: { key: string; manifest: ReturnType<typeof deriveCoverageManifest> } | null = null;
   /**
    * The waiting Runs Reconnect Preflight is handing to the drive loop now (Issue #760, S74c): the one way a Run approved with
    * 联网后开始任务 begins, and only for the moment of that hand-off. In memory only.
@@ -3590,7 +3591,9 @@ export class ReviewRunStore {
     }));
     if (headings.length > 0) return { basis: 'outline', chapters: chapterOptionsFromOutline(headings, head.totalBlocks) };
     try {
-      const manifest = deriveCoverageManifest({
+      const key = `${head.branchId}:${head.revisionId}:${head.workingDigest}`;
+      // The chapter fallback excludes notes; scope-unit counts include their separate units.
+      const manifest = this.#chapterManifest?.key === key ? this.#chapterManifest.manifest : deriveCoverageManifest({
         bookId,
         manuscriptId: head.manuscriptId,
         branchId: head.branchId,
@@ -3599,6 +3602,7 @@ export class ReviewRunStore {
         revisionDigest: head.workingDigest,
         blocks: this.#ledgers.baseline().readWorkingBlocks(head.branchId).filter((block) => block.kind !== 'note'),
       });
+      this.#chapterManifest = { key, manifest };
       return {
         basis: 'analysis-units',
         chapters: chapterOptionsFromUnits(manifest.units.map((unit) => ({
