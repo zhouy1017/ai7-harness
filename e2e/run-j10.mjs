@@ -94,7 +94,7 @@ const OUTCOME_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-outcome-unknown';
 const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 /** The eighth Book's launch (Issue #757): every range is read, and the reduction's request is sent and never answers whole. */
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
-const UNCONFIRMED_REASON = '运行已结束，但有请求已发出而回答没有完整传回，无法确认模型服务是否已处理并计费；这些部分记为结果待确认的缺口，AI7 没有自动再发。';
+const UNCONFIRMED_REASON = '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
 // Only a step is listed, so the statement names no later re-send (#763 review).
 const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */

@@ -40,6 +40,10 @@ describe('task overview', () => {
       const projection = composeTaskOverview({ groups: [{ key: 'active', items: [task('active', state, 'waiting')], total: 1 }], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
       expect(projection.runningCount).toBe(0); expect(projection.queuedCount).toBe(1);
       const card = taskOverviewCard(projection.groups[1]!.items[0]!, vi.fn());
+      expect(card.querySelector('.task-overview-card-kind')!.textContent).toBe(projection.groups[1]!.items[0]!.taskKind);
+      expect(card.querySelector('.task-overview-card-title .state-term')).not.toBeNull();
+      expect(card.querySelector('.task-overview-card-time')!.textContent).toContain('记录于');
+      expect([...card.querySelector('.task-overview-card-line')!.textContent!].length).toBeLessThanOrEqual(60);
       expect(card.querySelector('[data-task-action="pause"]')).toBeNull();
       expect(card.querySelector('[data-task-action="up"]')).toBeNull();
       expect(card.textContent).toContain(state === 'analysis-waiting-network' ? '等待联网' : state === 'analysis-waiting-connection' ? '等待模型连接' : state === 'analysis-waiting-admission' ? '等待开始前检查' : '等待运行名额');
@@ -80,22 +84,27 @@ describe('task overview', () => {
       expect(openResult).toHaveBeenCalledWith(recent[10]);
     } finally { panel.stop(); vi.unstubAllGlobals(); uninstall(); }
   });
-  it('reads the remaining Book task cards before completing a paged panel read', async () => {
+  it('keeps the pane ready from paged totals while the overview owns its cards', async () => {
     const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, clearTimeout: () => {} });
     const cards = ['first', 'last'].map((id) => ({ item: task('recent', 'analysis-completed', id), result: null }));
     const projection = composeTaskOverview({ groups: [], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null, cards);
     const partial: BookTasksProjection = { bookId: 'book', running: false,
       groups: [{ key: 'waiting', items: [], total: 0 }, { key: 'running', items: [], total: 0 }, { key: 'recent', items: cards.slice(0, 1), total: 2 }],
       listPages: { 'groups.2.items': { shown: 1, total: 2, nextOrdinal: 1, digest: 'a'.repeat(64) } } };
-    const getTaskPlanPage = vi.fn(async () => ({ path: 'groups.2.items', items: cards.slice(1), nextOrdinal: null, digest: 'a'.repeat(64) }));
-    const panel = mountTaskPanel({ api: { inspectTaskOverview: async () => projection, inspectBookTasks: async () => partial, getTaskPlanPage,
+    const getTaskPlanPage = vi.fn(async () => { throw new Error('TASK_PLAN_PAGE_CHANGED'); });
+    const inspectBookTasks = vi.fn(async () => partial);
+    const panel = mountTaskPanel({ api: { inspectTaskOverview: async () => projection, inspectBookTasks, getTaskPlanPage,
       inspectBaselineAnalysis: async () => { throw new Error('none'); } } as unknown as RendererApi,
       setStatus: vi.fn(), errorMessage: () => '', parked: () => null } as unknown as Parameters<typeof mountTaskPanel>[0]);
     try {
       panel.show('book'); await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(getTaskPlanPage).toHaveBeenCalledExactlyOnceWith({ kind: 'book-tasks', ref: null, path: 'groups.2.items', afterOrdinal: 1, digest: 'a'.repeat(64) });
+      expect(panel.element.querySelector('.task-panel-scope')!.textContent).toContain('2 项');
       expect(panel.element.dataset['taskPanel']).toBe('ready');
       expect(panel.element.querySelector('[data-task-item="last"]')).not.toBeNull();
+      panel.refresh(); await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(inspectBookTasks).toHaveBeenCalledTimes(2);
+      expect(getTaskPlanPage).not.toHaveBeenCalled();
+      expect(panel.element.dataset['taskPanel']).toBe('ready');
     } finally { panel.stop(); vi.unstubAllGlobals(); uninstall(); }
   });
   it('continues healthy tasks after one resume fails and always releases the queue', async () => {

@@ -45,6 +45,10 @@ describe('发起全书任务', () => {
     expect(labels.TASK_PANEL_COMPOSE_ACTIONS).toEqual({ quick: '快速开始', prepare: '准备任务' });
     expect(labels.TASK_PANEL_COMPOSE_NONE).toBe('导入稿件后即可开始分析。');
     expect(labels.TASK_PANEL_COMPOSE_FIRST).toEqual({ label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' });
+    expect(labels.TASK_PANEL_COMPOSE_MEANINGS).toEqual({
+      'sync-current': '更新改动涉及的分析，沿用仍适用的结果。',
+      'reanalyze-book': '重新通读全书，梳理人物、事件、关系与设定。',
+    });
     expect(labels.TASK_PANEL_COMPOSE_FIRST_QUICK).toBe('首次基线分析没有快速开始：先看计划再开始。');
     expect(labels.TASK_PANEL_COMPOSE_STATUS).toEqual({
       preparing: '正在为任务保存修订版…',

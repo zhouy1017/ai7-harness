@@ -77,6 +77,49 @@ async function assertCardFrames(renderer) {
   })()`, 'shell-card-frames-survive');
 }
 
+// #1325: actual shell layout, shortcut dispatch and menu; shared selectors cover all other Journeys.
+async function checkSidebarPrototype(renderer) {
+  await renderer.send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 1080, deviceScaleFactor: 1, mobile: false });
+  await assertRenderer(renderer, `(() => {
+    const bar=document.querySelector('#app-sidebar'), books=bar.querySelector('.sidebar-books > div');
+    const row=books.querySelector('.sidebar-book-row'), copies=[];
+    try {
+      for(let i=0;i<28;i++){ const copy=row.cloneNode(true); books.append(copy); copies.push(copy); }
+      const groups=[...bar.querySelectorAll('[data-nav-book-group], .sidebar-foot')];
+      return document.documentElement.dataset.sidebar==='full' && bar.scrollHeight<=bar.clientHeight+2 && groups.every(group=>group.getBoundingClientRect().bottom<=1080)
+        && [...bar.querySelectorAll('[data-nav-book]')].every(link=>link.getBoundingClientRect().height<=30)
+        && bar.querySelector('.sidebar-current-book')?.textContent===document.querySelector('#context-title')?.textContent
+        && !bar.querySelector('.sidebar-book-title, [data-shell-book-switcher]');
+    } finally { copies.forEach(copy=>copy.remove()); }
+  })()`, 'sidebar-expanded-1080p');
+  const firstPin = await renderer.evaluate(`(() => { const pin=document.querySelector('[data-nav-pin]'); return { id:pin.dataset.navPin, pressed:pin.getAttribute('aria-pressed') }; })()`);
+  await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-nav-book-row]'); row.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:80,clientY:300})); return document.querySelector('.sidebar-book-menu:popover-open [role="menuitem"]')?.textContent.includes('置顶'); })()`, 'sidebar-book-context-menu');
+  await clickSelector(renderer, '.sidebar-book-menu [role="menuitem"]', 'sidebar-context-pin');
+  await waitFor(renderer, `document.querySelector('[data-nav-pin="${firstPin.id}"]')?.getAttribute('aria-pressed')===${JSON.stringify(firstPin.pressed === 'true' ? 'false' : 'true')}`, 'sidebar-context-pin-saved');
+  await clickSelector(renderer, `[data-nav-pin="${firstPin.id}"]`, 'sidebar-context-pin-restore');
+  await waitFor(renderer, `document.querySelector('[data-nav-pin="${firstPin.id}"]')?.getAttribute('aria-pressed')===${JSON.stringify(firstPin.pressed)}`, 'sidebar-context-pin-restored');
+  await assertRenderer(renderer, `(() => { document.querySelector('[data-nav-book-row]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})); return document.querySelector('.sidebar-book-menu:popover-open')!==null; })()`, 'sidebar-context-reopen');
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...ESCAPE_KEY });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...ESCAPE_KEY });
+  const chord = { key: '\\', code: 'Backslash', windowsVirtualKeyCode: 220, nativeVirtualKeyCode: 220, modifiers: 2 };
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...chord });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
+  await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-ctrl-backslash');
+  await waitFor(renderer, `(() => {
+    const bar=document.querySelector('#app-sidebar'), link=bar.querySelector('[data-nav-book]'), initial=link.querySelector('.nav-book-initial');
+    const badge=bar.querySelector('.task-navigation-badge'), hidden=badge.hidden, text=badge.textContent;
+    try { badge.hidden=false; badge.textContent='3'; const box=badge.getBoundingClientRect();
+      return initial.textContent===[...link.querySelector('.nav-label').textContent.trim()][0] && getComputedStyle(initial).opacity==='1'
+        && box.width>0 && box.right<=bar.getBoundingClientRect().right && getComputedStyle(link.querySelector('.nav-label')).opacity==='0'
+        && document.documentElement.dataset.sidebarCollapsed==='true' && getComputedStyle(bar).transitionDuration==='0.24s, 0.24s';
+    } finally { badge.hidden=hidden; badge.textContent=text; }
+  })()`, 'sidebar-initial-badges-motion-token');
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', ...chord });
+  await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', ...chord });
+  await waitFor(renderer, `document.documentElement.dataset.sidebar==='full' && document.documentElement.dataset.sidebarCollapsed==='false' && document.querySelector('#app-sidebar').getBoundingClientRect().width===224`, 'sidebar-shortcut-expand');
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+}
+
 function inside(parent, child) {
   const relation = relative(parent, child);
   return relation === '' || (!relation.startsWith(`..${sep}`) && relation !== '..' && !isAbsolute(relation));
@@ -848,6 +891,7 @@ async function main() {
     await runSettingsPages(renderer, cancellation);
     const crossBookId = await createEmptyBook(renderer, cancellation);
     at('editorial-book-switcher');
+    await assertRenderer(renderer, `(() => { const pin=document.querySelector('[data-nav-pin="${imported.bookId}"]'); if(!pin)return false; pin.focus(); return getComputedStyle(pin).opacity==='1'; })()`, 'book-row-pin-on-focus');
     await clickSelector(renderer, `[data-nav-pin="${imported.bookId}"]`, 'book-row-pin');
     await waitFor(renderer, `document.querySelector('[data-nav-books="pinned"] [data-nav-pin="${imported.bookId}"]')`, 'book-row-pinned');
     await assertRenderer(renderer, `!document.querySelector('[data-shell-book-switcher]')`, 'book-switcher-removed');
@@ -885,6 +929,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-editor-technical]')?.checkVisibility()===false`, 'journal-disclosure-keyboard-close');
     // A real width changes between endpoints; do not confuse a transition declaration with visible motion.
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+    await checkSidebarPrototype(renderer);
     await assertRenderer(renderer, `(async () => { const sidebar=document.querySelector('#app-sidebar'); const toggle=document.querySelector('#sidebar-toggle'); if(!toggle)return false; const before=sidebar.getBoundingClientRect().width; const mode=document.documentElement.dataset.sidebar; toggle.click(); const deadline=Date.now()+3000; while(document.documentElement.dataset.sidebar===mode && Date.now()<deadline)await new Promise((r)=>setTimeout(r,5)); const samples=[]; for(let i=0;i<24;i++){ await new Promise(requestAnimationFrame); samples.push(sidebar.getBoundingClientRect().width); } const after=sidebar.getBoundingClientRect().width; return Math.abs(before-after)>50 && samples.some((middle)=>middle>Math.min(before,after)+1 && middle<Math.max(before,after)-1); })()`, 'sidebar-visible-transition');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await assertRenderer(renderer, `getComputedStyle(document.querySelector('#app-sidebar')).transitionDuration.split(',').every((v)=>parseFloat(v)===0)`, 'sidebar-reduced-motion');

@@ -43,6 +43,10 @@ export const TASK_PANEL_COMPOSE_ACTIONS = { quick: '快速开始', prepare: '准
 export const TASK_PANEL_COMPOSE_NONE = '导入稿件后即可开始分析。';
 /** The first baseline, before the Book has one: the one whole-Book procedure it can start. */
 export const TASK_PANEL_COMPOSE_FIRST = { label: '首次基线分析', meaning: '梳理全书的人物、事件、关系与设定，作为其他任务的底稿。' } as const;
+export const TASK_PANEL_COMPOSE_MEANINGS = {
+  'sync-current': '更新改动涉及的分析，沿用仍适用的结果。',
+  'reanalyze-book': '重新通读全书，梳理人物、事件、关系与设定。',
+} as const;
 /** No 默认执行规则 is ever set for the first baseline (Issue #421): it starts from its plan. */
 export const TASK_PANEL_COMPOSE_FIRST_QUICK = '首次基线分析没有快速开始：先看计划再开始。';
 /**
