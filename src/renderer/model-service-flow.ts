@@ -153,7 +153,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   })(); });
   const actions = el('div', 'button-row');
   const ready = credentialReady(projection, channel.route);
-  const refresh = el('button', 'secondary', '刷新模型列表'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'refresh-model-list';
+  const refresh = el('button', 'secondary', '重试'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'retry-model-list';
   refresh.addEventListener('click', () => void (async () => {
     refresh.disabled = true;
     try {
@@ -172,7 +172,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     try { options.render(await options.api.removeModelServiceCredential({ route: option.route })); options.setStatus('凭据已移除。', 'success'); }
     catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务凭据。'), 'error'); }
   })());
-  actions.append(save, refresh, remove);
+  actions.append(save, ...(projection.modelDiscovery?.status === 'failure' ? [refresh] : []), remove);
   form.append(...(technicalLayerVisible ? [nameLabel] : []), secretLabel, actions);
   const stored = el('span', undefined, ready ? '凭据已保存' : '需设置凭据');
   if (technicalLayerVisible) stored.append('；凭据只写入操作系统安全凭据库，保存后不再显示。');
@@ -192,7 +192,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const preferred = options.modelId || (current?.route === channel.route ? current.modelId : null);
   const group = el('fieldset', 'model-service-flow-models');
   const legend = el('legend', undefined, '选择模型，再指定使用角色');
-  if (offered.length === 0) legend.append(` · ${ready ? technicalLayerVisible ? '刷新列表或手动输入模型' : '刷新模型列表' : '保存凭据后获取模型'}`);
+  if (offered.length === 0) legend.append(` · ${ready ? '正在获取模型列表' : '保存凭据后获取模型'}`);
   group.append(legend);
   let checked: ModelServiceChannelModelProjection | null = null;
   let testing = false;

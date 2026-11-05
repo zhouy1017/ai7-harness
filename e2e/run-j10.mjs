@@ -305,6 +305,7 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Promise.resolve(${expression}).then((value)=>Boolean(value))`), name);
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
@@ -343,15 +344,15 @@ async function importSample1(renderer, title, distinct, name) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, `${name}-exact-source`);
   await fill(renderer, '#book-title', title, `${name}-title`);
-  await click(renderer, '确认书名并复核', `${name}-review`);
+  await click(renderer, '查看导入详情', `${name}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
   // Synchronized delta with Issue #410 (ADR 0086): sample1's inline styles and its one section are retained with
   // the file, so its review asks for no Import Degradation Decision.
@@ -1566,12 +1567,15 @@ async function main() {
     // 最近完成 and adds nothing to the count — it falls only by the stop the redo settled, if that was still counted.
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.length > 0`, 'quiet-completion-shown', 30_000);
     await waitFor(renderer, `globalThis.__j10QuietNotice.probe.shown.at(-1).hiddenAt !== null`, 'quiet-completion-dismissed', 10_000);
+    await waitFor(renderer, `document.querySelector('.task-result-window[data-task-result-kind="analysis"]')?.dataset.taskResult==='ready' && document.querySelectorAll('.task-result-window').length===1`, 'quiet-completion-notice', 10_000);
     const quietCompletion = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((projection) => { const { probe, stop } = globalThis.__j10QuietNotice; stop(); delete globalThis.__j10QuietNotice; return { count: projection.actionableCount, recent: projection.groups.find((group) => group.key === 'recent')?.items.some((item) => item.book.bookId === ${JSON.stringify(fifthBookId)} && item.state === 'analysis-completed') ?? false, notices: document.querySelectorAll('[data-toast]').length, shown: probe.shown.map((entry) => ({ noticeClass: entry.noticeClass, text: entry.text, ms: Math.round(entry.hiddenAt - entry.at) })) }; })`);
     const quietShown = quietCompletion.shown[0];
-    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === '任务结果已记录' &&
+    requireJourney(quietCompletion.notices === 1 && quietCompletion.shown.length === 1 && quietShown.noticeClass === 'analysis-completed' && quietShown.text === `《${FIFTH_BOOK.title}》分析完成` &&
       quietShown.ms >= 2_200 && quietShown.ms <= 4_000 && quietCompletion.recent === true &&
       quietCompletion.count === beforeQuietCompletion.count - (beforeQuietCompletion.stop ? 1 : 0),
     'quiet-completion-notice', { before: beforeQuietCompletion, after: quietCompletion });
+    await clickSelector(renderer, '.task-result-window [data-task-result-action="close"]', 'quiet-completion-notice');
+    await assertRenderer(renderer, `document.querySelector('.task-result-window')===null`, 'quiet-completion-notice');
     await renderer.send('Emulation.setFocusEmulationEnabled', { enabled: false });
 
     // ---- 模型服务账户限额 (Issue #51, S16b; MODEL-018, RUN-012) -------------------------------------------------------
@@ -1836,7 +1840,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'review-controls-workspace');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'review-controls-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-controls-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); for (const id of ['typos-and-usage','style-and-format']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'review-controls-plan');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskPlanKind==='review-run' && document.querySelector('#task-drawer [data-task-drawer-control="start"]')`, 'review-controls-drawer', 120_000);
     const reviewRef = await renderer.evaluate(`document.querySelector('#task-drawer')?.dataset.taskPlanRef`);
     requireJourney(UUID_PATTERN.test(reviewRef ?? ''), 'review-controls-ref');

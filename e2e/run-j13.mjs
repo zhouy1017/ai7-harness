@@ -220,6 +220,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
@@ -390,15 +391,15 @@ async function bookSide(renderer, bookId, name) {
 async function importSample1(renderer, title, sample1, name, distinct = false) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
   await click(renderer, '导入稿件', `${name}-start`);
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, `${name}-target`);
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, `${name}-target`);
   const target = distinct ? '新建图书（作为不同作品）' : '新建图书';
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, `${name}-relationship`);
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label=${JSON.stringify(target)}]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-target-explicit`);
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, `${name}-relationship`);
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, `${name}-relationship-explicit`);
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, `${name}-title-screen`);
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(sample1.sha256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(sample1.bytes))}`, `${name}-exact-source`);
   await fill(renderer, '#book-title', title, `${name}-title`);
-  await click(renderer, '确认书名并复核', `${name}-review`);
+  await click(renderer, '查看导入详情', `${name}-review`);
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, `${name}-review-ready`);
   await waitFor(renderer, `!document.querySelector('#accept-import-degradation')&&Array.from(document.querySelectorAll('button')).some((button)=>button.textContent==='新建图书并导入稿件'&&!button.disabled)`, `${name}-review-clean`);
   await click(renderer, '新建图书并导入稿件', `${name}-commit`);
@@ -1270,8 +1271,8 @@ async function main() {
     await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
     const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
-    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && sheet.checked.length === 0, 'consistency-sheet-offered', sheet);
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
+    requireJourney(sheet?.enabled === true && sheet.basis === CONSISTENCY_BASIS && JSON.stringify(sheet.checked) === JSON.stringify(['typos-and-usage']), 'consistency-sheet-offered', sheet);
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'consistency-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared' && document.querySelector('section.review-plans')?.dataset.reviewCategories==='series-consistency'`, 'consistency-prepared', 120_000);
     const prepared = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(prepared?.state === 'prepared' && UUID_PATTERN.test(prepared.reviewRunId) && prepared.categories.length === 1 &&
@@ -1341,7 +1342,7 @@ async function main() {
     await openMemberReview();
     await clickSelector(renderer, '[data-review-action="new-review"]', 'exclusion-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'exclusion-sheet-open');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'exclusion-prepare');
     await waitFor(renderer, `document.querySelector('.review-workspace-card')?.dataset.reviewState==='prepared'`, 'exclusion-prepared', 120_000);
     const heldRun = (await renderer.evaluate(`window.ai7.inspectReviewWorkspace()`))?.run;
     requireJourney(heldRun?.state === 'prepared' && heldRun.ordinal === 2 && UUID_PATTERN.test(heldRun.reviewRunId), 'exclusion-prepared-run', heldRun?.state);
@@ -1788,7 +1789,7 @@ async function main() {
     await openBookReview(renderer, MEMBER, member, 'capture-source-review');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'capture-source-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true && document.querySelector('[data-review-field="procedure"]')`, 'capture-source-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); for(const value of Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), input=>input.value))sheet.querySelector('input[name="review-category"][value="'+value+'"]').click(); for (const id of ['style-and-format','literary-expression']) { const box=sheet.querySelector('input[name="review-category"][value="'+id+'"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; box.click(); } const whole=sheet.querySelector('input[name="review-scope"][value="whole"]'); if(!(whole instanceof HTMLInputElement)||whole.disabled)return false; whole.click(); const prepare=sheet.querySelector('[data-review-action="prepare"]'); if(!(prepare instanceof HTMLButtonElement)||prepare.disabled)return false; prepare.click(); return true; })()`, 'capture-source-prepare');
     const sourceRun = await startPreparedReview(renderer, 'capture-source-run');
     // The member's 第 3 次审阅, after 书系一致性's two: the capture names it by those words, so the Journey pins it by its ordinal here.
     requireJourney(sourceRun?.state === 'settled' && sourceRun.ordinal === 3 && sourceRun.procedure === null && sourceRun.capture?.available === true &&

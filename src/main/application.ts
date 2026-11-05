@@ -1086,13 +1086,15 @@ function registerRendererHandlers(
     }),
   );
 
-  ipcMain.handle(IPC_CHANNELS.selectAndStageManuscript, (event) =>
+  ipcMain.handle(IPC_CHANNELS.selectAndStageManuscript, (event, input?: { droppedPath: string }) =>
     envelope<PickerStageResult>(async () => {
       const owned = requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
         claims.requireNewDraftCapacity(owned);
-        const selectedPath = await chooseManuscript(owned);
+        if (input !== undefined) requireDesktop(typeof input === 'object' && input !== null && Object.keys(input).join() === 'droppedPath' &&
+          typeof input.droppedPath === 'string' && input.droppedPath.length > 0 && /\.docx$/iu.test(input.droppedPath), 'AI7_RENDERER_BOUNDARY_INVALID');
+        const selectedPath = input?.droppedPath ?? await chooseManuscript(owned);
         if (!selectedPath) return { status: 'cancelled' as const };
         const staged = await service.call('stageSelectedManuscript', { selectionToken: randomUUID(), selectedPath });
         rememberImportDraft(owned, staged.draftId);

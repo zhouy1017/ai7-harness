@@ -1,5 +1,8 @@
 import type { RendererApi, TaskOverviewGroupProjection, TaskOverviewItemProjection, TaskOverviewProjection, TaskOverviewCall } from '../shared/protocol.js';
 import { createSheet, sheetContent } from './components/sheet.js';
+import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
+import { showToast } from './components/toast.js';
+import type { TaskPlanProjection, ClarificationOptionId } from '../shared/protocol.js';
 const GROUP_LABELS: Record<TaskOverviewGroupProjection['key'], string> = { running: '正在运行', queued: '排队等待', waiting: '等你处理', paused: '已暂停', recent: '最近完成' };
 const STATE_LABELS: Record<TaskOverviewItemProjection['state'], string> = { running: '运行中', queued: '排队中', waiting: '等你处理', paused: '已暂停', completed: '已完成', cancelled: '已取消', stopped: '已停止' };
 const PROCEDURES = [['baseline-analysis', '基线分析'], ['initial-evaluation', '评估']] as const;
@@ -41,6 +44,7 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   node.addEventListener('click', () => act(item, 'open')); return node;
 }
 export interface TaskOverviewOptions {
+  readonly beforeStart?: () => Promise<boolean>;
   readonly onChanged?: () => void; readonly onProjection?: (projection: TaskOverviewProjection) => void;
   readonly root: HTMLElement; readonly api: Pick<RendererApi, 'inspectTaskOverview' | 'controlAllTasks' | 'startQuickTasks' | 'reorderQueuedRun' | 'taskOverviewCall' | 'pollServiceJob'>; readonly bookId?: string;
   readonly setStatus: (message: string, tone?: 'busy' | 'success' | 'error') => void;
@@ -49,7 +53,7 @@ export interface TaskOverviewOptions {
   readonly configure?: (bookId: string, kind: 'review' | 'writing') => void;
   readonly closeDrawer?: () => void; readonly jumpToSelection?: (item: TaskOverviewItemProjection) => void;
 }
-export interface TaskOverviewSurface { refresh(): void; focus(itemId: string): void; destroy(): void; }
+export interface TaskOverviewSurface { refresh(): void; showStart(): void; focus(itemId: string): void; destroy(): void; }
 export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSurface {
   let destroyed = false, busy = false, inFlight = false; let projection: TaskOverviewProjection | null = null; let painted = ''; let selectedId: string | null = null; let pendingFocus: string | null = null;
   const key = `ai7.task-overview.filters.${options.bookId ?? 'all'}`;
@@ -65,19 +69,22 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   if (options.bookId) { heading.hidden = true; context.hidden = true; note.hidden = true; selectedType = 'all'; selectedTime = 'all'; }
   const sheet = createSheet('task-overview-sheet'); options.root.append(headingRow, filters, host, confirm, note, sheet);
   start.addEventListener('click', () => { if (sheet.open) sheet.close(); else { paintSheet(); sheet.show(); } });
-  function paintSheet(): void {
+  async function paintSheet(): Promise<void> {
+    const defaults = await readActionDefaults(); if (destroyed) return;
+    projection ??= await options.api.inspectTaskOverview(); if (destroyed) return;
     const books = projection?.books ?? []; const list = el('div', 'task-overview-sheet-books');
-    for (const book of books.filter((book) => !options.bookId || options.bookId === book.bookId)) { const label = el('label', 'task-overview-sheet-book'); const input = el('input'); input.type = 'checkbox'; input.value = book.bookId; input.checked = options.bookId === book.bookId || selectedBook === book.bookId; label.append(input, document.createTextNode(book.title)); list.append(label); }
+    for (const book of books.filter((book) => !options.bookId || options.bookId === book.bookId)) { const label = el('label', 'task-overview-sheet-book'); const input = el('input'); input.type = 'checkbox'; input.value = book.bookId; input.checked = options.bookId === book.bookId || (defaults.taskBooks.length ? defaults.taskBooks.includes(book.bookId) : selectedBook === 'all' || selectedBook === book.bookId); label.append(input, document.createTextNode(book.title)); list.append(label); }
     const type = el('select'); type.setAttribute('aria-label', '工序');
     const procedures = new Map<string, string>(PROCEDURES);
     for (const rule of projection?.quickStarts ?? []) if (!options.bookId || rule.bookId === options.bookId) procedures.set(rule.procedureId, rule.label);
     for (const [id, label] of procedures) type.add(new Option(label, id));
-    const savedProcedure = localStorage.getItem('ai7.task-overview.procedure'); type.value = savedProcedure && procedures.has(savedProcedure) ? savedProcedure : PROCEDURES[0][0];
-    type.addEventListener('change', () => localStorage.setItem('ai7.task-overview.procedure', type.value));
+    type.value = procedures.has(defaults.taskProcedure) ? defaults.taskProcedure : PROCEDURES[0][0];
     const added = el('span'); added.dataset['taskOverviewAdded'] = ''; let count = 0;
     const add = el('button', 'primary', '加入队列'); add.dataset['taskOverviewEnqueue'] = '';
     add.addEventListener('click', () => { const tasks = [...list.querySelectorAll<HTMLInputElement>('input:checked')].map((input) => ({ bookId: input.value, procedureId: type.value })); if (!tasks.length) { options.setStatus('请先选择图书。', 'error'); return; }
-      add.disabled = true; void options.api.startQuickTasks({ tasks }).then((result) => { count += result.results.length; added.textContent = `已加入 ${count} 项`; options.onChanged?.(); refresh(); }, (error: unknown) => { added.textContent = '未能全部加入，请查看任务列表后继续。'; options.setStatus(error instanceof Error ? error.message : '任务未能加入。', 'error'); refresh(); }).finally(() => { add.disabled = false; }); });
+      add.disabled = true; void rememberActionDefaults({ taskBooks: tasks.map((task) => task.bookId), taskProcedure: type.value }).catch(() => options.setStatus('未能记住任务设置。', 'error'));
+      const enqueue = async () => { if (options.beforeStart && !await options.beforeStart()) return null; return options.api.startQuickTasks({ tasks }); };
+      void enqueue().then((result) => { if (result === null) return; count += result.results.length; added.textContent = `已加入 ${count} 项`; options.onChanged?.(); refresh(); }, (error: unknown) => { added.textContent = '未能全部加入，请查看任务列表后继续。'; options.setStatus(error instanceof Error ? error.message : '任务未能加入。', 'error'); refresh(); }).finally(() => { add.disabled = false; }); });
     const close = el('button', 'quiet', '关闭'); close.addEventListener('click', () => sheet.close());
     const foot = el('div'); foot.append(added, add, close);
     const config = el('div', 'button-row'); for (const [label, kind] of [['自定义审阅…', 'review'], ['写作任务说明…', 'writing']] as const) { const link = el('button', 'quiet', label); link.addEventListener('click', () => { const book = list.querySelector<HTMLInputElement>('input:checked')?.value; if (book) { sheet.close(); options.configure?.(book, kind); } }); config.append(link); }
@@ -96,6 +103,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   async function call(item: TaskOverviewItemProjection, operation: TaskOverviewCall['operation'], input: object): Promise<unknown> { if (!item.bookId) return; return options.api.taskOverviewCall({ operation, bookId: item.bookId, input } as TaskOverviewCall); }
   function act(item: TaskOverviewItemProjection, action: TaskCardAction): void {
     selectedId = item.itemId;
+    if (action === 'answer' && item.nextAction === 'answer-clarification' && item.plan) { void answerOnCard(item); return; }
     if (['open', 'answer', 'plan', 'run'].includes(action)) { options.openTarget(item, action === 'plan' ? 'plan' : 'run'); return; }
     if (action === 'jump') { options.jumpToSelection?.(item); return; }
     if (action === 'book') { if (item.bookId) options.openBook(item.bookId); return; }
@@ -106,13 +114,40 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
       const no = el('button', 'quiet', '继续保留'); no.addEventListener('click', () => { confirm.hidden = true; }); confirm.append(yes, no); confirm.hidden = false; yes.focus(); return;
     }
     void perform(async () => {
+      if (action === 'again' && options.beforeStart && !await options.beforeStart()) return;
       if ((action === 'up' || action === 'top') && item.runRecordId) await options.api.reorderQueuedRun({ runRecordId: item.runRecordId, position: action === 'top' ? 1 : Math.max(1, (item.queuePosition ?? 1) - 1) });
       else if (action === 'again' && item.target.kind === 'dialogue') await dialogueAction(item, 'regenerateDialogueAnswer');
       else if (action === 'again' && item.bookId && item.plan?.ref && item.plan.kind !== 'fixed-task') await options.api.startQuickTasks({ tasks: [{ bookId: item.bookId, procedureId: 'repeat', repeat: { kind: item.plan.kind, ref: item.plan.ref } }] });
       else if (action === 'redo') options.openTarget(item, 'redo');
       else if (item.target.kind === 'dialogue') { await dialogueAction(item, action === 'pause' ? 'stopDialogueAnswer' : 'continueDialogueAnswer'); }
       else if (item.plan?.ref) await call(item, item.plan.kind === 'baseline-analysis' ? action === 'pause' ? 'pauseBaselineAnalysisRun' : 'resumeBaselineAnalysisRun' : 'controlTaskRun', item.plan.kind === 'baseline-analysis' ? { taskIntentId: item.plan.ref } : { ...item.plan, action });
+      if ((action === 'up' || action === 'top') && item.runRecordId && item.queuePosition !== null) showToast('队列顺序已更新。', { action: { label: '撤销', run: () => void perform(async () => { await options.api.reorderQueuedRun({ runRecordId: item.runRecordId!, position: item.queuePosition! }); }) } });
+      else if (action === 'pause' || action === 'resume') showToast(action === 'pause' ? '任务已暂停。' : '任务已续行。', { action: { label: '撤销', run: () => act(item, action === 'pause' ? 'resume' : 'pause') } });
     });
+  }
+  async function answerOnCard(item: TaskOverviewItemProjection): Promise<void> {
+    const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === item.itemId);
+    if (!node || node.querySelector('[data-card-answer]') || !item.plan) return;
+    try {
+      const plan = await call(item, 'inspectTaskPlan', item.plan) as TaskPlanProjection;
+      const question = plan.clarifications.find((card) => card.state === 'open');
+      if (!question) { options.openTarget(item); return; }
+      const form = el('form', 'task-card-answer'); form.dataset['cardAnswer'] = ''; form.addEventListener('click', (event) => event.stopPropagation());
+      const choices = el('fieldset'); choices.append(el('legend', undefined, question.question));
+      let selected: ClarificationOptionId | null = null;
+      const text = el('textarea'); text.setAttribute('aria-label', '补充说明'); text.maxLength = 1000;
+      const submit = el('button', 'primary', '提交回答'); submit.disabled = true;
+      const ready = (): void => { submit.disabled = question.answerable.reason !== null || selected === null || selected === 'free-text' && !text.value.trim(); };
+      for (const option of question.options) { const label = el('label', 'choice'); const radio = el('input'); radio.type = 'radio'; radio.name = `answer-${item.itemId}`; radio.value = option.id; radio.checked = false;
+        radio.addEventListener('change', () => { selected = option.id; ready(); }); label.append(radio, document.createTextNode(`${option.label} · ${option.consequence}`)); choices.append(label); }
+      text.addEventListener('input', ready);
+      form.addEventListener('submit', (event) => { event.preventDefault(); if (!selected || submit.disabled) return; submit.disabled = true; void perform(async () => {
+        await call(item, 'answerBaselineAnalysisClarification', { taskIntentId: question.taskIntentId ?? plan.ref, requestId: question.requestId, optionId: selected,
+          note: question.origin === 'model' && selected !== 'free-text' ? null : text.value.trim() || null }); form.remove(); options.setStatus('回答已提交。', 'success');
+      }); });
+      submit.type = 'submit'; const close = el('button', 'quiet', '收起'); close.addEventListener('click', () => form.remove());
+      form.append(choices, text, submit, close); node.append(form); text.focus();
+    } catch (error) { options.setStatus(error instanceof Error ? error.message : '无法读取问题。', 'error'); }
   }
   async function dialogueAction(item: TaskOverviewItemProjection, operation: 'stopDialogueAnswer' | 'continueDialogueAnswer' | 'regenerateDialogueAnswer', cancel = false): Promise<void> {
     if (item.target.kind !== 'dialogue') return;
@@ -129,6 +164,7 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   function paint(): void {
     if (!projection) return; start.disabled = false; const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
     const active = document.activeElement; const focusId = active instanceof HTMLElement && host.contains(active) ? active.closest<HTMLElement>('[data-task-item]')?.dataset['taskItem'] : null;
+    const answers = [...host.querySelectorAll<HTMLElement>('[data-card-answer]')].map((form) => ({ form, itemId: form.closest<HTMLElement>('[data-task-item]')?.dataset['taskItem'] }));
     const action = active instanceof HTMLElement ? active.dataset['taskAction'] : undefined;
     const count = (key: string): number => projection!.groups.find((group) => group.key === key)!.items.filter((item) => !options.bookId || item.bookId === options.bookId).length;
     context.textContent = `${options.bookId ? '本书' : '全部图书'} · 同时运行 ${count('running')} 项 · 排队 ${count('queued')} 项 · 上限 ${projection.capacity}`;
@@ -137,6 +173,8 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const visible = projection.groups.map((group) => ({ ...group, items: group.items.filter((item) => (selectedBook === 'all' || item.bookId === selectedBook) && (selectedType === 'all' || item.taskKind === selectedType) && (group.key !== 'recent' || Date.parse(item.at) >= since)) }));
     const groups = options.bookId ? [{ key: 'waiting' as const, items: visible[2]!.items }, { key: 'running' as const, items: [...visible[0]!.items, ...visible[1]!.items, ...visible[3]!.items] }, { key: 'recent' as const, items: visible[4]!.items }] : visible;
     host.replaceChildren(...groups.map((group) => { const section = el('section', 'task-overview-group'); section.dataset['taskGroup'] = group.key; section.append(el('h3', 'task-overview-group-heading', `${options.bookId && group.key === 'running' ? '进行中' : GROUP_LABELS[group.key]}`)); const count = el('span', 'task-overview-count', String(group.items.length)); section.firstElementChild?.append(' · ', count); const list = el('div', 'task-overview-items'); list.append(...group.items.map((item) => taskOverviewCard(item, act))); section.append(group.items.length ? list : el('p', 'task-overview-empty', '这里暂时没有任务。')); return section; }));
+    for (const { form, itemId } of answers) { const card = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === itemId); card?.append(form); }
+    if (active instanceof HTMLElement && active.closest('[data-card-answer]') && active.isConnected) active.focus({ preventScroll: true });
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
     if (focusId) { const card = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === focusId); (action ? card?.querySelector<HTMLElement>(`[data-task-action="${action}"]`) : card)?.focus(); }
   }
@@ -150,6 +188,8 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const item = projection?.groups.flatMap((group) => group.items).find((row) => row.itemId === (cards[index]?.dataset['taskItem'] ?? selectedId)); if (!item) return;
     if (event.key === 'Enter' || event.key === ' ' || event.key === 'Delete') { event.preventDefault(); if (event.key === 'Enter') act(item, 'open'); else if (event.key === 'Delete' && ['running', 'queued', 'paused'].includes(item.state)) act(item, 'cancel'); else if (event.key === ' ' && ['running', 'paused'].includes(item.state)) act(item, item.state === 'running' ? 'pause' : 'resume'); }
   }
-  options.root.addEventListener('keydown', keydown); const timer = window.setInterval(refresh, 5000); refresh();
-  return { refresh, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
+  const visible = (): void => { if (document.visibilityState === 'visible') refresh(); };
+  document.addEventListener('visibilitychange', visible);
+  options.root.addEventListener('keydown', keydown); const timer = window.setInterval(refresh, 2000); refresh();
+  return { refresh, showStart() { void paintSheet().then(() => { if (!destroyed) sheet.show(); }); }, focus(itemId) { selectedId = itemId; pendingFocus = itemId; const node = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((row) => row.dataset['taskItem'] === itemId); node?.focus(); node?.scrollIntoView({ block: 'nearest' }); }, destroy() { destroyed = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', visible); options.root.removeEventListener('keydown', keydown); if (sheet.open) sheet.close(); options.root.replaceChildren(); } };
 }

@@ -1,4 +1,5 @@
 import { windowStep } from './components/controls.js';
+import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
 import {
   type WordTrackedChangesChoice,
@@ -116,7 +117,7 @@ export function createImportReview(options: ImportReviewOptions) {
       { mode: 'suggestions', learnFromEdits: true, acceptedBaselineConfirmed: false };
     wordIntakeFormChoices.set(key, { ...selected });
     while (wordIntakeFormChoices.size > 16) { const oldest = wordIntakeFormChoices.keys().next().value; if (oldest === undefined) break; wordIntakeFormChoices.delete(oldest); }
-    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未选择稿件基线。`);
+    groupHeading.append(` · 当前预览：${projection.previewReading === 'rejected' ? '撤销修订后的阅读' : '接受修订后的阅读'}；尚未建立稿件基线。`);
     const modes: Array<{ input: HTMLInputElement; mode: WordTrackedChangesChoice['mode'] }> = [];
     for (const mode of ['suggestions', 'accepted-baseline'] as const) {
       const line = element('label', 'choice'); const input = element('input'); input.type = 'radio';
@@ -146,7 +147,7 @@ export function createImportReview(options: ImportReviewOptions) {
           : '接受修订后没有可编辑的非空稿件，不能建立该基线。'
         : '所选阅读超出当前支持边界，不能准备；可选择另一项可用阅读。'
         : selected.mode === 'accepted-baseline' && !selected.acceptedBaselineConfirmed ? '请单独确认「直接并入正文 · 定稿基线」，再准备导入。'
-          : '最终保真、导入方式及本机保留范围会在下一步复核。';
+          : '最终保真、导入方式及本机保留范围随导入记录保存，可按需查看导入详情。';
       for (const control of buttons) control.disabled = busy || !allowed();
     };
     const changed = (): void => { wordIntakeFormChoices.set(key, { ...selected }); paint(); };
@@ -167,10 +168,38 @@ export function createImportReview(options: ImportReviewOptions) {
     reuseSourceVersionId: string | null | undefined = undefined,
     reimportLineageChoice: ReimportLineageChoice | undefined = undefined,
   ): void {
+    if (selectedChoiceId === null) {
+      const currentBookId = document.querySelector<HTMLElement>('#screen > [data-book-id]')?.dataset['bookId'];
+      const origin = document.querySelector('#screen')?.firstElementChild;
+      void readActionDefaults().then(async (defaults) => {
+        const preferred = currentBookId ?? defaults.importBookId;
+        let offered = staged;
+        while (preferred && !offered.targetChoices.some((choice) => choice.kind === 'existing-book' && choice.bookId === preferred) && offered.nextBookCursor) {
+          const page = await window.ai7.listBooks({ after: offered.nextBookCursor });
+          offered = { ...offered, nextBookCursor: page.nextCursor, targetChoices: [...offered.targetChoices, ...page.items.map((book) => ({
+            kind: 'existing-book' as const, id: `existing-book:${book.bookId}`, bookId: book.bookId, label: book.title, internalNumber: book.internalNumber,
+            manuscriptState: book.manuscriptState, reimportLineageSourceVersionIds: book.reimportLineageSourceVersionIds,
+            reimportLineagePageAfter: null, reimportLineagePreviousCursor: null, reimportLineageNextCursor: book.reimportLineageNextCursor, selected: false as const,
+          }))] };
+        }
+        if (origin !== document.querySelector('#screen')?.firstElementChild) return;
+        const target = offered.targetChoices.find((choice) => choice.kind === 'existing-book' && choice.bookId === preferred)
+          ?? offered.targetChoices.find((choice) => choice.kind === 'new-book') ?? offered.targetChoices[0];
+        if (target) renderTargetChoice(offered, target.id, recoveryNotice, recoveryReturn,
+          !staged.editableImport.available || target.kind === 'existing-book' && target.manuscriptState === 'populated' ? 'source-only' : defaults.importRelationship);
+      }).catch((error: unknown) => renderError(error, () => void initializeStartup()));
+      return;
+    }
+    const defaultTarget = staged.targetChoices.find((choice) => choice.id === selectedChoiceId);
+    let previewOnly = false;
+    const previewAction = (confirm: HTMLButtonElement, controls?: { bind(button: HTMLButtonElement): void }): HTMLButtonElement => {
+      const preview = button('查看导入详情', 'quiet', () => { previewOnly = true; confirm.click(); });
+      controls?.bind(preview); return preview;
+    };
+    relationshipSelection ??= !staged.editableImport.available || defaultTarget?.kind === 'existing-book' && defaultTarget.manuscriptState === 'populated' ? 'source-only' : 'first-manuscript';
     const content = panel();
     content.append(
-      element('p', 'section-label', '步骤 1 / 3'),
-      element('h2', undefined, '选择本地文件导入目标'),
+      element('h2', undefined, '导入稿件'),
       element('p', 'lede', '请选择图书和导入方式。'),
       sourceCard(staged),
     );
@@ -179,7 +208,7 @@ export function createImportReview(options: ImportReviewOptions) {
     const choices = element('fieldset');
     choices.setAttribute('role', 'radiogroup');
     choices.setAttribute('aria-label', '本地文件导入目标');
-    choices.dataset['importTargetChoices'] = 'unselected-by-default';
+    choices.dataset['importTargetChoices'] = 'remembered-default';
     choices.append(element('legend', undefined, '图书目标'));
     for (const targetChoice of staged.targetChoices) {
       const choice = element('label', 'choice');
@@ -196,7 +225,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const copy = element('span');
       copy.append(element('strong', undefined, words));
       if (targetChoice.kind === 'new-book') {
-        copy.append(element('small', undefined, '选择后仍须另行选择“首份稿件”或“来源材料”关系。'));
+        copy.append(element('small', undefined, '用文件名作为书名。'));
       } else {
         copy.append(element(
           'small',
@@ -212,7 +241,7 @@ export function createImportReview(options: ImportReviewOptions) {
         renderTargetChoice(staged, targetChoice.id, recoveryNotice, recoveryReturn));
     }
     content.append(choices);
-    if (selectedChoiceId === null && staged.nextBookCursor) {
+    if (staged.nextBookCursor) {
       const moreTargets = button('加载更多图书目标', 'secondary', async () => {
         moreTargets.disabled = true;
         setStatus('正在读取下一页图书目标…', 'busy');
@@ -235,7 +264,7 @@ export function createImportReview(options: ImportReviewOptions) {
           }));
           renderTargetChoice(
             { ...staged, targetChoices: [...staged.targetChoices, ...additional], nextBookCursor: page.nextCursor },
-            null,
+            selectedChoiceId,
             recoveryNotice,
             recoveryReturn,
           );
@@ -267,7 +296,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const relationship = element('fieldset');
       relationship.setAttribute('role', 'radiogroup');
       relationship.setAttribute('aria-label', '本地文件与所选图书的关系');
-      relationship.dataset['importRelationshipChoices'] = 'unselected-by-default';
+      relationship.dataset['importRelationshipChoices'] = 'remembered-default';
       relationship.append(element('legend', undefined, '导入关系'));
       const allowedRelationships: ReadonlyArray<ImportRelationshipChoice> = !staged.editableImport.available
         ? ['source-only']
@@ -321,11 +350,11 @@ export function createImportReview(options: ImportReviewOptions) {
       title.name = 'book-title';
       title.maxLength = 180;
       title.required = true;
-      title.value = staged.titleSuggestion.value;
+      title.value = staged.source.displayName.replace(/\.[^.]+$/u, '').slice(0, 180) || staged.titleSuggestion.value;
       const fidelityView = renderFidelityReview(staged.fidelity, staged.source.conversion, { kind: 'offer' });
       const structureView = renderStructureReview(staged.structure);
       const wordControls = relationshipSelection === 'first-manuscript' ? renderWordIntakeControls(staged) : null;
-      const confirm = button('确认书名并复核', 'primary', async () => {
+      const confirm = button('导入', 'primary', async () => {
         if (wordControls !== null && !wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', 'error'); return; }
         if (relationshipSelection === 'first-manuscript' && !structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = relationshipSelection === 'first-manuscript' ? structureView.choice() : undefined;
@@ -352,7 +381,7 @@ export function createImportReview(options: ImportReviewOptions) {
                 relationship: 'source-only',
               },
             });
-            renderSourceImportReview(review, recoveryNotice, recoveryReturn);
+            if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
           } else {
             const review = await window.ai7.prepareNewBookReview({
               draftId: staged.draftId,
@@ -363,16 +392,15 @@ export function createImportReview(options: ImportReviewOptions) {
               ...(trackedChanges === undefined ? {} : { trackedChanges }),
               ...(structure === undefined ? {} : { structure }),
             });
-            renderReview(review, recoveryNotice, recoveryReturn);
+            if (previewOnly) renderReview(review, recoveryNotice, recoveryReturn); else await finishImport(review, recoveryReturn);
           }
-          setStatus('导入前复核已准备', 'success');
         } catch (error) {
           wordControls?.setBusy(false);
           renderError(error, () => void initializeStartup());
         }
       });
       const actions = element('div', 'button-row');
-      actions.append(confirm, cancelImport);
+      actions.append(confirm, previewAction(confirm, wordControls ?? undefined), cancelImport);
       form.append(label, title);
       if (relationshipSelection === 'first-manuscript') {
         if (wordControls !== null) { form.append(...wordControls.elements); wordControls.bind(confirm); }
@@ -388,7 +416,7 @@ export function createImportReview(options: ImportReviewOptions) {
       const wordControls = renderWordIntakeControls(staged);
       content.append(...wordControls.elements, ...fidelityView.elements, ...structureView.elements);
       const actions = element('div', 'button-row');
-      const confirm = button('复核导入到所选图书', 'primary', async () => {
+      const confirm = button('导入', 'primary', async () => {
         if (!wordControls.allowed()) { setStatus('请选择可用的 Word 阅读；选择「直接并入正文 · 定稿基线」时须单独确认。', 'error'); return; }
         if (!structureView.allowed()) { setStatus(STRUCTURE_CHOICE_REQUIRED, 'error'); return; }
         const structure = structureView.choice();
@@ -406,8 +434,7 @@ export function createImportReview(options: ImportReviewOptions) {
             ...(trackedChanges === undefined ? {} : { trackedChanges }),
             ...(structure === undefined ? {} : { structure }),
           });
-          renderReview(review, recoveryNotice, recoveryReturn);
-          setStatus('导入前复核已准备', 'success');
+          if (previewOnly) renderReview(review, recoveryNotice, recoveryReturn); else await finishImport(review, recoveryReturn);
         } catch (error) {
           confirm.disabled = false;
           wordControls.setBusy(false);
@@ -415,13 +442,14 @@ export function createImportReview(options: ImportReviewOptions) {
         }
       });
       wordControls.bind(confirm);
-      actions.append(confirm, cancelImport);
+      actions.append(confirm, previewAction(confirm, wordControls), cancelImport);
       content.append(actions);
       revealedControl = confirm;
     } else if (selectedChoice?.kind === 'existing-book' && relationshipSelection === 'source-only') {
       const sameBookMatches = [...new Set(staged.identityFindings
         .filter((finding) => finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')
         .map((finding) => finding.sourceVersionId))];
+      reuseSourceVersionId ??= sameBookMatches[0] ?? null;
       if (sameBookMatches.length > 0) {
         const reuseChoices = element('fieldset');
         reuseChoices.setAttribute('role', 'radiogroup');
@@ -449,7 +477,7 @@ export function createImportReview(options: ImportReviewOptions) {
       }
       const actions = element('div', 'button-row');
       if (sameBookMatches.length === 0 || reuseSourceVersionId !== undefined) {
-        const confirm = button('复核来源材料导入', 'primary', async () => {
+        const confirm = button('导入来源材料', 'primary', async () => {
           confirm.disabled = true;
           setStatus('正在重新校验图书与来源身份并准备复核…', 'busy');
           try {
@@ -463,15 +491,14 @@ export function createImportReview(options: ImportReviewOptions) {
                 reuseSourceVersionId: reuseSourceVersionId ?? null,
               },
             });
-            renderSourceImportReview(review, recoveryNotice, recoveryReturn);
-            setStatus('来源材料导入前复核已准备', 'success');
+            if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
           } catch (error) {
             confirm.disabled = false;
             setStatus(rendererErrorMessage(error, '无法复核来源材料导入。'), 'error');
           }
         });
         confirm.dataset['prepareSourceImportReview'] = selectedChoice.bookId;
-        actions.append(confirm);
+        actions.append(confirm, previewAction(confirm));
         revealedControl = confirm;
       }
       actions.append(cancelImport);
@@ -617,7 +644,7 @@ export function createImportReview(options: ImportReviewOptions) {
                 lineage: reimportLineageChoice === 'unconfirmed'
                   ? { kind: 'unconfirmed' }
                   : { kind: 'verified-source-version', sourceVersionId: reimportLineageChoice },
-                reuseSourceVersionId,
+                reuseSourceVersionId: reuseSourceVersionId ?? null,
               },
             });
             cancelPreparation.dataset['jobProgressCompleted'] = String(activePreparationJob.progress.completed);
@@ -688,6 +715,25 @@ export function createImportReview(options: ImportReviewOptions) {
         );
       }
     });
+  }
+
+  async function finishImport(review: ReviewBeforeImportProjection, recoveryReturn?: RecoveryReturnContext): Promise<void> {
+    if (review.reviewDigest === null) { renderReview(review, undefined, recoveryReturn); return; }
+    try {
+      const result = await window.ai7.commitNewBookImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+        reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
+      void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'first-manuscript' }).catch(() => setStatus('未能记住导入设置。', 'error'));
+      renderImported(result, recoveryReturn); setStatus(result.completionLabel, 'success');
+    } catch (error) {
+      if (['IMPORT_COMMIT_OUTCOME_UNCERTAIN', 'REVIEW_CHANGED', 'SNAPSHOT_RESELECTION_REQUIRED', 'DRAFT_VERSION_CHANGED'].some((code) => hasErrorCode(error, code))) { await initializeStartup(); return; }
+      throw error;
+    }
+  }
+  async function finishSourceImport(review: ReviewBeforeSourceImportProjection, recoveryReturn?: RecoveryReturnContext): Promise<void> {
+    const result = await window.ai7.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+      reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
+    void rememberActionDefaults({ importBookId: result.bookId, importRelationship: 'source-only' }).catch(() => setStatus('未能记住导入设置。', 'error'));
+    renderImported(result, recoveryReturn); setStatus(result.completionLabel, 'success');
   }
 
   function listSection(title: string, items: ReadonlyArray<string>): HTMLElement {

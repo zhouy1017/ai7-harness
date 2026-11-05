@@ -1,3 +1,4 @@
+import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -313,7 +314,7 @@ describe('the Manuscript screen lifecycle', () => {
     const toolbar = app.screen.querySelector('.editor-toolbar')!;
     expect(toolbar.querySelector('nav') === null).toBe(true);
     expect([...toolbar.querySelectorAll('button')].map((button) => button.textContent))
-      .toEqual(['撤销', '重做', '保存当前编辑', '重试权威刷新']);
+      .toEqual(['撤销', '重做', '重试权威刷新']);
     app.showing?.destroy();
   });
 
@@ -370,3 +371,5 @@ it('scans the manuscript screen in ordinary mode (#1315)', () => {
   try { const app = shell(); app.open(windowOf('book-one')); expectNoTechnicalText(app.screen); app.showing?.destroy(); }
   finally { setTechnicalLayerVisible(true); }
 });
+
+vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));

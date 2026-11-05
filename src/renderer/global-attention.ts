@@ -1,4 +1,5 @@
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
+import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
 import {
   GLOBAL_ATTENTION_HEADING,
@@ -21,13 +22,13 @@ import {
  * `global-attention-labels.ts`.
  *
  * One reader serves both: the entry and the screen paint the same answer. It reads on each screen change and
- * each time the window gains focus, and slowly on its own only while a Run is in flight (the projection's
- * `running`), so a quiet library costs nothing. Reading grants and changes nothing (V2-UX-ATTN-008): opening
+ * each time the window gains focus, and every two seconds even while idle. Reading grants and changes nothing
+ * (V2-UX-ATTN-008): opening
  * an item is only navigation, and every decision is still the record's.
  */
 
-/** How often the reader reads again on its own, and only while a Run is in flight. */
-export const GLOBAL_ATTENTION_POLL_MS = 5_000;
+/** Keep new and changed items following while the service is available. */
+export const GLOBAL_ATTENTION_POLL_MS = 2_000;
 
 type AttentionApi = Pick<RendererApi, 'inspectGlobalAttention'>;
 
@@ -71,8 +72,8 @@ export function createGlobalAttentionReader(api: AttentionApi): GlobalAttentionR
     latest = reading;
     for (const listener of listeners) listener(reading);
     clearPoll();
-    // A slow poll only while a Run is in flight: the view follows it to its end, and stops when it ends.
-    if (!interrupted && reading.kind === 'projection' && reading.projection.running) {
+    // Follow newly queued work as well as runs already in flight.
+    if (!interrupted) {
       pollTimer = window.setTimeout(() => {
         pollTimer = undefined;
         refresh();
@@ -122,6 +123,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, t
 }
 
 let identities = 0;
+// Reading is window-local view state; navigating away does not undo it or decide an item.
+const readAttentionItems = new Set<string>();
 function uid(prefix: string): string {
   identities += 1;
   return `global-attention-${prefix}-${identities}`;
@@ -187,6 +190,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   let unsubscribe: (() => void) | null = null;
   let focusHeading = true;
   const byItem = new Map<string, GlobalAttentionItemProjection>();
+  const readItems = readAttentionItems;
 
   const heading = el('h2', 'global-attention-title', GLOBAL_ATTENTION_HEADING);
   heading.tabIndex = -1;
@@ -203,6 +207,15 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     el('p', 'lede', GLOBAL_ATTENTION_LEDE),
     host,
   );
+  const readAll = el('button', 'quiet', '全部标记已读'); readAll.type = 'button'; readAll.dataset['attentionReadAll'] = '';
+  readAll.addEventListener('click', () => {
+    const before = new Set(readItems);
+    for (const item of byItem.values()) readItems.add(`${item.itemId}:${item.state}:${item.at}`);
+    for (const node of host.querySelectorAll<HTMLElement>('[data-attention-item]')) node.dataset['read'] = 'true';
+    options.setStatus('已标记为已读，待处理的决定仍会保留。', 'success');
+    showToast('已全部标记为已读。', { action: { label: '撤销', run: () => { readItems.clear(); for (const id of before) readItems.add(id); painted = ''; options.reader.refresh(); } } });
+  });
+  options.root.append(readAll);
 
   function fact(term: string, value: string): HTMLElement[] {
     return [el('dt', undefined, term), el('dd', 'technical-identity', value)];
@@ -214,6 +227,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     node.dataset['attentionState'] = view.state;
     node.dataset['attentionBlocked'] = projection.blocked ? 'true' : 'false';
     node.dataset['attentionTarget'] = projection.target.kind;
+    node.dataset['read'] = String(readItems.has(`${projection.itemId}:${projection.state}:${projection.at}`));
     if (projection.book.bookId !== null) node.dataset['bookId'] = projection.book.bookId;
     const reasonId = uid('reason');
     const stateId = uid('state');

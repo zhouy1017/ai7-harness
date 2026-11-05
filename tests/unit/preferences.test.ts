@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createPreferenceStore, PreferenceError, type PreferenceFileSystem } from '../../src/main/preferences.js';
 import {
   MAX_RECENT_BOOKS,
+  DEFAULT_QUICK_ACTIONS,
   PREFERENCE_ERRORS,
   PREFERENCE_KEYS,
   PREFERENCES_FILE_NAME,
@@ -46,6 +47,14 @@ function refusal(operation: () => unknown): PreferenceError {
 }
 
 describe('the preferences registry', () => {
+  it('remembers only non-disposition action defaults across restart', () => {
+    const defaults = { ...DEFAULT_QUICK_ACTIONS, reviewCategories: ['typos-and-usage', 'style-and-format'], reviewScope: 'changed' as const,
+      taskBooks: ['book-one', 'book-two'], exportFormat: 'pdf' as const, includeEditorNotes: true };
+    createPreferenceStore(sandbox).save({ key: 'actions.defaults', value: defaults });
+    expect(createPreferenceStore(sandbox).read().values['actions.defaults']).toEqual(defaults);
+    expect(PREFERENCE_KEYS['actions.defaults'].validate({ ...defaults, conclusion: 'accept' })).toBe(false);
+    expect(PREFERENCE_KEYS['actions.defaults'].validate({ ...defaults, manuscript: 'protected text' })).toBe(false);
+  });
   it('persists learning ask frequency, defaults to occasional and rejects unsupported values', () => {
     const store = createPreferenceStore(sandbox);
     expect(store.read().values['learning.askFrequency']).toBe('occasionally');
@@ -63,9 +72,9 @@ describe('the preferences registry', () => {
     for (const key of keys) expect(restarted.read().values[key]).toBe(true);
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
-    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
+    expect(Object.keys(PREFERENCE_KEYS)).toEqual(['actions.defaults', 'usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
       'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency']);
-    expect(preferenceDefaults()).toEqual({ 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
+    expect(preferenceDefaults()).toEqual({ 'actions.defaults': DEFAULT_QUICK_ACTIONS, 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
       'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
       'editor.density': 'standard',
       'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' },

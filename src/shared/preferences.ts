@@ -280,7 +280,39 @@ export async function readSampleGuidance(isSample: boolean, state: OnboardingSta
 }
 
 export type LearningAskFrequency = 'often' | 'occasionally' | 'off';
+/** Non-disposition input defaults only: these never authorize a task or retain editorial text. */
+export interface QuickActionDefaults {
+  importBookId: string | null;
+  importRelationship: 'first-manuscript' | 'source-only';
+  reviewCategories: string[];
+  reviewScope: 'whole' | 'chapters' | 'changed' | 'selection';
+  reviewFrom: string | null;
+  reviewTo: string | null;
+  taskBooks: string[];
+  taskProcedure: string;
+  exportFormat: 'docx' | 'pdf' | 'markdown';
+  includeAnnotations: boolean;
+  includeSuggestions: boolean;
+  includeEditorNotes: boolean;
+}
+export const DEFAULT_QUICK_ACTIONS: QuickActionDefaults = Object.freeze({
+  importBookId: null, importRelationship: 'first-manuscript', reviewCategories: ['typos-and-usage'],
+  reviewScope: 'whole', reviewFrom: null, reviewTo: null, taskBooks: [], taskProcedure: 'baseline-analysis',
+  exportFormat: 'docx', includeAnnotations: true, includeSuggestions: true, includeEditorNotes: false,
+});
+function isQuickActionDefaults(value: unknown): value is QuickActionDefaults {
+  if (!isPlainObject(value) || Object.keys(value).sort().join() !== Object.keys(DEFAULT_QUICK_ACTIONS).sort().join()) return false;
+  const id = (item: unknown): item is string => typeof item === 'string' && /^[a-zA-Z0-9_.:@-]{1,160}$/u.test(item);
+  const optional = (item: unknown): boolean => item === null || id(item);
+  const ids = (items: unknown): boolean => Array.isArray(items) && items.length <= 100 && items.every(id);
+  return optional(value['importBookId']) && ['first-manuscript', 'source-only'].includes(String(value['importRelationship'])) &&
+    ids(value['reviewCategories']) && ['whole', 'chapters', 'changed', 'selection'].includes(String(value['reviewScope'])) &&
+    optional(value['reviewFrom']) && optional(value['reviewTo']) && ids(value['taskBooks']) && id(value['taskProcedure']) &&
+    ['docx', 'pdf', 'markdown'].includes(String(value['exportFormat'])) &&
+    ['includeAnnotations', 'includeSuggestions', 'includeEditorNotes'].every((key) => typeof value[key] === 'boolean');
+}
 export const PREFERENCE_KEYS = Object.freeze({
+  'actions.defaults': preference(isQuickActionDefaults, DEFAULT_QUICK_ACTIONS),
   'usage.unitPrices': preference(isUnitPrices, {} as UnitPrices),
   'keyboard.bindings': preference(isKeyboardBindings, {} as KeyboardBindings),
   // 11a: the sidebar shows icons only while collapsed (IA-010); remembered across sessions.

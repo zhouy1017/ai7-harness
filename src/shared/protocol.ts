@@ -323,6 +323,8 @@ export const SERVICE_PROTOCOL_VERSION = 196 as const;
 export const BOOK_FINDINGS_PAGE_SIZE = 40;
 
 export interface BookFindingProjection {
+  /** Exact open suggestion offered by the owning review; Apply still revalidates this binding. */
+  suggestion?: { manuscriptId: string; branchId: string; markId: string; blockId: string; batchAllowed: boolean; quote: string; replacement: string };
   id: string;
   category: string;
   categoryLabel: string;
@@ -6793,6 +6795,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   restoreRecovery(input: Omit<ServiceOperationMap['restoreRecovery']['input'], 'restorationId'>): Promise<RecoveryRestorationProjection>;
   getImportStartup(): Promise<ImportStartupProjection>;
   selectAndStageManuscript(): Promise<PickerStageResult>;
+  stageDroppedManuscript(file: File): Promise<PickerStageResult>;
   importBundledSampleBook(): Promise<PickerStageResult>;
   continueImportDraft(input: ServiceOperationMap['continueImportDraft']['input']): Promise<ContinueImportProjection>;
   reselectImportDraft(input: {

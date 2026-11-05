@@ -205,6 +205,7 @@ async function settle(renderer, expression, timeout = 15_000) {
   return state;
 }
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
 async function fill(renderer, selector, value, name) {
@@ -301,11 +302,11 @@ async function importAndOpen(renderer, title) {
   await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'import-landing');
   await assertRenderer(renderer, SIDEBAR_LIBRARY_READY, 'sidebar-library-entry');
   await click(renderer, '导入稿件', 'import-start');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-target-select');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement) || radio.checked) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!(radio instanceof HTMLInputElement)) return false; radio.click(); return radio.checked; })()`, 'import-relationship-select');
   await fill(renderer, '#book-title', title, 'import-title');
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'import-committed', 180_000);
@@ -319,7 +320,7 @@ async function importAndOpen(renderer, title) {
 
 /** Wait until nothing typed is waiting for the journal, and no mark command is in flight. */
 async function settled(renderer, name) {
-  await waitFor(renderer, `Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑')?.disabled === true && document.documentElement.dataset.ai7CloseRisk !== 'true'`, name);
+  await waitFor(renderer, `document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed' && document.documentElement.dataset.ai7CloseRisk !== 'true'`, name);
 }
 
 /**
@@ -1044,8 +1045,10 @@ async function main() {
     await assertRenderer(renderer, `(() => { document.querySelector('#task-drawer [data-task-drawer-control="start"]').click(); return true; })()`, 'local-authorize-exact-plan');
     await waitFor(renderer, `document.querySelector('[data-local-check="materialized"]') && document.querySelector('.review-workspace-card')?.dataset.reviewState==='settled'`, 'local-finding-materialized');
     await assertRenderer(renderer, `(async () => { const run=(await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun})).run; const finding=run.findings.find((item)=>item.blockId===window.__j05LocalBlock&&item.stateLine?.startsWith('P02/v1')); if(!finding)return false; window.__j05LocalFinding=finding.findingId; window.__j05LocalMark=finding.markId; return finding.output==='change-suggestion'&&finding.replacement==='……'&&finding.fromGrapheme===4&&finding.toGrapheme===5&&run.localCheck.counts.N01.disabled===97&&run.report.record.appendix.categories[0].adapterPin===null&&run.report.record.appendix.categories[0].planEnvelopeDigest===window.__j05LocalDigest; })()`, 'local-exact-rule-run-report-lineage');
-    // #1164 / J-05: one editor action applies the exact non-overlapping mechanical suggestions through the existing batch authority.
+    // Q1: batch application lists the exact suggestions and waits for the editor's confirmation.
     await assertRenderer(renderer, `(() => { const button=document.querySelector('section[data-review-category="local-text-check"] [data-review-action="batch-prepare"]'); if(!button||button.disabled||button.textContent!=='批量采纳机械修正')return false; button.click(); return true; })()`, 'local-mechanical-batch-one-action');
+    await waitFor(renderer, `document.querySelector('[data-review-action="batch-confirm"]')?.disabled===false`, 'local-batch-confirm-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="batch-confirm"]').click(); return true; })()`, 'local-batch-confirm');
     await waitFor(renderer, `(async () => { const {manuscript}=await window.ai7.inspectReviewWorkspace({reviewRunId:window.__j05LocalRun}); const card=await window.ai7.getEditorialMarkCard({manuscriptId:manuscript.manuscriptId,branchId:manuscript.branchId,markId:window.__j05LocalMark}); return card.suggestion?.application!=null; })()`, 'local-batch-committed');
     await waitFor(renderer, `(() => { const button=document.querySelector('article[data-finding-id="'+window.__j05LocalFinding+'"] [data-review-action="go-to-text"]'); if(!button||button.disabled)return false; button.click(); return true; })()`, 'local-return-to-mark');
     // The finding retains the same suggestion and Apply lineage; its reverse action restores the tester edit.

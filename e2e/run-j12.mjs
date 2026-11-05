@@ -339,6 +339,7 @@ async function tabUntil(renderer, expression, name, maximumTabs = 12) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, name);
 }
 
@@ -365,11 +366,11 @@ async function createEmptyBook(renderer, title) {
 
 async function importBook(renderer, title, bundled = false) {
   await click(renderer, bundled ? '导入示例书' : '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-new-book');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship');
   await fill(renderer, '#book-title', title, 'import-title');
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   await click(renderer, '新建图书并导入稿件', 'import-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"]')`, 'imported', 180_000);
@@ -383,9 +384,9 @@ async function importFirstManuscript(renderer, bookId) {
   await clickBook(renderer, bookId, 'existing-open-empty');
   await waitFor(renderer, `document.querySelector('.book-overview[data-book-id=${JSON.stringify(bookId)}][data-manuscript-state="empty"]')`, 'existing-empty-overview');
   await click(renderer, '导入首份稿件', 'existing-import-first');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'existing-relationship');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'existing-relationship');
   await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'existing-first-relationship');
-  await click(renderer, '复核导入到所选图书', 'existing-review');
+  await click(renderer, '查看导入详情', 'existing-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'existing-review-ready');
   await assertRenderer(renderer, `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='导入为首份稿件'||item.textContent==='按上述降级方式导入为首份稿件'); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`, 'existing-commit');
   await waitFor(renderer, `document.querySelector('[data-screen="imported"] .book-overview[data-book-id=${JSON.stringify(bookId)}][data-manuscript-state="populated"]')`, 'existing-imported', 180_000);
@@ -395,8 +396,8 @@ async function importFirstManuscript(renderer, bookId) {
 async function saveEdit(renderer, suffix) {
   const inserted = await renderer.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`);
   requireJourney(inserted === true, 'edit-inserted');
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
-  await click(renderer, '保存当前编辑', 'edit-save');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
+  await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
 }
 
@@ -896,7 +897,7 @@ async function main() {
     const routeRiskSuffix = '，J12 路由风险保护';
     const riskyEditInserted = await primary.evaluate(`(() => { const editor=document.querySelector('[data-testid="manuscript-editor"]'); const block=editor?.querySelector('[data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(routeRiskSuffix)}); return block.textContent?.endsWith(${JSON.stringify(routeRiskSuffix)}); })()`);
     requireJourney(riskyEditInserted === true, 'close-risk-edit-inserted');
-    await waitFor(primary, `document.documentElement.dataset.ai7CloseRisk==='true' && !Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'close-risk-advertised');
+    await waitFor(primary, `document.documentElement.dataset.ai7CloseRisk==='true' && !(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'close-risk-advertised');
     at('close-risk-same-window-request');
     const sameWindowRisk = await primary.evaluate(`(async()=>{ const active=document.activeElement; const result=await window.ai7.openBookWorkbench({kind:'revision',revisionId:${JSON.stringify(revisionOne)}}).then(value=>({accepted:true,value}),error=>({accepted:false,code:error?.code,message:error?.message})); return {result,route:await window.ai7.getBookWorkbenchRoute(),activePreserved:active===document.activeElement,dirty:document.documentElement.dataset.ai7CloseRisk==='true'&&document.querySelector('[data-testid="manuscript-editor"] [data-block-id]')?.textContent.endsWith(${JSON.stringify(routeRiskSuffix)})}; })()`);
     requireJourney(
@@ -949,7 +950,7 @@ async function main() {
       'cross-window-risk-preserved-route-capability-content-and-focus',
     );
     at('background-journal-non-focus-steal');
-    await click(primary, '保存当前编辑', 'background-risk-edit-save');
+    await click(primary, '保存', 'background-risk-edit-save');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志') && document.documentElement.dataset.ai7CloseRisk==='false'`, 'background-risk-edit-durable', 120_000);
     await assertRenderer(bookBRenderer, `document.hasFocus() && document.visibilityState==='visible'`, 'background-journal-kept-book-b-focus');
     await assertRenderer(primary, `!document.hasFocus()`, 'background-journal-did-not-focus-book-a');
@@ -1016,7 +1017,7 @@ async function main() {
         historicalRoute.revisionId === revisionOne,
       'historical-exact-route-owned',
     );
-    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存当前编辑','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.textContent.includes('不提供写入'); })()`, 'immutable-readonly-reconstruction');
+    await assertRenderer(primary, `(() => { const view=document.querySelector('.historical-revision-viewer'); const blocks=document.querySelectorAll('.historical-revision-blocks>[data-block-id]'); return view?.dataset.bookId===${JSON.stringify(bookA)} && Number(view.dataset.blockCount)===blocks.length && blocks.length>0 && blocks.length<=32 && !view.textContent.includes(${JSON.stringify(editSuffix)}) && !document.querySelector('[data-testid="manuscript-editor"]') && !document.querySelector('[contenteditable="true"]') && !Array.from(view.querySelectorAll('button')).some((item)=>['保存','撤销','重做','保存为里程碑版本','保存里程碑版本'].includes(item.textContent??'')) && view.textContent.includes('不提供写入'); })()`, 'immutable-readonly-reconstruction');
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
     await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && document.querySelector('[data-return-to-current-revision]')!==null`, 'j14-zoom-200-reflow');
@@ -1271,12 +1272,12 @@ async function main() {
     const registeredBookA = await findRenderer(manager, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(bookA)}]')`, 'preflight-registered-a');
     const sourceRecordsBefore = await registeredBookA.evaluate(`(async()=>{ const overview=await window.ai7.getBookOverview({bookId:${JSON.stringify(bookA)},historyCursor:null}); return overview.records.filter((record)=>record.kind==='source-import-record').length; })()`);
     await click(primary, '导入稿件', 'preflight-stage-source');
-    await waitFor(primary, `document.querySelector('[data-screen="target"]')`, 'preflight-source-target');
+    await waitFor(primary, `document.querySelector('[data-import-target-choices]')`, 'preflight-source-target');
     await assertRenderer(primary, `(() => { const target=document.querySelector('input[data-import-target-choice="existing-book"][data-book-id=${JSON.stringify(bookA)}]'); if(!(target instanceof HTMLInputElement))return false; target.click(); return target.checked; })()`, 'preflight-select-a');
     await assertRenderer(primary, `(() => { const source=document.querySelector('input[data-import-relationship="source-only"]'); if(!(source instanceof HTMLInputElement))return false; source.click(); return source.checked; })()`, 'preflight-source-only');
     await waitFor(primary, `document.querySelector('[data-source-version-reuse-choices]')`, 'preflight-reuse-required');
     await assertRenderer(primary, `(() => { const reuse=document.querySelector('[data-reuse-source-version-id]'); if(!(reuse instanceof HTMLInputElement))return false; reuse.click(); return reuse.checked; })()`, 'preflight-reuse-source');
-    await click(primary, '复核来源材料导入', 'preflight-prepare-source');
+    await click(primary, '查看导入详情', 'preflight-prepare-source');
     await waitFor(primary, `document.querySelector('[data-screen="review"] [data-import-review-kind="source-only"]')`, 'preflight-source-review');
     await click(primary, '导入来源材料到所选图书', 'preflight-commit-source');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent.includes('已显示这本图书现有的工作台') && document.querySelector('#persistence-status')?.textContent.includes('来源材料未提交') && !document.querySelector('[data-commit-source-import]')?.disabled`, 'preflight-duplicate-rejected');
@@ -1506,7 +1507,7 @@ async function main() {
       settings=await window.ai7.selectBothRoleModels({route:'deepseek-open-platform',modelId:'deepseek-flash'});
       return binding('main-editorial')?.modelId==='deepseek-flash'&&binding('fast-interaction')?.modelId==='deepseek-flash';
     })()`, 'independent-role-models-without-test');
-    await assertRenderer(primary, `(() => { document.querySelector('[data-action="refresh-model-list"]').click(); return true; })()`, 'model-refresh-click');
+    await assertRenderer(primary, `(() => { document.dispatchEvent(new Event('visibilitychange')); return true; })()`, 'model-refresh-click');
     await waitFor(primary, `document.querySelector('#persistence-status')?.dataset.tone==='error' && document.querySelector('#persistence-status')?.textContent==='模型服务不可达，请检查网络或网络代理设置' && document.querySelector('.model-service-technical:not([open]) [data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')`, 'model-refresh-discovery-failure-visible');
     await assertRenderer(primary, `document.querySelector('[data-action="test-flow-connection"]')?.disabled===false && document.querySelector('.model-service-flow-feedback')?.textContent.includes('尚未测试')`, 'inline-model-connection-test-surface');
     at('model-service-search-backends');

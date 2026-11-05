@@ -99,10 +99,11 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   const isReview = entry.item.object.kind === 'review';
   // A dialogue Task's 回答 (Issue #52, S17a; TASK-044): its question and latest answer, read from the Harness Session Ledger.
   const isDialogue = entry.item.object.kind === 'dialogue';
+  const isTask = entry.item.object.kind === 'task';
   const section = el('section', 'task-result-window');
   section.setAttribute('role', 'dialog');
   section.dataset['taskResult'] = 'loading';
-  section.dataset['taskResultKind'] = isDialogue ? 'dialogue' : isReview ? 'review' : 'analysis';
+  section.dataset['taskResultKind'] = isTask ? 'task' : isDialogue ? 'dialogue' : isReview ? 'review' : 'analysis';
   const bar = el('header', 'task-result-bar');
   const kind = el('span', 'task-result-kind', TASK_RESULT_KIND);
   const title = el('h3', 'task-result-title', globalAttentionObjectLabel(entry.item.object));
@@ -122,7 +123,7 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   bar.append(kind, title, pill, close);
   const body = el('div', 'task-result-body');
   const foot = el('footer', 'task-result-foot');
-  const open = el('button', 'secondary', isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
+  const open = el('button', 'secondary', isTask ? '查看任务' : isDialogue ? DIALOGUE_OPEN_LABEL : isReview ? TASK_RESULT_OPEN.review : TASK_RESULT_OPEN.analysis);
   open.type = 'button';
   open.dataset['taskResultAction'] = 'open';
   const noFindings = el('span', 'task-result-no-findings', REVIEW_RESULT_NONE);
@@ -300,8 +301,14 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   async function load(): Promise<void> {
     const result = entry.result;
     try {
-      if (result === null) throw new Error(TASK_RESULT_UNAVAILABLE);
-      if (result.kind === 'dialogue') {
+      if (result === null && isTask) {
+        const completion = entry.item.facts.completion;
+        body.replaceChildren(el('p', undefined, completion
+          ? `已完成 ${completion.total - completion.gaps} / ${completion.total} 个单元。`
+          : '在这项任务中查看已有结果与后续操作。'));
+        if (completion?.reason) body.append(el('p', undefined, completion.reason));
+      } else if (result === null) throw new Error(TASK_RESULT_UNAVAILABLE);
+      else if (result.kind === 'dialogue') {
         const dialogue = await options.api.inspectDialogue({ dialogueId: result.dialogueId, afterFragment: 0 });
         if (closed) return;
         if (dialogue.dialogueId !== result.dialogueId) throw new Error(TASK_RESULT_UNAVAILABLE);

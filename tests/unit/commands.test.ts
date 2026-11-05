@@ -71,12 +71,12 @@ describe('the command registry', () => {
     }
   });
 
-  it('maps no command to an authority-bearing action (KEY-004)', () => {
+  it('keeps disposition commands out of the registry; Q1 adds explicit task start and input surfaces', () => {
     const forbidden = ['开始任务', '采纳', '设为发稿版本', '保存为里程碑版本', '删除', '批准', '授权', '应用', '放弃', '覆盖', '替换全部', '确认'];
     for (const command of COMMANDS) {
       for (const word of forbidden) expect(command.name, command.id).not.toContain(word);
-      expect(command.id, command.id).toMatch(/^(?:nav|search|view)\./u);
-      expect(command.id, command.id).not.toMatch(/start|run|authoriz|adopt|apply|publish|designate|delete|approve|milestone|decision/iu);
+      expect(command.id, command.id).toMatch(/^(?:nav|search|view|command|book|review|evaluation)\./u);
+      expect(command.id, command.id).not.toMatch(/authoriz|adopt|apply|publish|designate|delete|approve|milestone|decision/iu);
     }
     expect(FIXED_COMMANDS.map((fixed) => fixed.id)).toEqual(['edit.save', 'edit.undo', 'edit.redo', 'edit.replace', 'edit.previousWindow', 'edit.nextWindow']);
   });

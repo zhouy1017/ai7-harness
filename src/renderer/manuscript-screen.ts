@@ -2,6 +2,7 @@ import { showTransientNotice } from './notifications.js';
 import { icon } from './components/icon-sprite.js';
 import { technicalWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { createSaveMenu } from './save-menu.js';
+import { mountManuscriptExport } from './manuscript-export.js';
 import { SAVE_MENU_WORDS } from './save-menu-labels.js';
 import { mountParagraphAnalysis } from './paragraph-analysis.js';
 import { PARAGRAPH_ANALYSIS_WORDS } from './paragraph-analysis-labels.js';
@@ -189,6 +190,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   let viewportObserver: ResizeObserver | undefined;
 
   let destroyed = false;
+  let currentWindow = initialWindow;
   let editor: BoundedEditor | undefined;
   let editorialMarks: EditorialMarksSurface | undefined;
   let manuscriptRail: PositionRail | undefined;
@@ -268,11 +270,6 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const chipHost = element('div', 'return-chip-host');
   chipHost.hidden = true;
   title.append(meta);
-  const save = button('保存当前编辑', 'primary', () => editor?.flush());
-  save.disabled = true;
-  // The chord comes from the one label source and follows a remap (KEY-011); 保存 keeps its chord, the words are the window's own.
-  save.dataset['shortcutCommand'] = 'edit.save';
-  save.title = shortcutHint('edit.save') ?? '';
   const undo = button('撤销', 'quiet', () => void runHistory('undo'));
   const redo = button('重做', 'quiet', () => void runHistory('redo'));
   const paragraphStyle = element('select');
@@ -353,7 +350,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   taskOnDocument.dataset['documentAction'] = 'start-task';
   toolbarActions.classList.add('editor-edit-actions');
-  toolbarActions.append(paragraphStyle, undo, redo, save, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
+  toolbarActions.append(paragraphStyle, undo, redo, ...(isDocument ? [saveVersion, taskOnDocument] : []), retryAuthoritativeRefreshButton);
   toolbar.append(title, toolbarActions);
 
   const workspace = element('div', 'editor-workspace');
@@ -506,6 +503,10 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   );
   navigator.append(outlineSection, searchSection);
   const saveMenu = isDocument ? undefined : createSaveMenu(milestoneSection, () => void leaveForDeliverables());
+  const exportRoot = element('aside', 'manuscript-export-slot'); content.append(exportRoot);
+  const manuscriptExport = mountManuscriptExport({ root: exportRoot, bookId: initialWindow.bookId, api,
+    setStatus, errorMessage: rendererErrorMessage, beforeExport: () => settleLocalEdit(), onChanged: () => undefined, openerOf: () => null });
+  const exportMenu = manuscriptExport.menu(() => isDocument ? { kind: 'document', documentId: currentWindow.manuscriptId, revisionId: currentWindow.revisionId } : { kind: 'current' }, null);
   const analysisPanel = element('aside', 'manuscript-navigator paragraph-analysis-panel');
   analysisPanel.id = 'paragraph-analysis-panel';
   analysisPanel.setAttribute('aria-label', PARAGRAPH_ANALYSIS_WORDS.title);
@@ -709,16 +710,15 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   if (saveMenu !== undefined) {
     saveMenu.element.id = 'manuscript-save-menu';
     saveMenu.update(null, null);
-    options.setContextActions(chipHost, saveMenu.element);
+    options.setContextActions(chipHost, saveMenu.element, exportMenu);
     persistenceStatus.setAttribute('role', 'button'); persistenceStatus.tabIndex = 0;
     persistenceStatus.setAttribute('aria-controls', saveMenu.element.id);
     saveMenu.element.addEventListener('toggle', () => {
       if (!destroyed) persistenceStatus.setAttribute('aria-expanded', String((saveMenu.element as HTMLDetailsElement).open));
     });
   }
-  if (saveMenu === undefined) options.setContextActions(chipHost);
+  if (saveMenu === undefined) options.setContextActions(chipHost, exportMenu);
 
-  let currentWindow = initialWindow;
   if (!isDocument) {
     const currentBlock = (): string | null => {
       const focused = editor?.captureContinuity();
@@ -1950,8 +1950,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       saving = state.saving;
       retryRequired = state.retryRequired;
       editingInterrupted = state.interrupted;
+      editorHost.dataset['editorPersistence'] = state.dirty || state.saving || state.retryRequired || state.interrupted ? 'pending' : 'confirmed';
       updatePersistenceMenu();
-      save.disabled = authoritativeMutationBusy() || !state.dirty || state.saving || state.interrupted;
       journal.textContent = `修订日志序号 ${state.journalSequence}`;
       // Editing Protection Mode (Issue #951): the header's protection surface, and the close guard while input is at risk (DUR-010).
       protectionSurface?.update(state.protection);
@@ -1999,6 +1999,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   // 查找, 查找结果 and 聚焦稿件 (Issue #936, plan slice 11c; KEY-002): the remappable commands of the manuscript on screen. The
   // dispatcher's Command Guard holds each back while an input method composes; they leave with the screen.
   editorCommandsOff = commandDispatcher.register({
+    'edit.save': () => editor?.flush(),
+    'edit.undo': () => runHistory('undo'),
+    'edit.redo': () => runHistory('redo'),
+    'edit.replace': () => { setNavigationOpen(true); replacementInput.focus(); },
+    'edit.previousWindow': () => previousWindow.click(),
+    'edit.nextWindow': () => nextWindow.click(),
     'search.find': () => {
       setNavigationOpen(true);
       searchInput.focus();
@@ -2156,6 +2162,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     persistenceStatus.removeEventListener('click', toggleSaveMenu);
     persistenceStatus.removeEventListener('keydown', saveMenuKeydown);
     saveMenu?.destroy();
+    manuscriptExport.destroy();
     persistenceStatus.setAttribute('role', 'status');
     persistenceStatus.removeAttribute('tabindex');
     persistenceStatus.removeAttribute('aria-controls');

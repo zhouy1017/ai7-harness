@@ -63,7 +63,7 @@ describe('the one model-service flow', () => {
       }) as unknown as ModelServiceSettingsProjection;
       const calls = api(complete(['opencode-go', route]));
       vi.mocked(calls.getModelServiceSettings).mockResolvedValue(complete(['opencode-go']));
-      vi.stubGlobal('window', { ai7: calls });
+      vi.stubGlobal('window', { ai7: calls, setInterval: () => 0, clearInterval: () => undefined });
       try {
         const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
           const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
@@ -123,8 +123,7 @@ describe('the one model-service flow', () => {
     await vi.waitFor(() => expect(calls.selectMainRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'account/custom-opus' }));
     button(node, 'select-fast-role-model').click();
     await vi.waitFor(() => expect(calls.selectFastRoleModel).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId: 'account/custom-opus' }));
-    button(node, 'refresh-model-list').click();
-    await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalledWith({ route: 'anthropic-claude' }));
+    expect(node.querySelector('[data-action="refresh-model-list"]')).toBeNull();
     expect(calls.testModelServiceConnection).not.toHaveBeenCalled();
   });
 
@@ -132,15 +131,15 @@ describe('the one model-service flow', () => {
     const responseProjection = Object.assign(settings(['anthropic-claude']), {
       modelDiscovery: { status: 'failure', code: 'AI7_PROXY_UNREACHABLE', reason: '代理不可达：请检查网络代理设置' },
     });
-    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
-    button(node, 'refresh-model-list').click();
+    const { node, setStatus } = flow(Object.assign(settings(['anthropic-claude']), { modelDiscovery: { status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE', reason: '暂时无法获取模型' } }), api(responseProjection));
+    button(node, 'retry-model-list').click();
     await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('代理不可达：请检查网络代理设置', 'error'));
   });
 
   it('shows the model count after a successful refresh', async () => {
     const responseProjection = Object.assign(settings(['anthropic-claude']), { modelDiscovery: { status: 'success', modelCount: 7 } });
-    const { node, setStatus } = flow(settings(['anthropic-claude']), api(responseProjection));
-    button(node, 'refresh-model-list').click();
+    const { node, setStatus } = flow(Object.assign(settings(['anthropic-claude']), { modelDiscovery: { status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE', reason: '暂时无法获取模型' } }), api(responseProjection));
+    button(node, 'retry-model-list').click();
     await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('模型列表已刷新，共 7 个可用模型。', 'success'));
   });
 
@@ -172,7 +171,7 @@ describe('the one model-service flow', () => {
         externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
     } as unknown as ModelServiceSettingsProjection;
     const calls = { getModelServiceSettings: vi.fn(async () => projection), saveModelServiceProxy: vi.fn(async () => projection) };
-    vi.stubGlobal('window', { ai7: calls });
+    vi.stubGlobal('window', { ai7: calls, setInterval: () => 0, clearInterval: () => undefined });
     try {
       const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
         const node = document.createElement(tag);

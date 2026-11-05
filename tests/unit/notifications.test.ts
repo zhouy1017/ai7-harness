@@ -3,11 +3,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createGlobalAttentionReader } from '../../src/renderer/global-attention.js';
 import { createNotifier } from '../../src/main/notifications.js';
-import { createNotificationObserver, createStatusSurface, mountQuietNotice } from '../../src/renderer/notifications.js';
+import { createNotificationObserver, createStatusSurface, mountQuietNotice, openCurrentBookCompletion } from '../../src/renderer/notifications.js';
+import { composeTaskOverview } from '../../src/service/task-overview.js';
 import { installMiniDom, miniDocument } from '../support/mini-dom.js';
 import { completionLabel, NOTIFICATION_LABELS, notificationClass, systemNoticeText } from '../../src/renderer/notification-labels.js';
 import { preferenceDefaults } from '../../src/shared/preferences.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../../src/shared/protocol.js';
+import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection } from '../../src/shared/protocol.js';
 
 const START = Date.parse('2026-10-17T10:00:00Z');
 function item(overrides: Partial<GlobalAttentionItemProjection> = {}): GlobalAttentionItemProjection {
@@ -39,6 +40,52 @@ function setup() {
   return { notifier, notices, navigate, prefs: (change: Partial<typeof prefs>) => { prefs = { ...prefs, ...change }; }, focus: (value: boolean) => { focused = value; } };
 }
 afterEach(() => vi.restoreAllMocks());
+
+it('keeps a delayed completion on its Book and opens only while that Book is still current', async () => {
+  const restore = installMiniDom();
+  try {
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let currentBookId = event.book.bookId;
+    let release!: (value: TaskOverviewProjection) => void;
+    const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+    const open = vi.fn();
+    const options = { currentBookId: () => currentBookId, enabled: () => true, read: () => reading, open };
+    const pending = openCurrentBookCompletion(event, options);
+    currentBookId = 'another-book'; release(overview); await pending;
+    expect(open).not.toHaveBeenCalled();
+    currentBookId = event.book.bookId;
+    await openCurrentBookCompletion(event, options);
+    expect(open).toHaveBeenCalledExactlyOnceWith(overview.groups.find((group) => group.key === 'recent')!.items[0]);
+  } finally { restore(); }
+});
+
+it('keeps manuscript focus when a current-Book completion arrives or finishes reading', async () => {
+  const restore = installMiniDom();
+  try {
+    const editor = miniDocument.createElement('div'); editor.dataset['testid'] = 'manuscript-editor';
+    const text = miniDocument.createElement('span'); editor.append(text);
+    const elsewhere = miniDocument.createElement('button'); miniDocument.body.append(editor, elsewhere);
+    const event = item({ group: 'recent', state: 'analysis-completed' });
+    const overview = composeTaskOverview(projection([event]), 2, () => null);
+    let release!: (value: TaskOverviewProjection) => void;
+    const reading = new Promise<TaskOverviewProjection>((resolve) => { release = resolve; });
+    const read = vi.fn(() => reading); const open = vi.fn();
+    const options = { currentBookId: () => event.book.bookId, enabled: () => true, read, open };
+    text.focus();
+    await openCurrentBookCompletion(event, { ...options, read: async () => overview });
+    expect(open).not.toHaveBeenCalled();
+    elsewhere.focus();
+    const pending = openCurrentBookCompletion(event, options);
+    text.focus(); release(overview); await pending;
+    expect(read).toHaveBeenCalledOnce();
+    expect(open).not.toHaveBeenCalled();
+    expect(miniDocument.activeElement).toBe(text);
+    elsewhere.focus();
+    await openCurrentBookCompletion(event, options);
+    expect(open).toHaveBeenCalledOnce();
+  } finally { restore(); }
+});
 
 describe('privacy-safe main notifications', () => {
   it('shows generic silent actionable text when unfocused, and only navigates on click', () => {
@@ -263,7 +310,7 @@ describe('quiet notice lifetime', () => {
 });
 
 describe('a Run started from the Task Drawer reaches the observer', () => {
-  it('a read at the start follows the Run in flight to its outcome; without it the outcome is never heard', async () => {
+  it('automatically follows new Runs and reports their completion only once', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('window', { setTimeout, clearTimeout });
     try {
@@ -276,12 +323,12 @@ describe('a Run started from the Task Drawer reaches the observer', () => {
       reader.subscribe((reading) => { if (reading.kind === 'projection') observe(reading.projection); });
       reader.refresh();
       await vi.advanceTimersByTimeAsync(0);
-      // Started on the same screen: nothing reads again, so the outcome stays unheard however long the Run takes.
+      // A new task is followed even when the previous reading had no running work.
       current = running;
       current = settled;
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(completed).not.toHaveBeenCalled();
-      // The drawer's record of the start reads at once; the slow poll then follows the Run to its outcome.
+      expect(completed).toHaveBeenCalledOnce();
+      // Reading the same completion again does not open a second result.
       current = running;
       reader.refresh();
       await vi.advanceTimersByTimeAsync(0);

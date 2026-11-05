@@ -48,7 +48,7 @@ export {
 // ---- the destination --------------------------------------------------------------------------------
 
 export const REVIEW_SECTION_LABEL = '工作 · 审阅';
-export const REVIEW_LEDE = '按类别审读这本书的稿件：选好类别和范围，先看计划，授权一次后逐类审阅。发现以修改建议和批注标在稿件上，由你逐条决定；审阅本身不改稿件。';
+export const REVIEW_LEDE = '按类别审读稿件，类别与范围已预填；可直接开始，计划按需查看。修改建议和批注由你逐条决定，审阅本身不改稿件。';
 /** The editor toolbar's group (V2-UX-IA-006: 工作 · 稿件 / 审阅 / 评估 / 交付物) and its one entry today. */
 export const REVIEW_WORK_GROUP_LABEL = '工作';
 export const REVIEW_ENTRY_LABEL = '审阅';

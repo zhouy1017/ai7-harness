@@ -220,6 +220,7 @@ async function assertRenderer(renderer, expression, name) {
 }
 
 async function click(renderer, label, name) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
     `(() => { const node=Array.from(document.querySelectorAll('button')).find((item)=>item.textContent===${JSON.stringify(label)}); if(!(node instanceof HTMLButtonElement)||node.disabled)return false; node.click(); return true; })()`,
@@ -284,6 +285,12 @@ async function runSettingsPages(renderer, cancellation) {
   await waitFor(renderer, `document.querySelector('[data-screen="keyboard"] [data-keyboard-command="nav.series"]')`, 'keyboard-ready');
   await assertRenderer(renderer, `${label('nav.library')}===${JSON.stringify(libraryDefault)} && ${label('nav.series')}===${JSON.stringify(seriesDefault)} && document.querySelector('[data-shortcut-command="edit.save"]')?.textContent.startsWith(${JSON.stringify(darwin ? 'Command+S' : 'Ctrl+S')})`, 'keyboard-defaults');
   await assertRenderer(renderer, `document.querySelector('.keyboard-always-on')?.textContent.includes('始终有效')`, 'keyboard-always-on');
+
+  // Q1: the shared command registry is reachable from the palette, and its added shortcuts are listed here.
+  await assertRenderer(renderer, `['command.palette','book.switch','review.new','evaluation.start','nav.tasks'].every(id=>document.querySelector('[data-keyboard-command="'+id+'"]'))`, 'quick-shortcuts-listed');
+  await chord('KeyK', 'k', mod);
+  await waitFor(renderer, `document.querySelector('.command-palette')?.open===true && document.querySelector('.command-palette-results')?.textContent.includes('新建审阅') && document.querySelector('.command-palette-results')?.textContent.includes('发起任务')`, 'command-palette-open');
+  await assertRenderer(renderer, `(() => { const sheet=document.querySelector('.command-palette'); sheet.close(); return !sheet.open; })()`, 'command-palette-close');
 
   at('keyboard-remap-refused');
   cancellation.throwIfRequested();
@@ -452,18 +459,18 @@ const AUTHORIZE_LABELED_BUTTONS = `Array.from(document.querySelectorAll('#screen
 
 async function importSample1(renderer, cancellation) {
   await click(renderer, '导入稿件', 'import-open');
-  await waitFor(renderer, `document.querySelector('[data-screen="target"]')`, 'import-target');
+  await waitFor(renderer, `document.querySelector('[data-import-target-choices]')`, 'import-target');
   at('sample1-import-target');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
-  await waitFor(renderer, `document.querySelector('[data-screen="relationship"]')`, 'import-relationship-screen');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="新建图书"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-target-explicit');
+  await waitFor(renderer, `document.querySelector('[data-import-relationship-choices]')`, 'import-relationship-screen');
   at('sample1-import-relationship');
-  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement)||radio.checked)return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
+  await assertRenderer(renderer, `(() => { const radio=document.querySelector('input[aria-label="作为首份稿件导入"]'); if(!(radio instanceof HTMLInputElement))return false; radio.click(); return radio.checked; })()`, 'import-relationship-explicit');
   await waitFor(renderer, `document.querySelector('[data-screen="title"]')`, 'import-title-screen');
   at('sample1-import-title');
   await assertRenderer(renderer, `document.querySelector('[data-source-sha256]')?.textContent===${JSON.stringify(SAMPLE1_SHA256)} && document.querySelector('[data-source-bytes]')?.textContent===${JSON.stringify(String(SAMPLE1_BYTES))}`, 'import-exact-source');
   await fill(renderer, '#book-title', 'J-03 sample1 任务授权', 'import-title');
   cancellation.throwIfRequested();
-  await click(renderer, '确认书名并复核', 'import-review');
+  await click(renderer, '查看导入详情', 'import-review');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'import-review-ready');
   at('sample1-import-review');
   await assertShellFrame(renderer, 'shell-frame-import');
@@ -510,9 +517,9 @@ async function saveEditorSuffix(renderer, suffix, expectedSequence, cancellation
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `(() => { const block=document.querySelector('[data-testid="manuscript-editor"] [data-block-id]'); if(!(block instanceof HTMLElement))return false; block.focus(); const range=document.createRange(); range.selectNodeContents(block); range.collapse(false); const selection=getSelection(); selection.removeAllRanges(); selection.addRange(range); document.execCommand('insertText',false,${JSON.stringify(suffix)}); return block.textContent?.endsWith(${JSON.stringify(suffix)}); })()`, 'edit-inserted');
   cancellation.throwIfRequested();
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((item)=>item.textContent==='保存当前编辑')?.disabled`, 'edit-dirty');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'edit-dirty');
   cancellation.throwIfRequested();
-  await click(renderer, '保存当前编辑', 'edit-save');
+  await click(renderer, '保存', 'edit-save');
   await waitFor(renderer, `document.querySelector('#persistence-status')?.dataset.tone==='success' && document.querySelector('#persistence-status')?.textContent.includes('修订日志')`, 'edit-durable', 120_000);
   cancellation.throwIfRequested();
   await assertRenderer(renderer, `document.querySelector('.editor-meta')?.textContent.includes(${JSON.stringify(`修订日志序号 ${expectedSequence}`)})`, 'edit-sequence');

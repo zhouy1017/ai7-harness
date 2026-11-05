@@ -1,5 +1,5 @@
 import { showToast } from './components/toast.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection } from '../shared/protocol.js';
+import type { GlobalAttentionItemProjection, GlobalAttentionProjection, TaskOverviewProjection, TaskOverviewItemProjection } from '../shared/protocol.js';
 import type { NotificationsRendererApi } from '../shared/preferences.js';
 import { completionLabel, isOrdinaryOutcome, QUIET_NOTICE_WORDS } from './notification-labels.js';
 
@@ -69,4 +69,17 @@ export function createNotificationObserver(options: {
 /** Completion notices share the ordinary transient-message capsule. */
 export function mountQuietNotice(open: (item: GlobalAttentionItemProjection) => void): (item: GlobalAttentionItemProjection) => void {
   return (item) => showToast(completionLabel(item), { tone: item.state, action: { label: QUIET_NOTICE_WORDS.view, run: () => open(item) } });
+}
+
+/** A completion read may finish after the editor switches Books, resumes writing or turns automatic results off. */
+export async function openCurrentBookCompletion(item: GlobalAttentionItemProjection, options: {
+  currentBookId(): string | null; enabled(): boolean; read(): Promise<TaskOverviewProjection>; open(entry: TaskOverviewItemProjection): void;
+}): Promise<void> {
+  const current = (): boolean => item.book.bookId !== null && options.currentBookId() === item.book.bookId && options.enabled() &&
+    !document.querySelector('[data-testid="manuscript-editor"]')?.contains(document.activeElement);
+  if (!current()) return;
+  const tasks = await options.read();
+  if (!current()) return;
+  const entry = tasks.groups.flatMap((group) => group.items).find((entry) => entry.itemId === item.itemId);
+  if (entry) options.open(entry);
 }

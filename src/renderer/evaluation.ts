@@ -324,7 +324,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     errorMessage,
     onChanged: () => undefined,
     openerOf: (target) => target.kind === 'document'
-      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-readers-report-action="export"]`)
+      ? root.querySelector<HTMLElement>(`.evaluation-readers-report li[data-document-id="${CSS.escape(target.documentId)}"] [data-export-menu] > summary`)
       : null,
   });
 
@@ -382,14 +382,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         row.append(open);
         const latest = draft.document.versions[0];
         if (latest !== undefined) {
-          const exportButton = action(READERS_REPORT_ACTIONS.exportDraft, 'secondary', 'export-draft', () => {
-            if (busy || exporter.busy()) return;
-            exporter.open({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
-              documentExportLabel(draft.typeLabel, latest.label), exportButton);
-          });
-          exportButton.dataset['readersReportAction'] = 'export';
-          exportButton.disabled = busy || exporter.busy();
-          row.append(exportButton);
+          const menu = exporter.menu({ kind: 'document', documentId: draft.document.documentId, revisionId: latest.revisionId },
+            documentExportLabel(draft.typeLabel, latest.label));
+          menu.dataset['readersReportExport'] = '';
+          for (const button of menu.querySelectorAll('button')) button.disabled = busy || exporter.busy();
+          row.append(menu);
         }
       } else if (entry.drafted !== null) {
         const drafted = entry.drafted;
@@ -562,14 +559,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const row = el('div', 'button-row evaluation-initial-actions');
     const task = initial.task;
     if (task !== null && task.state === 'prepared' && !initialBlocked) {
-      const open = action(EVALUATION_AI7_OPEN_PLAN, 'primary', 'open-initial-plan', () => options.openPlan(task.taskIntentId));
+      const open = action('开始评估', 'primary', 'start-initial', () => void prepareInitial());
       open.disabled = busy;
       open.setAttribute('aria-controls', 'task-drawer');
       row.append(open);
     } else {
       if (initial.prepare.allowed) {
-        const prepare = action(EVALUATION_AI7_PREPARE[initial.prepare.mode], latest === null ? 'primary' : 'secondary', 'start-initial', () => void prepareInitial());
-        const preview = action('查看计划', 'secondary', 'prepare-initial', () => void prepareInitial(true));
+        const prepare = action('开始评估', 'primary', 'start-initial', () => void prepareInitial());
+        const preview = action('先看计划', 'quiet', 'prepare-initial', () => void prepareInitial(true));
+        preview.classList.add('text-link');
         preview.disabled = busy; row.append(preview);
         prepare.disabled = busy;
         row.append(prepare);
@@ -590,11 +588,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const close = action('关闭', 'quiet', 'close-initial-sheet', () => sheet.close());
     row.append(close);
     sheetContent(sheet, sheetTitle, configuration, row);
-    const open = action('新建评估', 'primary', 'new-evaluation', () => { initialSheetOpen = true; sheet.show(); sheet.querySelector<HTMLElement>('button, input, select')?.focus(); });
-    open.disabled = busy;
+    const open = action('开始评估', 'primary', 'new-evaluation', () => void prepareInitial());
+    open.disabled = busy || !initial.prepare.allowed && task?.state !== 'prepared';
     sheet.open = initialSheetOpen;
     sheet.addEventListener('close', () => { initialSheetOpen = false; open.focus({ preventScroll: true }); });
-    section.append(open, sheet);
+    const preview = action('先看计划', 'quiet', 'preview-evaluation', () => void prepareInitial(true));
+    preview.classList.add('text-link'); preview.disabled = busy || !initial.prepare.allowed;
+    const configure = action('评估设置', 'quiet', 'configure-evaluation', () => { initialSheetOpen = true; sheet.show(); });
+    section.append(open, preview, configure, sheet);
     return section;
   };
 
@@ -937,12 +938,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       // 从 AI7 初评开始 leads once AI7's latest 初评 read the text as it stands (EVAL-001, EVAL-006); the editor may still begin alone.
       const fromInitial = workspace.start.fromInitial;
       if (fromInitial !== null) {
-        const seeded = action(EVALUATION_START_FROM_INITIAL, 'primary', 'start-from-initial', () => void begin_(true));
+        const seeded = action(EVALUATION_START_FROM_INITIAL, 'quiet', 'start-from-initial', () => void begin_(true));
         seeded.disabled = busy;
         start.append(seeded);
       }
       // While the latest version cannot be read (Issue #726), the start names the 定稿 it will seed from and says what it skips.
-      const begin = action(evaluationStartLabel(workspace.start), workspace.start.kind === 'first' && fromInitial === null ? 'primary' : 'secondary', 'start', () => void begin_(false));
+      const begin = action(workspace.start.kind === 'first' ? '自行填写评估' : evaluationStartLabel(workspace.start), 'quiet', 'start', () => void begin_(false));
       begin.disabled = busy;
       if (workspace.start.skipDamaged !== null) begin.append(' · ', el('span', 'evaluation-skip-damaged', evaluationSkipDamagedLine(workspace.start.skipDamaged)));
       start.append(begin);
@@ -950,7 +951,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       start.append(el('p', 'field-note evaluation-start-reason', workspace.start.reason));
     }
     parts.push(start);
-    parts.push(readersReportNode(workspace));
+    if (workspace.readersReport.basis !== null) parts.push(readersReportNode(workspace));
     // 按我的评分重写评语 sits just above the version it rewrites (Issue #429, S81b2; EVAL-008).
     if (workspace.record !== null) parts.push(rewriteNode(workspace, workspace.record));
     if (refusal !== null) {
@@ -978,6 +979,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   /** 准备 AI7 初评: the Task's plan prepared as one cooperative job, then opened in the Task Drawer, whose bar starts it. */
   const prepareInitial = async (preview = false): Promise<void> => {
     if (busy || workspace === null) return;
+    if (workspace.initial.task?.state === 'prepared' && workspace.materialReferences?.blocked.initial !== true) {
+      const ref = workspace.initial.task.taskIntentId;
+      if (preview) { options.openPlan(ref); return; }
+      busy = true;
+      try { await startPreparedTask(api, 'initial-evaluation', ref); workspace = { ...await api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null }), record: workspace.record }; }
+      catch (error) { setStatus(errorMessage(error, EVALUATION_AI7_STATUS.failed), 'error'); }
+      finally { busy = false; paint(null, true); }
+      return;
+    }
     busy = true;
     refusal = null;
     setStatus(EVALUATION_AI7_STATUS.preparing, 'busy');

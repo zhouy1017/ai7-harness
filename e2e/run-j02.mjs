@@ -482,11 +482,11 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
     `(async () => {
       const editor = document.querySelector('[data-testid="manuscript-editor"]');
       const block = editor?.lastElementChild;
-      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const save = document.querySelector('[data-editor-persistence]');
       const actionLabels = ${JSON.stringify(actionLabels)};
-      const actions = actionLabels.map((label) => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label));
-      if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLButtonElement) ||
-          actions.some((action) => !(action instanceof HTMLButtonElement)) || !save.disabled ||
+      const actions = actionLabels.filter((label) => label !== '保存').map((label) => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label));
+      if (!(editor instanceof HTMLElement) || !(block instanceof HTMLElement) || !(save instanceof HTMLElement) ||
+          actions.some((action) => !(action instanceof HTMLButtonElement)) || !(save.dataset.editorPersistence === 'confirmed') ||
           actions.some((action) => action !== save && action.disabled)) return false;
       const blockId = block.dataset.blockId;
       const before = block.textContent;
@@ -502,11 +502,11 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
           resolve(dirty);
         };
         const observer = new MutationObserver(() => {
-          if (!save.disabled) finish(true);
+          if (!(save.dataset.editorPersistence === 'confirmed')) finish(true);
         });
-        observer.observe(save, { attributes: true, attributeFilter: ['disabled'] });
+        observer.observe(save, { attributes: true, attributeFilter: ['data-editor-persistence'] });
         timeout = setTimeout(() => finish(false), 250);
-        if (!save.disabled) finish(true);
+        if (!(save.dataset.editorPersistence === 'confirmed')) finish(true);
       });
       block.focus();
       const range = document.createRange();
@@ -519,8 +519,9 @@ async function editThenInvokeOnDirty(renderer, suffix, actionLabels, location) {
       if (!document.execCommand('insertText', false, ${JSON.stringify(suffix)})) return false;
       const dirty = await dirtyReady;
       const liveBlock = Array.from(editor.children).find((item) => item.getAttribute('data-block-id') === blockId);
-      if (!dirty || save.disabled || !(liveBlock instanceof HTMLElement) || liveBlock.textContent !== before + ${JSON.stringify(suffix)} ||
+      if (!dirty || (save.dataset.editorPersistence === 'confirmed') || !(liveBlock instanceof HTMLElement) || liveBlock.textContent !== before + ${JSON.stringify(suffix)} ||
           actions.some((action) => action.disabled)) return false;
+      if (actionLabels.includes('保存')) editor.dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }));
       for (const action of actions) action.click();
       return true;
     })()`,
@@ -551,10 +552,13 @@ async function openNavigation(renderer, location) {
 }
 
 async function clickVisibleControl(renderer, selector, name) {
-  const point = await renderer.evaluate(`(() => {
+  const point = await renderer.evaluate(`(async () => {
     const node=document.querySelector(${JSON.stringify(selector)});
     if(!(node instanceof HTMLElement)) return null;
     node.scrollIntoView({block:'nearest'});
+    // Resizing animates the shell padding; native pointer coordinates must be taken after that movement ends.
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await Promise.all(document.body.getAnimations().map(animation => animation.finished));
     const r=node.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
     return r.width>0 && r.height>0 && node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
   })()`);
@@ -589,6 +593,7 @@ async function assertSupportingOverlays(renderer) {
 }
 
 async function clickButton(renderer, label, location) {
+  if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(
     renderer,
     `(() => { const item = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === ${JSON.stringify(label)}); if (!item || item.disabled) return false; item.click(); return true; })()`,
@@ -759,7 +764,7 @@ async function waitForStagedTarget(renderer, dataRoot) {
   const watched = await watchImportStep(
     renderer,
     dataRoot,
-    `document.querySelector('[data-screen="target"]') ? 'done' : document.querySelector('[data-screen="error"]') ? 'refused' : 'waiting'`,
+    `document.querySelector('[data-import-target-choices]') ? 'done' : document.querySelector('[data-screen="error"]') ? 'refused' : 'waiting'`,
   );
   if (watched.outcome === 'done') return;
   const stood = importStagePhase(dataRoot);
@@ -830,11 +835,11 @@ async function importAndOpen(renderer, dataRoot) {
   await waitForStagedTarget(renderer, dataRoot);
   await assertRenderer(renderer, `document.querySelector('.source-card')?.textContent.includes('${BLOCK_COUNT} 个可编辑段落')`, 'exact-block-count');
   await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="新建图书"]'); if (!radio) return false; radio.click(); return true; })()`, 'target-select');
-  await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio || radio.checked) return false; radio.click(); return true; })()`, 'relationship-select');
+  await assertRenderer(renderer, `(() => { const radio = document.querySelector('input[aria-label="作为首份稿件导入"]'); if (!radio) return false; radio.click(); return true; })()`, 'relationship-select');
   at('import-review');
   await waitFor(renderer, `document.querySelector('#book-title')`, 'title');
   await fill(renderer, '#book-title', '千万字有界编辑校验', 'title-fill');
-  await clickButton(renderer, '确认书名并复核', 'review-click');
+  await clickButton(renderer, '查看导入详情', 'review-click');
   await waitFor(renderer, `document.querySelector('[data-screen="review"]')`, 'review');
   await assertRenderer(renderer, `!document.querySelector('#accept-import-degradation') && Array.from(document.querySelectorAll('[data-fidelity-category]')).every((row) => row.dataset.fidelityCategory === 'round-trip-export' || row.querySelector('.status-preserved'))`, 'clean-fidelity');
   at('import-commit');
@@ -1061,13 +1066,13 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     renderer,
     `(() => {
       const editor = document.querySelector('[data-testid="manuscript-editor"]');
-      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const save = document.querySelector('[data-editor-persistence]');
       const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
       const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
       const first = blocks[0];
       const second = blocks[1];
       if (!(editor instanceof HTMLElement) || editor.dataset.operationLocked !== 'false' || editor.getAttribute('contenteditable') !== 'true' ||
-          editor.getAttribute('aria-readonly') !== 'false' || !(save instanceof HTMLButtonElement) || !save.disabled ||
+          editor.getAttribute('aria-readonly') !== 'false' || !(save instanceof HTMLElement) || !(save.dataset.editorPersistence === 'confirmed') ||
           !(cancel instanceof HTMLButtonElement) || cancel.hidden || !cancel.dataset.serviceJobId ||
           cancel.dataset.serviceJobId !== globalThis.__ai7ServiceJobId ||
           document.querySelectorAll('button[data-service-job-id="' + cancel.dataset.serviceJobId + '"]').length !== 1 ||
@@ -1096,7 +1101,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     `(() => {
       const state = globalThis.__ai7CooperativeEdit;
       const editor = document.querySelector('[data-testid="manuscript-editor"]');
-      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const save = document.querySelector('[data-editor-persistence]');
       const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
       const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
       const first = blocks.find((block) => block.getAttribute('data-block-id') === state?.first?.blockId);
@@ -1112,7 +1117,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
         secondIdentity: second instanceof HTMLElement && second.dataset.blockId === state?.second?.blockId,
         secondTextUnchanged: second?.textContent === state?.second?.before,
         distinctBlocks: first instanceof HTMLElement && second instanceof HTMLElement && first !== second,
-        dirty: save instanceof HTMLButtonElement && !save.disabled,
+        dirty: save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed'),
         sameRunningSearchJob: cancel instanceof HTMLButtonElement && !cancel.hidden && cancel.dataset.serviceJobId === state?.jobId && state?.jobId === globalThis.__ai7ServiceJobId,
         singleServiceJob: typeof state?.jobId === 'string' && document.querySelectorAll('button[data-service-job-id="' + state.jobId + '"]').length === 1,
       };
@@ -1124,13 +1129,13 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     `(() => {
       const state = globalThis.__ai7CooperativeEdit;
       const editor = document.querySelector('[data-testid="manuscript-editor"]');
-      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const save = document.querySelector('[data-editor-persistence]');
       const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
       const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
       const first = blocks.find((block) => block.getAttribute('data-block-id') === state?.first?.blockId);
       const second = blocks.find((block) => block.getAttribute('data-block-id') === state?.second?.blockId);
       if (!(editor instanceof HTMLElement) || editor.dataset.operationLocked !== 'false' || editor.getAttribute('contenteditable') !== 'true' ||
-          editor.getAttribute('aria-readonly') !== 'false' || !(save instanceof HTMLButtonElement) || save.disabled ||
+          editor.getAttribute('aria-readonly') !== 'false' || !(save instanceof HTMLElement) || (save.dataset.editorPersistence === 'confirmed') ||
           !(cancel instanceof HTMLButtonElement) || cancel.hidden || cancel.dataset.serviceJobId !== state?.jobId ||
           state?.jobId !== globalThis.__ai7ServiceJobId || typeof state?.jobId !== 'string' ||
           document.querySelectorAll('button[data-service-job-id="' + state.jobId + '"]').length !== 1 ||
@@ -1154,7 +1159,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
     `(() => {
       const state = globalThis.__ai7CooperativeEdit;
       const editor = document.querySelector('[data-testid="manuscript-editor"]');
-      const save = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑');
+      const save = document.querySelector('[data-editor-persistence]');
       const cancel = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '取消当前操作');
       const blocks = Array.from(editor?.querySelectorAll(':scope > [data-block-id]') ?? []);
       const first = blocks.find((block) => block.getAttribute('data-block-id') === state?.first?.blockId);
@@ -1170,16 +1175,16 @@ async function runWorkspaceJourney(renderer, dataRoot) {
         secondIdentity: second instanceof HTMLElement && second.dataset.blockId === state?.second?.blockId,
         secondText: second?.textContent === state?.second?.before + ${JSON.stringify(secondCooperativeEdit)},
         distinctBlocks: first instanceof HTMLElement && second instanceof HTMLElement && first !== second,
-        dirty: save instanceof HTMLButtonElement && !save.disabled,
+        dirty: save instanceof HTMLElement && !(save.dataset.editorPersistence === 'confirmed'),
         sameRunningSearchJob: cancel instanceof HTMLButtonElement && !cancel.hidden && cancel.dataset.serviceJobId === state?.jobId && state?.jobId === globalThis.__ai7ServiceJobId,
         singleServiceJob: typeof state?.jobId === 'string' && document.querySelectorAll('button[data-service-job-id="' + state.jobId + '"]').length === 1,
       };
     })()`,
     'sustained-multiblock-edit-during-search',
   );
-  await waitFor(renderer, `!Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'concurrent-edit-dirty');
+  await waitFor(renderer, `!(document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'concurrent-edit-dirty');
   at('cooperative-journal-ack');
-  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 3') && Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '保存当前编辑')?.disabled`, 'automatic-serialized-durable-ack', 120_000);
+  await waitFor(renderer, `document.querySelector('.editor-meta')?.textContent.includes('修订日志序号 3') && (document.querySelector('[data-editor-persistence]')?.dataset.editorPersistence === 'confirmed')`, 'automatic-serialized-durable-ack', 120_000);
   at('cooperative-cursor-continuity');
   await renderer.evaluate(`globalThis.__ai7AfterAckFirst = document.querySelector('[data-testid="manuscript-editor"] > [data-block-id]')?.dataset.blockId`);
   await clickButton(renderer, '向后浏览', 'fresh-cursor-after-ack');
@@ -1196,7 +1201,7 @@ async function runWorkspaceJourney(renderer, dataRoot) {
 
   at('authoritative-mutation-drain');
   const dirtyHistoryObservation = await renderer.observeIpc();
-  await editThenInvokeOnDirty(renderer, '稳', ['保存当前编辑', '撤销'], 'dirty-saving-undo-start');
+  await editThenInvokeOnDirty(renderer, '稳', ['保存', '撤销'], 'dirty-saving-undo-start');
   await waitForChecks(
     renderer,
     `(() => { const editor = document.querySelector('[data-testid="manuscript-editor"]'); const host = editor?.parentElement; const journal = Array.from(document.querySelectorAll('.editor-meta [data-editor-technical]')).find((item) => item.textContent?.startsWith('修订日志序号 ')); const undo = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '撤销'); const retry = Array.from(document.querySelectorAll('button')).find((button) => button.textContent === '重试权威刷新'); return { journalSequence5: journal?.textContent === '修订日志序号 5', operationUnlocked: editor?.dataset.operationLocked === 'false', editorWritable: editor?.getAttribute('contenteditable') === 'true', ariaWritable: editor?.getAttribute('aria-readonly') === 'false', continuityResolved: editor instanceof HTMLElement && !editor.hasAttribute('tabindex'), authoritativeMutationCleared: host?.dataset.authoritativeMutation === 'false', authoritativeStartCleared: undo instanceof HTMLButtonElement && !undo.disabled, recoveryNotRequired: retry instanceof HTMLButtonElement && retry.hidden }; })()`,
@@ -1477,7 +1482,7 @@ async function runScreenLifecycleJourney(renderer) {
   at('screen-lifecycle-one-edit');
   const beforeEdit = await renderer.observeIpc();
   await renderer.send('Input.insertText', { text: '续' });
-  await waitForChecks(renderer, `(() => { const block = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((item) => item.getAttribute('data-block-id') === ${JSON.stringify(place.blockId)}); const save = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === '保存当前编辑'); return { oneEntry: ${JOURNAL_SEQUENCE_PROBE} === ${journalBefore + 1}, exactEdit: block?.textContent === ${JSON.stringify(place.before.slice(0, place.grapheme) + '续' + place.before.slice(place.grapheme))}, saved: save instanceof HTMLButtonElement && save.disabled, closeRiskClear: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'screen-lifecycle-one-durable-edit', 120_000);
+  await waitForChecks(renderer, `(() => { const block = Array.from(document.querySelectorAll('[data-testid="manuscript-editor"] > [data-block-id]')).find((item) => item.getAttribute('data-block-id') === ${JSON.stringify(place.blockId)}); const save = document.querySelector('[data-editor-persistence]'); return { oneEntry: ${JOURNAL_SEQUENCE_PROBE} === ${journalBefore + 1}, exactEdit: block?.textContent === ${JSON.stringify(place.before.slice(0, place.grapheme) + '续' + place.before.slice(place.grapheme))}, saved: save instanceof HTMLElement && (save.dataset.editorPersistence === 'confirmed'), closeRiskClear: document.documentElement.dataset.ai7CloseRisk === 'false' }; })()`, 'screen-lifecycle-one-durable-edit', 120_000);
   const afterEdit = await renderer.observeIpc();
   requireJourney((afterEdit.counts.flushJournalEdit ?? 0) - (beforeEdit.counts.flushJournalEdit ?? 0) === 1, 'screen-lifecycle-one-flush');
 }

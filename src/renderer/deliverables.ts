@@ -64,7 +64,7 @@ import {
   publicationsTruncatedLine,
 } from './deliverables-labels.js';
 import { localInstantLabel } from './plan-preview-labels.js';
-import { EXPORT_ACTION_LABELS, EXPORT_RECORDS_HEADING, EXPORT_TECHNICAL_TERMS, exportOpenAccessibleName, exportRecordLine } from './manuscript-export-labels.js';
+import { EXPORT_RECORDS_HEADING, EXPORT_TECHNICAL_TERMS, exportRecordLine } from './manuscript-export-labels.js';
 import { mountManuscriptExport } from './manuscript-export.js';
 import {
   DELIVERY_BLOCKERS,
@@ -297,10 +297,10 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     // 交付物 opens the card for a manuscript version, and for a document's delivered version from its Delivery Record
     // (Issue #415, S66b); a 审阅报告 is exported from 审阅.
     openerOf: (target) => target.kind === 'report' ? null : target.kind === 'document'
-      ? documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-revision-id="${CSS.escape(target.revisionId)}"] [data-export-action="open"]`) ?? null
+      ? documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-revision-id="${CSS.escape(target.revisionId)}"] [data-export-menu] > summary`) ?? null
       : block?.querySelector<HTMLElement>(target.kind === 'current'
-        ? '[data-export-action="open"][data-export-target="current"]'
-        : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-action="open"]`) ?? null,
+        ? '[data-export-menu="current"] > summary'
+        : `ol.milestone-list > li[data-milestone-id="${CSS.escape(target.milestoneId)}"] [data-export-menu] > summary`) ?? null,
   });
 
   const writing = mountWritingTask({
@@ -1126,16 +1126,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     item.append(record);
     item.append(el('p', 'document-delivery-export', documentDeliveryExportLine(delivery)));
     const label = documentExportLabel(type.label, delivery.versionLabel);
-    const open = el('button', 'secondary', EXPORT_ACTION_LABELS.open);
-    open.type = 'button';
-    open.dataset['exportAction'] = 'open';
-    open.dataset['exportTarget'] = 'document';
-    open.setAttribute('aria-label', exportOpenAccessibleName({ kind: 'document', label }));
-    open.disabled = working || exporter.busy();
-    open.addEventListener('click', () => {
-      if (working || exporter.busy()) return;
-      exporter.open({ kind: 'document', documentId: documentNow.documentId, revisionId: delivery.revisionId }, label, open);
-    });
+    const open = exporter.menu({ kind: 'document', documentId: documentNow.documentId, revisionId: delivery.revisionId }, label);
+    for (const button of open.querySelectorAll('button')) button.disabled = working || exporter.busy();
     const row = el('div', 'button-row export-open-row');
     row.append(open);
     item.append(row);
@@ -1177,7 +1169,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       bundle.refresh();
       drawDocuments(result.documents, 'keep');
       options.setStatus(documentDeliveredLine(delivered.ordinal, delivered.recipient.label), 'success');
-      const opener = documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-delivery-id="${CSS.escape(delivered.deliveryId)}"] [data-export-action="open"]`);
+      const opener = documentsBlock?.querySelector<HTMLElement>(`ol.production-document-deliveries > li[data-delivery-id="${CSS.escape(delivered.deliveryId)}"] [data-export-menu] > summary`);
       opener?.focus();
     } catch (error) {
       working = false;
@@ -1303,18 +1295,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   // ---- 导出 (Issue #413) ----------------------------------------------------------------------------------
 
   /** 导出… for one version: the card opens beside the block, and focus comes back here when it closes. */
-  function exportOpenButton(target: { kind: 'current' } | { kind: 'milestone'; milestoneId: string }, label: string | null): HTMLButtonElement {
-    const button = el('button', 'secondary', EXPORT_ACTION_LABELS.open);
-    button.type = 'button';
-    button.dataset['exportAction'] = 'open';
-    button.dataset['exportTarget'] = target.kind;
-    button.setAttribute('aria-label', exportOpenAccessibleName(target.kind === 'current' ? { kind: 'current' } : { kind: 'milestone', label: label ?? '' }));
-    button.disabled = working || exporter.busy();
-    button.addEventListener('click', () => {
-      if (working || exporter.busy()) return;
-      exporter.open(target, label, button);
-    });
-    return button;
+  function exportOpenButton(target: { kind: 'current' } | { kind: 'milestone'; milestoneId: string }, label: string | null): HTMLElement {
+    return exporter.menu(target, label);
   }
 
   /** Every approved export newest first, with what it came to (EXP-017, EXP-021); none of them is sending. */
