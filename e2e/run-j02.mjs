@@ -565,20 +565,27 @@ async function clickVisibleControl(renderer, selector, name) {
 }
 
 async function assertSupportingOverlays(renderer) {
+  if (localDebugEnabled()) await renderer.evaluate(`(() => {
+    const trace = globalThis.__ai7OverlayDebug = [];
+    const state = () => ({ width: innerWidth, panel: document.querySelector('#manuscript-navigation-panel')?.hidden, expanded: document.querySelector('[data-edge-entry="navigation"]')?.getAttribute('aria-expanded'), connected: document.querySelector('.editor-workspace')?.isConnected });
+    for (const name of ['mousedown', 'mouseup', 'click']) document.addEventListener(name, event => trace.push({ name, tag: event.target?.tagName, id: event.target?.id, entry: event.target?.closest?.('[data-edge-entry]')?.dataset.edgeEntry, x: event.clientX, y: event.clientY, ...state() }), true);
+    new MutationObserver(() => trace.push({ name: 'mutate', ...state() })).observe(document.querySelector('#manuscript-navigation-panel'), { attributes: true, attributeFilter: ['hidden'] });
+  })()`);
   // Cover both the narrow container's former second row and the wider second column.
   for (const width of [640, 1100]) {
     await renderer.send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false });
     for (const [entry, id] of [['navigation','manuscript-navigation-panel'], ['analysis','paragraph-analysis-panel']]) {
       await assertRenderer(renderer, `(() => { const node=document.querySelector('[data-edge-entry="${entry}"]'); if(node.getAttribute('aria-expanded')==='true') node.click(); return true; })()`, `overlay-${width}-${entry}-reset`);
       await clickVisibleControl(renderer, `[data-edge-entry="${entry}"]`, `overlay-${width}-${entry}-open`);
-      await waitForChecks(renderer, `(() => {
+      try { await waitForChecks(renderer, `(() => {
         const panel=document.querySelector('#${id}'), box=panel.getBoundingClientRect();
         const workspace=document.querySelector('.editor-workspace').getBoundingClientRect();
         const edge=document.querySelector('.editor-edge').getBoundingClientRect();
         return { visible:!panel.hidden, readable:box.width>=240 && box.height>=100,
           inside:box.top>=workspace.top-1 && box.bottom<=workspace.bottom+1 && box.left>=workspace.left-1 && box.right<=edge.left+1,
           painted:panel.contains(document.elementFromPoint(box.left+20,box.top+20)) };
-      })()`, `overlay-${width}-${entry}-bounds`);
+      })()`, `overlay-${width}-${entry}-bounds`); }
+      catch (error) { if (localDebugEnabled()) recordDebugDetail('J-02', '[DEBUG-q1-overlay] ' + JSON.stringify(await renderer.evaluate('globalThis.__ai7OverlayDebug'))); throw error; }
       if (entry === 'navigation') {
         await clickVisibleControl(renderer, '#manuscript-search', `overlay-${width}-search-click`);
         await assertRenderer(renderer, `document.activeElement?.id==='manuscript-search'`, `overlay-${width}-search-focused`);
