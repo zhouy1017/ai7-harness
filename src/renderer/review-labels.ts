@@ -55,7 +55,6 @@ export const REVIEW_ENTRY_LABEL = '审阅';
 export const REVIEW_CARD_HEADING = '审阅';
 export const REVIEW_COVERAGE_HEADING = '审阅覆盖矩阵';
 export const REVIEW_COVERAGE_NOTE = '每一类对照当前稿件：稿件改动后需要复审的类别会标出来，可以只审改动过的章。';
-export const REVIEW_COVERAGE_COLUMNS = ['类别', '当前稿件', '上次审阅', '改动', '可以做什么'] as const;
 export const REVIEW_RUNS_HEADING = '审阅记录';
 export const REVIEW_NO_RUNS = '还没有审阅记录。';
 export const REVIEW_WORKSPACE_UNAVAILABLE = '无法读取这本书的审阅记录。';

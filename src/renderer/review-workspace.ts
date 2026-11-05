@@ -132,7 +132,6 @@ import {
   REVIEW_CONVERT_TO,
   REVIEW_CONVERT_TO_HINT,
   REVIEW_COST_BEFORE_PLAN,
-  REVIEW_COVERAGE_COLUMNS,
   REVIEW_COVERAGE_HEADING,
   REVIEW_COVERAGE_PILLS,
   REVIEW_EXPORT_NEEDS_REPORT,
@@ -801,7 +800,10 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     heading.append(el('span', 'review-manuscript-line', reviewManuscriptLine(next.manuscript)));
     node.append(heading);
     const newReviewReasonId = uid('new-review-reason');
-    node.append(renderCoverage(next, newReviewReasonId), renderRuns(next), renderNewReview(next, newReviewReasonId));
+    if (next.coverage.some((row) => row.lastRunOrdinal !== null) || next.runs.some((run) => ['running', 'settled', 'partial', 'failed'].includes(run.state))) {
+      node.append(renderCoverage(next, newReviewReasonId));
+    }
+    node.append(renderRuns(next), renderNewReview(next, newReviewReasonId));
     if (run !== null) node.append(renderRun(next, run));
     swapCard(node);
     if (restore !== null) {
@@ -843,33 +845,17 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const headingId = uid('coverage');
     const heading = el('h4', undefined, REVIEW_COVERAGE_HEADING);
     heading.id = headingId;
-    const table = el('table', 'review-coverage');
-    table.setAttribute('aria-labelledby', headingId);
-    const head = el('thead');
-    const headRow = el('tr');
-    for (const column of REVIEW_COVERAGE_COLUMNS) {
-      const cell = el('th', undefined, column);
-      cell.scope = 'col';
-      headRow.append(cell);
-    }
-    head.append(headRow);
-    const body = el('tbody');
+    const grid = el('ul', 'review-coverage');
+    grid.setAttribute('aria-labelledby', headingId);
     for (const row of next.coverage) {
       const category = next.categories.find((candidate) => candidate.categoryId === row.categoryId);
-      const tr = el('tr');
-      tr.dataset['reviewCategory'] = row.categoryId;
-      tr.dataset['coverage'] = row.state;
-      const name = el('th', undefined, row.label);
-      name.scope = 'row';
-      const state = el('td');
-      state.dataset['label'] = REVIEW_COVERAGE_COLUMNS[1];
-      state.append(pillElement(row.stateLabel, REVIEW_COVERAGE_PILLS[row.state]));
-      const last = el('td', undefined, reviewCoverageLastReview(row));
-      last.dataset['label'] = REVIEW_COVERAGE_COLUMNS[2];
-      const changes = el('td', undefined, reviewCoverageChanges(row));
-      changes.dataset['label'] = REVIEW_COVERAGE_COLUMNS[3];
-      const act = el('td');
-      act.dataset['label'] = REVIEW_COVERAGE_COLUMNS[4];
+      const item = el('li', 'review-coverage-card');
+      item.dataset['reviewCategory'] = row.categoryId;
+      item.dataset['coverage'] = row.state;
+      const title = el('div', 'review-coverage-title');
+      title.append(el('h5', undefined, row.label), pillElement(row.stateLabel, REVIEW_COVERAGE_PILLS[row.state]));
+      const counts = row.lastRunOrdinal === null ? '尚无审阅记录' : [reviewCoverageLastReview(row), reviewCoverageChanges(row)].filter((text) => text !== '—').join(' · ');
+      const act = el('p', 'review-coverage-hint');
       if (row.state === 'needs-review') {
         const changed = category?.scopes.changed;
         if (changed !== undefined && !changed.available) {
@@ -888,11 +874,11 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       }
       // A reviewed category whose earlier records could not all be checked says so (Issue #709).
       if (row.state !== 'unavailable' && row.unavailableReason !== null) act.append(document.createTextNode(row.unavailableReason));
-      tr.append(name, state, last, changes, act);
-      body.append(tr);
+      item.append(title, el('p', 'review-coverage-counts', counts));
+      if (act.hasChildNodes()) item.append(act);
+      grid.append(item);
     }
-    table.append(head, body);
-    section.append(heading, table);
+    section.append(heading, grid);
     return section;
   }
 

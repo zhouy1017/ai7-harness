@@ -8,7 +8,6 @@ import {
   SERIES_HISTORY_MORE,
   SERIES_LEDE,
   SERIES_LIST_MORE,
-  SERIES_MEMBER_COLUMNS,
   SERIES_MEMBERS_MORE,
   SERIES_SCOPE_NOTE,
   bookSeriesChangeLine,
@@ -16,7 +15,7 @@ import {
   bookSeriesMoreLine,
   seriesChangeByline,
   seriesChangeLine,
-  seriesConsistencyLine,
+  seriesConsistencyLines,
   seriesImpactGroupLine,
   seriesListLine,
   seriesPeopleLine,
@@ -114,16 +113,16 @@ describe('书系 words', () => {
   it('states what membership means, and that the page reads no member\'s text', () => {
     expect(SERIES_LEDE).toContain('不会让一本书读到另一本书的原文');
     expect(SERIES_SCOPE_NOTE).toContain('不汇总、也不打开成员图书的原文');
-    expect(SERIES_MEMBER_COLUMNS).toEqual(['图书', '作者', '责编', '加入时间', '书系一致性审阅', '操作']);
   });
 
   it('writes the list, the member row, the preview and the records', () => {
     expect(seriesListLine({ title: '星河三部曲', memberCount: 2 })).toBe('书系「星河三部曲」 · 成员 2 本');
-    expect(seriesConsistencyLine({ seriesConsistencyReview: null, seriesConsistencyUnavailableReason: null }, instant)).toBe('尚未审阅 · 可以审阅');
-    expect(seriesConsistencyLine({ seriesConsistencyReview: null, seriesConsistencyUnavailableReason: '这本书还没有稿件；导入稿件后才能审阅。' }, instant))
-      .toBe('尚未审阅 · 暂不能审阅：这本书还没有稿件；导入稿件后才能审阅。');
-    expect(seriesConsistencyLine({ seriesConsistencyReview: { reviewedAt: '2026-09-25T08:00:00.000Z' }, seriesConsistencyUnavailableReason: null }, instant))
-      .toBe('审阅于 〔2026-09-25〕 · 可以审阅');
+    expect(seriesConsistencyLines({ seriesConsistencyReview: null, seriesConsistencyUnavailableReason: null }, instant))
+      .toEqual({ reviewed: '尚未审阅', availability: '可以审阅' });
+    expect(seriesConsistencyLines({ seriesConsistencyReview: null, seriesConsistencyUnavailableReason: '这本书还没有稿件；导入稿件后才能审阅。' }, instant))
+      .toEqual({ reviewed: '尚未审阅', availability: '暂不能审阅' });
+    expect(seriesConsistencyLines({ seriesConsistencyReview: { reviewedAt: '2026-09-25T08:00:00.000Z' }, seriesConsistencyUnavailableReason: null }, instant))
+      .toEqual({ reviewed: '审阅于 〔2026-09-25〕', availability: '可以审阅' });
     expect([seriesPeopleLine([]), seriesPeopleLine(['周一', '郑三'])]).toEqual(['未填写', '周一、郑三']);
     expect(seriesPreviewHeading({ actionLabel: '移出书系' })).toBe('移出书系的影响');
     expect(seriesPreviewIdentity({ bookTitle: '星河之一', seriesTitle: '星河三部曲' })).toBe('图书《星河之一》 · 书系「星河三部曲」');

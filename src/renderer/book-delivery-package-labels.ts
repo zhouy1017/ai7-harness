@@ -33,7 +33,7 @@ export const PACKAGE_STATUS_LINES = {
   refreshFailed: '无法读取图书交付包。',
 } as const;
 
-/** Why `准备图书交付包` is unavailable: the conditions that do not hold yet, in the table's order. */
+/** Why `准备图书交付包` is unavailable: the conditions that do not hold yet, in the conditions' order. */
 export function packageNotReadyLine(unmet: ReadonlyArray<string>): string {
   return `还不能准备：${unmet.join('、')}未满足。`;
 }

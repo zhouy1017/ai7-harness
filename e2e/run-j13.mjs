@@ -311,8 +311,9 @@ const READ_SERIES = `(() => {
     note: screen.querySelector('.series-note')?.textContent ?? null,
     scopeNote: root.querySelector('.series-scope-note')?.textContent ?? null,
     membersEmpty: root.querySelector('.series-members-empty')?.textContent ?? null,
-    members: Array.from(root.querySelectorAll('table.series-member-table tbody tr'), (row) => [row.dataset.bookId ?? null, ...Array.from(row.children, (cell) => cell.textContent ?? '')]),
-    columns: Array.from(root.querySelectorAll('table.series-member-table thead th'), (cell) => cell.textContent ?? ''),
+    members: Array.from(root.querySelectorAll('.series-member-card'), (row) => [row.dataset.bookId ?? null,
+      ...['.series-member-title', '.series-member-authors', '.series-member-editors', '.series-member-joined', '.series-consistency', '[data-series-action="remove-open"]'].map((selector) => row.querySelector(selector)?.textContent ?? '')]),
+    memberPills: Array.from(root.querySelectorAll('.series-member-card .series-consistency'), (line) => line.querySelectorAll('.state-term').length),
     addOpen: addOpen instanceof HTMLButtonElement ? !addOpen.disabled : null,
     addNone: root.querySelector('.series-add-none')?.textContent ?? null,
     chooser: root.querySelector('.series-add-chooser') === null ? null : Array.from(root.querySelectorAll('input[name="series-add-book"]'), (radio) => [radio.value, radio.checked, radio.parentElement?.textContent ?? '']),
@@ -916,7 +917,7 @@ async function main() {
     await clickSelector(renderer, '[data-series-action="commit"]', 'add-commit');
     await waitFor(renderer, `${notice} === ${JSON.stringify(`已加入书系「${SERIES}」：《${FIRST}》`)}`, 'added-status');
     const added = await readSeries(renderer, (read) => read.members.length === 1 && read.preview === null, 'added');
-    requireJourney(JSON.stringify(added.columns) === JSON.stringify(['图书', '作者', '责编', '加入时间', '书系一致性审阅', '操作']) &&
+    requireJourney(added.memberPills[0] === 2 &&
       added.members[0][0] === first && added.members[0][1] === `《${FIRST}》` && added.members[0][2] === '未填写' && added.members[0][3] === '未填写' &&
       added.members[0][4].length > 0 && added.members[0][5] === `尚未审阅 · 暂不能审阅：${NO_KNOWLEDGE}` && added.members[0][6] === '移出书系…' && added.focus === 'remove-open' &&
       JSON.stringify(added.history) === JSON.stringify([['add', first, `加入书系 · 《${FIRST}》`, 4]]), 'added-words', added);
@@ -1057,7 +1058,7 @@ async function main() {
     // The sidebar shows icons only at this width, every row keeping its name (Issue #934; §0.3).
     await waitFor(renderer, SIDEBAR_ICONS_ONLY, 'sidebar-icons-only', 10_000);
     await renderer.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-preview'), document.querySelector('table.series-member-table'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && getComputedStyle(document.querySelector('table.series-member-table tbody tr')).display==='block'; })()`, 'series-reflow', 10_000);
+    await waitFor(renderer, `(() => { const root=document.documentElement; const parts=[document.querySelector('.series-preview'), document.querySelector('.series-member-list'), document.querySelector('ol.series-history')]; return parts.every((part)=>part instanceof HTMLElement && part.scrollWidth<=part.clientWidth+2) && root.scrollWidth<=root.clientWidth+2 && document.querySelector('li.series-member-card')!==null && document.querySelector('.series-page table')===null; })()`, 'series-reflow', 10_000);
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(renderer, `(() => {
       if (!matchMedia('(forced-colors: active)').matches) return false;
@@ -1267,7 +1268,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
-    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='never'`, 'consistency-coverage-never');
+    await assertRenderer(renderer, `document.querySelector('.review-coverage-section')===null && document.querySelector('.review-workspace-card table')===null`, 'consistency-coverage-never');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
     const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
@@ -1294,7 +1295,7 @@ async function main() {
         finding.clauseRefs[0].clauseId === 'series-knowledge/1' && finding.clauseRefs[0].documentTitle === `地点「${PLACE}」` &&
         finding.clauseRefs[0].text === `地点「${PLACE}」：${EDITOR_WORDS}`),
     'consistency-run-settled', { state: reviewed?.state, categories: reviewed?.categories, findings: findings.map((finding) => [finding.status, finding.anchorState, finding.clauseRefs]) });
-    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
+    await assertRenderer(renderer, `document.querySelector('.review-coverage-card[data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelector('.review-coverage-card[data-review-category="series-consistency"] .state-term')!==null && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'consistency-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'consistency-drawer-closed');
 

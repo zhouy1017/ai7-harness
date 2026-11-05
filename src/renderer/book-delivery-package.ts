@@ -1,4 +1,4 @@
-import { windowStep } from './components/controls.js';
+import { stateTerm, windowStep } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import {
   MAX_BOOK_DELIVERY_PACKAGE_PURPOSE_CHARACTERS,
@@ -275,12 +275,13 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       if (condition.typeId !== null) item.dataset['typeId'] = condition.typeId;
       item.dataset['conditionMet'] = String(condition.met);
       const line = el('p', 'package-condition-line');
+      const state = stateTerm(condition.met ? PACKAGE_CONDITION_STATE.met : PACKAGE_CONDITION_STATE.unmet, condition.met ? 'good' : 'attention');
+      state.classList.add('package-condition-state', condition.met ? 'is-met' : 'is-unmet');
       line.append(
         el('strong', 'package-condition-label', condition.label),
-        el('span', `state-term status-pill package-condition-state${condition.met ? ' is-met' : ' is-unmet'}`, condition.met ? PACKAGE_CONDITION_STATE.met : PACKAGE_CONDITION_STATE.unmet),
-        el('span', 'package-condition-detail', condition.stateLabel),
+        state,
       );
-      item.append(line);
+      item.append(line, el('p', 'package-condition-detail', condition.stateLabel));
       if (condition.notice !== null) item.append(el('p', 'attention-note package-condition-notice', condition.notice));
       if (condition.route !== null && condition.routeLabel !== null) {
         const route = el('button', 'quiet', condition.routeLabel);
