@@ -3,7 +3,7 @@ import { housePreferenceLabel } from './house-review-preference.js';
 import { analysisBytePage, serializedBytes } from './analysis/baseline-analysis-wire.js';
 import { canonicalJson, requireAnalysis, sha256Hex } from './analysis/canonical.js';
 import { MAX_FRAME_BYTES } from '../shared/protocol.js';
-import type { FrozenSeriesScope, ReviewWorkspaceProjection, TaskIntentDraftsProjection } from '../shared/protocol.js';
+import type { BookTasksProjection, FrozenSeriesScope, ReviewWorkspaceProjection, TaskIntentDraftsProjection } from '../shared/protocol.js';
 
 import { researchDecisionLine } from '../shared/research-status.js';
 import { SEARCH_BACKENDS } from './provider/search-backends.js';
@@ -155,6 +155,34 @@ function taskDraftsWire(projection: TaskIntentDraftsProjection): TaskIntentDraft
     listPages: { drafts: { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal, digest: sha256Hex(canonicalJson(projection.drafts)) } } };
 }
 
+export function bookTasksPage(projection: BookTasksProjection, path: string, afterOrdinal: number, digest: string) {
+  requireAnalysis(projection.groups.some((_, index) => path === `groups.${index}.items`), 'TASK_PLAN_PAGE_INVALID', '任务列表读取范围无效。');
+  const value = taskPlanValue(projection, path) as BookTasksProjection['groups'][number]['items'];
+  requireAnalysis(sha256Hex(canonicalJson(value)) === digest, 'TASK_PLAN_PAGE_CHANGED', '任务列表已变化，请重新读取。');
+  const page = planValuePage(value, afterOrdinal, PAGE_BYTES);
+  requireAnalysis(afterOrdinal <= page.total, 'TASK_PLAN_PAGE_INVALID', '任务列表读取位置无效。');
+  return { path, items: page.items, nextOrdinal: page.nextOrdinal, digest };
+}
+
+function bookTasksWire(projection: BookTasksProjection): BookTasksProjection {
+  if (serializedBytes(projection) <= TASK_REPLY_BUDGET) return projection;
+  let share = INLINE_SHARE;
+  for (;;) {
+    const listPages: Record<string, NonNullable<BookTasksProjection['listPages']>[string]> = {};
+    const groups = projection.groups.map((group, index) => {
+      if (serializedBytes(group.items) <= share) return group;
+      const page = planValuePage(group.items, 0, share);
+      listPages[`groups.${index}.items`] = { shown: page.shown, total: page.total, nextOrdinal: page.nextOrdinal,
+        digest: sha256Hex(canonicalJson(group.items)) };
+      return { ...group, items: page.items as typeof group.items };
+    });
+    const wire = { ...projection, groups, listPages };
+    if (serializedBytes(wire) <= TASK_REPLY_BUDGET) return wire;
+    requireAnalysis(share > 0, 'TASK_PLAN_SUMMARY_TOO_LARGE', '任务列表摘要超出可读取范围。');
+    share = share < 256 ? 0 : Math.floor(share / 2);
+  }
+}
+
 /** Bound the reply at the transport edge, preserving short replies and cancellation's fifty-detail default. */
 export function taskPlanWire(plan: TaskPlanProjection, replyBudget = TASK_REPLY_BUDGET): TaskPlanProjection {
   const fits = serializedBytes(plan) <= replyBudget;
@@ -185,6 +213,7 @@ export function taskPlanOutbound(value: unknown): unknown {
   if ('technical' in value && 'start' in value && 'edit' in value && 'ref' in value) return taskPlanWire(value as TaskPlanProjection);
   if ('scopeOptions' in value && 'categories' in value && 'bookId' in value) return reviewWorkspaceWire(value as ReviewWorkspaceProjection);
   if ('drafts' in value && 'bookTitle' in value && 'bookId' in value) return taskDraftsWire(value as TaskIntentDraftsProjection);
+  if ('groups' in value && 'running' in value && 'bookId' in value) return bookTasksWire(value as BookTasksProjection);
   const record = value as Record<string, unknown>;
   let mapped = record;
   for (const key of ['result', 'projection'] as const) if (key in record) mapped = { ...mapped, [key]: taskPlanOutbound(record[key]) };
