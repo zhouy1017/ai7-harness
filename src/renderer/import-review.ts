@@ -492,6 +492,7 @@ export function createImportReview(options: ImportReviewOptions) {
             });
             if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
           } catch (error) {
+            previewOnly = false;
             confirm.disabled = false;
             setStatus(rendererErrorMessage(error, '无法复核来源材料导入。'), 'error');
           }
