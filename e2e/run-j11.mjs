@@ -1432,6 +1432,10 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'findings-empty-ready');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll(':scope > section').length===1 && root.querySelector('.findings-empty p')?.textContent==='还没有待处理的发现，发起审阅后会自动列在这里。' && root.querySelector('.findings-empty button')?.textContent==='新建审阅' && !root.querySelector('table, select, [data-list-position], [data-findings-filter]'); })()`, 'findings-empty-card');
 
+    await clickSelector(renderer, '.findings-empty button', 'findings-empty-new-review');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'findings-empty-review-sheet');
+    await clickSelector(renderer, 'dialog.review-sheet [data-review-action="close-sheet"]', 'findings-empty-review-close');
+
     at('evaluation-open');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-open');
     const opened = await readEvaluation(renderer, (page) => page.state === 'ready', 'evaluation-ready');

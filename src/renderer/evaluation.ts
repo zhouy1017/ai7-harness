@@ -303,7 +303,9 @@ export function evaluationPlanReferenceField(options: {
       if (!ref) throw new Error('未能更新参考资料。');
       return ref;
     });
-    host.replaceChildren(evaluationMaterialsField(page, initial ? 'initial' : 'readersReport', selected, true, false, update));
+    const materialLines = page.materialReferences?.[initial ? 'initial' : 'readersReport'] ?? [];
+    const basis = options.reference.filter((line) => !materialLines.includes(line));
+    host.replaceChildren(...basis.map((line) => stateTerm(line)), evaluationMaterialsField(page, initial ? 'initial' : 'readersReport', selected, true, false, update));
     host.append(similarMaterialsField(options.api, page.bookId, page.materials?.items ?? [], selected, (id) => { selected.add(id); update(); }));
     if (initial && page.market.series.length > 0) host.append(filterChoices({ label: '书系参考',
       choices: [['', '仅本书'], ...page.market.series.map((series) => [series.seriesId, `书系《${series.title}》`] as const)],
@@ -360,7 +362,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     for (const entry of report.templates) {
       const item = el('li');
       item.dataset['template'] = entry.template;
-      const template = el('h4', 'readers-report-template', entry.label);
+      const template = el('div', 'readers-report-template-heading');
+      template.append(el('h4', 'readers-report-template', entry.label));
       item.append(template);
       const row = el('div', 'button-row');
       const own = task !== null && task.template === entry.template;

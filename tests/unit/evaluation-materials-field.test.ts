@@ -164,10 +164,11 @@ it('edits only the matching prepared report plan and retains its exact reference
     const prepare = vi.fn(async () => ({ state: 'completed', result: { initial: {}, readersReport: { task: { taskIntentId: 'new-task' } } } }));
     const api = { inspectEvaluation: async () => page, prepareReadersReport: prepare, searchReferableMaterials: vi.fn() } as unknown as RendererApi;
     let changed: Promise<string> | null = null;
-    const host = evaluationPlanReferenceField({ api, bookId: 'book', ref: 'task', kind: 'readers-report', editable: true, reference: REFERENCES.readersReport,
+    const host = evaluationPlanReferenceField({ api, bookId: 'book', ref: 'task', kind: 'readers-report', editable: true, reference: ['定稿依据与本社范例', ...REFERENCES.readersReport],
       awaitJob: async (job) => job, change: (operation) => { changed = operation(); } });
     miniDocument.body.append(host as unknown as import('../support/mini-dom.js').MiniElement);
     await Promise.resolve();
+    expect(host.textContent).toContain('定稿依据与本社范例');
     expect(host.querySelector<HTMLInputElement>('[data-evaluation-material="a"]')?.checked).toBe(true);
     const choice = (host as unknown as MiniElement).querySelector('[data-evaluation-material="b"]')!;
     choice.checked = true; choice.dispatchEvent({ type: 'change' });
