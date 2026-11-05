@@ -671,6 +671,9 @@ export interface EvaluationWorkspaceProjection {
   readonly materialReferences?: {
     readonly initial: ReadonlyArray<string>;
     readonly readersReport: ReadonlyArray<string>;
+    /** Exact choices for changing a not-yet-started plan in the full Task Drawer. */
+    readonly initialInput?: { readonly materialIds: ReadonlyArray<string>; readonly seriesId: string | null };
+    readonly readersReportInput?: { readonly materialIds: ReadonlyArray<string> };
     readonly blocked: { readonly initial: boolean; readonly readersReport: boolean };
   };
   readonly bookId: string;

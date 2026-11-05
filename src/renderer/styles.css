@@ -2552,3 +2552,29 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-plan-activity-facts dd { font-variant-numeric: tabular-nums; }
 @keyframes task-busy-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .task-drawer, .task-plan-progress-fill { transition: none; } .state-term[data-busy="true"]::before, .task-plan-stage-chain [aria-current="step"]::before { animation: none; } }
+
+/* C1: review, evaluation and findings share quiet empty cards and visible filters. */
+.surface-empty { padding: 1.25rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
+.surface-empty h2, .surface-empty p { margin: 0; }
+.surface-empty { display: grid; justify-items: start; gap: .8rem; }
+.review-workspace-card:not(.surface-empty) { padding: 0; border: 0; background: transparent; }
+.review-workspace-heading h2 { margin: 0; }
+.review-more, .evaluation-more { position: relative; }
+.review-more > summary, .evaluation-more > summary { cursor: pointer; padding: .4rem .65rem; }
+.review-more[open] { display: flex; flex-wrap: wrap; gap: .4rem; }
+.evaluation-consequences { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .35rem 1rem; }
+.evaluation-consequences dd { margin: 0; }
+.readers-report-templates { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr)); gap: .8rem; padding: 0; list-style: none; }
+.readers-report-templates > li { padding: 1rem; border: 1px solid var(--boundary); border-radius: 10px; }
+.readers-report-template { margin: 0 0 .6rem; }
+.findings-center { display: grid; gap: .9rem; }
+.findings-filters { display: grid; gap: .5rem; }
+.finding-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: .8rem; padding: 1rem 0; border-top: 1px solid var(--boundary); }
+.finding-pills, .finding-actions { display: flex; align-items: start; flex-direction: column; gap: .45rem; }
+.finding-body { min-width: 0; overflow-wrap: anywhere; }
+.finding-body p { margin: 0 0 .3rem; }
+.finding-why, .finding-location { color: var(--text-subdued); font-size: .9rem; }
+@media (max-width: 760px) {
+  .finding-row { grid-template-columns: minmax(0, 1fr); }
+  .finding-pills, .finding-actions { flex-direction: row; flex-wrap: wrap; }
+}

@@ -30,7 +30,7 @@ it('renders each finding status with its actual tone, defaulting unknown statuse
     mountFindingsCenter(root as unknown as HTMLElement, async () => page, vi.fn());
     await Promise.resolve();
     expect(root.dataset['findingsState']).toBe('ready');
-    expect(root.querySelectorAll('.state-term').map((pill) => [pill.textContent, pill.dataset['pillTone']])).toEqual([
+    expect(root.querySelectorAll('.state-term').filter((pill) => statuses.includes(pill.textContent)).map((pill) => [pill.textContent, pill.dataset['pillTone']])).toEqual([
       ['未覆盖', 'attention'], ['待复核', 'attention'], ['待处理', 'progress'],
       ['已处理', 'good'], ['已忽略', 'neutral'], ['已停用', 'neutral'],
     ]);
@@ -76,5 +76,22 @@ it('confirms all eligible findings in the selected category across list windows'
     expect(apply).toHaveBeenCalledWith([items[0], items[40]]);
     await Promise.resolve();
     await vi.waitFor(() => expect(root.getAttribute('aria-busy')).toBeNull());
+  } finally { vi.unstubAllGlobals(); restore(); }
+});
+
+
+it('offers one review action in the empty card without filters or pagination', async () => {
+  const restore = installMiniDom();
+  vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => undefined });
+  try {
+    const root = miniDocument.createElement('div'); miniDocument.body.append(root);
+    const start = vi.fn();
+    mountFindingsCenter(root as unknown as HTMLElement, async () => ({ bookId: 'book', total: 0, offset: 0, next: null, pageSize: 40, groups: [], items: [] }), vi.fn(), undefined, start);
+    await Promise.resolve();
+    expect(root.querySelectorAll('.findings-empty')).toHaveLength(1);
+    expect(root.querySelectorAll('select, table, [data-list-position], [data-findings-filter]')).toHaveLength(0);
+    expect(root.querySelector('p')?.textContent).toBe('还没有待处理的发现，发起审阅后会自动列在这里。');
+    root.querySelector('button')!.click();
+    expect(start).toHaveBeenCalledOnce();
   } finally { vi.unstubAllGlobals(); restore(); }
 });

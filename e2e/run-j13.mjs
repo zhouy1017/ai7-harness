@@ -1267,7 +1267,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(member)}]')`, 'consistency-review-manuscript', 120_000);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-review-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="book-review"] .book-review .review-workspace-card')`, 'consistency-review-card');
-    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='never'`, 'consistency-coverage-never');
+    await assertRenderer(renderer, `!document.querySelector('.review-coverage') && document.querySelector('.review-workspace-card.surface-empty')`, 'consistency-coverage-empty');
     await clickSelector(renderer, '[data-review-action="new-review"]', 'consistency-new-review');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'consistency-sheet-open');
     const sheet = await renderer.evaluate(`(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=sheet.querySelector('input[name="review-category"][value="series-consistency"]'); const label=sheet.querySelector('[data-review-category-option="series-consistency"]'); return { enabled: box instanceof HTMLInputElement && !box.disabled && !box.checked, basis: label?.querySelector('.review-category-basis')?.textContent ?? null, checked: Array.from(sheet.querySelectorAll('input[name="review-category"]:checked'), (input) => input.value) }; })()`);
@@ -1294,7 +1294,7 @@ async function main() {
         finding.clauseRefs[0].clauseId === 'series-knowledge/1' && finding.clauseRefs[0].documentTitle === `地点「${PLACE}」` &&
         finding.clauseRefs[0].text === `地点「${PLACE}」：${EDITOR_WORDS}`),
     'consistency-run-settled', { state: reviewed?.state, categories: reviewed?.categories, findings: findings.map((finding) => [finding.status, finding.anchorState, finding.clauseRefs]) });
-    await assertRenderer(renderer, `document.querySelector('table.review-coverage tbody tr[data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
+    await assertRenderer(renderer, `document.querySelector('.review-coverage [data-review-category="series-consistency"]')?.dataset.coverage==='current' && document.querySelectorAll('section.review-group[data-review-category="series-consistency"] article.review-finding').length===3`, 'consistency-results');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'consistency-drawer-close');
     await waitFor(renderer, `document.body.dataset.taskDrawer !== 'open'`, 'consistency-drawer-closed');
 

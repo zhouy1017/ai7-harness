@@ -1,4 +1,4 @@
-import { createSheet, sheetContent } from './components/sheet.js';
+import { filterChoices, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
 import type {
@@ -33,9 +33,7 @@ import {
   EVALUATION_ADJUSTMENT_REASON_LABELS,
   EVALUATION_AI7_HEADING,
   EVALUATION_AI7_NONE,
-  EVALUATION_AI7_OPEN_PLAN,
   EVALUATION_AI7_OPEN_TASK,
-  EVALUATION_AI7_PREPARE,
   EVALUATION_AI7_STATUS,
   EVALUATION_AI7_SUGGESTED,
   EVALUATION_START_FROM_INITIAL,
@@ -51,7 +49,6 @@ import {
   EVALUATION_AI7_PENDING,
   EVALUATION_COMMENT,
   EVALUATION_CONCLUSION_LEGEND,
-  EVALUATION_EMPTY,
   EVALUATION_FINALIZE,
   EVALUATION_FINALIZE_NEEDS_SCORE,
   EVALUATION_NOT_RATED,
@@ -273,40 +270,52 @@ export function evaluationMaterialsField(
   return fieldset;
 }
 
-/**
- * 审稿意见's 允许参考 (Issue #795 item 4): one fieldset per template, each with its own selection, so 起草 of a template sends only
- * what was ticked for it. The template whose Task is prepared keeps its choices locked beside its plan's frozen rows; the other
- * stays editable while it may be prepared. Exported so the real rows run under a DOM stub in tests.
- */
-export function readersReportMaterialsFields(
-  page: Pick<EvaluationWorkspaceProjection, 'materials' | 'materialReferences' | 'readersReport'>,
-  selections: Map<ReadersReportTemplate, Set<string>>,
-  busy: boolean,
-  repaint: (template: ReadersReportTemplate, materialId: string) => void,
-): Array<{ template: ReadersReportTemplate; available: boolean; selected: Set<string>; field: HTMLElement }> {
-  const task = page.readersReport.task;
-  const blocked = page.materialReferences?.blocked.readersReport === true;
-  return page.readersReport.templates.map((entry) => {
-    const own = task !== null && task.template === entry.template;
-    const available = entry.prepare.allowed && !(own && task.state === 'prepared' && !blocked);
-    const selected = selections.get(entry.template) ?? new Set<string>();
-    selections.set(entry.template, selected);
-    // The latest Task's frozen rows are its own template's; the other template's fieldset shows none.
-    const references = page.materialReferences === undefined || own ? page.materialReferences : { ...page.materialReferences, readersReport: [] };
-    const field = evaluationMaterialsField({ ...(page.materials === undefined ? {} : { materials: page.materials }), ...(references === undefined ? {} : { materialReferences: references }) },
-      'readersReport', selected, available, busy, (materialId) => repaint(entry.template, materialId), entry.label);
-    field.dataset['template'] = entry.template;
-    return { template: entry.template, available, selected, field };
-  });
+/** Optional reference choices belong to segment 2 of the full plan, never the evaluation page. */
+export function evaluationPlanReferenceField(options: {
+  api: Pick<RendererApi, 'inspectEvaluation' | 'prepareInitialEvaluation' | 'prepareReadersReport' | 'searchReferableMaterials'>;
+  bookId: string; ref: string; kind: 'initial-evaluation' | 'readers-report'; editable: boolean;
+  reference: ReadonlyArray<string>;
+  awaitJob(job: ServiceJobProjection): Promise<ServiceJobProjection>;
+  change(operation: () => Promise<string>): void;
+}): HTMLElement {
+  const host = el('div', 'task-reference-chips');
+  host.dataset['evaluationPlanReferences'] = '';
+  for (const text of options.reference) host.append(stateTerm(text));
+  if (options.reference.length === 0) host.append(el('span', undefined, '不参考其他材料'));
+  if (!options.editable) return host;
+  void options.api.inspectEvaluation({ recordId: null }).then((page) => {
+    if (!host.isConnected || page.bookId !== options.bookId) return;
+    const initial = options.kind === 'initial-evaluation';
+    const task = initial ? page.initial.task : page.readersReport.task;
+    if (task?.taskIntentId !== options.ref || task.state !== 'prepared') return;
+    const template = page.readersReport.task?.template;
+    const input = initial ? page.materialReferences?.initialInput : page.materialReferences?.readersReportInput;
+    const selected = new Set(input?.materialIds ?? []);
+    let seriesId = initial ? page.materialReferences?.initialInput?.seriesId ?? null : null;
+    const update = (): void => options.change(async () => {
+      const materialIds = taskMaterialSelection(page.materials?.items ?? [], selected);
+      const job = initial ? await options.api.prepareInitialEvaluation({ materialIds, seriesId })
+        : await options.api.prepareReadersReport({ template: template!, materialIds });
+      const completed = await options.awaitJob(job);
+      const result = completed.result;
+      if (completed.state !== 'completed' || !result || !('initial' in result)) throw new Error('未能更新参考资料。');
+      const ref = (initial ? result.initial.task : result.readersReport.task)?.taskIntentId;
+      if (!ref) throw new Error('未能更新参考资料。');
+      return ref;
+    });
+    host.replaceChildren(evaluationMaterialsField(page, initial ? 'initial' : 'readersReport', selected, true, false, update));
+    host.append(similarMaterialsField(options.api, page.bookId, page.materials?.items ?? [], selected, (id) => { selected.add(id); update(); }));
+    if (initial && page.market.series.length > 0) host.append(filterChoices({ label: '书系参考',
+      choices: [['', '仅本书'], ...page.market.series.map((series) => [series.seriesId, `书系《${series.title}》`] as const)],
+      value: seriesId ?? '', change: (value) => { seriesId = value || null; update(); },
+    }));
+  }).catch(() => { if (host.isConnected) host.append(el('p', undefined, '参考资料读取失败，请重新打开计划。')); });
+  return host;
 }
 
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
-  const initialMaterialIds = new Set<string>();
-  let seriesId: string | null = null;
-  let initialSheetOpen = false;
-  const reportMaterialIds = new Map<ReadersReportTemplate, Set<string>>();
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
@@ -328,15 +337,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       : null,
   });
 
-  const materialsNode = (page: EvaluationWorkspaceProjection, kind: 'initial' | 'readersReport', selected: Set<string>, available: boolean): HTMLElement => {
-    const field = evaluationMaterialsField(page, kind, selected, available, busy,
-      (materialId) => paint(`[data-evaluation-materials="${kind}"] [data-evaluation-material="${materialId}"]`, true));
-    if (available && !busy) field.append(similarMaterialsField(api, page.bookId, page.materials?.items ?? [], selected, (id) => {
-      selected.add(id); paint(`[data-evaluation-materials="${kind}"]`, true);
-    }));
-    return field;
-  };
-
   /**
    * 审稿意见 (Issue #429, S81c; EVAL-013): the 定稿 version it drafts from, that the house has no 审稿意见 among its 范例 yet,
    * the latest Task, and per template — 起草, its plan, its drafted result to open, or its draft with its versions and 导出….
@@ -356,19 +356,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (task !== null) section.append(el('p', 'readers-report-task', readersReportTaskLine(task, READERS_REPORT_TEMPLATE_LABELS[task.template])));
     // A prepared plan whose frozen reference went away can never start: 评估 offers its preparation again, as the plan says.
     const reportBlocked = page.materialReferences?.blocked.readersReport === true;
-    for (const { template, available, selected, field } of readersReportMaterialsFields(page, reportMaterialIds, busy, (template, materialId) =>
-      paint(`[data-evaluation-materials="readersReport"][data-template="${template}"] [data-evaluation-material="${materialId}"]`, true))) {
-      if (available && !busy) field.append(similarMaterialsField(api, page.bookId, page.materials?.items ?? [], selected, (id) => {
-        selected.add(id); paint(`[data-evaluation-materials="readersReport"][data-template="${template}"]`, true);
-      }));
-      section.append(field);
-    }
     const list = el('ul', 'readers-report-templates');
     for (const entry of report.templates) {
       const item = el('li');
       item.dataset['template'] = entry.template;
-      const template = el('p');
-      template.append(el('span', 'readers-report-template', entry.label));
+      const template = el('h4', 'readers-report-template', entry.label);
       item.append(template);
       const row = el('div', 'button-row');
       const own = task !== null && task.template === entry.template;
@@ -431,9 +423,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(READERS_REPORT_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      // Only this template's own selection is sent (Issue #795 item 4).
-      const selected = reportMaterialIds.get(template) ?? new Set<string>();
-      const job = await api.prepareReadersReport({ template, ...(selected.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], selected) }) });
+      // Optional references can be changed in this template's full plan.
+      const job = await api.prepareReadersReport({ template });
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {
@@ -500,28 +491,25 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   const initialNode = (page: EvaluationWorkspaceProjection): HTMLElement => {
     const initial = page.initial;
     const section = el('section', 'evaluation-initial');
+    if (page.recordCount === 0 && initial.latest === null) section.classList.add('surface-empty');
     section.dataset['initialState'] = initial.task?.state ?? 'none';
     const heading = el('h3', undefined, EVALUATION_AI7_HEADING);
     heading.tabIndex = -1;
     const latest = initial.latest;
-    if (latest === null) heading.append(' · ', el('span', 'evaluation-initial-none', EVALUATION_AI7_NONE));
-    section.append(heading);
+    if (latest === null) {
+      section.append(el('h2', undefined, EVALUATION_AI7_HEADING), stateTerm(initial.task?.label ?? '尚未评估', initial.task?.state === 'settled' ? 'good' : initial.task?.state === 'failed' ? 'blocked' : initial.task?.state === 'executing' || initial.task?.state === 'queued' ? 'progress' : 'neutral'));
+      section.append(el('p', 'lede evaluation-initial-none', EVALUATION_AI7_NONE));
+      const consequences = el('dl', 'review-consequences evaluation-consequences');
+      for (const [term, words] of [
+        ['会读取', '当前稿件与本社评估方案。'],
+        ['会发送', '发送内容与模型服务以本次计划为准。'],
+        ['不会做', '不改稿、不定稿，也不替你选择出版结论。'],
+        ['费用', '按实际模型用量计费，预算上限见计划。'],
+      ]) consequences.append(el('dt', undefined, term), el('dd', undefined, words));
+      section.append(consequences);
+    } else section.append(heading);
     const initialBlocked = page.materialReferences?.blocked.initial === true;
-    const configuration: HTMLElement[] = [materialsNode(page, 'initial', initialMaterialIds, initial.prepare.allowed && (initial.task?.state !== 'prepared' || initialBlocked))];
     if (initial.task?.historicalMarker !== undefined) section.append(el('p', 'attention-note', initial.task.historicalMarker));
-    if (page.market.series.length > 0 && initial.prepare.allowed) {
-      const row = el('label', 'evaluation-field');
-      row.append(el('span', undefined, '参考什么'));
-      const select = el('select');
-      select.dataset['evaluationField'] = 'series-scope';
-      select.append(new Option('仅本书，不参考书系知识', ''));
-      for (const series of page.market.series) select.append(new Option(`允许参考 · 书系《${series.title}》的知识条目`, series.seriesId));
-      select.value = seriesId ?? '';
-      select.disabled = busy;
-      select.addEventListener('change', () => { seriesId = select.value || null; });
-      row.append(select);
-      configuration.push(row);
-    }
     if (initial.task !== null) {
       const taskLine = el('p', 'evaluation-initial-task', evaluationAi7TaskLine(initial.task));
       if (initial.task.historicalMarker !== undefined) taskLine.append(` · ${initial.task.historicalMarker}`);
@@ -558,44 +546,19 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
     const row = el('div', 'button-row evaluation-initial-actions');
     const task = initial.task;
-    if (task !== null && task.state === 'prepared' && !initialBlocked) {
-      const open = action('开始评估', 'primary', 'start-initial', () => void prepareInitial());
+    const canStart = initial.prepare.allowed || (task?.state === 'prepared' && !initialBlocked);
+    const start = action('开始评估', 'primary', 'start-initial', () => void prepareInitial());
+    const preview = action('先看计划', 'quiet', 'prepare-initial', () => void prepareInitial(true));
+    preview.classList.add('text-link');
+    start.disabled = preview.disabled = busy || !canStart;
+    row.append(start, preview);
+    if (!canStart && !initial.prepare.allowed) section.append(el('p', 'evaluation-initial-reason', initial.prepare.reason));
+    if (task !== null && task.state !== 'prepared') {
+      const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
       open.disabled = busy;
-      open.setAttribute('aria-controls', 'task-drawer');
       row.append(open);
-    } else {
-      if (initial.prepare.allowed) {
-        const prepare = action('开始评估', 'primary', 'start-initial', () => void prepareInitial());
-        const preview = action('先看计划', 'quiet', 'prepare-initial', () => void prepareInitial(true));
-        preview.classList.add('text-link');
-        preview.disabled = busy; row.append(preview);
-        prepare.disabled = busy;
-        row.append(prepare);
-      } else {
-        heading.append(' · ', el('span', 'evaluation-initial-reason', initial.prepare.reason));
-      }
-      if (task !== null) {
-        const open = action(EVALUATION_AI7_OPEN_TASK, 'quiet', 'open-initial-task', () => options.openPlan(task.taskIntentId));
-        open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
-        row.append(open);
-      }
     }
-    const sheet = createSheet('evaluation-sheet');
-    const sheetTitle = el('h3', undefined, '新建评估');
-    sheetTitle.id = 'new-evaluation-title';
-    sheet.setAttribute('aria-labelledby', sheetTitle.id);
-    const close = action('关闭', 'quiet', 'close-initial-sheet', () => sheet.close());
-    row.append(close);
-    sheetContent(sheet, sheetTitle, configuration, row);
-    const open = action('开始评估', 'primary', 'new-evaluation', () => void prepareInitial());
-    open.disabled = busy || !initial.prepare.allowed && task?.state !== 'prepared';
-    sheet.open = initialSheetOpen;
-    sheet.addEventListener('close', () => { initialSheetOpen = false; open.focus({ preventScroll: true }); });
-    const preview = action('先看计划', 'quiet', 'preview-evaluation', () => void prepareInitial(true));
-    preview.classList.add('text-link'); preview.disabled = busy || !initial.prepare.allowed;
-    const configure = action('评估设置', 'quiet', 'configure-evaluation', () => { initialSheetOpen = true; sheet.show(); });
-    section.append(open, preview, configure, sheet);
+    section.append(row);
     return section;
   };
 
@@ -879,6 +842,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
     const parts: HTMLElement[] = [initialNode(workspace)];
     const start = el('div', 'button-row evaluation-start');
+    const empty = workspace.recordCount === 0 && workspace.record === null && workspace.initial.latest === null;
     // The versions, newest first; each opens as it was recorded.
     if (workspace.records.length > 0) {
       const versions = el('section', 'evaluation-versions');
@@ -931,7 +895,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     } else {
       // No version reads: either none was begun, or every one is damaged — then say which, never 「no version yet」 (Issue #708).
       const unreadable = evaluationUnreadableLine(workspace.unreadableRecords, false);
-      start.append(unreadable === null ? el('span', 'evaluation-empty', EVALUATION_EMPTY) : el('span', 'evaluation-unreadable', unreadable));
+      if (unreadable !== null) start.append(el('span', 'evaluation-unreadable', unreadable));
     }
     start.dataset['skipDamaged'] = String(workspace.start.allowed && workspace.start.skipDamaged !== null);
     if (workspace.start.allowed) {
@@ -950,7 +914,11 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     } else {
       start.append(el('p', 'field-note evaluation-start-reason', workspace.start.reason));
     }
-    parts.push(start);
+    if (empty) {
+      const more = el('details', 'evaluation-more');
+      more.append(el('summary', undefined, '更多 ▾'), start);
+      parts[0]!.append(more);
+    } else parts.push(start);
     if (workspace.readersReport.basis !== null) parts.push(readersReportNode(workspace));
     // 按我的评分重写评语 sits just above the version it rewrites (Issue #429, S81b2; EVAL-008).
     if (workspace.record !== null) parts.push(rewriteNode(workspace, workspace.record));
@@ -993,8 +961,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     setStatus(EVALUATION_AI7_STATUS.preparing, 'busy');
     paint(null, true);
     try {
-      const job = await api.prepareInitialEvaluation({ ...(seriesId === null ? {} : { seriesId }),
-        ...(initialMaterialIds.size === 0 ? {} : { materialIds: taskMaterialSelection(workspace.materials?.items ?? [], initialMaterialIds) }) });
+      const job = await api.prepareInitialEvaluation({});
       const completed = await options.awaitServiceJob(job, (next) => setStatus(next.progress.label, 'busy'));
       busy = false;
       if (completed.state === 'cancelled') {
@@ -1007,7 +974,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         throw new Error(EVALUATION_AI7_STATUS.failed);
       }
       workspace = { ...result, record: workspace.record };
-      initialSheetOpen = false;
       setStatus(EVALUATION_AI7_STATUS.prepared, 'success');
       paint(null, true);
       const ref = result.initial.task?.taskIntentId ?? null;

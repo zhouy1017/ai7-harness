@@ -178,7 +178,9 @@ describe('审稿意见 references per template (Issue #795 item 4)', () => {
   it('pins only each template’s own selection into its own plan', async () => {
     const id = await material();
     const author = prepare('readers-report', [id]).taskIntent!.taskIntentId;
+    expect(store.inspectEvaluation(bookId, null).materialReferences?.readersReportInput).toEqual({ materialIds: [id] });
     const editorial = prepare('readers-report', [], 'editorial').taskIntent!.taskIntentId;
+    expect(store.inspectEvaluation(bookId, null).materialReferences?.readersReportInput).toEqual({ materialIds: [] });
     expect(editorial).not.toBe(author);
     expect(pins(author).map((pin) => pin.materialId)).toEqual([id]);
     expect(pins(editorial)).toEqual([]);
@@ -212,6 +214,7 @@ describe.each(['initial-evaluation', 'readers-report'] as const)('评估 referen
     try {
       const id = await material();
       const prepared = prepare(kind, [id]);
+    expect(store.inspectEvaluation(bookId, null).materialReferences?.[kind === 'initial-evaluation' ? 'initialInput' : 'readersReportInput']?.materialIds).toEqual([id]);
       answer(kind, prepared);
       const accepted = authorize(kind, prepared);
       expect(owner.admitOrQueue(accepted.dispatchRunRecordId!, accepted.ledger)).toBe('queued');

@@ -9,10 +9,10 @@ const STATUS_TONES: Readonly<Record<string, StateTone>> = {
 };
 
 export function mountFindingsCenter(root: HTMLElement, read: (offset: number) => Promise<BookFindingsProjection>, open: (item: BookFindingProjection) => void,
-  apply?: (items: BookFindingProjection[]) => Promise<void>): void {
+  apply?: (items: BookFindingProjection[]) => Promise<void>, newReview?: () => void): void {
   let offset = 0;
   let generation = 0;
-  let category = '';
+  let category = '', severity = '', status = '';
   let signature = '', busy = false, loading = false;
   const perform = async (items: BookFindingProjection[]): Promise<void> => {
     if (busy || !apply) return; busy = true;
@@ -36,35 +36,55 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       root.replaceChildren();
       root.dataset['findingsState'] = 'ready';
       root.dataset['findingsTotal'] = String(page.total);
-      const summary = document.createElement('p');
-      summary.textContent = page.total === 0 ? FINDINGS_CENTER_WORDS.empty : FINDINGS_CENTER_WORDS.summary(page.total, page.pageSize);
-      const groups = document.createElement('ul');
-      for (const group of page.groups) {
-        const line = document.createElement('li');
-        line.textContent = `${group.label} · ${group.count}`;
-        groups.append(line);
+      const heading = document.createElement('h2'); heading.textContent = FINDINGS_CENTER_WORDS.heading;
+      if (page.total === 0) {
+        const card = document.createElement('section'); card.className = 'findings-empty surface-empty';
+        const message = document.createElement('p'); message.textContent = FINDINGS_CENTER_WORDS.empty;
+        const start = createButton(); start.classList.add('primary'); start.textContent = '新建审阅';
+        start.addEventListener('click', () => newReview?.()); start.disabled = !newReview;
+        card.append(heading, stateTerm('暂无待处理项'), message, start); root.append(card);
+        return;
       }
+      const summary = document.createElement('p'); summary.textContent = FINDINGS_CENTER_WORDS.summary(page.total, page.pageSize);
+      const matches = (item: BookFindingProjection): boolean => (category === '' || item.category === category) && (severity === '' || item.severity === severity) && (status === '' || item.status === status);
       let batchButton: HTMLButtonElement | null = null;
-      const available = (): BookFindingProjection[] => batchItems.filter((item) => item.suggestion?.batchAllowed && (category === '' || item.category === category)).slice(0, 500);
+      const available = (): BookFindingProjection[] => batchItems.filter((item) => item.suggestion?.batchAllowed && matches(item)).slice(0, 500);
       const syncBatch = (): void => { if (batchButton) { const count = available().length; batchButton.textContent = `接受并应用全部 ${count} 条`; batchButton.hidden = count === 0; } };
       const filter = filterChoices({ label: FINDINGS_CENTER_WORDS.filter,
         choices: [['', FINDINGS_CENTER_WORDS.allCategories], ...page.groups.map((group) => [group.category, `${group.label} · ${group.count}`] as const)],
         value: category, change: (value) => { category = value; paint(); syncBatch(); },
       });
       filter.dataset['findingsFilter'] = 'category';
+      const severityFilter = filterChoices({ label: '严重度', choices: [['', '全部严重度'], ...Object.keys(Object.assign({}, ...page.groups.map((group) => group.bySeverity))).map((value) => [value, value] as const)],
+        value: severity, change: (value) => { severity = value; paint(); syncBatch(); } });
+      severityFilter.dataset['findingsFilter'] = 'severity';
+      const statusFilter = filterChoices({ label: '处理状态', choices: [['', '全部状态'], ...Object.keys(Object.assign({}, ...page.groups.map((group) => group.byStatus))).map((value) => [value, value] as const)],
+        value: status, change: (value) => { status = value; paint(); syncBatch(); } });
+      statusFilter.dataset['findingsFilter'] = 'status';
+      const filters = document.createElement('div'); filters.className = 'findings-filters'; filters.append(filter, severityFilter, statusFilter);
       const list = document.createElement('div');
       const paint = (): void => {
         list.replaceChildren();
         for (const group of page.groups.filter((entry) => category === '' || entry.category === category)) {
           const section = document.createElement('section');
           const heading = document.createElement('h3'); heading.textContent = group.label; section.append(heading);
-          for (const item of page.items.filter((entry) => entry.category === group.category)) {
+          for (const item of page.items.filter((entry) => entry.category === group.category && matches(entry))) {
             const row = document.createElement('article'); row.dataset['findingId'] = item.id; row.dataset['findingKind'] = item.target.kind;
-            const words = document.createElement('p'); words.append(stateTerm(item.status, STATUS_TONES[item.status] ?? 'neutral'), document.createTextNode(` ${item.severity} · ${item.summary}`));
+            row.className = 'finding-row';
+            const pills = document.createElement('div'); pills.className = 'finding-pills';
+            pills.append(stateTerm(item.status, STATUS_TONES[item.status] ?? 'neutral'), stateTerm(item.severity, item.severity === '必须处理' ? 'attention' : 'neutral'));
+            const words = document.createElement('div'); words.className = 'finding-body';
+            const body = document.createElement('p'); body.textContent = item.summary;
+            const why = document.createElement('p'); why.className = 'finding-why'; why.textContent = `来自${item.categoryLabel}。`;
+            const loc = document.createElement('p'); loc.className = 'finding-location';
+            loc.textContent = item.suggestion?.quote ?? (item.target.kind === 'gap' ? `第 ${item.target.unitOrdinal} 个阅读单元` : item.target.kind === 'risk' ? '评估中的风险项' : '稿件中的审阅标记');
+            words.append(body, why, loc);
+            const rowActions = document.createElement('div'); rowActions.className = 'finding-actions';
             const link = createButton(); link.type = 'button'; link.textContent = FINDINGS_CENTER_WORDS.open; link.addEventListener('click', () => open(item));
-            row.append(words, link);
+            rowActions.append(link);
+            row.append(pills, words, rowActions);
             if (item.suggestion && apply) { const accept = createButton(); accept.type = 'button'; accept.textContent = '接受并应用'; accept.dataset['findingApply'] = item.id;
-              accept.addEventListener('click', () => { accept.disabled = true; void perform([item]); }); row.append(accept); }
+              accept.addEventListener('click', () => { accept.disabled = true; void perform([item]); }); rowActions.append(accept); }
             section.append(row);
           }
           if (section.childElementCount > 1) list.append(section);
@@ -88,7 +108,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
         });
         actions.append(batchButton);
       }
-      root.append(summary, groups, filter, list, actions);
+      root.append(heading, summary, filters, list, actions);
     } catch {
       if (!root.isConnected || request !== generation) return;
       signature = '';

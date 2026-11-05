@@ -2929,9 +2929,8 @@ async function main() {
 
     at('review-destination');
     await openReviewDestination(renderer, 'review-destination');
-    // Nothing reviewed yet: every category the model reads is 未审阅, and the two whose basis does not exist
-    // yet are 不可用 with their reason (V2-UX-REV-007, REV-013).
-    await assertRenderer(renderer, `(() => { const rows=Array.from(document.querySelectorAll('table.review-coverage tbody tr[data-review-category]')); const state=Object.fromEntries(rows.map((row)=>[row.dataset.reviewCategory, row.dataset.coverage])); return rows.length===9 && document.querySelector('.review-workspace-card')?.dataset.reviewState==='empty' && state['series-consistency']==='unavailable' && state['cross-deliverable-consistency']==='unavailable' && ['typos-and-usage','style-and-format','academic-integrity','publication-risk','literary-expression'].every((id)=>state[id]==='never'); })()`, 'review-coverage-never');
+    // C1: no coverage, records or bare controls before the first review.
+    await assertRenderer(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewState==='empty' && card.classList.contains('surface-empty') && card.querySelector('h2')?.textContent==='审阅' && card.querySelector('.state-term')?.textContent==='尚未审阅' && card.querySelector('.lede')?.textContent==='按类别审读稿件，发现会同步到原文。' && card.querySelector('[data-review-action="new-review"]') && !card.querySelector('table, select, .review-coverage, .review-runs-section, [data-list-position]'); })()`, 'review-empty-card');
 
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
@@ -3063,6 +3062,7 @@ async function main() {
     requireJourney(centerBeforeDisposition.total > 0 && centerReview !== undefined && centerBeforeDisposition.groups.some((group) => group.category.startsWith('review:')), 'book-findings-source-counts');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-open');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-ready');
+    await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll('[data-findings-filter]').length===3 && !root.querySelector('select') && root.querySelector('.finding-row .finding-body .finding-why') && root.querySelector('.finding-row .finding-location'); })()`, 'findings-filter-row-layout');
     await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); const row=root?.querySelector('[data-finding-id='+CSS.escape(${JSON.stringify(centerReview.id)})+']'); const open=row?.querySelector('button'); if(root?.dataset.findingsTotal!==${JSON.stringify(String(centerBeforeDisposition.total))} || !(open instanceof HTMLButtonElement))return false; open.click(); return true; })()`, 'book-findings-record-link');
     await waitFor(renderer, `document.querySelector('article.review-finding[data-finding-id="${centerReview.target.findingId}"]')`, 'book-findings-exact-review');
 
@@ -3175,7 +3175,7 @@ async function main() {
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
     // both need review; the row offers only what changed (V2-UX-REV-007).
-    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('table.review-coverage tbody tr[data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
+    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('.review-coverage [data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
 
     // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, IA-012) ----
     // Synchronized delta with Issue #425: 资料与记录 gains 来源与证据 between 分析 and 工作概览. This Book's Runs read on the

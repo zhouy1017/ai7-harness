@@ -417,7 +417,7 @@ const READ_EVALUATION = `(() => {
   const active = document.activeElement;
   return {
     state: host.dataset.evaluation ?? null,
-    empty: host.querySelector('.evaluation-empty')?.textContent ?? null,
+    empty: host.querySelector('.evaluation-initial-none')?.textContent ?? null,
     start: host.querySelector('[data-evaluation-action="start"]')?.firstChild?.textContent ?? null,
     startReason: host.querySelector('.evaluation-start-reason')?.textContent ?? null,
     versions: Array.from(host.querySelectorAll('.evaluation-version-list button'), (button) => button.textContent),
@@ -1428,14 +1428,20 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, 'evaluation-summary-empty');
     await assertRenderer(renderer, `(() => { const summary = document.querySelector('.book-evaluation-summary'); return summary?.querySelector('h3')?.textContent === '评估' && summary.querySelector('p')?.textContent === '还没有评估。' && summary.querySelector('[data-evaluation-action="open"]')?.textContent === '打开评估'; })()`, 'evaluation-summary-words');
 
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'findings-empty-open');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'findings-empty-ready');
+    await assertRenderer(renderer, `(() => { const root=document.querySelector('.findings-center'); return root.querySelectorAll(':scope > section').length===1 && root.querySelector('.findings-empty p')?.textContent==='还没有待处理的发现，发起审阅后会自动列在这里。' && root.querySelector('.findings-empty button')?.textContent==='新建审阅' && !root.querySelector('table, select, [data-list-position], [data-findings-filter]'); })()`, 'findings-empty-card');
+
     at('evaluation-open');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'evaluation-open');
     const opened = await readEvaluation(renderer, (page) => page.state === 'ready', 'evaluation-ready');
-    requireJourney(opened.empty === '这本书还没有评估。' && opened.start === '自行填写评估' &&
+    requireJourney(opened.empty === 'AI7 还没有为这本书做初评。' && opened.start === '自行填写评估' &&
       opened.versions.length === 0 && opened.record === null, 'evaluation-empty', opened);
 
+    await assertRenderer(renderer, `(() => { const host=document.querySelector('.evaluation'); return host.querySelectorAll(':scope > section').length===1 && host.querySelectorAll('.evaluation-consequences dt').length===4 && !host.querySelector('table, select, [data-list-position], .evaluation-readers-report') && !host.textContent.includes('允许参考'); })()`, 'evaluation-empty-card');
     at('evaluation-start');
     // 开始评估: version 1 on r1, AI7's 初评 not yet there, every item unscored and no conclusion chosen.
+    await assertRenderer(renderer, `(() => { document.querySelector('.evaluation-more > summary')?.click(); return true; })()`, 'evaluation-more');
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&
@@ -1830,10 +1836,9 @@ async function main() {
     // the Run to its end on the J-04 adapter's authored fixture.
     const beforeInitial = await readEvaluation(renderer, (page) => page.initial !== null, 'initial-evaluation-offered');
     requireJourney(beforeInitial.initial.state === 'none' && beforeInitial.initial.none === 'AI7 还没有为这本书做初评。' &&
-      JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['prepare-initial', '先看计划', false], ['start-initial', '开始评估', false]]) && beforeInitial.startFromInitial === null,
+      JSON.stringify(beforeInitial.initial.actions) === JSON.stringify([['start-initial', '开始评估', false], ['prepare-initial', '先看计划', false]]) && beforeInitial.startFromInitial === null,
     'initial-evaluation-offered-words', beforeInitial.initial);
-    await clickSelector(renderer, '[data-evaluation-action="configure-evaluation"]', 'initial-evaluation-sheet');
-    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('[data-sheet].evaluation-sheet'); return sheet?.open && !sheet.matches(':modal') && sheet.getAttribute('aria-modal')==='false' && sheet.querySelector('.sheet-bar') && sheet.querySelector('.sheet-body') && sheet.querySelector('.sheet-foot'); })()`, 'initial-evaluation-nonmodal');
+    await assertRenderer(renderer, `!document.querySelector('.evaluation-sheet') && !document.querySelector('.evaluation')?.textContent.includes('允许参考')`, 'initial-evaluation-reference-location');
     await clickSelector(renderer, '[data-evaluation-action="prepare-initial"]', 'initial-evaluation-prepare');
     await waitFor(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return drawer?.dataset.taskDrawer === 'open' && drawer.dataset.taskPlanKind === 'initial-evaluation' && drawer.dataset.taskPlanStart === 'ready' && drawer.querySelector('[data-task-drawer-control="start"]')?.disabled === false; })()`, 'initial-evaluation-plan', 120_000);
     // The plan in the editor's words, as the drawer reads it: its task, its two steps, its 工序, and that it scores nothing for
@@ -1844,7 +1849,7 @@ async function main() {
       'initial-evaluation-plan-words', planWords);
     await assertRenderer(renderer, `(() => { const drawer = document.querySelector('#task-drawer'); return (drawer?.textContent ?? '').includes('按本社评估方案为这本书做 AI7 初评') && Array.from(drawer.querySelectorAll('button'), (button) => button.textContent).every((label) => !label.includes('授权')); })()`, 'initial-evaluation-plan-shown');
     const prepared = await readEvaluation(renderer, (page) => page.initial?.state === 'prepared', 'initial-evaluation-prepared');
-    requireJourney(JSON.stringify(prepared.initial.actions) === JSON.stringify([['start-initial', '开始评估', false]]) &&
+    requireJourney(JSON.stringify(prepared.initial.actions) === JSON.stringify([['start-initial', '开始评估', false], ['prepare-initial', '先看计划', false]]) &&
       prepared.initial.task === 'AI7 初评 · 尚未开始', 'initial-evaluation-prepared-words', prepared.initial);
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="start"]', 'initial-evaluation-run');
     const settledInitial = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.initial?.state), 'initial-evaluation-ended');
@@ -1860,7 +1865,7 @@ async function main() {
     requireJourney(settledInitial.initial.latest === '第 1 次初评 · 读的是修订版 r1 · 总分 73 / 100 · 优秀' &&
       JSON.stringify(settledInitial.initial.items) === JSON.stringify(AI7_ITEM_LINES) &&
       settledInitial.initial.conclusion === 'AI7 建议的结论：修改后再议' &&
-      JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['prepare-initial', '先看计划', false], ['start-initial', '开始评估', false], ['open-initial-task', '查看任务', false]]) &&
+      JSON.stringify(settledInitial.initial.actions) === JSON.stringify([['start-initial', '开始评估', false], ['prepare-initial', '先看计划', false], ['open-initial-task', '查看任务', false]]) &&
       settledInitial.startReason === '第 13 版还没有定稿；定稿后才能重新评估。' && settledInitial.startFromInitial === null,
     'initial-evaluation-latest-words', settledInitial.initial);
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'initial-evaluation-close-open-conclusion');
@@ -3117,7 +3122,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.book-evaluation-summary')?.dataset.evaluationState === 'empty'`, `${name}-summary`);
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), `${name}-open`);
     const fresh = await readEvaluation(renderer, (page) => page.state === 'ready' && page.initial?.state === 'none', `${name}-ready`);
-    requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['prepare-initial', '先看计划', false], ['start-initial', '开始评估', false]]), `${name}-prepare-offered`, fresh.initial);
+    requireJourney(JSON.stringify(fresh.initial.actions) === JSON.stringify([['start-initial', '开始评估', false], ['prepare-initial', '先看计划', false]]), `${name}-prepare-offered`, fresh.initial);
     await runInitialEvaluation(name);
     await clickSelector(renderer, '[data-evaluation-action="start-from-initial"]', `${name}-begin`);
     const begun = await readEvaluation(renderer, (page) => page.record?.heading === '第 1 版 · AI7 初稿', `${name}-draft`);
