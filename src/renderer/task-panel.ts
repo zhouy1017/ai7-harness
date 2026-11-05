@@ -219,6 +219,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const mine = ++ticket;
     const wasRunning = tasks?.running === true;
     void Promise.all([
+      // Only running/totals are consumed here; cards belong to inspectTaskOverview.
       api.inspectBookTasks(),
       withAnalysis || !analysisRead ? api.inspectBaselineAnalysis().then((value) => value, () => null) : Promise.resolve(undefined),
     ]).then(

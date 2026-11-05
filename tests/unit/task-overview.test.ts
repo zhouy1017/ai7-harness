@@ -6,7 +6,7 @@ import { mountTaskPanel } from '../../src/renderer/task-panel.js';
 import { describe, expect, it, vi } from 'vitest';
 import { taskOverviewApi } from '../../src/renderer/task-overview-api.js';
 import { composeTaskOverview, estimateTaskStarts, controlOverviewTasks } from '../../src/service/task-overview.js';
-import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../../src/shared/protocol.js';
+import type { BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../../src/shared/protocol.js';
 
 function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttentionItemProjection['state'], id: string): GlobalAttentionItemProjection {
   return { itemId: id, group, state, blocked: false, at: '2026-11-05T01:00:00Z', book: { bookId: 'book', title: '任务总览' },
@@ -82,6 +82,29 @@ describe('task overview', () => {
       panel.show('book'); await new Promise((resolve) => setTimeout(resolve, 0));
       panel.element.querySelector<HTMLElement>('[data-task-item="done-10"]')!.querySelector<HTMLButtonElement>('[data-task-action="result"]')!.click();
       expect(openResult).toHaveBeenCalledWith(recent[10]);
+    } finally { panel.stop(); vi.unstubAllGlobals(); uninstall(); }
+  });
+  it('keeps the pane ready from paged totals while the overview owns its cards', async () => {
+    const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, clearTimeout: () => {} });
+    const cards = ['first', 'last'].map((id) => ({ item: task('recent', 'analysis-completed', id), result: null }));
+    const projection = composeTaskOverview({ groups: [], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null, cards);
+    const partial: BookTasksProjection = { bookId: 'book', running: false,
+      groups: [{ key: 'waiting', items: [], total: 0 }, { key: 'running', items: [], total: 0 }, { key: 'recent', items: cards.slice(0, 1), total: 2 }],
+      listPages: { 'groups.2.items': { shown: 1, total: 2, nextOrdinal: 1, digest: 'a'.repeat(64) } } };
+    const getTaskPlanPage = vi.fn(async () => { throw new Error('TASK_PLAN_PAGE_CHANGED'); });
+    const inspectBookTasks = vi.fn(async () => partial);
+    const panel = mountTaskPanel({ api: { inspectTaskOverview: async () => projection, inspectBookTasks, getTaskPlanPage,
+      inspectBaselineAnalysis: async () => { throw new Error('none'); } } as unknown as RendererApi,
+      setStatus: vi.fn(), errorMessage: () => '', parked: () => null } as unknown as Parameters<typeof mountTaskPanel>[0]);
+    try {
+      panel.show('book'); await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(panel.element.querySelector('.task-panel-scope')!.textContent).toContain('2 项');
+      expect(panel.element.dataset['taskPanel']).toBe('ready');
+      expect(panel.element.querySelector('[data-task-item="last"]')).not.toBeNull();
+      panel.refresh(); await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(inspectBookTasks).toHaveBeenCalledTimes(2);
+      expect(getTaskPlanPage).not.toHaveBeenCalled();
+      expect(panel.element.dataset['taskPanel']).toBe('ready');
     } finally { panel.stop(); vi.unstubAllGlobals(); uninstall(); }
   });
   it('continues healthy tasks after one resume fails and always releases the queue', async () => {
