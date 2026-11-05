@@ -28,7 +28,7 @@ export function taskOverviewCard(item: TaskOverviewItemProjection, act: (item: T
   const title = el('div', 'task-overview-card-title'); title.append(el('span', 'task-overview-book', item.bookTitle ?? '全局'), el('span', undefined, ' · '), el('strong', undefined, item.label), el('span', `state-term task-overview-state task-overview-state-${item.state}`, item.attention.state === 'analysis-pausing' ? '正在暂停' : STATE_LABELS[item.state]));
   node.dataset['taskKind'] = item.taskKind;
   const line = el('div', 'task-overview-card-line', attentionSentence(progressLine(item))); line.title = line.textContent ?? '';
-  const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at)); time.dateTime = item.at;
+  const time = el('time', 'task-overview-card-time', globalAttentionTimeLine(item.attention.group, item.at, item.state)); time.dateTime = item.at;
   const body = el('div', 'task-overview-card-body'); body.append(el('div', 'task-overview-card-kind', item.taskKind), title, line, time);
   if (item.state === 'running' && item.progress !== null) { const bar = el('progress', 'task-overview-progress'); bar.max = Math.max(1, item.progress.total); bar.value = Math.min(item.progress.done, item.progress.total); body.append(bar); }
   const actions = el('div', 'task-overview-card-actions');

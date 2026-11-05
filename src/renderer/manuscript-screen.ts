@@ -621,7 +621,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     badge.hidden = true;
     entry.replaceChildren(icon(id), label, badge);
     entry.setAttribute('aria-label', label.textContent ?? '');
+    entry.title ||= label.textContent ?? '';
   }
+  const updateEdgeName = (entry: HTMLElement): void => {
+    const badge = entry.querySelector<HTMLElement>('.edge-badge')!;
+    entry.setAttribute('aria-label', `${entry.querySelector('.edge-label')!.textContent}${badge.hidden ? '' : ` · ${badge.dataset['count']}`}`);
+  };
   edgeEntries.append(navigationEntry, ...(isDocument ? [] : [analysisEntry, tasksEntry]));
   const railTrack = element('div', 'rail-track');
   railTrack.id = 'manuscript-position';
@@ -1280,6 +1285,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     };
   };
   const landAt = (blockId: string): void => {
+    if (document.activeElement?.matches('input, textarea, [contenteditable="true"]')) return;
     if (editor?.selectRange(blockId, 0, 0) === true) editor.focus();
   };
   function paintReturnChip(): void {
@@ -2096,7 +2102,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     binding: () => ({ manuscriptId: currentWindow.manuscriptId, branchId: currentWindow.branchId }),
     // A marker's paragraph gone between the rail's read and the click is said as the service says it.
     jumpToBlock: (blockId) => void surface.jump({ blockId, markId: null }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '无法移动到该稿件位置。'), 'error')),
-    jumpToProportion: (proportion) => void navigate({ kind: 'proportion', proportion }),
+    jumpToProportion: (proportion) => navigate({ kind: 'proportion', proportion }),
     onRead: (rail) => {
       railProjection = rail;
       paintOutline();
@@ -2108,6 +2114,8 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       analysisBadge.dataset['count'] = String(rail.uncovered?.length ?? 0);
       analysisBadge.hidden = !rail.uncovered?.length;
       analysisBadge.title = '分析未覆盖处';
+      updateEdgeName(navigationEntry);
+      updateEdgeName(analysisEntry);
     },
     onError: (error) => setStatus(rendererErrorMessage(error, '全稿位置轨未能更新。'), 'error'),
   });
@@ -2128,9 +2136,11 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       badge.dataset['count'] = String(count);
       badge.hidden = count === 0;
       badge.title = `${count} 项进行中或等你处理的任务`;
+      updateEdgeName(tasksEntry);
     } catch {
       // The task panel owns its retry/error surface; an unread count is never presented as zero.
       tasksEntry.querySelector<HTMLElement>('.edge-badge')!.hidden = true;
+      updateEdgeName(tasksEntry);
     } finally {
       taskBadgeReading = false;
       if (!destroyed && taskBadgeVisible()) taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), pollMs);

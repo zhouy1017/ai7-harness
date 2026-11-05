@@ -73,10 +73,11 @@ export class MiniElement {
 
   get className(): string { return this.attributes.get('class') ?? ''; }
   set className(value: string) { this.attributes.set('class', value); }
-  get classList(): { contains(name: string): boolean; add(...names: string[]): void } {
+  get classList(): { contains(name: string): boolean; add(...names: string[]): void; remove(...names: string[]): void } {
     return {
       contains: (name) => this.className.split(/\s+/u).includes(name),
       add: (...names) => { this.className = [...new Set([...this.className.split(/\s+/u).filter(Boolean), ...names])].join(' '); },
+      remove: (...names) => { this.className = this.className.split(/\s+/u).filter((name) => name && !names.includes(name)).join(' '); },
     };
   }
   get id(): string { return this.attributes.get('id') ?? ''; }

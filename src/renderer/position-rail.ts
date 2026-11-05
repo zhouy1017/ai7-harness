@@ -22,7 +22,7 @@ interface MountOptions {
   api: Pick<RendererApi, 'getManuscriptRail'>;
   binding(): { manuscriptId: string; branchId: string };
   jumpToBlock(blockId: string): void;
-  jumpToProportion?(proportion: number): void;
+  jumpToProportion?(proportion: number): boolean | void | Promise<boolean | void>;
   onRead?(rail: ManuscriptRailProjection): void;
   onError(error: unknown): void;
 }
@@ -113,7 +113,9 @@ export function mountPositionRail(options: MountOptions): PositionRail {
     const value = Number(options.track.getAttribute('aria-valuenow')) / 1_000_000;
     if (!Number.isFinite(value)) return;
     setPosition(value);
-    options.jumpToProportion?.(position);
+    void Promise.resolve(options.jumpToProportion?.(position)).then((accepted) => {
+      if (!destroyed && accepted === false) setPosition(confirmedPosition);
+    });
   };
   const pointAt = (event: MouseEvent): void => {
     const box = options.track.getBoundingClientRect();

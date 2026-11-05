@@ -783,7 +783,7 @@ async function prepareSourceImportReview(renderer, expectation) {
     await waitFor(renderer, `document.querySelector('[data-source-version-reuse-choices]')`, 'source-reuse-required');
     await assertRenderer(
       renderer,
-      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse && reuse.checked && Boolean(document.querySelector('[data-prepare-source-import-review]')); })()`,
+      `(() => { const reuse = document.querySelector('[data-reuse-source-version-id=${JSON.stringify(expectedReuseSourceVersionId)}]'); return reuse && !reuse.checked && !document.querySelector('[data-prepare-source-import-review]'); })()`,
       'source-reuse-unselected',
     );
     await assertRenderer(

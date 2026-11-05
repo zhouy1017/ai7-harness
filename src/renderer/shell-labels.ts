@@ -24,7 +24,7 @@ export const SHELL_DESTINATIONS: ReadonlyArray<{ readonly key: ShellDestination;
   { key: 'series', label: '书系', icon: 'i-series' },
   { key: 'knowledge', label: '知识库', icon: 'i-kb' },
   { key: 'quality', label: '质量与学习', icon: 'i-learn' },
-  { key: 'global-agent', label: '全域智能体（记忆与全局指导）', icon: 'i-learn' },
+  { key: 'global-agent', label: '全域智能体', icon: 'i-learn' },
 ]);
 
 /** The current Book's three groups (IA-012): 工作 · 处理 · 资料与记录. */
@@ -85,20 +85,6 @@ export const SHELL_LABELS = Object.freeze({
   library: '书库',
   libraryTitle: '图书与稿件',
   allBooks: '全部图书',
-  remainingHeading: '其余图书',
-  retryCatalog: '重试读取图书',
-  loadingCatalog: '正在读取图书目录…',
-  catalogFailed: '无法读取图书目录，请重试或打开完整书库。',
-  emptyCatalog: '书库里还没有图书。',
-  catalogCount: (count: number) => `共 ${count} 本图书`,
-  switchBook: '切换书稿',
-  switchBookTrigger: '切换书稿 ▾',
-  bookSearchPlaceholder: '搜索书名或编号…',
-  bookSearchLabel: '筛选图书列表',
-  allBooksHeading: '全部在编图书',
-  catalogBookState: '在编图书',
-  noMatchingBooks: '未找到匹配的图书。',
-  openLibraryDirectory: '打开完整书库目录',
 });
 
 export const SETTINGS_PAGE_TITLES: Readonly<Record<string, string>> = Object.freeze({

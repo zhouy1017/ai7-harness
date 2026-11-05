@@ -451,7 +451,6 @@ export function createImportReview(options: ImportReviewOptions) {
       const sameBookMatches = [...new Set(staged.identityFindings
         .filter((finding) => finding.bookId === selectedChoice.bookId && finding.identityClass.kind === 'immutable-original')
         .map((finding) => finding.sourceVersionId))];
-      reuseSourceVersionId ??= sameBookMatches[0] ?? null;
       if (sameBookMatches.length > 0) {
         const reuseChoices = element('fieldset');
         reuseChoices.setAttribute('role', 'radiogroup');
@@ -495,6 +494,7 @@ export function createImportReview(options: ImportReviewOptions) {
             });
             if (previewOnly) renderSourceImportReview(review, recoveryNotice, recoveryReturn); else await finishSourceImport(review, recoveryReturn);
           } catch (error) {
+            previewOnly = false;
             confirm.disabled = false;
             setStatus(rendererErrorMessage(error, '无法复核来源材料导入。'), 'error');
           }

@@ -4,6 +4,7 @@
 
 :root {
   color-scheme: light;
+  --font-serif: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif;
   --shell: #f3f0ea;
   --surface: #faf8f5;
   --surface-subdued: #ebe6dd;
@@ -140,7 +141,6 @@ body { padding-left: var(--sidebar-width); }
 .app-sidebar ul { margin: 0; padding: 0; list-style: none; }
 .app-sidebar li + li { margin-top: .1rem; }
 .sidebar-link { position: relative; display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 30px; padding: .15rem .5rem; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; text-decoration: none; cursor: pointer; }
-.sidebar-link::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border: 1px solid var(--boundary); border-radius: 7px; background: var(--surface); color: var(--action-text); font-size: .95rem; font-weight: 800; }
 .sidebar-link:hover:not([aria-disabled="true"]):not(:disabled) { background: var(--surface-subdued); }
 .sidebar-link[aria-current="page"] { border-color: var(--selection-boundary); background: var(--selection); color: var(--selection-text); box-shadow: inset 3px 0 0 var(--selection-boundary); }
 .sidebar-link[aria-current="true"] { border-color: var(--boundary-strong); }
@@ -156,7 +156,7 @@ body { padding-left: var(--sidebar-width); }
 .sidebar-book[hidden] { display: none; }
 .sidebar-book-row { position: relative; display: flex; align-items: center; }
 .sidebar-book-row .sidebar-link { flex: 1 1 auto; flex-wrap: nowrap; min-width: 0; min-height: 26px; }
-.sidebar-book-row .nav-label { flex: 1 1 auto; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
+.sidebar-book-row .nav-label { flex: 1 1 auto; font-family: var(--font-serif); }
 .nav-state { flex: 0 0 auto; padding: 0; color: var(--text-subdued); font-size: .7rem; font-weight: 400; }
 .sidebar-pin { position: absolute; right: 0; opacity: 0; pointer-events: none; min-width: 26px; min-height: 26px; border: 0; border-radius: 6px; background: var(--shell); color: var(--action-text); font-size: 1rem; cursor: pointer; }
 .sidebar-book-row:hover .sidebar-pin, .sidebar-book-row:focus-within .sidebar-pin { opacity: 1; pointer-events: auto; }
@@ -165,11 +165,8 @@ body { padding-left: var(--sidebar-width); }
 .nav-book-initial { position: absolute; width: 18px; opacity: 0; overflow: hidden; font-family: "Noto Serif SC", serif; text-align: center; }
 .sidebar-book-menu { position: fixed; inset: auto; margin: 0; padding: .25rem; border: 1px solid var(--boundary); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 4px 16px var(--shadow); }
 .sidebar-book-menu:not(:popover-open) { display: none; }
-.sidebar-book-menu .btn { width: 100%; }
 .sidebar-pin:hover:not(:disabled) { background: var(--surface-subdued); }
 .sidebar-empty { margin: 0 .5rem; font-size: .82rem; }
-.sidebar-book-title { display: flex; align-items: center; gap: .55rem; margin: 0; padding: 0 .5rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.02rem; font-weight: 700; overflow-wrap: anywhere; }
-.sidebar-book-title::before { content: attr(data-nav-icon); display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 7px; background: var(--action-primary); color: var(--action-primary-text); font-size: .95rem; }
 .sidebar-group + .sidebar-group { margin-top: .15rem; }
 .sidebar-foot { display: grid; flex: 0 0 auto; gap: .1rem; margin-top: auto; padding-top: .35rem; border-top: 1px solid var(--boundary); }
 .sidebar-help-slot:empty { display: none; }
@@ -185,8 +182,6 @@ body { padding-left: var(--sidebar-width); }
 :root[data-sidebar="icons"] .nav-book-initial { position: static; flex: 0 0 18px; opacity: 1; }
 :root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .nav-state, :root[data-sidebar="icons"] .global-attention-entry-label { opacity: 0; }
 :root[data-sidebar="icons"] .nav-label, :root[data-sidebar="icons"] .global-attention-entry-label { left: 34px; width: 180px; max-width: 0; height: auto; margin: 0; clip-path: none; pointer-events: none; }
-:root[data-sidebar="icons"] .sidebar-book-title { justify-content: center; padding: 0; font-size: 0; }
-:root[data-sidebar="icons"] .sidebar-book-title::before { font-size: .95rem; }
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry { gap: 0; }
 :root[data-sidebar="icons"] .app-sidebar .global-attention-entry .global-attention-badge { position: absolute; top: -2px; right: -2px; min-width: 1.35em; height: 1.35em; font-size: .7rem; }
 :root[data-sidebar="icons"] .task-navigation-badge { position: absolute; top: 0; right: 0; }
@@ -197,7 +192,7 @@ body { padding-left: var(--sidebar-width); }
 .context-identity { flex: 1 1 14rem; min-width: 0; }
 .context-position { margin: 0; color: var(--text-subdued); font-size: .78rem; font-weight: 700; letter-spacing: .08em; }
 .context-title { margin: .05rem 0 0; font-size: 1.3rem; font-weight: 700; overflow-wrap: anywhere; }
-.context-title[data-context-book="true"] { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
+.context-title[data-context-book="true"] { font-family: var(--font-serif); }
 .context-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; }
 .context-actions:empty { display: none; }
 .preferences-notice { flex: 1 1 100%; margin: 0; }
@@ -220,7 +215,7 @@ body { padding-left: var(--sidebar-width); }
 .screen { flex: 1 0 auto; min-width: 0; padding: 1.1rem 1.6rem; }
 .page-content { min-width: 0; }
 .hero { display: grid; grid-template-columns: 1.3fr .7fr; gap: 3rem; align-items: center; min-height: 420px; }
-.hero h2, .page-content h2 { margin: 0 0 .7rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 2rem; }
+.hero h2, .page-content h2 { margin: 0 0 .7rem; font-family: var(--font-serif); font-size: 2rem; }
 .hero-steps { margin: 1.5rem 0; padding-left: 1.25rem; color: var(--text-subdued); line-height: 1.9; }
 .hero-note { border-left: 3px solid var(--boundary); padding: .9rem 1rem; background: var(--surface-subdued); color: var(--text-subdued); }
 .recent-work { grid-column: 1 / -1; border-top: 1px solid var(--boundary); padding-top: 1.25rem; }
@@ -413,7 +408,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-finding-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem; }
 .review-finding-location { color: var(--text-subdued); font-size: .86rem; }
 .review-risk-point { padding: .1rem .5rem; border: 1px dashed var(--status-blocked); border-radius: 6px; color: var(--status-blocked); font-size: .84rem; font-weight: 800; }
-.review-finding-quote { margin: .5rem 0 .3rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
+.review-finding-quote { margin: .5rem 0 .3rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: var(--font-serif); }
 .review-finding p { margin: .3rem 0 0; }
 .review-finding-replacement { font-weight: 700; }
 .review-finding-basis { color: var(--text-subdued); font-size: .9rem; }
@@ -446,7 +441,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 /* 新建审阅 uses the shared non-modal sheet. */
 
 
-.review-sheet h3 { margin: 0 0 .4rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
+.review-sheet h3 { margin: 0 0 .4rem; font-family: var(--font-serif); font-size: 1.35rem; }
 .review-sheet fieldset { margin-top: 1rem; }
 .review-category-options { display: grid; gap: 0; min-width: 0; border: 0; padding: 0; }
 .review-scope-options { display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; border: 0; padding: 0; }
@@ -516,7 +511,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .global-attention-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .3rem .9rem; min-width: 0; padding: .75rem .9rem; border: 1px solid var(--boundary); border-left: 4px solid var(--boundary); border-radius: 10px; background: var(--surface); }
 .global-attention-item[data-attention-blocked="true"] { border-left: 6px solid var(--status-blocked); }
 .global-attention-body { min-width: 0; }
-.global-attention-book { margin: 0; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; }
+.global-attention-book { margin: 0; font-family: var(--font-serif); font-size: 1rem; overflow: hidden; text-overflow: ellipsis; }
 .global-attention-object { display: flex; align-items: center; gap: .25rem; margin: 0; font-size: 1rem; white-space: nowrap; overflow: hidden; }
 .global-attention-object-name { overflow: hidden; text-overflow: ellipsis; }
 .global-attention-pill { flex-shrink: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
@@ -541,7 +536,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-overview-items { display: grid; gap: .6rem; margin-top: .7rem; }
 .task-overview-card { display:flex; align-items:center; gap:16px; position:relative; padding:14px 16px; border:1px solid var(--boundary); border-radius:10px; background:var(--surface); cursor:pointer; min-width:0; width:100%; max-width:100%; box-sizing:border-box; }
 .task-overview-card:hover { border-color: var(--action-text); }
-.task-overview-book { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
+.task-overview-book { font-family: var(--font-serif); }
 .task-overview-separator { color: var(--text-subdued); }
 .task-overview-state { margin-left: auto; }
 .task-overview-card-line { color: var(--text-subdued); font-size: .92rem; }
@@ -604,7 +599,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .proposal-conflict-unit[data-unit-kind="conflict"] .proposal-conflict-unit-label { font-weight: 800; }
 .proposal-conflict-cell { min-width: 0; }
 .proposal-conflict-cell-label { display: none; color: var(--text-subdued); font-size: .78rem; }
-.proposal-conflict-words { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; white-space: pre-wrap; }
+.proposal-conflict-words { font-family: var(--font-serif); white-space: pre-wrap; }
 .proposal-conflict-cell[data-conflict-pane="current"] .proposal-conflict-words { font-weight: 700; }
 .proposal-conflict-cell[data-conflict-pane="proposed"] .proposal-conflict-words { font-style: italic; }
 .proposal-conflict-paths { min-width: 0; margin: 1rem 0 0; padding: .8rem .9rem; border: 1px solid var(--boundary); border-radius: 10px; }
@@ -698,7 +693,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-plan-unavailable .quiet { min-height: 32px; padding: .2rem .4rem; }
 .task-plan-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .55rem 0 0; padding: 0; list-style: none; }
 .task-plan-chip { max-width: 100%; padding: .1rem .55rem; border: 1px solid var(--status-progress); border-radius: 999px; background: var(--status-progress-surface); color: var(--status-progress); font-size: .82rem; font-weight: 700; }
-.task-plan-chip-book { font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; }
+.task-plan-chip-book { font-family: var(--font-serif); }
 .task-plan-saved { margin-top: .5rem; }
 .task-plan-drift { margin: 0; }
 .task-plan-drift h3 { margin: 0 0 .35rem; font-size: 1rem; }
@@ -848,7 +843,7 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .developer-proposal-form { display: grid; gap: .5rem; }
 .procedure-capture { width: min(46rem, calc(100vw - 2rem)); max-height: calc(100vh - 2rem); overflow: auto; padding: 1.2rem 1.4rem; border: 1px solid var(--boundary); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: 0 18px 50px var(--shadow); overflow-wrap: anywhere; }
 .procedure-capture::backdrop { background: var(--backdrop); }
-.procedure-capture h3 { margin: 0 0 .4rem; font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; font-size: 1.35rem; }
+.procedure-capture h3 { margin: 0 0 .4rem; font-family: var(--font-serif); font-size: 1.35rem; }
 .procedure-capture fieldset { display: grid; gap: .5rem; min-width: 0; margin-top: 1rem; }
 .procedure-capture-step, .procedure-capture-kind, .procedure-capture-scope-option { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .4rem .6rem; padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); }
 .procedure-capture-step:has(input:checked), .procedure-capture-kind:has(input:checked), .procedure-capture-scope-option:has(input:checked) { border-color: var(--selection-boundary); box-shadow: inset 0 0 0 1px var(--selection-boundary); background: var(--surface-subdued); }
@@ -1491,7 +1486,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .recovery-decision-actions { justify-content: flex-end; }
 .recovery-return-actions { justify-content: flex-end; margin-top: 1rem; }
 .recovery-viewer { max-width: 920px; margin: 0 auto; }
-.recovery-readonly-blocks { max-height: min(65vh, 720px); overflow: auto; padding: 1.5rem clamp(1rem, 5vw, 4rem); border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; line-height: 1.9; }
+.recovery-readonly-blocks { max-height: min(65vh, 720px); overflow: auto; padding: 1.5rem clamp(1rem, 5vw, 4rem); border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); font-family: var(--font-serif); line-height: 1.9; }
 .recovery-readonly-blocks h1 { font-size: 2rem; }
 .recovered-state-marker { padding: .2rem .55rem; border: 1px solid var(--status-attention); border-radius: 999px; background: var(--status-attention-surface); color: var(--status-attention); }
 
@@ -1609,7 +1604,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
    reading preferences as custom properties, with the former values as the fallback. The column counts fullwidth characters. */
 .ProseMirror {
   min-height: 480px; max-width: calc(var(--manuscript-column, 36) * 1em); margin: 0 auto;
-  line-height: var(--manuscript-line-height, 1.95); font-family: var(--manuscript-font-family, "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif);
+  line-height: var(--manuscript-line-height, 1.95); font-family: var(--manuscript-font-family, var(--font-serif));
   font-size: var(--manuscript-font-size, 17px); text-align: var(--manuscript-align, justify); caret-color: var(--status-good);
 }
 .ProseMirror h1 { font-size: 2rem; line-height: 1.35; }
@@ -1691,7 +1686,7 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editorial-mark-drifted { margin: .6rem 0 0; padding: .45rem .6rem; border: 1px dashed var(--status-attention); border-radius: 6px; background: var(--status-attention-surface); }
 /* ADR 0085 §2 beside an available 接受并应用: a quiet line with its own border, never an alarm. */
 .editorial-mark-safe-merge { margin: .45rem 0 0; padding: .35rem .55rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); }
-.editorial-mark-quote { margin: .3rem 0 .6rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: "Noto Serif SC", "Noto Serif CJK SC", "Songti SC", serif; overflow-wrap: anywhere; }
+.editorial-mark-quote { margin: .3rem 0 .6rem; padding: .3rem .6rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); font-family: var(--font-serif); overflow-wrap: anywhere; }
 .editorial-mark-field { display: grid; gap: .2rem; margin: .5rem 0; font-weight: 700; }
 .editorial-mark-field textarea { width: 100%; padding: .45rem .55rem; border: 1px solid var(--boundary); border-radius: 6px; font: inherit; font-weight: 400; resize: vertical; }
 .editorial-mark-field textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -1744,7 +1739,6 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
   .outline-list, .search-results { max-height: 150px; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
-  .position-rail-label { grid-column: 1 / -1; }
   .native-artifact-facts, .task-authorization-facts, .analysis-facts, .review-facts, .review-consequences,
   .deliverables-facts, .publication-designate-summary { grid-template-columns: 1fr; }
   .native-artifact-facts dd + dt, .task-authorization-facts dd + dt, .analysis-facts dd + dt, .review-facts dd + dt, .review-consequences dd + dt,
@@ -1847,7 +1841,6 @@ input, select, textarea { color: var(--text); background-color: var(--surface); 
   /* Without colour the sidebar keeps its edge, each icon its outline, and the current row a heavier outline of its own. */
   .app-sidebar, .context-header { color: CanvasText; background: Canvas; border-color: CanvasText; }
   .app-sidebar .global-attention-entry, .sidebar-link { color: LinkText; background: Canvas; border-color: transparent; forced-color-adjust: none; }
-  .sidebar-link::before, .sidebar-book-title::before { color: CanvasText; background: Canvas; border: 1px solid CanvasText; forced-color-adjust: none; }
   .sidebar-link[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; border-color: CanvasText; box-shadow: none; }
   .sidebar-pin, .sidebar-toggle { color: ButtonText; background: ButtonFace; border: 1px solid ButtonText; forced-color-adjust: auto; }
   .settings-row, .settings-coming-soon { color: CanvasText; background: Canvas; border-color: CanvasText; }
@@ -2281,8 +2274,6 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .app-sidebar .nav-label, .app-sidebar .global-attention-entry-label { max-width: 180px; }
 .app-sidebar .icon { opacity: .8; }
 :root[data-sidebar="icons"] .app-sidebar .icon { opacity: 1; }
-.editor-technical-details { font-size: .8rem; color: var(--text-subdued); }
-.editor-technical-details summary { cursor: pointer; }
 :root[data-reduced-motion="true"] *, :root[data-reduced-motion="true"] *::before, :root[data-reduced-motion="true"] *::after {
   transition: none !important;
   animation: none !important;
@@ -2390,8 +2381,7 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 @keyframes manuscript-marker { 0% { transform: scale(.6); } 55% { transform: scale(1.6); } 100% { transform: scale(1); } }
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .icon { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.sidebar-link::before, .sidebar-book-title::before { display: none; content: none; }
-.sidebar-link, .sidebar-book-title, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
+.sidebar-link, .edge-entries .btn { display: flex; align-items: center; gap: .5rem; }
 :root[data-sidebar="icons"] .edge-label { display: none; }
 .btn { display: inline-flex; align-items: center; gap: .35rem; box-sizing: border-box; min-height: 32px; padding: .3rem .8rem; border: 1px solid var(--boundary-strong); border-radius: 7px; font: inherit; line-height: 1.4; cursor: pointer; color: var(--action-text); background: var(--action-secondary); }
 .btn.small, .btn.sidebar-pin { min-height: 26px; padding: .1rem .6rem; font-size: .8rem; }
