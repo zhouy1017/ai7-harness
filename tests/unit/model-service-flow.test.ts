@@ -143,6 +143,52 @@ describe('the one model-service flow', () => {
     await vi.waitFor(() => expect(setStatus).toHaveBeenCalledWith('模型列表已刷新，共 7 个可用模型。', 'success'));
   });
 
+  it('reports a foreground discovery failure even when the catalogue is unchanged', async () => {
+    const reason = '模型服务不可达，请检查网络或网络代理设置';
+    const projection = { ...settings(['deepseek-open-platform']),
+      routeChoice: { ...settings(['deepseek-open-platform']).routeChoice, unsupportedProviders: [] },
+      proxy: { mode: 'direct' }, lastProxyProbe: null, searchBackends: { backends: [], candidates: [] },
+      protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
+      modelDiscovery: { status: 'failure', code: 'MODEL_SERVICE_UNREACHABLE', reason },
+      launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
+        externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
+    } as unknown as ModelServiceSettingsProjection;
+    const calls = api(projection);
+    // Ordinary settings reads omit the transient discovery result; explicit refresh returns it.
+    const { modelDiscovery: _discovery, ...storedSettings } = projection;
+    vi.mocked(calls.getModelServiceSettings).mockResolvedValue(storedSettings);
+    let poll: (() => void) | undefined;
+    vi.stubGlobal('window', { ai7: calls, setInterval: (tick: () => void) => { poll = tick; return 0; }, clearInterval: () => undefined });
+    try {
+      const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
+        const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
+      };
+      const root = element('main'); document.body.append(root);
+      const setStatus = vi.fn();
+      const replaceScreen = vi.fn((_state: string, content: HTMLElement) => root.replaceChildren(content));
+      const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus, initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+        button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
+        rendererErrorMessage: (_error, fallback) => fallback, replaceScreen });
+      await screen.renderModelServiceSettings();
+      const page = root as unknown as MiniElement;
+      const secret = page.querySelectorAll('input').find((input) => input.type === 'password')!;
+      secret.value = 'synthetic-key'; secret.dispatchEvent({ type: 'input' });
+      page.querySelector('.model-credential-form')!.dispatchEvent({ type: 'submit' });
+      await vi.waitFor(() => expect(setStatus).toHaveBeenLastCalledWith(`凭据已保存，但无法获取模型列表：${reason}`, 'error'));
+      // The real visibility listener follows settings after role choices return to their original values.
+      (document.body as unknown as MiniElement).dispatchEvent({ type: 'visibilitychange' });
+      await vi.waitFor(() => expect(calls.refreshModelServiceModels).toHaveBeenCalledOnce());
+      expect(setStatus).toHaveBeenLastCalledWith(reason, 'error');
+      const technical = root.querySelector<HTMLDetailsElement>('.model-service-technical')!;
+      expect(technical.open).toBe(false);
+      expect(technical.querySelector('[data-model-discovery-code="MODEL_SERVICE_UNREACHABLE"]')).not.toBeNull();
+      poll!();
+      await vi.waitFor(() => expect(calls.getModelServiceSettings).toHaveBeenCalledTimes(3));
+      expect(root.querySelector('.model-service-technical') === technical).toBe(true);
+      expect(replaceScreen).toHaveBeenCalledTimes(2);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
   it('shows saved credentials separately when discovery fails', async () => {
     const responseProjection = Object.assign(settings(['anthropic-claude']), {
       modelDiscovery: { status: 'failure', code: 'MODEL_DISCOVERY_CREDENTIAL_REJECTED', reason: '模型服务拒绝了凭据' },

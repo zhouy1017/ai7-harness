@@ -630,14 +630,17 @@ button:disabled { cursor: not-allowed; opacity: .5; }
    beside the central destination. Below 1120 px it lies over the page (§0.3: 所有面都要在 1120 px 以下把右侧辅助面
    改为覆盖抽屉); at 1120 px and wider the page makes room for it, so the manuscript stays visible beside the plan.
    It never scrolls sideways, its header and footer stay in view, and its content wraps at 200% zoom. */
-:root { --task-drawer-width: min(26rem, max(20rem, calc(100vw - var(--sidebar-width) - var(--manuscript-min-width, 480px) - 9rem))); }
-.task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(26rem, calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
+:root { --task-drawer-width: 500px; }
+.task-drawer { position: fixed; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; flex-direction: column; width: min(var(--task-drawer-width), calc(100vw - 1rem)); min-width: 0; border-left: 1px solid var(--boundary); background: var(--surface); color: var(--text); box-shadow: -18px 0 40px var(--shadow); overflow-wrap: anywhere; }
 .task-drawer[hidden] { display: none; }
 @media (min-width: 1120px) {
   body[data-task-drawer="open"] { padding-right: var(--task-drawer-width); }
   .task-drawer { width: var(--task-drawer-width); box-shadow: none; }
 }
-.task-drawer-head { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .5rem; padding: .55rem .8rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
+.task-drawer-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .5rem; padding: .55rem .8rem; border-bottom: 1px solid var(--boundary); background: var(--surface-subdued); }
+.task-drawer-identity { display: grid; gap: .2rem; min-width: 0; justify-items: start; }
+.task-drawer-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .5rem; }
+.task-drawer-close { justify-content: center; width: 36px; }
 .task-drawer-title { flex: 1 1 auto; margin: 0; font-size: 1.05rem; }
 .task-drawer-title:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .task-drawer-head .quiet { min-height: 36px; padding: .3rem .45rem; }
@@ -2435,8 +2438,6 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .task-overview-sheet-books { display:grid; gap:10px; margin-bottom:18px; }
 .task-overview-sheet-book { display:flex; gap:10px; align-items:center; }
 .task-overview-sheet .sheet-foot { display:flex; gap:12px; align-items:center; }
-body:has([data-screen="task-overview"]) { --task-drawer-width:500px; }
-body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:calc(100vw - 40px); }
 .task-panel .task-overview-card { flex-wrap:wrap; }
 .task-panel .task-overview-card-actions { width:100%; justify-content:flex-end; }
 .task-panel .task-overview-heading-row { flex-wrap:wrap; }
@@ -2534,3 +2535,17 @@ body:has([data-screen="task-overview"]) #task-drawer { width:500px; max-width:ca
 .library-material > .library-heading .library-source { display: none; }
 .library-material > .knowledge-file-summary { margin: .25rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .exemplar-book > :is(h3, .field-note) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: .25rem 0; }
+/* B2 / M1: state changes are immediate; spatial feedback never delays controls. */
+.task-drawer { transform: translateX(0); transition: transform var(--motion-slow) var(--motion-ease), display var(--motion-slow) allow-discrete; }
+.task-drawer[hidden] { transform: translateX(100%); pointer-events: none; transition-timing-function: var(--motion-exit); }
+@starting-style { .task-drawer:not([hidden]) { transform: translateX(100%); } }
+.task-plan-progress { height: 4px; overflow: hidden; border-radius: 2px; background: var(--boundary); }
+.task-plan-progress-fill { display: block; height: 100%; background: var(--status-progress); transition: width var(--motion-base) var(--motion-ease); }
+.task-plan-stage-chain { display: flex; flex-wrap: wrap; gap: .35rem .7rem; margin: 0; padding: 0; list-style: none; color: var(--text-subdued); font-size: .8rem; }
+.task-plan-stage-chain li::before { content: ''; display: inline-block; width: .45em; height: .45em; margin-right: .35em; border: 1px solid currentColor; border-radius: 50%; }
+.task-plan-stage-chain [aria-current="step"] { color: var(--status-progress); font-weight: 700; }
+.task-plan-stage-chain [aria-current="step"]::before { background: currentColor; animation: task-busy-pulse 1.6s ease-in-out infinite; }
+.state-term[data-busy="true"]::before { animation: task-busy-pulse 1.6s ease-in-out infinite; }
+.task-plan-activity-facts dd { font-variant-numeric: tabular-nums; }
+@keyframes task-busy-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .task-drawer, .task-plan-progress-fill { transition: none; } .state-term[data-busy="true"]::before, .task-plan-stage-chain [aria-current="step"]::before { animation: none; } }

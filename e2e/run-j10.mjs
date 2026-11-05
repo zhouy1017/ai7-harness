@@ -96,8 +96,7 @@ const EIGHTH_BOOK = Object.freeze({ title: '归纳结果待确认旅程' });
 const REDUCTION_UNKNOWN_FIXTURE_IDENTITY = 'sample1-baseline-reduction-unknown';
 const UNCONFIRMED_REASON = '回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。';
 // Only a step is listed, so the statement names no later re-send (#763 review).
-const UNCONFIRMED_STATEMENT = '跨单元归纳的请求已发出，但回答没有完整传回，无法确认模型服务是否已处理并计费；运行已结束，这些部分在结果里记为结果待确认的缺口，AI7 没有自动再发。' +
-  '保留为缺口只记下你的确认：不发送任何内容，不改变结果。';
+const UNCONFIRMED_STATEMENT = '回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认。';
 /** The fourth Book's launch: unit 2 fails for good, and unit 5's first attempt fails retry-safe (Issue #422, S76d). */
 const TRANSIENT_FIXTURE_IDENTITY = 'sample1-baseline-transient-retry';
 /** Five ranges may settle before the fourth Book's Run is held: 1 to 4 do, 5 asks, 6 settles, and 7 is in flight. */
@@ -862,6 +861,25 @@ async function main() {
     requireJourney(JSON.stringify(running.actions) === JSON.stringify(RUNNING_ACTIONS) && running.impact === null, 'run-controls', running.actions);
 
     // ---- 暂停 and 续行 (Issue #422, S76b; CTRL-001, CONT-015) ----------------------------------------------
+    await assertRenderer(renderer, `(() => {
+      const drawer=document.querySelector('#task-drawer'), progress=drawer.querySelector('[role="progressbar"]');
+      const elapsed=drawer.querySelector('[data-task-plan-activity-row="用时"]');
+      globalThis.b2Elapsed={node:elapsed, text:elapsed.textContent};
+      return drawer.querySelector('.state-term[data-busy="true"]') !== null &&
+        drawer.querySelector('[data-stage="units"][aria-current="step"]') !== null &&
+        progress?.getAttribute('aria-valuenow')==='2' && progress.getAttribute('aria-valuemax')==='8' &&
+        getComputedStyle(elapsed).fontVariantNumeric.includes('tabular-nums');
+    })()`, 'drawer-live-motion-state');
+    await waitFor(renderer, `(() => { const cell=document.querySelector('#task-drawer [data-task-plan-activity-row="用时"]'); return cell===globalThis.b2Elapsed.node && cell.textContent!==globalThis.b2Elapsed.text; })()`, 'drawer-elapsed-stable', 10_000);
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    await assertRenderer(renderer, `(() => {
+      const drawer=document.querySelector('#task-drawer'), fill=drawer.querySelector('.task-plan-progress-fill');
+      return getComputedStyle(drawer).transitionDuration==='0s' && getComputedStyle(fill).transitionDuration==='0s' &&
+        getComputedStyle(drawer.querySelector('[data-busy="true"]'),'::before').animationName==='none' &&
+        getComputedStyle(drawer.querySelector('[aria-current="step"]'),'::before').animationName==='none';
+    })()`, 'drawer-reduced-motion');
+    await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+
     at('pause-requested');
     // CTRL-001: 暂停 is one click and asks nothing. 正在暂停 is recorded at once, and nothing more is offered while
     // the range in flight finishes.
@@ -1750,7 +1768,7 @@ async function main() {
     'unknown-unit-gap-with-revision-and-outcome');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed h4')?.textContent==='该单元结果未知' && document.querySelector('#task-drawer [data-task-drawer-control="resume"]')===null && document.querySelector('#task-drawer [data-task-drawer-control="cancel-run"]')===null`, 'unknown-unit-ui', 30_000);
     // #1310: the range explanation separates changed text from a failed reread.
-    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent.includes('后续分析发现原文已修改时，该范围不再列出；上次重读未成功的范围仍待确认。')`, 'unknown-unit-explanation');
+    await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed .attention-note')?.textContent==='回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认，以后重读会先说明。'`, 'unknown-unit-explanation');
     await clickSelector(renderer, '#task-drawer [data-task-drawer-control="view-unconfirmed-record"]', 'unknown-unit-view');
     await waitFor(renderer, `document.querySelector('#task-drawer .task-plan-unconfirmed li')?.textContent==='第 4 个阅读范围 · 请求已发出 · 回答没有完整传回'`, 'unknown-unit-listed', 30_000);
     const completedAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention()`);

@@ -1312,11 +1312,11 @@ async function main() {
       JSON.stringify(firstDrawer.chips) === JSON.stringify({ book: bookName, position: '全书', selected: `已选 ${wholeCount} 字`, revision: '任务输入修订版 r1', procedure: '工序「基线分析」' }) &&
       firstDrawer.saved === null && firstDrawer.drift === null &&
       JSON.stringify(firstDrawer.rows) === JSON.stringify({
-        处理: `《${bookName}》全书 · ${wholeCount} 字 · ${SAMPLE1_UNITS} 个阅读范围`,
-        发送: '本环境不连接模型服务，不会发送任何内容 · 用量：不发送，没有模型用量 · 未设置任务预算上限',
-        会得到: '一份基线分析：梗概、人物与名称、事件、关系、设定和各章；这次运行的运行报告',
-        不会: '不会直接修改稿件 · 不导出或发布 · 不存里程碑版本 · 不读这本书以外的内容 · 不作事实判定',
-        中途: '预计无需中途参与',
+        处理: '只处理任务卡所列范围，不参考其他材料。',
+        发送: '不发送内容，无模型用量，未设预算上限。',
+        会得到: '一份基线分析。',
+        不会: '不改稿、导出发布、存里程碑、越界阅读或作事实判定。',
+        中途: '预计无需参与，可随时暂停或取消。',
       }) && firstDrawer.actions === 0 && firstDrawer.footer === '计划说明，不是运行授权', 'analysis-drawer-compact', firstDrawer);
     await reviewAction(renderer, '#task-drawer [data-task-drawer-control="mode-full"]', 'analysis-drawer-full');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerMode==='full' && document.querySelectorAll('#task-drawer [data-task-plan-section]').length===6`, 'analysis-drawer-full-mode');
@@ -1347,9 +1347,9 @@ async function main() {
     at('analysis-bar-ready');
     // Issue #420 (S74a): the drawer's footer is the authorization bar. The deterministic route sends nothing,
     // so the credential this Book holds — `missing` since the model setup above — is not needed: 开始任务 is
-    // offered. The summary names the plan version, and the word 授权 is on no button anywhere.
+    // offered. The summary names the output; the version stays in drawer state, and no button says 授权.
     requireJourney(missingConnection?.credentialOperationState === 'missing' && firstFull?.bar?.state === 'ready' && firstFull.bar.start === 'ready' &&
-      firstFull.bar.summary === `《${bookName}》 · 全书 · 计划版本 1 · 主编辑角色 · 未设置任务预算上限 · 产出：一份基线分析 · 不改稿` &&
+      firstFull.bar.summary === '产出一份基线分析，不修改稿件。' &&
       firstFull.bar.statement === BAR_STATEMENT && firstFull.bar.note === null && firstFull.bar.status === null && firstFull.bar.refusal === null &&
       // Synchronized delta with Issue #419 (S73): 返回修改 opens the editing of a plan that takes edits.
       barActions(firstFull) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
@@ -2584,8 +2584,8 @@ async function main() {
       v2Drawer.technical['selected-range'] === `段落 ${rangeB.startPosition}–${rangeB.endPosition}` &&
       v2Drawer.technical['plan-versions'] === `版本 1 · superseded · ${v1Digest}；版本 2 · current · ${v2Digest}` &&
       v2Drawer.technical['plan-envelope'] === v2Digest &&
-      // Issue #420 (S74a): version 2 is startable from the bar, whose summary names it.
-      v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary?.includes(' · 计划版本 2 · ') === true &&
+      // Issue #420 (S74a): version 2 is startable from the bar; its identity stays in the drawer state above.
+      v2Drawer.bar?.state === 'ready' && v2Drawer.bar.summary === '产出一份基线分析，不修改稿件。' &&
       barActions(v2Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'plan-revision-drawer-range', v2Drawer);
     await assertRenderer(renderer, `document.querySelector('.baseline-analysis-card .analysis-plan-summary .task-plan-summary-line')?.textContent===${JSON.stringify(`计划：重新分析所选范围 · 第 ${rangeB.startPosition}–${rangeB.endPosition} 段 · 重新分析 ${driftOptionB.expected.recomputed} 个阅读范围，沿用 ${driftOptionB.expected.reused} 个 · 任务输入修订版 ${reconfirmed.checkpoint.revisionLabel} · 计划版本 2`)}`, 'plan-revision-summary-range');
@@ -2674,7 +2674,7 @@ async function main() {
     'plan-edit-version', { planVersion: edited?.planVersion, planRevision: editRevision, boundary: edited?.planEnvelope?.boundary });
     const v3Drawer = await readDrawer(renderer);
     const v3Items = await readEditable(renderer);
-    requireJourney(v3Drawer?.version === '3' && v3Drawer.bar?.summary?.includes(' · 计划版本 3 · ') === true &&
+    requireJourney(v3Drawer?.version === '3' && v3Drawer.bar?.summary === '产出一份基线分析，不修改稿件。' &&
       barActions(v3Drawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled' &&
       v3Items?.record?.startsWith('第 3 版由你修改（') === true && v3Items.record.endsWith('）：步骤 · 核对与抽检：要做 → 不做；可以自己调整 · 安全地再试一次：允许 → 不允许') &&
       JSON.stringify(v3Items.items.slice(2).map((item) => [item.id, item.removed, item.tag, item.control])) === JSON.stringify([
@@ -2976,7 +2976,7 @@ async function main() {
     // Issue #420 (S74a): the Run's one approval is the bar's 开始任务; the categories' deterministic route
     // needs no credential, so it is offered while the Book's credential stays `missing`.
     requireJourney(reviewDrawer.bar?.state === 'ready' && reviewDrawer.bar.start === 'ready' &&
-      reviewDrawer.bar.summary === `《${bookName}》 · 全书 · 主编辑角色 · 未设置任务预算上限 · 产出：审阅发现与审阅报告 · 不改稿` &&
+      reviewDrawer.bar.summary === '产出审阅发现与审阅报告，不修改稿件。' &&
       reviewDrawer.bar.statement === BAR_STATEMENT && reviewDrawer.bar.note === null &&
       barActions(reviewDrawer) === 'start:开始任务:enabled|revise:返回修改:enabled|save-draft:保存草稿:enabled',
     'review-bar-ready', reviewDrawer.bar);
