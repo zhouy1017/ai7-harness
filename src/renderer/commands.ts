@@ -66,7 +66,7 @@ export const COMMANDS: readonly CommandDefinition[] = [
     defaults: { win32: `Alt+Shift+${index + 1}`, darwin: `Mod+Alt+Shift+${index + 1}` },
   })),
   { id: 'nav.settings', name: COMMAND_NAMES['nav.settings'], group: 'navigation', context: 'application', defaults: both('Mod+Comma') },
-  { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Shift+B') },
+  { id: 'view.toggleSidebar', name: COMMAND_NAMES['view.toggleSidebar'], group: 'view', context: 'application', defaults: both('Mod+Backslash') },
   { id: 'nav.back', name: COMMAND_NAMES['nav.back'], group: 'navigation', context: 'application', defaults: { win32: 'Alt+ArrowLeft', darwin: 'Mod+BracketLeft' } },
   { id: 'search.find', name: COMMAND_NAMES['search.find'], group: 'search', context: 'manuscript', defaults: both('Mod+F') },
   { id: 'search.next', name: COMMAND_NAMES['search.next'], group: 'search', context: 'manuscript', defaults: { win32: 'F3', darwin: 'Mod+G' } },

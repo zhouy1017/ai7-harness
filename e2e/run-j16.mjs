@@ -411,6 +411,8 @@ const READ_PANEL = `(() => {
         state: card.dataset.taskState ?? null,
         blocked: card.dataset.taskBlocked ?? null,
         kind: card.dataset.taskKind ?? null,
+        kindLabel: text(card.querySelector('.task-overview-card-kind')),
+        time: text(card.querySelector('.task-overview-card-time')),
         title: text(card.querySelector('.task-overview-card-title strong')),
         pill: text(card.querySelector('.task-overview-state')),
         reason: text(card.querySelector('.task-overview-card-line')),
@@ -1015,8 +1017,10 @@ async function main() {
     await assertRenderer(renderer, `document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'panel'`, 'panel-no-plan-wall');
     at('panel-stop-wording');
     const running = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running' &&
-      cardsOf(panel, 'running')[0].reason.startsWith(`第 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个单元`), 'panel-running', 180_000);
+      cardsOf(panel, 'running')[0].reason.startsWith(`已完成 ${FIRST_HOLD} / ${SAMPLE1_UNITS} 个阅读范围`), 'panel-running', 180_000);
     requireJourney(running.running === 'true' && cardsOf(running, 'running')[0].pill === '运行中' && statesOf(running, 'waiting').length === 0 &&
+      cardsOf(running, 'running')[0].kindLabel === cardsOf(running, 'running')[0].kind &&
+      cardsOf(running, 'running')[0].time.startsWith('记录于 ') && cardsOf(running, 'running')[0].reason.length <= 60 &&
       JSON.stringify(cardsOf(running, 'running')[0].actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消', 'enabled']]),
     'panel-running-card', running);
 
@@ -1320,7 +1324,7 @@ async function main() {
     const background = await waitForPanel(renderer, (panel) => cardsOf(panel, 'running').some((card) => card.state === 'dialogue-answering'), 'dialogue-background-card');
     const backgroundCard = cardsOf(background, 'running').find((card) => card.state === 'dialogue-answering');
     requireJourney(backgroundCard.kind === '对话' && backgroundCard.title === `对话 · ${DIALOGUE_QUESTION}` && backgroundCard.pill === '运行中' &&
-      backgroundCard.reason === '正在处理' &&
+      backgroundCard.reason === '正在处理稿件。' &&
       JSON.stringify(backgroundCard.actions) === JSON.stringify([['pause', '暂停', 'enabled'], ['cancel', '取消', 'enabled']]), 'dialogue-background-words', backgroundCard);
     await assertRenderer(renderer, `(() => { const title = document.querySelector('#task-drawer-title'); title.focus(); return document.activeElement === title; })()`, 'dialogue-background-focus');
     await writeAnswerHold(4);
