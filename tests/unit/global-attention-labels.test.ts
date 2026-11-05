@@ -381,12 +381,12 @@ describe('each item', () => {
     expect(globalAttentionObjectLabel({ kind: 'dialogue', question: null })).toBe('提问 · 记录不在本机');
   });
 
-  it('gives every state one bounded why-sentence without a next-step prefix', () => {
+  it('keeps fixed state copy complete without a next-step prefix', () => {
     for (const state of STATES) {
       const reason = globalAttentionReason(item(state));
       expect(reason, state).not.toBe('');
-      expect([...reason].length, state).toBeLessThanOrEqual(60);
-      expect(reason, state).not.toMatch(/安全的下一步：|[。！？].+/u);
+      expect(reason, state).not.toMatch(/…[。！？]?$/u);
+      expect(reason, state).not.toContain('安全的下一步：');
     }
     expect(globalAttentionReason(item('analysis-outcome-unknown'))).toBe('回答未完整传回，处理与计费结果待确认，AI7 没有自动重发。');
     expect(globalAttentionReason(item('analysis-prepared'))).toBe('计划已准备好，等待你开始任务。');
@@ -400,6 +400,8 @@ describe('each item', () => {
   it('says when, in local time, and as a completion in 最近完成', () => {
     expect(globalAttentionTimeLine('exceptions', AT)).toBe(`记录于 ${localInstantLabel(AT)}`);
     expect(globalAttentionTimeLine('recent', AT)).toBe(`完成于 ${localInstantLabel(AT)}`);
+    expect(globalAttentionTimeLine('recent', AT, 'cancelled')).toBe(`取消于 ${localInstantLabel(AT)}`);
+    expect(globalAttentionTimeLine('recent', AT, 'stopped')).toBe(`停止于 ${localInstantLabel(AT)}`);
   });
 
   it('reads as one view: the Book, the object, the state, the reason, the next step and the way in', () => {
