@@ -1206,7 +1206,7 @@ async function openTaskNotification(itemId: string, target: GlobalAttentionTarge
 async function openOverviewResult(item: TaskOverviewItemProjection): Promise<void> {
   if (!item.bookId) return;
   const api = taskOverviewApi(window.ai7, () => item.bookId);
-  if (item.result) openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), api);
+  if (item.result || item.attention.object.kind === 'task') openTaskResult({ item: item.attention, result: item.result }, () => taskOverviewSurface?.focus(item.itemId), api);
   else openOverviewTask(item, 'run');
 }
 function renderTaskOverview(focusItemId?: string): void {

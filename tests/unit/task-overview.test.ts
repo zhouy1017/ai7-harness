@@ -1,4 +1,5 @@
-import { installMiniDom } from '../support/mini-dom.js';
+import { installMiniDom, miniDocument } from '../support/mini-dom.js';
+import { openTaskResultWindow } from '../../src/renderer/task-result-window.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { mountTaskOverview, taskOverviewCard } from '../../src/renderer/tasks-overview.js';
 import { mountTaskPanel } from '../../src/renderer/task-panel.js';
@@ -13,6 +14,26 @@ function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttent
     target: { kind: 'analysis', bookId: 'book', taskIntentId: id }, technical: [{ key: 'run-record', label: '运行', value: id }] };
 }
 describe('task overview', () => {
+  it('shows a completed writing task without navigating away from the current plan', () => {
+    const uninstall = installMiniDom();
+    vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
+    vi.stubGlobal('document', { ...miniDocument, createElement: (tag: string) => Object.assign(miniDocument.createElement(tag), { style: { removeProperty: vi.fn() } }) });
+    const item: GlobalAttentionItemProjection = { ...task('recent', 'analysis-completed', 'writing'), object: { kind: 'task', taskKind: 'writing' },
+      target: { kind: 'task-plan', bookId: 'book', taskKind: 'writing', ref: 'writing' }, facts: { progress: null, categories: [], revisionOrdinal: null, completion: { gaps: 0, total: 2, reason: null } } };
+    const openSurface = vi.fn();
+    const api = { inspectBaselineAnalysis: vi.fn<RendererApi['inspectBaselineAnalysis']>(), getAnalysisRevisionUnits: vi.fn<RendererApi['getAnalysisRevisionUnits']>(),
+      getAnalysisRevisionOverview: vi.fn<RendererApi['getAnalysisRevisionOverview']>(), inspectReviewWorkspace: vi.fn<RendererApi['inspectReviewWorkspace']>(), inspectDialogue: vi.fn<RendererApi['inspectDialogue']>() };
+    const result = openTaskResultWindow({ entry: { item, result: null }, api, column: () => null, jump: vi.fn(), openSurface, onClose: vi.fn(), errorMessage: () => '读取失败' });
+    try {
+      expect(result.element.dataset['taskResult']).toBe('ready');
+      expect(result.element.dataset['taskResultKind']).toBe('task');
+      expect(result.element.textContent).toContain('已完成 2 / 2 个单元。');
+      expect(openSurface).not.toHaveBeenCalled();
+      for (const read of Object.values(api)) expect(read).not.toHaveBeenCalled();
+      result.element.querySelector<HTMLButtonElement>('[data-task-result-action="open"]')!.click();
+      expect(openSurface).toHaveBeenCalledWith(item.target, undefined);
+    } finally { result.close(false); vi.unstubAllGlobals(); uninstall(); }
+  });
   it.each(['analysis-waiting-network', 'analysis-waiting-connection', 'analysis-waiting-admission', 'analysis-waiting-slot'] as const)('keeps %s out of running counts and pause controls', (state) => {
     const uninstall = installMiniDom();
     try {
