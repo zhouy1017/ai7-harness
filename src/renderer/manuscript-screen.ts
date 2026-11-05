@@ -2113,8 +2113,9 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   });
   manuscriptRail.setPosition(initialWindow.position.proportion);
   manuscriptRail.refresh();
+  const taskBadgeVisible = (): boolean => document.visibilityState !== 'hidden';
   const readTaskBadge = async (): Promise<void> => {
-    if (taskBadgeReading || destroyed || document.visibilityState === 'hidden') return;
+    if (taskBadgeReading || destroyed || !taskBadgeVisible()) return;
     taskBadgeReading = true;
     let pollMs = 2_000;
     try {
@@ -2132,12 +2133,12 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
       tasksEntry.querySelector<HTMLElement>('.edge-badge')!.hidden = true;
     } finally {
       taskBadgeReading = false;
-      if (!destroyed && document.visibilityState !== 'hidden') taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), pollMs);
+      if (!destroyed && taskBadgeVisible()) taskBadgeTimer = window.setTimeout(() => void readTaskBadge(), pollMs);
     }
   };
   function taskBadgeVisibility(): void {
     if (taskBadgeTimer !== undefined) window.clearTimeout(taskBadgeTimer);
-    if (document.visibilityState !== 'hidden') void readTaskBadge();
+    if (taskBadgeVisible()) void readTaskBadge();
   }
   if (!isDocument) {
     document.addEventListener('visibilitychange', taskBadgeVisibility);

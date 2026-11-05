@@ -123,11 +123,14 @@ describe('the Position Rail at 1,200 marks', () => {
     expect(track.getAttribute('aria-valuenow')).toBe('260000');
     track.dispatchEvent({ type: 'keydown', key: 'End', preventDefault: vi.fn() });
     expect(jump).toHaveBeenLastCalledWith(1);
+    track.setAttribute('aria-valuenow', '750013');
+    track.dispatchEvent({ type: 'change' });
+    expect(jump).toHaveBeenLastCalledWith(0.750013);
     track.setAttribute('aria-disabled', 'true');
     track.dispatchEvent({ type: 'keydown', key: 'Home', preventDefault: vi.fn() });
-    expect(jump).toHaveBeenCalledTimes(2);
+    expect(jump).toHaveBeenCalledTimes(3);
     surface.destroy();
     track.dispatchEvent({ type: 'keydown', key: 'ArrowUp', preventDefault: vi.fn() });
-    expect(jump).toHaveBeenCalledTimes(2);
+    expect(jump).toHaveBeenCalledTimes(3);
   });
 });
