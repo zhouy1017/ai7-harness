@@ -357,9 +357,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .review-manuscript-line { margin: .45rem 0 0; }
 .review-coverage-section, .review-runs-section, .review-run, .review-plans, .review-progress-section, .review-results, .review-report { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--boundary); }
 .review-coverage-section > p, .review-runs-section > p, .review-results > p, .review-report > p { margin: .45rem 0 0; }
-.review-coverage { width: 100%; margin-top: .6rem; border-collapse: collapse; font-size: .92rem; }
-.review-coverage th, .review-coverage td { padding: .45rem .5rem; border-bottom: 1px solid var(--boundary); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
-.review-coverage thead th { color: var(--text-subdued); font-size: .84rem; }
+/* B4: state cards share the A4 pills; coverage appears only after a review has run. */
+.review-coverage { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: .65rem; margin: .6rem 0 0; padding: 0; list-style: none; }
+.review-coverage-card { min-width: 0; padding: .8rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
+.review-coverage-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: .35rem .6rem; }
+.review-coverage-title h5 { margin: 0; font-size: .92rem; }
+.review-coverage-counts, .review-coverage-hint { margin: .45rem 0 0; font-size: .84rem; color: var(--text-subdued); }
 .review-coverage .secondary { min-height: 36px; padding: .35rem .7rem; }
 .review-runs { display: grid; gap: .5rem; margin: .55rem 0 0; padding-left: 1.4rem; }
 .review-runs > li { padding: .6rem .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); }
@@ -959,8 +962,12 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .series-field input, .series-field textarea { width: 100%; max-width: 32rem; box-sizing: border-box; font: inherit; }
 .series-members, .series-history-section { display: grid; gap: .6rem; min-width: 0; }
 .series-members h3, .series-history-section h3, .series-members p { margin: 0; overflow-wrap: anywhere; }
-.series-member-table { width: 100%; border-collapse: collapse; }
-.series-member-table th, .series-member-table td { padding: .4rem .6rem; border-bottom: 1px solid var(--boundary); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.series-member-list { display: grid; gap: .65rem; margin: .6rem 0 0; padding: 0; list-style: none; }
+.series-member-card { min-width: 0; padding: .8rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); overflow-wrap: anywhere; }
+.series-member-heading, .series-consistency { display: flex; flex-wrap: wrap; gap: .35rem .6rem; align-items: baseline; }
+.series-member-heading { justify-content: space-between; }
+.series-member-title { margin: 0; }
+.series-member-people, .series-consistency { margin: .4rem 0 0; }
 .series-add-chooser { display: grid; gap: .4rem; min-width: 0; margin: 0; padding: .8rem 1rem; border: 1px solid var(--boundary); border-radius: 12px; }
 .series-add-choice { display: flex; align-items: center; gap: .45rem; }
 .series-preview { display: grid; gap: .6rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface-subdued); }
@@ -1174,6 +1181,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .deliverables-package > p { margin: .45rem 0 0; }
 .package-condition-list, .package-version-list { display: grid; gap: .45rem; margin: .5rem 0 0; padding-left: 1.2rem; }
 .package-condition-list > li, .package-version-list > li { min-width: 0; }
+.package-condition-list { padding: 0; list-style: none; }
+.package-condition-list > li { padding: .7rem; border: 1px solid var(--boundary); border-radius: 9px; background: var(--surface); }
+.package-condition-detail { margin: .3rem 0 0; }
 .package-condition-line { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: baseline; margin: 0; }
 .package-condition-state.is-unmet { font-weight: 800; }
 .package-condition-notice { margin: .3rem 0 0; }
@@ -1231,6 +1241,9 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .task-result-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .task-result-table th, .task-result-table td { padding: .35rem .4rem; border-bottom: 1px solid var(--boundary); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .task-result-table th:first-child, .task-result-table td:first-child { width: 2.4rem; }
+.task-result-units { display: grid; gap: .5rem; margin: .6rem 0 0; padding: 0; list-style: none; }
+.task-result-unit { display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem .7rem; padding: .7rem; border: 1px solid var(--boundary); border-radius: 9px; overflow-wrap: anywhere; }
+.task-result-unit h4 { margin: 0; }
 /* 就这段提问… (Issue #52, S17a): the dialogue in the side slot. Fragments run on as prose; one a line break follows ends its
    line. The answer in flight carries its state in words beside it, never in colour alone. */
 .dialogue { display: grid; gap: .8rem; min-width: 0; }
@@ -1418,6 +1431,7 @@ legend { margin-bottom: .7rem; font-weight: 800; }
 .field-note { display: block; margin-top: .45rem; color: var(--text-subdued); font-size: .84rem; }
 
 .fidelity-list, .dimension-list { display: grid; gap: .65rem; margin-top: 1rem; }
+.fidelity-list { padding: 0; list-style: none; }
 .fidelity-row { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(150px, .65fr) 2fr; gap: .8rem; align-items: start; padding: .8rem; border-radius: 9px; background: var(--surface); border: 1px solid var(--boundary); }
 .fidelity-name { font-weight: 800; }
 .count { color: var(--text-subdued); font-weight: 500; }
@@ -1738,21 +1752,14 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
   .analysis-axes { grid-template-columns: 1fr; }
 }
 
-/* 审阅's two tables reflow into one labelled block per row below 760 px, so a 200% zoom never scrolls
+/* 审阅's report tables reflow into one labelled block per row below 760 px, so a 200% zoom never scrolls
    sideways; each cell names its column itself, and the header row stays for assistive technology. */
 @media (max-width: 760px) {
-  .review-coverage thead, .review-report-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .review-coverage, .review-coverage tbody, .review-coverage tr, .review-coverage th, .review-coverage td,
+  .review-report-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .review-report-table, .review-report-table tbody, .review-report-table tr, .review-report-table th, .review-report-table td { display: block; width: 100%; }
-  .review-coverage tr, .review-report-table tr { padding: .5rem 0; border-bottom: 1px solid var(--boundary); }
-  .review-coverage th, .review-coverage td, .review-report-table th, .review-report-table td { padding: .15rem 0; border-bottom: 0; }
-  .review-coverage td[data-label]::before, .review-report-table td[data-label]::before { content: attr(data-label) "："; color: var(--text-subdued); font-size: .84rem; }
-  /* 书系's member table (S28a) stacks the same way, each cell saying its column. */
-  .series-member-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .series-member-table, .series-member-table tbody, .series-member-table tr, .series-member-table th, .series-member-table td { display: block; width: 100%; }
-  .series-member-table tr { padding: .5rem 0; border-bottom: 1px solid var(--boundary); }
-  .series-member-table th, .series-member-table td { padding: .15rem 0; border-bottom: 0; }
-  .series-member-table td[data-label]::before { content: attr(data-label) "："; color: var(--text-subdued); font-size: .84rem; }
+  .review-report-table tr { padding: .5rem 0; border-bottom: 1px solid var(--boundary); }
+  .review-report-table th, .review-report-table td { padding: .15rem 0; border-bottom: 0; }
+  .review-report-table td[data-label]::before { content: attr(data-label) "："; color: var(--text-subdued); font-size: .84rem; }
   .review-group-heading > button { margin-left: 0; }
   .review-sheet { padding: 1rem; }
   /* 稿件冲突's panes stack, each cell saying its pane; the header row stays for assistive technology. */

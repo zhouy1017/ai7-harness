@@ -77,7 +77,6 @@ export const TASK_RESULT_OPEN = { analysis: '在分析中打开', review: '在�
 /** The window leaves the reading position where it is; a jump leaves the way back (TASK-045). */
 export const TASK_RESULT_FOOT_NOTE = '浮窗不改变你在稿件中的位置；跳过去后，稿件顶部会有「回到…」，一键回来。';
 export const TASK_RESULT_COLUMNS = {
-  analysis: ['#', '阅读范围', '结果', '位置'],
   review: ['#', '类别', '发现', '位置'],
 } as const;
 

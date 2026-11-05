@@ -11,6 +11,7 @@ import type {
   SeriesProjection,
 } from '../shared/protocol.js';
 import { localInstantLabel } from './plan-preview-labels.js';
+import { stateTerm } from './components/controls.js';
 import { mountSeriesKnowledge } from './series-knowledge.js';
 import { mountSeriesExclusions } from './series-exclusions.js';
 import { technicalLayerVisible } from './technical-layer.js';
@@ -36,7 +37,6 @@ import {
   SERIES_HISTORY_IMPACT,
   SERIES_HISTORY_MORE,
   SERIES_LIST_MORE,
-  SERIES_MEMBER_COLUMNS,
   SERIES_MEMBERS_EMPTY,
   SERIES_MEMBERS_HEADING,
   SERIES_MEMBERS_MORE,
@@ -54,7 +54,7 @@ import {
   bookSeriesMoreLine,
   seriesChangeByline,
   seriesChangeLine,
-  seriesConsistencyLine,
+  seriesConsistencyLines,
   seriesListLine,
   seriesPeopleLine,
   seriesPreviewHeading,
@@ -314,7 +314,7 @@ export interface MountSeriesOptions {
 }
 
 /**
- * One Series' 成员与共享范围 (SER-001 to SER-010): the member table, 加入书系… and 移出书系… each through the inline preview
+ * One Series' 成员与共享范围 (SER-001 to SER-010): the member cards, 加入书系… and 移出书系… each through the inline preview
  * whose only committing action is exactly `加入书系` or `移出书系`, and the change records, newest first.
  *
  * Every list is read a page at a time (Issue #63 review): members newest joined first with `更多成员…`, the records with
@@ -367,7 +367,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     api,
     setStatus,
     errorMessage,
-    // A revision may change what 书系一致性 can read for each member: the member table repaints from the Series read again.
+    // A revision may change what 书系一致性 can read for each member: the member cards repaint from the Series read again.
     seriesChanged: (series) => {
       projection = series;
       paint(null, false);
@@ -383,7 +383,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     scope.append(el('span', 'series-scope-note', projection.members.length === 0 ? SERIES_SCOPE_NOTE.replace(/。$/u, '') : SERIES_SCOPE_NOTE));
     if (projection.members.length === 0) scope.append('；', el('span', 'series-members-empty', SERIES_MEMBERS_EMPTY));
     members.append(el('h3', undefined, SERIES_MEMBERS_HEADING), scope);
-    if (projection.members.length > 0) members.append(memberTable(projection));
+    if (projection.members.length > 0) members.append(memberCards(projection));
     if (projection.membersNext !== null) {
       const row = el('div', 'button-row series-more');
       const more = action(SERIES_MEMBERS_MORE, 'secondary', 'members-more', () => void loadMembers());
@@ -454,45 +454,32 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
   };
 
-  const memberTable = (series: SeriesProjection): HTMLElement => {
-    const table = el('table', 'series-member-table');
-    const head = el('thead');
-    const headRow = el('tr');
-    for (const column of SERIES_MEMBER_COLUMNS) {
-      const cell = el('th', undefined, column);
-      cell.scope = 'col';
-      headRow.append(cell);
-    }
-    head.append(headRow);
-    const body = el('tbody');
+  const memberCards = (series: SeriesProjection): HTMLElement => {
+    const list = el('ul', 'series-member-list');
     for (const member of series.members) {
-      const row = el('tr');
+      const row = el('li', 'series-member-card');
       row.dataset['bookId'] = member.bookId;
-      const title = el('th', undefined, `《${member.title}》`);
-      title.scope = 'row';
+      const title = el('h4', 'series-member-title', `《${member.title}》`);
       const remove = action(SERIES_REMOVE_OPEN, 'quiet', 'remove-open', () => void ask(member.bookId, 'remove'));
       remove.disabled = busy || chooser !== null || preview !== null;
       remove.setAttribute('aria-label', `移出书系：《${member.title}》`);
-      const actions = el('td');
-      actions.append(remove);
-      // Each cell names its column, which a narrow window shows beside it once the table stacks.
-      const cell = (column: number, text: string, className?: string): HTMLTableCellElement => {
-        const node = el('td', className, text);
-        node.dataset['label'] = SERIES_MEMBER_COLUMNS[column]!;
-        return node;
-      };
-      row.append(
-        title,
-        cell(1, seriesPeopleLine(member.authors)),
-        cell(2, seriesPeopleLine(member.editors)),
-        cell(3, localInstantLabel(member.joinedAt)),
-        cell(4, seriesConsistencyLine(member, localInstantLabel), 'series-consistency'),
-        actions,
-      );
-      body.append(row);
+      const heading = el('div', 'series-member-heading');
+      heading.append(title, remove);
+      const people = el('p', 'series-member-people');
+      people.append('作者：', el('span', 'series-member-authors', seriesPeopleLine(member.authors)),
+        ' · 责编：', el('span', 'series-member-editors', seriesPeopleLine(member.editors)));
+      const joined = el('span', 'series-member-joined', `${localInstantLabel(member.joinedAt)} 加入`);
+      people.append(' · ', joined);
+      const consistency = el('p', 'series-consistency');
+      const available = member.seriesConsistencyUnavailableReason === null;
+      const { reviewed, availability } = seriesConsistencyLines(member, localInstantLabel);
+      consistency.append(stateTerm(reviewed, member.seriesConsistencyReview === null ? 'neutral' : 'good'), ' · ',
+        stateTerm(availability, available ? 'good' : 'attention'));
+      if (!available) consistency.append(el('span', 'series-consistency-detail', `：${member.seriesConsistencyUnavailableReason}`));
+      row.append(heading, people, consistency);
+      list.append(row);
     }
-    table.append(head, body);
-    return table;
+    return list;
   };
 
   const chooserNode = (): HTMLElement => {
@@ -599,7 +586,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       asked = null;
       refusal = null;
       chooser = null;
-      paint(kind === 'remove' && bookId !== undefined ? `tr[data-book-id="${bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
+      paint(kind === 'remove' && bookId !== undefined ? `.series-member-card[data-book-id="${bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
     });
     cancel.disabled = busy;
     buttons.append(cancel);
@@ -654,7 +641,7 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
       projection = { ...shown, members: added, membersNext: page.nextCursor };
       membersLater = !fresh;
       busy = false;
-      paint(added[0] === undefined ? '[data-series-action="members-first"]' : `tr[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
+      paint(added[0] === undefined ? '[data-series-action="members-first"]' : `.series-member-card[data-book-id="${added[0].bookId}"] [data-series-action="remove-open"]`);
       setStatus(SERIES_STATUS.opened);
     } catch (error) {
       busy = false;
@@ -719,12 +706,12 @@ export function mountSeries(options: MountSeriesOptions): { load(): Promise<Seri
     try {
       const result = await api.changeSeriesMembership({ seriesId: shown.seriesId, bookId: shown.bookId, kind: shown.kind, previewDigest: shown.previewDigest });
       // The answer is the record alone (Issue #63 review): the Series is read again, its first pages newest first, so a Book
-      // just added heads the member table. The change stands whatever that read meets.
+      // just added heads the member cards. The change stands whatever that read meets.
       try { projection = await api.inspectSeries({ seriesId: shown.seriesId }); membersLater = false; historyLater = false; } catch { /* the page keeps what it had */ }
       busy = false;
       preview = null;
       asked = null;
-      paint(shown.kind === 'add' ? `tr[data-book-id="${shown.bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
+      paint(shown.kind === 'add' ? `.series-member-card[data-book-id="${shown.bookId}"] [data-series-action="remove-open"]` : '[data-series-action="add-open"]');
       setStatus(result.completionLabel, 'success');
     } catch (error) {
       busy = false;

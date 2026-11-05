@@ -1,4 +1,5 @@
 import { hydrateAnalysisRevision } from './analysis-paging.js';
+import { stateTerm } from './components/controls.js';
 import { ANALYSIS_MORE_RANGES } from './analysis-paging-labels.js';
 import type {
   HydratedAnalysisRevisionProjection as BaselineAnalysisResultSetRevisionProjection,
@@ -215,21 +216,22 @@ export function openTaskResultWindow(options: TaskResultWindowOptions): TaskResu
   }
 
   function showAnalysis(revision: BaselineAnalysisResultSetRevisionProjection): void {
+    const list = el('ul', 'task-result-units');
     const rows = revision.units.map((unit) => {
       const heading = revision.sections.find((candidate) => candidate.unitOrdinals.includes(unit.unitOrdinal))?.headingText ?? null;
-      const row = el('tr');
+      const row = el('li', 'task-result-unit');
       row.dataset['taskResultUnit'] = String(unit.unitOrdinal);
-      const place = el('td', 'task-result-place');
+      const place = el('div', 'task-result-place');
       place.append(jumpButton(unitBlockOf(unit), null));
       row.append(
-        el('td', undefined, String(unit.unitOrdinal)),
-        el('td', undefined, taskResultRangeTitle(unit.unitOrdinal, heading)),
-        el('td', undefined, analysisResultUnitLine(unit.state === 'gap' ? unit.gap : null)),
+        el('h4', undefined, taskResultRangeTitle(unit.unitOrdinal, heading)),
+        stateTerm(analysisResultUnitLine(unit.state === 'gap' ? unit.gap : null), unit.state === 'gap' ? 'attention' : 'good'),
         place,
       );
       return row;
     });
-    body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), table(TASK_RESULT_COLUMNS.analysis, rows));
+    list.append(...rows);
+    body.replaceChildren(meta(analysisResultReadLine(revision), ANALYSIS_RESULT_NOT_DONE), list);
     if (revision.unitPage.nextOrdinal !== null) {
       const more = el('button', 'secondary', ANALYSIS_MORE_RANGES);
       more.type = 'button';

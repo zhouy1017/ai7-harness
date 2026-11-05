@@ -3175,7 +3175,7 @@ async function main() {
     at('review-coverage-moves');
     // The batch wrote the manuscript, so what those two categories read is no longer the current text and
     // both need review; the row offers only what changed (V2-UX-REV-007).
-    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('.review-coverage [data-review-category="'+id+'"]'); return row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
+    await assertRenderer(renderer, `(() => { const row=(id)=>document.querySelector('.review-coverage-card[data-review-category="'+id+'"]'); const grid=document.querySelector('ul.review-coverage'); return grid!==null && getComputedStyle(grid).display==='grid' && grid.children.length===9 && Array.from(grid.children).every((card)=>card.querySelector('.state-term') && card.querySelector('.review-coverage-counts')) && row('typos-and-usage')?.dataset.coverage==='needs-review' && row('style-and-format')?.dataset.coverage==='needs-review' && row('typos-and-usage').querySelector('[data-review-action="rereview-changed"]')?.textContent==='只审改动过的章'; })()`, 'review-coverage-needs-review');
 
     // ---- 来源与证据 (Issue #425, plan slice S70; V2-UX-SRC-013, IA-012) ----
     // Synchronized delta with Issue #425: 资料与记录 gains 来源与证据 between 分析 and 工作概览. This Book's Runs read on the
