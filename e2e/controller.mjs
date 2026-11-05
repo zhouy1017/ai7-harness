@@ -1711,6 +1711,21 @@ export function collectJourneyDisclosures(result, journey) {
     .filter((disclosure) => disclosure !== null && isAdmittedDisclosure(journey, disclosure));
 }
 
+const J02_VIEWPORT_PREFIX = 'LOCAL_COMPLETION/J-02/disclosed/viewport-form/';
+
+/** Content-free geometry, so a passing J-02 also names the responsive form it exercised. */
+export function discloseJ02Viewport({ width, height, overlay }) {
+  if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0 || typeof overlay !== 'boolean') {
+    throw new TypeError('Invalid Journey viewport.');
+  }
+  console.log(`${J02_VIEWPORT_PREFIX}${overlay ? 'overlay' : 'separate'}-${width}x${height}`);
+}
+
+export function collectJ02ViewportDisclosures(result) {
+  return result.stdout.split(/\r?\n/u).filter((line) =>
+    line.startsWith(J02_VIEWPORT_PREFIX) && /^(?:separate|overlay)-[1-9][0-9]*x[1-9][0-9]*$/u.test(line.slice(J02_VIEWPORT_PREFIX.length)));
+}
+
 export function normalizePnpmArgs(args) {
   const normalized = [...args];
   if (normalized[0] === '--') normalized.shift();

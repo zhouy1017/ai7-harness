@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { refusedCheckLabels } from '../support/journey-check-labels.js';
 
 // Issue #652: a failed Journey names the check that failed beside its stage, as a content-free label the runner wrote,
@@ -27,6 +27,8 @@ const controller = (await import(new URL('../../e2e/controller.mjs', import.meta
   classifyJourneyResult(result: JourneyResult, journey: string): Failure;
   collectJourneyCheck(result: JourneyResult, journey: string, failure: Failure): string | null;
   journeyElapsedSegment(milliseconds: number): string;
+  discloseJ02Viewport(viewport: { width: number; height: number; overlay: boolean }): void;
+  collectJ02ViewportDisclosures(result: { stdout: string }): string[];
 };
 const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta.url).href)) as {
   parseGateLog(text: string): {
@@ -40,6 +42,23 @@ const queue = (await import(new URL('../../tools/nightly-queue.mjs', import.meta
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const E2E = resolve(ROOT, 'e2e');
 const J07_LOCATION = controller.JOURNEY_LOCATIONS['J-07']?.[0] as string;
+
+it('discloses J-02 viewport geometry without forwarding arbitrary child text', () => {
+  const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  try {
+    controller.discloseJ02Viewport({ width: 1180, height: 820, overlay: false });
+    controller.discloseJ02Viewport({ width: 1024, height: 768, overlay: true });
+    const lines = log.mock.calls.map(([line]) => String(line));
+    expect(lines).toEqual([
+      'LOCAL_COMPLETION/J-02/disclosed/viewport-form/separate-1180x820',
+      'LOCAL_COMPLETION/J-02/disclosed/viewport-form/overlay-1024x768',
+    ]);
+    expect(controller.collectJ02ViewportDisclosures({ stdout: [...lines, 'private text', `${lines[0]}/private text`].join('\n') })).toEqual(lines);
+    expect(() => controller.discloseJ02Viewport({ width: Number.NaN, height: 768, overlay: true })).toThrow('Invalid Journey viewport.');
+  } finally {
+    log.mockRestore();
+  }
+});
 
 function childResult(stderr: string): JourneyResult {
   return { stdout: '', stderr, spawnError: false, controllerSignal: null, signal: null, outputOverflow: false };

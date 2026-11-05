@@ -3872,9 +3872,11 @@ export async function runApplication(): Promise<void> {
       injectedPickerPath: string | undefined,
       revealAndFocus: boolean,
     ): Promise<OwnedRendererWindow> => {
+      const e2eWindow = process.env.AI7_E2E_JOURNEY
+        ? /^([1-9]\d*)x([1-9]\d*)$/.exec(process.env.AI7_E2E_WINDOW ?? '') : null;
       const window = new BrowserWindow({
-        width: 1180,
-        height: 820,
+        width: e2eWindow ? Number(e2eWindow[1]) : 1180,
+        height: e2eWindow ? Number(e2eWindow[2]) : 820,
         minWidth: 920,
         minHeight: 680,
         show: false,

@@ -4,6 +4,7 @@ import {
   collectJourneyCheck,
   collectReadinessTrace,
   collectJourneyDisclosures,
+  collectJ02ViewportDisclosures,
   journeyElapsedSegment,
   normalizePnpmArgs,
   runJourneyProcess,
@@ -15,6 +16,7 @@ const reportDisclosures = (journey, result) => {
   for (const disclosure of collectJourneyDisclosures(result, journey)) {
     console.log(`LOCAL_COMPLETION/${journey}/disclosed-skip/${disclosure}`);
   }
+  for (const disclosure of collectJ02ViewportDisclosures(result)) console.log(disclosure);
 };
 
 const args = normalizePnpmArgs(process.argv.slice(2));
