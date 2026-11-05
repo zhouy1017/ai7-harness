@@ -51,7 +51,7 @@ describe('the command registry', () => {
   it('covers the complete sidebar Book sections, settings and toggle without replacing shell navigation', () => {
     expect(BOOK_SECTION_COMMANDS.map((entry) => entry[2])).toEqual(SHELL_BOOK_SECTIONS);
     expect(COMMANDS.some((entry) => entry.id === 'nav.settings')).toBe(true);
-    expect(COMMANDS.some((entry) => entry.id === 'view.toggleSidebar')).toBe(true);
+    expect(effectiveSequence('view.toggleSidebar', {}, 'win32')).toBe('Mod+Backslash');
   });
   it('declares only navigation, search and view commands, each with a Chinese name and a default per platform', () => {
     expect(new Set(COMMANDS.map((command) => command.id)).size).toBe(COMMANDS.length);
