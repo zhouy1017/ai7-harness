@@ -2831,7 +2831,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       if (destroyed) return;
       state.job = null;
       if (state.dismissed) {
-        options.setStatus(completed.state === 'cancelled' ? REVIEW_STATUS_LINES.preparationCancelled : '已关闭审阅配置。', 'success');
+        options.setStatus(options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), 'error');
         return;
       }
       announceReasonOnce(state, options.errorMessage(error, REVIEW_STATUS_LINES.preparationFailed), options.setStatus);
