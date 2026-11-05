@@ -99,8 +99,8 @@ describe('the drawer\'s 结果待确认 block', () => {
     };
     expect(unconfirmedHeading(listed)).toBe('该单元结果未知');
     expect(unconfirmedHeading({ ...listed, ranges: [] })).toBe('结果待确认');
-    expect(unconfirmedStatement(listed)).toBe('回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认，以后重读会先说明。');
-    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认。');
+    expect(unconfirmedStatement(listed)).toBe('回答未传全，处理与计费未知，缺口未重发；保留只记确认；原文已改不再列出，上次重读失败仍待确认。');
+    expect(unconfirmedStatement({ ...listed, ranges: [] })).toBe('回答未传全，处理与计费未知，缺口未重发；保留只记确认。');
     expect(unconfirmedStatement(listed).length).toBeLessThanOrEqual(60);
     expect(unconfirmedLine({ unitOrdinal: 4, earlierText: true, category: null })).toBe('第 4 个阅读范围（当时的文字） · 请求已发出 · 回答没有完整传回');
     expect(unconfirmedLine({ unitOrdinal: 3, category: '错别字与规范用语' })).toBe('「错别字与规范用语」第 3 个阅读范围 · 请求已发出 · 回答没有完整传回');

@@ -1,7 +1,6 @@
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { createButton } from './components/controls.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
-import { CONFIGURED_PROVIDER_LABELS } from '../shared/provider-configuration.generated.js';
 import { taskPlanWording } from './task-drawer-labels.js';
 import type {
   EvidenceAssuranceLevel,
@@ -123,7 +122,7 @@ import {
   TASK_PLAN_EDIT_RESTORE,
   TASK_PLAN_EDIT_STEP_REMOVED,
   TASK_PLAN_EDIT_TAG,
-  TASK_PLAN_FULL_LINK_EDITABLE,
+  TASK_BAR_PRODUCTION_STATEMENT,
   TASK_BAR_UPDATE_FAILED,
   TASK_BAR_REDO_CONFIRM,
   TASK_BAR_REDO_FAILED,
@@ -337,12 +336,6 @@ const REDO_SUMMARY_ID = 'task-drawer-redo-summary';
 /** How the editor left an editable item (Issue #419; S76d): kept, left out or withheld, or asked first. */
 type ItemEdit = 'kept' | 'removed' | 'ask-first';
 
-/** The service's provider line may also include a model and search backends. */
-export function ordinaryProviderName(provider: string): string {
-  const name = provider.split(' · ')[0]!;
-  if (name === 'AI7 本地确定性模型适配器' || name === 'ai7-local-deterministic') return '本机';
-  return (CONFIGURED_PROVIDER_LABELS as Readonly<Record<string, string>>)[name] ?? name;
-}
 /** The book co-pilot follows only screens of its own Book. Global destinations close it. */
 const COPILOT_SCREENS: ReadonlyArray<string> = [
   ...TASK_DRAWER_SCREENS, 'proposal-workspace', 'proposal-conflict', 'book-findings', 'book-deliverables', 'book-sources', 'agent-workspace',
@@ -1033,7 +1026,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       dd.dataset['taskPlanRow'] = term;
       rows.append(dt, dd);
     }
-    const full = control(next.edit.editable ? TASK_PLAN_FULL_LINK_EDITABLE : TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
+    const full = control(TASK_PLAN_FULL_LINK, 'quiet task-plan-full-link', 'full-link');
     full.addEventListener('click', () => setMode('full', true));
     section.append(...(technicalLayerVisible ? [el('p', 'research-status', next.service.decision)] : []), rows, full);
     return section;
@@ -1340,7 +1333,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       parts.push(state);
     }
     parts.push(el('p', 'task-bar-summary', view.summary));
-    if (view.statement !== null) parts.push(el('p', 'task-bar-statement', technicalLayerVisible ? view.statement : '仅执行本次计划，改稿、受控动作、里程碑与发稿另行决定。'));
+    if (view.statement !== null) parts.push(el('p', 'task-bar-statement', technicalLayerVisible ? view.statement : TASK_BAR_PRODUCTION_STATEMENT));
     let noteId: string | null = null;
     if (view.note !== null) {
       const note = el('p', 'task-bar-note', redoing ? TASK_BAR_REDOING_NOTE : view.note);

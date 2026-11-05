@@ -142,8 +142,6 @@ export function groupedCount(value: number): string {
 
 export const TASK_PLAN_COMPACT_TERMS = ['处理', '发送', '会得到', '不会', '中途'] as const;
 export const TASK_PLAN_FULL_LINK = '完整计划（6 段）';
-/** §6: the same link on a plan the editor can edit says so. */
-export const TASK_PLAN_FULL_LINK_EDITABLE = TASK_PLAN_FULL_LINK;
 /** The usage figure is a ceiling the Run cannot pass, never a forecast of what it will use. */
 export const TASK_PLAN_CEILING_NOTE = '上限，不是预测';
 
@@ -152,22 +150,26 @@ export function taskPlanCompactRows(plan: TaskPlanProjection): ReadonlyArray<rea
   plan = taskPlanWording(plan);
   const references = plan.listPages?.['scope.reference']?.total ?? plan.scope.reference.length;
   const sends = !plan.service.send.includes('不发送') && !plan.service.send.includes('不会发送');
-  const ceiling = plan.service.budgetCeiling.match(/[\d,]+/u)?.[0];
-  const budget = ceiling === undefined ? '未设预算上限' : `上限${ceiling}词元`;
-  const nonEffects: Readonly<Record<TaskPlanKind, string>> = {
-    'fixed-task': '不运行、改稿、导出发布、存里程碑或越界阅读。',
-    'baseline-analysis': '不改稿、导出发布、存里程碑、越界阅读或作事实判定。',
-    'review-run': '不改稿、导出发布、存里程碑或越界处理。',
-    'initial-evaluation': '不改稿、导出发布、存里程碑、代评分定论、评风险或联网预测。',
-    'readers-report': '不改稿、导出、存里程碑、改评估、写营销、交付或越界阅读。',
-    'evaluation-rewrite': '不改稿、导出、存里程碑、改分、自动记评估、定论或评风险。',
-    writing: '不改稿、导出、存里程碑、交付、改评估分析、越界阅读或照抄。',
-  };
+  const ceiling = plan.service.usage.match(/[\d,]+(?= tokens)/u)?.[0];
+  const usage = ceiling === undefined ? sends ? '按用量计费，未设预算上限' : '无模型用量' : `达到 ${ceiling} tokens 后不再发送`;
+  const nonEffects = plan.notDo.editorial.map((fact) => fact.split('：')[0]!
+    .replace(/^不会开始运行（只记录）$/u, '不运行').replace('不会直接修改稿件', '不改稿')
+    .replace('不导出或发布', '不导出发布').replace('不存里程碑版本', '不存里程碑')
+    .replace('不替你打分', '不代评分').replace('不评风险项', '不评风险').replace('不联网检索', '不联网')
+    .replace('不读这本书以外的内容', '不读书外内容').replace('不读这本书以外的稿件', '不读书外稿件')
+    .replace('不读允许参考以外的资料', '不读参考外资料')
+    .replace(/^不重新读取.+以外的正文$/u, '不重读范围外正文').replace(/^不读.+以外的正文$/u, '不读范围外正文')
+    .replace('不照抄范例', '不抄范例').replace('不照抄资料库资料', '不抄资料')
+    .replace('不改评估记录与基线分析', '不改评估分析').replace('不改评估记录', '不改评估')
+    .replace('不自动写入评估', '不自动记评估').replace('不改分数', '不改分').replace('不写营销要点', '不写营销')
+    .replace('不选结论，不评风险', '不定论评风险').replace('不交付、不发送', '不交付发送')
+    .replace(/^不在所选段落以外标出发现.*$/u, '不在选段外标发现').replace('不给出合规、查重或政策结论', '不作合规查重政策结论')
+    .replace(/^不/u, '')).join('、');
   return [
     ['处理', references === 0 ? '只处理任务卡所列范围，不参考其他材料。' : `处理任务卡所列范围，参考 ${references} 项材料。`],
-    ['发送', sends ? `计划内材料发往模型，按用量计费，${budget}。` : `不发送内容，无模型用量，${budget}。`],
+    ['发送', `${sends ? '发往模型，' : '不发送，'}${usage}。`],
     ['会得到', `${TASK_BAR_OUTCOMES[plan.kind]}。`],
-    ['不会', nonEffects[plan.kind]],
+    ['不会', `不${nonEffects}。`],
     ['中途', plan.kind === 'fixed-task' ? '只记录本次授权，无需中途参与。' : plan.participation.during === '预计无需中途参与' ? '预计无需参与，可随时暂停或取消。' : '需你决定时先询问，可随时暂停或取消。'],
   ];
 }
@@ -342,6 +344,7 @@ export const TASK_BAR_SAVE_DRAFT = '保存草稿';
 export const TASK_BAR_SAVED = '计划已保存，可稍后开始';
 /** AUTH-003 as ADR 0077 revised it: what starting decides, and everything it leaves to the editor. */
 export const TASK_BAR_STATEMENT = '只是让 AI7 按这份计划做这一次；接受修改建议、批准受控动作、保存里程碑版本、设为发稿版本都仍由你另行决定';
+export const TASK_BAR_PRODUCTION_STATEMENT = '仅执行本次计划，改稿、受控动作、里程碑与发稿另行决定。';
 /** §10: 凭据引用 readiness missing reads 未连接 · 缺少凭据 → 去设置连接, never 设置模型服务. */
 export const TASK_BAR_CONNECT = '去设置连接';
 /** Network remediation for a Run stopped by an unreachable proxy or model service. */
@@ -527,7 +530,7 @@ export function unconfirmedWhat(ranges: number, steps: ReadonlyArray<Unconfirmed
 }
 /** What the block says above its list: what is known and what is missing, and what 保留为缺口 does and does not do. */
 export function unconfirmedStatement(listed: TaskPlanUnconfirmedProjection, rangesTotal = listed.ranges.length): string {
-  return `回答未传全，处理与计费未知，已记为缺口且未重发；保留缺口只记录确认${rangesTotal > 0 ? '，以后重读会先说明' : ''}。`;
+  return `回答未传全，处理与计费未知，缺口未重发；保留只记确认${rangesTotal > 0 ? '；原文已改不再列出，上次重读失败仍待确认' : ''}。`;
 }
 /**
  * One line of the list: the category in a Review Run, the range or the step, and that its request was sent. A range counted in a
