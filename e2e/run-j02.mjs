@@ -552,13 +552,10 @@ async function openNavigation(renderer, location) {
 }
 
 async function clickVisibleControl(renderer, selector, name) {
-  const point = await renderer.evaluate(`(async () => {
+  const point = await renderer.evaluate(`(() => {
     const node=document.querySelector(${JSON.stringify(selector)});
     if(!(node instanceof HTMLElement)) return null;
     node.scrollIntoView({block:'nearest'});
-    // Resizing animates the shell padding; native pointer coordinates must be taken after that movement ends.
-    await new Promise(resolve => requestAnimationFrame(resolve));
-    await Promise.all(document.body.getAnimations().map(animation => animation.finished));
     const r=node.getBoundingClientRect(), x=r.left+r.width/2, y=r.top+r.height/2;
     return r.width>0 && r.height>0 && node.contains(document.elementFromPoint(x,y)) ? {x,y} : null;
   })()`);
