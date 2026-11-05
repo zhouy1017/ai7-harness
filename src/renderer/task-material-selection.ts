@@ -145,7 +145,10 @@ export function reviewPlanReferenceField(options: {
     select.value = input.seriesId ?? '';
     select.addEventListener('change', () => update(selected, select.value || null));
     row.append(document.createTextNode('允许参考 '), select); host.append(row);
-  }).catch(() => { if (host.isConnected) host.textContent = '参考资料读取失败，请重新打开计划。'; });
+  }).catch(() => {
+    if (!host.isConnected) return;
+    const status = document.createElement('p'); status.textContent = '参考资料读取失败，请重新打开计划。'; host.append(status);
+  });
   return host;
 }
 
