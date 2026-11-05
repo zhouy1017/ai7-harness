@@ -1073,7 +1073,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     usage.append(next.service.usage);
     if (next.service.usageIsCeiling) usage.append(` · ${TASK_PLAN_CEILING_NOTE}`);
     const participation = [next.participation.during, ...(next.participation.after === null ? [] : [`${TASK_PLAN_AFTERWARDS}：${next.participation.after}`])];
-    const references = next.kind === 'review-run' ? reviewPlanReferenceField({ api, bookId: next.bookId, reviewRunId: next.ref,
+    const references = next.kind === 'review-run' ? reviewPlanReferenceField({ api, bookId: next.bookId, reviewRunId: next.ref, reference: next.scope.reference,
       awaitJob: (job) => options.awaitServiceJob(job, () => undefined), change: (operation) => {
       if (plan?.ref !== next.ref || !beginWork()) return;
       const asked = request;

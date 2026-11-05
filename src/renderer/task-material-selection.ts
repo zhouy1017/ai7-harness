@@ -114,10 +114,15 @@ export function reviewPlanReferences(options: {
 export function reviewPlanReferenceField(options: {
   api: Pick<RendererApi, 'inspectReviewWorkspace' | 'prepareReviewRun' | 'searchReferableMaterials' | 'inspectBookSeries'>;
   bookId: string; reviewRunId: string;
+  reference: ReadonlyArray<string>;
   awaitJob: (job: Awaited<ReturnType<RendererApi['prepareReviewRun']>>) => Promise<import('../shared/protocol.js').ServiceWireJobProjection>;
   change(operation: () => Promise<string>): void;
 }): HTMLElement {
   const host = document.createElement('div');
+  for (const text of options.reference) {
+    const chip = document.createElement('span'); chip.className = 'state-term'; chip.textContent = text; host.append(chip);
+  }
+  if (options.reference.length === 0) host.textContent = '暂无允许参考的资料。';
   void options.api.inspectReviewWorkspace({ reviewRunId: options.reviewRunId }).then(async (workspace) => {
     if (!host.isConnected) return;
     const input = workspace.run?.referenceInput;
@@ -130,7 +135,7 @@ export function reviewPlanReferenceField(options: {
       if (completed.kind !== 'review-run-preparation' || completed.state !== 'completed' || !result || !('scopeOptions' in result) || !result.run) throw new Error('未能更新参考资料。');
       return result.run.reviewRunId;
     });
-    host.append(reviewPlanReferences({ api: options.api, bookId: options.bookId, items: workspace.materials?.items ?? [], selected, change: update }));
+    host.replaceChildren(reviewPlanReferences({ api: options.api, bookId: options.bookId, items: workspace.materials?.items ?? [], selected, change: update }));
     if (input.capturedProcedure != null) return;
     const page = await options.api.inspectBookSeries({ bookId: options.bookId, membershipsAfter: null });
     if (!host.isConnected || page.memberships.length === 0) return;
