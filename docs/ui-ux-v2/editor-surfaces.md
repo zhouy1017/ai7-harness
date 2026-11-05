@@ -12,7 +12,7 @@ Status: **frozen design reference under [ADR 0064](../adr/0064-reweight-reposito
 4. 侧栏使用成套真正图标，先接入 2026-09 原型的 SVG symbol 集，再按相同 ID 替换风格稿。由 [#1318](https://github.com/zhouy1017/ai7-harness/issues/1318) 和 [#1325](https://github.com/zhouy1017/ai7-harness/issues/1325) 实施。
 5. 打包思源黑体与思源宋体（OFL，约 20–30 MB）。由 [#1317](https://github.com/zhouy1017/ai7-harness/issues/1317) 实施。
 6. 删除页底常驻「打开稿件 / 工作概览」按钮条与「切换书稿」按钮，切换并入侧栏书目。由 [#1319](https://github.com/zhouy1017/ai7-harness/issues/1319) 和 [#1325](https://github.com/zhouy1017/ai7-harness/issues/1325) 实施。
-7. 稿件顶栏只留修订版、章节位置、段落样式、撤销 / 重做；保留头部「已写入修订日志 ▾」菜单，保存不在顶栏重复出现。由 [#1322](https://github.com/zhouy1017/ai7-harness/issues/1322) 实施。
+7. 稿件顶栏只留修订版、章节位置、撤销 / 重做；保留头部「已写入修订日志 ▾」菜单，保存不在顶栏重复出现。由 [#1322](https://github.com/zhouy1017/ai7-harness/issues/1322) 实施（该 Issue 另增「段落样式」）。
 8. 右侧抽屉继续合并承担计划、结果、对话，但大幅减话。由 [#1321](https://github.com/zhouy1017/ai7-harness/issues/1321) 实施。
 9. 修改粒度位于组件级与结构级之间；每屏形态框架不重定，按原型对齐落地。由 A / B / C 组实施切片（[#1315](https://github.com/zhouy1017/ai7-harness/issues/1315)–[#1327](https://github.com/zhouy1017/ai7-harness/issues/1327)）共同落实。
 10. 开始执行前增加「任务总览」页面（跨书队列、位次与预计、详情抽屉、连续发起、通知与历史）。由 [#1328](https://github.com/zhouy1017/ai7-harness/issues/1328) 实施。

@@ -110,6 +110,19 @@ describe('the Position Rail at 1,200 marks', () => {
     expect(first.className).toContain('rail-marker-new');
   });
 
+  it('restores the confirmed position when navigation refuses a keyboard preview', async () => {
+    const track = miniDocument.createElement('div');
+    const surface = mountPositionRail({ track: track as unknown as HTMLElement, api: { getManuscriptRail: vi.fn() },
+      binding: () => ({ manuscriptId: 'm', branchId: 'b' }), jumpToBlock: vi.fn(),
+      jumpToProportion: async () => false, onError: vi.fn() });
+    surface.setPosition(0.25);
+    track.dispatchEvent({ type: 'keydown', key: 'End', preventDefault: vi.fn() });
+    await Promise.resolve();
+    expect(track.getAttribute('aria-valuenow')).toBe('250000');
+    expect(track.querySelector('.rail-now')!.style.top).toBe('25%');
+    surface.destroy();
+  });
+
   it('jumps with the drawn slider keyboard and keeps its accessible position in sync', () => {
     const track = miniDocument.createElement('div');
     const jump = vi.fn();

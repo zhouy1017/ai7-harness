@@ -1739,7 +1739,6 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
   .outline-list, .search-results { max-height: 150px; }
   .editor-window { padding: 1.25rem; }
   .window-actions { grid-template-columns: auto 1fr auto; }
-  .position-rail-label { grid-column: 1 / -1; }
   .native-artifact-facts, .task-authorization-facts, .analysis-facts, .review-facts, .review-consequences,
   .deliverables-facts, .publication-designate-summary { grid-template-columns: 1fr; }
   .native-artifact-facts dd + dt, .task-authorization-facts dd + dt, .analysis-facts dd + dt, .review-facts dd + dt, .review-consequences dd + dt,
@@ -2275,8 +2274,6 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .app-sidebar .nav-label, .app-sidebar .global-attention-entry-label { max-width: 180px; }
 .app-sidebar .icon { opacity: .8; }
 :root[data-sidebar="icons"] .app-sidebar .icon { opacity: 1; }
-.editor-technical-details { font-size: .8rem; color: var(--text-subdued); }
-.editor-technical-details summary { cursor: pointer; }
 :root[data-reduced-motion="true"] *, :root[data-reduced-motion="true"] *::before, :root[data-reduced-motion="true"] *::after {
   transition: none !important;
   animation: none !important;

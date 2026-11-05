@@ -4,6 +4,7 @@ import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountManuscriptScreen, type ManuscriptScreen } from '../../src/renderer/manuscript-screen.js';
 import type { mountBoundedEditor } from '../../src/renderer/editor.js';
+import { readReturnPlace } from '../../src/renderer/reading-return.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import type { ManuscriptRailProjection, ManuscriptWindowProjection, RendererApi } from '../../src/shared/protocol.js';
 
@@ -19,7 +20,7 @@ const children = vi.hoisted(() => ({
   failAt: null as 'modes' | 'editor' | null,
   destroyed: [] as string[],
   editors: [] as unknown[],
-  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn> }>,
+  editorSurfaces: [] as Array<{ selectRange: ReturnType<typeof vi.fn>; focus: ReturnType<typeof vi.fn> }>,
   protections: [] as Array<{ update: ReturnType<typeof vi.fn> }>,
   rails: [] as Array<{ onRead?: (rail: ManuscriptRailProjection) => void }>,
 }));
@@ -67,7 +68,7 @@ vi.mock('../../src/renderer/editorial-marks.js', async (importOriginal) => ({
 }));
 vi.mock('../../src/renderer/reading-return.js', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../src/renderer/reading-return.js')>(),
-  readReturnPlace: async () => null,
+  readReturnPlace: vi.fn(async () => null),
   preserveReturnPlace: async (place: unknown) => place,
   consumeReturnPlace: async () => null,
 }));
@@ -144,7 +145,7 @@ function shell(rendererApi = api) {
     taskDrawer: { close: vi.fn(), openPanel: vi.fn(), openDialogue: vi.fn(), openComposer: vi.fn() } as unknown as ScreenOptions['taskDrawer'],
     interrupted: () => false,
     attach: (content, surface) => { replace(content); showing = surface; },
-    setContextActions: vi.fn(), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
+    setContextActions: (...nodes) => contextView.replaceChildren(...nodes), setStatus, setCloseRisk: (risk) => { closeRisk = risk; },
     errorMessage: (_error, fallback) => fallback, recentlyActivatedControl: () => null, awaitServiceJob: async (job) => job,
     composerRangeOf: vi.fn(), selectionTaskOffer: vi.fn(), selectionProcedureOffer: vi.fn(), prepareSelectionTask: vi.fn(),
     renderEditorWindow: vi.fn(), renderBookAnalysis: vi.fn(),
@@ -152,7 +153,7 @@ function shell(rendererApi = api) {
     renderProposalConflict: vi.fn(), renderProposalWorkspace: vi.fn(), returnToRecoveryComparison: vi.fn(),
   });
   return {
-    persistenceStatus, screen, open,
+    persistenceStatus, screen, contextView, open,
     /** Another screen replaces this one without its leave guard (a recovery return, an owned workbench route) and says so. */
     leave: (status: string): void => { replace(document.createElement('section') as unknown as HTMLElement); setStatus(status); },
     get showing(): ManuscriptScreen | null { return showing; },
@@ -213,6 +214,25 @@ async function searchArrivalWithPendingWrite(jump = true) {
 }
 
 describe('the Manuscript screen lifecycle', () => {
+  it('returns through a reading chip without taking focus from an active input', async () => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const initial = windowOf('book-one');
+    vi.mocked(readReturnPlace).mockResolvedValueOnce({ manuscriptId: initial.manuscriptId, branchId: initial.branchId,
+      blockId: 'blk_3', place: '第一章' });
+    const app = shell(new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? async () => initial : Reflect.get(target, key) }));
+    app.open(initial);
+    await vi.advanceTimersByTimeAsync(0);
+    const input = document.createElement('input'); document.body.append(input);
+    const editor = children.editorSurfaces.at(-1)!; editor.focus.mockClear();
+    app.contextView.querySelector<HTMLButtonElement>('[data-return-chip]')!.click();
+    input.focus();
+    await vi.advanceTimersByTimeAsync(80);
+    expect(app.contextView.querySelector('[data-return-chip]')).toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(editor.selectRange).not.toHaveBeenCalled();
+    expect(editor.focus).not.toHaveBeenCalled();
+    app.showing?.destroy();
+  });
   it('keeps the full long outline heading available to assistive tools and its title', async () => {
     Object.defineProperty(MiniElement.prototype, 'style', { configurable: true, value: { setProperty: vi.fn() } });
     try {
