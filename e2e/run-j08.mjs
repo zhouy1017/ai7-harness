@@ -240,6 +240,15 @@ async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
+// Settings > Help remains the mode owner until Batch 3 #1376/#1382 moves that control.
+async function recoveryTechnicalMode(renderer, visible, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
+  await click(renderer, '帮助', `${name}-help`);
+  await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `${name}-toggle-ready`);
+  await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);
+  await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible===${JSON.stringify(String(visible))}`, `${name}-mode`);
+}
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
@@ -586,12 +595,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.recovered-state-marker')?.hidden`, 'marker-cleared-only-by-milestone');
     // #1379: the recovered manuscript keeps an ordinary-mode note card's hierarchy and registered editor.
     // The current Help switch moves under #1376/#1382 in Batch 3.
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'recovered-card-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'recovered-card-settings-ready');
-    await click(renderer, '帮助', 'recovered-card-help');
-    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true`, 'recovered-card-mode-ready');
-    await assertRenderer(renderer, `(() => { document.querySelector('.help-developer-mode input').click(); return true; })()`, 'recovered-card-mode-toggle');
-    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'recovered-card-ordinary');
+    await recoveryTechnicalMode(renderer, false, 'recovered-card-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'recovered-card-manuscript');
     await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'recovered-card-editor');
     await assertRenderer(renderer, `(async () => { const work=(await window.ai7.listPriorWork()).find((item)=>item.bookTitle==='恢复边界甲'); await window.ai7.updateBookPeople({bookId:work.bookId,expectedVersion:0,authors:[],editors:['恢复责编'],related:[]}); return true; })()`, 'recovered-card-editor-name');
@@ -609,6 +613,8 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-mark-card][data-mark-kind="editor-note"]')`, 'recovered-card-ready');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('[data-mark-card]'); return document.documentElement.dataset.technicalLayerVisible==='false' && Array.from(card.querySelectorAll('[data-mark-block]')).map((block)=>block.dataset.markBlock).join('|')==='body|quote|author|more|actions' && card.querySelector('[data-mark-body]').textContent==='恢复后公开合成备注' && card.querySelector('[data-mark-block="quote"]').textContent.length===4 && card.querySelector('[data-mark-source]').textContent.startsWith('恢复责编 · ') && !card.querySelector('.editorial-mark-more').open && card.querySelector('.editorial-mark-more [data-mark-action="remove"]') && !card.querySelector('[data-mark-action="edit"]').closest('details'); })()`, 'recovered-card-hierarchy-and-author');
 
+    // The remaining candidate UUID/SHA assertions inspect developer disclosures, not ordinary UI payload.
+    await recoveryTechnicalMode(renderer, true, 'recovery-identities-developer');
     await close();
     requireJourney((await readdir(objectRoot)).filter((name) => OBJECT_PATTERN.test(name)).length === 3, 'later-milestone-snapshot');
 
@@ -625,11 +631,13 @@ async function main() {
     await assertRenderer(renderer, `(() => { const journal=document.querySelector('[data-recovery-candidate="journal"] input'); journal.click(); return journal.checked; })()`, 'none-journal-select');
     await click(renderer, '恢复为新版本', 'none-restore');
     await waitForRestoredEditor(renderer, 'none-restored', 120_000);
+    await recoveryTechnicalMode(renderer, false, 'recovery-identities-ordinary-restored');
     await close();
 
     renderer = await launch();
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'final-clean-reopen');
     await assertRenderer(renderer, `!document.querySelector('[data-screen="manuscript-recovery"]') && !document.body.textContent.includes('恢复待确认状态')`, 'final-no-recovery-attention');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'final-ordinary-mode-restored');
     await close();
   } finally {
     try {
