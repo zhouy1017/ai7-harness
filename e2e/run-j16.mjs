@@ -1077,8 +1077,7 @@ async function main() {
     await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
     await click(renderer,'帮助','poll-attention-developer-help');
     await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`,'poll-attention-developer-mode');
-    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.section('manuscript')),'poll-attention-return-book');
-    await waitFor(renderer,`document.querySelector('[data-screen="editor"]')`,'poll-attention-book-ready');
+    await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
     await openPanel(renderer,'poll-attention-return-pane');
     await writeHold(SAMPLE1_UNITS);
     const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-completed', 180_000);
