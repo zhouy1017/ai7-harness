@@ -34,6 +34,14 @@ Ctrl+K 搜索命令、按图书与工序发起任务、切换图书与最近完�
 
 决定 1 收紧 ADR 0092 与本节既有的「决定层 / 技术身份层」分离（取代 §0.3、§1 的旧技术详情与切换书稿读法）：生产渠道只渲染编辑可理解的决定层，不渲染技术身份层，也不以「查看技术详情」作为生产模式的替代入口。渠道 / 模型内部标识（模型服务页的手动模型 ID 输入除外，#1372）、策略集、版本与分支名、记录标识、摘要、字节数、百分比小数、精确时间和来源标识等，只有在开发者模式中才可按 LAYER-001～008 的原有规则按需展开；开发者模式默认开，生产模式默认关。因而 LAYER-001～004、LAYER-006～008 的「技术层可达」均解释为开发者模式内可达，LAYER-005 的主操作可达性不变；生产模式的 Journey 只断言决定层，开发者模式的 Journey 才同时断言技术身份层的完整值。
 
+## 配置选择记忆 — Owner #1279 / #1374
+
+配置面暂时改变范围、模式、工序适用性或联网状态时，只禁用或隐藏不适用项，保留编辑已经作出的选择；条件恢复后原样显示。后果预估、开始按钮与提交共同使用当时的有效集合，不把暂不适用项发送给服务。只有编辑取消勾选、明确清除、成功提交后开始新表单，或按 ADR 0087 §4 显式选择固定成员工序，才重设对应选择；重新选择数据库文件等更换精确操作对象的动作也重新开始其决定。
+
+审阅的九类模型审阅旁提供可往返的本地文字检查选择：单独选择本地检查时挂起模型类别，取消后恢复；组合工序仍按其固定成员运行。选章起止、本地数字依据确认及本社词表选用不因隐藏或暂不可用而丢失，保存词表后所选项引用最新可用版本。评估的人工复核与推荐出版保留勾选记忆，只按当前风险条件提交有效值。事实核查的来源排除选择跨决定切换保留，仅补充核查提交排除来源；清空手动模型 ID 恢复此前明确选择的目录模型。
+
+固定成员工序不可拆分提交：暂不可用成员保持勾选并显示原因，在所有成员可用前禁用「先看计划 / 开始审阅」，恢复后仍按工序的完整顺序提交。已选用的本社词表更新读取期间保留原版本并暂停提交，读取成功后改用最新版本。评估的临时勾选记忆以一次表单为界；显式「保存评估」成功后以服务端已存的有效内容重建表单，暂不适用的复核或推荐不会被保存，之后需要时由编辑重新选择；保存失败则保留原表单。
+
 ## Wave 23 direct workflows — Owner #1279 / #1284
 
 The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft promotion and mandatory plan-review passages in §§1, 6, 7, 8 and 9. Every Book immediately has analysis, review, evaluation, writing and Agent capabilities. Starting a task prepares and authorizes the exact plan in one action; plan details remain optional. A production document can be the target of a same-type writing task, pinned to its saved manuscript, branch and version; edits require repinning before execution.

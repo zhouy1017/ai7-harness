@@ -77,6 +77,26 @@ function mountSettings(calls: ReturnType<typeof api>) {
 }
 
 describe('the one model-service flow', () => {
+  it.each([false, true])('restores the last explicit catalogue choice after clearing a manual ID (technical=%s, #1374)', async (technical) => {
+    setTechnicalLayerVisible(technical);
+    const { node, calls } = flow(settings(['anthropic-claude']));
+    const choices = node.querySelectorAll('[data-model-choice]');
+    const selector = node.querySelector('select[aria-label="AI7 使用的模型"]');
+    const chosen = technical ? choices.at(-1)! : selector!;
+    const modelId = technical ? chosen.value : selector!.children.at(-1)!.value;
+    chosen.value = modelId; chosen.checked = true; chosen.dispatchEvent({ type: 'change' });
+    const filter = node.querySelector('input[aria-label="筛选模型"]')!;
+    filter.value = 'no-matching-model'; filter.dispatchEvent({ type: 'input' });
+    const custom = node.querySelector('[data-custom-model-id]')!;
+    custom.value = 'synthetic/manual-model'; custom.dispatchEvent({ type: 'input' });
+    expect(choices.every((radio) => !radio.checked)).toBe(true);
+    custom.value = ' '; custom.dispatchEvent({ type: 'input' });
+    expect(technical ? choices.find((radio) => radio.value === modelId)!.checked : selector!.value).toBe(technical ? true : modelId);
+    expect(button(node, 'test-flow-connection').disabled).toBe(false);
+    button(node, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId }));
+  });
+
   it('restores the selected model and filter after channel round trips, refresh and two changed polls', async () => {
     setTechnicalLayerVisible(false);
     const projection = completeSettings();

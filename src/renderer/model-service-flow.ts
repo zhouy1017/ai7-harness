@@ -208,6 +208,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   if (offered.length === 0) legend.append(` · ${ready ? '正在获取模型列表' : '保存凭据后获取模型'}`);
   group.append(legend);
   let checked: ModelServiceChannelModelProjection | null = null;
+  let selectedRadioModel: ModelServiceChannelModelProjection | null = null;
   let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
   const test = el('button', 'secondary', '用公开消息测试连接');
@@ -260,8 +261,8 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     radio.disabled = !ready;
     radio.dataset['modelChoice'] = model.modelId;
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
-    if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; }
-    radio.addEventListener('change', () => { checked = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
+    if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; selectedRadioModel = model; }
+    radio.addEventListener('change', () => { checked = model; selectedRadioModel = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
     label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
     const row = el('div', 'model-service-catalogue-row');
     const favourite = favouriteButton(() => model.modelId);
@@ -273,6 +274,7 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     modelSelect.value = checked?.modelId ?? '';
     modelSelect.addEventListener('change', () => {
       checked = offered.find((model) => model.modelId === modelSelect.value) ?? null;
+      selectedRadioModel = checked;
       custom.value = '';
       options.chooseModel?.(modelSelect.value);
       paint();
@@ -311,9 +313,10 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   };
   const chooseCustom = (): void => {
     const modelId = custom.value.trim();
-    checked = modelId.length === 0 ? null : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
-    options.chooseModel?.(modelId);
-    for (const radio of Array.from(group.querySelectorAll('input'))) radio.checked = false;
+    checked = modelId.length === 0 ? selectedRadioModel : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
+    options.chooseModel?.(checked?.modelId ?? '');
+    for (const radio of Array.from(group.querySelectorAll<HTMLInputElement>('input[data-model-choice]'))) radio.checked = modelId.length === 0 && radio.value === selectedRadioModel?.modelId;
+    modelSelect.value = modelId.length === 0 ? selectedRadioModel?.modelId ?? '' : '';
     paint();
   };
   custom.addEventListener('input', chooseCustom);
