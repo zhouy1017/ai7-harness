@@ -152,6 +152,15 @@ export class MiniElement {
     parent.children.splice(parent.children.indexOf(this), 1);
     this.parentElement = null;
   }
+  before(...nodes: MiniElement[]): void {
+    for (const node of nodes) this.parentElement?.insertBefore(node, this);
+  }
+  after(...nodes: MiniElement[]): void {
+    const parent = this.parentElement;
+    if (parent === null) return;
+    const next = parent.children[parent.children.indexOf(this) + 1] ?? null;
+    for (const node of nodes) parent.insertBefore(node, next);
+  }
   #adopt(node: MiniElement): void {
     node.remove();
     node.parentElement = this;
@@ -271,6 +280,7 @@ function compound(element: MiniElement, part: string): boolean {
       if (value !== undefined && actual !== value.replace(/\\(.)/gu, '$1')) return false;
     }
     if (pseudo === ':disabled' && !element.disabled) return false;
+    if (pseudo === ':checked' && !element.checked) return false;
     if (pseudo === ':not(:disabled)' && element.disabled) return false;
   }
   if (consumed !== part.length) throw new Error(`mini-dom cannot read the selector part "${part}"`);

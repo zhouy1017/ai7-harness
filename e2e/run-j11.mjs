@@ -1490,6 +1490,16 @@ async function main() {
     await tick(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]`, 'evaluation-risk-reviewed');
     const reviewed = await readEvaluation(renderer, (page) => page.record?.blocked === false, 'evaluation-uncapped');
     requireJourney(reviewed.record.conclusions[0][2] === false, 'evaluation-recommend-open', reviewed.record.conclusions);
+    // #1374: temporary risk conditions suspend the effective values without erasing the editor's choices.
+    await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="recommend"] input', 'evaluation-memory-recommend');
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="medium"]`, 'evaluation-memory-medium');
+    await assertRenderer(renderer, `document.querySelector('${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]').checked && document.querySelector('${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]').disabled`, 'evaluation-memory-reviewed-suspended');
+    await tick(renderer, `${risk('law-rights-ethics-policy')} input[value="high"]`, 'evaluation-memory-high');
+    await assertRenderer(renderer, `document.querySelector('${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]').checked && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input').checked`, 'evaluation-memory-reviewed-restored');
+    await tick(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]`, 'evaluation-memory-unreviewed');
+    await assertRenderer(renderer, `document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input').disabled && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input').checked`, 'evaluation-memory-recommend-suspended');
+    await tick(renderer, `${risk('law-rights-ethics-policy')} [data-evaluation-field="reviewed"]`, 'evaluation-memory-rereviewed');
+    await assertRenderer(renderer, `!document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input').disabled && document.querySelector('.evaluation-conclusion [data-conclusion="recommend"] input').checked`, 'evaluation-memory-recommend-restored');
     await tick(renderer, '[data-screen="book-evaluation"] .evaluation-conclusion [data-conclusion="revise"] input', 'evaluation-conclusion');
     await fill(renderer, '[data-screen="book-evaluation"] .evaluation-lists [data-evaluation-field="readiness"]', '第三章结尾需要重写', 'evaluation-readiness');
     await submitEvaluationWithPendingInput(renderer, 'save', 'evaluation-save');

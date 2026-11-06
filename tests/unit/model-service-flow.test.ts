@@ -3,8 +3,9 @@ import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { MODEL_SERVICE_ROUTES, MODEL_SERVICE_ROUTE_BINDINGS, type ModelServiceRouteId, type ModelServiceSettingsProjection } from '../../src/shared/protocol.js';
-import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceChoices, modelServiceFlow, type ModelServiceFlowApi } from '../../src/renderer/model-service-flow.js';
+import { USE_FOR_BOTH_ROLES_LABEL, modelRolesLabel, modelServiceChoices, modelServiceFlow, type ModelServiceFlowApi, type ModelServiceFlowOptions } from '../../src/renderer/model-service-flow.js';
 import { createModelServiceSettings } from '../../src/renderer/model-service-settings.js';
+import { preferenceDefaults, type PreferencesRendererApi, type PreferenceValues } from '../../src/shared/preferences.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 
 // 设置 › 模型服务's one flow and the header's compact selector (Issue #1215), over the real generated channel catalogue and a
@@ -15,7 +16,7 @@ afterEach(() => restore());
 
 function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelServiceRouteId | null = ready[0] ?? null, fast: ModelServiceRouteId | null = inUse): ModelServiceSettingsProjection {
   const connection = (route: ModelServiceRouteId) => ({ connectionName: '合成连接', credentialOperationState: 'ready', connectionTest: null, binding: MODEL_SERVICE_ROUTE_BINDINGS[route] });
-  const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route] });
+  const role = (roleId: string, route: ModelServiceRouteId | null) => ({ roleId, roleLabel: roleId === 'main-editorial' ? '主编辑角色' : '快速交互角色', statusLabel: route === null ? '需设置' : '可用', binding: route === null ? null : MODEL_SERVICE_ROUTE_BINDINGS[route] });
   return {
     channels: modelServiceChannels(),
     roles: [role('fast-interaction', fast), role('main-editorial', inUse ?? 'opencode-go')],
@@ -23,7 +24,7 @@ function settings(ready: ReadonlyArray<ModelServiceRouteId>, inUse: ModelService
   } as unknown as ModelServiceSettingsProjection;
 }
 
-function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & { getModelServiceSettings: () => Promise<ModelServiceSettingsProjection> } {
+function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & PreferencesRendererApi & { getModelServiceSettings: () => Promise<ModelServiceSettingsProjection> } {
   return {
     saveModelServiceCredential: vi.fn(async () => answer),
     removeModelServiceCredential: vi.fn(async () => answer),
@@ -33,13 +34,15 @@ function api(answer = settings(['opencode-go'])): ModelServiceFlowApi & { getMod
     refreshModelServiceModels: vi.fn(async () => answer),
     testModelServiceConnection: vi.fn(async () => answer),
     getModelServiceSettings: vi.fn(async () => answer),
+    getPreferences: vi.fn(async () => ({ version: 1 as const, values: preferenceDefaults(), notice: null })),
+    savePreference: vi.fn(async () => ({ version: 1 as const, values: preferenceDefaults(), notice: null })),
   };
 }
 
-function flow(projection: ModelServiceSettingsProjection, calls = api()) {
+function flow(projection: ModelServiceSettingsProjection, calls = api(), options: Partial<ModelServiceFlowOptions> = {}) {
   const render = vi.fn();
   const setStatus = vi.fn();
-  const node = modelServiceFlow(projection, { api: calls, render, setStatus, errorMessage: (_error, fallback) => fallback, channel: null, chooseChannel: vi.fn() }) as unknown as MiniElement;
+  const node = modelServiceFlow(projection, { api: calls, render, setStatus, errorMessage: (_error, fallback) => fallback, channel: null, chooseChannel: vi.fn(), ...options }) as unknown as MiniElement;
   return { node, render, calls, setStatus };
 }
 
@@ -50,7 +53,148 @@ const pickChannel = (root: MiniElement, channelId: string) => {
   radio.dispatchEvent({ type: 'change', bubbles: true });
 };
 
+function completeSettings(): ModelServiceSettingsProjection {
+  const projection = settings(['opencode-go', 'anthropic-claude']);
+  return { ...projection, routeChoice: { ...projection.routeChoice, unsupportedProviders: [] },
+    proxy: { mode: 'direct' }, lastProxyProbe: null, searchBackends: { backends: [], candidates: [] },
+    protectedSecretStore: { label: '合成凭据库', availability: 'available' }, authorityStatement: '合成设置',
+    launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
+      externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
+  } as unknown as ModelServiceSettingsProjection;
+}
+
+function mountSettings(calls: ReturnType<typeof api>) {
+  let poll: (() => void) | undefined;
+  vi.stubGlobal('window', { ai7: calls, setInterval: (tick: () => void) => { poll = tick; return 0; }, clearInterval: () => undefined });
+  const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
+    const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
+  };
+  const root = element('main'); document.body.append(root);
+  const screen = createModelServiceSettings({ element, panel: () => element('section'), setStatus: vi.fn(), initializeStartup: vi.fn(), returnToOrigin: vi.fn(),
+    button: (label, className, action) => { const node = element('button', className, label); node.addEventListener('click', () => void action()); return node; },
+    rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
+  return { screen, node: root as unknown as MiniElement, poll: () => poll!() };
+}
+
 describe('the one model-service flow', () => {
+  it.each([false, true])('restores the last explicit catalogue choice after clearing a manual ID (technical=%s, #1374)', async (technical) => {
+    setTechnicalLayerVisible(technical);
+    const { node, calls } = flow(settings(['anthropic-claude']));
+    const choices = node.querySelectorAll('[data-model-choice]');
+    const selector = node.querySelector('select[aria-label="AI7 使用的模型"]');
+    const chosen = technical ? choices.at(-1)! : selector!;
+    const modelId = technical ? chosen.value : selector!.children.at(-1)!.value;
+    chosen.value = modelId; chosen.checked = true; chosen.dispatchEvent({ type: 'change' });
+    const filter = node.querySelector('input[aria-label="筛选模型"]')!;
+    filter.value = 'no-matching-model'; filter.dispatchEvent({ type: 'input' });
+    const custom = node.querySelector('[data-custom-model-id]')!;
+    custom.value = 'synthetic/manual-model'; custom.dispatchEvent({ type: 'input' });
+    expect(choices.every((radio) => !radio.checked)).toBe(true);
+    custom.value = ' '; custom.dispatchEvent({ type: 'input' });
+    expect(technical ? choices.find((radio) => radio.value === modelId)!.checked : selector!.value).toBe(technical ? true : modelId);
+    expect(button(node, 'test-flow-connection').disabled).toBe(false);
+    button(node, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId }));
+  });
+
+  it('restores the selected model and filter after channel round trips, refresh and two changed polls', async () => {
+    setTechnicalLayerVisible(false);
+    const projection = completeSettings();
+    const calls = api(projection);
+    const { screen, node, poll } = mountSettings(calls);
+    try {
+      await screen.renderModelServiceSettings();
+      const modelId = projection.channels.find((channel) => channel.channelId === 'opencode-go')!.models.at(-1)!.modelId;
+      const model = node.querySelector('select[aria-label="AI7 使用的模型"]')!;
+      model.value = modelId; model.dispatchEvent({ type: 'change' });
+      const filter = node.querySelector('input[aria-label="筛选模型"]')!;
+      filter.value = 'missing'; filter.dispatchEvent({ type: 'input' });
+      const channel = node.querySelector('select[aria-label="渠道"]')!;
+      for (const id of ['anthropic-claude', 'opencode-go']) { channel.value = id; channel.dispatchEvent({ type: 'change' }); }
+      const assertChoice = () => {
+        expect(node.querySelector('select[aria-label="AI7 使用的模型"]')!.value).toBe(modelId);
+        expect(node.querySelector('input[aria-label="筛选模型"]')!.value).toBe('missing');
+      };
+      assertChoice();
+      const refreshed = structuredClone(projection);
+      Object.assign(refreshed.channels.find((item) => item.channelId === 'opencode-go')!, { models: [...projection.channels.find((item) => item.channelId === 'opencode-go')!.models].reverse() });
+      vi.mocked(calls.refreshModelServiceModels).mockResolvedValue({ ...refreshed, modelDiscovery: { status: 'success', modelCount: 150 } });
+      const beforeRefresh = node.querySelector('[data-model-service-flow]');
+      button(node, 'retry-model-list').click();
+      await vi.waitFor(() => expect(node.querySelector('[data-model-service-flow]') === beforeRefresh).toBe(false));
+      assertChoice();
+      for (let cycle = 1; cycle <= 2; cycle++) {
+        const changed = structuredClone(projection);
+        Object.assign(changed.channels[0]!, { channelLabel: `changed ${cycle}` });
+        vi.mocked(calls.getModelServiceSettings).mockResolvedValue(changed);
+        const before = node.querySelector('[data-model-service-flow]');
+        poll();
+        await vi.waitFor(() => expect(node.querySelector('[data-model-service-flow]') === before).toBe(false));
+        assertChoice();
+      }
+      expect(node.querySelectorAll('[data-model-role]')).toHaveLength(2);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('saves favourites through preferences while retaining other channel choices', async () => {
+    setTechnicalLayerVisible(false);
+    const calls = api(completeSettings());
+    let values: PreferenceValues = { ...preferenceDefaults(), 'model.favourites': { 'anthropic-claude': ['shared-id'] } };
+    calls.getPreferences = vi.fn(async () => ({ version: 1 as const, values, notice: null }));
+    calls.savePreference = vi.fn(async (input) => { values = { ...values, [input.key]: input.value }; return { version: 1 as const, values, notice: null }; });
+    const { screen, node } = mountSettings(calls);
+    try {
+      await screen.renderModelServiceSettings();
+      node.querySelector('[data-favorite-model]')!.click();
+      await vi.waitFor(() => expect(calls.savePreference).toHaveBeenCalledWith({ key: 'model.favourites', value: {
+        'anthropic-claude': ['shared-id'], 'opencode-go': ['deepseek-v4.1-flash'],
+      } }));
+      await screen.renderModelServiceSettings();
+      expect(node.querySelector('[data-favorite-model]')!.getAttribute('aria-pressed')).toBe('true');
+      node.querySelector('[data-favorite-model]')!.click();
+      await vi.waitFor(() => expect(values['model.favourites']['opencode-go']).toEqual([]));
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it.each([false, true])('keeps manual refresh available with ready credentials (technical=%s)', async (technical) => {
+    setTechnicalLayerVisible(technical);
+    const projection = settings(['opencode-go']);
+    const calls = api({ ...projection, modelDiscovery: { status: 'success', modelCount: 150 } });
+    const { node, render } = flow(projection, calls);
+    const refresh = button(node, 'retry-model-list');
+    expect([refresh.textContent, refresh.disabled]).toEqual(['刷新模型列表', false]);
+    refresh.click();
+    await vi.waitFor(() => expect(render).toHaveBeenCalled());
+    expect(calls.refreshModelServiceModels).toHaveBeenCalledWith({ route: 'opencode-go' });
+    expect(button(flow(settings([])).node, 'retry-model-list').disabled).toBe(true);
+  });
+
+  it.each([false, true])('filters 150 models by name and ID without dropping selection (technical=%s)', async (technical) => {
+    setTechnicalLayerVisible(technical);
+    const projection = settings(['opencode-go']);
+    const channel = projection.channels.find((item) => item.channelId === 'opencode-go')!;
+    Object.assign(channel, { models: Array.from({ length: 150 }, (_, index) => ({ ...channel.models[0]!, modelId: `model-${index}`, modelLabel: `目录模型 ${index}` })) });
+    const favourites = { 'opencode-go': ['model-149'] };
+    const toggleFavourite = vi.fn(async () => ({ 'opencode-go': ['model-149', 'model-148'] }));
+    const { node, calls } = flow(projection, api(), { modelId: 'model-42', favourites, toggleFavourite });
+    const selector = node.querySelector('select[aria-label="AI7 使用的模型"]');
+    expect(technical ? node.querySelectorAll('[data-model-choice]')[0]!.value : selector!.children[0]!.value).toBe('model-149');
+    const filter = node.querySelector('input[aria-label="筛选模型"]')!;
+    for (const query of ['目录模型 149', 'model-149', '不存在', '']) {
+      filter.value = query; filter.dispatchEvent({ type: 'input' });
+      if (query === 'model-149' || query === '目录模型 149') {
+        if (technical) expect(node.querySelectorAll('.model-service-catalogue-row').filter((row) => !row.hidden)).toHaveLength(1);
+        else expect(selector!.children.map((option) => option.value)).toEqual(['model-149', 'model-42']);
+      }
+      if (technical) expect(node.querySelector('[data-model-choice="model-42"]')!.checked).toBe(true);
+      else expect(selector!.value).toBe('model-42');
+    }
+    if (technical) node.querySelector('[data-favorite-model="model-148"]')!.click();
+    else { selector!.value = 'model-148'; selector!.dispatchEvent({ type: 'change' }); node.querySelector('[data-favorite-model="model-148"]')!.click(); }
+    await vi.waitFor(() => expect(toggleFavourite).toHaveBeenCalledWith('opencode-go', 'model-148'));
+    await vi.waitFor(() => expect(node.querySelector('[data-favorite-model="model-148"]')!.getAttribute('aria-pressed')).toBe('true'));
+    button(node, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: technical ? 'model-42' : 'model-148' }));
+  });
   it.each(['deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen'] as const)(
     'keeps ordinary channel %s through credential save, model selection and connection test', async (route) => {
       setTechnicalLayerVisible(false);
@@ -115,7 +259,8 @@ describe('the one model-service flow', () => {
     button(ready, 'remove-model-service-credential').click();
     await vi.waitFor(() => expect(calls.removeModelServiceCredential).toHaveBeenCalledWith({ route: 'opencode-zen' }));
   });
-  it('refreshes the channel catalogue and chooses a custom ID independently for either role', async () => {
+  it.each([false, true])('chooses a custom ID independently for either role (technical=%s)', async (technical) => {
+    setTechnicalLayerVisible(technical);
     const { node, calls } = flow(settings(['anthropic-claude']));
     const custom = node.querySelector('[data-custom-model-id]')!;
     custom.value = 'account/custom-opus'; custom.dispatchEvent({ type: 'input' });
@@ -216,7 +361,7 @@ describe('the one model-service flow', () => {
       launchPolicy: { integrityState: 'verified', providerProcessing: { authorizedLiveTransmissionCount: 0, label: '本地' },
         externalExport: { label: '未授权' }, publicReleasePermission: { label: '未授权' } },
     } as unknown as ModelServiceSettingsProjection;
-    const calls = { getModelServiceSettings: vi.fn(async () => projection), saveModelServiceProxy: vi.fn(async () => projection) };
+    const calls = { ...api(projection), getModelServiceSettings: vi.fn(async () => projection), saveModelServiceProxy: vi.fn(async () => projection) };
     vi.stubGlobal('window', { ai7: calls, setInterval: () => 0, clearInterval: () => undefined });
     try {
       const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
@@ -401,9 +546,9 @@ it('offers one ordinary model view and saves both underlying roles without a tes
   setTechnicalLayerVisible(false);
   const { node, calls } = flow(settings(['opencode-go'], 'opencode-go', null));
   expect(node.querySelectorAll('select')).toHaveLength(2);
-  expect(node.querySelector('[data-action="select-main-role-model"]')).toBeNull();
-  expect(node.querySelector('[data-action="select-fast-role-model"]')).toBeNull();
-  expect(node.querySelector('[data-custom-model-id]')).toBeNull();
+  expect(node.querySelector('[data-action="select-main-role-model"]')).not.toBeNull();
+  expect(node.querySelector('[data-action="select-fast-role-model"]')).not.toBeNull();
+  expect(node.querySelector('[data-custom-model-id]')).not.toBeNull();
   expect(node.textContent).toContain('AI7 使用的模型');
   button(node, 'use-model-for-both-roles').click();
   await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'opencode-go', modelId: 'deepseek-v4.1-flash' }));

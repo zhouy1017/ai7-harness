@@ -262,7 +262,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     const actions = el('div', 'button-row evidence-card-actions');
     if (!card.excluded && projection?.claimRecheckAvailable && projection.decisionCard.drift === null) {
       const exclude = el('input');
-      exclude.type = 'checkbox'; exclude.checked = excludedSources.has(card.sourceRef); exclude.disabled = working;
+      exclude.type = 'checkbox'; exclude.checked = excludedSources.has(card.sourceRef); exclude.disabled = working || (decision.disposition !== null && decision.disposition !== 'request-evidence');
       exclude.addEventListener('change', () => {
         if (exclude.checked) {
           excludedSources.add(card.sourceRef);
@@ -438,7 +438,6 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
       input.dataset['evidenceFocus'] = `choice:${choice.disposition}`;
       input.addEventListener('change', () => {
         decision = { ...decision, disposition: choice.disposition, problem: null };
-        if (choice.disposition !== 'request-evidence') excludedSources.clear();
         render();
       });
       label.append(input, el('span', undefined, choice.label));
@@ -503,7 +502,7 @@ export function mountEvidenceWorkspace(options: MountEvidenceWorkspaceOptions): 
     options.setStatus('正在记录核查审阅决定…', 'busy');
     try {
       const recorded = await api.recordVerificationReviewDecision({
-        ...(excludedSources.size === 0 ? {} : { excludedSourceRefs: [...excludedSources] }),
+        ...(decision.disposition !== 'request-evidence' || excludedSources.size === 0 ? {} : { excludedSourceRefs: [...excludedSources] }),
         bookId, resultId, resultVersion: current.result.version, disposition: decision.disposition,
         ownWords: decision.disposition === 'own-words' ? decision.ownWords : null,
         reason: state === null ? null : { state, text: state === 'selected' ? decision.suggestion! : text, suggestion: state === 'replaced' ? null : decision.suggestion },

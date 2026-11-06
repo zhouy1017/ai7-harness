@@ -2860,6 +2860,12 @@ async function main() {
     // Synchronized delta with Issue #405: the Book route enters the manuscript now (V2-UX-RET-002),
     // and 工作概览 is reached back through the manuscript's 资料与记录 group (V2-UX-IA-012).
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(populatedBookId)}]')`, 'populated-book-manuscript-before-source');
+    // #1374 / J-01: an imported Book's deterministic-check choices survive temporary checking modes. No task starts.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'import-selection-review');
+    await waitFor(renderer, `document.querySelector('[data-review-action="new-review"]')`, 'import-selection-review-ready');
+    await assertRenderer(renderer, `(() => { document.querySelector('[data-review-action="new-review"]').click(); return true; })()`, 'import-selection-sheet-open');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'import-selection-sheet-ready');
+    await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const local=()=>sheet.querySelector('input[value="local-text-check"]'); local().click(); const numerals=sheet.querySelector('[data-local-check-numerals]'); numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); sheet.querySelector('[data-local-check-confirmation]').click(); numerals.value='off'; numerals.dispatchEvent(new Event('change',{bubbles:true})); if(!sheet.querySelector('[data-local-check-confirmation]').disabled)return false; numerals.value='editor-convention'; numerals.dispatchEvent(new Event('change',{bubbles:true})); local().click(); local().click(); const kept=sheet.querySelector('[data-local-check-confirmation]').checked&&sheet.querySelector('[data-local-check-numerals]').value==='editor-convention'; sheet.querySelector('[data-review-action="close-sheet"]').click(); return kept; })()`, 'import-local-selection-round-trip');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('overview')), 'populated-book-to-overview-before-source');
     await waitFor(renderer, `document.querySelector('[data-screen="book-overview"]')`, 'populated-book-overview-before-source');
     const populatedBefore = await renderer.evaluate(`Array.from(document.querySelectorAll('.record-navigation button[data-record-kind]'), (button) => ({ kind: button.dataset.recordKind, id: button.dataset.recordId }))`);

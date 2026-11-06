@@ -1225,7 +1225,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       levels.addEventListener('change', () => {
         const level = levels.querySelector<HTMLInputElement>('input:checked')?.value;
         reviewed.disabled = level !== 'high';
-        if (level !== 'high') reviewed.checked = false;
         refresh(node, record);
       });
       reviewed.addEventListener('change', () => refresh(node, record));
@@ -1328,6 +1327,14 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const lines = (name: string): string[] =>
       (node.querySelector<HTMLTextAreaElement>(`.evaluation-lists [data-evaluation-field="${name}"]`)?.value ?? '').split('\n').map((line) => line.trim()).filter((line) => line.length > 0);
     const optional = (value: string | undefined): string | null => (value === undefined || value.trim().length === 0 ? null : value);
+    const risks = record.profile.risks.map((risk) => {
+      const set = node.querySelector<HTMLElement>(`.evaluation-risk[data-risk-id="${risk.riskId}"]`)!;
+      const level = (set.querySelector<HTMLInputElement>('.evaluation-levels input:checked')?.value ?? null) as EvaluationRiskLevel | null;
+      return { riskId: risk.riskId, level,
+        statement: optional(set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="statement"]')!.value),
+        reviewed: level === 'high' && set.querySelector<HTMLInputElement>('[data-evaluation-field="reviewed"]')!.checked };
+    });
+    const conclusion = (node.querySelector<HTMLInputElement>('.evaluation-conclusion input:checked')?.value ?? null) as EvaluationConclusion | null;
     return {
       items: record.profile.items.map((item) => {
         const set = node.querySelector<HTMLElement>(`.evaluation-item[data-item-id="${item.itemId}"]`)!;
@@ -1342,21 +1349,12 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
           adjustment: adjustmentOf(set, record, item.itemId, score, notRated),
         };
       }),
-      risks: record.profile.risks.map((risk) => {
-        const set = node.querySelector<HTMLElement>(`.evaluation-risk[data-risk-id="${risk.riskId}"]`)!;
-        const level = (set.querySelector<HTMLInputElement>('.evaluation-levels input:checked')?.value ?? null) as EvaluationRiskLevel | null;
-        return {
-          riskId: risk.riskId,
-          level,
-          statement: optional(set.querySelector<HTMLTextAreaElement>('[data-evaluation-field="statement"]')!.value),
-          reviewed: level === 'high' && set.querySelector<HTMLInputElement>('[data-evaluation-field="reviewed"]')!.checked,
-        };
-      }),
+      risks,
       readiness: lines('readiness'),
       strengths: lines('strengths'),
       weaknesses: lines('weaknesses'),
       verdict: optional(node.querySelector<HTMLTextAreaElement>('.evaluation-lists [data-evaluation-field="verdict"]')?.value),
-      conclusion: (node.querySelector<HTMLInputElement>('.evaluation-conclusion input:checked')?.value ?? null) as EvaluationConclusion | null,
+      conclusion: conclusion === 'recommend' && recommendationBlocked(risks) ? null : conclusion,
     };
   };
 
@@ -1392,7 +1390,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     const note = node.querySelector<HTMLElement>('.evaluation-recommend-blocked');
     if (recommend !== null && note !== null) {
       recommend.disabled = record.state === 'finalized' || busy || blocked;
-      if (blocked && recommend.checked) recommend.checked = false;
       note.hidden = !blocked;
       if (blocked) recommend.setAttribute('aria-describedby', note.id);
       else recommend.removeAttribute('aria-describedby');

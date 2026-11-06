@@ -47,6 +47,14 @@ function refusal(operation: () => unknown): PreferenceError {
 }
 
 describe('the preferences registry', () => {
+  it('persists channel-scoped model favourites across restart in preferences.json', async () => {
+    const favourites = { 'openai-platform': ['account/model-149', 'gpt-5.6-sol'], 'opencode-zen': ['account/model-149'] };
+    createPreferenceStore(sandbox).save({ key: 'model.favourites', value: favourites });
+    expect(createPreferenceStore(sandbox).read().values['model.favourites']).toEqual(favourites);
+    expect(await stored()).toMatchObject({ values: { 'model.favourites': favourites } });
+    const validate = PREFERENCE_KEYS['model.favourites'].validate;
+    for (const value of [[], { unknown: [] }, { 'opencode-go': ['same', 'same'] }, { 'opencode-go': [''] }, { 'opencode-go': [' bad '] }, { 'opencode-go': [42] }]) expect(validate(value)).toBe(false);
+  });
   it('remembers only non-disposition action defaults across restart', () => {
     const defaults = { ...DEFAULT_QUICK_ACTIONS, reviewCategories: ['typos-and-usage', 'style-and-format'], reviewScope: 'changed' as const,
       taskBooks: ['book-one', 'book-two'], exportFormat: 'pdf' as const, includeEditorNotes: true };
@@ -73,8 +81,8 @@ describe('the preferences registry', () => {
   });
   it('declares the shell keys with their defaults, and each default passes its own validator', () => {
     expect(Object.keys(PREFERENCE_KEYS)).toEqual(['actions.defaults', 'usage.unitPrices', 'keyboard.bindings', 'shell.sidebarCollapsed', 'shell.pinnedBooks', 'shell.recentBooks', 'appearance.theme',
-      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency']);
-    expect(preferenceDefaults()).toEqual({ 'actions.defaults': DEFAULT_QUICK_ACTIONS, 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
+      'notifications.enabled', 'notifications.completions', 'notifications.sound', 'notifications.bookName', 'editor.density', 'editor.typography', 'layout.regions', 'analysis.lastViewedRevision', 'onboarding.state', 'learning.askFrequency', 'model.favourites']);
+    expect(preferenceDefaults()).toEqual({ 'model.favourites': {}, 'actions.defaults': DEFAULT_QUICK_ACTIONS, 'usage.unitPrices': {}, 'keyboard.bindings': {}, 'shell.sidebarCollapsed': false, 'shell.pinnedBooks': [], 'shell.recentBooks': [], 'appearance.theme': 'system',
       'notifications.enabled': false, 'notifications.completions': false, 'notifications.sound': false, 'notifications.bookName': false,
       'editor.density': 'standard',
       'editor.typography': { preset: 'editing', fontFamily: 'serif', fontSize: 17, lineHeight: 1.95, columnWidth: 36, alignment: 'justify' },
