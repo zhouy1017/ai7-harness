@@ -65,7 +65,7 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'exemplars',
     label: '范例',
-    holds: '按已出版图书整理的审稿意见与写作范例。',
+    holds: '本社交付过的工作文档（新闻稿、评论文章等）与审稿意见，按范例类型与来源图书查看（不含图书原稿）。',
     pending: null,
   },
   {
@@ -199,18 +199,30 @@ export function guidelineImported(title: string, ordinal: number): string {
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
 
 export const EXEMPLARS_EMPTY = '暂无范例，已发稿并交付的本社文档会自动加入。';
+export const EXEMPLARS_FILTER_EMPTY = '没有符合筛选条件的范例。';
 export const EXEMPLARS_NONE_DELIVERED = '还没有交付过的文档；交付后自动归入。';
 /** Reads the next page of published Books (Issue #427 review). */
 export const EXEMPLARS_MORE = '更多已出版的书…';
 export const EXEMPLARS_STATUS = {
   loading: '正在读取范例…',
   opened: '范例已打开',
-  loadingMore: '正在读取更多已出版的书…',
   unavailable: '无法读取范例。',
 } as const;
-/** What 范例 does not hold yet, said once below the Books. */
-export const EXEMPLARS_LATER = [] as const;
 export const EXEMPLAR_ELIGIBILITY_LABELS: Readonly<Record<ExemplarProjection['eligibility'], string>> = { 'house-only': '仅本社', excluded: '明确排除', deferred: '稍后决定' };
+
+/** Historical/imported entries have only a type; a custom document title stays verbatim. */
+export function exemplarTitle(book: Pick<ExemplarBookProjection, 'bookTitle'>, entry: { readonly title?: string; readonly typeLabel: string }): string {
+  return entry.title && entry.title !== entry.typeLabel ? entry.title : `《${book.bookTitle}》${entry.typeLabel}`;
+}
+
+export function exemplarKind(entry: { readonly typeId: string; readonly typeLabel: string }): string {
+  if (entry.typeId.startsWith('readers-report-')) return entry.typeLabel.startsWith('审稿意见') ? entry.typeLabel : `审稿意见 · ${entry.typeLabel}`;
+  return `工作文档 · ${entry.typeLabel}`;
+}
+
+export function exemplarKindFilter(entry: { readonly typeId: string }): string {
+  return entry.typeId.startsWith('readers-report-') ? 'readers-report' : entry.typeId;
+}
 
 // ---- 审稿意见 offered into 范例 (Issue #429, S81c remainder; KB-006) --------------------------------------------------------
 
@@ -234,13 +246,9 @@ export function readersReportExemplarAdmission(admission: ReadersReportExemplarP
   return '尚未归入：由你决定是否归入范例';
 }
 
-/**
- * One offered 审稿意见's line: its template and version, when that version was saved, why it is the version offered, its
- * eligibility, and where its admission stands.
- */
-export function readersReportExemplarLine(entry: ReadersReportExemplarProjection, instant: (iso: string) => string): string {
-  return `${entry.typeLabel}${technicalWords(` · 版本 ${entry.version}`)} · 保存于 ${instant(entry.savedAt)} · ${EXEMPLAR_READERS_REPORT_PINS[entry.pin]}` +
-    ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]} · ${readersReportExemplarAdmission(entry.admission, instant)}`;
+/** Version and pin facts shown below the report's title, beside its admission history. */
+export function readersReportExemplarFacts(entry: ReadersReportExemplarProjection, instant: (iso: string) => string): string {
+  return `版本 ${entry.version} · 保存于 ${instant(entry.savedAt)} · ${EXEMPLAR_READERS_REPORT_PINS[entry.pin]}`;
 }
 
 /** Who a published Book is attributed to, as its 人员 read now. */
@@ -260,12 +268,9 @@ export function exemplarDesignation(book: Pick<ExemplarBookProjection, 'designat
   return book.withdrawn ? `${designated} · ${MAINTENANCE_WITHDRAWN}；之后交付的文档，另设发稿版本后才归入` : designated;
 }
 
-/**
- * One exemplar's line: its type and version, where it was delivered and when, when it came in, its eligibility, and the
- * versions delivered before it — every one while they are few, and past that how many, with the latest named.
- */
-export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string) => string): string {
-  if (exemplar.imported) return `${exemplar.typeLabel}${technicalWords(` · 版本 ${exemplar.version}`)} · 导入于 ${instant(exemplar.archivedAt)} · 原件：${exemplar.imported.sourceName} · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}` +
+/** Delivery/import and history facts shown below the document's custom title. */
+export function exemplarFacts(exemplar: ExemplarProjection, instant: (iso: string) => string): string {
+  if (exemplar.imported) return `版本 ${exemplar.version} · 导入于 ${instant(exemplar.archivedAt)} · 原件：${exemplar.imported.sourceName}` +
     (exemplar.earlierVersionCount > 0 ? ` · 此前导入过 ${exemplar.earlierVersionCount} 个版本` : '');
   const named = exemplar.earlierVersions.join('、');
   const earlier = exemplar.earlierVersionCount === 0
@@ -273,8 +278,7 @@ export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string
     : exemplar.earlierVersionCount > exemplar.earlierVersions.length
       ? ` · 此前还交付过 ${exemplar.earlierVersionCount} 个版本，最近的是版本 ${named}`
       : ` · 此前还交付过版本 ${named}`;
-  return `${exemplar.typeLabel}${technicalWords(` · 版本 ${exemplar.version}`)} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}` +
-    ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}${earlier}`;
+  return `版本 ${exemplar.version} · 交付给${exemplar.deliveredTo}于 ${instant(exemplar.deliveredAt)} · 归入于 ${instant(exemplar.archivedAt)}${earlier}`;
 }
 
 /**
