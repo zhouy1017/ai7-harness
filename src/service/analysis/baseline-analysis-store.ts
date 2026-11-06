@@ -1532,7 +1532,7 @@ export class BaselineAnalysisStore {
 
   #selectedPlanMetadata(policy = this.#launch.policy): Pick<MaterialPlanInputsProjection, 'selectedPolicyIdentity' | 'localFixtureProfile'> {
     if (policy?.selectedPolicyIdentity === undefined) {
-      requireAnalysis(!['v21', 'v22', 'v23', 'v24'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33'].includes(policy?.providerProcessing.version ?? ''),
+      requireAnalysis(!['v21', 'v22', 'v23', 'v24', 'v25'].includes(policy?.activePolicySetVersion ?? '') && !['v29', 'v30', 'v31', 'v32', 'v33', 'v34'].includes(policy?.providerProcessing.version ?? ''),
         'ANALYSIS_POLICY_UNAVAILABLE', '当前计划缺少已选处理策略身份。');
       return {};
     }
@@ -3394,13 +3394,13 @@ export class BaselineAnalysisStore {
     const channel = modelServiceChannelOf(this.#launch.live.route);
     const native = SEARCH_BACKENDS.find((entry) => channel?.startsWith(`${entry.service}-`));
     const modelConnection = production ? this.#db.prepare("SELECT credential_updated_at FROM model_service_connections WHERE credential_reference = ? AND credential_operation_state = 'ready'").get(this.#launch.live.credentialReference) : undefined;
-    const usingNative = !readSearchOverride(this.#db) && native?.shipped === true && modelConnection !== undefined;
+    const nativeAdmitted = native !== undefined && platformToolsFromProjection(admitted) !== null &&
+      admitted.platformTools?.websearch.backends.some((backend) => backend.id === native.id) === true;
+    const usingNative = !readSearchOverride(this.#db) && nativeAdmitted && modelConnection !== undefined;
     const selectedRow = selected !== undefined && (!production || (selected.credential_operation_state === 'ready' && typeof selected.credential_reference === 'string')) ? selected : undefined;
     const configuredRows = rows.filter((entry) => !production || (entry.credential_operation_state === 'ready' && typeof entry.credential_reference === 'string'));
     const row = selectedRow ?? configuredRows[0];
     const adapterId = usingNative ? native.id : asString(row?.backend_id ?? '');
-    const nativeAdmitted = native?.shipped === true && platformToolsFromProjection(admitted) !== null &&
-      admitted.platformTools?.websearch.backends.some((backend) => backend.id === native.id) === true;
     requireAnalysis(adapterId.length > 0, 'SEARCH_CREDENTIAL_MISSING', native === undefined
       ? '当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
       : nativeAdmitted ? '当前模型渠道自带联网搜索，可一键启用；请前往 设置 › 联网检索。'

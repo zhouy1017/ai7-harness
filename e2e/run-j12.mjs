@@ -809,6 +809,11 @@ async function main() {
     // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
     await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
+    // #1371: ordinary mode keeps the native source explanation and unmeasured disclosure, with five manual cards.
+    // Production admission/request construction is exercised by composed ordinary-production service tests; this Journey sends nothing.
+    requireJourney(await primary.evaluate(`window.ai7.getModelServiceSettings().then(settings => settings.launchPolicy.activePolicySetVersion==='v25' && settings.launchPolicy.providerProcessing.version==='v1')`), 'ordinary-search-selected-set');
+    await assertRenderer(primary, `document.querySelectorAll('[data-search-backend]').length===5 && ['openai-native-search-v1','anthropic-native-search-v1'].every(id => { const card=document.querySelector('[data-search-candidate="'+id+'"]'); return card?.textContent.includes('未实测') && card.textContent.includes('自动用于随渠道检索') && !card.textContent.includes('不能用于任务'); })`, 'ordinary-native-source-disclosure');
+
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');
     await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); const address=document.querySelector('input[aria-label="代理 URL"]'); if(!(mode instanceof HTMLSelectElement)||!(address instanceof HTMLInputElement))return false; mode.value='proxy'; mode.dispatchEvent(new Event('change')); address.value='http://127.0.0.1:1'; return !address.disabled; })()`, 'ordinary-proxy-configure');
@@ -1463,7 +1468,7 @@ async function main() {
     const diagnosticsBundle = resolve(diagnosticsDestination, diagnosticsFolders[0]);
     requireJourney((await readdir(diagnosticsBundle)).sort().join(',') === 'README.txt,crashes,summary.json', 'diagnostics-allowed-files');
     const diagnosticsSummary = JSON.parse(await readFile(resolve(diagnosticsBundle, 'summary.json'), 'utf8'));
-    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v24.json'), 'utf8'));
+    const builtPolicySet = JSON.parse(await readFile(resolve(ROOT, 'dist/docs/policies/active-policy-set.v25.json'), 'utf8'));
     // 数据版本 and 数据库修订 named apart (Issue #967): the Data Version is 1, the schema revision the store's own.
     requireJourney(diagnosticsSummary.appVersion === packageVersion && diagnosticsSummary.dataVersion === 1 && diagnosticsSummary.schemaRevision === CREDENTIAL_CLEANUP_SCHEMA_VERSION && diagnosticsSummary.protocol === 197 &&
       diagnosticsSummary.policySetVersion === builtPolicySet.version && diagnosticsSummary.logs === '无日志文件', 'diagnostics-summary');
@@ -1691,13 +1696,13 @@ async function main() {
     requireJourney(candidateSettings.every((candidate) => candidate.measurement === 'not-measured' && candidate.selectable === false), 'search-native-candidates-unmeasured');
     await assertRenderer(primary, `['openai-native-search-v1','anthropic-native-search-v1'].every(id => {
       const card=document.querySelector('[data-search-candidate="'+id+'"]');
-      return card?.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
+      return card?.textContent.includes('未实测') && card.textContent.includes('不作为独立排名默认后端或备用来源') && card.querySelector('[data-action="probe-search-candidate"]')?.disabled===true;
     })`, 'search-native-candidates-disclosed');
     await assertRenderer(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false`, 'search-native-follow-default');
     requireJourney(await primary.evaluate(`window.ai7.selectSearchBackend({backendId:'search-brave',alwaysUseSelectedBackend:true}).then(settings=>settings.searchBackends.alwaysUseSelectedBackend===true)`), 'search-source-override-saved');
     await assertRenderer(primary, `(() => { const card=document.querySelector('[data-search-candidate="deepseek-direct-search-v1"]');
       const labels=Array.from(card?.querySelectorAll('button')??[]).map((node)=>node.textContent);
-      return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不能用于任务') && card.textContent.includes('USD 0.75') &&
+      return card?.dataset.measurement==='not-measured' && card.textContent.includes('未实测') && card.textContent.includes('不作为独立排名默认后端或备用来源') && card.textContent.includes('USD 0.75') &&
         card.textContent.includes('不承诺直连调用免费') && JSON.stringify(labels)==='["测试连接"]' && card.querySelector('[data-search-candidate-probe]').textContent==='';
     })()`, 'search-candidate-disclosed-unselectable');
     await assertRenderer(primary, `document.querySelector('[data-action="probe-search-candidate"]')?.disabled===true && !document.querySelector('[data-search-candidate]').textContent.includes('2026-11-01')`, 'search-candidate-keyless-disabled');
@@ -1743,7 +1748,7 @@ async function main() {
         firstConnection.binding?.approvedFallbackChain?.length === 0 &&
         firstConnection.policy?.operationalScope === 'development-ci' &&
         // Synchronized delta with Issue #1163: selected active set v22; new local Plans use Provider Processing v1.
-        firstConnection.policy?.activePolicySetVersion === 'v24' &&
+        firstConnection.policy?.activePolicySetVersion === 'v25' &&
         firstConnection.policy?.providerProcessing?.version === 'v1' &&
         firstConnection.policy?.providerProcessing?.authorizedLiveTransmissionCount === 0 &&
         firstConnection.policy?.externalExport?.version === 'v2' &&

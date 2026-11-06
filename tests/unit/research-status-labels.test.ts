@@ -11,6 +11,13 @@ const report: Pick<RunReportProjection, 'webToolsBackend' | 'usagePerStage' | 'c
 };
 
 describe('research status (#744)', () => {
+  it.each(['search-openai', 'search-anthropic'])('discloses %s as unmeasured in frozen plans and every Run outcome', (backendId) => {
+    const native = { ...backend, backendId, selectionSource: 'model-channel' as const, sourceLabel: '官方渠道' };
+    expect(researchPlanLine(native)).toContain('官方渠道（未实测） 自带的联网搜索');
+    for (const classification of ['completed', 'cancelled'] as const) {
+      expect(researchStatusLine({ ...report, webToolsBackend: native, classification })).toContain('（未实测）');
+    }
+  });
   it('discloses an unshipped or keyless backend as unavailable with its reason', () => {
     expect(researchUnavailableLine('SEARCH_BACKEND_NOT_SHIPPED', '请先选择已提供的后端')).toBe('暂不可用 · 请先选择已提供的后端');
     expect(researchUnavailableLine('SEARCH_CREDENTIAL_MISSING', 'Brave 需要密钥')).toBe('暂不可用 · Brave 需要密钥');

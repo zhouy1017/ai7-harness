@@ -312,7 +312,7 @@ export function platformToolsFromProjection(rule: unknown): import('./egress-gat
       if (entry['host'] !== declared.host || entry['credentialSlot'] !== declared.credentialSlot) return null;
     } catch { return null; }
   }
-  if (search['backends'].length !== 5 || new Set(search['backends'].map((entry: { id: string }) => entry.id)).size !== 5) return null;
+  if (![5, 7].includes(search['backends'].length) || new Set(search['backends'].map((entry: { id: string }) => entry.id)).size !== search['backends'].length) return null;
   return { websearch: { selection: 'user-configured', backends: search['backends'] as Array<{ id: string; host: string; credentialSlot: string }> },
     webfetch: { maxBytes: 5_242_880, timeoutSeconds: 30, boundedByCitations: true } };
 }
@@ -411,11 +411,20 @@ export async function composeSearchCandidateProbe(input: {
 }): Promise<SearchBackendProbeProjection> {
   let candidate: import('./search-backends.js').SearchBackendCandidate;
   try { candidate = searchBackendCandidate(input.backendId, input.candidateId); } catch { throw new SearchCandidateProbeRefusal('SEARCH_CANDIDATE_UNKNOWN', '没有这一联网检索候选接口；未发送任何内容。'); }
-  const policy = input.launchPolicy.providerProcessing.searchConnectionTest;
+  const declared = input.launchPolicy.providerProcessing.searchConnectionTest;
+  const policy = [declared, ...(declared?.candidates ?? [])].find((entry) => entry?.candidateId === candidate.candidateId) ?? declared;
   const native = candidate.fetch === null;
-  // Only an ordinary-production click can read the corresponding model connection; no candidate enters Task admission.
-  const connection = () => native ? input.modelConnection?.(candidate.backendId) : input.connection(candidate.backendId);
-  const model = native && input.operationalScope === 'ordinary-production' ? input.modelConnection?.(candidate.backendId) : undefined;
+  // Non-production scopes never inspect either connection; the gate refuses before secret access or transport.
+  const modelConnection = () => input.modelConnection?.(candidate.backendId);
+  const connection = () => {
+    if (native) return modelConnection();
+    const own = input.connection(candidate.backendId);
+    return own?.credentialOperationState === 'ready' || policy?.credentialFallbackSlot === undefined ? own : modelConnection();
+  };
+  let model: ReturnType<typeof modelConnection>;
+  if (input.operationalScope === 'ordinary-production' && policy?.candidateId === candidate.candidateId) {
+    if (native || (policy.credentialFallbackSlot !== undefined && input.connection(candidate.backendId)?.credentialOperationState !== 'ready')) model = modelConnection();
+  }
   const decision = evaluateSearchCandidateProbe({ operationalScope: input.operationalScope, providerProcessingVersion: input.launchPolicy.providerProcessing.version, policy,
     configurationDigest: searchBackendCandidateConfigurationDigest(candidate.backendId, candidate.candidateId), connection, ...(model === undefined ? {} : { model: model.modelId }),
     candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: model?.credentialSlot ?? candidate.credentialSlot, arguments: candidate.search.probeArguments },
@@ -426,7 +435,11 @@ export async function composeSearchCandidateProbe(input: {
   try {
     return await probeSearchCandidate({ ticket, policy: policy!, broker: input.broker, fetch: input.fetch, admitHost: input.admitHost,
       // Removing or replacing the key between the click and the read retargets nothing: the frozen reference must still be the ready one.
-      isCurrent: () => { const now = connection(); return now?.credentialOperationState === 'ready' && now.credentialReference === ticket.credentialReference; } });
+      isCurrent: () => {
+        const now = connection(); const currentModel = model === undefined ? undefined : modelConnection();
+        return now?.credentialOperationState === 'ready' && now.credentialReference === ticket.credentialReference &&
+          (model === undefined || (currentModel?.modelId === model.modelId && currentModel?.credentialSlot === model.credentialSlot));
+      } });
   } catch (error) {
     const code = error !== null && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : 'SEARCH_CANDIDATE_PROBE_FAILED';
     throw new SearchCandidateProbeRefusal(code === 'CREDENTIAL_MISSING' ? 'SEARCH_CREDENTIAL_MISSING' : code, '连接测试未完成：凭据未释放或请求未发送；请检查本页保存的密钥后重试。');
