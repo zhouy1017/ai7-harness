@@ -325,6 +325,39 @@ async function assertRenderer(renderer, expression, name) {
   requireJourney(await renderer.evaluate(`Boolean(${expression})`), name);
 }
 
+/** #1372: complete ordinary settings may scroll vertically; controls must remain visible and usable at supported sizes. */
+async function assertOrdinaryModelReachability(renderer) {
+  const native = await renderer.evaluate(`({width:innerWidth,height:innerHeight,outerWidth,outerHeight})`);
+  if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-native ${JSON.stringify(native)}`);
+  for (const viewport of [native, { width: 1008, height: 681 }, { width: 640, height: 681 }]) {
+    await renderer.send('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: false });
+    await waitFor(renderer, `innerWidth===${viewport.width} && innerHeight===${viewport.height}`, 'ordinary-model-supported-viewport');
+    const geometry = await renderer.evaluate(`(async () => {
+      const selectors=['select[aria-label="渠道"]','.model-credential-form input[type="password"]','[data-action="save-channel-credential"]','[data-action="retry-model-list"]','[data-action="remove-model-service-credential"]','input[aria-label="筛选模型"]','select[aria-label="AI7 使用的模型"]','[data-favorite-model]','[data-custom-model-id]','[data-action="select-main-role-model"]','[data-action="select-fast-role-model"]','[data-action="use-model-for-both-roles"]','[data-action="test-flow-connection"]','[data-model-role="main-editorial"]','[data-model-role="fast-interaction"]'];
+      const controls=[];
+      for (const [index,selector] of selectors.entries()) {
+        const node=document.querySelector(selector);
+        if(!(node instanceof HTMLElement))return {ok:false,width:innerWidth,height:innerHeight,missing:index,controls};
+        node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'});
+        const focusable=node.matches('input,select,button')&&!node.disabled;
+        if(focusable)node.focus();
+        await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        const box=node.getBoundingClientRect(), hit=document.elementFromPoint(box.left+box.width/2,box.top+box.height/2);
+        const header=document.querySelector('#context-header').getBoundingClientRect(), sidebar=document.querySelector('#app-sidebar').getBoundingClientRect();
+        const visible=box.width>0&&box.height>0&&box.top>=header.bottom&&box.bottom<=innerHeight&&box.left>=sidebar.right&&box.right<=innerWidth&&!node.closest('[hidden],[aria-hidden="true"],[inert]')&&(hit===node||node.contains(hit));
+        const focused=!focusable||(node.tabIndex>=0&&document.activeElement===node);
+        controls.push({index,top:Math.round(box.top),bottom:Math.round(box.bottom),left:Math.round(box.left),right:Math.round(box.right),disabled:Number(Boolean(node.disabled)),visible:Number(visible),focused:Number(focused)});
+        if(!visible||!focused)return {ok:false,width:innerWidth,height:innerHeight,controls};
+      }
+      return {ok:document.documentElement.scrollWidth<=innerWidth+1,width:innerWidth,height:innerHeight,scrollWidth:document.documentElement.scrollWidth,controls};
+    })()`);
+    if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-reachability ${JSON.stringify(geometry)}`);
+    requireJourney(geometry.ok, 'ordinary-model-controls-reachable', geometry);
+  }
+  await renderer.send('Emulation.clearDeviceMetricsOverride');
+  await renderer.evaluate(`(() => { document.activeElement?.blur(); window.scrollTo({top:0,left:0,behavior:'instant'}); })()`);
+}
+
 async function dispatchTab(renderer) {
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab' });
   await renderer.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab' });
@@ -764,18 +797,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
     await click(primary, '模型服务', 'ordinary-model-entry');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles')`, 'ordinary-model-single-view');
-    // #1372: exercise the hosted 1024×768 window's client area even on a larger guest desktop.
-    const nativeModelViewport = await primary.evaluate(`({width:innerWidth,height:innerHeight,outerWidth,outerHeight})`);
-    if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-native ${JSON.stringify(nativeModelViewport)}`);
-    await primary.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
-    await waitFor(primary, `innerWidth===1008 && innerHeight===681`, 'ordinary-model-hosted-viewport');
-    const ordinaryModelGeometry = await primary.evaluate(`(() => {
-      const rect=(selector)=>{const box=document.querySelector(selector).getBoundingClientRect();return {top:Math.round(box.top),bottom:Math.round(box.bottom),left:Math.round(box.left),right:Math.round(box.right),width:Math.round(box.width),height:Math.round(box.height)};};
-      return {width:innerWidth,height:innerHeight,scrollX,scrollY,flow:rect('[data-model-service-flow]'),test:rect('[data-action="test-flow-connection"]')};
-    })()`);
-    if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-hosted ${JSON.stringify(ordinaryModelGeometry)}`);
-    await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const test=flow?.querySelector('[data-action="test-flow-connection"]'); return flow instanceof HTMLElement && test instanceof HTMLButtonElement && flow.getBoundingClientRect().top>=0 && test.getBoundingClientRect().bottom<=innerHeight; })()`, 'ordinary-model-one-screen');
-    await primary.send('Emulation.clearDeviceMetricsOverride');
+    await assertOrdinaryModelReachability(primary);
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
@@ -1534,6 +1556,7 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-catalogue-return-ready');
     await click(primary, '模型服务', 'ordinary-catalogue-entry');
     await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelectorAll('[data-model-role]').length===2`, 'ordinary-catalogue-roles');
+    await assertOrdinaryModelReachability(primary);
     await assertRenderer(primary, `(() => {
       const select=document.querySelector('select[aria-label="AI7 使用的模型"]');
       const filter=document.querySelector('input[aria-label="筛选模型"]');
