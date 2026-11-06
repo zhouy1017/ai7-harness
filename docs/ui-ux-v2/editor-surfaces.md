@@ -40,6 +40,8 @@ Ctrl+K 搜索命令、按图书与工序发起任务、切换图书与最近完�
 
 审阅的九类模型审阅旁提供可往返的本地文字检查选择：单独选择本地检查时挂起模型类别，取消后恢复；组合工序仍按其固定成员运行。选章起止、本地数字依据确认及本社词表选用不因隐藏或暂不可用而丢失，保存词表后所选项引用最新可用版本。评估的人工复核与推荐出版保留勾选记忆，只按当前风险条件提交有效值。事实核查的来源排除选择跨决定切换保留，仅补充核查提交排除来源；清空手动模型 ID 恢复此前明确选择的目录模型。
 
+固定成员工序不可拆分提交：暂不可用成员保持勾选并显示原因，在所有成员可用前禁用「先看计划 / 开始审阅」，恢复后仍按工序的完整顺序提交。已选用的本社词表更新读取期间保留原版本并暂停提交，读取成功后改用最新版本。评估的临时勾选记忆以一次表单为界；显式「保存评估」成功后以服务端已存的有效内容重建表单，暂不适用的复核或推荐不会被保存，之后需要时由编辑重新选择；保存失败则保留原表单。
+
 ## Wave 23 direct workflows — Owner #1279 / #1284
 
 The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft promotion and mandatory plan-review passages in §§1, 6, 7, 8 and 9. Every Book immediately has analysis, review, evaluation, writing and Agent capabilities. Starting a task prepares and authorizes the exact plan in one action; plan details remain optional. A production document can be the target of a same-type writing task, pinned to its saved manuscript, branch and version; edits require repinning before execution.

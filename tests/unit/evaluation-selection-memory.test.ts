@@ -11,7 +11,7 @@ beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(false); 
 afterEach(() => { restore(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); });
 vi.mock('../../src/renderer/action-defaults.js', () => ({ readActionDefaults: async () => ({ ...DEFAULT_QUICK_ACTIONS }), rememberActionDefaults: async () => undefined }));
 
-async function mount() {
+async function mount(successfulSave = false) {
   const profile = { ...BUILTIN_EVALUATION_PROFILE, sha256: 'a'.repeat(64) };
   const content = emptyEvaluationContent(profile);
   const record = { recordId: 'record', ordinal: 1, state: 'draft', revisionLabel: 'Revision 1', revisionId: 'revision', entries: 1,
@@ -24,7 +24,10 @@ async function mount() {
     market: { series: [], comparables: [], pricing: { enabled: false, booksWithActuals: 0, threshold: 30 } },
   } as unknown as EvaluationWorkspaceProjection;
   const root = new MiniElement('main'); miniDocument.body.append(root);
-  const save = vi.fn<RendererApi['saveEvaluation']>(async () => { throw new Error('synthetic refusal keeps draft'); });
+  const save = vi.fn<RendererApi['saveEvaluation']>(async (input) => {
+    if (!successfulSave) throw new Error('synthetic refusal keeps draft');
+    return { ...page, record: { ...record, entries: record.entries + 1, content: input.content } };
+  });
   let reads = 0;
   const api = { inspectEvaluation: async () => ({ ...page, initial: { ...page.initial, prepare: { allowed: false, reason: `公开合成读取周期${++reads}` } } }), saveEvaluation: save } as unknown as MountEvaluationOptions['api'];
   const surface = mountEvaluation({ root: root as unknown as HTMLElement, api, bookId: 'book', setStatus: vi.fn(), errorMessage: (_e, fallback) => fallback,
@@ -58,4 +61,25 @@ it('remembers recommend while an unreviewed high risk blocks its effective submi
   view.reviewed.checked = true; view.reviewed.dispatchEvent({ type: 'change' });
   expect(view.recommend.disabled).toBe(false); expect(view.recommend.checked).toBe(true);
   expect((await view.submit()).conclusion).toBe('recommend');
+});
+
+it('starts from saved effective values after an explicit successful save (#1374 / P3-2)', async () => {
+  const view = await mount(true); view.level('high');
+  view.reviewed.checked = true; view.reviewed.dispatchEvent({ type: 'change' }); view.level('medium');
+  view.recommend.checked = true;
+  const choose = (risk: MiniElement, value: string) => {
+    const radios = risk.querySelectorAll('.evaluation-levels input');
+    for (const input of radios) input.checked = input.value === value;
+    radios.find((input) => input.value === value)!.dispatchEvent({ type: 'change', bubbles: true });
+  };
+  choose(view.root.querySelectorAll('.evaluation-risk')[1]!, 'high');
+  expect(view.recommend.disabled).toBe(true);
+  const saved = await view.submit(); expect(saved.risks[0]!.reviewed).toBe(false); expect(saved.conclusion).toBeNull();
+  await vi.waitFor(() => expect(view.root.querySelector('.evaluation-record')!.dataset['entries']).toBe('2'));
+  choose(view.root.querySelectorAll('.evaluation-risk')[0]!, 'high');
+  expect(view.root.querySelector('[data-evaluation-field="reviewed"]')!.checked).toBe(false);
+  choose(view.root.querySelectorAll('.evaluation-risk')[0]!, 'medium');
+  choose(view.root.querySelectorAll('.evaluation-risk')[1]!, 'low');
+  const recommend = view.root.querySelector('[data-conclusion="recommend"] input')!;
+  expect(recommend.disabled).toBe(false); expect(recommend.checked).toBe(false);
 });

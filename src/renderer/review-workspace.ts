@@ -331,6 +331,7 @@ interface SheetState {
   localOptions: import('../shared/protocol/procedures.js').LocalCheckOptions;
   houseWordListWanted: boolean;
   houseWordListRequest: number;
+  houseWordListLoading: boolean;
   seriesId: string | null;
   readonly seriesChoices: ReadonlyArray<{ readonly seriesId: string; readonly title: string }>;
   readonly recommendation: ProcedureRecommendationSelection;
@@ -365,6 +366,7 @@ function localOnly(state: SheetState): boolean {
 }
 
 function categoryUnavailableReason(entry: ReviewWorkspaceCategoryProjection, state: SheetState): string | null {
+  if (state.definition !== null && !state.definition.categoryIds.includes(entry.categoryId)) return '不在所选的固定成员工序里。';
   if (localOnly(state) && entry.categoryId !== 'local-text-check') return '本次仅运行本地文字检查；取消后恢复模型审阅类别。';
   const filled = state.procedure?.resolved ?? null;
   const step = filled?.steps.find((candidate) => candidate.categoryId === entry.categoryId) ?? null;
@@ -376,7 +378,9 @@ function categoryUnavailableReason(entry: ReviewWorkspaceCategoryProjection, sta
 
 /** Stored choices survive temporary conditions; only this effective set is estimated and submitted. */
 function effectiveCategories(workspace: ReviewWorkspaceProjection, state: SheetState): string[] {
-  const ordered = state.definition?.categoryIds ?? ['local-text-check', ...workspace.categories.filter((entry) => entry.categoryId !== 'local-text-check').map((entry) => entry.categoryId)];
+  // A definition is indivisible: the service requires its complete ordered membership, or no submission.
+  if (state.definition !== null) return [...state.definition.categoryIds];
+  const ordered = ['local-text-check', ...workspace.categories.filter((entry) => entry.categoryId !== 'local-text-check').map((entry) => entry.categoryId)];
   return ordered.filter((id) => {
     if (!state.categories.has(id)) return false;
     if (id === 'local-text-check') return workspace.manuscript !== null && state.scope !== 'changed';
@@ -384,6 +388,22 @@ function effectiveCategories(workspace: ReviewWorkspaceProjection, state: SheetS
     const entry = workspace.categories.find((category) => category.categoryId === id);
     return entry !== undefined && (categoryUnavailableReason(entry, state) === null || entry.networkUnavailable === true);
   });
+}
+
+function sheetPreparationReason(workspace: ReviewWorkspaceProjection, state: SheetState): string | null {
+  for (const id of state.definition?.categoryIds ?? []) {
+    if (id === 'local-text-check') {
+      if (workspace.manuscript === null) return '本地文字检查：导入稿件后即可检查。';
+      if (state.scope === 'changed') return '本地文字检查请选择全书、选章或当前选区。';
+      continue;
+    }
+    const entry = workspace.categories.find((category) => category.categoryId === id);
+    if (entry === undefined) return '固定成员已不在审阅配置中，请重新打开此工序。';
+    const why = categoryUnavailableReason(entry, state) ?? (entry.networkUnavailable === true ? '此类别需要联网检索。' : null);
+    if (why !== null) return `${entry.label}：${why}`;
+  }
+  return state.categories.has('local-text-check') && state.houseWordListWanted && state.houseWordListLoading
+    ? '正在更新本社词表版本，请稍候再开始审阅。' : null;
 }
 
 /** 运行此工序… names a Procedure Definition version as `id@version`; a Captured Procedure is named by its UUID alone. */
@@ -2256,6 +2276,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       dismissed: false,
       houseWordListWanted: false,
       houseWordListRequest: 0,
+      houseWordListLoading: false,
       localOptions: { punctuation: 'chinese-prose', numerals: 'off', publication: 'unknown', numeralRules: [], numeralsConfirmed: false, excludedRanges: [], doubledEllipsisBlockIds: [],
         tables: { characters: true, variantWords: true, bookTerms: projection.localBookTerms ?? [], houseWordList: null } },
       seriesId: null,
@@ -2495,13 +2516,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     });
     termsLabel.append(el('span', undefined, '本书术语、人名与地名表：每行用制表符分隔类型、采用写法和异写，多种异写用 | 分隔；类型为 term/person/place，明确列出的异写可机械替换并随本次审阅保存。'), terms, termProblem);
     localOptions.append(termsLabel);
+    let refreshHouse: (() => Promise<void>) | null = null;
     if (api.inspectHouseWordList !== undefined && api.saveHouseWordList !== undefined) {
       const houseChoice = el('label', 'review-field'); const house = el('input'); house.type = 'checkbox'; house.disabled = true; house.dataset['localHouseWordList'] = '';
       const houseStatus = el('span', undefined, '本社自用词表：正在读取');
-      const refreshHouse = async (): Promise<void> => {
+      refreshHouse = async (): Promise<void> => {
         const request = ++state.houseWordListRequest;
+        state.houseWordListLoading = true;
         house.disabled = true;
-        state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: null } };
+        updateSheet();
         try {
           const page = await api.inspectHouseWordList!({ versionId: null, entryOffset: 0, historyOffset: 0 });
           if (sheetState !== state || state.dismissed || destroyed || request !== state.houseWordListRequest) return;
@@ -2512,16 +2535,19 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
           house.onchange = () => { state.houseWordListWanted = house.checked; state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: house.checked ? page.current : null } }; updateSheet(); };
         } catch {
           if (sheetState !== state || state.dismissed || destroyed || request !== state.houseWordListRequest) return;
-          house.disabled = true; state.localOptions = { ...state.localOptions, tables: { ...state.localOptions.tables!, houseWordList: null } }; houseStatus.textContent = '本社词表读取失败，请重新打开检查选项。';
+          house.disabled = true; houseStatus.textContent = '本社词表读取失败，保留此前选用的版本；请重新打开检查选项。';
+        } finally {
+          if (sheetState === state && !state.dismissed && !destroyed && request === state.houseWordListRequest) {
+            state.houseWordListLoading = false;
+            updateSheet();
+          }
         }
-        updateSheet();
       };
       houseChoice.append(house, houseStatus); localOptions.append(houseChoice);
       const details = el('details'); details.append(el('summary', undefined, '编辑本社自用词表')); const host = el('div'); details.append(host); localOptions.append(details);
-      const editor = mountHouseWordList({ root: host, api: { inspectHouseWordList: api.inspectHouseWordList, saveHouseWordList: api.saveHouseWordList }, setStatus: options.setStatus, onSaved: () => void refreshHouse() });
+      const editor = mountHouseWordList({ root: host, api: { inspectHouseWordList: api.inspectHouseWordList, saveHouseWordList: api.saveHouseWordList }, setStatus: options.setStatus, onSaved: () => void refreshHouse?.() });
       details.addEventListener('toggle', () => { if (details.open) void editor.load(); });
       sheet.addEventListener('close', () => editor.destroy(), { once: true });
-      void refreshHouse();
     }
 
     const scopes = el('fieldset', 'review-scope-options');
@@ -2632,6 +2658,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     costValue.dataset['consequence'] = 'cost';
 
     const problem = el('p', 'review-problem review-sheet-problem');
+    problem.id = uid('sheet-problem');
     problem.setAttribute('role', 'alert');
     const progress = el('p', 'review-preparation-progress');
     progress.setAttribute('aria-live', 'polite');
@@ -2653,6 +2680,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       const filled = state.procedure?.resolved ?? null;
       const loading = state.requests.loading;
       const effective = effectiveCategories(workspace, state);
+      const blocked = sheetPreparationReason(workspace, state);
       procedureField.dataset['procedureLoading'] = String(loading);
       for (const { input, label, reason, calls, entry } of categoryInputs.values()) {
         input.checked = effective.includes(entry.categoryId);
@@ -2661,7 +2689,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
         const networkUnavailable = entry.networkUnavailable === true && !localOnly(state);
         // A filled sheet's categories are the procedure's: neither added to nor dropped here (ADR 0087 §4) — but a Series step
         // is the editor's to choose at each run (S31b; REUSE-050).
-        input.disabled = (why !== null && !networkUnavailable) || preparing || !procedureCategoryOpen(filled !== null, step);
+        input.disabled = state.definition !== null || (why !== null && !networkUnavailable) || preparing || !procedureCategoryOpen(filled !== null, step);
         if (step !== null && step.available && step.chosenApart) label.dataset['procedureChosenApart'] = 'true';
         else delete label.dataset['procedureChosenApart'];
         reason.textContent = networkUnavailable ? '此类别需要联网检索。' : (why ?? '').split(/[；。]/u)[0] + (why === null ? '' : '。');
@@ -2704,11 +2732,15 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       networkNotice.hidden = !networkBlocked;
       networkSettings.hidden = !networkBlocked || options.openSearchSettings === undefined;
       networkNotice.textContent = networkBlocked ? '联网检索尚未就绪，请到设置中配置后再开始。' : '';
-      problem.textContent = state.problem ?? '';
-      problem.hidden = state.problem === null;
+      problem.textContent = blocked ?? state.problem ?? '';
+      problem.hidden = state.problem === null && blocked === null;
       progress.hidden = state.job === null;
       progress.textContent = state.job === null ? '' : reviewPreparationLine(state.job.progress);
-      prepare.disabled = preparing || loading || networkBlocked || effective.length === 0 || state.scope === null;
+      prepare.disabled = preparing || loading || networkBlocked || blocked !== null || effective.length === 0 || state.scope === null;
+      for (const control of [prepare, start]) {
+        if (blocked !== null) control.setAttribute('aria-describedby', problem.id);
+        else control.removeAttribute('aria-describedby');
+      }
       if (local && (invalidTerms || (state.localOptions.punctuation === 'off' && state.localOptions.numerals === 'off' && !state.localOptions.tables?.characters && !state.localOptions.tables?.variantWords && state.localOptions.tables?.bookTerms.length === 0 && state.localOptions.tables?.houseWordList === null) || (state.localOptions.numerals !== 'off' && !state.localOptions.numeralsConfirmed))) prepare.disabled = true;
       start.disabled = prepare.disabled;
       close.disabled = preparing;
@@ -2720,6 +2752,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     sheetUpdate = updateSheet;
     sheetContent(sheet, bar, Array.from(form.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== actions), actions, form);
     updateSheet();
+    void refreshHouse?.();
   }
 
   /** A scope as the sheet offers it: 当前选区 once it holds a Run's selection, every other as the workspace says (P2-4). */
@@ -2745,6 +2778,12 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
     const choice = procedurePreparationPin(resolved, shown, state.requests.loading);
     if (choice.refusal !== null) {
       state.problem = choice.refusal;
+      sheetUpdate();
+      return;
+    }
+    const blocked = sheetPreparationReason(projection, state);
+    if (blocked !== null) {
+      state.problem = blocked;
       sheetUpdate();
       return;
     }

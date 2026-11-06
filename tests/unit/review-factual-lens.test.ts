@@ -343,9 +343,13 @@ describe('terminal factual results through the mounted review workspace (#1058 /
   });
 });
 
-async function selectionSheet() {
+async function selectionSheet(composite = false) {
   setTechnicalLayerVisible(false);
-  const view = mount(); const next = workspace(); const available = { available: true, unavailableReason: null };
+  const procedureId = 'ai7-procedure/selection-memory';
+  const view = mount('failed', 1, composite ? `${procedureId}@1` : null); const next = workspace(); const available = { available: true, unavailableReason: null };
+  if (composite) view.api.procedureLibrary = vi.fn().mockResolvedValue({ procedures: [{ procedureId, executorKind: 'review',
+    versions: [{ procedureId, version: 1, digest: 'a'.repeat(64) }], documents: [{ version: 1, title: '固定顺序工序',
+      members: [{ categoryId: 'style-and-format' }, { categoryId: 'typos-and-usage' }] }] }] });
   next.newReview = available; next.scopeOptions.whole = available; next.scopeOptions.changed = available;
   next.scopeUnitCounts = { whole: 2, units: [{ startPosition: 0, endPosition: 0 }, { startPosition: 1, endPosition: 1 }] };
   next.scopeOptions.chapters = { ...available, basis: 'outline', chapters: [0, 1].map((position) => ({ blockId: `chapter-${position}`, title: `章${position}`, position, endPosition: position, level: 1 })) };
@@ -359,12 +363,29 @@ async function selectionSheet() {
   view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
   const box = (id: string) => view.root.querySelector(`[data-review-category-option="${id}"] input`)!;
   const change = (node: MiniElement, value: string | boolean) => { if (typeof value === 'boolean') node.checked = value; else node.value = value; node.dispatchEvent({ type: 'change', bubbles: true }); };
-  change(box('style-and-format'), true);
+  if (!composite) change(box('style-and-format'), true);
   return { ...view, prepare, box, change, scope: (kind: string) => change(view.root.querySelector(`[data-review-scope-option="${kind}"] input`)!, true) };
 }
 
 describe('configuration selection memory (#1374)', () => {
   afterEach(() => setTechnicalLayerVisible(true));
+  it('blocks an unavailable fixed member and restores the full definition order when its scope becomes available', async () => {
+    const view = await selectionSheet(true);
+    expect(view.root.querySelector('[data-procedure-definition="ai7-procedure/selection-memory@1"]')).not.toBeNull();
+    view.scope('changed');
+    expect(view.box('style-and-format').checked).toBe(true);
+    expect(view.box('style-and-format').disabled).toBe(true);
+    for (const action of ['prepare', 'start']) expect(view.root.querySelector(`[data-review-action="${action}"]`)!.disabled).toBe(true);
+    expect(view.root.querySelector('.review-sheet-problem')!.textContent).toContain('未开放');
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush(); expect(view.prepare).not.toHaveBeenCalled();
+    view.scope('whole');
+    expect(view.root.querySelector('.review-sheet-problem')!.hidden).toBe(true);
+    expect(view.box('style-and-format').checked).toBe(true);
+    expect(view.box('typos-and-usage').checked).toBe(true);
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['style-and-format', 'typos-and-usage'],
+      procedureDefinition: { procedureId: 'ai7-procedure/selection-memory', version: 1, digest: 'a'.repeat(64) } }));
+  });
   it('keeps scope-disabled categories while estimating and submitting only the effective set in ordinary mode', async () => {
     const view = await selectionSheet();
     const cost = () => view.root.querySelector('[data-consequence="cost"]')!.textContent;
@@ -413,6 +434,27 @@ describe('configuration selection memory (#1374)', () => {
     expect(house.checked).toBe(wanted);
     view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
     expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ tables: expect.objectContaining({ houseWordList: wanted ? page().current : null }) }) }));
+  });
+  it('blocks a wanted wordlist while the post-save current-version read is pending', async () => {
+    const view = await selectionSheet(); let ordinal = 1; let saving = false;
+    const page = () => { const pin = { listId: BOOK, versionId: ordinal === 1 ? RUN : OTHER, digest: 'a'.repeat(64) }; return { current: pin,
+      selected: { pin, ordinal, entryCount: 1, enabledCount: 1 }, entries: [{ entryId: RESULT, literal: '公开合成词条', note: '', enabled: true }], nextEntryOffset: null, history: [], nextHistoryOffset: null }; };
+    const refreshed = deferred<ReturnType<typeof page>>();
+    Object.assign(view.api, { inspectHouseWordList: vi.fn(async (input: { versionId: string | null }) => saving && input.versionId === null ? refreshed.promise : page()),
+      saveHouseWordList: vi.fn(async () => { ordinal++; saving = true; return { pin: page().current, ordinal, created: true }; }) });
+    view.change(view.box('local-text-check'), true); await flush();
+    const house = view.root.querySelector('[data-local-house-word-list]')!;
+    house.checked = true; (house as unknown as { onchange(): void }).onchange();
+    const details = house.closest('fieldset')!.querySelector('details')!; details.open = true; details.dispatchEvent({ type: 'toggle' }); await flush();
+    view.root.querySelector('[data-house-action="edit"]')!.click(); await flush();
+    view.root.querySelector('[data-house-action="save"]')!.click(); await flush();
+    for (const action of ['prepare', 'start']) expect(view.root.querySelector(`[data-review-action="${action}"]`)!.disabled).toBe(true);
+    expect(view.root.querySelector('.review-sheet-problem')!.textContent).toContain('本社词表');
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); expect(view.prepare).not.toHaveBeenCalled();
+    refreshed.resolve(page()); await flush(); expect(house.checked).toBe(true);
+    expect(view.root.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ tables: expect.objectContaining({ houseWordList: page().current }) }) }));
   });
   it('keeps excluded sources through dispositions and excludes them only from request-evidence submissions', async () => {
     const page = evidence(result()); Object.assign(page, { claimRecheckAvailable: true });
