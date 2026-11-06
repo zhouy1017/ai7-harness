@@ -2263,7 +2263,9 @@ async function main() {
     await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社文档会自动加入。'`, 'catalogue-no-manuscripts');
     await assertRenderer(renderer, `(async () => { const preview=await window.ai7.previewImportedExemplar(); await window.ai7.importEarlierExemplar({previewId:preview.previewId,bookId:null,bookTitle:'书系工作文档来源',authors:['测试作者'],editors:['测试责编'],typeId:'news-release',expectedVersion:0}); return true; })()`, 'catalogue-import-work-document');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-refresh-home');
-    await click(renderer, '范例', 'catalogue-refresh');
+    // Sidebar navigation settles asynchronously; the previous page still has an already-selected 范例 tab meanwhile.
+    await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] .knowledge-category[data-knowledge-category="exemplars"]')`, 'catalogue-refresh-home-ready');
+    await clickSelector(renderer, '.knowledge-category[data-knowledge-category="exemplars"]', 'catalogue-refresh');
     await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'catalogue-kind-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'catalogue-book-filter');
