@@ -103,8 +103,8 @@ describe('反馈历史 words (Issue #61, S26c)', () => {
 
   it('opens at the history, says what it is not, and reads each entry by origin, dimension, verdict and reason', () => {
     // The view is named as the spec names it: 反馈历史 (Issue #61, S26c review).
-    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['feedback', '反馈历史'], ['learning', '学习准入'], ['audit', '学习回溯']]);
-    expect(visibleQualityLearningTabs(false).map((entry) => entry.tab)).toEqual(['feedback']);
+    expect(QUALITY_LEARNING_TABS.map((entry) => [entry.tab, entry.label])).toEqual([['preferences', '审阅偏好'], ['feedback', '反馈历史'], ['learning', '学习准入'], ['audit', '学习回溯']]);
+    expect(visibleQualityLearningTabs(false).map((entry) => [entry.tab, entry.label])).toEqual([['preferences', '审阅偏好'], ['feedback', '反馈记录']]);
     expect(visibleQualityLearningTabs(true)).toEqual(QUALITY_LEARNING_TABS);
     expect([FEEDBACK_HISTORY_HEADING, FEEDBACK_HISTORY_STATUS.loading, FEEDBACK_HISTORY_STATUS.opened]).toEqual(['反馈历史', '正在读取反馈历史…', '反馈历史已打开']);
     // An entry names the people it is attributed to where they are not the Book's now, and a gone paragraph says so.
