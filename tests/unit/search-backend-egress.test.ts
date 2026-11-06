@@ -13,6 +13,8 @@ import { DEVELOPMENT_OPENCODE_GO_CREDENTIAL_REFERENCE } from '../../src/shared/p
 import { SEARCH_BACKENDS } from '../../src/service/provider/search-backends.js';
 import { armHostAllowanceSet, armPerTicketHostAdmission, admitTicketHost, hostAllowanceSet, allowanceAdmitsConnection, installNodeNetworkDenial, ticketHostHolds } from '../../src/shared/network-denial.js';
 import { searchToolsRule } from '../support/search-tools-policy.js';
+import { resolveSourceCheckoutLaunchPolicySync, ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
+import { searchBackend } from '../../src/service/provider/search-backends/index.js';
 
 const frozen = SEARCH_BACKENDS.find((entry) => entry.id === 'search-tinyfish')!;
 const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
@@ -33,6 +35,33 @@ const binding: EgressBindingFacts = { bindingDigest: 'a'.repeat(64), route: 'ope
 const scope = { currentBindingDigest: () => 'a'.repeat(64), acceptedOutputDigests: new Set<string>(), ceilingState: () => 'within' as const };
 
 describe('frozen backend egress and per-Run tool accounting', () => {
+  it.each(['openai-platform', 'anthropic-claude'] as const)('executes %s native search using the frozen model UUID through readiness and one release', async (route) => {
+    const configured = ORDINARY_PRODUCTION_ALLOWED_BINDINGS.find((entry) => entry.route === route)!;
+    const reference = '11111111-1111-4111-8111-111111111111';
+    const policy = resolveSourceCheckoutLaunchPolicySync(process.cwd(), 'ordinary-production', { ...configured, credentialReference: reference });
+    const adapter = searchBackend(`search-${route.split('-')[0]}`);
+    const tools = platformToolsFromProjection(policy.providerProcessing.admittedRules.find((rule) => rule.ruleId === 'ordinary-production-review'));
+    const reads: string[] = []; let sends = 0;
+    const broker = new CredentialBroker({ resolve: async (uuid) => { reads.push(uuid); return 'synthetic-key'; } }, { developmentReferences: 'refused' });
+    expect(await broker.checkPlanReadiness(adapter.declaration.credentialSlot, reference)).toBe('present');
+    const session = new PlatformToolSession({ binding: { ...binding, route, model: configured.model, platformTools: tools,
+      policy: { operationalScope: 'ordinary-production', providerProcessingVersion: 'v34', liveTransmissionAllowed: true, authorizedLiveTransmissionCount: 'bounded-by-run' },
+      searchBackend: { backendId: adapter.declaration.id, host: adapter.declaration.host!, endpoint: adapter.declaration.endpoint!, credentialSlot: adapter.declaration.credentialSlot, credentialReference: reference } },
+      scope, broker, purpose: 'provider-free-native-search', admitHost: admitTicketHost,
+      fetch: async (url, init) => {
+        sends += 1; expect(url).toBe(adapter.declaration.endpoint);
+        expect(JSON.parse(String(init.body)).model).toBe(configured.model);
+        expect(init.headers[route === 'openai-platform' ? 'authorization' : 'x-api-key']).toBe(route === 'openai-platform' ? 'Bearer synthetic-key' : 'synthetic-key');
+        return new Response(JSON.stringify(route === 'openai-platform'
+          ? { output: [{ action: { sources: [{ title: 'Public source', url: 'https://example.org/source' }] } }] }
+          : { content: [{ type: 'web_search_tool_result', content: [{ type: 'web_search_result', title: 'Public source', url: 'https://example.org/source' }] }] }));
+      } });
+    const signal = new AbortController().signal;
+    const call = { tool: 'websearch' as const, callId: 'native', arguments: { query: 'public fact' }, signal, dispatch: { token: Symbol(), active: () => true } };
+    expect((await session.execute(call)).text).toContain('https://example.org/source');
+    await session.execute({ ...call, callId: 'cached', dispatch: { token: Symbol(), active: () => true } });
+    expect({ sends, releases: broker.releaseCount, reads, holds: ticketHostHolds() }).toEqual({ sends: 1, releases: 1, reads: [reference, reference], holds: 0 });
+  });
   it('holds exactly the model host at rest; no backend host and no global fetch is admitted', async () => {
     expect(hostAllowanceSet()).toEqual([MODEL]);
     expect(allowanceAdmitsConnection([MODEL])).toBe(true);

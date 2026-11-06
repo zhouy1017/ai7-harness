@@ -331,10 +331,12 @@ export function evaluateSearchCandidateProbe(input: {
   }
   if (policy.backendId !== candidate.backendId || policy.candidateId !== candidate.candidateId || policy.endpoint !== candidate.endpoint ||
       policy.method !== candidate.method || policy.protocol !== candidate.protocol || policy.headerForm !== candidate.headerForm ||
-      policy.credentialSlot !== candidate.credentialSlot || canonicalJson(policy.arguments) !== canonicalJson(candidate.arguments) ||
+      (policy.credentialSlot !== candidate.credentialSlot && policy.credentialFallbackSlot !== candidate.credentialSlot) ||
+      canonicalJson(policy.arguments) !== canonicalJson(candidate.arguments) ||
       sha256Hex(canonicalJson(candidate.arguments)) !== policy.argumentsCanonicalSha256 || new URL(candidate.endpoint).hostname !== candidate.host) {
     return refuse('SEARCH_CANDIDATE_PROBE_POLICY_MISMATCH', '所选策略未准许这一候选接口或其固定查询；未读取凭据，也未发送任何内容。');
   }
+  if (candidate.protocol !== 'deepseek-direct-search' && !input.model?.trim()) return refuse('SEARCH_CREDENTIAL_MISSING', '连接测试需要已保存的对应模型渠道与模型选择；未发送任何内容。');
   const connection = input.connection();
   const reference = connection?.credentialOperationState === 'ready' ? connection.credentialReference : null;
   if (reference === null || !DIGEST_PATTERN.test(input.configurationDigest) || input.developmentReference(reference)) {
@@ -460,7 +462,7 @@ export function consumeSearchCredentialRelease(ticket: SearchServiceTicket): boo
 function searchBackendAdmitted(binding: EgressBindingFacts, rule: PlatformToolsRule): boolean {
   const backend = binding.searchBackend;
   if (backend === undefined) return !('backends' in rule.websearch);
-  const declared = SEARCH_BACKENDS.find((entry) => entry.id === backend.backendId && entry.shipped);
+  const declared = SEARCH_BACKENDS.find((entry) => entry.id === backend.backendId);
   const search: unknown = rule.websearch;
   if (!isRecord(search) || !Array.isArray(search['backends']) || declared === undefined) return false;
   return declared.host === backend.host && declared.endpoint === backend.endpoint && declared.credentialSlot === backend.credentialSlot &&
@@ -591,7 +593,7 @@ export function evaluateEgress(
     return { decision: 'refuse', reason: 'binding-stale', detail: '断言会话、冻结来源或剩余额度已变化；未发送。' };
   }
   if (binding.learningCurationScope !== undefined && (binding.policy.operationalScope !== 'ordinary-production' ||
-    (binding.policy.providerProcessingVersion !== 'v31' && (binding.policy.providerProcessingVersion !== 'v32' && binding.policy.providerProcessingVersion !== 'v33')) || binding.outboundDataCategory !== 'editorial-learning-example' ||
+    (binding.policy.providerProcessingVersion !== 'v31' && (binding.policy.providerProcessingVersion !== 'v32' && binding.policy.providerProcessingVersion !== 'v33' && binding.policy.providerProcessingVersion !== 'v34')) || binding.outboundDataCategory !== 'editorial-learning-example' ||
     payload.messages.length !== 1 || payload.tools?.length || payload.messages[0]?.role !== 'user' ||
     sha256Hex(messageText(payload.messages[0]!) ?? '') !== binding.learningCurationScope.messageDigest ||
     scope.ceilingState?.() !== 'within' || !binding.learningCurationScope.current())) {
@@ -600,7 +602,7 @@ export function evaluateEgress(
   if (!isSupportedProviderProcessingVersion(binding.policy.operationalScope, binding.policy.providerProcessingVersion))
     return refuse('payload-out-of-scope', '处理策略版本无法识别；未发送任何内容。');
   const global = binding.globalAgentScope;
-  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31' || (binding.policy.providerProcessingVersion === 'v32' || binding.policy.providerProcessingVersion === 'v33'))) {
+  if (global !== undefined && (binding.policy.providerProcessingVersion === 'v30' || binding.policy.providerProcessingVersion === 'v31' || (binding.policy.providerProcessingVersion === 'v32' || binding.policy.providerProcessingVersion === 'v33' || binding.policy.providerProcessingVersion === 'v34'))) {
     const qualified = global.qualification;
     const messages = [...binding.admittedUserMessages];
     if (qualified === undefined || qualified.providerProcessingVersion !== binding.policy.providerProcessingVersion || selectedPolicyIdentityOf({ providerProcessingVersion: qualified.providerProcessingVersion, providerProcessingSha256: qualified.providerProcessingSha256,
@@ -619,7 +621,7 @@ export function evaluateEgress(
       global.rule.source.unlistedSourcesAllowed === false && global.rule.outboundCategoryRestriction === 'none' &&
       global.rule.outboundDataDisclosureRequired === true && global.rule.redaction.housePeopleNamesAndRolesStripped === true &&
       global.rule.redaction.remarksAndInternalNotesStripped === true
-    : (binding.policy.providerProcessingVersion === 'v31' || (binding.policy.providerProcessingVersion === 'v32' || binding.policy.providerProcessingVersion === 'v33')) && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
+    : (binding.policy.providerProcessingVersion === 'v31' || (binding.policy.providerProcessingVersion === 'v32' || binding.policy.providerProcessingVersion === 'v33' || binding.policy.providerProcessingVersion === 'v34')) && scoped!.source['ambientWholeLibraryReadAllowed'] === false &&
       scoped!.source['lastOpenBookSuppliesAuthority'] === false && scoped!.source['unlistedSourcesAllowed'] === false &&
       scoped!.scopedTools['directMemoryOrManuscriptMutationAllowed'] === false && scoped!.scopedTools['shellFilesystemWebOrUnrestrictedNetworkAllowed'] === false &&
       scoped!.outboundDataDisclosureRequired === true && scoped!.redaction.housePeopleNamesAndRolesStripped === true &&
