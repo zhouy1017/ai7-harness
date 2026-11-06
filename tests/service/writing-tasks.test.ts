@@ -1,4 +1,5 @@
 import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
+import { initializeMultiDocumentSchema } from '../../src/service/production-document-ledger.js';
 import { CURATION_SCHEMA_SQL, FACTUAL_TASK_INTENTS_SQL } from '../../src/service/task-authorization.js';
 import { ModelRequestGovernor } from '../../src/service/analysis/execution.js';
 import { capturedMapAnswer, capturedOrdinaryExecution } from '../support/captured-ordinary-transport.js';
@@ -217,7 +218,7 @@ async function run(session: Session, bookId: string, prepared: WritingProjection
   return session.store.inspectWriting(bookId)!;
 }
 
-it('preserves a historical writing draft digest while admitting a same-type peer after reopen', async () => {
+it.each(['before migration', 'after relations commit'] as const)('preserves a historical writing draft and admits a peer after reopening 108→109 %s', async (interruption) => {
   const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
   let bookId = '', documentId = '';
   await withSession(fixture, async (session) => {
@@ -229,11 +230,21 @@ it('preserves a historical writing draft digest while admitting a same-type peer
   const old = new DatabaseSync(path);
   asMultiDocumentRevision108(old);
   const before = productionDocumentDigestBytes(old);
+  if (interruption === 'after relations commit') initializeMultiDocumentSchema(old);
+  expect(old.prepare('PRAGMA user_version').get()!.user_version).toBe(108);
   old.close();
   await withSession(fixture, async (session) => {
     const store = session.store;
-    const check = new DatabaseSync(path, { readOnly: true });
-    try { expect(productionDocumentDigestBytes(check) === before).toBe(true); } finally { check.close(); }
+    const check = new DatabaseSync(path);
+    try {
+      expect(productionDocumentDigestBytes(check) === before).toBe(true);
+      expect(check.prepare('PRAGMA user_version').get()!.user_version).toBe(LATEST_SCHEMA_VERSION);
+      expect(check.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      for (const table of ['production_documents', 'writing_drafts']) {
+        expect(() => check.prepare(`UPDATE ${table} SET document_id = document_id WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
+        expect(() => check.prepare(`DELETE FROM ${table} WHERE document_id = ?`).run(documentId)).toThrow(/LEDGER_IMMUTABLE/);
+      }
+    } finally { check.close(); }
     const settled = await run(session, bookId, prepare(store, bookId));
     const second = store.createWritingDraft(bookId, settled.resultSetRevision!.revisionId, '后续写作').document;
     expect(second.documentId).not.toBe(documentId);
