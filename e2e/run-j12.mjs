@@ -1637,7 +1637,10 @@ async function main() {
       await assertRenderer(primary, `(() => {const input=document.querySelector('input[aria-label="代理 URL"]');return input===globalThis.__j12PollDraft && document.activeElement===input && input.value==='http://127.0.0.1:1' && input.selectionStart===7 && input.selectionEnd===12;})()`, 'ordinary-draft-during-changed-catalogue');
     }
     await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
-    await assertRenderer(primary, `(() => {const channel=document.querySelector('select[aria-label="渠道"]');channel.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`, 'ordinary-poll-discard-proxy-draft');
+    // Changing channels only repaints the model controls. Leave settings to discard the unsaved proxy draft.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-poll-discard-proxy-draft');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-poll-draft-settings-ready');
+    await click(primary, '模型服务', 'ordinary-poll-draft-reopen');
     await waitFor(primary, `document.querySelector('select[aria-label="网络代理方式"]')?.value==='direct' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash'`, 'ordinary-poll-draft-cleared');
     await assertOrdinaryModelReachability(primary);
     await assertRenderer(primary, `(() => {

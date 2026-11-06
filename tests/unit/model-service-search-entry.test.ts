@@ -106,6 +106,30 @@ it('saves ordinary proxy configuration and restores it after navigating away and
   expect(root.querySelector('input[aria-label="代理 URL"]')!.value).toBe('http://127.0.0.1:7890');
 });
 
+it('discards an ordinary unsaved proxy draft after the polling scenario leaves and returns (#1394 J12)', async () => {
+  vi.useFakeTimers(); const { root, page, settings, api } = mount(true);
+  try {
+    await page.renderModelServiceSettings();
+    const mode = root.querySelector('select[aria-label="网络代理方式"]')!;
+    mode.value = 'proxy'; mode.dispatchEvent({ type: 'change', bubbles: true });
+    const address = root.querySelector('input[aria-label="代理 URL"]')!;
+    address.value = 'http://127.0.0.1:1'; address.dispatchEvent({ type: 'input', bubbles: true }); address.focus(); address.setSelectionRange(7, 12, 'backward');
+    for (let cycle = 0; cycle < 2; cycle++) {
+      Object.assign(settings.channels[0]!, { models: [{ modelId: `synthetic-${cycle}`, modelLabel: `Synthetic ${cycle}` }] });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(root.querySelector('input[aria-label="代理 URL"]')).toBe(address);
+      expect([address.value, address.selectionStart, address.selectionEnd]).toEqual(['http://127.0.0.1:1', 7, 12]);
+    }
+    root.querySelector('select[aria-label="渠道"]')!.dispatchEvent({ type: 'change', bubbles: true });
+    expect(root.querySelector('input[aria-label="代理 URL"]')).toBe(address);
+    expect(settings.proxy.mode).toBe('direct');
+    root.replaceChildren(); await page.renderModelServiceSettings();
+    expect(root.querySelector('select[aria-label="网络代理方式"]')!.value).toBe('direct');
+    expect(root.querySelector('input[aria-label="代理 URL"]')!.value).toBe('');
+    expect(api.saveModelServiceProxy).not.toHaveBeenCalled();
+  } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+});
+
 it('keeps the review search heading focused through two changed catalogue reads (#1370)', async () => {
   const { root, page, settings, poll } = mount();
   await page.renderModelServiceSettings('search');
