@@ -1,4 +1,5 @@
 import { initializeTaskAuthorizationSchema } from '../../src/service/task-authorization.js';
+import { asMultiDocumentRevision108, MULTI_DOCUMENT_REVISION_108_TABLE_SQL } from '../support/production-documents.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { OUTCOME_RESOLUTION_SCHEMA_SQL, initializeOutcomeResolutionSchema } from '../../src/service/analysis/outcome-resolutions.js';
 import { join } from 'node:path';
@@ -41,6 +42,7 @@ import { initializeExportLedgerSchema } from '../../src/service/manuscript-expor
 import {
   initializeProductionDocumentDeliverySchema,
   initializeProductionDocumentSchema,
+  initializeMultiDocumentSchema,
   PRODUCTION_DOCUMENT_SCHEMA_SQL,
 } from '../../src/service/production-document-ledger.js';
 import { initializeProductionDocumentOriginSchema, PRODUCTION_DOCUMENT_ORIGIN_SCHEMA_SQL } from '../../src/service/production-document-origins.js';
@@ -68,7 +70,7 @@ import {
   LATEST_SCHEMA_VERSION,
 } from '../../src/service/task-authorization.js';
 import { EVALUATION_REWRITE_SCHEMA_SQL, initializeEvaluationRewriteSchema } from '../../src/service/evaluation-rewrites.js';
-import { WRITING_TASK_SCHEMA_SQL, initializeWritingTaskSchema } from '../../src/service/writing-tasks.js';
+import { WRITING_TASK_SCHEMA_SQL, WRITING_TASK_TRIGGER_SQL } from '../../src/service/writing-tasks.js';
 import { BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL, initializeBackgroundAnalysisEnrollmentSchema } from '../../src/service/background-analysis-enrollments.js';
 import { MATERIAL_INDEX_SCHEMA_SQL, initializeMaterialIndexSchema } from '../../src/service/material-index.js';
 import { READERS_REPORT_SCHEMA_SQL, initializeReadersReportSchema } from '../../src/service/readers-reports.js';
@@ -158,7 +160,7 @@ function drop(database: DatabaseSync, relations: ReadonlyArray<string>): void {
 
 interface Revision {
   readonly revision: number;
-  /** The product's step that commits the relations the revision adds, without the version stamp; none for a widening. */
+  /** Commit the revision's relations without its version stamp; use the historical shape when later revisions changed it. */
   readonly step: ((database: DatabaseSync) => void) | null;
   /** Take a store at this revision back to the one before, as the suites' own plants do. */
   readonly undo: (database: DatabaseSync) => void;
@@ -166,6 +168,13 @@ interface Revision {
 
 // Newest first: a store is walked down one revision at a time.
 const REVISIONS: ReadonlyArray<Revision> = [
+  {
+    // #1378: both tables and their indexes commit atomically before the terminal version stamp.
+    // Earlier plants must undo this step too: a revision-65 store never held a revision-109 index.
+    revision: 109,
+    step: initializeMultiDocumentSchema,
+    undo: asMultiDocumentRevision108,
+  },
   {
     // Revision 68 (Issue #757): the editor's 人工结果确认 over requests whose results cannot be known, created before the stamp.
     revision: 68,
@@ -193,7 +202,15 @@ const REVISIONS: ReadonlyArray<Revision> = [
     // one step an interruption can leave committed without the stamp is the two relations of 写作任务. Revision 64 left the
     // kind-coupled relations as it shaped them.
     revision: 65,
-    step: initializeWritingTaskSchema,
+    step: (database) => {
+      database.exec('BEGIN IMMEDIATE');
+      try {
+        database.exec(WRITING_TASK_SCHEMA_SQL.writing_tasks);
+        database.exec(MULTI_DOCUMENT_REVISION_108_TABLE_SQL.writing_drafts);
+        for (const sql of Object.values(WRITING_TASK_TRIGGER_SQL)) database.exec(sql);
+        database.exec('COMMIT');
+      } catch (error) { database.exec('ROLLBACK'); throw error; }
+    },
     undo: (database) => {
       drop(database, Object.keys(WRITING_TASK_SCHEMA_SQL).reverse());
       downgradeKindCoupledRelations(database, ANALYSIS_LEDGER_REVISION_64_SQL);

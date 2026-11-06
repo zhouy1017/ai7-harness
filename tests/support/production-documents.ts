@@ -121,15 +121,17 @@ export function dropProductionDocumentRelations(database: DatabaseSync): void {
   }
 }
 
+/** Historical single-document shapes, unchanged from revisions 37 and 65 through 108. */
+export const MULTI_DOCUMENT_REVISION_108_TABLE_SQL = {
+  production_documents: PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents.replace('created_at TEXT NOT NULL\n', 'created_at TEXT NOT NULL,\n  UNIQUE(book_id, type_id)\n'),
+  writing_drafts: WRITING_TASK_SCHEMA_SQL.writing_drafts.replace('sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)\n', 'sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n  UNIQUE(book_id, type_id)\n'),
+} as const;
+
 /** Plant the actual pre-109 table definitions, keeping the existing records and triggers. */
 export function asMultiDocumentRevision108(db: DatabaseSync): void {
-  const tables = {
-    production_documents: PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents.replace('created_at TEXT NOT NULL\n', 'created_at TEXT NOT NULL,\n  UNIQUE(book_id, type_id)\n'),
-    writing_drafts: WRITING_TASK_SCHEMA_SQL.writing_drafts.replace('sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)\n', 'sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n  UNIQUE(book_id, type_id)\n'),
-  };
   db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON; BEGIN IMMEDIATE');
   try {
-    for (const [table, sql] of Object.entries(tables)) {
+    for (const [table, sql] of Object.entries(MULTI_DOCUMENT_REVISION_108_TABLE_SQL)) {
       const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
       db.exec(`ALTER TABLE ${table} RENAME TO ${table}_newer`);
       db.exec(sql);
