@@ -5,6 +5,7 @@ import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mountReviewWorkspace, type MountReviewWorkspaceOptions, type ReviewWorkspaceSurface } from '../../src/renderer/review-workspace.js';
+import { mountEvidenceWorkspace } from '../../src/renderer/evidence-workspace.js';
 import type { EvidenceWorkspaceProjection, FactualVerificationLensProjection, FactualVerificationResultProjection, RendererApi, ReviewFindingProjection, ReviewRunCategoryState, ReviewWorkspaceProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 
@@ -135,7 +136,7 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     sheet.close(); view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
     await new Promise((resolve) => setTimeout(resolve, 0)); await flush();
     expect(sheet.open).toBe(true);
-    expect(sheet.querySelectorAll('input').filter((input) => input.name === 'review-category')).toHaveLength(3);
+    expect(sheet.querySelectorAll('input').filter((input) => input.name === 'review-category')).toHaveLength(4);
     expect(sheet.querySelector('[data-review-action="prepare"]')!.disabled).toBe(false);
   });
   it('retains custom local procedure identity beside the selected local check on its sheet', async () => {
@@ -339,6 +340,98 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     expect(view.root.querySelectorAll('[data-fact-result-id]')).toHaveLength(0);
     view.inspectFactualVerification.mockResolvedValue({ ...lens(), bookId: 'foreign-book' }); view.surface.refresh(); await flush();
     expect(view.root.querySelectorAll('[data-fact-result-id]')).toHaveLength(0);
+  });
+});
+
+async function selectionSheet() {
+  setTechnicalLayerVisible(false);
+  const view = mount(); const next = workspace(); const available = { available: true, unavailableReason: null };
+  next.newReview = available; next.scopeOptions.whole = available; next.scopeOptions.changed = available;
+  next.scopeUnitCounts = { whole: 2, units: [{ startPosition: 0, endPosition: 0 }, { startPosition: 1, endPosition: 1 }] };
+  next.scopeOptions.chapters = { ...available, basis: 'outline', chapters: [0, 1].map((position) => ({ blockId: `chapter-${position}`, title: `章${position}`, position, endPosition: position, level: 1 })) };
+  next.categories = ['typos-and-usage', 'style-and-format'].map((categoryId) => ({ categoryId, label: categoryId, description: '审阅。', output: 'annotation', riskPointsOnly: false,
+    batchApply: false, searchEngine: false, modelFree: false, changedUnits: 1, available: true, unavailableReason: null,
+    basis: { categoryId, executor: 'review-category-contract', searchEngine: false, guidelineDocuments: [], procedure: { title: '审阅', version: '1' } },
+    guidelineDocuments: [], procedure: { title: '审阅', version: '1' }, scopes: { whole: available, chapters: available, changed: categoryId === 'style-and-format' ? unavailable : available, selection: unavailable } }));
+  const prepare = vi.fn(async () => { throw new Error('synthetic preparation refusal retains the sheet'); });
+  Object.assign(view.api, { prepareReviewRun: prepare });
+  view.inspectReviewWorkspace.mockResolvedValue(next); view.surface.refresh(); await flush();
+  view.root.querySelector('[data-review-action="new-review"]')!.click(); await flush();
+  const box = (id: string) => view.root.querySelector(`[data-review-category-option="${id}"] input`)!;
+  const change = (node: MiniElement, value: string | boolean) => { if (typeof value === 'boolean') node.checked = value; else node.value = value; node.dispatchEvent({ type: 'change', bubbles: true }); };
+  change(box('style-and-format'), true);
+  return { ...view, prepare, box, change, scope: (kind: string) => change(view.root.querySelector(`[data-review-scope-option="${kind}"] input`)!, true) };
+}
+
+describe('configuration selection memory (#1374)', () => {
+  afterEach(() => setTechnicalLayerVisible(true));
+  it('keeps scope-disabled categories while estimating and submitting only the effective set in ordinary mode', async () => {
+    const view = await selectionSheet();
+    const cost = () => view.root.querySelector('[data-consequence="cost"]')!.textContent;
+    const wholeCost = cost(); view.scope('changed');
+    expect(view.box('style-and-format').checked).toBe(false); expect(view.box('style-and-format').disabled).toBe(true);
+    expect(cost()).not.toBe(wholeCost);
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['typos-and-usage'] }));
+    view.scope('whole'); expect(view.box('style-and-format').checked).toBe(true); expect(cost()).toBe(wholeCost);
+    view.scope('chapters'); view.change(view.root.querySelector('[data-review-chapter="from"]')!, 'chapter-1');
+    view.scope('whole'); view.scope('chapters'); expect(view.root.querySelector('[data-review-chapter="from"]')!.value).toBe('chapter-1');
+    view.scope('whole'); view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['typos-and-usage', 'style-and-format'] }));
+    view.change(view.box('typos-and-usage'), false); view.scope('changed');
+    expect(view.root.querySelector('[data-review-action="prepare"]')!.disabled).toBe(true);
+    expect(view.root.querySelector('[data-review-action="start"]')!.disabled).toBe(true);
+    expect(cost()).toBe('选好类别后显示'); view.scope('whole'); expect(view.box('style-and-format').checked).toBe(true);
+  });
+  it('suspends model categories during local checking and remembers numeral confirmation through off/on', async () => {
+    const view = await selectionSheet(); view.change(view.box('local-text-check'), true);
+    expect(view.box('typos-and-usage').disabled).toBe(true); expect(view.box('typos-and-usage').checked).toBe(false);
+    view.change(view.root.querySelector('[data-local-check-numerals]')!, 'editor-convention');
+    view.change(view.root.querySelector('[data-local-check-confirmation]')!, true);
+    view.change(view.root.querySelector('[data-local-check-numerals]')!, 'off');
+    expect(view.root.querySelector('[data-local-check-confirmation]')!.disabled).toBe(true);
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ categoryIds: ['local-text-check'], localCheck: expect.objectContaining({ numeralsConfirmed: false }) }));
+    view.change(view.root.querySelector('[data-local-check-numerals]')!, 'editor-convention');
+    expect(view.root.querySelector('[data-local-check-confirmation]')!.checked).toBe(true);
+    view.change(view.box('local-text-check'), false);
+    expect(view.box('typos-and-usage').checked).toBe(true); expect(view.box('style-and-format').checked).toBe(true);
+  });
+  it.each([true, false])('preserves house-wordlist wanted=%s after saving and submits its latest version', async (wanted) => {
+    const view = await selectionSheet(); let ordinal = 1;
+    const page = () => { const pin = { listId: BOOK, versionId: ordinal === 1 ? RUN : OTHER, digest: 'a'.repeat(64) }; return { current: pin,
+      selected: { pin, ordinal, entryCount: 1, enabledCount: 1 }, entries: [{ entryId: RESULT, literal: '公开合成词条', note: '', enabled: true }], nextEntryOffset: null, history: [], nextHistoryOffset: null }; };
+    const saveHouse = vi.fn(async () => { ordinal++; return { pin: page().current, ordinal, created: true }; });
+    Object.assign(view.api, { inspectHouseWordList: vi.fn(async () => page()), saveHouseWordList: saveHouse });
+    view.change(view.box('local-text-check'), true); await flush();
+    let house = view.root.querySelector('[data-local-house-word-list]')!;
+    house.checked = wanted; (house as unknown as { onchange(): void }).onchange();
+    const details = house.closest('fieldset')!.querySelector('details')!; details.open = true; details.dispatchEvent({ type: 'toggle' }); await flush();
+    view.root.querySelector('[data-house-action="edit"]')!.click(); await flush();
+    view.root.querySelector('[data-house-action="save"]')!.click(); await flush();
+    expect(saveHouse).toHaveBeenCalledOnce(); house = view.root.querySelector('[data-local-house-word-list]')!;
+    expect(house.checked).toBe(wanted);
+    view.root.querySelector('[data-review-action="prepare"]')!.click(); await flush();
+    expect(view.prepare).toHaveBeenLastCalledWith(expect.objectContaining({ localCheck: expect.objectContaining({ tables: expect.objectContaining({ houseWordList: wanted ? page().current : null }) }) }));
+  });
+  it('keeps excluded sources through dispositions and excludes them only from request-evidence submissions', async () => {
+    const page = evidence(result()); Object.assign(page, { claimRecheckAvailable: true });
+    page.decisionCard.choices = ['request-evidence', 'keep-pending'].map((disposition) => ({ disposition, label: disposition })) as typeof page.decisionCard.choices;
+    page.sources = [{ cardId: RESULT, sourceRef: 'https://example.org/public', sourceKind: 'web', title: '公开合成来源', excluded: false, excerpt: null, checkState: 'candidate', relation: 'supports', limitations: [] }] as unknown as typeof page.sources;
+    const record = vi.fn<RendererApi['recordVerificationReviewDecision']>(async () => { throw new Error('synthetic refusal retains form'); });
+    const surface = mountEvidenceWorkspace({ bookId: BOOK, resultId: RESULT, api: { inspectEvidenceWorkspace: async () => page, recordVerificationReviewDecision: record } as unknown as Parameters<typeof mountEvidenceWorkspace>[0]['api'],
+      setStatus: vi.fn(), errorMessage: (_e, fallback) => fallback, instant: (s) => s, openSource: vi.fn(), goToText: async () => undefined, changed: vi.fn() });
+    const root = surface.element as unknown as MiniElement; miniDocument.body.append(root); setTechnicalLayerVisible(false); await surface.load();
+    const exclude = () => root.querySelector('.evidence-card-actions input')!;
+    exclude().checked = true; exclude().dispatchEvent({ type: 'change' });
+    root.querySelector('[data-decision-choice="keep-pending"]')!.dispatchEvent({ type: 'change' });
+    expect(exclude().checked).toBe(true); expect(exclude().disabled).toBe(true);
+    root.querySelector('[data-evidence-action="record-decision"]')!.click(); await flush();
+    expect(record.mock.calls[0]![0]).not.toHaveProperty('excludedSourceRefs');
+    root.querySelector('[data-decision-choice="request-evidence"]')!.dispatchEvent({ type: 'change' });
+    expect(exclude().checked).toBe(true); expect(exclude().disabled).toBe(false);
+    root.querySelector('[data-evidence-action="record-decision"]')!.click(); await flush();
+    expect(record).toHaveBeenLastCalledWith(expect.objectContaining({ excludedSourceRefs: ['https://example.org/public'] })); surface.destroy();
   });
 });
 

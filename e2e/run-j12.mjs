@@ -1496,6 +1496,25 @@ async function main() {
       return flow.dataset.flowChannel==='deepseek-open-platform' && model instanceof HTMLInputElement && model.checked && !model.disabled &&
         model.closest('label')?.textContent.includes('当前使用中') && use instanceof HTMLButtonElement && use.disabled && test instanceof HTMLButtonElement && !test.disabled;
     })()`, 'model-service-flow-current-choice');
+    // #1374: clearing a manually entered ID restores the selected catalogue radio and its effective actions.
+    await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const radio=flow.querySelector('[data-model-choice="deepseek-flash"]'); const custom=flow.querySelector('[data-custom-model-id]'); if(!(custom instanceof HTMLInputElement)||!radio.checked)return false; custom.value='j12-temporary-manual'; custom.dispatchEvent(new Event('input',{bubbles:true})); if(radio.checked)return false; custom.value=''; custom.dispatchEvent(new Event('input',{bubbles:true})); return radio.checked && !flow.querySelector('[data-action="test-flow-connection"]').disabled && flow.querySelector('[data-action="use-model-for-both-roles"]').disabled; })()`, 'model-manual-id-round-trip');
+    // Ordinary mode uses the same remembered catalogue choice; channel round trips restore the selection through the owner.
+    await primary.evaluate(`localStorage.setItem('ai7.technicalLayerVisible','false')`);
+    await primary.send('Page.reload');
+    await waitFor(primary, `document.documentElement.dataset.ai7ProductReady==='true' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-memory-ordinary-mode');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-ordinary-settings-ready');
+    await click(primary, '模型服务', 'model-memory-ordinary-entry');
+    await waitFor(primary, `document.querySelector('select[aria-label="渠道"]')`, 'model-memory-ordinary-ready');
+    await assertRenderer(primary, `(() => { const channel=document.querySelector('select[aria-label="渠道"]'); const choose=(value)=>{channel.value=value;channel.dispatchEvent(new Event('change',{bubbles:true}));}; choose('deepseek-open-platform'); const selected=document.querySelector('select[aria-label="AI7 使用的模型"]').value; choose('openai-platform'); choose('deepseek-open-platform'); const model=document.querySelector('select[aria-label="AI7 使用的模型"]'); return selected==='deepseek-flash' && model.value===selected && !model.disabled; })()`, 'model-ordinary-catalogue-round-trip');
+    await primary.evaluate(`localStorage.setItem('ai7.technicalLayerVisible','true')`);
+    await primary.send('Page.reload');
+    await waitFor(primary, `document.documentElement.dataset.ai7ProductReady==='true' && document.documentElement.dataset.technicalLayerVisible==='true'`, 'model-memory-development-restored');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-return-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-return-settings-ready');
+    await click(primary, '模型服务', 'model-memory-return-models');
+    await waitFor(primary, `document.querySelector('[data-model-channel="deepseek-open-platform"] input')`, 'model-memory-return-models-ready');
+    await primary.evaluate(`document.querySelector('[data-model-channel="deepseek-open-platform"] input').click()`);
     // #1282: model IDs and roles are configurable without running a diagnostic; refresh stays provider-free here.
     await assertRenderer(primary, `(async () => {
       const refreshed=await window.ai7.refreshModelServiceModels({route:'deepseek-open-platform'});

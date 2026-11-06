@@ -51,6 +51,20 @@ const pickChannel = (root: MiniElement, channelId: string) => {
 };
 
 describe('the one model-service flow', () => {
+  it('restores the last explicit catalogue choice after clearing a manual ID (#1374)', async () => {
+    const { node, calls } = flow(settings(['anthropic-claude']));
+    const choices = node.querySelectorAll('[data-model-choice]');
+    const chosen = choices.at(-1)!;
+    const modelId = chosen.value;
+    chosen.value = modelId; chosen.checked = true; chosen.dispatchEvent({ type: 'change' });
+    const custom = node.querySelector('[data-custom-model-id]')!;
+    custom.value = 'synthetic/manual-model'; custom.dispatchEvent({ type: 'input' });
+    expect(choices.every((radio) => !radio.checked)).toBe(true);
+    custom.value = ' '; custom.dispatchEvent({ type: 'input' });
+    expect(choices.find((radio) => radio.value === modelId)!.checked).toBe(true);
+    button(node, 'use-model-for-both-roles').click();
+    await vi.waitFor(() => expect(calls.selectBothRoleModels).toHaveBeenCalledWith({ route: 'anthropic-claude', modelId }));
+  });
   it.each(['deepseek-open-platform', 'openai-platform', 'anthropic-claude', 'google-gemini', 'opencode-zen'] as const)(
     'keeps ordinary channel %s through credential save, model selection and connection test', async (route) => {
       setTechnicalLayerVisible(false);
