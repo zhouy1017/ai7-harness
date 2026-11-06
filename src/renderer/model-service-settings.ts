@@ -181,14 +181,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     }
     const actions = element('div', 'button-row');
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
-    if (technicalLayerVisible) content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }));
-    const proxy = renderModelServiceProxyBlock(projection);
-    if (technicalLayerVisible) content.append(proxy);
-    else {
-      const details = element('details', 'model-service-proxy-options');
-      details.append(element('summary', undefined, '网络代理'), proxy);
-      content.append(details);
-    }
+    content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }),
+      renderModelServiceProxyBlock(projection));
     content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
     let reading = false;
@@ -218,13 +212,18 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     if (projection.channels.some((channel) => channel.models.length === 0 && channel.route !== null && projection.routeChoice.routes.some((route) => route.route === channel.route && route.connection?.credentialOperationState === 'ready')) && projection.modelDiscovery?.status !== 'failure') void follow(true);
   }
 
-  async function renderModelServiceSettings(): Promise<void> {
+  async function renderModelServiceSettings(focus?: 'search'): Promise<void> {
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
     try {
       renderModelServiceSettingsProjection(await window.ai7.getModelServiceSettings());
       setStatus('模型服务设置已打开');
+      if (focus === 'search') {
+        const heading = document.querySelector<HTMLElement>('[data-search-backends="true"] h3');
+        heading?.scrollIntoView({ block: 'start' });
+        heading?.focus({ preventScroll: true });
+      }
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取模型服务设置。'), 'error');
     }
