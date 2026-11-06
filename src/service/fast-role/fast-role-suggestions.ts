@@ -31,7 +31,7 @@ import {
   type ConflictRegenerateMessageInput,
 } from './conflict-regenerate-contract.js';
 import { FastRoleError } from './fast-role-error.js';
-import type { FastRoleExecutionOwner } from './fast-role-execution.js';
+import type { FastRoleExecutionOwner, FastRoleBindingFacts } from './fast-role-execution.js';
 import {
   EDITORIAL_POLISH_CONTEXT_GRAPHEMES,
   EDITORIAL_POLISH_KIND,
@@ -179,7 +179,7 @@ async function finishPolish(owner: FastRoleExecutionOwner, store: FastRoleStore,
     parts: [{ blockId: selection.blockId, fromGrapheme: selection.fromGrapheme + suggestion.fromGrapheme, toGrapheme: selection.fromGrapheme + suggestion.toGrapheme,
       original: suggestion.original, replacement: suggestion.replacement }] }));
   const withheld: EditorialPolishWithheld[] = [...reading.withheld, ...spread?.withheld ?? []];
-  const markIds = placePolishMarks(store, selection, taskId, placements, withheld);
+  const markIds = placePolishMarks(store, selection, taskId, placements, withheld, answer.binding);
   withheld.sort((left, right) => left.ordinal - right.ordinal);
   const notOffered = withheld.length === 0 ? '' : `另有 ${withheld.length} 条建议没有提供。`;
   if (markIds.length > 0) {
@@ -200,7 +200,7 @@ class GroupMoved extends Error {
  * without it, so an atomic group is never placed in part. What is not placed is added to `withheld`; the placed marks return.
  */
 function placePolishMarks(store: FastRoleStore, selection: DialogueSelectionInput, taskId: string, placements: ReadonlyArray<PolishPlacement>,
-  withheld: EditorialPolishWithheld[]): string[] {
+  withheld: EditorialPolishWithheld[], binding: FastRoleBindingFacts): string[] {
   const moved = (ordinal: number): void => { withheld.push({ ordinal, reason: '所选文字已改动，这条建议没有放到稿件上' }); };
   let pending = [...placements];
   while (pending.length > 0) {
@@ -221,6 +221,7 @@ function placePolishMarks(store: FastRoleStore, selection: DialogueSelectionInpu
         atomicGroupId: groups[index]!,
         ...(groups[index] === null ? {} : { atomicReason: EDITORIAL_POLISH_SPAN_ATOMIC_REASON }),
         source: { kind: 'ai7' as const, origin: 'task' as const, label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, taskId },
+        sourceModelBinding: { route: binding.route, model: binding.model },
         basis: [{ label: EDITORIAL_POLISH_MARK_SOURCE_LABEL, blockId: part.blockId, fromGrapheme: part.fromGrapheme, toGrapheme: part.toGrapheme, quote }],
       };
     }));

@@ -76,6 +76,15 @@ describe('the wording of the Mark surface', () => {
     expect(markStateLabel({ kind: 'editor-note', status: 'open', anchorState: 'exact', suggestion: null })).toBe('仅自己可见');
   });
 
+  it('uses registered editors and frozen human model labels, with technical IDs only when requested (#1379)', () => {
+    expect(markSourceLine({ source: { ...editor, editorName: '责任编辑甲、责任编辑乙' }, convertedFrom: null })).toBe('责任编辑甲、责任编辑乙');
+    const card = { source: { kind: 'ai7', origin: 'task', label: '润色这段', taskId: 'past-task',
+      modelLabel: 'OpenAI 官方 · 模型甲', modelTechnicalLabel: 'OpenAI 官方 · raw-model-id' }, convertedFrom: null } as const;
+    expect(markSourceLine(card)).toBe('OpenAI 官方 · 模型甲 · 任务「润色这段」');
+    expect(markSourceLine(card, true)).toContain('raw-model-id');
+    expect(markSourceLine({ ...card, source: { ...card.source, modelLabel: 'AI7 本地检查' } })).toBe('AI7 本地检查 · 任务「润色这段」');
+  });
+
   it('names a version saved from a conflict for what it came from, not as a conversion (Issue #57)', () => {
     const convertedFrom = { markId: 'mark', kind: 'change-suggestion', sourceKind: 'ai7' } as const;
     expect(markSourceLine({ source: editor, convertedFrom, resolvedFrom: { markId: 'mark', conflictKind: 'suggestion' } })).toBe('你 · 由冲突解决生成的新版本');

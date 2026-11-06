@@ -1,3 +1,4 @@
+import { editorialMarkCardMoreOpen as moreOpen, renderEditorialMarkCard } from './editorial-mark-card.js';
 import { windowStep } from './components/controls.js';
 import { showToast } from './components/toast.js';
 import { technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
@@ -57,10 +58,7 @@ import {
   RESOLVE_CONFLICT_LABEL,
   REVERSAL_CORRECTION_LINE,
   SAFE_MERGE_LINE,
-  insertionLine,
   markDriftNote,
-  markSourceLine,
-  markStateLabel,
   markTimeLabel,
   reverseApplyNote,
   selectionMenuReason,
@@ -467,6 +465,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
   const closeFloating = (): void => {
     floatingRefresh = undefined;
     if (floating !== undefined) {
+      const details = floating.querySelector<HTMLDetailsElement>('.editorial-mark-more');
+      if (details && floating.dataset['markCard']) moreOpen.set(floating.dataset['markCard'], details.open);
       floating.remove();
       // Where the pane rests once the card's height is gone. The mark lapses two frames on, past the
       // frame that dispatches the `scroll` event of that adjustment, exactly as the editor's own does.
@@ -1024,33 +1024,25 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
 
   function showCard(card: EditorialMarkCardProjection, form?: (cancel: () => void) => FormConfig): void {
     closeMenu();
-    floating?.remove();
     if (promptFor !== null && promptFor.markId !== card.markId) promptFor = null;
-    const panel = el('section', 'editorial-mark-card');
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}浮卡`);
-    panel.dataset['markCard'] = card.markId;
-    panel.dataset['learningDecisionId'] = card.suggestion?.decision?.decisionId ?? '';
-    panel.dataset['markKind'] = card.kind;
-    panel.dataset['markAnchor'] = card.anchorState;
-
-    const header = el('header', 'editorial-mark-card-header');
-    const kindLabel = el('span', `editorial-mark-kind editorial-mark-kind-${card.kind}`, MARK_KIND_LABELS[card.kind]);
-    const source = el('span', 'editorial-mark-source', `${markSourceLine(card)} · ${markTimeLabel(card.createdAt)}`);
-    source.dataset['markSource'] = card.source.kind;
-    const state = el('span', 'state-term status-pill', markStateLabel(card));
-    state.dataset['markState'] = card.suggestion?.decision?.disposition ?? card.status;
+    const previous = floating?.dataset['markCard'] === card.markId ? floating : null;
+    const active = previous?.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
+    const focusAction = active?.dataset['markAction'];
+    const focusMore = active?.tagName === 'SUMMARY' && active.parentElement?.classList.contains('editorial-mark-more');
+    const priorMore = previous?.querySelector<HTMLDetailsElement>('.editorial-mark-more');
+    if (priorMore) moreOpen.set(card.markId, priorMore.open);
     const dismiss = actionButton('close', '关闭', 'quiet', () => {
       closeFloating();
       editor.focus();
     });
-    header.append(kindLabel, source, state, dismiss);
-    panel.append(header);
+    const { panel, more, actions } = renderEditorialMarkCard(card, { technical: technicalLayerVisible, moreOpen, dismiss });
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', `${MARK_KIND_LABELS[card.kind]}浮卡`);
 
     if (card.anchorState !== 'exact') {
       const drifted = el('p', 'editorial-mark-drifted', markDriftNote(card));
       drifted.dataset['markDrifted'] = 'true';
-      panel.append(drifted);
+      more.append(drifted);
     }
 
     const reopen = (): void => showCard(card);
@@ -1091,27 +1083,17 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       const shown = decision?.editedText ?? suggestion.proposedText;
       // An insertion a file's author proposed stands at a point and replaces nothing (Issue #411).
       const inserts = suggestion.changeType === 'insert';
-      const content = el('p', 'editorial-mark-change');
-      content.dataset['markChange'] = suggestion.changeType;
-      if (inserts) {
-        content.append(el('ins', undefined, insertionLine(shown)));
-      } else {
-        const from = el('del', undefined, suggestion.currentText);
-        const to = el('ins', undefined, shown.length === 0 ? '（删去）' : shown);
-        content.append(from, ' → ', to);
-      }
-      panel.append(
-        region('content', '修改内容', content, el('p', 'muted', applied !== null
+      more.append(
+        el('p', 'muted', applied !== null
           ? '这处修改已经写入稿件；正文里是应用后的文字。'
           : exact && decision?.disposition !== 'rejected'
             ? inserts
               ? '正文里在插入处显示要插入的文字（预览 · 未应用）；稿件本身仍是原文。'
               : '正文里显示的是替换后的样子（预览 · 未应用）；稿件本身仍是原文。'
-            : '稿件本身仍是原文。')),
-        region('rationale', '修改理由', el('p', undefined, suggestion.rationale.length > 0 ? suggestion.rationale : '没有填写修改理由。')),
+            : '稿件本身仍是原文。'),
         region('basis', '依据与核查', basisList(card), ...factualLineage(card), ...findingEvidence(card)),
       );
-      const yours = region('disposition', '你的处理');
+      const yours = actions;
       const pendingReceipt = recoveryCards.get(card.markId);
       if (pendingReceipt) {
         const state = el('p', 'editorial-mark-recorded', pendingReceipt.state === 'confirming' ? '正在确认应用结果' : pendingReceipt.state === 'unresolved' ? '结果待确认' : pendingReceipt.state === 'applied' ? '已应用' : '未应用');
@@ -1120,7 +1102,7 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       // One decision system on the card (ADR 0096 §3): the draft dispositions live only in the proposal workspace, which the
       // card opens; an atomic group is decided there as a whole.
       if (applied === null && pendingReceipt?.state !== 'unresolved' && pendingReceipt?.state !== 'confirming') {
-        const workspaceRow = el('div', 'button-row'); yours.append(workspaceRow);
+        const workspaceRow = el('div', 'button-row'); more.append(workspaceRow);
         void proposalWorkspace().then((workspace) => {
           if (!workspaceRow.isConnected) return;
           const item = workspace.items.find((entry) => entry.markId === card.markId); if (!item) return;
@@ -1148,12 +1130,12 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         // 已应用 is said only of a verified Effect Receipt (V2-UX-EAPP-011, EREC-002); what it binds is one step away.
         const receipt = el('p', 'editorial-mark-recorded', `已应用 · 已写入稿件 · ${markTimeLabel(applied.committedAt)} · 你`);
         receipt.dataset['markApplication'] = applied.effectId;
-        yours.append(receipt);
+        more.append(receipt);
         void api.inspectApplyReceipt({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, clientEffectId: applied.effectId, recovery: 'settled' }).then((value) => { if (receipt.isConnected) receipt.dataset['applyReceiptState'] = value.state; }).catch(() => {});
-        yours.append(actionButton('receipt-manuscript', '在稿件中查看', 'quiet', () => { closeFloating(); editor.focus(); }), actionButton('receipt-proposal', '返回提案', 'quiet', reopen));
+        more.append(actionButton('receipt-manuscript', '在稿件中查看', 'quiet', () => { closeFloating(); editor.focus(); }), actionButton('receipt-proposal', '返回提案', 'quiet', reopen));
         if (decision) {
           yours.dataset['markReasonState'] = decision.reasonState;
-          yours.append(...reasonNodes(card, decision));
+          more.append(...reasonNodes(card, decision));
         }
         const credentials = el('details', 'editorial-mark-receipt');
         credentials.dataset['markReceipt'] = applied.receiptId;
@@ -1172,11 +1154,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           bound.append(el('dt', undefined, term), el('dd', undefined, value));
         }
         credentials.append(bound, el('p', 'muted', '凭据只证明这次写入发生了，不证明内容的对错。'));
-        yours.append(credentials);
+        more.append(credentials);
         if (form) {
           yours.append(buildForm(form(reopen)));
         } else if (exact) {
-          disposition.append(actionButton('prepare-reverse', '准备撤销本次应用', 'secondary', () => void api.prepareReverseApply({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, markId: card.markId }).then((preparation) => { if (!preparation.ready) { options.setStatus(preparation.reason, 'error'); return; } showCard(card, (cancel) => ({
+          more.append(actionButton('prepare-reverse', '准备撤销本次应用', 'secondary', () => void api.prepareReverseApply({ manuscriptId: binding().manuscriptId, branchId: binding().branchId, markId: card.markId }).then((preparation) => { if (!preparation.ready) { options.setStatus(preparation.reason, 'error'); return; } showCard(card, (cancel) => ({
             id: 'reverse-apply',
             title: '撤销本次应用',
             quote: null,
@@ -1188,7 +1170,8 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           })); }).catch((error) => options.setStatus(options.errorMessage(error, '无法准备撤销。'), 'error'))));
           yours.append(disposition);
         } else {
-          yours.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'), ...resolveConflict());
+          more.append(disabledAction('prepare-reverse', '准备撤销本次应用', '应用后的文字又改过，不能直接撤销这次应用。'));
+          yours.append(...resolveConflict());
           if (card.conflict?.state === 'resolved' && card.conflict.outcome === 'new-version') {
             const correction = el('p', 'muted', REVERSAL_CORRECTION_LINE);
             correction.dataset['markCorrection'] = card.conflict.newMarkId ?? '';
@@ -1224,9 +1207,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
                 cancel,
               })))
             : disabledAction('accept-with-edit', '修改后接受', '原文已变，无法接受这条修改建议。'),
-          inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'),
         );
-        yours.append(disposition, ...safeMerge(), el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
+        yours.append(disposition, ...safeMerge());
+        more.append(inserts ? disabledAction('convert-annotation', CONVERT_LABELS.annotation, INSERTION_CONVERT_REASON) : convertOrExplain('annotation'), el('p', 'muted', '都不预选；接受即写入稿件，之后可以撤销本次应用。'));
         if (form) yours.append(buildForm(form(reopen)));
       } else {
         const recorded = el('p', 'editorial-mark-recorded', decision.disposition === 'rejected'
@@ -1242,30 +1225,18 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
         }
         // 保留当前稿件 resolved a conflict with this rejection; that resolution is final (Issue #57).
         if (card.conflict?.outcome !== 'keep-current') {
-          disposition.append(actionButton('withdraw', '撤回', 'quiet', () => void decide(card, 'withdrawn', null, null)));
+          more.append(actionButton('withdraw', '撤回', 'quiet', () => void decide(card, 'withdrawn', null, null)));
         }
-        yours.append(recorded, disposition, ...(decision.disposition === 'accepted-with-edit' ? safeMerge() : []));
+        more.append(recorded);
+        yours.append(disposition, ...(decision.disposition === 'accepted-with-edit' ? safeMerge() : []));
         yours.dataset['markReasonState'] = decision.reasonState;
-        yours.append(...reasonNodes(card, decision));
+        more.append(...reasonNodes(card, decision));
         if (form) yours.append(buildForm(form(reopen)));
       }
-      if (card.source.kind === 'ai7') yours.append(viewTaskAction(card));
-      panel.append(yours);
+      if (card.source.kind === 'ai7') more.append(viewTaskAction(card));
     } else {
-      const body = el('p', 'editorial-mark-body', card.body);
-      body.dataset['markBody'] = card.kind;
-      panel.append(region('content', card.kind === 'annotation' ? '批注内容' : '备注内容', body));
-      if (card.replies.length > 0) {
-        const replies = el('ol', 'editorial-mark-replies');
-        for (const reply of card.replies) {
-          const item = el('li');
-          item.append(el('span', undefined, reply.body), el('small', 'muted', ` · 你 · ${markTimeLabel(reply.createdAt)}`));
-          replies.append(item);
-        }
-        panel.append(region('replies', '回复', replies));
-      }
-      if (card.kind === 'annotation' && (card.basis.length > 0 || card.source.kind === 'ai7')) panel.append(region('basis', '依据', basisList(card), ...findingEvidence(card)));
-      const yours = region('disposition', '你的处理');
+      if (card.kind === 'annotation' && (card.basis.length > 0 || card.source.kind === 'ai7')) more.append(region('basis', '依据', basisList(card), ...findingEvidence(card)));
+      const yours = actions;
       if (card.kind === 'annotation') {
         disposition.append(
           actionButton('reply', '回复', 'secondary', () => showCard(card, (cancel) => ({
@@ -1280,11 +1251,11 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           card.status === 'open'
             ? actionButton('resolve', '标记为已处理', 'secondary', () => void change(card.markId, 'set-status', { status: 'resolved' }, '已标记为已处理。'))
             : actionButton('reopen', '重新打开', 'secondary', () => void change(card.markId, 'set-status', { status: 'open' }, '已重新打开。')),
-          convertOrExplain('change-suggestion'),
         );
-        if (card.source.kind === 'ai7') disposition.append(viewTaskAction(card));
+        more.append(convertOrExplain('change-suggestion'));
+        if (card.source.kind === 'ai7') more.append(viewTaskAction(card));
       } else {
-        disposition.append(convertOrExplain('annotation'), convertOrExplain('change-suggestion'));
+        more.append(convertOrExplain('annotation'), convertOrExplain('change-suggestion'));
       }
       if (card.source.kind === 'editor') {
         disposition.prepend(actionButton('edit', '编辑', 'secondary', () => showCard(card, (cancel) => ({
@@ -1297,10 +1268,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
           cancel,
         }))));
       }
-      disposition.append(actionButton('remove', '删除', 'quiet', () => void change(card.markId, 'remove', {}, card.kind === 'annotation' ? '已删除批注。' : '已删除备注。')));
+      more.append(actionButton('remove', '删除', 'quiet', () => void change(card.markId, 'remove', {}, card.kind === 'annotation' ? '已删除批注。' : '已删除备注。')));
       yours.append(disposition);
       if (form) yours.append(buildForm(form(reopen)));
-      panel.append(yours, el('p', 'muted', card.kind === 'annotation'
+      more.append(el('p', 'muted', card.kind === 'annotation'
         ? '批注随稿件导出（导出时可选不含批注）。'
         : '默认不随稿件导出（导出时可选含备注），也不会发送给模型。'));
     }
@@ -1321,8 +1292,9 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       identities.append(el('dt', undefined, term), el('dd', undefined, value));
     }
     technical.append(identities);
-    panel.append(technicalDisclosure(technical));
+    more.append(technicalDisclosure(technical));
 
+    floating?.remove();
     placeBelowBlock(panel, card.blockId);
     layer.append(panel);
     floating = panel;
@@ -1334,7 +1306,10 @@ export function mountEditorialMarks(options: MountOptions): EditorialMarksSurfac
       markId: card.markId,
       previewText: previews ? card.suggestion!.decision?.editedText ?? card.suggestion!.proposedText : null,
     });
-    if (!form) dismiss.focus({ preventScroll: true });
+    if (!form) {
+      const restore = focusMore ? more.querySelector<HTMLElement>('summary') : focusAction ? panel.querySelector<HTMLElement>(`[data-mark-action="${CSS.escape(focusAction)}"]`) : null;
+      (restore ?? dismiss).focus({ preventScroll: true });
+    }
   }
 
   /**
