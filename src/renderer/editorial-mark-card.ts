@@ -98,7 +98,11 @@ export function renderEditorialMarkCard(card: EditorialMarkCardProjection, optio
     provenance.dataset['markProvenance'] = 'true';
     more.append(provenance);
   }
-  if (fullState !== compactState) more.append(node('p', 'muted', fullState));
+  if (fullState !== compactState) {
+    const detail = node('p', 'muted', fullState);
+    detail.dataset['markStateDetail'] = 'true';
+    more.append(detail);
+  }
   more.addEventListener('toggle', () => { if (more.isConnected) options.moreOpen.set(card.markId, more.open); });
   const actions = node('section', 'editorial-mark-region editorial-mark-actions');
   actions.dataset['markRegion'] = 'disposition';
