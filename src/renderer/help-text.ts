@@ -7,7 +7,7 @@ import { SETTINGS_HUB_GROUPS, SHELL_BOOK_GROUPS, SHELL_DESTINATIONS, SHELL_SETTI
 import { TASK_PANEL_TITLE } from './task-panel-labels.js';
 import { TASK_BAR_START } from './task-drawer-labels.js';
 import { visibleKnowledgeBaseTabs } from './knowledge-base-labels.js';
-import { QUALITY_LEARNING_TABS } from './quality-learning-labels.js';
+import { visibleQualityLearningTabs } from './quality-learning-labels.js';
 import { MILESTONE_FORM_WORDS, PUBLICATION_ACTION_LABELS } from './deliverables-labels.js';
 
 export interface HelpSection {
@@ -41,13 +41,13 @@ export function helpUsageSections(developerMode: boolean): ReadonlyArray<HelpSec
     `${sectionLabel('deliverables')}管理发稿、交付与图书交付包：先在稿件里选「${MILESTONE_FORM_WORDS.summary}」，再到交付物选「${PUBLICATION_ACTION_LABELS.designate}」，然后按关口推进。`,
   ] },
   { heading: '知识库与工序', paragraphs: [
-    `${destinationLabel('knowledge')}${developerMode ? '七类' : '分为三类'}：${knowledgeTabs.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
+    `${destinationLabel('knowledge')}${developerMode ? '七类' : '分为四类'}：${knowledgeTabs.map((entry) => entry.label).join('、')}；任务只选用并记版本。`,
   ] },
   { heading: '书系', paragraphs: [
     `${destinationLabel('series')}管理成员与共享范围、书系知识${developerMode ? '与检索排除' : ''}；书系一致性审阅在成员图书的「${sectionLabel('review')}」里。`,
   ] },
   { heading: '设置', paragraphs: [
-    `${SHELL_SETTINGS.label}：${settingsRows.map((row) => row.label).join('、')}。质量与学习${developerMode ? `还包括「${QUALITY_LEARNING_TABS.slice(1).map((entry) => entry.label).join('、')}」` : `只显示「${QUALITY_LEARNING_TABS[0]!.label}」`}。`,
+    `${SHELL_SETTINGS.label}：${settingsRows.map((row) => row.label).join('、')}。质量与学习提供「${visibleQualityLearningTabs(developerMode).map((entry) => entry.label).join('、')}」。`,
   ] },
   ]);
 }
