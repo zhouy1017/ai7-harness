@@ -2290,7 +2290,12 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .model-service-flow fieldset { display: flex; flex-wrap: wrap; gap: .4rem .9rem; min-width: 0; margin: .6rem 0 0; padding: .55rem .7rem; border: 1px solid var(--boundary); border-radius: 8px; }
 .model-service-flow-choice { min-width: 0; overflow-wrap: anywhere; }
 .model-service-flow-step { min-width: 0; margin-top: 1rem; }
-[data-model-service-mode="ordinary"] > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.model-service-catalogue { width: 100%; max-height: 20rem; overflow-y: auto; }
+.model-service-catalogue-row { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.model-service-catalogue-row[hidden] { display: none; }
+.model-service-filter { display: grid; gap: .3rem; }
+[data-model-service-mode="ordinary"] > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
+[data-model-service-mode="ordinary"] .model-service-flow-models { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 [data-model-service-mode="ordinary"] select { width: 100%; min-width: 0; }
 [data-model-service-mode="ordinary"] .model-service-flow-test { margin-top: .8rem; }
 @media (max-width: 640px) {

@@ -10,6 +10,14 @@ import type { GlobalAttentionTarget } from './protocol.js';
 // validators and defaults, and never changes or removes one another slice declared.
 
 import { isThemePreference, type ThemePreference } from './appearance.js';
+import { MODEL_SERVICE_CHANNELS, validModelServiceModelId, type ModelServiceChannelId } from './protocol/model-service.js';
+
+/** Local catalogue favourites, isolated by account channel; never part of the database. */
+export type ModelFavourites = Readonly<Partial<Record<ModelServiceChannelId, ReadonlyArray<string>>>>;
+const isModelFavourites = (value: unknown): value is ModelFavourites => isPlainObject(value) &&
+  Object.entries(value).every(([channel, models]) => (MODEL_SERVICE_CHANNELS as readonly string[]).includes(channel) &&
+    Array.isArray(models) && new Set(models).size === models.length && models.every((model: unknown) =>
+      typeof model === 'string' && validModelServiceModelId(model)));
 
 /** One declared key: what a stored value must be, and the value read when none is stored or the stored one is invalid. */
 export interface PreferenceDefinition<Value> {
@@ -338,6 +346,7 @@ export const PREFERENCE_KEYS = Object.freeze({
   'analysis.lastViewedRevision': preference(isAnalysisLastViewed, {} as AnalysisLastViewed),
   'onboarding.state': preference((value: unknown): value is OnboardingState => value === null || value === 'skipped' || value === 'completed', null as OnboardingState),
   'learning.askFrequency': preference((value: unknown): value is LearningAskFrequency => value === 'often' || value === 'occasionally' || value === 'off', 'occasionally' as LearningAskFrequency),
+  'model.favourites': preference(isModelFavourites, {} as ModelFavourites),
 });
 
 export type PreferenceKey = keyof typeof PREFERENCE_KEYS;

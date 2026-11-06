@@ -4,6 +4,7 @@ import { modelServiceFlow } from './model-service-flow.js';
 import { renderSearchBackendSettings } from './search-backend-settings.js';
 import { launchPolicyIntegritySentence } from './plan-preview-labels.js';
 import type { ShellPlace } from './shell.js';
+import type { ModelFavourites } from '../shared/preferences.js';
 
 const proxyProbeMessages = {
   available: '代理可用',
@@ -103,6 +104,8 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
 
   let modelServiceChannel: ModelServiceChannelId | null = null;
   const modelChoices = new Map<ModelServiceChannelId, string>();
+  const modelFilters = new Map<ModelServiceChannelId, string>();
+  let favourites: ModelFavourites = {};
   let stopFollow: (() => void) | undefined;
 
   function focusSearchSettings(): void {
@@ -128,16 +131,25 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     content.append(modelServiceFlow(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage,
       channel: modelServiceChannel, chooseChannel: (channel) => { modelServiceChannel = channel; },
       get modelId() { return modelServiceChannel === null ? '' : modelChoices.get(modelServiceChannel) ?? ''; },
-      chooseModel: (modelId) => { if (modelServiceChannel !== null) modelChoices.set(modelServiceChannel, modelId); } }));
+      chooseModel: (modelId) => { if (modelServiceChannel !== null) modelChoices.set(modelServiceChannel, modelId); },
+      get filter() { return modelServiceChannel === null ? '' : modelFilters.get(modelServiceChannel) ?? ''; },
+      chooseFilter: (filter) => { if (modelServiceChannel !== null) modelFilters.set(modelServiceChannel, filter); },
+      get favourites() { return favourites; },
+      toggleFavourite: async (channel, modelId) => {
+        const latest = (await window.ai7.getPreferences()).values['model.favourites'];
+        const models = latest[channel] ?? [];
+        const value = { ...latest, [channel]: models.includes(modelId) ? models.filter((id) => id !== modelId) : [...models, modelId] };
+        favourites = (await window.ai7.savePreference({ key: 'model.favourites', value })).values['model.favourites'];
+        return favourites;
+      } }));
     const currentRoles = element('section', 'model-service-current-roles');
     currentRoles.setAttribute('aria-label', '当前角色模型');
     for (const role of projection.roles.filter((role) => role.roleId === 'main-editorial' || role.roleId === 'fast-interaction')) {
       const line = element('p', undefined, `${role.roleLabel}：${role.binding === null ? '尚未选择' : `${role.binding.providerLabel} / ${modelLabelWords(role.binding)}`} · ${role.statusLabel}`);
-      line.dataset['developerOnly'] = 'true';
       line.dataset['modelRole'] = role.roleId; line.dataset['modelRoleStatus'] = role.status;
       currentRoles.append(line);
     }
-    if (technicalLayerVisible) content.append(currentRoles);
+    content.append(currentRoles);
     const unsupported = element('section', 'review-section model-unsupported-providers');
     unsupported.dataset['unsupportedProviders'] = 'true';
     unsupported.setAttribute('aria-label', '尚未支持的模型服务');
@@ -224,8 +236,11 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
+    modelFilters.clear();
     try {
-      renderModelServiceSettingsProjection(await window.ai7.getModelServiceSettings());
+      const [projection, preferences] = await Promise.all([window.ai7.getModelServiceSettings(), window.ai7.getPreferences()]);
+      favourites = preferences.values['model.favourites'];
+      renderModelServiceSettingsProjection(projection);
       setStatus('模型服务设置已打开');
       if (focus === 'search') focusSearchSettings();
     } catch (error) {
