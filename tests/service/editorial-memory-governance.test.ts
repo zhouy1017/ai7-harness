@@ -11,6 +11,10 @@ import { parseAssuranceSamplingListedRefs } from '../../src/service/analysis/ass
 import { EditorialLearningLedger } from '../../src/service/learning/ledger.js';
 import { HousePreferenceInfluence, HouseReviewPreferenceLedger } from '../../src/service/house-review-preference.js';
 import { SupervisionDirectives } from '../../src/service/learning/supervision-directives.js';
+import { mountEditorialMemory } from '../../src/renderer/knowledge-base-memory.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { installMiniDom } from '../support/mini-dom.js';
+import type { RendererApi } from '../../src/shared/protocol.js';
 import type { CreateEditorialMemoryInput, EditorialMemoryVersion, GlobalMemoryPin, RecordLearningSupervisionInput } from '../../src/shared/protocol.js';
 import { createServiceTestRoots, type ServiceTestRoots } from '../support/temp-data-root.js';
 import { importSample1Book, pinEditorialWorkspaceProfileRevision2 } from '../support/sample1-baseline.js';
@@ -27,7 +31,7 @@ afterEach(async () => {
 });
 
 /** Actual selected production policy/store/gate; only transport is synthetic. Nothing is sent to a provider. */
-async function sourceDecisions() {
+async function sourceDecisions(admitLegacy = true) {
   requestGovernor = new ModelRequestGovernor();
   roots = await createServiceTestRoots('ai7-memory-governance-');
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, {
@@ -87,7 +91,7 @@ async function sourceDecisions() {
   expect(signals).toHaveLength(4);
   const explicit = signals[1]!;
   const material = subject.inspectLearningMaterial(book.bookId, explicit.source.materialKey);
-  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+  if (admitLegacy) subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
     expectedDecisions: material.decisions, choice: 'house', note: null });
   const create = (selected: readonly string[], title: string): CreateEditorialMemoryInput => ({ schema: 'ai7.global-editorial-memory/2', actionId: randomUUID(),
     signalIds: selected, applicability: { kind: 'house' }, title, editorialDimension: 'typos-and-usage', confidence: 0.6 });
@@ -126,6 +130,81 @@ async function sourceDecisions() {
   };
   return { subject, book, signals, explicit, inspect, current, make, create, accept, govern, prepare, requests, sourceBook };
 }
+
+async function ordinaryMemory(subject: EditorialStore) {
+  const restore = installMiniDom(); setTechnicalLayerVisible(false);
+  const root = document.createElement('main'); document.body.append(root);
+  const api = { inspectEditorialLearning: async (input) => subject.inspectEditorialLearning(input),
+    inspectGlobalAgent: async () => subject.inspectGlobalAgent(), inspectHouseReviewPreference: async () => subject.inspectHouseReviewPreference(),
+    acceptEditorialMemory: async (input) => subject.acceptEditorialMemory(input), deactivateEditorialMemory: async (input) => subject.deactivateEditorialMemory(input),
+    changeEditorialLearning: async (input) => subject.changeEditorialLearning(input), recordLearningSupervision: async (input) => subject.recordLearningSupervision(input),
+  } satisfies Pick<RendererApi, 'inspectEditorialLearning' | 'inspectGlobalAgent' | 'inspectHouseReviewPreference' | 'acceptEditorialMemory' | 'deactivateEditorialMemory' | 'changeEditorialLearning' | 'recordLearningSupervision'>;
+  const remount = async () => { root.replaceChildren(); await mountEditorialMemory(root, api as RendererApi, async () => {}); };
+  const click = async (selector: string, label: string) => {
+    Array.from(root.querySelector(selector)!.querySelectorAll('button')).find((button) => button.textContent === label)!.click();
+    for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  };
+  await remount();
+  return { root, click, remount, close: () => { restore(); setTechnicalLayerVisible(true); vi.useRealTimers(); } };
+}
+
+it('sets up a legacy feedback preference through its learning admission before mixed-action selection', async () => {
+  const { subject, book, signals } = await sourceDecisions(false);
+  subject.rebuildHouseReviewPreference();
+  const isLegacy = (item: ReturnType<EditorialStore['inspectGlobalAgent']>['items'][number]) => item.kind === 'preference' && item.bookId === null && item.categoryId === 'typos-and-usage';
+  expect(subject.inspectGlobalAgent().items.some(isLegacy)).toBe(false);
+  const material = subject.inspectLearningMaterial(book.bookId, signals[0]!.source.materialKey);
+  subject.decideLearningMaterial({ bookId: book.bookId, materialKey: material.materialKey, materialDigest: material.digest,
+    expectedDecisions: material.decisions, choice: 'house', note: null });
+  subject.rebuildHouseReviewPreference();
+  expect(subject.inspectGlobalAgent().items.some(isLegacy)).toBe(true);
+});
+
+it('refreshes ordinary preference pins after memory acceptance before stopping feedback-derived preferences', async () => {
+  const { subject, signals, make, create } = await sourceDecisions();
+  subject.rebuildHouseReviewPreference();
+  const preference = subject.inspectGlobalAgent().items.find((item) => item.kind === 'preference' && item.bookId === null)!;
+  expect(preference).toBeDefined();
+  const candidate = make(create([signals[0]!.signalId], '保留合成作者节奏。'));
+  const view = await ordinaryMemory(subject);
+  try {
+    await view.click(`[data-memory-item="${candidate.itemId}"]`, '接受记忆');
+    expect(() => subject.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
+      scope: { kind: 'house' }, categoryId: preference.categoryId, text: '', effect: 'guide' })).toThrow('版本已经变化');
+    await view.click(`[data-review-preference="${preference.itemId}"]`, '停用');
+    expect(subject.inspectGlobalAgent().items.find((item) => item.itemId === preference.itemId)?.state).toBe('inactive');
+    expect(view.root.textContent).not.toContain('无法更新学习记录');
+  } finally { view.close(); }
+});
+
+it.each([false, true])('retains stopped ordinary preference source books and item history after remount (memory publication=%s)', async (withMemory) => {
+  const { subject, signals, make, create, accept, book } = await sourceDecisions();
+  subject.rebuildHouseReviewPreference();
+  if (withMemory) accept(make(create([signals[0]!.signalId], '合成已启用记忆。')));
+  if (withMemory) {
+    const publication = subject.inspectHouseReviewPreference().current!;
+    expect(publication.schema).toBe('ai7.house-review-preference/2');
+    expect(publication.legacyBasis!.lines.some((line) => line.bookId === null)).toBe(true);
+    expect(publication.governance).toBeUndefined();
+  }
+  const preference = subject.inspectGlobalAgent().items.find((item) => item.kind === 'preference' && item.bookId === null)!;
+  expect(preference).toBeDefined();
+  const sourceTitle = subject.inspectGlobalAgent().books.find((entry) => entry.bookId === book.bookId)!.title;
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-07T01:00:00.000Z'));
+  const view = await ordinaryMemory(subject);
+  try {
+    await view.click(`[data-review-preference="${preference.itemId}"]`, '停用');
+    vi.setSystemTime(new Date('2026-11-07T02:00:00.000Z'));
+    accept(make(create([signals[0]!.signalId], '合成后续另一条记忆。')));
+    await view.remount();
+    const row = view.root.querySelector(`[data-review-preference="${preference.itemId}"]`)!;
+    expect(row.textContent).toContain(`来自《${sourceTitle}》`);
+    expect(row.textContent).toContain('2026-11-07T01:00:00.000Z');
+    expect(row.textContent).not.toContain('2026-11-07T02:00:00.000Z');
+    expect(row.textContent).toContain('已停用');
+    expect(row.textContent).not.toMatch(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|[0-9a-f]{64}/iu);
+  } finally { view.close(); }
+});
 
 it('freezes native curation examples from actual decision and feedback meaning', async () => {
   const { subject, book, signals } = await sourceDecisions();

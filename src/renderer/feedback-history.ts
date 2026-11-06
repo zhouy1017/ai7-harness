@@ -1,4 +1,5 @@
 import { filterChoices } from './components/controls.js';
+import { technicalLayerVisible } from './technical-layer.js';
 import type { FeedbackHistoryInput, FeedbackHistoryEntryProjection, FeedbackHistoryPeopleVersion, FeedbackHistoryProjection, FeedbackHistoryTarget, RendererApi } from '../shared/protocol.js';
 import { FEEDBACK_HISTORY_SIGNALS } from '../shared/protocol.js';
 import {
@@ -14,6 +15,7 @@ import {
   FEEDBACK_HISTORY_TRUNCATED,
   FEEDBACK_HISTORY_UNCLASSIFIED,
   FEEDBACK_ORIGIN_LABELS,
+  FEEDBACK_RECORD_ORIGIN_LABELS,
   feedbackAttributionLine,
   feedbackDateBounds,
   feedbackDateValue,
@@ -71,13 +73,19 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     const wrapper = el('div', 'feedback-filter');
     const values: Array<readonly [string, string]> = [['', FEEDBACK_HISTORY_ALL], ...choices];
     if (chosen[filter] !== '' && !choices.some(([value]) => value === chosen[filter])) values.push([chosen[filter], filter === 'book' ? selectedBookLabel : chosen[filter]]);
-    const control = filterChoices({ label: FEEDBACK_HISTORY_FILTERS[filter], choices: values, value: chosen[filter], disabled: loading || opening,
-      change: (value) => {
+    const change = (value: string): void => {
         if (loading || opening) return;
         if (filter === 'book') selectedBookLabel = values.find(([key]) => key === value)?.[1] ?? '所选图书';
         void request({ ...chosen, [filter]: value }, null, `#feedback-filter-${filter}`);
-      },
-    });
+    };
+    const control = technicalLayerVisible ? filterChoices({ label: FEEDBACK_HISTORY_FILTERS[filter], choices: values, value: chosen[filter], disabled: loading || opening, change }) : el('select');
+    if (!technicalLayerVisible) {
+      const dropdown = control as HTMLSelectElement;
+      dropdown.setAttribute('aria-label', FEEDBACK_HISTORY_FILTERS[filter]);
+      for (const [value, label] of values) { const option = el('option', undefined, label); option.value = value; dropdown.append(option); }
+      dropdown.value = chosen[filter]; dropdown.disabled = loading || opening;
+      dropdown.addEventListener('change', () => change(dropdown.value));
+    }
     control.id = `feedback-filter-${filter}`;
     control.dataset['feedbackFilter'] = filter;
     wrapper.append(el('span', undefined, FEEDBACK_HISTORY_FILTERS[filter]), control);
@@ -119,7 +127,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       if (loading || opening) return;
       void request({ ...chosen, dimension: check.checked ? 'null' : '' }, null, '#feedback-filter-unclassified');
     });
-    unclassified.append(check, document.createTextNode(`仅${FEEDBACK_HISTORY_UNCLASSIFIED}`));
+    unclassified.append(check, `仅${FEEDBACK_HISTORY_UNCLASSIFIED}`);
     wrapper.append(label, suggestions, unclassified);
     return wrapper;
   };
@@ -148,28 +156,33 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     const filters = el('div', 'feedback-filters');
     filters.append(
       select('book', projection.books.map((book) => [book.bookId, `《${book.title}》`] as const)),
-      select('origin', (Object.keys(FEEDBACK_ORIGIN_LABELS) as Array<keyof typeof FEEDBACK_ORIGIN_LABELS>).map((origin) => [origin, FEEDBACK_ORIGIN_LABELS[origin]] as const)),
-      select('signal', FEEDBACK_HISTORY_SIGNALS.map((signal) => [signal, signal] as const)),
-      select('author', authors.map((name) => [name, name] as const)),
-      select('editor', editors.map((name) => [name, name] as const)),
-      dimensionFilter(),
-      dateFilter('from'), dateFilter('to'),
+      select('origin', Object.entries(technicalLayerVisible ? FEEDBACK_ORIGIN_LABELS : FEEDBACK_RECORD_ORIGIN_LABELS)),
     );
-    const grouping = el('div', 'feedback-filter');
-    const groupControl = filterChoices({ label: '分组方式', choices: Object.entries(FEEDBACK_HISTORY_GROUPS), value: groupBy, disabled: loading || opening,
-      change: (value) => {
-        if (loading || opening || !Object.hasOwn(FEEDBACK_HISTORY_GROUPS, value)) return;
-        groupBy = value as Group;
-        paint('#feedback-group-by');
-      },
-    });
-    groupControl.id = 'feedback-group-by';
-    grouping.append(el('span', undefined, '分组方式'), groupControl);
-    filters.append(grouping);
+    if (technicalLayerVisible) {
+      filters.append(
+        select('signal', FEEDBACK_HISTORY_SIGNALS.map((signal) => [signal, signal] as const)),
+        select('author', authors.map((name) => [name, name] as const)),
+        select('editor', editors.map((name) => [name, name] as const)),
+        dimensionFilter(),
+        dateFilter('from'), dateFilter('to'),
+      );
+      const grouping = el('div', 'feedback-filter');
+      const groupControl = filterChoices({ label: '分组方式', choices: Object.entries(FEEDBACK_HISTORY_GROUPS), value: groupBy, disabled: loading || opening,
+        change: (value) => {
+          if (loading || opening || !Object.hasOwn(FEEDBACK_HISTORY_GROUPS, value)) return;
+          groupBy = value as Group;
+          paint('#feedback-group-by');
+        },
+      });
+      groupControl.id = 'feedback-group-by';
+      grouping.append(el('span', undefined, '分组方式'), groupControl);
+      filters.append(grouping);
+    }
     parts.push(filters);
     const shown = projection.entries;
     root.dataset['feedbackEntries'] = String(shown.length);
-    root.dataset['feedbackGrouping'] = groupBy;
+    root.dataset['feedbackGrouping'] = technicalLayerVisible ? groupBy : 'none';
+    if (!technicalLayerVisible) root.classList.add('feedback-history-ordinary');
     if (shown.length === 0) {
       const none = el('p', 'field-note feedback-history-none', Object.values(chosen).every((value) => value === '') && after == null ? FEEDBACK_HISTORY_EMPTY : FEEDBACK_HISTORY_NONE_MATCH);
       none.setAttribute('role', 'status');
@@ -178,7 +191,7 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
     const groups = new Map<string, { label: string; entries: FeedbackHistoryEntryProjection[] }>();
     for (const entry of shown) {
       const book = projection.books.find((candidate) => candidate.bookId === entry.bookId)!;
-      const key = groupBy === 'book' ? entry.bookId : groupBy === 'origin' ? entry.origin :
+      const key = !technicalLayerVisible ? 'all' : groupBy === 'book' ? entry.bookId : groupBy === 'origin' ? entry.origin :
         groupBy === 'time' ? feedbackDateValue(entry.recordedAt) : JSON.stringify(entry.dimension);
       let group = groups.get(key);
       if (group === undefined) {
@@ -189,16 +202,16 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
       }
       group.entries.push(entry);
     }
-    const orderedGroups = groupBy === 'book' ? projection.books.flatMap((book) => {
+    const orderedGroups = technicalLayerVisible && groupBy === 'book' ? projection.books.flatMap((book) => {
       const group = groups.get(book.bookId);
       return group === undefined ? [] : [[book.bookId, group] as const];
     }) : [...groups.entries()];
     for (const [key, { label, entries }] of orderedGroups) {
       const section = el('section', groupBy === 'book' ? 'feedback-group feedback-book' : 'feedback-group');
-      if (groupBy === 'book') section.dataset['bookId'] = key;
+      if (technicalLayerVisible && groupBy === 'book') section.dataset['bookId'] = key;
       const heading = el('h3', undefined, `${label} · ${entries.length} 条`);
-      if (groupBy === 'book') heading.append(' · ', el('span', 'feedback-people', learningPeopleLine(projection.books.find((book) => book.bookId === key)!)));
-      section.append(heading);
+      if (technicalLayerVisible && groupBy === 'book') heading.append(' · ', el('span', 'feedback-people', learningPeopleLine(projection.books.find((book) => book.bookId === key)!)));
+      if (technicalLayerVisible) section.append(heading);
       const list = el('ul', 'feedback-entries');
       for (const entry of entries) {
         const book = projection.books.find((candidate) => candidate.bookId === entry.bookId)!;
@@ -211,16 +224,18 @@ export function mountFeedbackHistory(options: MountFeedbackHistoryOptions): { lo
         const line = el('p', 'feedback-entry-line');
         line.append(el('span', 'feedback-entry-description', feedbackEntryLine(entry)), ' · ', el('span', 'feedback-entry-time', `记录于 ${localInstantLabel(entry.recordedAt)}`));
         const people = peopleOf(entry);
-        if (groupBy !== 'book') line.prepend(el('span', 'feedback-entry-book', `《${book.title}》 · ${learningPeopleLine(people ?? book)}`), ' · ');
-        if (people !== null && learningPeopleLine(people) !== now) line.append(' · ', el('span', 'feedback-entry-people', feedbackAttributionLine(people)));
-        item.append(line, el('p', 'feedback-entry-reason', feedbackReasonLine(entry)));
+        if (!technicalLayerVisible) line.prepend(el('span', 'feedback-entry-book', `《${book.title}》`), ' · ');
+        else if (groupBy !== 'book') line.prepend(el('span', 'feedback-entry-book', `《${book.title}》 · ${learningPeopleLine(people ?? book)}`), ' · ');
+        if (technicalLayerVisible && people !== null && learningPeopleLine(people) !== now) line.append(' · ', el('span', 'feedback-entry-people', feedbackAttributionLine(people)));
+        item.append(line, el('p', 'feedback-entry-reason', technicalLayerVisible ? feedbackReasonLine(entry) : entry.reasonState === 'given' && entry.reason !== null ? `你的原因：${entry.reason}` : feedbackReasonLine(entry)));
         if (entry.target.kind === 'mark' && entry.target.detached) {
           line.append(' · ', el('span', 'feedback-entry-detached', FEEDBACK_HISTORY_DETACHED));
         } else {
-          const go = el('button', 'button quiet', FEEDBACK_HISTORY_OPEN);
+          const openLabel = technicalLayerVisible ? FEEDBACK_HISTORY_OPEN : '查看原处';
+          const go = el('button', 'button quiet', openLabel);
           go.type = 'button';
           go.dataset['feedbackAction'] = 'open';
-          go.setAttribute('aria-label', `${FEEDBACK_HISTORY_OPEN.replace('…', '')}：${feedbackEntryLine(entry)}`);
+          go.setAttribute('aria-label', `${openLabel.replace('…', '')}：${feedbackEntryLine(entry)}`);
           go.disabled = opening || loading;
           go.addEventListener('click', () => void openEntry(entry));
           item.append(go);

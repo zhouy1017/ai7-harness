@@ -59,7 +59,6 @@ export const KNOWLEDGE_BASE_TAB_VIEWS: ReadonlyArray<KnowledgeBaseTabView> = [
   {
     tab: 'memory',
     label: '社级编辑记忆',
-    developerOnly: true,
     holds: '社里沉淀下来的编辑经验，供审阅与写作参考。',
     pending: null,
   },
@@ -89,7 +88,8 @@ export function knowledgeBaseTabView(tab: KnowledgeBaseTab): KnowledgeBaseTabVie
 }
 
 export function visibleKnowledgeBaseTabs(developerMode: boolean): ReadonlyArray<KnowledgeBaseTabView> {
-  return developerMode ? KNOWLEDGE_BASE_TAB_VIEWS : KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.developerOnly !== true);
+  return developerMode ? KNOWLEDGE_BASE_TAB_VIEWS : KNOWLEDGE_BASE_TAB_VIEWS.filter((view) => view.developerOnly !== true)
+    .map((view) => view.tab === 'memory' ? { ...view, label: '本社审阅偏好' } : view);
 }
 
 // ---- 审阅规范文件 ----------------------------------------------------------------------------------------------------

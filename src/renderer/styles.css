@@ -1040,8 +1040,22 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .feedback-entry { display: grid; gap: .2rem; min-width: 0; padding: .45rem .7rem; border-left: 3px solid var(--boundary); }
 .feedback-entry p { margin: 0; overflow-wrap: anywhere; }
 .feedback-entry-line { font-weight: 700; }
+/* #1377: ordinary records keep two reading lines with the source action alongside. */
+.feedback-history-ordinary .feedback-entry { grid-template-columns: minmax(0, 1fr) auto; }
+.feedback-history-ordinary .feedback-entry-line, .feedback-history-ordinary .feedback-entry-reason { grid-column: 1; }
+.feedback-history-ordinary .feedback-entry > button { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+.review-preferences-ordinary .review-preferences-heading { display: flex; flex-wrap: wrap; align-items: center; gap: .8rem; }
+.review-preferences-ordinary .review-preferences-heading h3 { margin: 0; }
+.review-preferences-ordinary .preference-row { grid-template-columns: minmax(0, 1fr) auto; padding: .65rem .8rem; margin-block: .5rem; gap: .2rem .8rem; }
+.review-preferences-ordinary .preference-row > p { grid-column: 1; margin: 0; }
+.preference-actions { grid-column: 2; grid-row: 1 / 3; display: flex; flex-wrap: wrap; align-items: start; gap: .4rem; }
+.preference-actions details { max-width: 24rem; }
+@media (max-width: 700px) {
+  .review-preferences-ordinary .preference-row, .feedback-history-ordinary .feedback-entry { grid-template-columns: minmax(0, 1fr); }
+  .preference-actions, .feedback-history-ordinary .feedback-entry > button { grid-column: 1; grid-row: auto; justify-self: start; }
+}
 /* 质量与学习 › 学习准入 (S26b): Books in turn, each material one row, its Review Card opening in place. */
-.learning-materials { display: grid; gap: .8rem; }
+.learning-materials { display: grid; gap: .8rem; overflow-wrap: anywhere; }
 .learning-book { display: grid; gap: .45rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
 .learning-book h3, .learning-book p { margin: 0; overflow-wrap: anywhere; }
 .learning-material-list { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
