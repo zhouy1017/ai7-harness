@@ -2924,10 +2924,15 @@ async function main() {
     modelAdapterIdentity = REVIEW_FIXTURE_IDENTITY;
     await launchForCleanup();
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'review-ready');
-    // #1374: reload the persisted ordinary-mode choice so this configuration regression exercises the packaged UI branch.
-    await renderer.evaluate(`localStorage.setItem('ai7.technicalLayerVisible','false')`);
-    await renderer.send('Page.reload');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelector('[data-screen="landing"]')`, 'review-memory-ordinary-mode');
+    // #1374: use the real persisted mode switch so this configuration regression exercises the ordinary UI branch.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-ordinary-mode-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-ordinary-mode-settings-ready');
+    await click(renderer, '帮助', 'review-memory-ordinary-mode-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true`, 'review-memory-ordinary-mode-toggle-ready');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-ordinary-mode-toggle');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'review-memory-ordinary-mode');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-memory-ordinary-mode-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'review-memory-ordinary-mode-library-ready');
     await assertRenderer(renderer, `(() => { const button=document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]'); if(!(button instanceof HTMLButtonElement))return false; button.click(); return true; })()`, 'review-open-book');
     await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(imported.bookId)}]')`, 'review-open-book-manuscript');
 
@@ -2946,9 +2951,14 @@ async function main() {
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const before=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); const after=sheet.querySelector('[data-consequence="cost"]').textContent; sheet.querySelector('input[value="style-and-format"]').click(); return before!==after && sheet.querySelector('.sheet-foot .review-sheet-procedure') && !sheet.querySelector('.review-materials') && !sheet.querySelector('.similar-materials') && [...sheet.querySelectorAll('.review-category-basis')].every(node=>!/第\s*[0-9]+\s*版|\bv[0-9]+|version/iu.test(node.textContent)); })()`, 'review-reactive-consequences');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const box=(id)=>sheet.querySelector('input[name="review-category"][value="'+id+'"]'); box('style-and-format').click(); const before=sheet.querySelector('[data-consequence="cost"]').textContent; const scope=(kind)=>sheet.querySelector('input[name="review-scope"][value="'+kind+'"]').click(); scope('changed'); if(!box('style-and-format').disabled||box('style-and-format').checked||sheet.querySelector('[data-consequence="cost"]').textContent===before)return false; scope('whole'); if(!box('typos-and-usage').checked||!box('style-and-format').checked)return false; box('local-text-check').click(); if(!box('style-and-format').disabled||box('style-and-format').checked)return false; box('local-text-check').click(); const kept=box('typos-and-usage').checked&&box('style-and-format').checked; box('style-and-format').click(); return kept; })()`, 'review-category-selection-round-trip');
     await assertRenderer(renderer, `(() => { const sheet=document.querySelector('dialog.review-sheet'); const page=document.querySelector('#screen'); const scroll=document.querySelector('.content') ?? page; const before=scroll?.scrollTop; if(scroll)scroll.scrollTop=scroll.scrollHeight; const scrollable=!scroll || scroll.scrollHeight<=scroll.clientHeight || scroll.scrollTop!==before || before>0; sheet.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})); return !sheet.open && scrollable && !page?.inert; })()`, 'review-sheet-escape-and-page');
-    await renderer.evaluate(`localStorage.setItem('ai7.technicalLayerVisible','true')`);
-    await renderer.send('Page.reload');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.documentElement.dataset.technicalLayerVisible==='true' && document.querySelector('[data-screen="landing"]')`, 'review-memory-development-restored');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-memory-development-restored-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-memory-development-restored-settings-ready');
+    await click(renderer, '帮助', 'review-memory-development-restored-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false`, 'review-memory-development-restored-toggle-ready');
+    await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'review-memory-development-restored-toggle');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'review-memory-development-restored');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'review-memory-development-restored-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'review-memory-development-restored-library-ready');
     await assertRenderer(renderer, `(() => { document.querySelector('button[data-book-id=${JSON.stringify(imported.bookId)}]').click(); return true; })()`, 'review-memory-book-reopen');
     await waitFor(renderer, `document.querySelector('.editor-shell')`, 'review-memory-book-ready');
     await openReviewDestination(renderer, 'review-memory-return');

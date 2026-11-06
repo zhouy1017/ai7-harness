@@ -1499,17 +1499,23 @@ async function main() {
     // #1374: clearing a manually entered ID restores the selected catalogue radio and its effective actions.
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const radio=flow.querySelector('[data-model-choice="deepseek-flash"]'); const custom=flow.querySelector('[data-custom-model-id]'); if(!(custom instanceof HTMLInputElement)||!radio.checked)return false; custom.value='j12-temporary-manual'; custom.dispatchEvent(new Event('input',{bubbles:true})); if(radio.checked)return false; custom.value=''; custom.dispatchEvent(new Event('input',{bubbles:true})); return radio.checked && !flow.querySelector('[data-action="test-flow-connection"]').disabled && flow.querySelector('[data-action="use-model-for-both-roles"]').disabled; })()`, 'model-manual-id-round-trip');
     // Ordinary mode uses the same remembered catalogue choice; channel round trips restore the selection through the owner.
-    await primary.evaluate(`localStorage.setItem('ai7.technicalLayerVisible','false')`);
-    await primary.send('Page.reload');
-    await waitFor(primary, `document.documentElement.dataset.ai7ProductReady==='true' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'model-memory-ordinary-mode');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-mode-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-ordinary-mode-settings-ready');
+    await click(primary, '帮助', 'model-memory-ordinary-mode-help');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===true`, 'model-memory-ordinary-mode-toggle-ready');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'model-memory-ordinary-mode-toggle');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'`, 'model-memory-ordinary-mode');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-ordinary-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-ordinary-settings-ready');
     await click(primary, '模型服务', 'model-memory-ordinary-entry');
     await waitFor(primary, `document.querySelector('select[aria-label="渠道"]')`, 'model-memory-ordinary-ready');
     await assertRenderer(primary, `(() => { const channel=document.querySelector('select[aria-label="渠道"]'); const choose=(value)=>{channel.value=value;channel.dispatchEvent(new Event('change',{bubbles:true}));}; choose('deepseek-open-platform'); const selected=document.querySelector('select[aria-label="AI7 使用的模型"]').value; choose('openai-platform'); choose('deepseek-open-platform'); const model=document.querySelector('select[aria-label="AI7 使用的模型"]'); return selected==='deepseek-flash' && model.value===selected && !model.disabled; })()`, 'model-ordinary-catalogue-round-trip');
-    await primary.evaluate(`localStorage.setItem('ai7.technicalLayerVisible','true')`);
-    await primary.send('Page.reload');
-    await waitFor(primary, `document.documentElement.dataset.ai7ProductReady==='true' && document.documentElement.dataset.technicalLayerVisible==='true'`, 'model-memory-development-restored');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-development-restored-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-development-restored-settings-ready');
+    await click(primary, '帮助', 'model-memory-development-restored-help');
+    await waitFor(primary, `document.querySelector('.help-developer-mode input')?.checked===false`, 'model-memory-development-restored-toggle-ready');
+    await assertRenderer(primary, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(!(toggle instanceof HTMLInputElement)||toggle.disabled)return false; toggle.click(); return true; })()`, 'model-memory-development-restored-toggle');
+    await waitFor(primary, `document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'`, 'model-memory-development-restored');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'model-memory-return-settings');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'model-memory-return-settings-ready');
     await click(primary, '模型服务', 'model-memory-return-models');
