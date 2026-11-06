@@ -261,6 +261,8 @@ const PAGE_HELPERS = `(() => {
   const draft = () => conflict()?.querySelector('[data-conflict-draft]') ?? null;
   const press = (control) => {
     if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+    const more=control.closest('details.editorial-mark-more');
+    if(more&&!more.open)more.querySelector('summary').click();
     control.click();
     return true;
   };
@@ -943,7 +945,7 @@ async function main() {
       const card = window.__j06.card();
       const accept = card.querySelector('[data-mark-action="accept-and-apply"]');
       return card.dataset.markKind === 'change-suggestion' && card.dataset.markAnchor === 'exact' && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
-        (card.querySelector('[data-mark-source]')?.textContent ?? '').includes(${JSON.stringify(NEW_VERSION_SOURCE)}) &&
+        (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(NEW_VERSION_SOURCE)}) &&
         card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j06Texts.current &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(MERGED)} &&
         (card.querySelector('[data-mark-region="rationale"]')?.textContent ?? '').includes(${JSON.stringify(FIRST_RATIONALE)}) &&
@@ -1074,7 +1076,7 @@ async function main() {
     requireJourney(UUID_PATTERN.test(correctionId ?? ''), 'correction-identity');
     await assertRenderer(renderer, `(() => {
       const card = window.__j06.card();
-      return (card.querySelector('[data-mark-source]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
+      return (card.querySelector('.editorial-mark-more [data-mark-provenance]')?.textContent ?? '').includes(${JSON.stringify(CORRECTION_SOURCE)}) && card.querySelector('[data-mark-state]')?.textContent === '待你处理' &&
         card.querySelector('[data-mark-region="content"] ins')?.textContent === window.__j06Replaced && window.__j06.text(${JSON.stringify(first)}) === window.__j06Reversal.now;
     })()`, 'correction-proposal-not-applied');
     const corrected = await renderer.evaluate(`(async () => { const binding = await ${BINDING}; const applied = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(versionId)} }); const correction = await window.ai7.getEditorialMarkCard({ ...binding, markId: ${JSON.stringify(correctionId)} }); return { applied: applied.status, conflict: applied.conflict, resolvedFrom: correction.resolvedFrom, convertedFrom: correction.convertedFrom }; })()`);

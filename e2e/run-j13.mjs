@@ -1310,7 +1310,7 @@ async function main() {
     at('consistency-marks-on-manuscript');
     // A finding is the mark on the manuscript: 回到原文 opens the text at it, its card naming the category.
     await clickSelector(renderer, `article.review-finding[data-finding-id="${findings[0].findingId}"] [data-review-action="go-to-text"]`, 'consistency-go-to-text');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${findings[0].markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「书系一致性」')`, 'consistency-mark-and-card', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${findings[0].markId}"]')?.dataset.markSource==='ai7' && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.startsWith('AI7 本地检查 · ') && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.includes('审阅「书系一致性」')`, 'consistency-mark-and-card', 30_000);
 
     at('consistency-member-reviewed');
     // The Series page's 书系一致性审阅 column says when the member's findings reached its manuscript.

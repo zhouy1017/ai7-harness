@@ -3058,7 +3058,7 @@ async function main() {
     );
     await waitFor(
       renderer,
-      `(() => { const card = document.querySelector('[data-mark-card]'); return card?.querySelector('[data-mark-change="insert"]')?.textContent.startsWith('在此插入「') === true && card.querySelector('.editorial-mark-source')?.textContent.startsWith(${JSON.stringify(`${IMPORTED_MARKS_AUTHOR}（导入文件的作者）`)}) === true && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.querySelector('[data-mark-action="convert-annotation"]')?.disabled === true && document.querySelector('[data-mark-preview]') !== null; })()`,
+      `(() => { const card = document.querySelector('[data-mark-card]'); const proposed=card?.querySelector('[data-mark-block="proposed"] ins')?.textContent; return card?.querySelector('[data-mark-change="insert"]') && proposed?.length>0 && proposed===document.querySelector('.editorial-mark-preview-text')?.textContent && card.querySelector('[data-mark-block="original"] del')?.textContent==='插入位置' && card.querySelector('.editorial-mark-more')?.open===false && card.querySelector('.editorial-mark-source')?.textContent.startsWith(${JSON.stringify(`${IMPORTED_MARKS_AUTHOR}（导入文件的作者）`)}) === true && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.querySelector('[data-mark-action="convert-annotation"]')?.disabled === true && document.querySelector('[data-mark-preview]') !== null; })()`,
       'imported-marks-insertion-card',
     );
     // Opening the card previewed the insertion; the manuscript itself is still the rejected reading.

@@ -231,7 +231,7 @@ async function click(renderer, label, name) {
 }
 /** Press the one enabled button a selector names, refusing one that is missing or disabled. */
 async function clickSelector(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; const more=button.closest('details.editorial-mark-more'); if(more&&!more.open)more.querySelector('summary').click(); button.click(); return true; })()`, name);
 }
 /**
  * Wait until the open manuscript's Position Rail has drawn a marker of `kind` (Issue #690). The rail reads its places from
@@ -1471,7 +1471,7 @@ async function main() {
     await assertRenderer(renderer, `(async () => { const form = document.querySelector('#task-drawer .dialogue-convert'); const proposed = form?.querySelector('textarea[name="proposedText"]'); if (!(proposed instanceof HTMLTextAreaElement)) return false; proposed.dispatchEvent(new CompositionEvent('compositionstart', { data: '平缓', bubbles: true })); proposed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', isComposing: true, bubbles: true, cancelable: true })); proposed.dispatchEvent(new CompositionEvent('compositionend', { data: '平缓', bubbles: true })); await new Promise((resolve) => setTimeout(resolve, 100)); return form.isConnected && document.querySelector('#task-drawer')?.hidden === false && document.querySelector('#task-drawer')?.dataset.taskDrawerView === 'dialogue'; })()`, 'dialogue-convert-ime-escape');
     await assertRenderer(renderer, `(() => { const proposed = document.querySelector('#task-drawer .dialogue-convert textarea[name="proposedText"]'); proposed.value = ${JSON.stringify(DIALOGUE_PROPOSAL)}; proposed.dispatchEvent(new Event('input', { bubbles: true })); return proposed.value === ${JSON.stringify(DIALOGUE_PROPOSAL)}; })()`, 'dialogue-convert-write');
     await clickSelector(renderer, '#task-drawer .dialogue-convert [data-dialogue-action="convert-submit"]', 'dialogue-convert-submit');
-    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 · 任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
+    await waitFor(renderer, `(() => { const card = document.querySelector('.editorial-mark-layer [data-mark-card]'); return card instanceof HTMLElement && card.dataset.markKind === 'change-suggestion' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').startsWith('AI7 本地检查 · ') && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('任务「对话回答」'); })()`, 'dialogue-converted-card', 60_000);
     const converted = await renderer.evaluate(`window.ai7.inspectDialogue({ dialogueId: ${JSON.stringify(dialogueId)}, afterFragment: 0 })`);
     const convertedAttempt = converted?.attempts?.at(-1);
     const markId = convertedAttempt?.convertedMarkIds?.[0] ?? null;

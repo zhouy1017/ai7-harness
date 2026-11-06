@@ -61,4 +61,11 @@ describe('shared editorial card hierarchy in ordinary mode (#1379)', () => {
     expect(panel.querySelector('ins')?.textContent).toBe(value.suggestion.proposedText);
     expect(panel.querySelector('[data-mark-source]')?.textContent).toContain('raw-model-id');
   });
+
+  it('keeps conversion provenance under More while the author stays compact for conflict-card consumers', () => {
+    const { panel, more } = render({ ...card, resolvedFrom: { markId: 'original', conflictKind: 'suggestion' } });
+    expect(panel.querySelector('[data-mark-source]')?.textContent).not.toContain('由冲突');
+    expect(more.querySelector('[data-mark-provenance]')?.textContent).toContain('由冲突解决生成的新版本');
+    expect(more.open).toBe(false);
+  });
 });
