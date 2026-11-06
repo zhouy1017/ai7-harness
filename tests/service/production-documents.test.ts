@@ -122,14 +122,14 @@ function documentSurface(store: EditorialStore, book: Book, pickerPath?: string)
     commitSourceImport: async (input) => store.commitSourceImport({ draftId: input.draftId, expectedDraftVersion: input.expectedDraftVersion,
       reviewDigest: input.reviewDigest, commitId: input.commitAttemptId ?? randomUUID() }),
     acknowledgeImportCompletion: async (input) => store.acknowledgeImportCompletion(input.commitId),
-    abandonImportDraft: async (input) => store.abandonImportDraft(input.draftId, input.expectedDraftVersion),
+    abandonImportDraft: vi.fn(async (input) => store.abandonImportDraft(input.draftId, input.expectedDraftVersion)),
     createProductionDocument: async (input) => store.createProductionDocument({ ...input, bookId: book.bookId }),
   };
   const surface = mountDeliverables({ root, bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountDeliverables>[0]['api'],
     setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败', openDocument: opened, openReview: () => {},
     awaitServiceJob: async (job) => job, openWritingPlan: () => {},
     technicalDetails: (_className, ...rows) => { const section = document.createElement('div'); section.append(...rows); return section; } });
-  return { root, surface, opened, status, close: () => { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); } };
+  return { root, api, surface, opened, status, close: () => { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); } };
 }
 
 async function withDocument(run: (fixture: DocumentFixture) => Promise<void>): Promise<void> {
@@ -354,6 +354,7 @@ describe('Production Documents', () => {
         view.root.querySelector<HTMLButtonElement>('.production-document-card[data-document-type-id="news-release"] [data-document-action="import"]')!.click();
         await vi.waitFor(() => expect(view.status).toHaveBeenCalledWith('请选择 DOCX、Markdown 或 TXT 文件。', 'error'));
         expect(abandon).toHaveBeenCalledTimes(1);
+        expect(view.api.abandonImportDraft).toHaveBeenCalledWith(expect.objectContaining({ preserveBookRoute: true }));
         expect(acknowledge).not.toHaveBeenCalled();
         expect((await store.getImportStartup()).state).toBe('none');
         expect(view.opened).not.toHaveBeenCalled();

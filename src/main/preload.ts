@@ -220,7 +220,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>
     invoke<PickerReselectResult>(IPC_CHANNELS.reselectImportDraft, input),
-  abandonImportDraft: (input: ServiceOperationMap['abandonImportDraft']['input']) =>
+  abandonImportDraft: (input: Parameters<RendererApi['abandonImportDraft']>[0]) =>
     invoke<ServiceOperationMap['abandonImportDraft']['output']>(IPC_CHANNELS.abandonImportDraft, input),
   prepareBookCreation: (input: ServiceOperationMap['prepareBookCreation']['input']) =>
     invoke<ServiceOperationMap['prepareBookCreation']['output']>(IPC_CHANNELS.prepareBookCreation, input),

@@ -965,7 +965,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         if (picked.status === 'cancelled') return;
         const staged = picked.staged;
         if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) {
-          await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion });
+          await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion, preserveBookRoute: true });
           throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
         }
         const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion,

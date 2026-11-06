@@ -6808,7 +6808,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
     draftId: string;
     expectedDraftVersion: number;
   }): Promise<PickerReselectResult>;
-  abandonImportDraft(input: ServiceOperationMap['abandonImportDraft']['input']): Promise<ImportStartupProjection>;
+  abandonImportDraft(input: ServiceOperationMap['abandonImportDraft']['input'] & { preserveBookRoute?: true }): Promise<ImportStartupProjection>;
   prepareBookCreation(input: ServiceOperationMap['prepareBookCreation']['input']): Promise<BookCreationReviewProjection>;
   commitBookCreation(input: ServiceOperationMap['commitBookCreation']['input']): Promise<BookCreationCommitProjection>;
   getBookOverview(input: ServiceOperationMap['getBookOverview']['input']): Promise<BookWorkOverviewProjection>;
