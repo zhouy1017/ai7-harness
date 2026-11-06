@@ -38,12 +38,15 @@ describe('the direct-search candidate in 联网检索', () => {
     setTechnicalLayerVisible(false);
     const { node, api } = section(async () => SUCCESS);
     expect(node.textContent).toContain('不能用于任务');
+    expect(node.textContent).toContain('尚未测量这一接口的命中率、延迟与可达性');
     expectNoTechnicalText(node);
+    expect(node.textContent).not.toMatch(/https?:\/\/|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|配置摘要|评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u);
     node.querySelector('button[data-action="probe-search-candidate"]')!.click();
     await settle();
     expect(node.querySelector('[data-search-candidate-probe]')!.textContent).toContain('连接成功');
     expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: 'search-deepseek', candidateId: 'deepseek-direct-search-v1' });
     expectNoTechnicalText(node);
+    expect(node.textContent).not.toContain(SUCCESS.candidate!.configurationDigest);
   });
   it('shows the effective source and why it is selected', () => {
     const settings = projection();
@@ -62,7 +65,8 @@ describe('the direct-search candidate in 联网检索', () => {
     settings.searchBackends.alwaysUseSelectedBackend = true;
     expect(effectiveSearchSourceLine(settings)).toContain('编辑指定 · TinyFish');
   });
-  it('offers both unmeasured native candidates with a connection test enabled by their model channel', async () => {
+  it.each([false, true])('offers native candidate connection tests with technical mode %s', async (technical) => {
+    setTechnicalLayerVisible(technical);
     const settings = projection();
     Object.assign(settings, { routeChoice: { routes: ['openai-platform', 'anthropic-claude'].map((route) => ({ route, connection: { credentialOperationState: 'ready' } })) } });
     const api = { probeSearchBackend: vi.fn().mockResolvedValue(SUCCESS), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() };
@@ -74,6 +78,7 @@ describe('the direct-search candidate in 联网检索', () => {
       controls[0]!.click(); await settle();
       expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: `search-${service}`, candidateId: `${service}-native-search-v1` });
     }
+    if (!technical) expectNoTechnicalText(node);
   });
   it('keeps keyless backends unselected, distinguishes measured references, and disables empty credential actions', () => {
     const settings = projection();
@@ -95,6 +100,7 @@ describe('the direct-search candidate in 联网检索', () => {
   });
 
   it('synchronizes the saved official DeepSeek model credential without exposing its value', async () => {
+    setTechnicalLayerVisible(false);
     const settings = projection();
     Object.assign(settings, { launchPolicy: { operationalScope: 'ordinary-production' }, routeChoice: { routes: [{ route: 'deepseek-open-platform', connection: { credentialOperationState: 'ready' } }] } });
     const api = { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(async () => settings), removeSearchBackendCredential: vi.fn() };
@@ -103,6 +109,31 @@ describe('the direct-search candidate in 联网检索', () => {
     node.querySelector('[data-action="reuse-model-credential"]')!.click(); await settle();
     expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-deepseek', reuseModelCredential: true });
     expect(setStatus).toHaveBeenCalledWith('模型渠道凭据已同步到联网检索。', 'success');
+  });
+  it('saves an ordinary search key, selects and tests its backend, then removes the key (#1370)', async () => {
+    setTechnicalLayerVisible(false);
+    const settings = projection(); Object.assign(settings.launchPolicy, { operationalScope: 'ordinary-production' });
+    const backend = settings.searchBackends.backends.find((entry) => entry.backendId === 'search-brave')!;
+    Object.assign(backend.connection, { credentialOperationState: 'missing', credentialReference: null });
+    const { candidate: _candidate, ...result } = SUCCESS;
+    const api = { probeSearchBackend: vi.fn(async () => result),
+      selectSearchBackend: vi.fn<SearchBackendSettingsApi['selectSearchBackend']>(async (input) => { if (input.backendId !== null) settings.searchBackends.selectedBackendId = input.backendId; return settings; }),
+      saveSearchBackendCredential: vi.fn(async () => { backend.connection.credentialOperationState = 'ready'; return settings; }),
+      removeSearchBackendCredential: vi.fn(async () => { backend.connection.credentialOperationState = 'missing'; return settings; }) };
+    let node: MiniElement;
+    const paint = () => { node = renderSearchBackendSettings(settings, { api, render: paint, setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement; };
+    const card = () => node.querySelector('[data-search-backend="search-brave"]')!;
+    const press = async (label: string) => { card().querySelectorAll('button').find((control) => control.textContent === label)!.click(); await settle(); };
+    paint(); const input = card().querySelector('input')!;
+    input.value = 'synthetic-search-key'; input.dispatchEvent({ type: 'input' });
+    await press('保存密钥'); expect(input.value).toBe('');
+    expect(api.saveSearchBackendCredential).toHaveBeenCalledWith({ backendId: 'search-brave', secret: 'synthetic-search-key' });
+    await press('选择后端'); expect(card().dataset['selected']).toBe('true');
+    paint(); expect(card().dataset['selected']).toBe('true');
+    await press('测试检索'); expect(card().querySelector('[data-search-probe]')!.textContent).toContain('可达');
+    expect(card().querySelector('[data-search-probe]')!.textContent).not.toContain('延迟');
+    expectNoTechnicalText(node!);
+    await press('移除密钥'); expect(card().querySelectorAll('button').find((control) => control.textContent === '测试检索')!.disabled).toBe(true);
   });
   it('lists it after the five ranked backends, 未实测, with 测试连接 as its only action', () => {
     const { node } = section(async () => SUCCESS);
@@ -140,6 +171,7 @@ describe('the direct-search candidate in 联网检索', () => {
 
 describe('the 备用来源 control in 联网检索 (#1226)', () => {
   it('offers only a keyed non-default backend, sends role fallback, and clears the chosen one', async () => {
+    setTechnicalLayerVisible(false);
     const keyed = (backendId: string) => backendId === 'search-brave' || backendId === 'search-parallel';
     const settings = { ...projection(), searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId,
       credentialReference: keyed(backendId) ? `11111111-1111-4111-8111-11111111111${SHIPPED.indexOf(backendId)}` : null,

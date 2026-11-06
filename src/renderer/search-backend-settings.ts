@@ -84,9 +84,10 @@ function candidateCard(candidate: SearchBackendCandidateProjection, options: Sea
   card.dataset['searchCandidate'] = candidate.candidateId;
   card.dataset['measurement'] = candidate.measurement;
   card.append(element('h4', undefined, `${candidate.name} · 未实测`));
-  const price = technicalLayerVisible && candidate.protocol === 'deepseek-direct-search' ? `接口 ${candidate.endpoint} · 单价 ${candidate.price} · 不可选择` : `单价 ${candidate.price} · 不可选择`;
+  const price = `单价 ${candidate.price} · 不可选择`;
   const disclosure = candidate.disclosure.map((line) => (technicalLayerVisible ? line : line.replace(/（\/[^）]+）/gu, '')).replace(/。$/u, '')).join('；');
   card.append(element('p', 'field-note', disclosure === '' ? price : `${price}；${disclosure}。`));
+  if (technicalLayerVisible) card.append(element('p', 'field-note search-candidate-technical', `接口 ${candidate.endpoint} · 协议 ${candidate.protocol} · 配置摘要 ${candidate.configurationDigest}`));
   const output = element('div');
   output.dataset['searchCandidateProbe'] = candidate.candidateId;
   const probe = button(SEARCH_CANDIDATE_PROBE_LABEL, 'quiet', async () => {
@@ -111,7 +112,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
   section.setAttribute('aria-label', '联网检索');
   section.dataset['searchBackends'] = 'true';
   const heading = element('h3', undefined, '联网检索');
-  if (technicalLayerVisible) heading.dataset['developerOnly'] = 'true';
+  heading.tabIndex = -1;
   section.append(heading, element('p', 'field-note', `${effectiveSearchSourceLine(projection).replace(/。$/u, '')}；新任务优先用主编辑模型自带搜索，否则用已配置的检索服务；已开始的任务继续使用原来源；${SEARCH_FALLBACK_NOTE}`));
   const { selectedBackendId, fallbackBackendId } = projection.searchBackends;
   const override = element('input'); override.type = 'checkbox'; override.checked = projection.searchBackends.alwaysUseSelectedBackend ?? false;
@@ -137,7 +138,9 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     card.dataset['selected'] = String(selected);
     card.dataset['fallback'] = String(backend.backendId === fallbackBackendId);
     card.append(element('h4', undefined, `${backend.rank}. ${backend.name}${selected ? ' · 已选择' : ''}${backend.backendId === fallbackBackendId ? ' · 备用来源' : ''}`),
-      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%${backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
+      element('p', 'field-note', `${keyed ? '密钥已保存，可测试当前连接' : '未配置密钥'}；${technicalLayerVisible
+        ? `评测参考：延迟 p50 ${backend.p50Ms === null ? '未知' : `${backend.p50Ms} ms`} · 单价 ${backend.price} · 中文命中率 ${(backend.chineseHitRate * 100).toFixed(1)}% · 国际命中率 ${(backend.internationalHitRate * 100).toFixed(1)}%`
+        : '可配置为检索来源或备用来源'}${!technicalLayerVisible || backend.note === null ? '' : `；${backend.note.replace(/。/gu, '；').replace(/；$/u, '。')}`}`));
     const actions = element('div', 'button-row');
     const choose = button('选择后端', 'quiet', () => void (async () => {
       try { render(await api.selectSearchBackend({ backendId: backend.backendId })); setStatus('联网检索后端已保存'); }
@@ -150,7 +153,7 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
       probe.disabled = true;
       try {
         const result = await api.probeSearchBackend({ backendId: backend.backendId });
-        output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'} · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}${result.failure === null ? '' : ` · ${result.failure}`}`));
+        output.replaceChildren(element('p', undefined, `${result.reachable ? '可达' : '不可达'}${technicalLayerVisible ? ` · 延迟 ${result.latencyMs} ms · 结果数 ${result.resultCount}` : ''}${result.failure === null ? '' : ` · ${result.failure}`}`));
         output.append(resultList(result));
       } catch (error) { output.replaceChildren(element('p', 'attention-note', errorMessage(error, '测试检索未完成。'))); }
       finally { probe.disabled = !keyed; }
