@@ -1096,7 +1096,7 @@ async function dispatch(
       };
     }
     case 'createWritingDraft':
-      return { id: request.id, ok: true, op: request.op, result: store.createWritingDraft(request.input.bookId, request.input.revisionId) };
+      return { id: request.id, ok: true, op: request.op, result: store.createWritingDraft(request.input.bookId, request.input.revisionId, request.input.title) };
     case 'inspectAnalysisFeedback':
       return { id: request.id, ok: true, op: request.op, result: store.inspectAnalysisFeedback(request.input.bookId, request.input.revisionId) };
     case 'recordAnalysisFeedback':
@@ -1540,6 +1540,8 @@ async function dispatch(
       return { id: request.id, ok: true, op: request.op, result: store.appendMaintenanceCaseRevision(request.input) };
     case 'saveMaintenanceErrata':
       return { id: request.id, ok: true, op: request.op, result: store.saveMaintenanceErrata(request.input) };
+    case 'renameProductionDocument':
+      return { id: request.id, ok: true, op: request.op, result: store.renameProductionDocument(request.input) };
     case 'createProductionDocument':
       return { id: request.id, ok: true, op: request.op, result: await store.createProductionDocument(request.input) };
     case 'decideProductionDocumentType':

@@ -1,6 +1,6 @@
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -256,8 +256,39 @@ describe('Production Documents', () => {
       expect(created.document!.versions.map((version) => [version.ordinal, version.label])).toEqual([[1, '版本 1']]);
       expect(created.document!.changedSinceVersion).toBe(false);
       expect([created.document!.deliveries, created.document!.deliveriesTruncated, created.document!.changedSinceDelivery]).toEqual([[], false, false]);
-      expect(await asyncCode(() => store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId })))
-        .toBe('PRODUCTION_DOCUMENT_EXISTS');
+      const second = await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId });
+      expect(second.document!.title).toBe('新闻稿 2');
+      expect(second.documents.types[0]!.documents.map((doc) => doc.documentId)).toEqual([created.document!.documentId, second.document!.documentId]);
+      expect(second.documents.types[0]!.document).toEqual(created.document);
+    });
+  });
+
+  it('keeps blank and imported peers independently named, versioned and delivered', async () => {
+    await withBook(async (store, book) => {
+      const before = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发通稿' })).document!;
+      const blank = store.getManuscriptWindow(first.documentId, first.branchId, null);
+      expect(blank.blocks.map((block) => [block.kind, block.text.length])).toEqual([['paragraph', 0]]);
+      const path = join(roots.inputRoot, '公开材料.md');
+      await writeFile(path, await sourceSpanText(SOURCE, { block: 21 }));
+      const sourceVersionId = await importSource(store, book.bookId, path);
+      const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId, title: '媒体通稿' })).document!;
+      const initial = store.getManuscriptWindow(second.documentId, second.branchId, null);
+      const block = initial.blocks[0]!;
+      store.flushJournalEdit({ manuscriptId: second.documentId, branchId: second.branchId, clientEditId: randomUUID(), baseRevisionId: initial.revisionId, windowStartBlockId: block.blockId, expectedJournalSequence: initial.journalSequence, blockId: block.blockId, baseBlockDigest: block.digest, fromGrapheme: 0, toGrapheme: 0, insertText: '公开修订' });
+      const saved = await store.saveProductionDocumentVersion({ bookId: book.bookId, documentId: second.documentId, branchId: second.branchId });
+      expect(saved.document!.versions).toHaveLength(2);
+      expect(saved.documents.types[0]!.documents[0]!.versions).toHaveLength(1);
+      const renamed = store.renameProductionDocument({ bookId: book.bookId, documentId: second.documentId, title: '  媒体通稿修订  ' });
+      expect(renamed.document!.title).toBe('媒体通稿修订');
+      expect(renamed.document!.versions).toEqual(saved.document!.versions);
+      expect(code(() => store.renameProductionDocument({ bookId: book.bookId, documentId: second.documentId, title: ' ' }))).toBe('PRODUCTION_DOCUMENT_TITLE_INVALID');
+      const delivered = await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: second.documentId, version: { kind: 'saved', revisionId: second.versions[0]!.revisionId }, recipient: { kind: 'publicity', custom: null }, note: null });
+      expect(delivered.document!.documentId).toBe(second.documentId);
+      expect(delivered.documents.types[0]!.documents[0]!.deliveries).toHaveLength(0);
+      const review = await store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'document', documentId: first.documentId, revisionId: first.versions[0]!.revisionId }, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } }, true);
+      expect(review.restoration).toBe('regenerated');
+      expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).toEqual(before);
     });
   });
 

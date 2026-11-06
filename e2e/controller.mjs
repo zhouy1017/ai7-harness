@@ -1176,6 +1176,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'writing-library-material',
     'writing-library-plan',
     'writing-library-draft',
+    'multi-documents-ordinary',
     'zero-loopback-requests',
     'completion-browser-close',
     'completion-cleanup',

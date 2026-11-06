@@ -132,7 +132,7 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
+  'renameProductionDocument' | 'selectAndStageManuscript' | 'prepareSourceImportReview' | 'commitSourceImport' | 'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
   'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'>;
 
 export interface MountDeliverablesOptions {
@@ -164,6 +164,7 @@ export interface MountDeliverablesOptions {
 
 /** 从来源材料创建…'s inline form while it is open: the type it creates and the material chosen, if any. */
 interface DocumentForm {
+  title: string;
   typeId: string;
   sourceVersionId: string | null;
   problem: string | null;
@@ -171,6 +172,7 @@ interface DocumentForm {
 
 /** 交付…'s inline form while it is open (DELIV-003): the version, who it goes to and the note, none preselected. */
 interface DeliveryForm {
+  documentId: string;
   typeId: string;
   /** A saved version's revision, or `CURRENT_TEXT`: the text as it stands, saved as the next version first. */
   revisionId: string | null;
@@ -184,7 +186,7 @@ interface DeliveryForm {
 const CURRENT_TEXT = 'current';
 
 /** Where focus goes once the documents block is drawn again. */
-type DocumentFocus = 'keep' | { typeId: string; action: DocumentAction | 'source' | 'delivery-version' };
+type DocumentFocus = 'keep' | { typeId: string; documentId?: string; action: DocumentAction | 'source' | 'delivery-version' };
 
 /** 设为发稿版本's inline form while it is open: what the editor has chosen and written so far. */
 interface DesignateForm {
@@ -825,7 +827,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   function drawDocuments(next: ProductionDocumentsProjection, focus: DocumentFocus): void {
     const documents = next;
     if (documentForm !== null && (documents.unavailableReason !== null ||
-      !documents.types.some((type) => type.typeId === documentForm!.typeId && type.document === null && !type.notForThisBook))) {
+      !documents.types.some((type) => type.typeId === documentForm!.typeId && !type.notForThisBook))) {
       documentForm = null;
     }
     if (documentForm !== null && documentForm.sourceVersionId !== null &&
@@ -833,10 +835,11 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       documentForm.sourceVersionId = null;
     }
     const deliverable = deliveryForm === null ? undefined : documents.types.find((type) => type.typeId === deliveryForm!.typeId);
-    if (deliveryForm !== null && (deliverable?.document == null || deliverable.notForThisBook)) deliveryForm = null;
+    const selectedDocument = deliverable?.documents.find((doc) => doc.documentId === deliveryForm?.documentId);
+    if (deliveryForm !== null && (selectedDocument == null || deliverable?.notForThisBook)) deliveryForm = null;
     if (deliveryForm !== null && deliveryForm.revisionId !== null && !(deliveryForm.revisionId === CURRENT_TEXT
-      ? deliverable!.document!.changedSinceVersion
-      : deliverable!.document!.versions.some((version) => version.revisionId === deliveryForm!.revisionId))) {
+      ? selectedDocument!.changedSinceVersion
+      : selectedDocument!.versions.some((version) => version.revisionId === deliveryForm!.revisionId))) {
       deliveryForm.revisionId = null;
     }
     const active = document.activeElement;
@@ -859,7 +862,8 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     else documentsSlot.replaceChildren(section);
     documentsBlock = section;
     if (focus !== 'keep') {
-      const card = section.querySelector<HTMLElement>(`li[data-document-type-id="${CSS.escape(focus.typeId)}"]`);
+      let card = section.querySelector<HTMLElement>(`li.production-document-card[data-document-type-id="${CSS.escape(focus.typeId)}"]`);
+      if (focus.documentId !== undefined) card = card?.querySelector<HTMLElement>(`li.production-document-row[data-document-id="${CSS.escape(focus.documentId)}"]`) ?? null;
       const target = focus.action === 'source'
         ? card?.querySelector<HTMLElement>('input[name="document-source"]:checked') ?? card?.querySelector<HTMLElement>('input[name="document-source"]')
         : focus.action === 'delivery-version'
@@ -877,6 +881,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       node.tagName,
       node.dataset['documentAction'] ?? '',
       node instanceof HTMLInputElement && node.type === 'radio' ? node.name + ':' + node.value : '',
+      node.closest<HTMLElement>('[data-document-id]')?.dataset['documentId'] ?? '',
       node.dataset['deliveryField'] ?? '',
       node.dataset['exportAction'] ?? '',
       node.closest<HTMLElement>('li[data-delivery-id]')?.dataset['deliveryId'] ?? '',
@@ -894,11 +899,96 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
   }
 
   function renderDocumentCard(next: ProductionDocumentsProjection, type: ProductionDocumentTypeProjection): HTMLElement {
+    const card = el('li', 'production-document-card');
+    const first = type.documents[0];
+    card.dataset['documentState'] = type.notForThisBook ? 'not-for-this-book' : first === undefined ? 'none' : 'document';
+    if (first !== undefined) {
+      card.dataset['documentId'] = first.documentId;
+      card.dataset['documentVersion'] = String(first.versions[0]?.ordinal ?? 0);
+      card.dataset['documentChanged'] = String(first.changedSinceVersion);
+      card.dataset['documentDeliveries'] = String(first.deliveries.length);
+      card.dataset['documentChangedSinceDelivery'] = String(first.changedSinceDelivery);
+    }
+    card.dataset['documentTypeId'] = type.typeId;
+    card.append(el('h4', undefined, type.label));
+    const row = el('div', 'button-row compact-actions');
+    const add = (label: string, action: string, run: () => void): HTMLButtonElement => {
+      const button = el('button', 'secondary', label);
+      button.type = 'button';
+      button.dataset['documentAction'] = action;
+      button.disabled = working || next.unavailableReason !== null || type.notForThisBook;
+      button.addEventListener('click', run);
+      row.append(button);
+      return button;
+    };
+    add('空白文档', 'blank', () => void createDirect(type));
+    add('AI7 写作任务', 'writing', () => { writing.open(type.typeId); writingSlot.scrollIntoView({ block: 'nearest' }); });
+    const sourceButton = add('从本书来源材料创建…', 'create', () => {
+      documentForm = documentForm?.typeId === type.typeId ? null : { typeId: type.typeId, title: '', sourceVersionId: null, problem: null };
+      drawDocuments(next, { typeId: type.typeId, action: 'source' });
+    });
+    sourceButton.disabled ||= next.sources.length === 0;
+    const sourceReason = next.unavailableReason ?? (next.sources.length === 0 ? DOCUMENT_NO_SOURCES : null);
+    if (sourceReason !== null) {
+      const reason = el('span', 'document-create-reason', sourceReason);
+      reason.id = uid('document-create-reason');
+      sourceButton.setAttribute('aria-describedby', reason.id);
+      row.append(reason);
+    }
+    add('导入文件…', 'import', () => void createDirect(type, true));
+    const decideButton = documentButton(type.notForThisBook ? 'restore' : 'notForThisBook', type, 'quiet');
+    decideButton.addEventListener('click', () => void decide(type, !type.notForThisBook));
+    row.append(decideButton);
+    card.append(row);
+    if (type.notForThisBook) card.append(el('p', 'document-not-for-this-book', DOCUMENT_STATE_NOT_FOR_THIS_BOOK));
+    if (documentForm?.typeId === type.typeId) card.append(renderDocumentForm(next, type, documentForm));
+    const list = el('ol', 'production-document-list');
+    for (const document of type.documents) list.append(renderDocumentRow(next, { ...type, document }));
+    if (type.documents.length === 0) card.append(el('p', 'document-state-none', DOCUMENT_STATE_NONE));
+    card.append(list);
+    return card;
+  }
+
+  async function createDirect(type: ProductionDocumentTypeProjection, fromFile = false): Promise<void> {
+    if (working || destroyed) return;
+    working = true;
+    lockDocuments();
+    try {
+      let sourceVersionId: string | null = null;
+      let title: string | undefined;
+      if (fromFile) {
+        const picked = await api.selectAndStageManuscript();
+        if (picked.status === 'cancelled') return;
+        const staged = picked.staged;
+        if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
+        const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion,
+          target: { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: null } });
+        const imported = await api.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
+          reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
+        sourceVersionId = imported.sourceVersionId;
+        title = Array.from(staged.source.displayName.replace(/\.[^.]+$/, '').normalize('NFC').trim()).slice(0, 80).join('');
+      }
+      const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId, ...(title === undefined ? {} : { title }) });
+      if (destroyed || result.document === null) return;
+      documentsProjection = result.documents;
+      bundle.refresh();
+      working = false;
+      drawDocuments(result.documents, 'keep');
+      await openDocument(result.document, type, result.notice);
+    } catch (error) {
+      if (!destroyed) options.setStatus(options.errorMessage(error, DOCUMENT_STATUS_LINES.createFailed), 'error');
+    } finally {
+      working = false;
+      if (!destroyed && documentsProjection !== null) drawDocuments(documentsProjection, 'keep');
+    }
+  }
+
+  function renderDocumentRow(next: ProductionDocumentsProjection, type: ProductionDocumentTypeProjection): HTMLElement {
     const documents = next;
-    const item = el('li', 'production-document-card');
+    const item = el('li', 'production-document-row');
     item.dataset['documentTypeId'] = type.typeId;
     item.dataset['documentState'] = type.notForThisBook ? 'not-for-this-book' : type.document === null ? 'none' : 'document';
-    const heading = el('h4', undefined, type.label);
+    const heading = el('h4', undefined, type.document?.title ?? type.label);
     heading.id = uid('document-type');
     item.setAttribute('aria-labelledby', heading.id);
     item.append(heading);
@@ -926,10 +1016,54 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     }
     if (type.document !== null) {
       const documentNow = type.document;
-      const open = documentButton('open', type, 'primary');
+      const open = documentButton('open', { ...type, label: documentNow.title }, 'primary');
       open.disabled = working || documents.unavailableReason !== null;
       open.addEventListener('click', () => void openDocument(documentNow, type));
       actions.append(open);
+      const rename = el('button', 'quiet', '改名');
+      rename.type = 'button';
+      rename.dataset['documentAction'] = 'rename';
+      rename.disabled = working;
+      rename.addEventListener('click', () => {
+        rename.disabled = true;
+        const form = el('div', 'button-row');
+        const title = el('input');
+        title.value = documentNow.title;
+        title.maxLength = 80;
+        title.setAttribute('aria-label', '文档题目');
+        const save = el('button', 'secondary', '保存题目');
+        save.type = 'button';
+        save.dataset['documentAction'] = 'confirmRename';
+        save.addEventListener('click', async () => {
+          if (working) return;
+          working = true;
+          save.disabled = true;
+          title.disabled = true;
+          cancel.disabled = true;
+          try {
+            const result = await api.renameProductionDocument({ documentId: documentNow.documentId, title: title.value });
+            if (destroyed) return;
+            working = false;
+            documentsProjection = result.documents;
+            drawDocuments(result.documents, 'keep');
+            bundle.refresh();
+            options.setStatus('文档题目已保存', 'success');
+          } catch (error) {
+            working = false;
+            save.disabled = false;
+            title.disabled = false;
+            cancel.disabled = false;
+            options.setStatus(options.errorMessage(error, '题目无法保存'), 'error');
+          }
+        });
+        const cancel = el('button', 'quiet', '取消');
+        cancel.type = 'button';
+        cancel.addEventListener('click', () => { form.remove(); rename.disabled = false; rename.focus(); });
+        form.append(title, save, cancel);
+        item.append(form);
+        title.focus();
+      });
+      actions.append(rename, exporter.menu({ kind: 'document', documentId: documentNow.documentId, revisionId: documentNow.versions[0]!.revisionId }, `${documentNow.title} · ${documentNow.versions[0]!.label}`));
       // Its Deliverable Workflow at a glance (Issue #415, S66c; WORK-005): the summary, the first 下一项 and the seven phases —
       // before 交付状态, in the order §9 总览页 and DELIV-001 give (Issue #626).
       item.append(renderWorkflowCardSummary(documentNow.workflow));
@@ -939,47 +1073,18 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       item.dataset['documentChangedSinceDelivery'] = String(documentNow.changedSinceDelivery);
       item.append(el('p', 'document-delivery-line', latest === undefined ? DOCUMENT_NOT_DELIVERED : documentDeliveryLine(latest, localInstantLabel(latest.recordedAt))));
       if (documentNow.changedSinceDelivery) item.append(el('p', 'attention-note document-changed-since-delivery', DOCUMENT_CHANGED_SINCE_DELIVERY));
-      const deliver = documentButton(latest === undefined ? 'deliver' : 'redeliver', type, 'secondary');
-      const deliveryOpen = deliveryForm?.typeId === type.typeId;
+      const deliver = documentButton(latest === undefined ? 'deliver' : 'redeliver', { ...type, label: documentNow.title }, 'secondary');
+      const deliveryOpen = deliveryForm?.documentId === documentNow.documentId;
       deliver.setAttribute('aria-expanded', String(deliveryOpen));
       deliver.disabled = working || exporter.busy();
       deliver.addEventListener('click', () => {
-        deliveryForm = deliveryOpen ? null : { typeId: type.typeId, revisionId: null, recipient: null, custom: '', note: '', problem: null };
-        drawDocuments(next, { typeId: type.typeId, action: deliveryOpen ? (latest === undefined ? 'deliver' : 'redeliver') : 'delivery-version' });
+        deliveryForm = deliveryOpen ? null : { documentId: documentNow.documentId, typeId: type.typeId, revisionId: null, recipient: null, custom: '', note: '', problem: null };
+        drawDocuments(next, { typeId: type.typeId, documentId: documentNow.documentId, action: deliveryOpen ? (latest === undefined ? 'deliver' : 'redeliver') : 'delivery-version' });
       });
       actions.append(deliver);
-    } else {
-      item.append(el('p', 'document-state-none', DOCUMENT_STATE_NONE));
-      const create = documentButton('create', type, 'secondary');
-      const formOpen = documentForm?.typeId === type.typeId;
-      create.setAttribute('aria-expanded', String(formOpen));
-      const blocked = documents.unavailableReason ?? (documents.sources.length === 0 ? DOCUMENT_NO_SOURCES : null);
-      if (blocked !== null) {
-        // Unavailable, with its reason in words beside it (the pattern of 设为发稿版本's, PUB-002).
-        create.disabled = true;
-        const why = el('span', 'document-create-reason', blocked);
-        why.id = uid('document-create-reason');
-        create.setAttribute('aria-label', create.textContent ?? '');
-        create.setAttribute('aria-describedby', why.id);
-        create.append(' · ', why);
-        const notForThisBook = documentButton('notForThisBook', type, 'quiet');
-        notForThisBook.addEventListener('click', () => void decide(type, true));
-        actions.append(create, notForThisBook);
-        item.append(actions);
-        return item;
-      }
-      create.addEventListener('click', () => {
-        documentForm = formOpen ? null : { typeId: type.typeId, sourceVersionId: null, problem: null };
-        drawDocuments(next, { typeId: type.typeId, action: formOpen ? 'create' : 'source' });
-      });
-      actions.append(create);
     }
-    const notForThisBook = documentButton('notForThisBook', type, 'quiet');
-    notForThisBook.addEventListener('click', () => void decide(type, true));
-    actions.append(notForThisBook);
     item.append(actions);
-    if (documentForm?.typeId === type.typeId && type.document === null) item.append(renderDocumentForm(next, type, documentForm));
-    if (type.document !== null && deliveryForm?.typeId === type.typeId) item.append(renderDeliveryForm(type, type.document, deliveryForm));
+    if (type.document !== null && deliveryForm?.documentId === type.document.documentId) item.append(renderDeliveryForm(type, type.document, deliveryForm));
     if (type.document !== null && type.document.deliveries.length > 0) item.append(renderDeliveries(type, type.document));
     return item;
   }
@@ -1144,7 +1249,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     const note = state.note.trim() === '' ? null : state.note;
     if (note !== null && publicationText(note, MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS) === null) {
       state.problem = `备注最多 ${MAX_PRODUCTION_DOCUMENT_DELIVERY_NOTE_CHARACTERS} 个字。`;
-      if (documentsProjection !== null) drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmDeliver' });
+      if (documentsProjection !== null) drawDocuments(documentsProjection, { typeId: type.typeId, documentId: documentNow.documentId, action: 'confirmDeliver' });
       return;
     }
     working = true;
@@ -1175,7 +1280,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       working = false;
       if (destroyed || documentsProjection === null) return;
       state.problem = options.errorMessage(error, DOCUMENT_STATUS_LINES.deliverFailed);
-      drawDocuments(documentsProjection, { typeId: type.typeId, action: 'confirmDeliver' });
+      drawDocuments(documentsProjection, { typeId: type.typeId, documentId: documentNow.documentId, action: 'confirmDeliver' });
       options.setStatus(state.problem, 'error');
       // The document may have moved under the form — an edit elsewhere, a version saved — so it is read again; the form
       // keeps what the editor chose.
@@ -1207,7 +1312,13 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
       label.append(input, el('span', undefined, documentSourceLine(source, localInstantLabel(source.createdAt))));
       fieldset.append(label);
     }
-    form.append(fieldset);
+    const title = el('input');
+    title.setAttribute('aria-label', '文档题目');
+    title.placeholder = '文档题目（可选）';
+    title.maxLength = 80;
+    title.value = state.title;
+    title.addEventListener('input', () => { state.title = title.value; });
+    form.append(title, fieldset);
     if (state.problem !== null) form.append(el('p', 'attention-note', state.problem));
     const row = el('div', 'button-row compact-actions');
     const confirm = documentButton('confirmCreate', type, 'primary');
@@ -1235,7 +1346,7 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
     lockDocuments();
     options.setStatus(DOCUMENT_STATUS_LINES.creating, 'busy');
     try {
-      const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId: state.sourceVersionId });
+      const result = await api.createProductionDocument({ typeId: type.typeId, sourceVersionId: state.sourceVersionId, ...(state.title.trim() === '' ? {} : { title: state.title }) });
       if (destroyed) return;
       if (result.bookId !== bookId || result.documents.bookId !== bookId || result.document === null) throw new Error(DOCUMENT_STATUS_LINES.createFailed);
       working = false;

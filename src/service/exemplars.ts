@@ -46,6 +46,7 @@ interface ExemplarDeliveryReading {
 export interface ExemplarDocumentReading {
   readonly typeId: string;
   readonly typeLabel: string;
+  readonly title?: string;
   readonly documentId: string;
   readonly deliveries: (order: 'latest' | 'version') => Iterable<ExemplarDeliveryReading>;
 }
@@ -88,6 +89,7 @@ function exemplarOf(document: ExemplarDocumentReading, archive: ReturnType<Exemp
     documentId: document.documentId,
     typeId: document.typeId,
     typeLabel: document.typeLabel,
+    title: document.title ?? document.typeLabel,
     version: delivery.version,
     revisionId: delivery.revisionId,
     revisionDigest: delivery.revisionDigest,

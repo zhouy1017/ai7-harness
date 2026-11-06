@@ -125,6 +125,8 @@ import {
   type SaveProposalConflictDraftInput,
   type DesignatePublicationVersionInput,
   type CreateProductionDocumentInput,
+  type RenameProductionDocumentInput,
+  publicationText,
   type DecideProductionDocumentTypeInput,
   type ProductionDocumentResultProjection,
   type SaveProductionDocumentVersionInput,
@@ -923,6 +925,7 @@ import { initializeReimportGroupSchema } from './reimport-group-ledger.js';
 import {
   initializeProductionDocumentDeliverySchema,
   initializeProductionDocumentSchema,
+  initializeMultiDocumentSchema,
 } from './production-document-ledger.js';
 import {
   BOOK_DELIVERY_PACKAGE_WORDS,
@@ -3186,6 +3189,7 @@ export class EditorialStore {
       initializeEvaluationRewriteSchema(authority);
       // Revision 65 (Issue #432, S84a): which type and reference set each writing Task drafts from, and which result became a document.
       initializeWritingTaskSchema(authority);
+      initializeMultiDocumentSchema(authority);
       // Revision 66 (Issue #95, S39): each Book's 后台分析登记; `initializeTaskAuthorizationSchema` widens the Run Authorizations'
       // origin for it and stamps the version.
       initializeBackgroundAnalysisEnrollmentSchema(authority);
@@ -8303,8 +8307,8 @@ export class EditorialStore {
    * command starts the phase; no Run moves one. Once per type of a Book, and refused for a draft that copies an exemplar, checked
    * again here against the contract's bound. Nothing is delivered or sent.
    */
-  createWritingDraft(bookId: string, revisionId: string): WritingDraftCreatedProjection {
-    return writingTaskOperations.createWritingDraft(this.#writingTaskOperationsHost, bookId, revisionId);
+  createWritingDraft(bookId: string, revisionId: string, title?: string): WritingDraftCreatedProjection {
+    return writingTaskOperations.createWritingDraft(this.#writingTaskOperationsHost, bookId, revisionId, title);
   }
 
   // ---- 市场 and 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008 to EVAL-010; editor-surfaces §5 ②C) ----------
@@ -14342,18 +14346,24 @@ export class EditorialStore {
    */
   async createProductionDocument(input: CreateProductionDocumentInput): Promise<ProductionDocumentResultProjection> {
     this.#assertAvailable();
-    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.sourceVersionId),
+    requireStore(UUID_PATTERN.test(input.bookId) && (input.sourceVersionId == null || UUID_PATTERN.test(input.sourceVersionId)),
       'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
     const type = productionDocumentType(input.typeId);
     requireStore(type !== undefined, 'PRODUCTION_DOCUMENT_TYPE_INVALID', '这个文档类型不在本社的类型配置中。');
     const plan = this.#documentCall(() => this.#productionDocumentPlan(input));
-    const object = one(
+    const title = input.title === undefined ? undefined : publicationText(input.title, 80);
+    requireStore(title !== null, 'PRODUCTION_DOCUMENT_TITLE_INVALID', '题目须为 1–80 个字。');
+    const object = input.sourceVersionId == null ? null : one(
       this.#authority.prepare('SELECT relative_key, byte_length FROM content_objects WHERE object_digest = ?').all(plan.objectDigest) as SqlRow[],
       'PRODUCTION_DOCUMENT_SOURCE_INVALID', '来源材料的文件对象记录缺失。',
     );
     const blocks: ParsedDocxBlock[] = [];
-    let parsed: ParsedDocx;
-    try {
+    let parsed: Pick<ParsedDocx, 'contentDigest' | 'structureDigest' | 'blockCount' | 'importedMarks'> & { parserIdentity: string };
+    if (object === null) {
+      const digest = sha256(canonicalJson({ kind: 'paragraph', level: null, text: '' }));
+      blocks.push({ blockId: '', position: 1, kind: 'paragraph', level: null, text: '', digest, graphemeLength: 0, sourceParagraphIndex: -1 });
+      parsed = { parserIdentity: 'ai7.blank-production-document/1', contentDigest: digest, structureDigest: digest, blockCount: 1, importedMarks: [] };
+    } else try {
       parsed = await parseDocx(
         this.#contentObjectPath(plan.objectDigest, asString(object.relative_key)),
         plan.displayName,
@@ -14387,13 +14397,12 @@ export class EditorialStore {
       characterCount,
     }));
     this.#documentCall(() => this.#transaction(this.#authority, () => {
-      // The checks again, inside the transaction that writes: a second 创建 of the type, or a 本书不做 recorded while
-      // the file was read, refuses this one.
+      // Recheck the source and type decision after reading the file, inside the writing transaction.
       this.#productionDocumentPlan(input);
       this.#authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
         .run(documentId, input.bookId, now);
       this.#authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
-        .run(branchId, documentId, type.label, now);
+        .run(branchId, documentId, title ?? this.#productionDocuments.defaultTitle(input.bookId, input.typeId, type.label), now);
       this.#authority.prepare(
         `INSERT INTO manuscript_revisions(
            revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
@@ -14446,7 +14455,18 @@ export class EditorialStore {
     }));
     // The material's comments and tracked changes stay with the material: the document says so where it opens.
     const notCarried = parsed.importedMarks.length;
-    return this.#productionDocumentResult(input.bookId, input.typeId, notCarried === 0 ? null : productionDocumentMarksNotCarried(notCarried));
+    return this.#productionDocumentResult(input.bookId, input.typeId, notCarried === 0 ? null : productionDocumentMarksNotCarried(notCarried), documentId);
+  }
+
+  renameProductionDocument(input: RenameProductionDocumentInput): ProductionDocumentResultProjection {
+    this.#assertAvailable();
+    requireStore(UUID_PATTERN.test(input.bookId) && UUID_PATTERN.test(input.documentId), 'PRODUCTION_DOCUMENT_INVALID', '生产文档参数无效。');
+    const title = publicationText(input.title, 80);
+    requireStore(title !== null, 'PRODUCTION_DOCUMENT_TITLE_INVALID', '题目须为 1–80 个字。');
+    const row = this.#documentCall(() => this.#productionDocuments.documentById(input.bookId, input.documentId));
+    requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
+    this.#authority.prepare('UPDATE manuscript_branches SET name = ? WHERE manuscript_id = ?').run(title, row.documentId);
+    return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
   }
 
   /** `本书不做` or `恢复` for one house type of a Book (WORK-013): an appended decision, or no change. */
@@ -14496,7 +14516,7 @@ export class EditorialStore {
         throw error;
       }
     }
-    return this.#productionDocumentResult(input.bookId, row.typeId);
+    return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
   }
 
   /**
@@ -14518,7 +14538,7 @@ export class EditorialStore {
     const party = this.#documentCall(() => this.#productionDocuments.deliveryParty(input.recipient, input.note));
     if (version.kind === 'saved') {
       this.#documentCall(() => this.#transaction(this.#authority, () => this.#productionDocuments.recordDelivery(row, version.revisionId, party)));
-      return this.#productionDocumentResult(input.bookId, row.typeId);
+      return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
     }
     requireStore(this.#documentCall(() => this.#productionDocuments.workingDigest(row)) === version.workingDigest,
       'PRODUCTION_DOCUMENT_DELIVERY_CHANGED', '文档在打开交付后又有修改；请重新选择要交付的版本。');
@@ -14532,7 +14552,7 @@ export class EditorialStore {
     if (work.workId === null) {
       const checkpoint = work.checkpoint!;
       this.#documentCall(() => this.#transaction(this.#authority, () => deliver(checkpoint.revisionId, checkpoint.revisionDigest)));
-      return this.#productionDocumentResult(input.bookId, row.typeId);
+      return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
     }
     const workId = work.workId;
     try {
@@ -14549,10 +14569,10 @@ export class EditorialStore {
       this.#boundedCall(() => owner.cancelManuscriptCheckpointWork(workId));
       throw error;
     }
-    return this.#productionDocumentResult(input.bookId, row.typeId);
+    return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
   }
 
-  /** What 从来源材料创建 may do for this input, or the reason it may not: a Manuscript, a free type, a material of the Book's. */
+  /** Resolve this document's source without changing the Book's primary Manuscript. */
   #productionDocumentPlan(input: CreateProductionDocumentInput): {
     sourceVersionId: string;
     displayName: string;
@@ -14560,10 +14580,15 @@ export class EditorialStore {
   } {
     const primary = this.#authority.prepare("SELECT 1 FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(input.bookId);
     requireStore(primary !== undefined, 'PRODUCTION_DOCUMENT_NEEDS_MANUSCRIPT', PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT);
-    requireStore(this.#productionDocuments.documentOfType(input.bookId, input.typeId) === undefined,
-      'PRODUCTION_DOCUMENT_EXISTS', '这本书已经有这一类文档。');
     requireStore(!this.#productionDocuments.notForThisBook(input.bookId, input.typeId),
       'PRODUCTION_DOCUMENT_NOT_FOR_THIS_BOOK', '这一类文档已标为本书不做；先恢复。');
+    if (input.sourceVersionId == null) {
+      const row = one(this.#authority.prepare(`SELECT mr.source_version_id FROM manuscripts m
+        JOIN manuscript_branches mb ON mb.manuscript_id = m.manuscript_id
+        JOIN manuscript_revisions mr ON mr.revision_id = mb.base_revision_id
+        WHERE m.book_id = ? AND m.role = 'primary'`).all(input.bookId) as SqlRow[], 'PRODUCTION_DOCUMENT_NEEDS_MANUSCRIPT', PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT);
+      return { sourceVersionId: asString(row.source_version_id), displayName: '', objectDigest: '' };
+    }
     const source = this.#productionDocuments.source(input.bookId, input.sourceVersionId);
     requireStore(source !== undefined, 'PRODUCTION_DOCUMENT_SOURCE_INVALID', '只能从这本书作为来源材料导入的文件创建文档。');
     return {
@@ -14582,14 +14607,14 @@ export class EditorialStore {
     return this.#documentCall(() => this.#productionDocuments.documents(bookId, primary));
   }
 
-  #productionDocumentResult(bookId: string, typeId: string, notice: string | null = null): ProductionDocumentResultProjection {
+  #productionDocumentResult(bookId: string, typeId: string, notice: string | null = null, documentId?: string): ProductionDocumentResultProjection {
     const documents = this.inspectProductionDocuments(bookId);
     // A 审稿意见 draft (Issue #429, S81c) is saved as a version and moves its phases exactly as a house type's document does.
     const card = documents.types.find((type) => type.typeId === typeId);
     const draft = card === undefined && readersReportDocumentType(typeId) !== undefined
       ? this.#documentCall(() => this.#productionDocuments.documentOfType(bookId, typeId))
       : undefined;
-    return { bookId, documents, typeId, document: draft !== undefined ? this.#documentCall(() => this.#productionDocuments.document(draft)) : card?.document ?? null, notice };
+    return { bookId, documents, typeId, document: documentId !== undefined ? this.#productionDocuments.document(this.#productionDocuments.documentById(bookId, documentId)!) : draft !== undefined ? this.#documentCall(() => this.#productionDocuments.document(draft)) : card?.document ?? null, notice };
   }
 
   /**
@@ -14604,7 +14629,7 @@ export class EditorialStore {
     requireStore(row !== undefined, 'PRODUCTION_DOCUMENT_NOT_FOUND', '这本书没有这份生产文档。');
     const recordedAt = new Date().toISOString();
     this.#documentCall(() => this.#transaction(this.#authority, () => this.#documentWorkflow.transition(input, recordedAt)));
-    return this.#productionDocumentResult(input.bookId, row.typeId);
+    return this.#productionDocumentResult(input.bookId, row.typeId, null, row.documentId);
   }
 
   #documentCall<T>(operation: () => T): T {

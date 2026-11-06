@@ -1190,7 +1190,7 @@ async function main() {
           const create = card.querySelector('[data-document-action="create"]');
           const reason = document.getElementById(create?.getAttribute('aria-describedby') ?? '');
           return card.dataset.documentState === 'none' && create instanceof HTMLButtonElement && create.disabled &&
-            reason?.textContent === '先把文档的初稿作为来源材料导入：导入稿件时选「作为来源材料导入」。';
+            reason?.textContent === '暂无来源材料：可在这里导入文件，或新建空白文档。';
         });
     })()`, 'designate-unavailable-before-a-milestone');
     // Issue #416 (S67a): 图书交付包 comes last and waits for everything, naming what is missing.
@@ -2919,6 +2919,41 @@ async function main() {
     // The index the Run read is the one the plan pinned, unchanged.
     const libraryAfter = await renderer.evaluate(`window.ai7.inspectLibraryMaterial({ materialId: ${JSON.stringify(libraryMaterialId)} }).then((material) => material.index.digest)`);
     requireJourney(libraryAfter === libraryIndexDigest, 'writing-library-index-unchanged', libraryAfter);
+
+    // #1378: all type-level entry points remain reachable in ordinary mode, and peers keep their identities.
+    at('multi-documents-ordinary');
+    await close();
+    renderer = await launch({picker: libraryPath, adapter: WRITING_FIXTURE});
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'multi-product-ready');
+    await assertRenderer(renderer, PAGE_HELPERS, 'multi-page-helpers');
+    await clickSelector(renderer, `[data-screen="landing"] button[data-book-id=${JSON.stringify(writingBookId)}]`, 'multi-book-open');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-book-id=${JSON.stringify(writingBookId)}]')`, 'multi-book-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'multi-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'multi-settings-ready');
+    await click(renderer, '帮助', 'multi-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, 'multi-mode-ready');
+    await assertRenderer(renderer, `(() => { const box=document.querySelector('.help-developer-mode input'); if(box.checked)box.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'multi-mode-off');
+    await openDeliverables(renderer, 'multi-deliverables');
+    await assertRenderer(renderer, `['blank','writing','import'].every(action=>!window.__j07.cardAction('promotion-article',action)?.disabled)`, 'multi-ordinary-actions');
+    await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="writing"]', 'multi-writing-entry');
+    await waitFor(renderer, `document.querySelector('.writing-task input[name="writing-type"][value="promotion-article"]')?.checked===true`, 'multi-writing-type');
+    await clickSelector(renderer, '.writing-task [data-writing-action="cancel"]', 'multi-writing-cancel');
+    const primaryBefore = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)}}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
+    await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="blank"]', 'multi-blank');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent==='宣传文章 2'`, 'multi-blank-open');
+    await openDeliverables(renderer, 'multi-back');
+    await waitFor(renderer, `window.__j07.card('promotion-article')?.querySelectorAll('.production-document-row').length===2`, 'multi-two-rows');
+    await assertRenderer(renderer, `(() => { const row=window.__j07.card('promotion-article').querySelectorAll('.production-document-row')[1]; row.querySelector('[data-document-action="rename"]').click(); return true; })()`, 'multi-rename-open');
+    await fill(renderer, '.production-document-row input[aria-label="文档题目"]', '另一篇宣传文章', 'multi-rename-title');
+    await clickSelector(renderer, '[data-document-action="confirmRename"]', 'multi-rename-save');
+    await waitFor(renderer, `window.__j07.card('promotion-article')?.querySelectorAll('.production-document-row h4')[1]?.textContent==='另一篇宣传文章'`, 'multi-renamed');
+    await clickSelector(renderer, 'li.production-document-card[data-document-type-id="promotion-article"] [data-document-action="import"]', 'multi-import');
+    await waitFor(renderer, `document.querySelector('.editor-shell[data-document-type-id="promotion-article"] .editor-toolbar h2')?.textContent===${JSON.stringify(WRITING_LIBRARY_TITLE)}`, 'multi-import-open', 120_000);
+    await openDeliverables(renderer, 'multi-import-back');
+    await waitFor(renderer, `window.__j07.card('promotion-article')?.querySelectorAll('.production-document-row').length===3`, 'multi-three-rows');
+    await assertRenderer(renderer, `window.ai7.inspectProductionDocuments().then(page=>{const type=page.types.find(type=>type.typeId==='promotion-article');return type.documents.length===3&&new Set(type.documents.map(doc=>doc.documentId)).size===3&&type.document.documentId===type.documents[0].documentId&&type.documents.every(doc=>doc.versions.length===1);})`, 'multi-independent-identities');
+    const primaryAfter = await renderer.evaluate(`window.ai7.getBookOverview({bookId:${JSON.stringify(writingBookId)}}).then(page=>JSON.stringify(page.manuscriptAnchor))`);
+    requireJourney(primaryBefore===primaryAfter, 'multi-primary-unchanged');
 
     at('zero-loopback-requests');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-loopback-requests');

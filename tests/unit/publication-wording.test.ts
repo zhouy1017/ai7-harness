@@ -199,7 +199,9 @@ describe('the words of 发稿', () => {
           typeId,
           label: '类'.repeat(16),
           notForThisBook: true,
+          documents: [],
           document: {
+            title: '题'.repeat(80),
             documentId: identity,
             branchId: identity,
             createdAt: time,

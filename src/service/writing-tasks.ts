@@ -34,7 +34,7 @@ import {
  *   frozen contract input and its digest, with the 定稿 evaluation version, the baseline Result Set Revision and the exemplar
  *   versions it was read from, by identity. A Task the analysis ledger revised in place for a later request may hold two; the
  *   one whose contract its frozen plan names is its own.
- * - `writing_drafts`: which drafted result became which type's document, once per type of a Book.
+ * - `writing_drafts`: which drafted result became which type's document, once per writing result, with multiple documents per type.
  */
 export const WRITING_TASK_SCHEMA_SQL = {
   writing_tasks: `CREATE TABLE writing_tasks (
@@ -57,8 +57,7 @@ export const WRITING_TASK_SCHEMA_SQL = {
   task_intent_id TEXT NOT NULL REFERENCES analysis_task_intents(task_intent_id),
   recorded_at TEXT NOT NULL,
   canonical_json TEXT NOT NULL,
-  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
-  UNIQUE(book_id, type_id)
+  sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)
 ) STRICT`,
 } as const;
 
@@ -683,7 +682,7 @@ export class WritingTasks {
     };
   }
 
-  /** The Book's drafted documents, one per type at most. */
+  /** The Book's drafted documents, each bound to its own writing result. */
   drafts(bookId: string): StoredWritingDraft[] {
     return (this.#db.prepare('SELECT * FROM writing_drafts WHERE book_id = ? ORDER BY recorded_at, rowid').all(bookId) as SqlRow[])
       .map((row) => this.#draft(row));

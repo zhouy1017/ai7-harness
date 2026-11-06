@@ -545,7 +545,7 @@ export const SEARCH_BACKEND_FALLBACK_SQL = `CREATE TABLE search_backend_fallback
 ) STRICT`;
 /** Revision 105 (#1282): independent Fast model and cached account model metadata. */
 export const MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION = 105;
-export const LATEST_SCHEMA_VERSION = 108; // #1312: persist the editor's search source override.
+export const LATEST_SCHEMA_VERSION = 109; // #1378: multiple production documents per house type.
 /** The custom analysis kind family slice 7f brings (ADR 0090 item 4): admitted here so it needs no second rebuild. */
 const CUSTOM_ANALYSIS_KIND_GLOB = 'custom-analysis/[a-z0-9-]*' as const;
 const CUSTOM_ANALYSIS_CONTRACT_VERSION_GLOB = 'ai7.custom-analysis*/[0-9]*' as const;
@@ -3231,7 +3231,7 @@ function initializeCurationSchema(db: DatabaseSync): void {
 
 export function initializeTaskAuthorizationSchema(db: DatabaseSync): void {
   if (Number(db.prepare('PRAGMA user_version').get()?.user_version) === LATEST_SCHEMA_VERSION) return validateTaskAuthorizationSchema(db);
-  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
+  if ([FACTUAL_CLAIM_SCHEMA_VERSION, EDITABLE_PROCEDURE_SCHEMA_VERSION, COMPOSITE_PROCEDURE_SCHEMA_VERSION, STRUCTURAL_EDIT_SCHEMA_VERSION, NOTE_BLOCK_SCHEMA_VERSION, IMPORT_STRUCTURE_SCHEMA_VERSION, ADMITTED_CHANNELS_SCHEMA_VERSION, SEARCH_FALLBACK_SCHEMA_VERSION, MODEL_SERVICE_DISCOVERY_SCHEMA_VERSION, 106, 107, 108].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) {
     db.exec(`PRAGMA user_version = ${LATEST_SCHEMA_VERSION}`);
     return validateTaskAuthorizationSchema(db);
   }

@@ -1,4 +1,5 @@
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
+import { WRITING_TASK_SCHEMA_SQL } from './writing-tasks.js';
 
 /**
  * Production Documents' relations (Issue #415, plan slice S66; V2-UX-DELIV-001, DELIV-002, WORK-013; ADR 0077 §6).
@@ -11,7 +12,7 @@ import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
  *   Every existing row is copied byte for byte. Milestones, the Publication Version, reimport, analysis,
  *   review and Tasks bind only the primary row.
  * - `production_documents`: which house type a document is, under which type configuration, and the Book's
- *   source material it was made from — at most one per type of a Book.
+ *   source material it was made from — multiple documents per type of a Book since schema 109.
  * - `production_document_versions`: a document's versions, `版本 N` in its own order — the revision it was made
  *   with, and every one `保存为版本` or 交付 saved. A revision the block store made for another reason (a recovered
  *   working state) is no version, so a version names its revision rather than the other way round.
@@ -30,8 +31,7 @@ export const PRODUCTION_DOCUMENT_SCHEMA_SQL = {
   origin_source_version_id TEXT NOT NULL REFERENCES source_versions(source_version_id),
   parser_identity TEXT NOT NULL,
   record_digest TEXT NOT NULL UNIQUE CHECK(length(record_digest) = 64),
-  created_at TEXT NOT NULL,
-  UNIQUE(book_id, type_id)
+  created_at TEXT NOT NULL
 ) STRICT`,
   production_document_versions: `CREATE TABLE production_document_versions (
   document_id TEXT NOT NULL REFERENCES production_documents(document_id),
@@ -227,5 +227,42 @@ export function initializeProductionDocumentDeliverySchema(db: DatabaseSync): vo
   }
   if (db.prepare('PRAGMA foreign_key_check').all().length !== 0) {
     throw new ProductionDocumentSchemaError('SCHEMA_INVALID', '交付记录的关系与已有记录不一致。');
+  }
+}
+
+/** Schema 109 copies ledger bytes unchanged and preserves foreign-key names. */
+export const MULTI_DOCUMENT_INDEX_SQL = {
+  production_documents_book_type: 'CREATE INDEX production_documents_book_type ON production_documents(book_id, type_id, created_at)',
+  writing_drafts_book_type: 'CREATE INDEX writing_drafts_book_type ON writing_drafts(book_id, type_id, recorded_at)',
+} as const;
+
+export function initializeMultiDocumentSchema(db: DatabaseSync): void {
+  const tables = { production_documents: PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents, writing_drafts: WRITING_TASK_SCHEMA_SQL.writing_drafts };
+  const rebuild = Object.keys(tables).filter((table) => {
+    const row = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = ?").get(table);
+    return typeof row?.sql === 'string' && /UNIQUE\s*\(book_id,\s*type_id\)/i.test(row.sql);
+  });
+  if (rebuild.length === 0 && Object.keys(MULTI_DOCUMENT_INDEX_SQL).every((name) => db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name) !== undefined)) return;
+  const legacy = Number(db.prepare('PRAGMA legacy_alter_table').get()!.legacy_alter_table);
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON');
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    for (const table of rebuild) {
+      const triggers = db.prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = ?").all(table);
+      db.exec(`ALTER TABLE ${table} RENAME TO ${table}_v108`);
+      db.exec(tables[table as keyof typeof tables]);
+      db.exec(`INSERT INTO ${table} SELECT * FROM ${table}_v108 ORDER BY rowid; DROP TABLE ${table}_v108`);
+      for (const trigger of triggers) db.exec(String(trigger.sql));
+    }
+    for (const [name, sql] of Object.entries(MULTI_DOCUMENT_INDEX_SQL)) {
+      if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?").get(name) === undefined) db.exec(sql);
+    }
+    if (db.prepare('PRAGMA foreign_key_check').get() !== undefined) throw new ProductionDocumentSchemaError('SCHEMA_MIGRATION_FAILED', '生产文档的关系与已有记录不一致。');
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.exec(`PRAGMA legacy_alter_table = ${legacy}; PRAGMA foreign_keys = ON`);
   }
 }

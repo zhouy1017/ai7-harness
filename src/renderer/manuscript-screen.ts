@@ -123,9 +123,10 @@ interface ManuscriptScreenOptions {
 /** A Production Document's type and versions, read for a window that holds it (Issue #415, S66). */
 export async function documentContextOf(api: RendererApi, window_: ManuscriptWindowProjection): Promise<ProductionDocumentContext> {
   const documents = await api.inspectProductionDocuments();
-  const type = documents.types.find((entry) => entry.document?.documentId === window_.manuscriptId);
-  if (documents.bookId === window_.bookId && type !== undefined && type.document !== null) {
-    return { typeId: type.typeId, typeLabel: type.label, document: type.document };
+  const type = documents.types.find((entry) => entry.documents.some((document) => document.documentId === window_.manuscriptId));
+  const document = type?.documents.find((entry) => entry.documentId === window_.manuscriptId);
+  if (documents.bookId === window_.bookId && type !== undefined && document !== undefined) {
+    return { typeId: type.typeId, typeLabel: type.label, document };
   }
   // A 审稿意见 draft (Issue #429, S81c) is no card of 交付物: 评估 names it, and it is drawn exactly as a document is.
   const draft = await readersReportDraftOf(api, window_.manuscriptId);
@@ -254,7 +255,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   };
   if (isDocument) title.append(
     element('h2', undefined, productionDocument !== undefined
-      ? technicalLayerVisible ? `${productionDocument.typeLabel} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.typeLabel
+      ? technicalLayerVisible ? `${productionDocument.document.title} · ${versionOf(initialWindow) ?? productionDocument.document.versions[0]?.label ?? ''}` : productionDocument.document.title
       : '稿件'),
   );
   const meta = element('div', 'editor-meta');
@@ -638,7 +639,7 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
     move: async (input) => (await api.transitionProductionDocumentPhase({ documentId: productionDocument.document.documentId, ...input })).document,
     read: async () => {
       const documents = await api.inspectProductionDocuments();
-      return documents.types.find((type) => type.typeId === productionDocument.typeId)?.document ??
+      return documents.types.find((type) => type.typeId === productionDocument.typeId)?.documents.find((doc) => doc.documentId === productionDocument.document.documentId) ??
         (await readersReportDraftOf(api, productionDocument.document.documentId))?.document ?? null;
     },
     setStatus,

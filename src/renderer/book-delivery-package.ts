@@ -272,6 +272,7 @@ export function mountBookDeliveryPackage(options: MountBookDeliveryPackageOption
       const item = el('li');
       item.dataset['conditionKey'] = condition.key;
       item.dataset['conditionId'] = condition.typeId === null ? condition.key : `${condition.key}:${condition.typeId}`;
+      if (condition.documentId !== undefined) item.dataset['documentId'] = condition.documentId;
       if (condition.typeId !== null) item.dataset['typeId'] = condition.typeId;
       item.dataset['conditionMet'] = String(condition.met);
       const line = el('p', 'package-condition-line');

@@ -1574,8 +1574,8 @@ export class ManuscriptExportStore {
 
   /** Whether a document's words began as AI7's writing draft (Issue #432, S84a), as its record's parser identity says. */
   #drafted(documentId: string): boolean {
-    return this.#db.prepare('SELECT 1 FROM production_documents WHERE document_id = ? AND parser_identity = ?')
-      .get(documentId, WRITING_DRAFT_PARSER_IDENTITY) !== undefined;
+    return this.#db.prepare('SELECT 1 FROM production_documents WHERE document_id = ? AND parser_identity IN (?, ?)')
+      .get(documentId, WRITING_DRAFT_PARSER_IDENTITY, 'ai7.blank-production-document/1') !== undefined;
   }
 
   /**
@@ -1585,12 +1585,13 @@ export class ManuscriptExportStore {
    */
   #documentTarget(bookId: string, documentId: string, revisionId: string): ResolvedTarget {
     const row = this.#db.prepare(
-      `SELECT pd.type_id, pv.version, mr.revision_label, mr.revision_digest, mr.branch_id, b.title
+      `SELECT pd.type_id, pv.version, mr.revision_label, mr.revision_digest, mr.branch_id, b.title, mb.name document_title
        FROM production_documents pd
        JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
        JOIN production_document_versions pv ON pv.document_id = pd.document_id AND pv.revision_id = ?
        JOIN manuscript_revisions mr ON mr.revision_id = pv.revision_id AND mr.manuscript_id = pd.document_id
        JOIN books b ON b.book_id = pd.book_id
+       JOIN manuscript_branches mb ON mb.branch_id = mr.branch_id
        WHERE pd.document_id = ? AND pd.book_id = ?`,
     ).get(revisionId, documentId, bookId) as SqlRow | undefined;
     requireExport(row !== undefined, 'EXPORT_TARGET_NOT_FOUND', '所选版本不是这本书的生产文档的版本。');
@@ -1602,7 +1603,7 @@ export class ManuscriptExportStore {
     return {
       kind: 'document', targetKind: 'production-document-version', targetId: revisionId, milestoneId: null, milestoneLabel: null,
       revisionId, revisionLabel: text(row.revision_label), revisionDigest, manuscriptId: documentId, branchId: text(row.branch_id),
-      bookTitle: `${text(row.title)} · ${typeLabel}`, savedForExport: false, report: null,
+      bookTitle: `${text(row.title)} · ${text(row.document_title)}`, savedForExport: false, report: null,
       document: { documentId, typeId, typeLabel, versionLabel },
       manifest: null,
     };

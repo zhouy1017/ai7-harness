@@ -194,6 +194,7 @@ export interface ImportedExemplarDecisionInput {
 
 /** One exemplar: the version of one delivered document of a published Book that stands in 范例. */
 export interface ExemplarProjection {
+  readonly title?: string;
   readonly documentId: string;
   readonly typeId: string;
   readonly typeLabel: string;

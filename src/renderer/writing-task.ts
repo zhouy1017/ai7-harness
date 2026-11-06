@@ -55,6 +55,7 @@ const GRAPHEMES = new Intl.Segmenter('zh-CN', { granularity: 'grapheme' });
 export interface WritingTaskSurface {
   /** Read 新建文档 · 写作任务 again and paint it; a Run under way is followed until it settles. */
   refresh(): void;
+  open(typeId: string): void;
   destroy(): void;
 }
 
@@ -118,6 +119,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   let projection: WritingTaskProjection | null = null;
   let sheet: Sheet | null = null;
   let busy = false;
+  const draftTitles = new Map<string, string>();
   let poll: number | null = null;
   const section = el('section', 'writing-task');
   root.append(section);
@@ -189,7 +191,14 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         item.dataset['writingTypeId'] = type.typeId;
         item.dataset['revisionId'] = type.drafted.revisionId;
         item.append(el('p', 'writing-drafted-line', writingDraftedLine(type.label, localInstantLabel(type.drafted.createdAt))));
-        const open = action(WRITING_ACTIONS.openDraft, 'primary', 'open-draft', () => void openDraft(type));
+        const title = el('input');
+        title.setAttribute('aria-label', '草稿题目');
+        title.placeholder = '文档题目（可选）';
+        title.maxLength = 80;
+        title.value = draftTitles.get(type.drafted.revisionId) ?? '';
+        title.addEventListener('input', () => draftTitles.set(type.drafted!.revisionId, title.value));
+        item.append(title);
+        const open = action(WRITING_ACTIONS.openDraft, 'primary', 'open-draft', () => void openDraft(type, title.value));
         open.disabled = busy;
         item.append(open);
         list.append(item);
@@ -490,13 +499,13 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
   }
 
   /** 打开草稿: the drafted result made the type's document in its 起草 phase, then opened on the manuscript surface. */
-  async function openDraft(type: WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> }): Promise<void> {
+  async function openDraft(type: WritingTaskTypeProjection & { drafted: NonNullable<WritingTaskTypeProjection['drafted']> }, title: string): Promise<void> {
     if (busy) return;
     busy = true;
     options.setStatus(WRITING_STATUS.creating, 'busy');
     paint(null);
     try {
-      const created = await api.createWritingDraft({ revisionId: type.drafted.revisionId });
+      const created = await api.createWritingDraft({ revisionId: type.drafted.revisionId, ...(title.trim() === '' ? {} : { title }) });
       busy = false;
       if (destroyed) return;
       projection = created.writing;
@@ -513,6 +522,11 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
 
   return {
     refresh,
+    open: (typeId) => {
+      sheet = { typeId, audience: '', channel: '', requirements: '', materialIds: [], problem: null };
+      if (projection !== null) paint('legend');
+      else refresh();
+    },
     destroy: () => {
       destroyed = true;
       generation += 1;

@@ -18,6 +18,7 @@ import { documentStanding } from '../../src/renderer/production-document-lens.js
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const identity = '00000000-0000-4000-8000-000000000000';
 const document: ProductionDocumentProjection = {
+  title: '新闻稿',
   documentId: identity,
   branchId: identity,
   createdAt: '2026-09-24T02:00:00.000Z',
@@ -50,7 +51,7 @@ describe('the words of 交付 · 生产文档', () => {
     expect(labels.DOCUMENT_STATE_NOT_FOR_THIS_BOOK).toBe('本书不做');
     expect(labels.DOCUMENT_KEPT_NOTE).toBe('文档与它的版本都保留；恢复后照常处理。');
     expect(labels.DOCUMENT_CHANGED_SINCE_VERSION).toBe('有修改尚未保存为版本');
-    expect(labels.DOCUMENT_NO_SOURCES).toBe('先把文档的初稿作为来源材料导入：导入稿件时选「作为来源材料导入」。');
+    expect(labels.DOCUMENT_NO_SOURCES).toBe('暂无来源材料：可在这里导入文件，或新建空白文档。');
     expect(labels.DOCUMENT_ACTION_LABELS).toEqual({
       create: '从来源材料创建…',
       confirmCreate: '创建文档',

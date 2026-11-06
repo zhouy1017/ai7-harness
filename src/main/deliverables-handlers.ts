@@ -385,6 +385,26 @@ export function registerProductionAndPackageHandlers(context: {
   }
 
   ipcMain.handle(
+    IPC_CHANNELS.renameProductionDocument,
+    (event, input: Omit<ServiceOperationMap['renameProductionDocument']['input'], 'bookId'>) =>
+      envelope(async () => {
+        const owned = requireSender(event);
+        return serializeEffect(async () => {
+          requireAuthority();
+          const route = requireCurrentBookRoute(owned);
+          const routeGeneration = owned.routeGeneration;
+          const result = await service.call('renameProductionDocument', {
+            bookId: route.bookId,
+            documentId: input.documentId,
+            title: input.title,
+          });
+          requireCurrentRouteGeneration(owned, routeGeneration);
+          return requireProductionDocumentResultOfRoute(route, result);
+        });
+      }),
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.createProductionDocument,
     (event, input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
       envelope(async () => {
@@ -396,7 +416,8 @@ export function registerProductionAndPackageHandlers(context: {
           const result = await service.call('createProductionDocument', {
             bookId: route.bookId,
             typeId: input.typeId,
-            sourceVersionId: input.sourceVersionId,
+            sourceVersionId: input.sourceVersionId ?? null,
+            ...(input.title === undefined ? {} : { title: input.title }),
           });
           requireCurrentRouteGeneration(owned, routeGeneration);
           return requireProductionDocumentResultOfRoute(route, result);

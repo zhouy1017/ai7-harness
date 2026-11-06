@@ -1182,8 +1182,8 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
     }
     // 打开草稿: one drafted result of the route's Book's writing Task.
     case 'createWritingDraft': {
-      const input = requireInput(value.input, ['bookId', 'revisionId'], tentativeId);
-      if (!validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
+      const input = requireInputWithOptional(value.input, ['bookId', 'revisionId'], ['title'], tentativeId);
+      if ((input.title !== undefined && publicationText(input.title, 80) === null) || !validUuid(input.bookId) || !validUuid(input.revisionId)) throw new ProtocolError(tentativeId);
       break;
     }
     case 'authorizeWritingTask':
@@ -2977,9 +2977,14 @@ export function decodeRequest(frame: Uint8Array): ServiceRequest {
       }
       break;
     }
+    case 'renameProductionDocument': {
+      const input = requireInput(value.input, ['bookId', 'documentId', 'title'], tentativeId);
+      if (!validUuid(input.bookId) || !validUuid(input.documentId) || publicationText(input.title, 80) === null) throw new ProtocolError(tentativeId);
+      break;
+    }
     case 'createProductionDocument': {
-      const input = requireInput(value.input, ['bookId', 'typeId', 'sourceVersionId'], tentativeId);
-      if (!validUuid(input.bookId) || !validProductionDocumentTypeId(input.typeId) || !validUuid(input.sourceVersionId)) {
+      const input = requireInputWithOptional(value.input, ['bookId', 'typeId'], ['sourceVersionId', 'title'], tentativeId);
+      if (!validUuid(input.bookId) || !validProductionDocumentTypeId(input.typeId) || (input.sourceVersionId != null && !validUuid(input.sourceVersionId)) || (input.title !== undefined && publicationText(input.title, 80) === null)) {
         throw new ProtocolError(tentativeId);
       }
       break;

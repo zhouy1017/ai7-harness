@@ -156,7 +156,8 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
       const titleRow = db.prepare("SELECT text FROM manuscript_block_versions WHERE revision_id = ? AND kind = 'title' ORDER BY position LIMIT 1").get(text(chosen?.revision_id ?? latest.revision_id)) as SqlRow | undefined;
       // The title is one prompt line: whitespace and control characters collapse, and an empty title falls back to the type.
       const heading = titleRow === undefined ? '' : sliceGraphemes(text(titleRow.text).replace(/[\s\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim(), 0, 80).trim();
-      title = heading.length > 0 ? heading : typeLabel;
+      const branch = db.prepare('SELECT name FROM manuscript_branches WHERE manuscript_id = ?').get(documentId) as SqlRow | undefined;
+      title = branch === undefined ? (heading.length > 0 ? heading : typeLabel) : text(branch.name);
       if (decision?.decision === 'not-for-this-book') {
         leftOut.push({ documentId, title, reason: '本书不做' });
         continue;
@@ -187,7 +188,7 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
         const kept = sliceGraphemes(words, 0, Math.min(remaining, 2_000));
         if (kept.trim().length === 0) continue;
         const position = integer(block.position);
-        paragraphs.push({ ref: `deliverable/${typeId}/${position}`, position, text: kept, truncated: kept !== words });
+        paragraphs.push({ ref: rows.filter((candidate) => candidate.type_id === typeId).length === 1 ? `deliverable/${typeId}/${position}` : `deliverable/${typeId}/${documentId}/${position}`, position, text: kept, truncated: kept !== words });
         remaining -= graphemeCount(kept);
       }
       // A finalized version the editor emptied is a state of the document, not a damaged record: it sits out, named.
@@ -224,10 +225,12 @@ export interface ProductionDocumentRow {
   bookId: string;
   typeId: string;
   branchId: string;
+  title: string;
   originSourceVersionId: string;
   createdAt: string;
   /** The words the document began with were AI7's writing draft (Issue #432, S84a), read from no file. */
   drafted: boolean;
+  blank: boolean;
 }
 
 /**
@@ -251,7 +254,7 @@ export class ProductionDocuments {
   documents(bookId: string, hasManuscript: boolean): ProductionDocumentsProjection {
     requireDocument(UUID_PATTERN.test(bookId), 'BOOK_INVALID', '图书标识无效。');
     const decisions = this.#latestDecisions(bookId);
-    const documents = new Map(this.#documentRows(bookId).map((row) => [row.typeId, row]));
+    const rows = this.#documentRows(bookId);
     const read = this.#sources(bookId, MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED + 1);
     return {
       bookId,
@@ -262,12 +265,13 @@ export class ProductionDocuments {
       },
       unavailableReason: hasManuscript ? null : PRODUCTION_DOCUMENTS_NEED_MANUSCRIPT,
       types: BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type) => {
-        const row = documents.get(type.typeId);
+        const documents = rows.filter((row) => row.typeId === type.typeId).map((row) => this.document(row));
         return {
           typeId: type.typeId,
           label: type.label,
           notForThisBook: decisions.get(type.typeId) === 'not-for-this-book',
-          document: row === undefined ? null : this.document(row),
+          documents,
+          document: documents[0] ?? null,
         };
       }),
       sources: read.slice(0, MAX_PRODUCTION_DOCUMENT_SOURCES_LISTED),
@@ -323,9 +327,10 @@ export class ProductionDocuments {
     ).get(row.documentId, row.branchId) as SqlRow).total);
     return {
       documentId: row.documentId,
+      title: row.title,
       branchId: row.branchId,
       createdAt: row.createdAt,
-      origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name), marksNotCarried: this.#originMarks(row), drafted: row.drafted },
+      origin: { sourceVersionId: row.originSourceVersionId, displayName: text(state.display_name), marksNotCarried: this.#originMarks(row), drafted: row.drafted, ...(row.blank ? { blank: true } : {}) },
       versions: versions.slice(0, MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED),
       versionsTruncated: versions.length > MAX_PRODUCTION_DOCUMENT_VERSIONS_LISTED,
       changedSinceVersion,
@@ -464,19 +469,23 @@ export class ProductionDocuments {
   packageReadings(bookId: string): PackageDocumentReading[] {
     const decisions = this.#latestDecisions(bookId);
     const rows = this.#documentRows(bookId);
-    return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type): PackageDocumentReading => {
-      const row = rows.find((candidate) => candidate.typeId === type.typeId);
-      const notForThisBook = decisions.get(type.typeId) === 'not-for-this-book';
-      if (row === undefined) return { typeId: type.typeId, typeLabel: type.label, notForThisBook, document: null };
-      const deliveries = Array.from(this.#deliveryReadings(row.documentId));
-      const working = this.workingDigest(row);
-      return {
-        typeId: type.typeId,
-        typeLabel: type.label,
-        notForThisBook,
-        // 交付后有修改 read as the document's own card reads it (DELIV-004): one check, in one place.
-        document: { documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries },
-      };
+    return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.flatMap((type): PackageDocumentReading[] => {
+      const matching = rows.filter((candidate) => candidate.typeId === type.typeId);
+      if (decisions.get(type.typeId) === 'not-for-this-book') return [{ typeId: type.typeId, typeLabel: type.label, notForThisBook: true, document: null }];
+      return (matching.length === 0 ? [undefined] : matching).map((row): PackageDocumentReading => {
+        const notForThisBook = decisions.get(type.typeId) === 'not-for-this-book';
+        if (row === undefined) return { typeId: type.typeId, typeLabel: type.label, notForThisBook, document: null };
+        const deliveries = Array.from(this.#deliveryReadings(row.documentId));
+        const working = this.workingDigest(row);
+        return {
+          typeId: type.typeId,
+          typeLabel: matching.length > 1 || row.title !== type.label ? `${type.label} · 《${row.title}》` : type.label,
+          notForThisBook,
+          multiple: matching.length > 1,
+          // 交付后有修改 read as the document's own card reads it (DELIV-004): one check, in one place.
+          document: { documentId: row.documentId, changedSinceDelivery: this.changedSinceDelivery(row.documentId, working), deliveries, title: row.title },
+        };
+      });
     });
   }
 
@@ -484,11 +493,10 @@ export class ProductionDocuments {
    * What 范例 reads of the Book's Production Documents (Issue #427, S79b review): each house type's document in the house's
    * order, with its every Delivery Record newest first, each verified exactly as 图书交付包 reads it. A read.
    */
-  deliveryReadings(bookId: string): Array<{ typeId: string; typeLabel: string; documentId: string; deliveries: (order: 'latest' | 'version') => Iterable<PackageDeliveryReading> }> {
+  deliveryReadings(bookId: string): Array<{ typeId: string; typeLabel: string; title: string; documentId: string; deliveries: (order: 'latest' | 'version') => Iterable<PackageDeliveryReading> }> {
     const rows = this.#documentRows(bookId);
     return BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.flatMap((type) => {
-      const row = rows.find((candidate) => candidate.typeId === type.typeId);
-      return row === undefined ? [] : [{ typeId: type.typeId, typeLabel: type.label, documentId: row.documentId, deliveries: (order: 'latest' | 'version') => this.#deliveryReadings(row.documentId, order) }];
+      return rows.filter((row) => row.typeId === type.typeId).map((row) => ({ typeId: type.typeId, typeLabel: type.label, title: row.title, documentId: row.documentId, deliveries: (order: 'latest' | 'version') => this.#deliveryReadings(row.documentId, order) }));
     });
   }
 
@@ -513,7 +521,12 @@ export class ProductionDocuments {
     }
   }
 
-  /** The document of one type of a Book, or `undefined`. */
+  defaultTitle(bookId: string, typeId: string, label: string): string {
+    const count = this.#documentRows(bookId).filter((row) => row.typeId === typeId).length;
+    return count === 0 ? label : `${label} ${count + 1}`;
+  }
+
+  /** The first document of one type of a Book, or `undefined`. */
   documentOfType(bookId: string, typeId: string): ProductionDocumentRow | undefined {
     return this.#documentRows(bookId).find((row) => row.typeId === typeId);
   }
@@ -635,19 +648,21 @@ export class ProductionDocuments {
 
   #documentRows(bookId: string): ProductionDocumentRow[] {
     return (this.#db.prepare(
-      `SELECT pd.document_id, pd.book_id, pd.type_id, pd.origin_source_version_id, pd.created_at, pd.parser_identity, mb.branch_id
+      `SELECT pd.document_id, pd.book_id, pd.type_id, pd.origin_source_version_id, pd.created_at, pd.parser_identity, mb.branch_id, mb.name
        FROM production_documents pd
        JOIN manuscripts m ON m.manuscript_id = pd.document_id AND m.role = 'production-document' AND m.book_id = pd.book_id
        JOIN manuscript_branches mb ON mb.manuscript_id = pd.document_id
-       WHERE pd.book_id = ? ORDER BY pd.created_at, pd.document_id`,
+       WHERE pd.book_id = ? ORDER BY pd.created_at, pd.rowid`,
     ).all(bookId) as SqlRow[]).map((row) => ({
       documentId: text(row.document_id),
       bookId: text(row.book_id),
       typeId: text(row.type_id),
       branchId: text(row.branch_id),
+      title: text(row.name),
       originSourceVersionId: text(row.origin_source_version_id),
       createdAt: text(row.created_at),
       drafted: row.parser_identity === WRITING_DRAFT_PARSER_IDENTITY,
+      blank: row.parser_identity === 'ai7.blank-production-document/1',
     }));
   }
 

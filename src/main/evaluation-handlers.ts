@@ -348,7 +348,7 @@ export function registerEvaluationHandlers(context: {
         requireAuthority();
         const route = requireCurrentBookRoute(owned);
         const routeGeneration = owned.routeGeneration;
-        const result = await service.call('createWritingDraft', { bookId: route.bookId, revisionId: input.revisionId });
+        const result = await service.call('createWritingDraft', { bookId: route.bookId, revisionId: input.revisionId, ...(input.title === undefined ? {} : { title: input.title }) });
         requireCurrentRouteGeneration(owned, routeGeneration);
         if (result.writing.bookId !== route.bookId) throw new ServiceCallError('AI7_SERVICE_ROUTE_INVALID', '写作任务不属于当前图书工作台。');
         return result;

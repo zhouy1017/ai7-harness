@@ -156,6 +156,8 @@ async function richBook(store: EditorialStore): Promise<{ bookId: string; manusc
     bookId: book.bookId, documentId: news.documentId, version: { kind: 'saved', revisionId: news.versions[0]!.revisionId },
     recipient: { kind: 'publicity', custom: null }, note: '首发稿',
   });
+  const peer = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '独立通稿' })).document!;
+  await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: peer.documentId, version: { kind: 'saved', revisionId: peer.versions[0]!.revisionId }, recipient: { kind: 'editorial', custom: null }, note: null });
   for (const typeId of ['promotion-article', 'review-article', 'launch-materials', 'marketing-points']) {
     store.decideProductionDocumentType({ bookId: book.bookId, typeId, notForThisBook: true });
   }
@@ -955,7 +957,7 @@ describe('只导入其中的图书 over the store', () => {
       categoryId: 'typos-and-usage', text: '目标本社保留的合成偏好。', effect: 'guide' });
     const targetHouse = target.inspectGlobalAgent();
     const preview = await target.inspectDatabaseImport(packagePath);
-    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 108, dataVersion: 1 });
+    expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 109, dataVersion: 1 });
     await target.prepareDatabaseMerge(preview.previewId, T);
     target.close();
     target = await EditorialStore.open(otherRoot, roots.codeRoot, control);

@@ -2610,3 +2610,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
   .finding-row { grid-template-columns: minmax(0, 1fr); }
   .finding-pills, .finding-actions { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* Independent documents remain grouped under their house type (#1378). */
+.production-document-list { display: grid; gap: 12px; list-style: none; margin: 12px 0 0; padding: 0; }
+.production-document-row { border-top: 1px solid var(--boundary); padding-top: 12px; }

@@ -476,7 +476,9 @@ export class BookDeliveryPackageExports {
     const deliveries: string[] = [];
     for (const entry of record.content.documents) {
       if (entry.disposition !== 'included') continue;
-      const typeLabel = productionDocumentType(entry.typeId)?.label ?? entry.typeId;
+      const baseLabel = productionDocumentType(entry.typeId)?.label ?? entry.typeId;
+      const peers = record.content.documents.filter((candidate) => candidate.typeId === entry.typeId && candidate.disposition === 'included').length;
+      const typeLabel = entry.title === undefined || (entry.title === baseLabel && peers === 1) ? baseLabel : `${baseLabel} · 《${entry.title}》`;
       lines.push(`- ${typeLabel} · 版本 ${entry.version}`);
       deliveries.push('', `### ${typeLabel}`, '');
       for (const deliveryId of entry.deliveryIds) {
@@ -719,7 +721,7 @@ export class BookDeliveryPackageExports {
     function* members(): Generator<{ key: string; target: ExportTargetInput; format: ManuscriptExportFormat }> {
       yield { key: 'publication', target: { kind: 'milestone', milestoneId: record.content.publication!.milestoneId }, format: 'docx' };
       for (const entry of record.content.documents) {
-        if (entry.disposition === 'included') yield { key: `document:${entry.typeId}`, target: { kind: 'document', documentId: entry.documentId, revisionId: entry.revisionId }, format: 'docx' };
+        if (entry.disposition === 'included') yield { key: entry.exportKey ?? (record.content.documents.filter((candidate) => candidate.typeId === entry.typeId && candidate.disposition === 'included').length === 1 ? `document:${entry.typeId}` : `document:${entry.documentId}`), target: { kind: 'document', documentId: entry.documentId, revisionId: entry.revisionId }, format: 'docx' };
       }
       for (const report of record.content.reviewReports) {
         yield { key: `report:${report.reportId}`, target: { kind: 'report', reportId: report.reportId }, format: 'docx' };
@@ -753,9 +755,11 @@ export class BookDeliveryPackageExports {
         requirePackageExport(pinned !== undefined && review.target.document?.documentId === pinned.documentId && review.target.revisionId === pinned.revisionId &&
           review.technical.revisionDigest === pinned.revisionDigest, 'BOOK_DELIVERY_PACKAGE_EXPORT_CHANGED', '交付包记下的审稿意见已不是这一版，请重新查看导出。');
       }
+      const documentId = review.target.document?.documentId;
+      const frozenDocument = record.content.documents.find((entry) => entry.disposition === 'included' && entry.documentId === documentId);
       files.push({
         key: item.key,
-        label: labelOf(review.target, item.key, record),
+        label: frozenDocument?.disposition !== 'included' || frozenDocument.title === undefined ? labelOf(review.target, item.key, record) : `${review.target.document!.typeLabel}${frozenDocument.title === review.target.document!.typeLabel ? '' : ` · 《${frozenDocument.title}》`} · ${review.target.document!.versionLabel}`,
         fileName: memberFileName(review.suggestedFileName, item.key === 'manifest' ? null : ordinal),
         format: item.format,
         restoration: review.restoration,

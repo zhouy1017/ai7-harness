@@ -39,6 +39,7 @@ import {
   MAX_WRITING_MATERIALS_TOTAL_GRAPHEMES,
   MAX_WRITING_MATERIAL_GRAPHEMES,
   MAX_WRITING_MATERIAL_OFFERS,
+  publicationText,
   WRITING_KIND,
   WRITING_LIVE_UNAVAILABLE,
   WRITING_MATERIAL_LIVE_UNAVAILABLE,
@@ -73,7 +74,6 @@ import {
   readWritingExemplarWords,
   writingExemplarDigest,
   writingBlockLength,
-  writingDocumentExists,
   writingDraftBlocks,
   writingNotForThisBook,
   writingWords,
@@ -473,8 +473,6 @@ export function createWritingPreparationWork(host: WritingTaskOperationsHost, bo
     : internalWritingField(host, request.requirements, MAX_WRITING_REQUIREMENTS_GRAPHEMES, '', '其他要求');
   const primary = host.authority.prepare("SELECT 1 FROM manuscripts WHERE book_id = ? AND role = 'primary'").get(bookId);
   requireStore(primary !== undefined, 'WRITING_NEEDS_MANUSCRIPT', WRITING_NEEDS_MANUSCRIPT);
-  requireStore(intentDraft?.deliverable !== undefined || host.documentCall(() => host.productionDocuments.documentOfType(bookId, type.typeId)) === undefined,
-      'WRITING_DOCUMENT_EXISTS', writingDocumentExists(type.label));
   requireStore(!host.documentCall(() => host.productionDocuments.notForThisBook(bookId, type.typeId)),
       'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
   const latest = internalLatestWriting(host, bookId);
@@ -581,6 +579,7 @@ export function reconcileStoppedWritingRuns(host: WritingTaskOperationsHost): { 
 
 export function internalWritingDrafted(host: WritingTaskOperationsHost, bookId: string): Map<string, { revisionId: string; createdAt: string }> {
   const drafted = new Map<string, { revisionId: string; createdAt: string }>();
+  const opened = new Set(host.writingTasks.drafts(bookId).map((draft) => draft.analysisRevisionId));
   for (const revision of internalWritingCall(host, () => host.writingTasks.revisions(bookId))) {
     // Whether a revision holds a draft never changes, so each is read once while the store is open (#688 re-review).
     let known = host.writingRevisionDrafts.get(revision.revisionId);
@@ -593,7 +592,7 @@ export function internalWritingDrafted(host: WritingTaskOperationsHost, bookId: 
       if (host.writingRevisionDrafts.size >= 1024) host.writingRevisionDrafts.clear();
       host.writingRevisionDrafts.set(revision.revisionId, known);
     }
-    if (known.drafted && !drafted.has(known.typeId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
+    if (known.drafted && !opened.has(revision.revisionId) && !drafted.has(known.typeId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
   }
   return drafted;
 }
@@ -681,7 +680,6 @@ export function inspectWritingTask(host: WritingTaskOperationsHost, bookId: stri
       const unread = exemplarsByType.damaged.get(type.typeId) ?? [];
       const prepare: WritingTaskTypeProjection['prepare'] =
         unavailable !== null ? { allowed: false, reason: unavailable }
-        : type.document !== null ? { allowed: false, reason: writingDocumentExists(type.label) }
         : type.notForThisBook ? { allowed: false, reason: writingNotForThisBook(type.label) }
         : runIsActive(runState) ? { allowed: false, reason: activeRunReason(runState, WRITING_KIND) }
         : { allowed: true, mode: latest === null || latest.projection.resultSetRevision === null ? 'writing-first' : 'writing-again' };
@@ -690,7 +688,7 @@ export function inspectWritingTask(host: WritingTaskOperationsHost, bookId: stri
         label: type.label,
         prepare,
         exemplars: { count: exemplars.length, statement: writingExemplarStatement(writingExemplarLine(type.label, exemplars), exemplars.length, unread) },
-        drafted: type.document === null ? drafted.get(type.typeId) ?? null : null,
+        drafted: drafted.get(type.typeId) ?? null,
         quickStart: internalWritingQuickStart(host, bookId, type.typeId, prepare, facts),
       };
     }),
@@ -832,7 +830,7 @@ export async function quickStartWritingTask(host: WritingTaskOperationsHost, boo
   return { outcome: 'started', reasons: [], dispatchRunRecordId: authorized.dispatchRunRecordId, ledger: latest.ledger };
 }
 
-export function createWritingDraft(host: WritingTaskOperationsHost, bookId: string, revisionId: string): WritingDraftCreatedProjection {
+export function createWritingDraft(host: WritingTaskOperationsHost, bookId: string, revisionId: string, title?: string): WritingDraftCreatedProjection {
   host.assertAvailable();
   requireStore(UUID_PATTERN.test(bookId) && UUID_PATTERN.test(revisionId), 'WRITING_INVALID', '写作任务参数无效。');
   const revision = internalWritingCall(host, () => host.writingTasks.revisions(bookId)).find((entry) => entry.revisionId === revisionId);
@@ -857,6 +855,13 @@ export function createWritingDraft(host: WritingTaskOperationsHost, bookId: stri
     digest: sha256(canonicalJson({ kind: block.kind, level: block.level, text: block.text })),
     graphemeLength: writingBlockLength(block.text),
   }));
+  const documentTitle = title === undefined ? host.productionDocuments.defaultTitle(bookId, type.typeId, type.label) : publicationText(title, 80);
+  requireStore(documentTitle !== null, 'PRODUCTION_DOCUMENT_TITLE_INVALID', '题目须为 1–80 个字。');
+  const existing = host.writingTasks.drafts(bookId).find((entry) => entry.analysisRevisionId === revisionId);
+  if (existing !== undefined) {
+    const row = host.productionDocuments.documentById(bookId, existing.documentId)!;
+    return { writing: host.inspectWritingTask(bookId), typeId: type.typeId, typeLabel: type.label, document: host.productionDocuments.document(row) };
+  }
   const now = new Date().toISOString();
   const documentId = randomUUID();
   const branchId = randomUUID();
@@ -864,13 +869,12 @@ export function createWritingDraft(host: WritingTaskOperationsHost, bookId: stri
   const characterCount = blocks.reduce((total, block) => total + block.graphemeLength, 0);
   const revisionDigest = WritingTasks.draftRevisionDigest(documentId, revisionId, blocks.map(({ kind, level, text }) => ({ kind, level, text })));
   host.documentCall(() => internalWritingCall(host, () => host.transaction(host.authority, () => {
-    // The checks again, inside the transaction that writes: a document of the type made meanwhile refuses this one.
-    requireStore(host.productionDocuments.documentOfType(bookId, type.typeId) === undefined, 'WRITING_DOCUMENT_EXISTS', writingDocumentExists(type.label));
+    // Recheck the type decision inside the transaction that writes the new document.
     requireStore(!host.productionDocuments.notForThisBook(bookId, type.typeId), 'WRITING_NOT_FOR_THIS_BOOK', writingNotForThisBook(type.label));
     host.authority.prepare("INSERT INTO manuscripts(manuscript_id, book_id, role, created_at) VALUES (?, ?, 'production-document', ?)")
       .run(documentId, bookId, now);
     host.authority.prepare('INSERT INTO manuscript_branches(branch_id, manuscript_id, name, created_at) VALUES (?, ?, ?, ?)')
-      .run(branchId, documentId, type.label, now);
+      .run(branchId, documentId, documentTitle, now);
     host.authority.prepare(
         `INSERT INTO manuscript_revisions(
            revision_id, manuscript_id, branch_id, ordinal, revision_label, parent_revision_id,
