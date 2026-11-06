@@ -882,9 +882,16 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .guideline-preview h4 { margin: 0; }
 /* 知识库 › 范例 (S79b): one card per published Book. */
 .exemplar-list { display: grid; gap: .8rem; }
-.exemplar-book { display: grid; gap: .4rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
-.exemplar-book h3, .exemplar-book p { margin: 0; overflow-wrap: anywhere; }
-.exemplar-items, .exemplar-readers-reports { display: grid; gap: .3rem; margin: 0; padding-left: 1.2rem; overflow-wrap: anywhere; }
+.exemplar-book { display: grid; gap: .4rem; min-width: 0; }
+.exemplar-book p { margin: 0; overflow-wrap: anywhere; }
+.exemplar-items, .exemplar-readers-reports { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; overflow-wrap: anywhere; }
+.exemplar-readers-reports:empty { display: none; }
+.exemplar-entry { display: grid; gap: .5rem; min-width: 0; padding: 1rem; border: 1px solid var(--boundary); border-radius: 12px; background: var(--surface); }
+.exemplar-heading, .exemplar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+.exemplar-title { flex: 1 1 12rem; overflow-wrap: anywhere; font-size: 1rem; }
+.exemplar-actions { margin-left: auto; }
+.exemplar-kind-badge { font-weight: 650; }
+.exemplar-filters { display: grid; gap: .5rem; margin: .75rem 0; }
 /* ②C 评估 (S81a): the versions, then the version on show as a form; each item and risk a fieldset that reflows to one column. */
 .book-evaluation-summary { margin-top: 1rem; }
 .evaluation { display: grid; gap: .9rem; min-width: 0; }
@@ -2590,7 +2597,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .library-material > .library-heading { display: flex; flex-wrap: nowrap; min-width: 0; }
 .library-material > .library-heading h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .library-material > .knowledge-file-summary { margin: .25rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.exemplar-book > :is(h3, .field-note) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: .25rem 0; }
+.exemplar-book > .field-note { margin: .25rem 0; }
 /* B2 / M1: state changes are immediate; spatial feedback never delays controls. */
 .task-drawer { transform: translateX(0); transition: transform var(--motion-slow) var(--motion-ease), display var(--motion-slow) allow-discrete; }
 .task-drawer[hidden] { transform: translateX(100%); pointer-events: none; transition-timing-function: var(--motion-exit); }

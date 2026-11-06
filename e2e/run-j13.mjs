@@ -2266,6 +2266,35 @@ async function main() {
     await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'skill-restart-ready');
     await assertRenderer(renderer, `(async () => { const read=await window.ai7.inspectImportedSkills({revisionId:${JSON.stringify(importedSkillId)},before:null}); return read.revision.state==='enabled' && read.revision.enabledBooks[0]===${JSON.stringify(enabledSkillBook)} && read.revision.files[0].path==='SKILL.md'; })()`, 'skill-restart-keeps-snapshot');
 
+    at('exemplar-catalogue-ordinary');
+    await closeBrowser();
+    const exemplarPath = resolve(runRoot, 'catalogue-exemplar.txt');
+    await writeFile(exemplarPath, '书系范例目录验证使用的虚构新闻稿。', 'utf8');
+    manager = await launch(REVIEW_FIXTURE_IDENTITY, [], exemplarPath);
+    renderer = await waitForRenderer(manager, 'exemplar-catalogue-window');
+    // Preload readiness precedes renderer startup; wait for its completed landing paint before navigating or switching mode.
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'exemplar-catalogue-ready');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'catalogue-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'catalogue-settings-ready');
+    await click(renderer, '帮助', 'catalogue-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'catalogue-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'catalogue-ordinary-mode');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-knowledge');
+    await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'catalogue-category-copy');
+    await click(renderer, '范例', 'catalogue-open');
+    await waitFor(renderer, `document.querySelector('[data-exemplar-action="import"]')`, 'catalogue-empty-ready');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===0 && document.querySelector('.exemplars-empty')?.textContent==='暂无范例，已发稿并交付的本社文档会自动加入。'`, 'catalogue-no-manuscripts');
+    // assertRenderer wraps Boolean(expression); await this async fixture command directly before refreshing the catalogue.
+    requireJourney(await renderer.evaluate(`(async () => { const preview=await window.ai7.previewImportedExemplar(); const book=await window.ai7.importEarlierExemplar({previewId:preview.previewId,bookId:null,bookTitle:'书系工作文档来源',authors:['测试作者'],editors:['测试责编'],typeId:'news-release',expectedVersion:0}); return book.bookTitle==='书系工作文档来源' && book.exemplars.length===1 && book.exemplars[0].typeId==='news-release'; })()`), 'catalogue-import-work-document');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-refresh-home');
+    // Sidebar navigation settles asynchronously; the previous page still has an already-selected 范例 tab meanwhile.
+    await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] .knowledge-category[data-knowledge-category="exemplars"]')`, 'catalogue-refresh-home-ready');
+    await clickSelector(renderer, '.knowledge-category[data-knowledge-category="exemplars"]', 'catalogue-refresh');
+    await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
+    await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'catalogue-kind-filter');
+    await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'catalogue-book-filter');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
+
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
     requireJourney(loopback.healthy() && loopback.observedRequests() === 0, 'zero-network-provider-session');
