@@ -136,7 +136,7 @@ describe('润色这段 on the authored fixture', () => {
       expect(card.kind).toBe('change-suggestion');
       expect(card.status).toBe('open');
       // Attributed to the polish task, visibly, like a review-derived mark is to its category.
-      expect(card.source).toEqual({ kind: 'ai7', origin: 'task', label: '润色这段', taskId: projection.taskId });
+      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'task', label: '润色这段', taskId: projection.taskId, modelLabel: 'AI7 本地检查' });
       expect(card.pinnedText).toBe(AUTHORED_POLISH_SUGGESTIONS[index]!.original);
       expect(card.suggestion).toMatchObject({ proposedText: AUTHORED_POLISH_SUGGESTIONS[index]!.replacement, rationale: AUTHORED_POLISH_SUGGESTIONS[index]!.reason });
       expect(card.suggestion!.decision).toBeNull();
@@ -294,7 +294,7 @@ describe('the recorded Go captures, replayed through the real path (provider-fre
     expect(polished.markIds).toHaveLength(3);
     for (const markId of polished.markIds) {
       const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
-      expect(card.source).toEqual({ kind: 'ai7', origin: 'task', label: '润色这段', taskId: polished.taskId });
+      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'task', label: '润色这段', taskId: polished.taskId, modelLabel: 'AI7 本地检查' });
       expect(card.suggestion!.decision).toBeNull();
     }
     expect(typoBlock(store, book).block.digest).toBe(block.digest);

@@ -242,6 +242,7 @@ export class AgentWorkspace {
       atomicGroupId,
       atomicReason: null,
       source: { kind: 'ai7', origin: 'task', label: AGENT_WORKSPACE_MARK_SOURCE_LABEL, taskId: round.dialogueId },
+      sourceAttemptId: round.attemptId,
       basis: [{
         label: words.basis(candidate.ordinal),
         blockId: candidate.anchor.blockId,

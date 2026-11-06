@@ -1681,8 +1681,16 @@ html[data-editing-protection="active"] .editor-save-menu > summary, html[data-ed
 .editorial-mark-region { margin-top: .75rem; }
 .editorial-mark-region > h4, .editorial-mark-form > h4 { margin: 0 0 .25rem; color: var(--text-subdued); font-size: .8rem; font-weight: 800; }
 .editorial-mark-region p, .editorial-mark-form p { margin: .25rem 0; }
-.editorial-mark-change del { color: var(--text-subdued); }
-.editorial-mark-change ins { text-decoration: none; background: var(--mark-suggestion-fill); border-bottom: 2px solid var(--mark-suggestion); }
+.editorial-mark-card .editorial-mark-block { display: grid; gap: .15rem; margin: .65rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.editorial-mark-card .editorial-mark-proposed { font-size: 1.05rem; font-weight: 650; }
+.editorial-mark-card .editorial-mark-proposed ins { text-decoration: none; }
+.editorial-mark-card .editorial-mark-original { color: var(--text-subdued); }
+.editorial-mark-card .editorial-mark-original del { text-decoration: none; }
+.editorial-mark-card .editorial-mark-difference { background: var(--mark-suggestion-fill); color: inherit; }
+.editorial-mark-card .editorial-mark-author { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem .6rem; margin: .65rem 0; }
+.editorial-mark-card .editorial-mark-more { margin: .65rem 0; }
+.editorial-mark-card .editorial-mark-more > summary { cursor: pointer; color: var(--text-subdued); font-size: .85rem; }
+.editorial-mark-card .editorial-mark-more > .button-row { margin-top: .5rem; }
 .editorial-mark-drifted { margin: .6rem 0 0; padding: .45rem .6rem; border: 1px dashed var(--status-attention); border-radius: 6px; background: var(--status-attention-surface); }
 /* ADR 0085 §2 beside an available 接受并应用: a quiet line with its own border, never an alarm. */
 .editorial-mark-safe-merge { margin: .45rem 0 0; padding: .35rem .55rem; border-left: 3px solid var(--boundary); color: var(--text-subdued); }

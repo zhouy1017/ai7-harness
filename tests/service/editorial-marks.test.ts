@@ -173,6 +173,32 @@ function storeError(operation: () => unknown): string {
 }
 
 describe('Editorial Marks on a manuscript', () => {
+  it('projects registered editors and keeps a produced model author frozen across conversion and restart (#1379)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(window);
+      const own = store.createEditorialMark(markInput(book, window, block.blockId, 2, 6, 'annotation')).card!;
+      expect(own.source.editorName).toBeNull();
+      store.updateBookPeople({ bookId: window.bookId, expectedVersion: 0, authors: [], editors: ['责编甲', '责编乙'], related: [] });
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, own.markId).source.editorName).toBe('责编甲、责编乙');
+      const markId = store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 8, toGrapheme: 13,
+        pinnedText: graphemesOf(block.text).slice(8, 13).join(''), kind: 'change-suggestion', body: '', proposedText: '公开合成建议',
+        rationale: '公开合成理由', atomicGroupId: null, basis: [],
+        source: { kind: 'ai7', origin: 'task', label: '润色这段', taskId: randomUUID() },
+        sourceModelBinding: { route: 'openai-platform', model: 'historical-custom-model' } });
+      const source = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).source;
+      expect(source.modelLabel).toBe('OpenAI 官方');
+      expect(source.modelTechnicalLabel).toBe('OpenAI 官方 · historical-custom-model');
+      const converted = store.updateEditorialMark(change(book, window, markId, 'convert', { targetKind: 'annotation' })).card!;
+      expect(converted.source).toEqual(source);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, converted.markId).source).toEqual(source);
+    } finally { store.close(); }
+  });
+
   it('makes the four kinds on exact text, carries them in the window, and keeps them across a restart', async () => {
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let book: Imported;
@@ -189,7 +215,7 @@ describe('Editorial Marks on a manuscript', () => {
         const result = first.createEditorialMark(markInput(book, window, blockId, 2 + index * 6, 6 + index * 6, kind));
         expect(result.marks).toHaveLength(index + 1);
         expect(result.card?.kind).toBe(kind);
-        expect(result.card?.source).toEqual({ kind: 'editor', origin: null, label: null, taskId: null });
+        expect(result.card?.source).toEqual({ kind: 'editor', origin: null, label: null, taskId: null, editorName: null });
         expect(result.card?.anchorState).toBe('exact');
         expect(graphemesOf(result.card!.pinnedText)).toHaveLength(4);
       });
@@ -446,7 +472,7 @@ describe('Editorial Marks on a manuscript', () => {
         basis: [{ label: '第三章 第二节', blockId: window.blocks[1]!.blockId, fromGrapheme: 0, toGrapheme: 2, quote: null }],
       });
       const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, produced);
-      expect(card.source).toEqual({ kind: 'ai7', origin: 'review-category', label: '人名与称谓一致', taskId: null });
+      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: '人名与称谓一致', taskId: null, modelLabel: 'AI7 本地检查' });
       expect(card.basis).toHaveLength(1);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks[0]).toMatchObject({ markId: produced, sourceKind: 'ai7' });
       // AI7's words are not the editor's to rewrite; what the editor may do is turn the comment into a suggestion.

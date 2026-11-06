@@ -71,15 +71,13 @@ export const RESOLVE_CONFLICT_LABEL = '解决冲突…';
 /** A reversal conflict resolved by a new version: the Correction Proposal waits on the manuscript. */
 export const REVERSAL_CORRECTION_LINE = '已为这处冲突生成更正建议；它在稿件上等你处理，尚未应用。';
 
-export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' | 'convertedFrom'> & Partial<Pick<EditorialMarkCardProjection, 'resolvedFrom'>>): string {
+export function markSourceLine(card: Pick<EditorialMarkCardProjection, 'source' | 'convertedFrom'> & Partial<Pick<EditorialMarkCardProjection, 'resolvedFrom'>>, technical = false): string {
   const { source } = card;
   const who = source.kind === 'editor'
-    ? '你'
+    ? source.editorName?.trim() || '你'
     : source.kind === 'imported-author'
       ? `${source.label ?? '作者'}（导入文件的作者）`
-      : source.origin === 'analysis'
-        ? 'AI7 · 分析'
-        : `AI7 · ${source.origin === 'review-category' ? '审阅' : '任务'}「${source.label ?? ''}」`;
+      : `${(technical ? source.modelTechnicalLabel ?? source.modelLabel : source.modelLabel) ?? 'AI7'} · ${source.origin === 'analysis' ? source.label ?? '分析' : `${source.origin === 'review-category' ? '审阅' : '任务'}「${source.label ?? ''}」`}`;
   // A version saved from a conflict is no conversion: it says what it came from (Issue #57).
   if (card.resolvedFrom) return `${who} · ${card.resolvedFrom.conflictKind === 'reversal' ? '由撤销冲突生成的更正建议' : '由冲突解决生成的新版本'}`;
   if (card.convertedFrom === null) return who;

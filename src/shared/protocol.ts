@@ -1897,6 +1897,10 @@ export interface EditorialMarkSourceProjection {
   /** The Task's title, the review category's name, or the imported author's name. */
   label: string | null;
   taskId: string | null;
+  /** Registered Book editors, or the frozen producing model's human/technical labels (#1379). */
+  editorName?: string | null;
+  modelLabel?: string | null;
+  modelTechnicalLabel?: string | null;
 }
 
 /** One mark as the manuscript surface draws it; the card's content is read on demand. */
@@ -1958,8 +1962,8 @@ export interface ProposalItemDecisionProjection {
 
 /**
  * Everything a Mark Card shows (V2-UX-MARK-003, MARK-004). A Change Suggestion carries its Proposal
- * Change Item in the four regions of V2-UX-PROP-022: the exact current and proposed wording, the
- * rationale, the basis, and the editor's own decision, which is a record apart from the item and
+ * Change Item in the content-first hierarchy of V2-UX-PROP-022: proposed then current wording,
+ * rationale, author, collapsed evidence and the editor's decision, a record apart from the item and
  * from any change to the manuscript.
  */
 export interface EditorialMarkCardProjection {

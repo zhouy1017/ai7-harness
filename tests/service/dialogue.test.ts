@@ -363,7 +363,7 @@ describe('就这段提问… over the real store and harness', () => {
       expect(converted.dialogue.attempts[1]!.convertedMarkIds).toEqual([converted.markId]);
       const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, converted.markId);
       expect(card.kind).toBe('change-suggestion');
-      expect(card.source).toEqual({ kind: 'ai7', origin: 'task', label: '对话回答', taskId: turn.dialogueId });
+      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'task', label: '对话回答', taskId: turn.dialogueId, modelLabel: 'AI7 本地检查' });
       expect(card.suggestion).toMatchObject({ currentText: selection.selectedText, proposedText: '这段话的语气改得平缓些', decision: null, application: null });
       expect(card.basis).toEqual([{ label: '对话回答 · 第 2 次', blockId: selection.blockId, fromGrapheme: 2, toGrapheme: 22, quote: `${FIRST_SENTENCE}${SECOND_SENTENCE}${TAIL}` }]);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).workingDigest).toBe(workingBefore);
