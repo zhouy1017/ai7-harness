@@ -773,7 +773,8 @@ async function main() {
         search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]');
     })()`, 'ordinary-search-proxy-visible');
     await assertRenderer(primary, `!/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-technical-identifiers');
-    await assertRenderer(primary, `!/评测参考|p50|命中率/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
+    // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
+    await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
     await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');

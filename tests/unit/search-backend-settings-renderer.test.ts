@@ -38,8 +38,9 @@ describe('the direct-search candidate in 联网检索', () => {
     setTechnicalLayerVisible(false);
     const { node, api } = section(async () => SUCCESS);
     expect(node.textContent).toContain('不能用于任务');
+    expect(node.textContent).toContain('尚未测量这一接口的命中率、延迟与可达性');
     expectNoTechnicalText(node);
-    expect(node.textContent).not.toMatch(/https?:\/\/|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|配置摘要|评测参考|p50|中文命中率|国际命中率/u);
+    expect(node.textContent).not.toMatch(/https?:\/\/|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|配置摘要|评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u);
     node.querySelector('button[data-action="probe-search-candidate"]')!.click();
     await settle();
     expect(node.querySelector('[data-search-candidate-probe]')!.textContent).toContain('连接成功');
