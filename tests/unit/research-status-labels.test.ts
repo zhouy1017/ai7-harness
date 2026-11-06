@@ -13,7 +13,7 @@ const report: Pick<RunReportProjection, 'webToolsBackend' | 'usagePerStage' | 'c
 describe('research status (#744)', () => {
   it.each(['search-openai', 'search-anthropic'])('discloses %s as unmeasured in frozen plans and every Run outcome', (backendId) => {
     const native = { ...backend, backendId, selectionSource: 'model-channel' as const, sourceLabel: '官方渠道' };
-    expect(researchPlanLine(native)).toContain('官方渠道 自带的联网搜索（未实测）');
+    expect(researchPlanLine(native)).toContain('官方渠道（未实测） 自带的联网搜索');
     for (const classification of ['completed', 'cancelled'] as const) {
       expect(researchStatusLine({ ...report, webToolsBackend: native, classification })).toContain('（未实测）');
     }

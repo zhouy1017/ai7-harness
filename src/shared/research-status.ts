@@ -17,12 +17,21 @@ export function researchUnavailableLine(code: string | null | undefined, reason:
 
 /** Always reads the Run's frozen selection, never the current settings. */
 export function researchBackendName(backend: FrozenWebToolsBackend): string {
-  return `${BACKEND_NAMES[backend.backendId] ?? backend.backendId}${backend.backendId === 'search-openai' || backend.backendId === 'search-anthropic' ? '（未实测）' : ''}`;
+  return `${BACKEND_NAMES[backend.backendId] ?? backend.backendId}${measurementSuffix(backend)}`;
+}
+
+function measurementSuffix(backend: FrozenWebToolsBackend): string {
+  return backend.backendId === 'search-openai' || backend.backendId === 'search-anthropic' ? '（未实测）' : '';
+}
+
+/** The same native source disclosure for review configuration, prepared plans and Run Reports. */
+export function researchModelChannelLabel(backend: FrozenWebToolsBackend): string {
+  return `${backend.sourceLabel ?? BACKEND_NAMES[backend.backendId] ?? backend.backendId}${measurementSuffix(backend)}`;
 }
 
 export function researchPlanLine(backend: FrozenWebToolsBackend | undefined): string {
   if (backend === undefined) return '未联网核查';
-  if (backend.selectionSource === 'model-channel') return `将使用 ${backend.sourceLabel ?? BACKEND_NAMES[backend.backendId] ?? backend.backendId} 自带的联网搜索${backend.backendId === 'search-openai' || backend.backendId === 'search-anthropic' ? '（未实测）' : ''}`;
+  if (backend.selectionSource === 'model-channel') return `将使用 ${researchModelChannelLabel(backend)} 自带的联网搜索`;
   return `未联网核查 · ${researchBackendName(backend)} · 已冻结后端，尚未执行`;
 }
 
@@ -43,7 +52,7 @@ export function researchStatusLine(report: Pick<RunReportProjection, 'webToolsBa
   // Issue #1226: sends to any other backend than the frozen default went to its frozen 备用来源, counted per backend.
   const switched = Object.entries(usage.searchCalls ?? {}).filter(([id, count]) => id !== backend.backendId && count > 0);
   const source = backend.selectionSource === 'model-channel'
-    ? `随模型渠道 · ${backend.sourceLabel ?? BACKEND_NAMES[backend.backendId] ?? backend.backendId} 自带搜索${backend.backendId === 'search-openai' || backend.backendId === 'search-anthropic' ? '（未实测）' : ''}`
+    ? `随模型渠道 · ${researchModelChannelLabel(backend)} 自带搜索`
     : researchBackendName(backend);
   const suffix = ` · ${source}${switched.length === 0 ? '' : ` · 已切换备用来源 ${switched.map(([id, count]) => `${BACKEND_NAMES[id] ?? id} ${count} 次`).join('、')}`}`;
   // A Run that froze a backend and stopped short never reads as 未联网核查, even before its first search.

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { technicalReviewBasis } from '../../src/shared/review-basis.js';
 import { describe, expect, it } from 'vitest';
 import { EditorialStore } from '../../src/service/store.js';
 import { resolveSourceCheckoutLaunchPolicy, DEVELOPER_LIVE_POLICY_BINDING, ORDINARY_PRODUCTION_ALLOWED_BINDINGS } from '../../src/service/launch-policy.js';
@@ -76,7 +77,8 @@ describe('a review Run freezes its search backend', () => {
       const category = workspace.categories.find((entry) => entry.categoryId === 'factual-review')!;
       expect(workspace.categories.find((entry) => entry.categoryId === 'academic-integrity')!.available).toBe(true);
       expect(category.available).toBe(true);
-      expect(category.basis.modelChannelSearchLabel).toBe(store.getModelServiceRouteConnection(route)!.binding.providerLabel);
+      expect(category.basis.modelChannelSearchLabel).toBe(store.getModelServiceRouteConnection(route)!.binding.providerLabel + (route === 'deepseek-open-platform' ? '' : '（未实测）'));
+      expect(technicalReviewBasis(category.basis).includes('（未实测）')).toBe(route !== 'deepseek-open-platform');
       const backendId = `search-${route.split('-')[0]}`;
       const connections = store.getSearchBackendConnections();
       const prepare = () => {

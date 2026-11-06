@@ -1,4 +1,4 @@
-import { researchBackendName } from '../../shared/research-status.js';
+import { researchModelChannelLabel } from '../../shared/research-status.js';
 import { selectedProcedureForBook, resolveProcedurePin, procedureStopped } from '../procedures/editable.js';
 import { resolveProcedureDefinition, readProcedurePlanPin } from '../procedures/definition-store.js';
 import { reviewProcedureId } from '../procedures/preinstalled.js';
@@ -4239,7 +4239,7 @@ export class ReviewRunStore {
       if (entry.searchEngine) {
         try {
           const source = ledger.currentResearchBackend();
-          if (source?.selectionSource === 'model-channel') modelChannelSearchLabel = source.sourceLabel ?? researchBackendName(source);
+          if (source?.selectionSource === 'model-channel') modelChannelSearchLabel = researchModelChannelLabel(source);
         } catch (error) {
           if (!(error instanceof AnalysisError)) throw error;
           researchUnavailableReason = error.message;
