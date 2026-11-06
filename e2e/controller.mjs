@@ -1639,6 +1639,7 @@ export const JOURNEY_LOCATIONS = Object.freeze({
     'capture-restart',
     'j14-capture-keyboard-reflow-forced-colors',
     'skill-import-validate-enable',
+    'exemplar-catalogue-ordinary',
     'zero-activity',
   ]),
 });
