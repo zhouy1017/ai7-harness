@@ -108,7 +108,14 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
   let favourites: ModelFavourites = {};
   let stopFollow: (() => void) | undefined;
 
+  function focusSearchSettings(): void {
+    const heading = document.querySelector<HTMLElement>('[data-search-backends="true"] h3');
+    heading?.scrollIntoView({ block: 'start' });
+    heading?.focus({ preventScroll: true });
+  }
+
   function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
+    const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
     stopFollow?.();
     const content = panel();
     content.classList.add('model-service-settings');
@@ -193,16 +200,11 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     }
     const actions = element('div', 'button-row');
     actions.append(button('返回', 'quiet', () => void returnToOrigin()));
-    if (technicalLayerVisible) content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }));
-    const proxy = renderModelServiceProxyBlock(projection);
-    if (technicalLayerVisible) content.append(proxy);
-    else {
-      const details = element('details', 'model-service-proxy-options');
-      details.append(element('summary', undefined, '网络代理'), proxy);
-      content.append(details);
-    }
+    content.append(renderSearchBackendSettings(projection, { api: window.ai7, render: renderModelServiceSettingsProjection, setStatus, errorMessage: rendererErrorMessage }),
+      renderModelServiceProxyBlock(projection));
     content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
+    if (searchHadFocus) focusSearchSettings();
     let reading = false;
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);
@@ -230,7 +232,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     if (projection.channels.some((channel) => channel.models.length === 0 && channel.route !== null && projection.routeChoice.routes.some((route) => route.route === channel.route && route.connection?.credentialOperationState === 'ready')) && projection.modelDiscovery?.status !== 'failure') void follow(true);
   }
 
-  async function renderModelServiceSettings(): Promise<void> {
+  async function renderModelServiceSettings(focus?: 'search'): Promise<void> {
     setStatus('正在读取模型服务状态…', 'busy');
     modelServiceChannel = null;
     modelChoices.clear();
@@ -240,6 +242,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       favourites = preferences.values['model.favourites'];
       renderModelServiceSettingsProjection(projection);
       setStatus('模型服务设置已打开');
+      if (focus === 'search') focusSearchSettings();
     } catch (error) {
       setStatus(rendererErrorMessage(error, '无法读取模型服务设置。'), 'error');
     }

@@ -87,6 +87,7 @@ beforeEach(() => {
   } });
 });
 afterEach(() => {
+  setTechnicalLayerVisible(true);
   for (const surface of surfaces) surface.destroy();
   Reflect.deleteProperty(MiniElement.prototype, 'options');
   Reflect.deleteProperty(MiniElement.prototype, 'prepend');
@@ -171,6 +172,7 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     await flush(); expect(cancel).toHaveBeenCalledWith({ jobId: OTHER }); expect(authorize).not.toHaveBeenCalled();
   });
   it.each([true, false])('shows truthful native search availability in the new-review dialog (admitted: %s)', async (admitted) => {
+    setTechnicalLayerVisible(false);
     const view = mount();
     const next = workspace();
     const available = { available: true, unavailableReason: null };
@@ -191,11 +193,11 @@ describe('terminal factual results through the mounted review workspace (#1058 /
     if (!admitted) expect(option.querySelector('.review-category-reason')!.textContent).toBe('此类别需要联网检索。');
     const box = option.querySelector('input')!; box.checked = true; box.dispatchEvent({ type: 'change' });
     expect(view.root.querySelector('.review-network-notice')!.hidden).toBe(admitted);
+    const settings = view.root.querySelector('[data-review-action="open-search-settings"]')!;
+    expect(settings.hidden).toBe(false); settings.click(); expect(view.searchSettings).toHaveBeenCalledOnce();
     if (!admitted) {
       expect(view.root.querySelector('.review-network-notice')!.textContent).toBe('联网检索尚未就绪，请到设置中配置后再开始。');
       expect(view.root.querySelector('[data-review-action="start"]')!.disabled).toBe(true);
-      const settings = view.root.querySelector('[data-review-action="open-search-settings"]')!;
-      expect(settings.hidden).toBe(false); settings.click(); expect(view.searchSettings).toHaveBeenCalledOnce();
     }
 
   });

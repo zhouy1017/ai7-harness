@@ -796,8 +796,40 @@ async function main() {
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-model-settings-hub');
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
     await click(primary, '模型服务', 'ordinary-model-entry');
-    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles')`, 'ordinary-model-single-view');
+    await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles') && document.querySelectorAll('[data-search-backend]').length===5`, 'ordinary-model-single-view');
     await assertOrdinaryModelReachability(primary);
+    // #1370: both configuration sections are directly mounted in ordinary mode. CI has no search keys;
+    // credential save/test success is covered by the ordinary-production renderer/service tests, never a live provider.
+    await assertRenderer(primary, `(() => {
+      const search=document.querySelector('[data-search-backends="true"]'); const proxy=document.querySelector('[data-model-service-proxy]');
+      return search instanceof HTMLElement && proxy instanceof HTMLElement && search.parentElement===proxy.parentElement && !proxy.closest('details') &&
+        search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]');
+    })()`, 'ordinary-search-proxy-visible');
+    await assertRenderer(primary, `!/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-technical-identifiers');
+    // The 未实测 disclosure names hit rates; detailed measurement labels and numeric values remain technical-only.
+    await assertRenderer(primary, `!/评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
+    await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
+    await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
+    await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');
+    await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); const address=document.querySelector('input[aria-label="代理 URL"]'); if(!(mode instanceof HTMLSelectElement)||!(address instanceof HTMLInputElement))return false; mode.value='proxy'; mode.dispatchEvent(new Event('change')); address.value='http://127.0.0.1:1'; return !address.disabled; })()`, 'ordinary-proxy-configure');
+    await click(primary, '保存网络代理', 'ordinary-proxy-save');
+    await waitFor(primary, `document.querySelector('[data-model-service-proxy="proxy"]') && !document.querySelector('.model-service-proxy-form button')?.disabled`, 'ordinary-proxy-saved');
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-search-roundtrip-settings');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-search-roundtrip-ready');
+    await click(primary, '模型服务', 'ordinary-search-roundtrip-return');
+    await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('select[aria-label="网络代理方式"]')?.value==='proxy' && document.querySelector('input[aria-label="代理 URL"]')?.value==='http://127.0.0.1:1'`, 'ordinary-search-proxy-roundtrip-restored');
+    await assertRenderer(primary, `(() => { document.querySelector('[data-action="always-use-selected-search-backend"]').click(); return true; })()`, 'ordinary-search-source-reset');
+    await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===false && document.querySelector('[data-action="always-use-selected-search-backend"]')?.disabled===false`, 'ordinary-search-source-reset-saved');
+    await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); mode.value='direct'; mode.dispatchEvent(new Event('change')); return true; })()`, 'ordinary-proxy-reset');
+    await click(primary, '保存网络代理', 'ordinary-proxy-reset-save');
+    await waitFor(primary, `document.querySelector('[data-model-service-proxy="direct"]')`, 'ordinary-proxy-reset-saved');
+    // The deliberately unused loopback proxy reports a persistent error. Dismiss it through the UI
+    // after restoring direct mode so the following page can expose its own ordinary status.
+    await assertRenderer(primary, `(() => {
+      const status=document.querySelector('#persistence-status'); const dismiss=status?.querySelector('button[aria-label="关闭错误提示"]');
+      if(!(status instanceof HTMLElement)||status.dataset.tone!=='error'||!status.textContent.includes('代理不可达')||!(dismiss instanceof HTMLButtonElement))return false;
+      dismiss.click(); return status.hidden;
+    })()`, 'ordinary-proxy-probe-error-dismissed');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
@@ -1487,9 +1519,10 @@ async function main() {
     })()`, 'model-service-unbound-provider-absent');
     await assertRenderer(primary, `(() => {
       const flow=document.querySelector('[data-model-service-flow]');
-      const badges=[document.querySelector('[data-search-backends] h3')];
-      if(flow?.querySelector('[data-action="select-main-role-model"]')?.dataset.developerOnly==='true')return false;
-      if(!badges.every(node=>node instanceof HTMLElement && getComputedStyle(node,'::after').content.includes('开发者')))return false;
+      const mainRole=flow?.querySelector('[data-action="select-main-role-model"]');
+      const searchHeading=document.querySelector('[data-search-backends] h3');
+      if(!(mainRole instanceof HTMLButtonElement)||mainRole.hasAttribute('data-developer-only')||
+        !(searchHeading instanceof HTMLElement)||searchHeading.hasAttribute('data-developer-only'))return false;
       const channels=Array.from(flow?.querySelectorAll('[data-model-channel]')??[]).map((node)=>node.dataset.modelChannel);
       const zen=flow?.querySelector('[data-model-channel="opencode-zen"] input');
       if(JSON.stringify(channels)!==JSON.stringify(['opencode-go','deepseek-open-platform','openai-platform','anthropic-claude','google-gemini','opencode-zen'])||!(zen instanceof HTMLInputElement))return false;
@@ -1725,7 +1758,12 @@ async function main() {
 
     await primary.send('Emulation.setDeviceMetricsOverride', { width: 640, height: 800, deviceScaleFactor: 2, mobile: false });
     await primary.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await assertRenderer(primary, `document.documentElement.scrollWidth<=document.documentElement.clientWidth+2 && getComputedStyle(document.querySelector('.model-credential-form')).gridTemplateColumns.split(' ').length===1`, 'model-settings-zoom-reflow');
+    const modelZoom = await primary.evaluate(`(() => ({
+      viewportFits: document.documentElement.scrollWidth<=document.documentElement.clientWidth+2,
+      credentialFormSingleColumn: getComputedStyle(document.querySelector('.model-credential-form')).gridTemplateColumns.split(' ').length===1,
+      candidateCardsFit: Array.from(document.querySelectorAll('[data-search-candidate]')).every(card=>card.scrollWidth<=card.clientWidth+2)
+    }))()`);
+    requireJourney(modelZoom.viewportFits && modelZoom.credentialFormSingleColumn && modelZoom.candidateCardsFit, 'model-settings-zoom-reflow', modelZoom);
     await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] });
     await assertRenderer(primary, `matchMedia('(forced-colors: active)').matches && getComputedStyle(document.querySelector('.model-role-card')).boxShadow==='none' && getComputedStyle(document.querySelector('.model-credential-form input')).borderStyle!=='none'`, 'model-settings-forced-colors');
     await primary.send('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'none' }] });

@@ -2677,7 +2677,7 @@ export function mountReviewWorkspace(options: MountReviewWorkspaceOptions): Revi
       notDoValue.textContent = estimate.notDo; costValue.textContent = estimate.cost;
       const networkBlocked = selected.some((entry) => entry.networkUnavailable === true);
       networkNotice.hidden = !networkBlocked;
-      networkSettings.hidden = !networkBlocked || options.openSearchSettings === undefined;
+      networkSettings.hidden = !selected.some((entry) => entry.searchEngine) || options.openSearchSettings === undefined;
       networkNotice.textContent = networkBlocked ? '联网检索尚未就绪，请到设置中配置后再开始。' : '';
       problem.textContent = state.problem ?? '';
       problem.hidden = state.problem === null;

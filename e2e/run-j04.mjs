@@ -2932,6 +2932,27 @@ async function main() {
     // C1: no coverage, records or bare controls before the first review.
     await assertRenderer(renderer, `(() => { const card=document.querySelector('.review-workspace-card'); return card?.dataset.reviewState==='empty' && card.classList.contains('surface-empty') && card.querySelector('h2')?.textContent==='审阅' && card.querySelector('.state-term')?.textContent==='尚未审阅' && card.querySelector('.lede')?.textContent==='按类别审读稿件，发现会同步到原文。' && card.querySelector('[data-review-action="new-review"]') && !card.querySelector('table, select, .review-coverage, .review-runs-section, [data-list-position]'); })()`, 'review-empty-card');
 
+    // #1370: exercise the actual review navigation in ordinary mode. The deterministic review route
+    // needs no provider search, but selecting a search category still offers its configuration entry.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-search-mode-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-search-mode-settings-ready');
+    await click(renderer, '帮助', 'review-search-mode-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true`, 'review-search-mode-help-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'review-search-mode-off');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'review-search-ordinary-mode');
+    await openReviewDestination(renderer, 'review-search-ordinary-review');
+    await reviewAction(renderer, '[data-review-action="new-review"]', 'review-search-new');
+    await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-search-sheet');
+    await assertRenderer(renderer, `(() => { const box=document.querySelector('input[name="review-category"][value="factual-review"]'); if(!(box instanceof HTMLInputElement)||box.disabled)return false; if(!box.checked)box.click(); const action=document.querySelector('[data-review-action="open-search-settings"]'); if(!(action instanceof HTMLButtonElement)||action.hidden||action.disabled)return false; action.click(); return true; })()`, 'review-search-settings-action');
+    await waitFor(renderer, `(() => { const heading=document.querySelector('[data-screen="model-service"] [data-search-backends="true"] h3'); if(!(heading instanceof HTMLElement))return false; const box=heading.getBoundingClientRect(); return document.activeElement===heading && box.top>=0 && box.bottom<=innerHeight && document.querySelector('[data-model-service-proxy]') && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'review-search-settings-focused-visible');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'review-search-restore-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'review-search-restore-settings-ready');
+    await click(renderer, '帮助', 'review-search-restore-help');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===false`, 'review-search-restore-help-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement))return false; input.click(); return true; })()`, 'review-search-mode-on');
+    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='true'`, 'review-search-mode-restored');
+    await openReviewDestination(renderer, 'review-search-return');
+
     at('review-sheet');
     await reviewAction(renderer, '[data-review-action="new-review"]', 'review-new');
     await waitFor(renderer, `document.querySelector('dialog.review-sheet')?.open===true`, 'review-sheet-open');

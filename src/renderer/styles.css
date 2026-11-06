@@ -2312,6 +2312,8 @@ body { transition: padding-left var(--motion-slow) var(--motion-ease), padding-r
 .model-service-flow-models { max-height: 18rem; overflow-y: auto; }
 .model-service-current-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: .5rem 1rem; }
 .model-service-current-roles p { margin: .4rem 0; overflow-wrap: anywhere; }
+[data-search-backends] > h3 { scroll-margin-top: 1rem; }
+.search-candidate-technical { overflow-wrap: anywhere; }
 .model-service-proxy-form { display: grid; grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 2fr) auto; gap: .65rem; align-items: center; }
 .model-service-proxy-form :is(input, select), .model-service-flow-step > label input { width: 100%; min-width: 0; border: 1px solid var(--boundary); border-radius: 8px; padding: .65rem .8rem; background: var(--surface); color: var(--text); }
 .model-service-technical { margin: 1rem 0; }
