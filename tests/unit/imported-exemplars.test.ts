@@ -32,7 +32,7 @@ describe('imported exemplar boundaries and editor words', () => {
     const entry: ExemplarProjection = { documentId: 'd', revisionId: 'r', revisionDigest: 'a'.repeat(64), typeId: 'news-release', typeLabel: '新闻稿',
       version: 2, deliveredTo: '', deliveredAt: 'T', archivedAt: 'T', eligibility: 'excluded', earlierVersions: [1], earlierVersionCount: 1,
       imported: { sourceName: '测试.txt', decisions: 2 } };
-    expect(exemplarLine(entry, (instant) => instant)).toBe('新闻稿 · 版本 2 · 导入于 T · 原件：测试.txt · 学习准入：明确排除 · 此前导入过 1 个版本');
+    expect(exemplarLine(entry, (instant) => instant)).toBe('新闻稿 · 版本 2 · 导入于 T · 原件：测试.txt · 此前导入过 1 个版本 · 学习准入：明确排除');
     expect(exemplarLine({ ...entry, eligibility: 'deferred' }, (instant) => instant)).toContain('稍后决定');
   });
 });

@@ -2512,9 +2512,9 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.knowledge-base')?.dataset.knowledgeTab === 'exemplars' && document.querySelector('.knowledge-panel')?.dataset.exemplarBooks === '1'`, 'exemplars-painted');
     const exemplars = await renderer.evaluate(`window.ai7.inspectExemplars()`);
     const exemplarPage = await renderer.evaluate(`Array.from(document.querySelectorAll('.exemplar-book'), (card) => ({
-      bookId: card.dataset.bookId, title: card.querySelector('h3')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
+      bookId: card.dataset.bookId, title: card.querySelector('.exemplar-title')?.textContent ?? null, attribution: card.querySelector('.exemplar-attribution')?.textContent ?? null,
       designation: card.querySelector('.exemplar-designation')?.textContent ?? null, more: document.querySelector('.exemplars-more')?.hidden ?? null,
-      items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.textContent]),
+      items: Array.from(card.querySelectorAll('.exemplar-items li'), (item) => [item.dataset.exemplarType, item.dataset.exemplarVersion, item.querySelector('.exemplar-context')?.textContent, item.querySelector('.exemplar-kind-badge')?.textContent, item.querySelector('.exemplar-actions')?.textContent]),
       readersReports: card.querySelectorAll('.exemplar-readers-reports li').length,
       later: Array.from(document.querySelectorAll('.knowledge-panel .exemplars-later'), (line) => line.textContent),
     }))`);
@@ -2525,11 +2525,12 @@ async function main() {
       exemplarPage[0]?.designation?.startsWith(`第 ${exemplarBook.publicationOrdinal} 次设为发稿版本于 `) === true &&
       exemplarPage[0].designation.endsWith(' · 已在 AI7 内撤回；之后交付的文档，另设发稿版本后才归入') && exemplarPage[0].more === true &&
       exemplarNews?.typeLabel === '新闻稿' && exemplarNews.eligibility === 'house-only' &&
-      exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === `《${EXCERPT.title}》` &&
+      exemplarNews.earlierVersions.length === 1 && exemplarPage.length === 1 && exemplarPage[0].bookId === bookId && exemplarPage[0].title === (exemplarNews.title && exemplarNews.title !== exemplarNews.typeLabel ? exemplarNews.title : `《${EXCERPT.title}》新闻稿`) &&
       exemplarPage[0].attribution === '作者：未填写 · 责编：未填写' && exemplarPage[0].items.length === exemplarBook.exemplars.length &&
       exemplarPage[0].items[0][0] === 'news-release' && exemplarPage[0].items[0][1] === String(exemplarNews.version) &&
-      exemplarPage[0].items[0][2].startsWith(`新闻稿 · 版本 ${exemplarNews.version} · 交付给`) &&
-      exemplarPage[0].items[0][2].includes(` · 学习准入：仅本社 · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
+      exemplarPage[0].items[0][2].startsWith(`来自《${EXCERPT.title}》（作者：未填写 · 责编：未填写） · 版本 ${exemplarNews.version} · 交付给`) &&
+      exemplarPage[0].items[0][2].includes(` · 此前还交付过版本 ${exemplarNews.earlierVersions[0]}`) &&
+      exemplarPage[0].items[0][3] === '工作文档 · 新闻稿' && exemplarPage[0].items[0][4] === '学习准入：仅本社' &&
       // This Book has no 审稿意见; earlier Books can now be imported through the KB.
       exemplarBook.readersReports.length === 0 && exemplarPage[0].readersReports === 0 &&
       JSON.stringify(exemplarPage[0].later) === JSON.stringify([]),

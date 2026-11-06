@@ -33,6 +33,8 @@ import {
   exemplarAttribution,
   exemplarDesignation,
   exemplarLine,
+  exemplarTitle,
+  exemplarKind,
   exemplarSkippedNote,
   GUIDELINE_CANCEL,
   GUIDELINE_CONFIRM,
@@ -143,11 +145,19 @@ describe('范例 (Issue #427, S79b)', () => {
       documentId: 'd', typeId: 'news-release', typeLabel: '新闻稿', version: 3, revisionId: 'r', revisionDigest: 'a'.repeat(64),
       deliveredTo: '编辑部', deliveredAt: 't1', archivedAt: 't2', earlierVersionCount: 2, earlierVersions: [1, 2], eligibility: 'house-only' as const,
     };
-    expect(exemplarLine(exemplar, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社 · 此前还交付过版本 1、2');
+    expect(exemplarLine(exemplar, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 此前还交付过版本 1、2 · 学习准入：仅本社');
     expect(exemplarLine({ ...exemplar, earlierVersionCount: 0, earlierVersions: [] }, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社');
     // Past the versions it names, the line says how many there were.
     expect(exemplarLine({ ...exemplar, version: 14, earlierVersionCount: 12, earlierVersions: [12, 13] }, (iso) => iso))
-      .toBe('新闻稿 · 版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社 · 此前还交付过 12 个版本，最近的是版本 12、13');
+      .toBe('新闻稿 · 版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 此前还交付过 12 个版本，最近的是版本 12、13 · 学习准入：仅本社');
+    expect(exemplarLine({ ...exemplar, title: '新书发布会' }, (iso) => iso)).toContain('新闻稿 · 新书发布会 · 版本 3');
+    expect(exemplarTitle({ bookTitle: '甲书' }, exemplar)).toBe('《甲书》新闻稿');
+    expect(exemplarTitle({ bookTitle: '甲书' }, { ...exemplar, title: '新闻稿' })).toBe('《甲书》新闻稿');
+    expect(exemplarTitle({ bookTitle: '甲书' }, { ...exemplar, title: '新书发布会' })).toBe('新书发布会');
+    expect(exemplarKind(exemplar)).toBe('工作文档 · 新闻稿');
+    expect(exemplarKind({ ...exemplar, imported: {} })).toBe('写作范例 · 新闻稿');
+    expect(exemplarKind({ typeId: 'readers-report-author', typeLabel: '审稿意见 · 给作者的修改意见' })).toBe('审稿意见 · 给作者的修改意见');
+    expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')?.holds).toContain('不含图书原稿');
     // A damaged imported version is named by Book and document type as 写作任务 names it, and skipped (Issue #800).
     expect(exemplarSkippedNote(['以前出版的测试图书 · 新闻稿'])).toBe('另有 1 份范例记录已损坏，无法读取：《以前出版的测试图书 · 新闻稿》');
     expect(exemplarSkippedNote(['甲书 · 新闻稿', '乙书 · 审稿意见']))
