@@ -27,13 +27,13 @@ export const SEARCH_CANDIDATE_OUTCOME_LABELS: Readonly<Record<SearchCandidatePro
   'transport-unknown': '传输结果未知',
 });
 
-/** Explain the resolver's current source using the selected Main route and only a saved, measured native backend. */
+/** Explain the resolver's current source using the selected Main route and a ready model channel admitted by the selected policy. */
 export function effectiveSearchSourceLine(projection: ModelServiceSettingsProjection): string {
   const ready = projection.searchBackends.backends.filter((backend) => backend.connection.credentialOperationState === 'ready');
   const mainRoute = projection.routeChoice?.routes.find((route) => route.inUse);
   const native = mainRoute?.connection?.credentialOperationState !== 'ready' || projection.searchBackends.alwaysUseSelectedBackend ? undefined
-    : projection.searchBackends.backends.find((backend) => mainRoute.route.startsWith(`${backend.backendId.slice('search-'.length)}-`));
-  if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索`;
+    : projection.launchPolicy.providerProcessing.settingsSearchTools?.websearch.backends.find((backend) => mainRoute.route.startsWith(`${backend.id.slice('search-'.length)}-`));
+  if (native !== undefined) return `当前生效来源：随模型渠道 · ${mainRoute!.binding.providerLabel} 自带搜索${native.id === 'search-openai' || native.id === 'search-anthropic' ? '（未实测）' : ''}`;
   const selected = ready.find((backend) => backend.backendId === projection.searchBackends.selectedBackendId) ?? ready[0];
   return selected === undefined ? '当前生效来源：暂不可用 · 当前模型渠道不自带联网搜索，请在 设置 › 联网检索 保存一个后端密钥。'
     : projection.searchBackends.alwaysUseSelectedBackend ? `当前生效来源：编辑指定 · ${selected.name}`
@@ -202,7 +202,8 @@ export function renderSearchBackendSettings(projection: ModelServiceSettingsProj
     section.append(element('h4', undefined, '候选接口 · 未实测'));
     for (const candidate of projection.searchBackends.candidates) section.append(candidateCard(candidate, options,
       candidate.protocol === 'deepseek-direct-search'
-        ? projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready')
+        ? projection.searchBackends.backends.some((backend) => backend.backendId === candidate.backendId && backend.connection.credentialOperationState === 'ready') ||
+          (projection.launchPolicy.providerProcessing?.searchConnectionTest?.credentialFallbackSlot !== undefined && projection.routeChoice.routes.some((route) => route.route === 'deepseek-open-platform' && route.connection?.credentialOperationState === 'ready'))
         : projection.routeChoice.routes.some((route) => route.route.startsWith(`${candidate.backendId.slice('search-'.length)}-`) && route.connection?.credentialOperationState === 'ready')));
   }
   return section;

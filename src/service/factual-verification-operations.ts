@@ -140,7 +140,7 @@ export function internalFactualRecheckCandidate(host: FactualVerificationOperati
   const admitted = liveKindRule(launch.policy, 'factual-recheck', [], 'background');
   const rule = admitted?.factualRecheck;
   if (enrollment.kind !== 'factual-recheck' || enrollment.state !== 'active' || enrollment.paused || enrollment.version.share === null ||
-    launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || (policy?.providerProcessingVersion !== 'v31' && (policy?.providerProcessingVersion !== 'v32' && policy?.providerProcessingVersion !== 'v33')) ||
+    launch.operationalScope !== 'ordinary-production' || live?.scope !== 'ordinary-production' || (policy?.providerProcessingVersion !== 'v31' && (policy?.providerProcessingVersion !== 'v32' && policy?.providerProcessingVersion !== 'v33' && policy?.providerProcessingVersion !== 'v34')) ||
     rule?.maximumClaims !== 1 || host.replacementFrozen()) return null;
   const binding = host.getConfiguredModelRoleBinding('main-editorial');
   if (binding === null || canonicalJson(binding) !== canonicalJson({ route: live.route, endpoint: live.endpoint, model: live.model,

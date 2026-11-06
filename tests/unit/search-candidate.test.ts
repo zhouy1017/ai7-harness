@@ -12,6 +12,7 @@ import { candidateConfigurationDigestOf, legacyConfigurationDigestOf, searchBack
 import { deepseekBackend, deepseekDirectFetchRequest, deepseekDirectSearchRequest, readDeepseekDirectFetch, readDeepseekDirectSearch } from '../../src/service/provider/search-backends/deepseek.js';
 import type { SearchConnectionTestPolicy } from '../../src/shared/protocol.js';
 import { installNodeNetworkDenial } from '../../src/shared/network-denial.js';
+import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 
 // Issue #1055 into W22-S10a #1181: the DeepSeek direct-search candidate is declared beside the legacy Messages backend and
 // inherits none of it. Nothing here sends: transports are captures and credentials are placeholders.
@@ -94,6 +95,25 @@ function decide(overrides: Partial<Parameters<typeof evaluateSearchCandidateProb
 }
 
 describe('the candidate probe decision and its single credential release', () => {
+  it.each(['deepseek', 'openai', 'anthropic'])('issues and redeems one v34 %s candidate ticket for its exact declared slot', async (vendor) => {
+    const declared = resolveSourceCheckoutLaunchPolicySync(process.cwd(), 'ordinary-production').providerProcessing.searchConnectionTest!;
+    const policy = [declared, ...declared.candidates!].find((entry) => entry.backendId === `search-${vendor}`)!;
+    const candidate = searchBackendCandidate(policy.backendId, policy.candidateId);
+    const reference = randomUUID(); let reads = 0;
+    const decision = evaluateSearchCandidateProbe({ operationalScope: 'ordinary-production', providerProcessingVersion: 'v34', policy,
+      candidate: { ...candidate.search, backendId: candidate.backendId, candidateId: candidate.candidateId, credentialSlot: policy.credentialSlot, arguments: candidate.search.probeArguments },
+      configurationDigest: 'a'.repeat(64), ...(vendor === 'deepseek' ? {} : { model: 'account-selected-model' }),
+      connection: () => ({ credentialReference: reference, credentialOperationState: 'ready' }), developmentReference: () => false });
+    if (decision.decision !== 'call-search-candidate-probe') throw new Error('expected an admitted candidate ticket');
+    const { ticket } = decision;
+    expect(ticket).toMatchObject({ credentialSlot: policy.credentialSlot, credentialReference: reference, endpoint: policy.endpoint, arguments: policy.arguments });
+    expect(redeemSearchCandidateProbe(ticket)).toBe(true); expect(redeemSearchCandidateProbe(ticket)).toBe(false);
+    const broker = new CredentialBroker({ resolve: async (uuid) => { expect(uuid).toBe(reference); reads += 1; return 'placeholder'; } }, { developmentReferences: 'refused' });
+    const binding = { bindingDigest: ticket.bindingDigest, modelRole: 'Main Editorial Role' as const, slot: ticket.credentialSlot, credentialReference: reference };
+    expect(await broker.releaseTo(binding, ticket, async () => 'sent')).toBe('sent');
+    await expect(broker.releaseTo(binding, ticket, async () => 'again')).rejects.toMatchObject({ code: 'CREDENTIAL_RELEASE_REFUSED' });
+    expect(reads).toBe(1);
+  });
   it('refuses development-ci, fixture-recording, developer-live and a missing policy before reading the connection', () => {
     for (const operationalScope of ['development-ci', 'fixture-recording', 'developer-live', null]) {
       const reads = { connection: 0 };

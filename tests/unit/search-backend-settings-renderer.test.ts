@@ -4,6 +4,7 @@ import { SEARCH_CANDIDATE_PROBE_LABEL, candidateProbeLines, effectiveSearchSourc
 import type { ModelServiceSettingsProjection, SearchBackendProbeProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { resolveSourceCheckoutLaunchPolicySync } from '../../src/service/launch-policy.js';
 import { expectNoTechnicalText } from '../support/technical-layer-scan.js';
 
 // 设置 › 模型服务 › 联网检索 (Issue #1055 into W22-S10a #1181) over the real registry's projection and stubbed API calls: the
@@ -17,7 +18,7 @@ const projection = (): ModelServiceSettingsProjection => ({
   searchBackends: searchBackendSettingsProjection(SHIPPED.map((backendId) => ({ backendId, credentialReference: '11111111-1111-4111-8111-111111111111', credentialOperationState: 'ready',
     selected: backendId === 'search-tinyfish', selectedAt: '2026-10-29T00:00:00.000Z' }))),
   routeChoice: { routes: [], unsupportedProviders: [], effectLabel: '' },
-  launchPolicy: { operationalScope: 'development-ci' },
+  launchPolicy: resolveSourceCheckoutLaunchPolicySync(process.cwd(), 'ordinary-production'),
 } as unknown as ModelServiceSettingsProjection);
 
 const SUCCESS: SearchBackendProbeProjection = { backendId: 'search-deepseek', reachable: true, latencyMs: 12, resultCount: 7,
@@ -34,10 +35,23 @@ function section(probe: SearchBackendSettingsApi['probeSearchBackend']) {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('the direct-search candidate in 联网检索', () => {
+  it.each(['openai-platform', 'anthropic-claude'] as const)('shows %s admitted native source in ordinary mode and restores it after an override round trip', (route) => {
+    setTechnicalLayerVisible(false);
+    const settings = projection();
+    Object.assign(settings, { routeChoice: { routes: [{ route, inUse: true, binding: { providerLabel: '官方渠道' }, connection: { credentialOperationState: 'ready' } }] } });
+    const render = () => renderSearchBackendSettings(settings, { api: { probeSearchBackend: vi.fn(), selectSearchBackend: vi.fn(), saveSearchBackendCredential: vi.fn(), removeSearchBackendCredential: vi.fn() }, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
+    for (const override of [false, true, false]) {
+      settings.searchBackends.alwaysUseSelectedBackend = override;
+      const node = render();
+      expect(node.textContent).toContain(override ? '编辑指定 · TinyFish' : '随模型渠道 · 官方渠道 自带搜索（未实测）');
+      expectNoTechnicalText(node);
+      expect(node.querySelectorAll('[data-search-backend]')).toHaveLength(5);
+    }
+  });
   it('keeps candidate decisions and test outcomes without technical identifiers in ordinary mode', async () => {
     setTechnicalLayerVisible(false);
     const { node, api } = section(async () => SUCCESS);
-    expect(node.textContent).toContain('不能用于任务');
+    expect(node.textContent).toContain('不作为独立排名默认后端或备用来源');
     expect(node.textContent).toContain('尚未测量这一接口的命中率、延迟与可达性');
     expectNoTechnicalText(node);
     expect(node.textContent).not.toMatch(/https?:\/\/|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|配置摘要|评测参考|p50|中文命中率|国际命中率|命中率[ ：:]*[0-9]/u);
@@ -73,7 +87,7 @@ describe('the direct-search candidate in 联网检索', () => {
     const node = renderSearchBackendSettings(settings, { api, render: vi.fn(), setStatus: vi.fn(), errorMessage: (_error, fallback) => fallback }) as unknown as MiniElement;
     for (const service of ['openai', 'anthropic']) {
       const card = node.querySelector(`[data-search-candidate="${service}-native-search-v1"]`)!;
-      expect(card.textContent).toContain('未实测'); expect(card.textContent).toContain('不能用于任务');
+      expect(card.textContent).toContain('未实测'); expect(card.textContent).toContain('不作为独立排名默认后端或备用来源');
       const controls = card.querySelectorAll('button'); expect(controls).toHaveLength(1); expect(controls[0]!.disabled).toBe(false);
       controls[0]!.click(); await settle();
       expect(api.probeSearchBackend).toHaveBeenCalledWith({ backendId: `search-${service}`, candidateId: `${service}-native-search-v1` });
@@ -141,7 +155,7 @@ describe('the direct-search candidate in 联网检索', () => {
     const card = node.querySelector('[data-search-candidate="deepseek-direct-search-v1"]')!;
     expect(card.dataset['measurement']).toBe('not-measured');
     expect(card.textContent).toContain('未实测');
-    expect(card.textContent).toContain('不能用于任务');
+    expect(card.textContent).toContain('不作为独立排名默认后端或备用来源');
     expect(card.querySelectorAll('button').map((item) => item.textContent)).toEqual([SEARCH_CANDIDATE_PROBE_LABEL]);
     expect(card.querySelector('[data-search-candidate-probe]')!.textContent).toBe('');
   });

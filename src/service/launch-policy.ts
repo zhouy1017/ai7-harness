@@ -15,7 +15,7 @@ import { familyAdmissionRefusal, modelDisposition, providerPreflight, type Provi
 import { modelProfileFor, validModelId, type ProviderModelProfile } from './provider/model-profile.js';
 import { GENERATED_MODEL_PROFILES, GENERATED_ROUTE_DISPOSITIONS, GENERATED_ROUTE_PROFILES as PROVIDER_ROUTE_PROFILES } from './provider/provider-profiles.generated.js';
 import type { RemoteExecutionRoute } from './provider/egress-gate.js';
-import { SEARCH_BACKENDS } from './provider/search-backends.js'; import { SEARCH_RESPONSE_MAX_BYTES, SEARCH_SERVICE_TIMEOUT_MS } from './provider/search-service.js';
+import { SEARCH_BACKENDS, searchBackendCandidate } from './provider/search-backends.js'; import { SEARCH_RESPONSE_MAX_BYTES, SEARCH_SERVICE_TIMEOUT_MS } from './provider/search-service.js';
 import { CURRENT_PRODUCTION_POLICY_SHA256, CURRENT_ACTIVE_SET_SHA256, DEVELOPMENT_CI_POLICY_SHA256, ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
   selectedPolicyIdentityOf, localFixtureProfileOf } from '../shared/protocol.js';
 export { ORIGINAL_FIELDS_ACTIVE_SET_SHA256, ORIGINAL_FIELDS_POLICY_SHA256, LOCAL_FIXTURE_POLICY_SHA256, LOCAL_FIXTURE_MANIFEST_SHA256,
@@ -24,19 +24,19 @@ import { canonicalJson } from './analysis/canonical.js';
 
 /**
  * The source-checkout launch authority (ADR 0046, ADR 0065): the build-embedded carrier pins active
- * policy set v23, the sole active set for all four Provider Processing scopes, and names the three
+ * policy set v25, the sole active set for all four Provider Processing scopes, and names the three
  * scopes the built entry may bind from its launch form. `development-ci` is the default and binds
  * Provider Processing v1 (zero live transmissions); `developer-live` is bound only by the launch
  * argument `--trusted-operational-scope developer-live` on a developer host and binds the immutable
  * Provider Processing v24; `ordinary-production` is bound only by `--trusted-operational-scope ordinary-production`
- * and binds v32, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
+ * and binds v34, whose rules are filled from the editor's own configured provider binding. `fixture-recording`
  * is pinned by the active set but is not selectable from the source checkout. No environment variable or product
  * setting selects a scope; every invalid state resolves to the zero-transmission denial.
  */
 const CARRIER_PATH = 'config/source-checkout-launch-authority.json';
 const CARRIER_VERSION = 2;
-export const ACTIVE_SET_VERSION = 'v24' as const;
-const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v24.json';
+export const ACTIVE_SET_VERSION = 'v25' as const;
+const ACTIVE_SET_PATH = 'docs/policies/active-policy-set.v25.json';
 const ACTIVE_SET_SHA256 = CURRENT_ACTIVE_SET_SHA256;
 const PROVIDER_PINS = {
   'development-ci': {
@@ -50,8 +50,8 @@ const PROVIDER_PINS = {
     sha256: 'd0e3996ce7ba091200d83178b48fb578090bf73b509406182a2d5403ab2a4ebc',
   },
   'ordinary-production': {
-    version: 'v33',
-    canonicalPath: 'docs/policies/provider-processing-policy.v33.json',
+    version: 'v34',
+    canonicalPath: 'docs/policies/provider-processing-policy.v34.json',
     sha256: CURRENT_PRODUCTION_POLICY_SHA256,
   },
   'developer-live': {
@@ -491,8 +491,8 @@ function sameValue(actual: unknown, expected: unknown): boolean {
  * and the breaker are this build's constants. A registry with no shipped backend, a keyless one or one without an endpoint makes
  * every research rule unreadable: the launch denies rather than guess.
  */
-function expectedPlatformTools(scope: 'developer-live' | 'ordinary-production'): Record<string, unknown> {
-  const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped);
+function expectedPlatformTools(scope: 'developer-live' | 'ordinary-production', version?: unknown): Record<string, unknown> {
+  const shipped = SEARCH_BACKENDS.filter((entry) => entry.shipped || (scope === 'ordinary-production' && version === 'v34' && (entry.id === 'search-openai' || entry.id === 'search-anthropic')));
   requirePolicy(shipped.length > 0 && shipped.every((entry) => entry.keyRequired && entry.endpoint !== null && entry.host !== null));
   return {
     websearch: {
@@ -517,17 +517,17 @@ function expectedPlatformTools(scope: 'developer-live' | 'ordinary-production'):
 /**
  * A rule's web switch and platform tools (Provider Processing v16 and v17), read whole: a rule that may research states
  * `webSearchToolAllowed: true` and exactly the expected block; every other rule states `false` and names no block. A missing,
- * malformed or tampered term, a backend outside the registry's shipped set, or the switch on without the block is a policy this
+ * malformed or tampered term, a backend outside the version's admitted registry set, or the switch on without the block is a policy this
  * launch cannot read. Returns the projection of the verified block, or `null` for a rule without web.
  */
-function verifyPlatformTools(rule: Record<string, unknown>, scope: 'developer-live' | 'ordinary-production', research: boolean): AdmittedPlatformTools | null {
+function verifyPlatformTools(rule: Record<string, unknown>, scope: 'developer-live' | 'ordinary-production', research: boolean, version?: unknown): AdmittedPlatformTools | null {
   const transmissions = rule['transmissions'];
   requirePolicy(isRecord(transmissions));
   if (!research) {
     requirePolicy(transmissions['webSearchToolAllowed'] === false && !Object.hasOwn(rule, 'platformTools'));
     return null;
   }
-  requirePolicy(transmissions['webSearchToolAllowed'] === true && sameValue(rule['platformTools'], expectedPlatformTools(scope)));
+  requirePolicy(transmissions['webSearchToolAllowed'] === true && sameValue(rule['platformTools'], expectedPlatformTools(scope, version)));
   let reading: ReturnType<typeof readPlatformToolsRule>;
   try {
     reading = readPlatformToolsRule(rule);
@@ -1903,7 +1903,7 @@ function readWave21Eligibility(policy: Record<string, unknown>): Record<string, 
   return legacy;
 }
 
-/** Every term of the selected `searchConnectionTest` block (v28, unchanged through v32), in document order. */
+/** Every shared term of the fixed-public `searchConnectionTest` blocks (v28 onward), in document order. */
 const SEARCH_CONNECTION_TEST_TERMS = ['ruleId', 'purpose', 'operationalScope', 'backendId', 'candidateId', 'endpoint', 'method', 'protocol', 'credentialSlot',
   'headerForm', 'modelBindingRequired', 'explicitEditorActionRequired', 'source', 'allowedOutboundDataCategories', 'bookMaterialAllowed', 'arguments',
   'argumentsCanonicalSha256', 'maximumRequests', 'timeoutMilliseconds', 'responseMaxBytes', 'redirectMode', 'automaticRetryAllowed', 'fallbackAllowed',
@@ -1921,40 +1921,54 @@ const SEARCH_CONNECTION_TEST_TERMS = ['ruleId', 'purpose', 'operationalScope', '
  * constants. Its typed reading is the only thing the candidate probe consumer reads; a tampered block is a policy the launch
  * cannot read.
  */
-function readSearchConnectionTest(block: unknown): SearchConnectionTestPolicy {
-  requirePolicy(isRecord(block) && exactKeys(block, [...SEARCH_CONNECTION_TEST_TERMS]));
+function readSearchConnectionTest(block: unknown, version?: unknown, native = false): SearchConnectionTestPolicy {
+  const successor = version === 'v34';
+  requirePolicy(isRecord(block) && exactKeys(block, [...SEARCH_CONNECTION_TEST_TERMS, ...(successor && !native ? ['candidates', 'credentialFallbackSlot'] : [])]));
+  const candidate = searchBackendCandidate(String(block['backendId']), String(block['candidateId']));
+  const slot = native ? candidate.backendId === 'search-openai' ? 'openai-platform' : 'anthropic-claude' : candidate.credentialSlot;
+  if (successor) requirePolicy(sameValue(block['arguments'], candidate.search.probeArguments) && block['endpoint'] === candidate.search.endpoint &&
+    (!native ? block['credentialFallbackSlot'] === 'deepseek-api-key' : candidate.fetch === null));
   const args = block['arguments'];
   requirePolicy(isRecord(args) && exactKeys(args, ['query', 'count', 'need_content']) && typeof args['query'] === 'string' && Number.isInteger(args['count']) && args['need_content'] === false &&
     block['argumentsCanonicalSha256'] === digest(Buffer.from(canonicalJson(args))) && sameValue(block['argumentKeysExact'], ['count', 'need_content', 'query']));
   requirePolicy(block['ruleId'] === 'ordinary-production-direct-search-connection-test' && block['purpose'] === 'fixed-public-search-connection-test' &&
-    block['operationalScope'] === 'ordinary-production' && block['method'] === 'POST' && block['protocol'] === 'deepseek-direct-search' &&
-    block['headerForm'] === 'authorization-bearer' && block['credentialSlot'] === block['backendId'] && block['maximumRequests'] === 1 &&
+    block['operationalScope'] === 'ordinary-production' && block['method'] === 'POST' && block['protocol'] === candidate.search.protocol &&
+    block['headerForm'] === candidate.search.headerForm && block['credentialSlot'] === slot && block['maximumRequests'] === 1 &&
     block['timeoutMilliseconds'] === SEARCH_SERVICE_TIMEOUT_MS && block['responseMaxBytes'] === SEARCH_RESPONSE_MAX_BYTES && block['redirectMode'] === 'manual' &&
     sameValue(block['allowedOutboundDataCategories'], ['public-or-synthetic']) && sameValue(block['resultUrlSchemes'], ['http', 'https']) &&
     sameValue(block['rejectedOperationalScopes'], ['development-ci', 'fixture-recording', 'developer-live']) &&
     block['resultsMaximum'] === 3 && block['titleMaximumCharacters'] === 120 && block['urlMaximumCharacters'] === 2048);
   for (const key of ['explicitEditorActionRequired', 'singleUseFinalGateTicketRequired', 'presentationBoundsEnforcedBeforeExposure', 'resultProvesOnlyThisExactProbeResponse',
     'rejectionPrecedesTicketCredentialOrTransport'] as const) requirePolicy(block[key] === true);
-  for (const key of ['modelBindingRequired', 'bookMaterialAllowed', 'automaticRetryAllowed', 'fallbackAllowed', 'taskOrDefaultSelectionAllowed', 'measuredStatusPromotionAllowed',
+  requirePolicy(block['modelBindingRequired'] === native);
+  for (const key of ['bookMaterialAllowed', 'automaticRetryAllowed', 'fallbackAllowed', 'taskOrDefaultSelectionAllowed', 'measuredStatusPromotionAllowed',
     'durableResultStorageAllowed', 'responseBodiesRetained', 'argumentOverrideOrAdditionalFieldsAllowed', 'developmentCredentialMainModelBindingOtherSlotFallbackOrAmbientDefaultInherited',
     'resultUrlUserinfoControlsOrPrivateTargetAllowed', 'linkOrRedirectFollowingAllowed', 'bodySnippetSummaryOrContentRetentionAllowed', 'providerBodyLoggingAllowed',
     'bookOrSourceAcquisitionAllowed', 'addsDirectApiToOrdinaryResearchTool', 'qualifiesFetch'] as const) requirePolicy(block[key] === false);
   for (const key of ['backendId', 'candidateId', 'endpoint'] as const) requirePolicy(typeof block[key] === 'string' && (block[key] as string).length > 0);
   return Object.freeze({ ruleId: 'ordinary-production-direct-search-connection-test', purpose: 'fixed-public-search-connection-test',
-    backendId: block['backendId'] as string, candidateId: block['candidateId'] as string, endpoint: block['endpoint'] as string, method: 'POST', protocol: 'deepseek-direct-search',
-    credentialSlot: block['credentialSlot'] as string, headerForm: 'authorization-bearer',
+    backendId: block['backendId'] as string, candidateId: block['candidateId'] as string, endpoint: block['endpoint'] as string, method: 'POST', protocol: candidate.search.protocol,
+    credentialSlot: slot, headerForm: candidate.search.headerForm,
+    ...(successor && !native ? { credentialFallbackSlot: 'deepseek-api-key', candidates: readNativeSearchConnectionTests(block['candidates']) } : {}),
     arguments: Object.freeze({ query: args['query'] as string, count: args['count'] as number, need_content: false as const }),
     argumentsCanonicalSha256: block['argumentsCanonicalSha256'] as string, maximumRequests: 1, timeoutMilliseconds: SEARCH_SERVICE_TIMEOUT_MS,
     responseMaxBytes: SEARCH_RESPONSE_MAX_BYTES, resultsMaximum: 3, titleMaximumCharacters: 120, urlMaximumCharacters: 2048,
     rejectedOperationalScopes: Object.freeze(['development-ci', 'fixture-recording', 'developer-live'] as const) } satisfies SearchConnectionTestPolicy);
 }
 
+function readNativeSearchConnectionTests(block: unknown): ReadonlyArray<SearchConnectionTestPolicy> {
+  requirePolicy(Array.isArray(block) && block.length === 2);
+  const candidates = block.map((entry) => readSearchConnectionTest(entry, 'v34', true));
+  requirePolicy(candidates[0]?.candidateId === 'openai-native-search-v1' && candidates[1]?.candidateId === 'anthropic-native-search-v1');
+  return Object.freeze(candidates);
+}
+
 /** Read the pinned successor directly; no predecessor document is synthesized or restamped. */
 function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
   requirePolicy(digest(Buffer.from(canonicalJson(policy))) === ({ v30: '146677f260a885ea5b6f1f5839b3574683d45d1224ebaa0ecd50509876fa47f3',
-    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058', v33: '8b75acbe8c662abf00981b7762f91d87347a6267c0bde5ab2bcd3843d14eab46' } as Record<string, string>)[String(policy['version'])]);
+    v31: 'ffe7a210dfe52c22810f8bcd07db8dc4335a770dde098ebc77f6755ed0c86e3d', v32: '72ecdd5f401fb4291a7ae1a4546a47f3b831a192e29e1dce445bbe4d31e7a058', v33: '8b75acbe8c662abf00981b7762f91d87347a6267c0bde5ab2bcd3843d14eab46', v34: '486c831bdc752a413fe7e194981dd0c5e838318dcba255aa392ed8baa26a9a5f' } as Record<string, string>)[String(policy['version'])]);
   const declared = (policy['decision'] as { providerAllowRules: Array<Record<string, unknown>> }).providerAllowRules;
-  const admission = (policy['version'] === 'v32' || policy['version'] === 'v33') ? readFamilyAdmission(policy) : null;
+  const admission = (policy['version'] === 'v32' || policy['version'] === 'v33' || policy['version'] === 'v34') ? readFamilyAdmission(policy) : null;
   const rules: OrdinaryProductionPolicyReading['rules'][number][] = [];
   for (const rule of declared) {
     const ruleId = String(rule['ruleId']);
@@ -1999,7 +2013,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
     // v32 declares every admitted route; the reviewed runtime choices are a subset of them, never the reverse.
     if (admission !== null) requirePolicy(allowedRoutes.every((route) => ((rule['providerBinding'] as { allowedRoutes: string[] }).allowedRoutes).includes(route)));
     rules.push({ ruleId, reading, projection, allowedRoutes,
-      platformTools: verifyPlatformTools(factualRecheck ? declared.find((candidate) => candidate['ruleId'] === 'ordinary-production-review')! : rule, 'ordinary-production', base.platformTools),
+      platformTools: verifyPlatformTools(factualRecheck ? declared.find((candidate) => candidate['ruleId'] === 'ordinary-production-review')! : rule, 'ordinary-production', base.platformTools, policy['version']),
       localTools: rule['localTools'] as AdmittedLocalTools });
   }
   return { originalFieldQualificationId: 'ordinary-production-original-fields-adr0099', declaredRuleIds: declared.map((rule) => String(rule['ruleId'])),
@@ -2007,7 +2021,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
     allowedBindings: ORDINARY_PRODUCTION_ALLOWED_BINDINGS, fastAllowedBindings: ORDINARY_PRODUCTION_FAST_ALLOWED_BINDINGS, connectionTestAllowed: true,
     execution: policy['execution'] as NonNullable<OrdinaryProductionPolicyReading['execution']>,
     transport: policy['transport'] as NonNullable<OrdinaryProductionPolicyReading['transport']>,
-    research: policy['research'] as NonNullable<OrdinaryProductionPolicyReading['research']>, searchConnectionTest: readSearchConnectionTest(policy['searchConnectionTest']),
+    research: policy['research'] as NonNullable<OrdinaryProductionPolicyReading['research']>, searchConnectionTest: readSearchConnectionTest(policy['searchConnectionTest'], policy['version']),
     ...(admission === null ? {} : { searchFallback: readSearchFallbackTerms(declared.find((rule) => rule['ruleId'] === 'ordinary-production-review')) }),
     subAgents: policy['subAgents'] as NonNullable<OrdinaryProductionPolicyReading['subAgents']>,
     backgroundProcessingEnrollment: declared.find((rule) => rule['ruleId'] === BACKGROUND_PROCESSING_RULE_ID)!['backgroundProcessingEnrollment'] as NonNullable<OrdinaryProductionPolicyReading['backgroundProcessingEnrollment']>, rules };
@@ -2021,7 +2035,7 @@ function projectOriginalFieldPolicy(policy: Record<string, unknown>): OrdinaryPr
  * the document's `allowedBindings`, which the SHA-256 pin fixes, and checked for consistency across the roles and rules.
  */
 export function verifyOrdinaryProductionPolicy(policy: Record<string, unknown>): OrdinaryProductionPolicyReading {
-  if (policy['version'] === 'v30' || policy['version'] === 'v31' || (policy['version'] === 'v32' || policy['version'] === 'v33')) return projectOriginalFieldPolicy(policy);
+  if (policy['version'] === 'v30' || policy['version'] === 'v31' || (policy['version'] === 'v32' || policy['version'] === 'v33' || policy['version'] === 'v34')) return projectOriginalFieldPolicy(policy);
   const wave21 = policy['version'] === 'v27' ? policy : null;
   if (policy['version'] === 'v27') policy = readWave21Eligibility(policy);
   const wave20 = policy['version'] === 'v26' ? policy : null;
@@ -2358,8 +2372,8 @@ function* verifyLaunchPolicyInputs(
     const activeSetBytes = yield ACTIVE_SET_PATH;
     requirePolicy(digest(activeSetBytes) === ACTIVE_SET_SHA256);
     for (const [path, sha256] of [
-      ['docs/policies/active-policy-set.v24.schema.json', '96ab1479f9853c54980dfbf6aa467bbb9cf7393738d68b1c60d83345d3a001e1'],
-      ['docs/policies/provider-processing-policy.v33.schema.json', '2e01a84df92e4a31237924b73aefc5ff941cab1d86fc057dbbcc6978aa15e463'],
+      ['docs/policies/active-policy-set.v25.schema.json', '528351fc5d082d3716cb0a6a60638d44de09c03a09a69a2e33b8e49bce4464a8'],
+      ['docs/policies/provider-processing-policy.v34.schema.json', '8432bc19fe31e317feb34a771b3c6ebe184a50d28d7e3b46cb374e6dd1a219c3'],
     ] as const) requirePolicy(digest(yield path) === sha256);
     const activeSet = parseJson(activeSetBytes);
     requirePolicy(
