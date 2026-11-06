@@ -208,6 +208,15 @@ async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
+// Settings > Help is the current product owner; #1376/#1382 moves this entry in Batch 3.
+async function markTechnicalMode(renderer, visible, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
+  await click(renderer, '帮助', `${name}-help`);
+  await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `${name}-toggle-ready`);
+  await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);
+  await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible===${JSON.stringify(String(visible))}`, `${name}-mode`);
+}
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
@@ -484,13 +493,8 @@ async function main() {
     fastCredentialSaved = true;
     await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
     await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
-    // #1379 ordinary card hierarchy; #1376/#1382 will move this existing Help control in Batch 3.
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'mark-ordinary-settings');
-    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'mark-ordinary-settings-ready');
-    await click(renderer, '帮助', 'mark-ordinary-help');
-    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.checked===true`, 'mark-ordinary-toggle-ready');
-    await assertRenderer(renderer, `(() => { document.querySelector('.help-developer-mode input').click(); return true; })()`, 'mark-ordinary-toggle');
-    await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='false'`, 'mark-ordinary-mode');
+    // #1379 explicitly exercises the ordinary card branch.
+    await markTechnicalMode(renderer, false, 'mark-ordinary');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'mark-ordinary-library');
     await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'mark-ordinary-library-ready');
     await importAndOpen(renderer, EXCERPT.title);
@@ -662,12 +666,22 @@ async function main() {
     await click(renderer, '撤销', 'undo-after-apply');
     await waitFor(renderer, `window.__j05.status().includes('没有可撤销的编辑') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first`, 'apply-is-not-undone-by-history', 15_000);
     await openMarkCard(renderer, 'change-suggestion', first, 'applied-card-again');
+    // Preserve the developer disclosure checks without assuming the whole Journey runs in that mode.
+    await markTechnicalMode(renderer, true, 'mark-developer-roundtrip');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'mark-developer-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'mark-developer-editor');
+    await openMarkCard(renderer, 'change-suggestion', first, 'mark-developer-card');
+    await assertRenderer(renderer, `(() => { window.__j05.card().querySelector('.editorial-mark-more').open=true; return true; })()`, 'mark-developer-more');
     await assertRenderer(renderer, `(() => { const summary = document.querySelector('[data-technical-collection] > summary') ?? window.__j05.card().querySelector('details.technical-details > summary'); if (!(summary instanceof HTMLElement)) return false; summary.click(); return true; })()`, 'technical-identities-open');
     await waitFor(renderer, `window.__j05.card().querySelector('details.technical-details dl')?.checkVisibility() === true`, 'technical-identities-visible');
     await assertRenderer(renderer, `(() => { const details = window.__j05.card().querySelector('details.technical-details'); const terms = Array.from(details.querySelectorAll('dt')).map((term) => term.textContent); return terms.includes('提案修改项') && terms.includes('提案决定') && terms.includes('标记时的修订版'); })()`, 'technical-identities-are-one-step-away');
     await assertRenderer(renderer, `(() => { const summary = document.querySelector('[data-technical-collection] > summary') ?? window.__j05.card().querySelector('details.technical-details > summary'); summary.click(); return true; })()`, 'technical-identities-close');
     await waitFor(renderer, `window.__j05.card().querySelector('details.technical-details dl')?.checkVisibility() === false`, 'technical-identities-hidden');
     await press(renderer, 'Escape');
+
+    await markTechnicalMode(renderer, false, 'mark-ordinary-roundtrip');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'mark-ordinary-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'mark-ordinary-editor');
 
     at('apply-accept-and-apply');
     // 接受并应用: one click on a suggestion the editor has not decided. The text is written, the mark stands on it.
