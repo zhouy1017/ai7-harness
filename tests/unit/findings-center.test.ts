@@ -3,6 +3,66 @@ import { mountFindingsCenter } from '../../src/renderer/findings-center.js';
 import type { BookFindingsProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { applyFindingBatches } from '../../src/renderer/manuscript-apply.js';
+import type { RendererApi } from '../../src/shared/protocol.js';
+
+it('clamps a shrinking final page to its page start after a changed poll (#1383 F3)', async () => {
+  const restore = installMiniDom(); vi.useFakeTimers(); vi.stubGlobal('window', { setInterval, clearInterval });
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root); let total = 81;
+  const items = Array.from({ length: total }, (_, index) => ({ id: String(index), category: 'review', categoryLabel: '审阅', severity: '提示', status: '待处理', summary: '公开合成发现', target: { kind: 'review' as const, reviewRunId: 'run', findingId: String(index), blockId: 'block' } }));
+  try {
+    mountFindingsCenter(root as unknown as HTMLElement, async (offset) => ({ bookId: 'book', total, offset, pageSize: 40, next: offset + 40 < total ? offset + 40 : null, groups: [{ category: 'review', label: '审阅', count: total, bySeverity: {}, byStatus: {} }], items: items.slice(offset, Math.min(total, offset + 40)) }), vi.fn());
+    await vi.advanceTimersByTimeAsync(0);
+    const rail = root.querySelector('[data-list-position]')!; rail.value = '2'; rail.dispatchEvent({ type: 'change' });
+    total = 79; await vi.advanceTimersByTimeAsync(2000);
+    expect(root.querySelectorAll('[data-finding-id]')).toHaveLength(39);
+    expect(root.querySelector('[data-finding-id]')?.dataset['findingId']).toBe('40');
+    expect(root.textContent).toContain('41–79 / 79'); expect(root.querySelector('[data-list-position]')?.value).toBe('1');
+  } finally { root.remove(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); restore(); }
+});
+
+function batchConsumer(refuseLast: boolean, unknownLast = false) {
+  const suggestions = Array.from({ length: 501 }, (_, index) => ({ manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '合成', replacement: '修订' }));
+  const api = { applyChangeSuggestionBatch: vi.fn<RendererApi['applyChangeSuggestionBatch']>(async () => ({} as never)), applyChangeSuggestion: vi.fn<RendererApi['applyChangeSuggestion']>(async () => { if (refuseLast) throw new Error('current Apply wrote nothing'); return {} as never; }),
+    reverseAppliedChangeSuggestion: vi.fn<RendererApi['reverseAppliedChangeSuggestion']>(async () => ({} as never)), getManuscriptApplyOutcome: vi.fn<RendererApi['getManuscriptApplyOutcome']>(async () => { if (unknownLast) throw new Error('unavailable'); return { state: 'not-committed', application: null }; }) };
+  return { suggestions, api, apply: () => applyFindingBatches(suggestions, api as unknown as Parameters<typeof applyFindingBatches>[1]) };
+}
+
+it('applies >500 through bounded requests and reverses every confirmed group in reverse order (#1383 F5)', async () => {
+  const { api, apply } = batchConsumer(false); const result = await apply();
+  expect(api.applyChangeSuggestionBatch.mock.calls[0]![0].markIds).toHaveLength(500);
+  expect(api.applyChangeSuggestion.mock.calls[0]![0].markId).toBe('mark-500');
+  expect(result.message).toContain('已接受并应用 501 条');
+  const reversed = await result.undo!();
+  expect(api.reverseAppliedChangeSuggestion.mock.calls.map(([input]) => input.markId)).toEqual(['mark-500', 'mark-0']);
+  expect(reversed.message).toContain('已撤销 501 条'); expect(reversed.undo).toBeUndefined();
+});
+
+it('keeps confirmed counts and reversal visible after a later chunk refusal (#1383 F5)', async () => {
+  const restore = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: vi.fn() });
+  const { api, suggestions } = batchConsumer(true); const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  let available = true;
+  const read = async (): Promise<BookFindingsProjection> => ({ bookId: 'book', offset: 0, total: available ? 1 : 0, pageSize: 40, next: null, groups: available ? [{ category: 'review', label: '审阅', count: 1, bySeverity: {}, byStatus: {} }] : [], items: available ? [{ id: 'finding', category: 'review', categoryLabel: '审阅', severity: '提示', status: '待处理', summary: '合成', suggestion: suggestions[0]!, target: { kind: 'review', reviewRunId: 'run', findingId: 'finding', blockId: 'block' } }] : [] });
+  try {
+    mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), async () => { available = false; return applyFindingBatches(suggestions, api as unknown as RendererApi); });
+    await vi.waitFor(() => expect(root.querySelector('[data-finding-apply]')).not.toBeNull()); root.querySelector('[data-finding-apply]')!.click();
+    await vi.waitFor(() => expect(root.querySelector('.findings-apply-feedback')?.textContent).toContain('已接受并应用 500 条；未应用 1 条'));
+    expect(root.querySelector('.findings-apply-feedback')!.textContent).not.toContain('current Apply wrote nothing');
+    root.querySelector('.findings-apply-feedback button')!.click();
+    await vi.waitFor(() => expect(root.querySelector('.findings-apply-feedback')?.textContent).toContain('已撤销 500 条'));
+    expect(api.reverseAppliedChangeSuggestion).toHaveBeenCalledTimes(1);
+  } finally { vi.unstubAllGlobals(); restore(); }
+});
+
+it('recovers the same unknown Effect without replaying a failed later chunk (#1383 F5)', async () => {
+  const { api, apply } = batchConsumer(true, true); const result = await apply();
+  expect(result.message).toContain('已接受并应用 500 条；未应用 0 条；结果待确认 1 条');
+  const identity = api.getManuscriptApplyOutcome.mock.calls[0]![0].clientEffectId;
+  api.getManuscriptApplyOutcome.mockResolvedValue({ state: 'committed', application: null });
+  const recovered = await result.recover!(); expect(recovered.message).toContain('已接受并应用 501 条');
+  expect(api.getManuscriptApplyOutcome.mock.calls.at(-1)![0].clientEffectId).toBe(identity);
+  expect(api.applyChangeSuggestion).toHaveBeenCalledTimes(1);
+});
 
 it('filters the whole book beyond 500, resets position, and retains focus and scroll across two changed polls (#1375, #1383)', async () => {
   const restore = installMiniDom(); vi.useFakeTimers(); setTechnicalLayerVisible(false);

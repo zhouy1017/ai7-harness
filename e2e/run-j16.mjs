@@ -1026,9 +1026,31 @@ async function main() {
 
     at('panel-pause');
     // 暂停 on the card, as the drawer's bar would: 正在暂停 while the range in flight finishes, then 已暂停 with 续行.
-    await cardAction(renderer, 'analysis-running', 'pause', 'panel-pause');
-    await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-pausing', 'panel-pausing');
-    await writeHold(FIRST_HOLD + 1);
+    const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
+    await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
+    await click(renderer,'帮助','poll-attention-ordinary-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
+    const pollAttentionId=await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis'&&item.target.taskIntentId===${JSON.stringify(pollTaskId)}).itemId)`);
+    const pollAttentionSelector=`[data-attention-item="${pollAttentionId}"]`;
+    await waitFor(renderer,`document.querySelector(${JSON.stringify(pollAttentionSelector)})?.dataset.attentionState==='analysis-running' && document.documentElement.dataset.technicalLayerVisible==='false'`,'poll-attention-running');
+    await renderer.evaluate(`document.querySelector(${JSON.stringify(pollAttentionSelector)}).querySelector('[data-attention-open]').focus();globalThis.__j16PollAttention=document.querySelector(${JSON.stringify(pollAttentionSelector)})`);
+    await renderer.evaluate(`window.ai7.pauseBaselineAnalysisRun({taskIntentId:${JSON.stringify(pollTaskId)}})`);
+    await new Promise(resolve=>setTimeout(resolve,2200));
+    await waitFor(renderer,`(() => {const current=document.querySelector(${JSON.stringify(pollAttentionSelector)});return current!==globalThis.__j16PollAttention&&current?.dataset.attentionState==='analysis-pausing'&&document.activeElement===current.querySelector('[data-attention-open]');})()`,'attention-first-changed-paint');
+    await renderer.evaluate(`globalThis.__j16PollAttention=document.querySelector(${JSON.stringify(pollAttentionSelector)})`);
+    await writeHold(FIRST_HOLD+1);
+    await new Promise(resolve=>setTimeout(resolve,2200));
+    await waitFor(renderer,`(() => {const current=document.querySelector(${JSON.stringify(pollAttentionSelector)});return current!==globalThis.__j16PollAttention&&current?.dataset.attentionState==='analysis-paused'&&document.activeElement===current.querySelector('[data-attention-open]');})()`,'attention-second-changed-paint');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
+    await click(renderer,'帮助','poll-attention-developer-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`,'poll-attention-developer-mode');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.section('manuscript')),'poll-attention-return-book');
+    await waitFor(renderer,`document.querySelector('[data-screen="editor"]')`,'poll-attention-book-ready');
+    await openPanel(renderer,'poll-attention-return-pane');
     const paused = await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-paused', 'panel-paused', 120_000);
     requireJourney(cardsOf(paused, 'running')[0].pill === '已暂停' &&
       JSON.stringify(cardsOf(paused, 'running')[0].actions) === JSON.stringify([['resume', '续行', 'enabled'], ['redo', '改计划重做', 'enabled']]),
@@ -1716,14 +1738,6 @@ async function main() {
     const draftAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((item) => item.state === 'draft-unfinished').map((item) => [item.book.bookId, item.target.kind, item.target.draftId]))`);
     requireJourney(JSON.stringify(draftAttention) === JSON.stringify([[bookId, 'task-intent-draft', saved.draftId]]), 'composer-draft-attention', draftAttention);
 
-    // #1375: the global attention record retains its precise focus during two background reads.
-    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'poll-attention-close-pane');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'poll-attention-open');
-    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] [data-attention-state="draft-unfinished"]')`, 'poll-attention-ready');
-    await assertRenderer(renderer, `(async () => { const card=document.querySelector('[data-attention-state="draft-unfinished"]'); const id=card.dataset.attentionItem; const more=card.querySelector('details'); if(more)more.open=true; const target=more?.querySelector('summary')??card.querySelector('[data-attention-open]'); target.focus(); for(let cycle=0;cycle<2;cycle++){await new Promise(resolve=>setTimeout(resolve,2200));const current=[...document.querySelectorAll('[data-attention-item]')].find(node=>node.dataset.attentionItem===id);if(!current||more&&!current.querySelector('details')?.open||document.activeElement!==(more?current.querySelector('summary'):current.querySelector('[data-attention-open]')))return false;}return true;})()`, 'attention-focus-poll-survival');
-    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'poll-attention-return-book');
-    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'poll-attention-book-ready');
-    await openPanel(renderer, 'poll-attention-return-pane');
     at('draft-promote-prepared-task');
     // 发起全书任务… opens the composer on the whole Book; 准备任务 saves the draft and 准备计划 makes it a prepared baseline Task through
     // the existing preparation — the plan opens in the slot leading with the draft's sentence, and 开始任务 is still the editor's.

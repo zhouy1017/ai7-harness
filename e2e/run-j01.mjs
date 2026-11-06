@@ -1584,6 +1584,7 @@ async function runJourney(
   }
   if (start !== 'accepted-review') await assertRenderer(renderer, `document.querySelectorAll('.import-steps [data-import-step]').length===4 && document.querySelector('.import-file-card') && !/来源字节数|本机文件选择器|工作流程实例/.test(document.querySelector('#screen').textContent)`, 'import-pills-and-file-summary');
   if (quickImport) await assertRenderer(renderer, `(() => { const steps=document.querySelector('.import-steps'); const button=steps?.querySelector('[data-import-step="3"] button'); if(!button||button.disabled)return false; button.click(); return steps.querySelector('[data-import-step="3"]').getAttribute('aria-current')==='step' && document.activeElement?.matches('.fidelity-list, .import-structure'); })()`, 'import-fidelity-step-navigation');
+  if (quickImport) await assertRenderer(renderer, `(() => {const steps=document.querySelector('.import-steps');steps.querySelector('[data-import-step="2"] button').click();return steps.querySelector('[data-import-step="2"]').getAttribute('aria-current')==='step' && document.activeElement?.matches('[data-import-target-choices]');})()`, 'import-return-target-step-navigation');
   if (quickImport) {
     await assertRenderer(renderer, `document.querySelector('input[name="import-target"]:checked') && document.querySelector('input[aria-label="作为首份稿件导入"]')?.checked && document.querySelector('#book-title')?.value.length > 0 && !document.querySelector('[data-screen="review"]')`, 'quick-import-defaults-one-page');
   } else if (start !== 'accepted-review') {

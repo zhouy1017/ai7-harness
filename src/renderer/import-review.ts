@@ -1,4 +1,4 @@
-import { importSteps } from './components/import-steps.js';
+import { focusImportStep, importSteps } from './components/import-steps.js';
 import { windowStep } from './components/controls.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
 import { technicalWords, identityWords, technicalLayerVisible } from './technical-layer.js';
@@ -698,7 +698,7 @@ export function createImportReview(options: ImportReviewOptions) {
       fidelity: content.querySelector('.fidelity-list, .import-structure') !== null,
       go: (step) => {
         const target = content.querySelector<HTMLElement>(step === 'target' ? '[data-import-target-choices]' : '.fidelity-list, .import-structure');
-        if (target) { target.tabIndex = -1; target.scrollIntoView({ block: 'start' }); target.focus({ preventScroll: true }); }
+        if (target) focusImportStep(target);
       },
     }));
     content.addEventListener('focusin', (event) => {

@@ -1,4 +1,4 @@
-import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
+import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { technicalWords, identityWords } from './technical-layer.js';
 import type {
   BaselineAnalysisUpdateRequest,
@@ -93,6 +93,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   const { bookId, api } = options;
   panel.dataset['customAnalysis'] = 'reading';
   let busy = false;
+  let deferred: CustomAnalysisDimensionsProjection | null = null;
 
   const updateFor = (dimension: CustomAnalysisDimensionProjection): BaselineAnalysisUpdateRequest | null => {
     const latest = dimension.book?.latest ?? null;
@@ -166,7 +167,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   };
 
   const render = (projection: CustomAnalysisDimensionsProjection): void => {
-    if (pollControlEngaged(panel, false)) return;
+    if (pollControlEngaged(panel, false)) { deferred = projection; return; }
+    deferred = null;
     const restoreInteraction = retainPollInteraction(panel);
     panel.dataset['customAnalysis'] = 'ready';
     panel.dataset['dimensionCount'] = String(projection.dimensions.length);
@@ -251,6 +253,9 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
     }
   };
 
+  onPollControlEnd(panel, () => {
+    if (deferred !== null && panel.isConnected && !pollControlEngaged(panel, false)) render(deferred);
+  });
   const cached = readings.get(bookId);
   if (cached === undefined) panel.replaceChildren(el('p', 'field-note', CUSTOM_TAB_READING));
   else render(cached.projection);

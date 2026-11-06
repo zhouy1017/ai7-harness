@@ -12,7 +12,7 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
-import { applyOnce } from './manuscript-apply.js';
+import { applyOnce, applyFindingBatches } from './manuscript-apply.js';
 import { showToast } from './components/toast.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
@@ -2676,31 +2676,9 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     else renderBookAnalysis(bookId, bookTitle, target.revisionId, { tab: 'chapters', gap: target.unitOrdinal });
   }, async (items) => {
     const suggestions = items.flatMap((item) => item.suggestion ? [item.suggestion] : []);
-    const first = suggestions[0]; if (!first) return;
-    try {
-      if (suggestions.some((item) => item.manuscriptId !== first.manuscriptId || item.branchId !== first.branchId)) throw new Error('请选择同一稿件版本的修改建议。');
-      const binding = { manuscriptId: first.manuscriptId, branchId: first.branchId, windowStartBlockId: first.blockId };
-      // One confirmation covers the selected findings; each existing Apply request remains bounded to 500 marks.
-      const appliedGroups: typeof suggestions[number][] = [];
-      for (let offset = 0; offset < suggestions.length; offset += 500) {
-        const group = suggestions.slice(offset, offset + 500);
-        const applied = await applyOnce(binding, (clientEffectId) => group.length === 1
-          ? window.ai7.applyChangeSuggestion({ ...binding, markId: group[0]!.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null })
-          : window.ai7.applyChangeSuggestionBatch({ ...binding, markIds: group.map((item) => item.markId), clientEffectId }), (input) => window.ai7.getManuscriptApplyOutcome(input));
-        if (!applied.acknowledged && applied.outcome?.state !== 'committed') throw applied.failure ?? new Error(`已应用 ${offset} 条，其余结果待确认，请查看历史记录。`);
-        appliedGroups.push(group[0]!);
-      }
-      showToast(`已接受并应用 ${suggestions.length} 条。`, { action: { label: '撤销', run: () => {
-        void (async () => {
-          for (const group of [...appliedGroups].reverse()) {
-            const result = await applyOnce(binding, (clientEffectId) => window.ai7.reverseAppliedChangeSuggestion({ ...binding, markId: group.markId, clientEffectId }),
-              (input) => window.ai7.getManuscriptApplyOutcome(input));
-            if (!result.acknowledged && result.outcome?.state !== 'committed') throw result.failure ?? new Error('撤销结果待确认。');
-          }
-          setStatus('已撤销本次应用。', 'success'); renderBookFindings(bookId, bookTitle);
-        })().catch((error: unknown) => setStatus(rendererErrorMessage(error, '未能撤销应用。'), 'error'));
-      } } });
-    } catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
+    if (!suggestions.length) return;
+    try { return await applyFindingBatches(suggestions, window.ai7); }
+    catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
   }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); });
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }

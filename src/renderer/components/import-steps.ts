@@ -1,3 +1,13 @@
+/** A step may point into folded fidelity rows; reveal them before asking the browser to focus. */
+export function focusImportStep(target: HTMLElement): void {
+  for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+    if (parent.tagName === 'DETAILS') (parent as HTMLDetailsElement).open = true;
+  }
+  target.tabIndex = -1;
+  target.scrollIntoView({ block: 'start' });
+  target.focus({ preventScroll: true });
+}
+
 /** One-page intake keeps its choices together; the pills name the work in order. */
 export function importSteps(current: 'choices' | 'review' | 'complete', navigation?: { fidelity: boolean; go(step: 'target' | 'fidelity'): void }): HTMLElement {
   const steps = document.createElement('ol');

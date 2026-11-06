@@ -1717,6 +1717,10 @@ async function main() {
       overviewBooks.push(await importSample1(renderer, title, true, 'overview-import'));
     }
     await writeFile(holdPath, '1', 'utf8');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-ordinary-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-ordinary-settings-ready');
+    await click(renderer,'帮助','overview-poll-ordinary-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`,'overview-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('tasks')), 'overview-entry');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"] [data-task-overview-start]')?.disabled===false`, 'overview-ready');
     await clickSelector(renderer, '[data-task-overview-start]', 'overview-sheet');
@@ -1740,16 +1744,23 @@ async function main() {
     const overviewPauseRecorded = async (id) => waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.flatMap(g=>g.items).some(i=>i.itemId===${JSON.stringify(id)} && ['analysis-pausing','analysis-paused'].includes(i.attention.state)))()`, 'overview-pause-recorded');
     await waitFor(renderer, `document.querySelector('.task-overview-card[data-task-item="${overviewIds[2]}"] .task-overview-card-line')?.textContent.startsWith('第 1 位')`, 'overview-first-position-visible');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
-    // #1375: the held running task changes elapsed time while More and its exact summary survive two polls.
-    await assertRenderer(renderer, `(async () => { const selector='.task-overview-card[data-task-item="${overviewIds[0]}"] .task-overview-more'; let more=document.querySelector(selector); more.open=true; more.querySelector('summary').focus(); for(let cycle=0;cycle<2;cycle++){ await new Promise(resolve=>setTimeout(resolve,2200)); more=document.querySelector(selector); if(!more?.open||document.activeElement!==more.querySelector('summary'))return false; } return true; })()`, 'overview-more-poll-survival');
+    // #1375: release two real reading units; both changed cards must keep More and summary focus in ordinary mode.
+    const pollOverviewSelector=`.task-overview-card[data-task-item="${overviewIds[0]}"]`;
+    await assertRenderer(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card.querySelector('.task-overview-more');more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='false';})()`,'overview-more-poll-open');
+    for(const done of [2,3]) {
+      await renderer.evaluate(`globalThis.__j09PollCard=document.querySelector(${JSON.stringify(pollOverviewSelector)})`);
+      await writeFile(holdPath,String(done),'utf8');
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer,`(() => {const card=document.querySelector(${JSON.stringify(pollOverviewSelector)}),more=card?.querySelector('.task-overview-more');return card!==globalThis.__j09PollCard&&card?.querySelector('progress')?.value===${done}&&more?.open&&document.activeElement===more.querySelector('summary');})()`,'overview-more-changed-poll-survival');
+    }
     await overviewAction(overviewIds[0], 'pause');
     await overviewPauseRecorded(overviewIds[0]);
-    await writeFile(holdPath, '2', 'utf8');
+    await writeFile(holdPath, '4', 'utf8');
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])} && i.attention.state==='analysis-paused') && p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}); })()`, 'overview-pause-starts-third', 60000);
     // Put the same third task back in the queue before adding the fourth, then prove 置顶 wins the next release.
     await overviewAction(overviewIds[2], 'pause');
     await overviewPauseRecorded(overviewIds[2]);
-    await writeFile(holdPath, '3', 'utf8');
+    await writeFile(holdPath, '5', 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='paused').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])}))()`, 'overview-third-paused', 60000);
     await overviewAction(overviewIds[0], 'resume');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(overviewIds[0])}))()`, 'overview-first-resumed');
@@ -1765,13 +1776,18 @@ async function main() {
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='queued').items[0]?.itemId===${JSON.stringify(fourth.itemId)})()`, 'overview-fourth-top');
     await overviewAction(overviewIds[0], 'pause');
     await overviewPauseRecorded(overviewIds[0]);
-    await writeFile(holdPath, '4', 'utf8');
+    await writeFile(holdPath, '6', 'utf8');
     await waitFor(renderer, `(async () => { const p=await window.ai7.inspectTaskOverview(); return p.groups.find(g=>g.key==='running').items.some(i=>i.itemId===${JSON.stringify(fourth.itemId)}) && p.groups.find(g=>g.key==='queued').items.some(i=>i.itemId===${JSON.stringify(overviewIds[2])} && i.queuePosition===1); })()`, 'overview-fourth-before-third', 60000);
     await overviewAction(fourth.itemId, 'run');
     await waitFor(renderer, `document.querySelector('[data-screen="task-overview"]') && document.querySelector('#task-drawer')?.hidden===false && Math.abs(document.querySelector('#task-drawer').getBoundingClientRect().width-500)<2`, 'overview-drawer-stays-on-page');
     await press(renderer, 'Escape');
     await writeFile(holdPath, String(SAMPLE1_UNITS), 'utf8');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.filter(g=>g.key==='running'||g.key==='queued').every(g=>g.items.every(i=>!${JSON.stringify(overviewBooks)}.includes(i.bookId))))()`, 'overview-released-completions', 120000);
+
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'overview-poll-developer-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'overview-poll-developer-settings-ready');
+    await click(renderer,'帮助','overview-poll-developer-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`,'overview-poll-developer-mode');
 
     // #865 synchronized delta: the same clarification family carries one model-originated question, only its unit waits.
     at('model-question-launch');

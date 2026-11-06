@@ -1,3 +1,4 @@
+import type { FindingsBatchFeedback } from './manuscript-apply.js';
 import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { filterChoices, listPosition, stateTerm, type StateTone } from './components/controls.js';
 import { createButton } from './components/controls.js';
@@ -10,14 +11,26 @@ const STATUS_TONES: Readonly<Record<string, StateTone>> = {
 };
 
 export function mountFindingsCenter(root: HTMLElement, read: (offset: number) => Promise<BookFindingsProjection>, open: (item: BookFindingProjection) => void,
-  apply?: (items: BookFindingProjection[]) => Promise<void>, newReview?: () => void): void {
+  apply?: (items: BookFindingProjection[]) => Promise<FindingsBatchFeedback | void>, newReview?: () => void): void {
   let offset = 0;
   let generation = 0;
   let category = '', severity = '', status = '';
   let signature = '', busy = false, loading = false;
+  let feedback: FindingsBatchFeedback | void;
+  const paintFeedback = (): void => {
+    root.querySelector('.findings-apply-feedback')?.remove();
+    if (!feedback) return;
+    const bar = document.createElement('section'); bar.className = 'findings-apply-feedback attention-note'; bar.setAttribute('role', feedback.attention ? 'alert' : 'status');
+    const words = document.createElement('p'); words.textContent = feedback.message; bar.append(words);
+    for (const [label, action] of [['撤销已确认应用', feedback.undo], ['核对未知结果', feedback.recover]] as const) {
+      if (!action) continue;
+      const button = createButton(); button.textContent = label; button.addEventListener('click', () => { if (busy) return; busy = true; button.disabled = true; void action().then((next) => { feedback = next; }).finally(() => { busy = false; signature = ''; void load(); }); }); bar.append(button);
+    }
+    root.append(bar);
+  };
   const perform = async (items: BookFindingProjection[]): Promise<void> => {
     if (busy || !apply) return; busy = true;
-    try { await apply(items); } finally { busy = false; signature = ''; void load(); }
+    try { feedback = await apply(items); } finally { busy = false; signature = ''; void load(); }
   };
   const load = async (): Promise<void> => {
     if (busy || loading) return; loading = true;
@@ -42,7 +55,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
         const message = document.createElement('p'); message.textContent = FINDINGS_CENTER_WORDS.empty;
         const start = createButton(); start.classList.add('primary'); start.textContent = '新建审阅';
         start.addEventListener('click', () => newReview?.()); start.disabled = !newReview;
-        card.append(heading, stateTerm('暂无待处理项'), message, start); root.append(card);
+        card.append(heading, stateTerm('暂无待处理项'), message, start); root.append(card); paintFeedback();
         return;
       }
       const summary = document.createElement('p'); summary.textContent = FINDINGS_CENTER_WORDS.summary(page.total);
@@ -66,7 +79,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       const position = document.createElement('div');
       const paint = (): void => {
         const matching = allItems.filter(matches);
-        offset = Math.min(offset, Math.max(0, matching.length - 1));
+        offset = Math.min(offset, Math.floor(Math.max(0, matching.length - 1) / page.pageSize) * page.pageSize);
         const visibleItems = matching.slice(offset, offset + page.pageSize);
         summary.textContent = FINDINGS_CENTER_WORDS.summary(matching.length);
         position.replaceChildren(listPosition({ offset, total: matching.length, pageSize: page.pageSize, label: '发现位置', change: (next) => { offset = next; paint(); } }));
@@ -115,13 +128,14 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
         actions.append(batchButton);
       }
       root.append(heading, summary, filters, list, actions);
+      paintFeedback();
       restoreInteraction();
     } catch {
       if (!root.isConnected || request !== generation) return;
       signature = '';
       root.dataset['findingsState'] = 'failed';
       root.replaceChildren();
-      const retry = createButton(); retry.type = 'button'; retry.textContent = FINDINGS_CENTER_WORDS.unavailable; retry.addEventListener('click', () => void load()); root.append(retry);
+      const retry = createButton(); retry.type = 'button'; retry.textContent = FINDINGS_CENTER_WORDS.unavailable; retry.addEventListener('click', () => void load()); root.append(retry); paintFeedback();
     } finally { loading = false; if (request === generation) root.removeAttribute('aria-busy'); }
   };
   const visible = (): void => { if (document.visibilityState === 'visible') void load(); };

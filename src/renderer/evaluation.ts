@@ -1,4 +1,4 @@
-import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
+import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { filterChoices, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -325,6 +325,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
   let poll: number | null = null;
+  let paintDeferred = false;
 
   // 审稿意见's DOCX export (Issue #429, S81c): ④ 导出's own card, drawn into one slot every paint of the 审稿意见 block takes
   // back, so a card open across a repaint keeps its state.
@@ -828,7 +829,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       void api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore: workspace.recordsBefore }).then((page) => {
         if (!root.isConnected || workspace === null || busy) return;
         workspace = { ...page, record: workspace.record };
-        if (!pollControlEngaged(root, false)) paint(null, true);
+        paint(null, true);
       }).catch(() => undefined).finally(() => follow());
     }, INITIAL_POLL_MS);
   };
@@ -840,6 +841,8 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
 
   const paint = (focus: string | null, preserveForm = false): void => {
     if (workspace === null) return;
+    if (preserveForm && pollControlEngaged(root, false)) { paintDeferred = true; follow(); return; }
+    paintDeferred = false;
     const restoreInteraction = retainPollInteraction(root, preserveForm);
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
@@ -1469,6 +1472,10 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     }
   };
 
+  onPollControlEnd(root, () => {
+    if (paintDeferred && workspace !== null && root.isConnected && !busy && !pollControlEngaged(root, false)) paint(null, true);
+  });
+
   return {
     /** The drawer's bar started AI7's 初评: read it again now, keeping the form the editor is filling in. */
     refresh(): void {
@@ -1477,7 +1484,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       void api.inspectEvaluation({ recordId: current.record?.recordId ?? null, recordsBefore: current.recordsBefore }).then((page) => {
         if (!root.isConnected || workspace === null || busy) return;
         workspace = { ...page, record: workspace.record };
-        if (!pollControlEngaged(root, false)) paint(null, true);
+        paint(null, true);
       }).catch(() => undefined);
     },
     async load(): Promise<void> {

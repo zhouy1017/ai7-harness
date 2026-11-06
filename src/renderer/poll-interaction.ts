@@ -1,8 +1,8 @@
 /** Retain editor interaction when a polled projection replaces its DOM (#1375). */
-const RECORD_KEYS = ['data-task-item', 'data-attention-item', 'data-finding-id', 'data-dimension-id', 'data-row-id', 'data-record-id', 'data-model-channel'];
-const CONTROL_KEYS = ['data-task-action', 'data-task-drawer-control', 'data-task-plan-edit', 'data-analysis-tab', 'data-analysis-action', 'data-action', 'data-model-choice', 'data-favorite-model', 'data-evaluation-action', 'data-custom-action', 'data-filter-value', 'data-findings-filter', 'data-task-compose-action', 'data-task-composer-field', 'aria-label', 'name'];
+const RECORD_KEYS = ['data-history-revision-id', 'data-history-result-set-id', 'data-task-item', 'data-attention-item', 'data-finding-id', 'data-dimension-id', 'data-row-id', 'data-record-id', 'data-model-channel'];
+const CONTROL_KEYS = ['data-attention-open', 'data-task-action', 'data-task-drawer-control', 'data-task-plan-edit', 'data-analysis-tab', 'data-analysis-action', 'data-action', 'data-model-choice', 'data-favorite-model', 'data-evaluation-action', 'data-custom-action', 'data-filter-value', 'data-findings-filter', 'data-task-compose-action', 'data-task-composer-field', 'aria-label', 'name'];
 type Part = { tag: string; attribute: string | null; value: string; index: number };
-type Address = { record: [string, string] | null; path: Part[] };
+type Address = { record: [string, string] | null; scope: [string, string] | null; path: Part[] };
 
 function part(node: HTMLElement): Omit<Part, 'index'> {
   const attribute = CONTROL_KEYS.find((key) => node.hasAttribute(key)) ?? null;
@@ -16,15 +16,19 @@ function address(root: HTMLElement, node: HTMLElement): Address {
   const path: Part[] = [];
   for (let current = node; current !== root && current.parentElement; current = current.parentElement) {
     const recordKey = RECORD_KEYS.find((key) => current.hasAttribute(key));
-    if (recordKey) return { record: [recordKey, current.getAttribute(recordKey)!], path };
+    if (recordKey) {
+      const history = recordKey === 'data-history-revision-id' ? current.closest<HTMLElement>('[data-history-result-set-id]') : null;
+      return { record: [recordKey, current.getAttribute(recordKey)!], scope: history ? ['data-history-result-set-id', history.getAttribute('data-history-result-set-id')!] : null, path };
+    }
     const key = part(current);
     path.unshift({ ...key, index: Array.from(current.parentElement.children).filter((child) => same(child as HTMLElement, key)).indexOf(current) });
   }
-  return { record: null, path };
+  return { record: null, scope: null, path };
 }
 function resolve(root: HTMLElement, location: Address): HTMLElement | null {
-  let node: HTMLElement | undefined = location.record === null ? root
-    : Array.from(root.querySelectorAll<HTMLElement>(`[${location.record[0]}]`)).find((item) => item.getAttribute(location.record![0]) === location.record![1]);
+  const scope = location.scope === null ? root : Array.from(root.querySelectorAll<HTMLElement>(`[${location.scope[0]}]`)).find((item) => item.getAttribute(location.scope![0]) === location.scope![1]);
+  let node: HTMLElement | undefined = location.record === null ? scope
+    : Array.from(scope?.querySelectorAll<HTMLElement>(`[${location.record[0]}]`) ?? []).find((item) => item.getAttribute(location.record![0]) === location.record![1]);
   for (const key of location.path) node = node && Array.from(node.children).filter((child) => same(child as HTMLElement, key))[key.index] as HTMLElement | undefined;
   return node ?? null;
 }
@@ -35,7 +39,7 @@ export function retainPollInteraction(root: HTMLElement, drafts = true): (replac
   const focus = active === null ? null : address(root, active);
   const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
   const disclosures = nodes.filter((node) => node.tagName === 'DETAILS').map((node) => ({ at: address(root, node), open: (node as HTMLDetailsElement).open }));
-  const fields = (drafts ? nodes : []).filter((node) => node.tagName === 'TEXTAREA' || node.tagName === 'INPUT' && !['password', 'checkbox', 'radio', 'hidden', 'submit', 'button'].includes((node as HTMLInputElement).type))
+  const fields = (drafts ? nodes : []).filter((node) => node.tagName === 'TEXTAREA' || node.tagName === 'INPUT' && !['password', 'range', 'checkbox', 'radio', 'hidden', 'submit', 'button'].includes((node as HTMLInputElement).type))
     .map((node) => { const field = node as HTMLInputElement | HTMLTextAreaElement; return { at: address(root, node), value: field.value, start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection }; });
   const scroll = nodes.filter((node) => node.scrollTop || node.scrollLeft).map((node) => ({ at: address(root, node), top: node.scrollTop, left: node.scrollLeft }));
   const ancestors: { node: HTMLElement; top: number; left: number }[] = [];
@@ -61,5 +65,11 @@ export function retainPollInteraction(root: HTMLElement, drafts = true): (replac
 export function pollControlEngaged(root: HTMLElement, textFields = true): boolean {
   const active = document.activeElement;
   return active instanceof HTMLElement && root.contains(active) && (textFields ? ['INPUT', 'TEXTAREA', 'SELECT'] : ['SELECT']).includes(active.tagName)
-    || Array.from(root.querySelectorAll<HTMLElement>('[aria-expanded="true"], [popover], [role="listbox"]')).some((node) => node.getAttribute('aria-expanded') === 'true' || node.matches(':popover-open') || node.getAttribute('role') === 'listbox' && !node.hidden);
+    || Array.from(root.querySelectorAll<HTMLElement>('[aria-haspopup][aria-expanded="true"], [popover], [role="listbox"]')).some((node) => node.hasAttribute('aria-haspopup') && node.getAttribute('aria-expanded') === 'true' || node.matches(':popover-open') || node.getAttribute('role') === 'listbox' && !node.hidden);
+}
+
+/** Owners flush their latest deferred projection when the editor leaves or closes a native/progressive control. */
+export function onPollControlEnd(root: HTMLElement, flush: () => void): void {
+  const afterInteraction = (): void => { queueMicrotask(flush); };
+  for (const event of ['focusout', 'click', 'change', 'keyup', 'toggle']) root.addEventListener(event, afterInteraction, true);
 }

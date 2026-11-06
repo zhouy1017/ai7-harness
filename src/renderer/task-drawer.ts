@@ -1,4 +1,4 @@
-import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
+import { retainPollInteraction, pollControlEngaged, onPollControlEnd } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
 import { createButton } from './components/controls.js';
@@ -388,6 +388,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   const { root, shell, api } = options;
   let request: TaskPlanRequest | null = null;
   let plan: TaskPlanProjection | null = null;
+  let deferredPlan: TaskPlanProjection | null = null;
   /** The plan as last painted, so a read that brought nothing new repaints nothing the editor has open. */
   let painted = '';
   let returnFocus: () => HTMLElement | null = () => null;
@@ -738,9 +739,16 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
     );
   }
 
+  onPollControlEnd(root, () => {
+    if (deferredPlan === null || plan === null || root.hidden || view !== 'plan' || interrupted || pollControlEngaged(root, false)) return;
+    if (deferredPlan.ref !== plan.ref || deferredPlan.kind !== plan.kind) { deferredPlan = null; return; }
+    const next = deferredPlan; deferredPlan = null; paint(next, false);
+  });
+
   // ---- painting ---------------------------------------------------------------------------------------
 
   function paint(next: TaskPlanProjection, force: boolean): void {
+    if (force && next === plan && deferredPlan !== null) next = deferredPlan;
     next = taskPlanWording(next);
     const key = JSON.stringify(next);
     const sameItem = plan !== null && plan.ref === next.ref && plan.kind === next.kind;
@@ -750,7 +758,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       schedulePoll(next);
       return;
     }
-    if (sameItem && !force && pollControlEngaged(root, false)) { schedulePoll(next); return; }
+    if (sameItem && !force && pollControlEngaged(root, false)) { deferredPlan = next; schedulePoll(next); return; }
+    deferredPlan = null;
     if (!sameVersion) {
       diffShown = false;
       unconfirmedRecordShown = false;
@@ -2792,6 +2801,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       request = next;
       returnFocus = finder;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = note ?? null;
@@ -2826,6 +2836,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       panelBookId = bookId;
       request = null;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = null;
@@ -2853,6 +2864,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       panelBookId = bookId;
       request = null;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = null;
@@ -2898,6 +2910,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       cancelOnOpen = false;
       request = null;
       plan = null;
+      deferredPlan = null;
       painted = '';
       refusal = null;
       pendingNote = null;

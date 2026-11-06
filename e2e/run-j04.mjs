@@ -3162,10 +3162,26 @@ async function main() {
       findingsOffset = page.next;
     }
     requireJourney(!remainingFindings.some((item) => item.id === ignorable.findingId) && remainingFindings.some((item) => item.target.kind === 'review'), 'book-findings-disposition-reflected');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-ordinary-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-ordinary-settings-ready');
+    await click(renderer, '帮助', 'findings-poll-ordinary-help');
+    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`, 'findings-poll-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
-    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-reread');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready' && document.documentElement.dataset.technicalLayerVisible==='false'`, 'book-findings-reread');
     await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
-    await assertRenderer(renderer, `(async () => { const selector='[data-findings-filter="category"] [data-filter-value=""]'; document.querySelector(selector)?.focus(); for(let cycle=0;cycle<2;cycle++){await new Promise(resolve=>setTimeout(resolve,2200));if(document.activeElement!==document.querySelector(selector))return false;}return true;})()`, 'findings-filter-poll-survival');
+    const pollFindings=remainingFindings.filter(item=>item.target.kind==='review').slice(0,2);
+    requireJourney(pollFindings.length===2,'findings-poll-two-records');
+    await renderer.evaluate(`document.querySelector('[data-findings-filter="category"] [data-filter-value=""]').focus()`);
+    for(const item of pollFindings) {
+      await renderer.evaluate(`globalThis.__j04PollFindings=document.querySelector('.findings-filters');globalThis.__j04PollTotal=Number(document.querySelector('.findings-center').dataset.findingsTotal)`);
+      await renderer.evaluate(`window.ai7.recordReviewFindingDisposition({reviewRunId:${JSON.stringify(item.target.reviewRunId)},findingId:${JSON.stringify(item.target.findingId)},disposition:'ignored',reason:'公开测试：轮询期间保留筛选焦点'})`);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer, `document.querySelector('.findings-filters')!==globalThis.__j04PollFindings && Number(document.querySelector('.findings-center').dataset.findingsTotal)===globalThis.__j04PollTotal-1 && document.activeElement===document.querySelector('[data-findings-filter="category"] [data-filter-value=""]')`, 'findings-filter-changed-poll-survival');
+    }
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'findings-poll-developer-settings');
+    await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'findings-poll-developer-settings-ready');
+    await click(renderer,'帮助','findings-poll-developer-help');
+    await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`, 'findings-poll-developer-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
     await waitFor(renderer, `document.querySelector('section.review-run')`, 'book-findings-review-ready');
 
