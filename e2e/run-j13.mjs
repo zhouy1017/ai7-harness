@@ -2267,7 +2267,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'catalogue-kind-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'catalogue-book-filter');
-    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='写作范例 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');

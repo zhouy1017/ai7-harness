@@ -1054,7 +1054,7 @@ async function main() {
     await assertRenderer(renderer, `(() => {
       const card = document.querySelector('.exemplar-book');
       return card.querySelector('.exemplar-title')?.textContent==='《以前出版的测试图书》新闻稿' &&
-        card.querySelector('.exemplar-kind-badge')?.textContent==='写作范例 · 新闻稿' &&
+        card.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' &&
         card.querySelector('.exemplar-context')?.textContent.startsWith('来自《以前出版的测试图书》') &&
         !card.querySelector('.knowledge-file-more') &&
         card.querySelector('.exemplar-attribution')?.textContent==='作者：测试作者 · 责编：测试责编' &&
@@ -1066,7 +1066,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');
-    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='写作范例 · 新闻稿'`, 'exemplar-combined-filters');
+    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='工作文档 · 新闻稿'`, 'exemplar-combined-filters');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value=""]', 'exemplar-type-return');
     await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="book"]').dataset.value!==''`, 'exemplar-book-selection-survives');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-restore-settings');

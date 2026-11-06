@@ -127,11 +127,46 @@ it('combines stable type and book filters, preserves admission, and names an emp
   expect(admit).toHaveBeenCalledWith({ bookId: 'book-a', template: 'author', revisionDigest: 'b'.repeat(64), expectedDecisions: 0 });
   page.root.querySelector<HTMLElement>('[data-exemplar-filter="book"] [data-filter-value="book-b"]')!.click();
   expect(page.root.querySelectorAll('.exemplar-entry')).toHaveLength(0);
-  expect(page.root.querySelector('.exemplars-empty')?.textContent).toBe('当前页没有符合筛选条件的范例。');
+  expect(page.root.querySelector('.exemplars-empty')?.textContent).toBe('没有符合筛选条件的范例。');
   expect(page.root.querySelector('[data-exemplar-filter="kind"]')?.getAttribute('data-value')).toBe('readers-report');
   page.root.querySelector<HTMLElement>('[data-exemplar-filter="book"] [data-filter-value="book-a"]')!.click();
   expect(page.root.querySelectorAll('.exemplar-entry')).toHaveLength(1);
   expect(page.root.querySelector('[data-exemplar-admission="admitted"]')).not.toBeNull();
   page.root.querySelector<HTMLElement>('[data-exemplar-filter="kind"] [data-filter-value="news-release"]')!.click();
   expect(page.root.querySelectorAll('.exemplar-title')).toHaveLength(2);
+});
+
+it('finds unvisited later-page types and Books before paginating and resets pages on filter round trips', async () => {
+  setTechnicalLayerVisible(false);
+  const books = Array.from({ length: 21 }, (_, index) => ({ ...sampleBook, bookId: `book-${index}`, bookTitle: `来源书 ${index}`,
+    exemplars: [{ ...sampleExemplar, documentId: `document-${index}`, title: `题目 ${index}`,
+      ...(index === 20 ? { typeId: 'commentary', typeLabel: '评论文章' } : {}) }], readersReports: [] }));
+  const cursor = { title: books[19]!.bookTitle, bookId: books[19]!.bookId };
+  const inspect = vi.fn(async ({ after }: { after: typeof cursor | null }) =>
+    after === null ? { books: books.slice(0, 20), nextCursor: cursor } : { books: books.slice(20), nextCursor: null });
+  vi.stubGlobal('window', { ai7: { inspectExemplars: inspect } });
+  const page = navigation(); await page.renderKnowledgeBase('exemplars');
+  expect(inspect).toHaveBeenCalledTimes(2);
+  expect(inspect).toHaveBeenLastCalledWith({ after: cursor });
+  expect(page.root.querySelectorAll('.exemplar-entry')).toHaveLength(20);
+  const choose = (key: string, value: string) => page.root.querySelector<HTMLElement>(`[data-exemplar-filter="${key}"] [data-filter-value="${value}"]`)!.click();
+  choose('kind', 'commentary');
+  expect(page.root.querySelector('.exemplar-title')?.textContent).toBe('题目 20');
+  expect(page.root.querySelectorAll('.exemplar-entry')).toHaveLength(1);
+  choose('kind', '');
+  page.root.querySelector<HTMLElement>('[data-exemplar-action="more"]')!.click();
+  expect(page.root.querySelector('.exemplar-title')?.textContent).toBe('题目 20');
+  choose('book', 'book-0');
+  expect(page.root.querySelector('.exemplar-title')?.textContent).toBe('题目 0');
+  expect(page.root.querySelector<HTMLElement>('[data-exemplar-action="first"]')?.hidden).toBe(true);
+  choose('book', 'book-20');
+  expect(page.root.querySelector('.exemplar-title')?.textContent).toBe('题目 20');
+  choose('kind', 'news-release');
+  expect(page.root.querySelectorAll('.exemplar-entry')).toHaveLength(0);
+  choose('kind', '');
+  expect(page.root.querySelector('.exemplar-title')?.textContent).toBe('题目 20');
+  expect(page.root.querySelector('[data-exemplar-filter="book"]')?.getAttribute('data-value')).toBe('book-20');
+  choose('book', '');
+  expect(page.root.querySelectorAll('.exemplar-entry')).toHaveLength(20);
+  expect(inspect).toHaveBeenCalledTimes(2);
 });

@@ -8,6 +8,7 @@ import { mountEditQualitySignals } from './quality-learning.js';
 import { renderEvaluationProfiles } from './evaluation-profiles.js';
 import { exemplarImportButton, exemplarEligibility } from './imported-exemplars.js';
 import type { DefaultExecutionRulesProjection, ExemplarBookProjection, ExemplarsProjection, KnowledgeProceduresProjection } from '../shared/protocol.js';
+import { MAX_EXEMPLAR_BOOKS_PAGE } from '../shared/protocol.js';
 import { mountReviewGuidelines } from './review-guidelines.js';
 import { mountLibraryMaterials } from './library-materials.js';
 import { mountLearningMaterials } from './quality-learning.js';
@@ -122,7 +123,7 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     if (tab === 'exemplars') {
       setStatus(EXEMPLARS_STATUS.loading, 'busy');
       try {
-        renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
+        await renderExemplars(panelNode, await window.ai7.inspectExemplars({ after: null }));
         if (content.isConnected) setStatus(EXEMPLARS_STATUS.opened);
       } catch (error) {
         setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
@@ -160,18 +161,27 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
   /**
    * 知识库 › 范例 (Issue #427, S79b; KB-004, KB-006): each published Book with who it is attributed to and when it was set as a
    * 发稿版本, and its delivered documents by type — each the version its latest delivery named, with its eligibility. The
-   * Books come a page at a time; moving forward or back to the first page replaces the current bounded page.
+   * Books are collected through bounded service reads; filters apply to that catalogue before displaying a bounded page.
    */
-  function renderExemplars(root: HTMLElement, projection: ExemplarsProjection,
-    filters = { kind: '', book: '', kinds: new Map<string, string>(), books: new Map<string, string>() },
-    after: ExemplarsProjection['nextCursor'] = null): void {
+  async function renderExemplars(root: HTMLElement, projection: ExemplarsProjection,
+    filters = { kind: '', book: '' }, offset = 0): Promise<void> {
+    // Read metadata only through the existing bounded cursor API. An unvisited Book/type must remain findable.
+    let catalogue = [...projection.books];
+    let cursor = projection.nextCursor;
+    while (cursor !== null) {
+      const next = await window.ai7.inspectExemplars({ after: cursor });
+      if (!root.isConnected) return;
+      catalogue.push(...next.books);
+      cursor = next.nextCursor;
+    }
+    if (!root.isConnected) return;
     const surface = {
       api: window.ai7, status: setStatus, error: rendererErrorMessage,
       refresh: async () => {
-        const next = await window.ai7.inspectExemplars({ after });
+        const next = await window.ai7.inspectExemplars({ after: null });
         if (!root.isConnected) return;
         root.replaceChildren();
-        renderExemplars(root, next, filters, after);
+        await renderExemplars(root, next, filters, offset);
       },
     };
     const importRow = element('div', 'button-row');
@@ -181,39 +191,47 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
     const empty = element('p', 'exemplars-empty');
     root.append(toolbar);
     const list = element('div', 'exemplar-list');
-    let pageBooks = projection.books;
+    const kinds = new Map<string, string>();
+    const books = new Map<string, string>();
     const drawFilters = () => {
-      for (const book of pageBooks) {
-        filters.books.set(book.bookId, book.bookTitle);
+      for (const book of catalogue) {
+        books.set(book.bookId, book.bookTitle);
         for (const entry of [...book.exemplars, ...book.readersReports]) {
           const kind = exemplarKindFilter(entry);
-          filters.kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `工作文档 · ${entry.typeLabel}`);
+          kinds.set(kind, kind === 'readers-report' ? '审稿意见' : `工作文档 · ${entry.typeLabel}`);
         }
       }
       toolbar.replaceChildren();
       for (const [key, label, choices] of [
-        ['kind', '范例类型', [['', '全部类型'], ...filters.kinds]],
-        ['book', '来源图书', [['', '全部图书'], ...filters.books]],
+        ['kind', '范例类型', [['', '全部类型'], ...kinds]],
+        ['book', '来源图书', [['', '全部图书'], ...books]],
       ] as const) {
         const control = filterChoices({ label, choices, value: filters[key], change: (value) => {
           filters[key] = value;
-          append(pageBooks);
+          offset = 0;
+          append();
         } });
         control.dataset['exemplarFilter'] = key;
         toolbar.append(control);
       }
-      if (projection.nextCursor !== null || after !== null) toolbar.append(element('p', 'field-note', '筛选当前页；可翻页继续查看。'));
     };
-    const append = (books: ExemplarsProjection['books']): HTMLElement | null => {
+    const append = (): HTMLElement | null => {
+      const matching = catalogue.filter((book) => (!filters.book || filters.book === book.bookId) &&
+        (!filters.kind || [...book.exemplars, ...book.readersReports].some((entry) => exemplarKindFilter(entry) === filters.kind)));
+      offset = Math.min(offset, Math.max(0, Math.ceil(matching.length / MAX_EXEMPLAR_BOOKS_PAGE) - 1) * MAX_EXEMPLAR_BOOKS_PAGE);
+      firstPage.hidden = offset === 0;
+      more.hidden = offset + MAX_EXEMPLAR_BOOKS_PAGE >= matching.length;
+      moreRow.hidden = firstPage.hidden && more.hidden;
       list.replaceChildren();
       let first: HTMLElement | null = null;
+      let firstContext: HTMLElement | null = null;
       let count = 0;
-      for (const book of books) {
-        if (filters.book && filters.book !== book.bookId) continue;
+      for (const book of matching.slice(offset, offset + MAX_EXEMPLAR_BOOKS_PAGE)) {
         const exemplars = book.exemplars.filter((entry) => !filters.kind || exemplarKindFilter(entry) === filters.kind);
         const reports = book.readersReports.filter((entry) => !filters.kind || exemplarKindFilter(entry) === filters.kind);
         if (filters.kind && exemplars.length === 0 && reports.length === 0) continue;
         const card = element('article', 'exemplar-book');
+        card.tabIndex = -1;
         card.dataset['bookId'] = book.bookId;
         card.dataset['exemplarCount'] = String(book.exemplars.length);
         card.dataset['exemplarWithdrawn'] = String(book.withdrawn);
@@ -245,62 +263,39 @@ export function createKnowledgeBase(options: KnowledgeBaseOptions) {
         if (exemplars.length > 0) card.append(items);
         // A damaged imported version is named and skipped while the rest of the Book stays listed (Issue #800).
         const reportItems = readersReportExemplars({ ...book, readersReports: reports }, (next) => {
-          pageBooks = pageBooks.map((entry) => entry.bookId === next.bookId ? next : entry);
+          catalogue = catalogue.map((entry) => entry.bookId === next.bookId ? next : entry);
         });
         card.append(reportItems, context);
         count += reports.length;
         first ??= reportItems.querySelector<HTMLElement>('li');
         if (book.imported) card.append(exemplarImportButton(surface, book));
         list.append(card);
+        firstContext ??= card;
       }
       root.dataset['exemplarBooks'] = String(list.children.length);
       empty.hidden = count > 0;
       empty.textContent = filters.kind || filters.book ? EXEMPLARS_FILTER_EMPTY : EXEMPLARS_EMPTY;
-      return first;
+      return first ?? firstContext;
     };
-    drawFilters();
-    append(projection.books);
-    let cursor = projection.nextCursor;
     const more = element('button', 'button secondary', EXEMPLARS_MORE);
     more.type = 'button';
     more.dataset['exemplarAction'] = 'more';
     const moreRow = element('div', 'button-row exemplars-more');
-    moreRow.hidden = cursor === null && after === null;
     const firstPage = element('button', 'button secondary', '回到第一页');
     firstPage.type = 'button';
     firstPage.dataset['exemplarAction'] = 'first';
-    firstPage.hidden = after === null;
-    more.hidden = cursor === null;
     moreRow.append(firstPage, more);
-    const turn = async (nextAfter: ExemplarsProjection['nextCursor']) => {
-      if (more.disabled) return;
-      more.disabled = true;
-      firstPage.disabled = true;
-      setStatus(EXEMPLARS_STATUS.loadingMore, 'busy');
-      try {
-        const next = await window.ai7.inspectExemplars({ after: nextAfter });
-        if (!root.isConnected) return;
-        after = nextAfter;
-        pageBooks = next.books;
-        drawFilters();
-        const first = append(pageBooks);
-        cursor = next.nextCursor;
-        firstPage.hidden = after === null;
-        more.hidden = cursor === null;
-        moreRow.hidden = cursor === null && after === null;
-        setStatus(EXEMPLARS_STATUS.opened);
-        const focusTarget = first ?? root.closest('.knowledge-base')?.querySelector<HTMLElement>('h2');
-        if (focusTarget) { focusTarget.tabIndex = -1; focusTarget.focus(); }
-      } catch (error) {
-        if (!root.isConnected) return;
-        setStatus(rendererErrorMessage(error, EXEMPLARS_STATUS.unavailable), 'error');
-      } finally {
-        more.disabled = false;
-        firstPage.disabled = false;
-      }
+    const turn = (nextOffset: number) => {
+      offset = nextOffset;
+      const first = append();
+      setStatus(EXEMPLARS_STATUS.opened);
+      const focusTarget = first ?? root.closest('.knowledge-base')?.querySelector<HTMLElement>('h2');
+      if (focusTarget) { focusTarget.tabIndex = -1; focusTarget.focus(); }
     };
-    more.addEventListener('click', () => { if (cursor !== null) void turn(cursor); });
-    firstPage.addEventListener('click', () => void turn(null));
+    more.addEventListener('click', () => turn(offset + MAX_EXEMPLAR_BOOKS_PAGE));
+    firstPage.addEventListener('click', () => turn(0));
+    drawFilters();
+    append();
     root.append(list, empty, moreRow);
   }
 

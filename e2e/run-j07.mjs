@@ -2619,9 +2619,9 @@ async function main() {
     await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20`, 'exemplars-first-page');
     for (let repetition = 0; repetition < 2; repetition += 1) {
       await clickSelector(renderer, '[data-exemplar-action="more"]', 'exemplars-next-page');
-      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 1 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="more"]').hidden`, 'exemplars-last-page-bounded');
+      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 1 && document.activeElement === (document.querySelector('.exemplar-book .exemplar-entry') ?? document.querySelector('.exemplar-book')) && document.querySelector('[data-exemplar-action="more"]').hidden`, 'exemplars-last-page-bounded');
       await clickSelector(renderer, '[data-exemplar-action="first"]', 'exemplars-return-first');
-      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20 && document.activeElement === document.querySelector('.exemplar-book h3') && document.querySelector('[data-exemplar-action="first"]').hidden`, 'exemplars-first-page-replaced');
+      await waitFor(renderer, `document.querySelectorAll('.exemplar-book').length === 20 && document.activeElement === (document.querySelector('.exemplar-book .exemplar-entry') ?? document.querySelector('.exemplar-book')) && document.querySelector('[data-exemplar-action="first"]').hidden`, 'exemplars-first-page-replaced');
     }
 
     at('writing-book');

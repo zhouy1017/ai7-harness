@@ -199,18 +199,15 @@ export function guidelineImported(title: string, ordinal: number): string {
 // ---- 范例 (Issue #427, plan slice S79b; KB-004, KB-006) --------------------------------------------------------------
 
 export const EXEMPLARS_EMPTY = '暂无范例，已发稿并交付的本社文档会自动加入。';
-export const EXEMPLARS_FILTER_EMPTY = '当前页没有符合筛选条件的范例。';
+export const EXEMPLARS_FILTER_EMPTY = '没有符合筛选条件的范例。';
 export const EXEMPLARS_NONE_DELIVERED = '还没有交付过的文档；交付后自动归入。';
 /** Reads the next page of published Books (Issue #427 review). */
 export const EXEMPLARS_MORE = '更多已出版的书…';
 export const EXEMPLARS_STATUS = {
   loading: '正在读取范例…',
   opened: '范例已打开',
-  loadingMore: '正在读取更多已出版的书…',
   unavailable: '无法读取范例。',
 } as const;
-/** What 范例 does not hold yet, said once below the Books. */
-export const EXEMPLARS_LATER = [] as const;
 export const EXEMPLAR_ELIGIBILITY_LABELS: Readonly<Record<ExemplarProjection['eligibility'], string>> = { 'house-only': '仅本社', excluded: '明确排除', deferred: '稍后决定' };
 
 /** Historical/imported entries have only a type; a custom document title stays verbatim. */
@@ -218,9 +215,9 @@ export function exemplarTitle(book: Pick<ExemplarBookProjection, 'bookTitle'>, e
   return entry.title && entry.title !== entry.typeLabel ? entry.title : `《${book.bookTitle}》${entry.typeLabel}`;
 }
 
-export function exemplarKind(entry: { readonly typeId: string; readonly typeLabel: string; readonly imported?: unknown }): string {
+export function exemplarKind(entry: { readonly typeId: string; readonly typeLabel: string }): string {
   if (entry.typeId.startsWith('readers-report-')) return entry.typeLabel.startsWith('审稿意见') ? entry.typeLabel : `审稿意见 · ${entry.typeLabel}`;
-  return `${entry.imported ? '写作范例' : '工作文档'} · ${entry.typeLabel}`;
+  return `工作文档 · ${entry.typeLabel}`;
 }
 
 export function exemplarKindFilter(entry: { readonly typeId: string }): string {
@@ -249,15 +246,7 @@ export function readersReportExemplarAdmission(admission: ReadersReportExemplarP
   return '尚未归入：由你决定是否归入范例';
 }
 
-/**
- * One offered 审稿意见's line: its template and version, when that version was saved, why it is the version offered, its
- * eligibility, and where its admission stands.
- */
-export function readersReportExemplarLine(entry: ReadersReportExemplarProjection, instant: (iso: string) => string): string {
-  return `${entry.typeLabel} · ${readersReportExemplarFacts(entry, instant)}` +
-    ` · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[entry.eligibility]} · ${readersReportExemplarAdmission(entry.admission, instant)}`;
-}
-
+/** Version and pin facts shown below the report's title, beside its admission history. */
 export function readersReportExemplarFacts(entry: ReadersReportExemplarProjection, instant: (iso: string) => string): string {
   return `版本 ${entry.version} · 保存于 ${instant(entry.savedAt)} · ${EXEMPLAR_READERS_REPORT_PINS[entry.pin]}`;
 }
@@ -279,15 +268,7 @@ export function exemplarDesignation(book: Pick<ExemplarBookProjection, 'designat
   return book.withdrawn ? `${designated} · ${MAINTENANCE_WITHDRAWN}；之后交付的文档，另设发稿版本后才归入` : designated;
 }
 
-/**
- * One exemplar's line: its type and version, where it was delivered and when, when it came in, its eligibility, and the
- * versions delivered before it — every one while they are few, and past that how many, with the latest named.
- */
-export function exemplarLine(exemplar: ExemplarProjection, instant: (iso: string) => string): string {
-  const title = exemplar.title && exemplar.title !== exemplar.typeLabel ? ` · ${exemplar.title}` : '';
-  return `${exemplar.typeLabel}${title} · ${exemplarFacts(exemplar, instant)} · 学习准入：${EXEMPLAR_ELIGIBILITY_LABELS[exemplar.eligibility]}`;
-}
-
+/** Delivery/import and history facts shown below the document's custom title. */
 export function exemplarFacts(exemplar: ExemplarProjection, instant: (iso: string) => string): string {
   if (exemplar.imported) return `版本 ${exemplar.version} · 导入于 ${instant(exemplar.archivedAt)} · 原件：${exemplar.imported.sourceName}` +
     (exemplar.earlierVersionCount > 0 ? ` · 此前导入过 ${exemplar.earlierVersionCount} 个版本` : '');

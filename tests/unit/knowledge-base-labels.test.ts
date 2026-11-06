@@ -24,15 +24,14 @@ import {
   materialIndexStateLine,
   materialSegmentsHeading,
   artifactLine,
-  EXEMPLARS_LATER,
   EXEMPLAR_READERS_REPORT_ADMIT,
   EXEMPLAR_READERS_REPORT_PINS,
   EXEMPLAR_READERS_REPORT_STATUS,
   readersReportExemplarAdmission,
-  readersReportExemplarLine,
+  readersReportExemplarFacts,
   exemplarAttribution,
   exemplarDesignation,
-  exemplarLine,
+  exemplarFacts,
   exemplarTitle,
   exemplarKind,
   exemplarSkippedNote,
@@ -145,25 +144,23 @@ describe('范例 (Issue #427, S79b)', () => {
       documentId: 'd', typeId: 'news-release', typeLabel: '新闻稿', version: 3, revisionId: 'r', revisionDigest: 'a'.repeat(64),
       deliveredTo: '编辑部', deliveredAt: 't1', archivedAt: 't2', earlierVersionCount: 2, earlierVersions: [1, 2], eligibility: 'house-only' as const,
     };
-    expect(exemplarLine(exemplar, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 此前还交付过版本 1、2 · 学习准入：仅本社');
-    expect(exemplarLine({ ...exemplar, earlierVersionCount: 0, earlierVersions: [] }, (iso) => iso)).toBe('新闻稿 · 版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 学习准入：仅本社');
+    expect(exemplarFacts(exemplar, (iso) => iso)).toBe('版本 3 · 交付给编辑部于 t1 · 归入于 t2 · 此前还交付过版本 1、2');
+    expect(exemplarFacts({ ...exemplar, earlierVersionCount: 0, earlierVersions: [] }, (iso) => iso)).toBe('版本 3 · 交付给编辑部于 t1 · 归入于 t2');
     // Past the versions it names, the line says how many there were.
-    expect(exemplarLine({ ...exemplar, version: 14, earlierVersionCount: 12, earlierVersions: [12, 13] }, (iso) => iso))
-      .toBe('新闻稿 · 版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 此前还交付过 12 个版本，最近的是版本 12、13 · 学习准入：仅本社');
-    expect(exemplarLine({ ...exemplar, title: '新书发布会' }, (iso) => iso)).toContain('新闻稿 · 新书发布会 · 版本 3');
+    expect(exemplarFacts({ ...exemplar, version: 14, earlierVersionCount: 12, earlierVersions: [12, 13] }, (iso) => iso))
+      .toBe('版本 14 · 交付给编辑部于 t1 · 归入于 t2 · 此前还交付过 12 个版本，最近的是版本 12、13');
+
     expect(exemplarTitle({ bookTitle: '甲书' }, exemplar)).toBe('《甲书》新闻稿');
     expect(exemplarTitle({ bookTitle: '甲书' }, { ...exemplar, title: '新闻稿' })).toBe('《甲书》新闻稿');
     expect(exemplarTitle({ bookTitle: '甲书' }, { ...exemplar, title: '新书发布会' })).toBe('新书发布会');
     expect(exemplarKind(exemplar)).toBe('工作文档 · 新闻稿');
-    expect(exemplarKind({ ...exemplar, imported: {} })).toBe('写作范例 · 新闻稿');
+
     expect(exemplarKind({ typeId: 'readers-report-author', typeLabel: '审稿意见 · 给作者的修改意见' })).toBe('审稿意见 · 给作者的修改意见');
     expect(KNOWLEDGE_BASE_TAB_VIEWS.find((view) => view.tab === 'exemplars')?.holds).toContain('不含图书原稿');
     // A damaged imported version is named by Book and document type as 写作任务 names it, and skipped (Issue #800).
     expect(exemplarSkippedNote(['以前出版的测试图书 · 新闻稿'])).toBe('另有 1 份范例记录已损坏，无法读取：《以前出版的测试图书 · 新闻稿》');
     expect(exemplarSkippedNote(['甲书 · 新闻稿', '乙书 · 审稿意见']))
       .toBe('另有 2 份范例记录已损坏，无法读取：《甲书 · 新闻稿》、《乙书 · 审稿意见》');
-    // The 审稿意见 now come in (Issue #429); only the import of earlier Books is still to come.
-    expect(EXEMPLARS_LATER).toEqual([]);
   });
 
   it('offers a Book\'s 审稿意见 at the version 图书交付包 pins, under 仅本社, and says where its admission stands (Issue #429)', () => {
@@ -172,10 +169,12 @@ describe('范例 (Issue #427, S79b)', () => {
       revisionId: 'r', revisionDigest: 'b'.repeat(64), savedAt: 't1', pin: 'designation' as const, eligibility: 'house-only' as const,
       admission: { state: 'offered' as const, admittedAt: null, decisions: 0 },
     };
-    expect(readersReportExemplarLine(offered, (iso) => iso))
-      .toBe('审稿意见 · 给作者的修改意见 · 版本 2 · 保存于 t1 · 设为发稿版本时的最新一版 · 学习准入：仅本社 · 尚未归入：由你决定是否归入范例');
-    expect(readersReportExemplarLine({ ...offered, pin: 'later', admission: { state: 'admitted', admittedAt: 't2', decisions: 1 } }, (iso) => iso))
-      .toBe('审稿意见 · 给作者的修改意见 · 版本 2 · 保存于 t1 · 发稿版本设定后才起草，按现在的最新一版 · 学习准入：仅本社 · 已归入于 t2');
+    expect(readersReportExemplarFacts(offered, (iso) => iso))
+      .toBe('版本 2 · 保存于 t1 · 设为发稿版本时的最新一版');
+    expect(readersReportExemplarFacts({ ...offered, pin: 'later', admission: { state: 'admitted', admittedAt: 't2', decisions: 1 } }, (iso) => iso))
+      .toBe('版本 2 · 保存于 t1 · 发稿版本设定后才起草，按现在的最新一版');
+    expect(readersReportExemplarAdmission(offered.admission, (iso) => iso)).toBe('尚未归入：由你决定是否归入范例');
+    expect(readersReportExemplarAdmission({ state: 'admitted', admittedAt: 't2', decisions: 1 }, (iso) => iso)).toBe('已归入于 t2');
     expect(readersReportExemplarAdmission({ state: 'superseded', admittedAt: null, decisions: 1 }, (iso) => iso)).toBe('此前归入的是另一版；这一版尚未归入');
     expect(EXEMPLAR_READERS_REPORT_PINS).toEqual({ designation: '设为发稿版本时的最新一版', later: '发稿版本设定后才起草，按现在的最新一版' });
     expect(EXEMPLAR_READERS_REPORT_ADMIT).toBe('归入本社范例');
