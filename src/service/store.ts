@@ -15655,6 +15655,7 @@ export class EditorialStore {
         rationale: input.rationale,
         atomicGroupId: null,
         source: { kind: 'ai7', origin: 'task', label: DIALOGUE_MARK_SOURCE_LABEL, taskId: task.dialogueId },
+        sourceAttemptId: input.attemptId,
         basis: [{ label: `${DIALOGUE_MARK_SOURCE_LABEL} · 第 ${latest.attempt.ordinal} 次`, blockId: task.blockId, fromGrapheme: task.fromGrapheme, toGrapheme: task.toGrapheme, quote }],
       }], ([created]) => {
         requireStore(created !== null && created !== undefined, 'MARK_ANCHOR_CHANGED', task.span === undefined ? '所选文字已不在当前稿件中；不能把这次回答转为修改建议。' : '跨段的提问不能直接转为修改建议；请转为任务意图草稿。');

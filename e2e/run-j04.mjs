@@ -485,7 +485,12 @@ async function openReviewDestination(renderer, name) {
 
 /** Press one 审阅 action by its data attribute, refusing one that is missing or disabled. */
 async function reviewAction(renderer, selector, name) {
-  await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; button.click(); return true; })()`, name);
+  await assertRenderer(renderer, `(() => { const button=document.querySelector(${JSON.stringify(selector)}); if(!(button instanceof HTMLButtonElement)||button.disabled)return false; const more=button.closest('details.editorial-mark-more'); if(more&&!more.open)more.querySelector('summary').click(); button.click(); return true; })()`, name);
+}
+
+async function openMarkMore(renderer, markId, name) {
+  await waitFor(renderer, `document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more')`, `${name}-ready`, 30_000);
+  await assertRenderer(renderer, `(() => { const more=document.querySelector('[data-mark-card="'+CSS.escape(${JSON.stringify(markId)})+'"] .editorial-mark-more'); if(!(more instanceof HTMLDetailsElement))return false; if(!more.open)more.querySelector('summary').click(); return more.open; })()`, name);
 }
 
 /**
@@ -3113,7 +3118,7 @@ async function main() {
       'review-no-preference-references-under-ci', reviewed.run.influence);
     await assertRenderer(renderer, `document.querySelectorAll('article.review-finding [data-referenced-rules]').length===0`, 'review-no-referenced-rules-chip-under-ci');
     await reviewAction(renderer, `article.review-finding[data-finding-id="${typosFinding.findingId}"] [data-review-action="go-to-text"]`, 'review-go-to-text');
-    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && (document.querySelector('[data-mark-card]')?.textContent??'').includes('AI7 · 审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"] [data-mark-id="${typosFinding.markId}"]')?.dataset.markSource==='ai7' && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.startsWith('AI7 本地检查 · ') && document.querySelector('[data-mark-card] [data-mark-source]')?.textContent.includes('审阅「错别字与规范用语」')`, 'review-mark-and-card', 30_000);
     await assertRenderer(renderer, `(() => {const reject=document.querySelector('[data-mark-card] [data-mark-action="reject"]');if(!(reject instanceof HTMLButtonElement)||reject.disabled)return false;reject.click();return true;})()`, 'review-learning-reject');
     await waitFor(renderer, `document.querySelector('[data-mark-card] [data-learning-reason-ask]') !== null`, 'review-learning-ask');
     await assertRenderer(renderer, `(() => {const ask=document.querySelector('[data-learning-reason-ask]');return ask.querySelectorAll('input[type="radio"]').length===3&&ask.querySelectorAll('input:checked').length===0&&ask.querySelector('textarea')?.value===''&&ask.querySelector('[data-learning-ask-answer]')?.disabled===true&&document.querySelector('[data-mark-action="withdraw"]')?.disabled===false;})()`, 'review-learning-ask-unselected-nonblocking');
@@ -3419,6 +3424,7 @@ async function main() {
     const factualCard = `document.querySelector('article.review-finding[data-finding-id="${sourced.reviewFindingId}"]')`;
     await waitFor(renderer, `${evidenceRows(factualCard)}===${JSON.stringify(expectedEvidence)}`, 'factual-card-evidence', 30_000);
     await reviewAction(renderer, `article.review-finding[data-finding-id="${sourced.reviewFindingId}"] [data-review-action="go-to-text"]`, 'factual-card-go-to-text');
+    await openMarkMore(renderer, sourced.markId, 'factual-mark-card-more');
     await waitFor(renderer, `${evidenceRows(`document.querySelector('[data-mark-card="${sourced.markId}"]')`)}===${JSON.stringify(expectedEvidence)}`, 'factual-mark-card-evidence', 30_000);
     await openReviewDestination(renderer, 'factual-card-evidence-back');
     await waitFor(renderer, `document.querySelectorAll('section.review-group[data-review-category="factual-review"] .fact-lens .fact-lens-row').length > 0`, 'factual-card-evidence-lens', 60_000);
@@ -3469,6 +3475,7 @@ async function main() {
     // from 事实核查 · 更正提案, nothing decided, and its 依据与核查 keeps 证据核查未完成 with the result it came from.
     await reviewAction(renderer, `${workspaceSelector} [data-evidence-action="go-to-correction"]`, 'factual-correction-go');
     const correctionCardSelector = `.editorial-mark-card[data-mark-card=${JSON.stringify(correctionMarkId)}]`;
+    await openMarkMore(renderer, correctionMarkId, 'factual-correction-card-more');
     await waitFor(renderer, `document.querySelector('${correctionCardSelector} .editorial-mark-factual-incomplete')?.textContent==='证据核查未完成'`, 'factual-correction-card');
     await assertRenderer(renderer, `(() => { const card=document.querySelector('${correctionCardSelector}'); const lineage=card?.querySelector('.editorial-mark-factual'); return card?.dataset.markKind==='change-suggestion' && lineage?.dataset.markFactualResult===${JSON.stringify(sourced.resultId)} && lineage.dataset.markFactualVersion==='1' && (card.querySelector('.editorial-mark-source')?.textContent ?? '').includes('事实核查 · 更正提案'); })()`, 'factual-correction-mark');
     cancellation.throwIfRequested();

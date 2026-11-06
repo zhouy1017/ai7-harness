@@ -375,6 +375,8 @@ const MARK_HELPERS = `(() => {
     act: (action) => {
       const control = layer()?.querySelector('[data-mark-card] [data-mark-action="' + action + '"], [data-mark-composer] [data-mark-action="' + action + '"]');
       if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      const more=control.closest('details.editorial-mark-more');
+      if(more&&!more.open)more.querySelector('summary').click();
       control.click();
       return true;
     },

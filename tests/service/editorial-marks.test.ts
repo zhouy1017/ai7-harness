@@ -2,7 +2,8 @@ import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
@@ -173,6 +174,75 @@ function storeError(operation: () => unknown): string {
 }
 
 describe('Editorial Marks on a manuscript', () => {
+  it('keeps the original author through legacy bare-array conversions after a later dialogue binding (#1379)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(window);
+      const selection = markInput(book, window, block.blockId, 2, 6, 'annotation');
+      const at = (minute: number) => new Date(Date.UTC(2026, 10, 1, 0, minute));
+      const turn = store.askAboutSelection(window.bookId, { selection, question: '公开合成问题' }, at(0));
+      // Backfill the historical ledger after producing bare arrays: this builds the old reader's valid shape
+      // through the real owners, without mutating stored JSON, disabling triggers or sending any request.
+      vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(at(1));
+      const produce = () => store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 2, toGrapheme: 6,
+        pinnedText: selection.selectedText, kind: 'change-suggestion', body: '', proposedText: '公开合成改稿', rationale: '',
+        atomicGroupId: null, basis: [], source: { kind: 'ai7', origin: 'task', label: '对话回答', taskId: turn.dialogueId } });
+      const original = produce(); const alreadyConverted = produce();
+      vi.setSystemTime(at(3));
+      const legacyAnnotation = store.updateEditorialMark(change(book, window, alreadyConverted, 'convert', { targetKind: 'annotation' })).card!;
+      vi.useRealTimers();
+      const ledger = new DialogueLedger(database);
+      const bind = (attemptId: string, route: 'opencode-go' | 'deepseek-open-platform', model: string, minute: number) => {
+        const session = randomUUID();
+        ledger.bind(attemptId, { harnessSessionId: session, route, model, operationalScope: 'ordinary-production',
+          providerProcessingVersion: 'v13', policyRuleId: 'ordinary-production-editorial-dialogue',
+          behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: 'b'.repeat(64), boundAt: at(minute).toISOString() });
+        ledger.openSpan(attemptId, session, 0, at(minute)); ledger.settle(attemptId, 'completed', 1, null, at(minute));
+      };
+      bind(turn.attemptId, 'opencode-go', 'historical-model-a', 0);
+      ledger.convert(turn.attemptId, original, at(1)); ledger.convert(turn.attemptId, alreadyConverted, at(1));
+      const next = ledger.nextAttempt(turn.dialogueId, 'regenerate', () => 0, at(2));
+      bind(next, 'deepseek-open-platform', 'historical-model-b', 2);
+      const converted = store.updateEditorialMark(change(book, window, original, 'convert', { targetKind: 'annotation' })).card!;
+      expect(converted.source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, legacyAnnotation.markId).source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
+      store.markCleanShutdown(); store.close(); database.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      for (const markId of [converted.markId, legacyAnnotation.markId]) {
+        expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
+      }
+    } finally { vi.useRealTimers(); store.close(); if (database.isOpen) database.close(); }
+  });
+
+  it('projects registered editors and keeps a produced model author frozen across conversion and restart (#1379)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(window);
+      const own = store.createEditorialMark(markInput(book, window, block.blockId, 2, 6, 'annotation')).card!;
+      expect(own.source.editorName).toBeNull();
+      store.updateBookPeople({ bookId: window.bookId, expectedVersion: 0, authors: [], editors: ['责编甲', '责编乙'], related: [] });
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, own.markId).source.editorName).toBe('责编甲、责编乙');
+      const markId = store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 8, toGrapheme: 13,
+        pinnedText: graphemesOf(block.text).slice(8, 13).join(''), kind: 'change-suggestion', body: '', proposedText: '公开合成建议',
+        rationale: '公开合成理由', atomicGroupId: null, basis: [],
+        source: { kind: 'ai7', origin: 'task', label: '润色这段', taskId: randomUUID() },
+        sourceModelBinding: { route: 'openai-platform', model: 'historical-custom-model' } });
+      const source = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).source;
+      expect(source.modelLabel).toBe('OpenAI 官方');
+      expect(source.modelTechnicalLabel).toBe('OpenAI 官方 · historical-custom-model');
+      const converted = store.updateEditorialMark(change(book, window, markId, 'convert', { targetKind: 'annotation' })).card!;
+      expect(converted.source).toEqual(source);
+      store.markCleanShutdown(); store.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, converted.markId).source).toEqual(source);
+    } finally { store.close(); }
+  });
+
   it('makes the four kinds on exact text, carries them in the window, and keeps them across a restart', async () => {
     const first = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     let book: Imported;
@@ -189,7 +259,7 @@ describe('Editorial Marks on a manuscript', () => {
         const result = first.createEditorialMark(markInput(book, window, blockId, 2 + index * 6, 6 + index * 6, kind));
         expect(result.marks).toHaveLength(index + 1);
         expect(result.card?.kind).toBe(kind);
-        expect(result.card?.source).toEqual({ kind: 'editor', origin: null, label: null, taskId: null });
+        expect(result.card?.source).toEqual({ kind: 'editor', origin: null, label: null, taskId: null, editorName: null });
         expect(result.card?.anchorState).toBe('exact');
         expect(graphemesOf(result.card!.pinnedText)).toHaveLength(4);
       });
@@ -446,7 +516,7 @@ describe('Editorial Marks on a manuscript', () => {
         basis: [{ label: '第三章 第二节', blockId: window.blocks[1]!.blockId, fromGrapheme: 0, toGrapheme: 2, quote: null }],
       });
       const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, produced);
-      expect(card.source).toEqual({ kind: 'ai7', origin: 'review-category', label: '人名与称谓一致', taskId: null });
+      expect(card.source).toMatchObject({ kind: 'ai7', origin: 'review-category', label: '人名与称谓一致', taskId: null, modelLabel: 'AI7 本地检查' });
       expect(card.basis).toHaveLength(1);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).marks[0]).toMatchObject({ markId: produced, sourceKind: 'ai7' });
       // AI7's words are not the editor's to rewrite; what the editor may do is turn the comment into a suggestion.

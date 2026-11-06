@@ -208,6 +208,15 @@ async function click(renderer, label, name) {
   if (label === '保存') { await renderer.evaluate(`document.querySelector('[data-testid="manuscript-editor"]').dispatchEvent(new KeyboardEvent('keydown', { key: 's', code: 'KeyS', ctrlKey: true, bubbles: true, cancelable: true }))`); return; }
   await assertRenderer(renderer, `(() => { const button = Array.from(document.querySelectorAll('button')).find((item) => item.textContent === ${JSON.stringify(label)}); if (!(button instanceof HTMLButtonElement) || button.disabled) return false; button.click(); return true; })()`, name);
 }
+// Settings > Help is the current product owner; #1376/#1382 moves this entry in Batch 3.
+async function markTechnicalMode(renderer, visible, name) {
+  await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), `${name}-settings`);
+  await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, `${name}-settings-ready`);
+  await click(renderer, '帮助', `${name}-help`);
+  await waitFor(renderer, `document.querySelector('.help-developer-mode input')`, `${name}-toggle-ready`);
+  await assertRenderer(renderer, `(() => { const toggle=document.querySelector('.help-developer-mode input'); if(toggle.checked!==${JSON.stringify(visible)})toggle.click(); return true; })()`, `${name}-toggle`);
+  await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible===${JSON.stringify(String(visible))}`, `${name}-mode`);
+}
 async function fill(renderer, selector, value, name) {
   await assertRenderer(renderer, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); if (!(input instanceof HTMLInputElement)) return false; input.value=${JSON.stringify(value)}; input.dispatchEvent(new Event('input',{bubbles:true})); return true; })()`, name);
 }
@@ -282,6 +291,8 @@ const PAGE_HELPERS = `(() => {
     act: (action) => {
       const control = layer()?.querySelector('[data-mark-card] [data-mark-action="' + action + '"], [data-mark-composer] [data-mark-action="' + action + '"]');
       if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      const more = control.closest('details.editorial-mark-more');
+      if (more && !more.open) more.open = true;
       control.click();
       return true;
     },
@@ -482,6 +493,10 @@ async function main() {
     fastCredentialSaved = true;
     await renderer.evaluate(`window.ai7.saveModelServiceCredential({connectionName:'J05 selected Fast',secret:${JSON.stringify(fastSecret)}})`);
     await renderer.evaluate(`window.ai7.selectFastRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    // #1379 explicitly exercises the ordinary card branch.
+    await markTechnicalMode(renderer, false, 'mark-ordinary');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('library')), 'mark-ordinary-library');
+    await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, 'mark-ordinary-library-ready');
     await importAndOpen(renderer, EXCERPT.title);
     await assertRenderer(renderer, PAGE_HELPERS, 'page-helpers');
     at('selected-fast-text-scope-refusal');
@@ -571,13 +586,15 @@ async function main() {
     await waitFor(renderer, `window.__j05.composer() === null && window.__j05.mark('annotation', ${JSON.stringify(first)}).length > 0`, 'annotation-drawn');
     await assertRenderer(renderer, `window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'annotation' && window.__j05.markText('annotation', ${JSON.stringify(first)}) === window.__j05Original.first.slice(${RANGES.annotation[0]}, ${RANGES.annotation[1]})`, 'annotation-line-outranks-highlight');
     await openMarkCard(renderer, 'annotation', first, 'annotation-open');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.getAttribute('role') === 'dialog' && card.querySelector('[data-mark-source]')?.dataset.markSource === 'editor' && card.querySelector('[data-mark-source]').textContent.startsWith('你 · ') && card.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(ANNOTATION_BODY)} && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.textContent.includes('批注随稿件导出') && (!card.querySelector('details.technical-details').open || card.querySelector('details.technical-details').hidden) && window.__j05.mark('annotation', ${JSON.stringify(first)})[0].classList.contains('editorial-mark-active'); })()`, 'annotation-card-decision-layer');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.getAttribute('role') === 'dialog' && card.querySelector('[data-mark-source]')?.dataset.markSource === 'editor' && card.querySelector('[data-mark-source]').textContent.startsWith('你 · ') && card.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(ANNOTATION_BODY)} && card.querySelector('[data-mark-state]')?.textContent === '待你处理' && card.textContent.includes('批注随稿件导出') && !card.querySelector('details.technical-details')?.textContent && window.__j05.mark('annotation', ${JSON.stringify(first)})[0].classList.contains('editorial-mark-active'); })()`, 'annotation-card-decision-layer');
     // The card sits below its paragraph and keeps to the text column.
     await assertRenderer(renderer, `(() => { const card = window.__j05.card().getBoundingClientRect(); const block = window.__j05.block(${JSON.stringify(first)}).getBoundingClientRect(); return Math.abs(card.left - block.left) <= 2 && Math.abs(card.width - block.width) <= 2 && card.top >= block.bottom - 1; })()`, 'annotation-card-aligned-to-text-column');
-    await assertRenderer(renderer, `window.__j05.act('reply')`, 'annotation-reply-open');
+    await assertRenderer(renderer, `(() => { const card=window.__j05.card(); return Array.from(card.querySelectorAll('[data-mark-block]')).map((block)=>block.dataset.markBlock).join('|')==='body|quote|author|more|actions' && !card.querySelector('.editorial-mark-more').open && card.querySelector('.editorial-mark-more [data-mark-action="remove"]') && !card.querySelector('[data-mark-action="reply"]').closest('details'); })()`, 'annotation-ordinary-hierarchy');
+    await assertRenderer(renderer, `(() => { const more=window.__j05.card().querySelector('.editorial-mark-more'); more.open=true; return window.__j05.act('reply'); })()`, 'annotation-reply-open');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="reply"]')`, 'annotation-reply-form');
     await assertRenderer(renderer, `window.__j05.write('body', ${JSON.stringify(ANNOTATION_REPLY)}) && window.__j05.act('submit')`, 'annotation-reply-submit');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-region="replies"]')?.textContent.includes(${JSON.stringify(ANNOTATION_REPLY)})`, 'annotation-replied');
+    await assertRenderer(renderer, `window.__j05.card().querySelector('.editorial-mark-more').open`, 'annotation-more-survives-reply');
     await assertRenderer(renderer, `window.__j05.act('resolve')`, 'annotation-resolve');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-state]')?.textContent === '已处理' && window.__j05.mark('annotation', ${JSON.stringify(first)})[0]?.dataset.markStatus === 'resolved' && window.__j05.block(${JSON.stringify(first)}).dataset.markLine === 'personal-highlight'`, 'annotation-resolved-leaves-the-margin');
     await assertRenderer(renderer, `window.__j05.act('reopen')`, 'annotation-reopen');
@@ -599,6 +616,7 @@ async function main() {
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-body]')?.textContent === ${JSON.stringify(NOTE_EDITED)} && window.__j05.card().querySelector('[data-mark-form]') === null`, 'note-edited');
     await press(renderer, 'Escape');
 
+    await assertRenderer(renderer, `(async () => { const work=(await window.ai7.listPriorWork()).find((item)=>item.bookTitle===${JSON.stringify(EXCERPT.title)}); await window.ai7.updateBookPeople({bookId:work.bookId,expectedVersion:0,authors:[],editors:['卡片责编'],related:[]}); return true; })()`, 'mark-registered-editor');
     at('mark-change-suggestion');
     await openSelectionMenu(renderer, first, RANGES.suggestion[0], RANGES.suggestion[1], 'suggestion-menu');
     await chooseMenuItem(renderer, 'add-change-suggestion', 'suggestion-choose');
@@ -610,7 +628,7 @@ async function main() {
     // 预览 · 未应用: the replacement shows in place, labelled, while the manuscript stays the original.
     await assertRenderer(renderer, `(() => { const preview = document.querySelector('[data-mark-preview]'); const mark = window.__j05.mark('change-suggestion', ${JSON.stringify(first)})[0]; return preview?.querySelector('.editorial-mark-preview-text')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && preview.querySelector('.editorial-mark-preview-label')?.textContent === '预览 · 未应用' && preview.contentEditable === 'false' && mark.classList.contains('editorial-mark-previewed') && getComputedStyle(mark).textDecorationLine.includes('line-through') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first; })()`, 'suggestion-previews-in-place');
     await assertRenderer(renderer, `(async () => { const work = (await window.ai7.listPriorWork()).find((entry) => entry.bookTitle === ${JSON.stringify(EXCERPT.title)}); const page = await window.ai7.getManuscriptWindowAt({ manuscriptId: work.manuscriptId, branchId: work.branchId, target: { kind: 'start' } }); window.__j05Journal = page.journalSequence; return page.blocks.find((block) => block.blockId === ${JSON.stringify(first)})?.text === window.__j05Original.first && page.marks.length === 4 && page.marksTruncated === false; })()`, 'suggestion-durable-text-unchanged');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const regions = Array.from(card.querySelectorAll('[data-mark-region]')).map((region) => region.dataset.markRegion + ':' + region.querySelector('h4')?.textContent); const accept = card.querySelector('[data-mark-action="accept-and-apply"]'); return regions.join('|') === 'content:修改内容|rationale:修改理由|basis:依据与核查|disposition:你的处理' && card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j05Original.first.slice(${RANGES.suggestion[0]}, ${RANGES.suggestion[1]}) && card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && card.querySelector('[data-mark-region="rationale"]').textContent.includes(${JSON.stringify(SUGGESTED_REASON)}) && accept?.disabled === false && accept.textContent === '接受并应用' && accept.classList.contains('primary') && card.querySelector('[data-mark-action="reject"]')?.disabled === false && card.querySelector('[data-mark-action="accept-with-edit"]')?.disabled === false && card.querySelector('[data-mark-decision]') === null && card.querySelector('[data-mark-state]').textContent === '待你处理'; })()`, 'suggestion-card-four-regions');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); const blocks = Array.from(card.querySelectorAll('[data-mark-block]')).map((block) => block.dataset.markBlock); const accept = card.querySelector('[data-mark-action="accept-and-apply"]'); return document.documentElement.dataset.technicalLayerVisible==='false' && blocks.join('|')==='proposed|original|rationale|author|more|actions' && card.querySelector('[data-mark-source]').textContent.startsWith('卡片责编 · ') && !card.querySelector('.editorial-mark-more').open && card.querySelector('.editorial-mark-more [data-mark-region="basis"]') && card.querySelector('.editorial-mark-more [data-mark-action="convert-annotation"]') && !accept.closest('details') && card.querySelector('[data-mark-region="content"] del')?.textContent === window.__j05Original.first.slice(${RANGES.suggestion[0]}, ${RANGES.suggestion[1]}) && card.querySelector('[data-mark-region="content"] ins')?.textContent === ${JSON.stringify(SUGGESTED_TEXT)} && card.querySelector('[data-mark-region="rationale"]').textContent.includes(${JSON.stringify(SUGGESTED_REASON)}) && accept?.disabled === false && accept.textContent === '接受并应用' && accept.classList.contains('primary') && card.querySelector('[data-mark-action="reject"]')?.disabled === false && card.querySelector('[data-mark-action="accept-with-edit"]')?.disabled === false && card.querySelector('[data-mark-decision]') === null && card.querySelector('[data-mark-state]').textContent === '待你处理'; })()`, 'suggestion-card-ordinary-hierarchy');
 
     // A card that opens below the pane's edge is brought into view, and that scroll is the surface's own:
     // the pane does not take it for the reader reaching the window's end.
@@ -648,12 +666,22 @@ async function main() {
     await click(renderer, '撤销', 'undo-after-apply');
     await waitFor(renderer, `window.__j05.status().includes('没有可撤销的编辑') && window.__j05.text(${JSON.stringify(first)}) === window.__j05Original.first`, 'apply-is-not-undone-by-history', 15_000);
     await openMarkCard(renderer, 'change-suggestion', first, 'applied-card-again');
+    // Preserve the developer disclosure checks without assuming the whole Journey runs in that mode.
+    await markTechnicalMode(renderer, true, 'mark-developer-roundtrip');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'mark-developer-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'mark-developer-editor');
+    await openMarkCard(renderer, 'change-suggestion', first, 'mark-developer-card');
+    await assertRenderer(renderer, `(() => { window.__j05.card().querySelector('.editorial-mark-more').open=true; return true; })()`, 'mark-developer-more');
     await assertRenderer(renderer, `(() => { const summary = document.querySelector('[data-technical-collection] > summary') ?? window.__j05.card().querySelector('details.technical-details > summary'); if (!(summary instanceof HTMLElement)) return false; summary.click(); return true; })()`, 'technical-identities-open');
     await waitFor(renderer, `window.__j05.card().querySelector('details.technical-details dl')?.checkVisibility() === true`, 'technical-identities-visible');
     await assertRenderer(renderer, `(() => { const details = window.__j05.card().querySelector('details.technical-details'); const terms = Array.from(details.querySelectorAll('dt')).map((term) => term.textContent); return terms.includes('提案修改项') && terms.includes('提案决定') && terms.includes('标记时的修订版'); })()`, 'technical-identities-are-one-step-away');
     await assertRenderer(renderer, `(() => { const summary = document.querySelector('[data-technical-collection] > summary') ?? window.__j05.card().querySelector('details.technical-details > summary'); summary.click(); return true; })()`, 'technical-identities-close');
     await waitFor(renderer, `window.__j05.card().querySelector('details.technical-details dl')?.checkVisibility() === false`, 'technical-identities-hidden');
     await press(renderer, 'Escape');
+
+    await markTechnicalMode(renderer, false, 'mark-ordinary-roundtrip');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'mark-ordinary-manuscript');
+    await waitFor(renderer, `document.querySelector('[data-testid="manuscript-editor"]')`, 'mark-ordinary-editor');
 
     at('apply-accept-and-apply');
     // 接受并应用: one click on a suggestion the editor has not decided. The text is written, the mark stands on it.
@@ -708,14 +736,14 @@ async function main() {
     await waitFor(renderer, `window.__j05.composer()?.dataset.markComposer === 'convert-editor-note'`, 'convert-note-composer');
     await assertRenderer(renderer, `window.__j05.write('body', ${JSON.stringify(CONVERTED_NOTE)}) && window.__j05.act('submit')`, 'convert-note-submit');
     await waitFor(renderer, `window.__j05.mark('editor-note', ${JSON.stringify(second)}).length > 0 && window.__j05.mark('personal-highlight', ${JSON.stringify(second)}).length === 0`, 'highlight-became-note');
-    await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'editor-note' && window.__j05.card().querySelector('[data-mark-source]').textContent.includes('由高亮转来')`, 'note-names-its-origin');
+    await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'editor-note' && window.__j05.card().querySelector('.editorial-mark-more [data-mark-provenance]').textContent.includes('由高亮转来')`, 'note-names-its-origin');
     await assertRenderer(renderer, `window.__j05.act('convert-annotation')`, 'note-to-annotation');
     await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'annotation' && window.__j05.card().querySelector('[data-mark-body]').textContent === ${JSON.stringify(CONVERTED_NOTE)} && window.__j05.mark('editor-note', ${JSON.stringify(second)}).length === 0`, 'note-became-annotation');
     await assertRenderer(renderer, `window.__j05.act('convert-change-suggestion')`, 'annotation-to-suggestion-open');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="convert-change-suggestion"] [data-mark-field="rationale"]')?.value === ${JSON.stringify(CONVERTED_NOTE)}`, 'annotation-to-suggestion-form');
     await assertRenderer(renderer, `window.__j05.write('proposedText', ${JSON.stringify(CONVERTED_SUGGESTION)}) && window.__j05.act('submit')`, 'annotation-to-suggestion-submit');
     await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'change-suggestion' && window.__j05.mark('annotation', ${JSON.stringify(second)}).length === 0`, 'annotation-became-suggestion');
-    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-region="rationale"]').textContent.includes(${JSON.stringify(CONVERTED_NOTE)}) && card.querySelector('[data-mark-source]').textContent.includes('由批注转来') && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === window.__j05Original.second.slice(${RANGES.second[0]}, ${RANGES.second[1]}) && window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second; })()`, 'conversion-keeps-the-pinned-text');
+    await assertRenderer(renderer, `(() => { const card = window.__j05.card(); return card.querySelector('[data-mark-region="rationale"]').textContent.includes(${JSON.stringify(CONVERTED_NOTE)}) && card.querySelector('.editorial-mark-more [data-mark-provenance]').textContent.includes('由批注转来') && window.__j05.markText('change-suggestion', ${JSON.stringify(second)}) === window.__j05Original.second.slice(${RANGES.second[0]}, ${RANGES.second[1]}) && window.__j05.text(${JSON.stringify(second)}) === window.__j05Original.second; })()`, 'conversion-keeps-the-pinned-text');
     // An undecided suggestion may go back to a comment that says what it proposed.
     await assertRenderer(renderer, `window.__j05.act('convert-annotation')`, 'suggestion-to-annotation');
     await waitFor(renderer, `window.__j05.card()?.dataset.markKind === 'annotation' && window.__j05.card().querySelector('[data-mark-body]').textContent.includes(${JSON.stringify(CONVERTED_SUGGESTION)})`, 'suggestion-became-annotation');
@@ -1015,7 +1043,7 @@ async function main() {
     // offered no choice, as a one-paragraph draft is here, and 准备计划 stays disabled with that reason. The card names the span.
     // Promotion over exactly the span, its plan statement and `draft-span` pins are proven by tests/service/task-intent-drafts.test.ts.
     at('selection-span-no-review-choice');
-    await waitFor(renderer, `(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range blockquote footer')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字 · 修订版 ' + range.revisionLabel; })()`, 'span-promote-withheld-by-reason', 10_000);
+    await waitFor(renderer, `(async () => { const composer = ${composerOf}; const range = window.__j05SpanDraft.version.ranges[0]; const reason = '没有能审阅这个范围的审阅类别。'; const read = (await window.ai7.inspectTaskIntentDrafts({ draftId: window.__j05SpanDraft.draftId })).drafts[0]; return composer?.querySelector('[data-task-composer-resolution]')?.dataset.taskComposerResolution === 'unsupported' && composer.querySelector('.task-composer-unsupported')?.textContent === reason && composer.querySelector('[data-task-composer-field^="choice-"]') === null && composer.querySelector('[data-task-composer-action="promote"]')?.disabled === true && read.resolution?.state === 'unsupported' && read.resolution.reason === reason && read.promotion === null && composer.querySelector('li.task-composer-range blockquote footer')?.textContent === '第 ' + range.position + '–' + (range.position + 2) + ' 段 · ' + ([...range.text].length - 2) + ' 字' && document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'span-promote-withheld-by-reason', 10_000);
     await assertRenderer(renderer, `(async () => (await window.ai7.inspectReviewWorkspace({ reviewRunId: null })).run === null && window.__j05.text(${JSON.stringify(spanA)}) === window.__j05Span.a && window.__j05.text(${JSON.stringify(spanB)}) === window.__j05Span.b && window.__j05.text(${JSON.stringify(spanC)}) === window.__j05Span.c)()`, 'span-nothing-prepared-or-written');
     await assertRenderer(renderer, `(() => { const close = document.querySelector('#task-drawer [data-task-drawer-control="close"]'); if (!(close instanceof HTMLButtonElement)) return false; close.click(); return true; })()`, 'span-drawer-close');
     await waitFor(renderer, `document.querySelector('#task-drawer')?.hidden === true`, 'span-drawer-closed', 15_000);
@@ -1055,6 +1083,7 @@ async function main() {
     await waitFor(renderer, `document.querySelector('[data-screen="editor"]') && window.__j05.mark('change-suggestion', window.__j05LocalBlock).length===1`, 'local-batch-suggestion-on-text');
     await openMarkCard(renderer, 'change-suggestion', await renderer.evaluate('window.__j05LocalBlock'), 'local-suggestion');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-application]') && window.__j05.text(window.__j05LocalBlock).startsWith('本地检查……保留原文。')`, 'local-batch-writes-mechanical-choice');
+    await assertRenderer(renderer, `(() => { const card=window.__j05.card(); return document.documentElement.dataset.technicalLayerVisible==='false' && card.querySelector('[data-mark-source]').textContent.startsWith('AI7 本地检查 · 审阅') && card.querySelector('.editorial-mark-more [data-mark-receipt]') && !card.querySelector('.editorial-mark-more').open; })()`, 'local-card-frozen-author-and-collapsed-receipt');
     await assertRenderer(renderer, `window.__j05.act('prepare-reverse')`, 'local-prepare-reversal');
     await waitFor(renderer, `window.__j05.card()?.querySelector('[data-mark-form="reverse-apply"]')`, 'local-reversal-preview');
     await assertRenderer(renderer, `window.__j05.act('submit')`, 'local-confirm-reversal');

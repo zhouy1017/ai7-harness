@@ -312,7 +312,7 @@ describe('Agent 工作区 over the real store, dialogue owner and harness', () =
         const card = store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId);
         const candidate = proposal.candidates[index]!;
         expect(card.kind).toBe('change-suggestion');
-        expect(card.source).toMatchObject({ kind: 'ai7', origin: 'task', label: AGENT_WORKSPACE_MARK_SOURCE_LABEL, taskId: proposal.dialogueId });
+        expect(card.source).toMatchObject({ kind: 'ai7', origin: 'task', label: AGENT_WORKSPACE_MARK_SOURCE_LABEL, taskId: proposal.dialogueId, modelLabel: 'AI7 本地检查' });
         expect(card.suggestion).toMatchObject({ currentText: candidate.anchor.text, proposedText: candidate.proposedText,
           atomicGroupId: promotion.atomicGroupId, decision: null, application: null });
       }

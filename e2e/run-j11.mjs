@@ -708,6 +708,8 @@ const MARK_HELPERS = `(() => {
     act: (action) => {
       const control = layer()?.querySelector('[data-mark-card] [data-mark-action="' + action + '"], [data-mark-composer] [data-mark-action="' + action + '"]');
       if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+      const more=control.closest('details.editorial-mark-more');
+      if(more&&!more.open)more.querySelector('summary').click();
       control.click();
       return true;
     },
@@ -2251,6 +2253,11 @@ async function main() {
 
     at('j14-decision-feedback-keyboard');
     // Without a pointer: Enter on 补充原因… opens the row with the focus on its first reason, and Escape leaves it.
+    if (await renderer.evaluate(`window.__j11.card()?.querySelector('.editorial-mark-more')?.open===false`)) {
+      await assertRenderer(renderer, `(() => { const summary=window.__j11.card()?.querySelector('.editorial-mark-more > summary'); if(!(summary instanceof HTMLElement))return false; summary.focus(); return document.activeElement===summary; })()`, 'decision-keyboard-more-focused');
+      await pressEnter(renderer);
+      await waitFor(renderer, `window.__j11.card()?.querySelector('.editorial-mark-more')?.open===true`, 'decision-keyboard-more-open');
+    }
     await assertRenderer(renderer, `(() => { const add = window.__j11.card()?.querySelector('[data-mark-action="reason-add"]'); if (!(add instanceof HTMLButtonElement)) return false; add.focus(); return document.activeElement === add; })()`, 'decision-keyboard-focused');
     await pressEnter(renderer);
     const keyboardRow = await readDecision(renderer, (card) => card.prompt?.mode === 'add' && card.focus === '语言更准确', 'decision-keyboard-row');
