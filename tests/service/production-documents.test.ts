@@ -104,6 +104,34 @@ async function withBook(run: (store: EditorialStore, book: Book) => Promise<void
   await withStore(async (store) => run(store, await importBook(store, await compose('交付记录组稿', [1, 2, 3, 4, 5, 6]))));
 }
 
+function documentSurface(store: EditorialStore, book: Book, pickerPath?: string) {
+  const uninstall = installMiniDom();
+  vi.stubGlobal('window', { ai7: { getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }) } });
+  setTechnicalLayerVisible(false);
+  const root = document.createElement('main'); document.body.append(root);
+  const opened = vi.fn(async (_document: ProductionDocumentProjection) => {});
+  const status = vi.fn();
+  const api: Partial<Parameters<typeof mountDeliverables>[0]['api']> = {
+    inspectDeliverables: async () => store.inspectDeliverables(book.bookId),
+    inspectProductionDocuments: async () => store.inspectProductionDocuments(book.bookId),
+    inspectBookDeliveryPackage: async () => store.inspectBookDeliveryPackage(book.bookId),
+    inspectWritingTask: async () => store.inspectWritingTask(book.bookId),
+    selectAndStageManuscript: async () => pickerPath === undefined ? { status: 'cancelled' }
+      : { status: 'staged', staged: await store.stageSelectedManuscript(randomUUID(), pickerPath) },
+    prepareSourceImportReview: async (input) => store.prepareSourceImportReview(input.draftId, input.expectedDraftVersion, input.target),
+    commitSourceImport: async (input) => store.commitSourceImport({ draftId: input.draftId, expectedDraftVersion: input.expectedDraftVersion,
+      reviewDigest: input.reviewDigest, commitId: input.commitAttemptId ?? randomUUID() }),
+    acknowledgeImportCompletion: async (input) => store.acknowledgeImportCompletion(input.commitId),
+    abandonImportDraft: async (input) => store.abandonImportDraft(input.draftId, input.expectedDraftVersion),
+    createProductionDocument: async (input) => store.createProductionDocument({ ...input, bookId: book.bookId }),
+  };
+  const surface = mountDeliverables({ root, bookId: book.bookId, bookTitle: '交付物测试', api: api as Parameters<typeof mountDeliverables>[0]['api'],
+    setStatus: status, errorMessage: (error) => error instanceof Error ? error.message : '读取失败', openDocument: opened, openReview: () => {},
+    awaitServiceJob: async (job) => job, openWritingPlan: () => {},
+    technicalDetails: (_className, ...rows) => { const section = document.createElement('div'); section.append(...rows); return section; } });
+  return { root, surface, opened, status, close: () => { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); } };
+}
+
 async function withDocument(run: (fixture: DocumentFixture) => Promise<void>): Promise<void> {
   await withBook(async (store, book) => {
     const sourceVersionId = await importSource(store, book.bookId, await compose('新闻稿初稿', [21, 22, 23]));
@@ -296,22 +324,49 @@ describe('Production Documents', () => {
     });
   });
 
+  it('acknowledges successful same-page import without startup or prior-work recovery', async () => {
+    await withBook(async (store, book) => {
+      const before = store.listPriorWork();
+      const acknowledge = vi.spyOn(store, 'acknowledgeImportCompletion');
+      const abandon = vi.spyOn(store, 'abandonImportDraft');
+      const view = documentSurface(store, book, await compose('同页材料', [21, 22]));
+      try {
+        view.surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
+        view.root.querySelector<HTMLButtonElement>('.production-document-card[data-document-type-id="news-release"] [data-document-action="import"]')!.click();
+        await vi.waitFor(() => expect(view.opened).toHaveBeenCalledTimes(1));
+        expect(acknowledge).toHaveBeenCalledTimes(1);
+        expect(abandon).not.toHaveBeenCalled();
+        expect((await store.getImportStartup()).state).toBe('none');
+        expect(store.listPriorWork()).toEqual(before);
+      } finally { view.close(); acknowledge.mockRestore(); abandon.mockRestore(); }
+    });
+  });
+
+  it('abandons only a refused staged format so startup offers no spurious recovery', async () => {
+    await withBook(async (store, book) => {
+      // The container is the subject: a byte marker has no manuscript content and is retained as UNKNOWN.
+      const path = join(roots.inputRoot, 'refused.bin'); await writeFile(path, Uint8Array.of(0));
+      const acknowledge = vi.spyOn(store, 'acknowledgeImportCompletion');
+      const abandon = vi.spyOn(store, 'abandonImportDraft');
+      const view = documentSurface(store, book, path);
+      try {
+        view.surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
+        view.root.querySelector<HTMLButtonElement>('.production-document-card[data-document-type-id="news-release"] [data-document-action="import"]')!.click();
+        await vi.waitFor(() => expect(view.status).toHaveBeenCalledWith('请选择 DOCX、Markdown 或 TXT 文件。', 'error'));
+        expect(abandon).toHaveBeenCalledTimes(1);
+        expect(acknowledge).not.toHaveBeenCalled();
+        expect((await store.getImportStartup()).state).toBe('none');
+        expect(view.opened).not.toHaveBeenCalled();
+      } finally { view.close(); acknowledge.mockRestore(); abandon.mockRestore(); }
+    });
+  });
+
   it('focuses the package condition document rather than the first same-type document', async () => {
     await withBook(async (store, book) => {
       const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'A' })).document!;
       const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'B' })).document!;
-      const uninstall = installMiniDom();
-      vi.stubGlobal('window', { ai7: { getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }) } });
-      setTechnicalLayerVisible(false);
-      const root = document.createElement('main'); document.body.append(root);
-      const api = { inspectDeliverables: async () => store.inspectDeliverables(book.bookId),
-        inspectProductionDocuments: async () => store.inspectProductionDocuments(book.bookId),
-        inspectBookDeliveryPackage: async () => store.inspectBookDeliveryPackage(book.bookId),
-        inspectWritingTask: async () => store.inspectWritingTask(book.bookId) } as unknown as Parameters<typeof mountDeliverables>[0]['api'];
-      const surface = mountDeliverables({ root, bookId: book.bookId, bookTitle: '路由测试', api,
-        setStatus: () => {}, errorMessage: () => '读取失败', openDocument: async () => {}, openReview: () => {},
-        awaitServiceJob: async (job) => job, openWritingPlan: () => {},
-        technicalDetails: (_className, ...rows) => { const section = document.createElement('div'); section.append(...rows); return section; } });
+      const view = documentSurface(store, book);
+      const { root, surface } = view;
       try {
         surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
         expect(root.querySelector<HTMLButtonElement>(`.production-document-row[data-document-id="${first.documentId}"] [data-document-action="deliver"]`)!.disabled).toBe(false);
@@ -320,7 +375,7 @@ describe('Production Documents', () => {
         expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('deliver');
         root.querySelector<HTMLButtonElement>('.package-condition-list li[data-type-id="promotion-article"] [data-package-route="document"]')!.click();
         expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('blank');
-      } finally { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); }
+      } finally { view.close(); }
     });
   });
 

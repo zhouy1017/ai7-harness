@@ -121,13 +121,15 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
   const leftOut: Array<{ documentId: string; title: string; reason: string }> = [];
   const houseTypes = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.map((type) => type.typeId);
   const rows = db.prepare(`SELECT * FROM production_documents WHERE book_id = ? AND type_id IN (${houseTypes.map(() => '?').join(', ')})
-    ORDER BY type_id, document_id LIMIT 17`).all(bookId, ...houseTypes) as SqlRow[];
+    ORDER BY type_id, created_at, rowid LIMIT 17`).all(bookId, ...houseTypes) as SqlRow[];
   if (rows.length > 16) return { participants, leftOut, unavailableReason: '交付物数量超出本次比对边界。' };
   let corrupt: string | null = null;
   for (const row of rows) {
     const documentId = text(row.document_id);
     const typeId = text(row.type_id);
     const typeLabel = documentTypeLabel(typeId);
+    const peers = rows.filter((candidate) => candidate.type_id === typeId);
+    const refPrefix = peers.length === 1 ? `deliverable/${typeId}` : `deliverable/${typeId}/${peers.findIndex((candidate) => candidate.document_id === documentId) + 1}`;
     let title = typeLabel;
     try {
       const recordDigest = sha256Hex(canonicalJson({
@@ -188,7 +190,7 @@ export function reviewDeliverables(db: DatabaseSync, bookId: string): ReviewDeli
         const kept = sliceGraphemes(words, 0, Math.min(remaining, 2_000));
         if (kept.trim().length === 0) continue;
         const position = integer(block.position);
-        paragraphs.push({ ref: rows.filter((candidate) => candidate.type_id === typeId).length === 1 ? `deliverable/${typeId}/${position}` : `deliverable/${typeId}/${documentId}/${position}`, position, text: kept, truncated: kept !== words });
+        paragraphs.push({ ref: `${refPrefix}/${position}`, position, text: kept, truncated: kept !== words });
         remaining -= graphemeCount(kept);
       }
       // A finalized version the editor emptied is a state of the document, not a damaged record: it sits out, named.

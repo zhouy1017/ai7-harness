@@ -343,10 +343,6 @@ export const WRITING_NOT_DO = '不改稿件；不照抄范例；不交付、不�
 export const WRITING_COST_BEFORE_PLAN = '先看计划后显示' as const;
 export { WRITING_EXEMPLAR_MOVED } from './writing/writing-contract.js';
 
-export function writingDocumentExists(typeLabel: string): string {
-  return `这本书已经有「${typeLabel}」；请在交付物中打开它继续修改。`;
-}
-
 export function writingNotForThisBook(typeLabel: string): string {
   return `「${typeLabel}」已标为本书不做；先恢复，再起草。`;
 }
@@ -655,7 +651,7 @@ export class WritingTasks {
     return (this.#db.prepare(
       `SELECT r.revision_id, r.ordinal, r.created_at, r.task_intent_id FROM analysis_result_set_revisions r
        JOIN analysis_result_sets s ON s.result_set_id = r.result_set_id
-       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.ordinal DESC`,
+       WHERE s.book_id = ? AND s.kind = ? ORDER BY r.created_at DESC, r.rowid DESC`,
     ).all(bookId, WRITING_KIND) as SqlRow[]).map((row) => ({
       revisionId: text(row.revision_id),
       ordinal: Number(row.ordinal),

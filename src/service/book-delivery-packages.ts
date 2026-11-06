@@ -449,11 +449,13 @@ export class BookDeliveryPackages {
         excluded.push({ kind: 'not-for-this-book', label: type.typeLabel, detail: BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook });
       } else if (latest !== undefined) {
         const deliveries = type.document!.deliveries;
+        const defaultTitle = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label;
+        const namedMember = type.multiple === true || (type.document!.title !== undefined && type.document!.title !== defaultTitle);
         documents.push({
           typeId: type.typeId,
           disposition: 'included',
-          exportKey: type.multiple === true ? `document:${type.document!.documentId}` : `document:${type.typeId}`,
-          ...(type.document!.title === undefined ? {} : { title: type.document!.title }),
+          ...(namedMember ? { exportKey: type.multiple === true ? `document:${type.document!.documentId}` : `document:${type.typeId}`,
+            ...(type.document!.title === undefined ? {} : { title: type.document!.title }) } : {}),
           documentId: type.document!.documentId,
           version: latest.version,
           revisionId: latest.revisionId,

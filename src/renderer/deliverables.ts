@@ -132,7 +132,7 @@ type DeliverablesApi = Pick<RendererApi, 'inspectDeliverables' | 'inspectProduct
   'approveBookDeliveryPackageExport' | 'cancelBookDeliveryPackageExport' | 'designatePublicationVersion' | 'reviewManuscriptExport' |
   'inspectMaintenanceCase' | 'listMaintenanceCases' | 'recordMaintenanceCase' | 'appendMaintenanceCaseRevision' | 'saveMaintenanceErrata' |
   'chooseManuscriptExportDestination' | 'approveManuscriptExport' | 'revealManuscriptExport' |
-  'renameProductionDocument' | 'selectAndStageManuscript' | 'prepareSourceImportReview' | 'commitSourceImport' | 'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
+  'acknowledgeImportCompletion' | 'abandonImportDraft' | 'renameProductionDocument' | 'selectAndStageManuscript' | 'prepareSourceImportReview' | 'commitSourceImport' | 'createProductionDocument' | 'decideProductionDocumentType' | 'recordProductionDocumentDelivery' |
   'inspectWritingTask' | 'prepareWritingTask' | 'quickStartWritingTask' | 'createWritingDraft'>;
 
 export interface MountDeliverablesOptions {
@@ -964,11 +964,15 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         const picked = await api.selectAndStageManuscript();
         if (picked.status === 'cancelled') return;
         const staged = picked.staged;
-        if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
+        if (!['DOCX', 'MD', 'TXT'].includes(staged.source.format)) {
+          await api.abandonImportDraft({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion });
+          throw new Error('请选择 DOCX、Markdown 或 TXT 文件。');
+        }
         const review = await api.prepareSourceImportReview({ draftId: staged.draftId, expectedDraftVersion: staged.draftVersion,
           target: { kind: 'existing-book', bookId, relationship: 'source-only', reuseSourceVersionId: null } });
         const imported = await api.commitSourceImport({ draftId: review.draftId, expectedDraftVersion: review.draftVersion,
           reviewDigest: review.reviewDigest, commitAttemptId: review.commitAttemptId });
+        await api.acknowledgeImportCompletion({ commitId: imported.commitId });
         sourceVersionId = imported.sourceVersionId;
         title = Array.from(staged.source.displayName.replace(/\.[^.]+$/, '').normalize('NFC').trim()).slice(0, 80).join('');
       }

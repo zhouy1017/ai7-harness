@@ -580,6 +580,7 @@ export function reconcileStoppedWritingRuns(host: WritingTaskOperationsHost): { 
 export function internalWritingDrafted(host: WritingTaskOperationsHost, bookId: string): Map<string, { revisionId: string; createdAt: string }> {
   const drafted = new Map<string, { revisionId: string; createdAt: string }>();
   const opened = new Set(host.writingTasks.drafts(bookId).map((draft) => draft.analysisRevisionId));
+  const latestTypes = new Set<string>();
   for (const revision of internalWritingCall(host, () => host.writingTasks.revisions(bookId))) {
     // Whether a revision holds a draft never changes, so each is read once while the store is open (#688 re-review).
     let known = host.writingRevisionDrafts.get(revision.revisionId);
@@ -592,7 +593,9 @@ export function internalWritingDrafted(host: WritingTaskOperationsHost, bookId: 
       if (host.writingRevisionDrafts.size >= 1024) host.writingRevisionDrafts.clear();
       host.writingRevisionDrafts.set(revision.revisionId, known);
     }
-    if (known.drafted && !opened.has(revision.revisionId) && !drafted.has(known.typeId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
+    if (!known.drafted || latestTypes.has(known.typeId)) continue;
+    latestTypes.add(known.typeId);
+    if (!opened.has(revision.revisionId)) drafted.set(known.typeId, { revisionId: revision.revisionId, createdAt: revision.createdAt });
   }
   return drafted;
 }

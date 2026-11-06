@@ -1,3 +1,4 @@
+import type { PackageVersionRecord } from '../../src/service/book-delivery-packages.js';
 import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { mkdir, rm, copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
@@ -111,19 +112,43 @@ afterEach(async () => {
   await roots.dispose();
 });
 
+/** Append a valid old-shape version; never rewrite a ledger row or disable its guards. */
+function appendLegacySingletonPackage(db: DatabaseSync, bookId: string): void {
+  const row = db.prepare('SELECT canonical_json FROM book_delivery_package_versions WHERE book_id = ? ORDER BY version DESC LIMIT 1').get(bookId)!;
+  const current = JSON.parse(String(row.canonical_json)) as PackageVersionRecord;
+  const content = { ...current.content, documents: current.content.documents.map((entry) => {
+    if (entry.disposition !== 'included') return entry;
+    const { title: _title, exportKey: _key, ...legacy } = entry; return legacy;
+  }) };
+  const legacy = { ...current, packageVersionId: randomUUID(), priorVersionId: current.packageVersionId, version: current.version + 1,
+    preparedAt: new Date().toISOString(), content, contentDigest: canonicalRecord(content).digest };
+  const record = canonicalRecord(legacy);
+  db.prepare(`INSERT INTO book_delivery_package_versions(package_version_id, package_id, book_id, version, prior_version_id, purpose,
+    publication_version_id, content_sha256, actor, prepared_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      legacy.packageVersionId, legacy.packageId, bookId, legacy.version, legacy.priorVersionId, legacy.purpose,
+      legacy.content.publication!.publicationVersionId, legacy.contentDigest, legacy.actor, legacy.preparedAt, record.json, record.digest);
+}
+
 it('migrates revision 108 without changing ledger digests and restores peer documents through a backup', async () => {
   let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   const book = await importSample1Book(store, roots.codeRoot, '多篇文档迁移');
-  const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '首发稿' })).document!;
+  let first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release' })).document!;
+  first = (await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: first.documentId, version: { kind: 'saved', revisionId: first.versions[0]!.revisionId }, recipient: { kind: 'publicity', custom: null }, note: null })).document!;
+  const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '迁移前发稿', 'stage-archive', null, '');
+  store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '测试', basis: '历史版本' });
+  const packageBefore = store.inspectBookDeliveryPackage(book.bookId);
+  store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '旧版交付包', expectedContentDigest: packageBefore.content.digest });
   store.close();
   const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
   const old = new DatabaseSync(databasePath);
+  appendLegacySingletonPackage(old, book.bookId);
   asMultiDocumentRevision108(old);
   const digests = productionDocumentDigestBytes(old);
   old.close();
   store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   try {
     expect(store.inspectDataVersion().schemaRevision).toBe(109);
+    expect(store.inspectBookDeliveryPackage(book.bookId).changedSinceLatest).toBe(false);
     expect(store.inspectProductionDocuments(book.bookId).types[0]!.document).toEqual(first);
     const check = new DatabaseSync(databasePath, { readOnly: true });
     try { expect(productionDocumentDigestBytes(check) === digests).toBe(true); } finally { check.close(); }

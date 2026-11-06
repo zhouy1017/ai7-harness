@@ -189,8 +189,8 @@ function rewrite(id: string, replacementOf: (kind: string) => string) {
 
 describe('cross-deliverable participants and revision lineage', () => {
   it('keeps peer titles and paragraph references distinct in a review', async () => {
-    const first = await create();
-    const second = await create();
+    const first = await create('promotion-article');
+    const second = await create('promotion-article');
     store.renameProductionDocument({ bookId: book.bookId, documentId: first.documentId, title: '首发稿' });
     store.renameProductionDocument({ bookId: book.bookId, documentId: second.documentId, title: '媒体稿' });
     await finalize(first.documentId);
@@ -199,7 +199,8 @@ describe('cross-deliverable participants and revision lineage', () => {
     expect(participants.map((entry) => entry.title).sort()).toEqual(['媒体稿', '首发稿']);
     const refs = participants.flatMap((entry) => entry.paragraphs.map((paragraph) => paragraph.ref));
     expect(new Set(refs).size).toBe(refs.length);
-    expect(participants.every((entry) => entry.paragraphs.every((paragraph) => paragraph.ref.includes(entry.documentId)))).toBe(true);
+    expect(refs.every((ref) => ref.length <= 64 && /^deliverable\/promotion-article\/[12]\/[1-9][0-9]*$/u.test(ref))).toBe(true);
+    expect(prepare().categories.map((category) => category.categoryId)).toContain(CATEGORY);
   });
 
   it('keeps the built-in entry and exact absence reason; excludes created-only drafts', async () => {

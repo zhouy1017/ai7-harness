@@ -6307,7 +6307,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string };
     output: QuickStartWritingTaskResult;
   };
-  /** 打开草稿: one drafted result made the type's document, its 起草 phase started; once per type of a Book. */
+  /** 打开草稿: one drafted result made the type's document, its 起草 phase started; once per writing result. */
   createWritingDraft: {
     input: { bookId: string; revisionId: string; title?: string };
     output: WritingDraftCreatedProjection;

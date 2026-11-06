@@ -241,6 +241,20 @@ it('preserves a historical writing draft digest while admitting a same-type peer
   });
 });
 
+it('does not resurface a superseded draft after the newest result becomes a document', async () => {
+  const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
+  await withSession(fixture, async (session) => {
+    const bookId = await sample1Book(session.store, WRITING_BOOK_TITLE);
+    await run(session, bookId, prepare(session.store, bookId));
+    const newest = await run(session, bookId, prepare(session.store, bookId));
+    expect(session.store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!.drafted!.revisionId).toBe(newest.resultSetRevision!.revisionId);
+    session.store.createWritingDraft(bookId, newest.resultSetRevision!.revisionId);
+    const type = session.store.inspectWritingTask(bookId).types.find((type) => type.typeId === 'promotion-article')!;
+    expect(type.drafted).toBeNull();
+    expect(type.prepare.allowed).toBe(true);
+  });
+});
+
 describe('写作任务 over the real store on exact sample1', () => {
   it('drafts J-07\'s 宣传文章 from the plan, and 打开草稿 makes it the Book\'s 宣传文章 in its 起草 phase', async () => {
     const fixture = await loadModelFixture(FIXTURES_ROOT, WRITING_FIXTURE_IDENTITY);
