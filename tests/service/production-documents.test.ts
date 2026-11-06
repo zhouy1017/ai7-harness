@@ -1,9 +1,13 @@
+import { DEFAULT_QUICK_ACTIONS } from '../../src/shared/preferences.js';
+import { mountDeliverables } from '../../src/renderer/deliverables.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+import { installMiniDom } from '../support/mini-dom.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseDocx, type ParsedDocxBlock } from '../../src/service/docx.js';
 import { productionDocumentMarksNotCarried } from '../../src/service/production-documents.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
@@ -289,6 +293,34 @@ describe('Production Documents', () => {
       const review = await store.reviewManuscriptExport({ bookId: book.bookId, target: { kind: 'document', documentId: first.documentId, revisionId: first.versions[0]!.revisionId }, options: { ...DEFAULT_MANUSCRIPT_EXPORT_OPTIONS } }, true);
       expect(review.restoration).toBe('regenerated');
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null)).toEqual(before);
+    });
+  });
+
+  it('focuses the package condition document rather than the first same-type document', async () => {
+    await withBook(async (store, book) => {
+      const first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'A' })).document!;
+      const second = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: 'B' })).document!;
+      const uninstall = installMiniDom();
+      vi.stubGlobal('window', { ai7: { getPreferences: async () => ({ values: { 'actions.defaults': DEFAULT_QUICK_ACTIONS } }) } });
+      setTechnicalLayerVisible(false);
+      const root = document.createElement('main'); document.body.append(root);
+      const api = { inspectDeliverables: async () => store.inspectDeliverables(book.bookId),
+        inspectProductionDocuments: async () => store.inspectProductionDocuments(book.bookId),
+        inspectBookDeliveryPackage: async () => store.inspectBookDeliveryPackage(book.bookId),
+        inspectWritingTask: async () => store.inspectWritingTask(book.bookId) } as unknown as Parameters<typeof mountDeliverables>[0]['api'];
+      const surface = mountDeliverables({ root, bookId: book.bookId, bookTitle: '路由测试', api,
+        setStatus: () => {}, errorMessage: () => '读取失败', openDocument: async () => {}, openReview: () => {},
+        awaitServiceJob: async (job) => job, openWritingPlan: () => {},
+        technicalDetails: (_className, ...rows) => { const section = document.createElement('div'); section.append(...rows); return section; } });
+      try {
+        surface.start(); await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(root.querySelector<HTMLButtonElement>(`.production-document-row[data-document-id="${first.documentId}"] [data-document-action="deliver"]`)!.disabled).toBe(false);
+        root.querySelector<HTMLButtonElement>(`.package-condition-list li[data-document-id="${second.documentId}"] [data-package-route="document"]`)!.click();
+        expect(document.activeElement?.closest<HTMLElement>('.production-document-row')?.dataset['documentId']).toBe(second.documentId);
+        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('deliver');
+        root.querySelector<HTMLButtonElement>('.package-condition-list li[data-type-id="promotion-article"] [data-package-route="document"]')!.click();
+        expect((document.activeElement as HTMLElement).dataset['documentAction']).toBe('blank');
+      } finally { surface.destroy(); root.remove(); vi.unstubAllGlobals(); uninstall(); }
     });
   });
 

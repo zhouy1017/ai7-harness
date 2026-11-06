@@ -158,7 +158,7 @@ async function execution(afterFirst?: () => Promise<void>, recorded?: ResolvedMo
 
 /** Reproduce the live item's exact sample1-derived words through the editor's bounded edit API; no file or model supplies them. */
 async function recordedDocument(id: string) {
-  store.renameProductionDocument({ bookId: book.bookId, documentId: id, title: 'sample1 新闻稿（合成比对）' });
+  store.renameProductionDocument({ bookId: book.bookId, documentId: id, title: store.baselineAnalysisLedger.readWorkingBlocks(document(id).branchId).some((block) => block.kind === 'title') ? 'sample1 新闻稿（合成比对）' : '新闻稿' });
   const passage = store.baselineAnalysisLedger.readWorkingBlocks(book.branchId).find((block) =>
     block.kind === 'paragraph' && block.text.length > 100 && /[一二三四五六七八〇○]/u.test(block.text))!;
   const composed = sliceGraphemes(passage.text, 0, 200).replace(/[一二三四五六七八〇○]/u, '九');

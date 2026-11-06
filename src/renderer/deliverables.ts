@@ -333,12 +333,16 @@ export function mountDeliverables(options: MountDeliverablesOptions): Deliverabl
         return;
       }
       // The 发稿 block's 设为发稿版本…, or the type card's own next action: the editor acts there, on this page.
-      const target = route.kind === 'publication'
-        ? block?.querySelector<HTMLElement>('[data-publication-action="designate"]') ?? null
-        : (['deliver', 'redeliver', 'create', 'notForThisBook'] as const)
-          .map((action) => documentsBlock?.querySelector<HTMLButtonElement>(
-            `li.production-document-card[data-document-type-id="${CSS.escape(route.typeId)}"] [data-document-action="${action}"]`) ?? null)
+      let target: HTMLElement | null = null;
+      if (route.kind === 'publication') target = block?.querySelector<HTMLElement>('[data-publication-action="designate"]') ?? null;
+      else {
+        const typeCard = documentsBlock?.querySelector<HTMLElement>(`li.production-document-card[data-document-type-id="${CSS.escape(route.typeId)}"]`) ?? null;
+        const scope = route.documentId === undefined ? typeCard
+          : typeCard?.querySelector<HTMLElement>(`li.production-document-row[data-document-id="${CSS.escape(route.documentId)}"]`) ?? null;
+        target = (['deliver', 'redeliver', 'create', 'blank', 'notForThisBook'] as const)
+          .map((action) => scope?.querySelector<HTMLButtonElement>(`[data-document-action="${action}"]`) ?? null)
           .find((button) => button !== null && !button.disabled) ?? null;
+      }
       target?.scrollIntoView({ block: 'center' });
       target?.focus();
     },

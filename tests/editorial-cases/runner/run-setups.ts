@@ -73,7 +73,7 @@ export async function finalizedNewsRelease(store: EditorialStore, codeRoot: stri
   const committed = await store.commitSourceImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion, reviewDigest: review.reviewDigest, commitId });
   await store.acknowledgeImportCompletion(commitId);
   const documentId = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId: committed.sourceVersionId })).document!.documentId;
-  store.renameProductionDocument({ bookId: book.bookId, documentId, title: 'sample1 新闻稿（合成比对）' });
+  store.renameProductionDocument({ bookId: book.bookId, documentId, title: store.baselineAnalysisLedger.readWorkingBlocks(store.inspectProductionDocuments(book.bookId).types[0]!.document!.branchId).some((block) => block.kind === 'title') ? 'sample1 新闻稿（合成比对）' : '新闻稿' });
   const documentOf = () => store.inspectProductionDocuments(book.bookId).types.find((type) => type.document?.documentId === documentId)!.document!;
   const passage = workingBlocks(store, book).find((block) => block.kind === 'paragraph' && block.text.length > 100 && /[一二三四五六七八〇○]/u.test(block.text))!;
   const composed = sliceGraphemes(passage.text, 0, 200).replace(/[一二三四五六七八〇○]/u, '九');
