@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import { showToast } from './components/toast.js';
 import type { GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../shared/protocol.js';
@@ -292,12 +293,12 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
   }
 
   function paint(reading: GlobalAttentionProjection): void {
+    if (pollControlEngaged(host, false)) return;
     const projection = visibleGlobalAttention(reading, technicalLayerVisible);
     const key = JSON.stringify(projection);
     if (key === painted) return;
     painted = key;
-    const active = document.activeElement;
-    const restore = active instanceof HTMLElement && host.contains(active) ? active.dataset['attentionOpen'] ?? null : null;
+    const restoreInteraction = retainPollInteraction(host);
     byItem.clear();
     for (const group of projection.groups) for (const item of group.items) byItem.set(item.itemId, item);
     host.dataset['attentionCount'] = String(projection.actionableCount);
@@ -306,10 +307,7 @@ export function mountGlobalAttention(options: MountGlobalAttentionOptions): Glob
     loading.remove();
     host.replaceChildren(...globalAttentionView(projection).map((view) => groupNode(view, projection)));
     if (opening) for (const button of host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')) button.disabled = true;
-    if (restore !== null) {
-      const again = Array.from(host.querySelectorAll<HTMLButtonElement>('button.global-attention-open')).find((button) => button.dataset['attentionOpen'] === restore);
-      if (again !== undefined) again.focus();
-    }
+    restoreInteraction();
   }
 
   function paintUnavailable(error: unknown): void {

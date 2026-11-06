@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import type { RendererApi, TaskOverviewGroupProjection, TaskOverviewItemProjection, TaskOverviewProjection, TaskOverviewCall } from '../shared/protocol.js';
 import { createSheet, sheetContent } from './components/sheet.js';
 import { readActionDefaults, rememberActionDefaults } from './action-defaults.js';
@@ -165,9 +166,8 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
   }
   function paint(): void {
     if (!projection) return; start.disabled = false; const signature = JSON.stringify([projection, selectedBook, selectedType, selectedTime]); if (signature === painted) return; painted = signature;
-    const active = document.activeElement; const focusId = active instanceof HTMLElement && host.contains(active) ? active.closest<HTMLElement>('[data-task-item]')?.dataset['taskItem'] : null;
+    const restoreInteraction = retainPollInteraction(options.root);
     const answers = [...host.querySelectorAll<HTMLElement>('[data-card-answer]')].map((form) => ({ form, itemId: form.closest<HTMLElement>('[data-task-item]')?.dataset['taskItem'] }));
-    const action = active instanceof HTMLElement ? active.dataset['taskAction'] : undefined;
     const count = (key: string): number => projection!.groups.find((group) => group.key === key)!.items.filter((item) => !options.bookId || item.bookId === options.bookId).length;
     context.textContent = `${options.bookId ? '本书' : '全部图书'} · 同时运行 ${count('running')} 项 · 排队 ${count('queued')} 项 · 上限 ${projection.capacity}`;
     all.textContent = projection.queueFrozen ? '继续全部' : '暂停全部'; all.disabled = projection.groups.some((group) => group.items.some((item) => item.attention.state === 'analysis-pausing')); all.hidden = !projection.queueFrozen && projection.runningCount === 0;
@@ -176,11 +176,10 @@ export function mountTaskOverview(options: TaskOverviewOptions): TaskOverviewSur
     const groups = options.bookId ? [{ key: 'waiting' as const, items: visible[2]!.items }, { key: 'running' as const, items: [...visible[0]!.items, ...visible[1]!.items, ...visible[3]!.items] }, { key: 'recent' as const, items: visible[4]!.items }] : visible;
     host.replaceChildren(...groups.map((group) => { const section = el('section', 'task-overview-group'); section.dataset['taskGroup'] = group.key; section.append(el('h3', 'task-overview-group-heading', `${options.bookId && group.key === 'running' ? '进行中' : GROUP_LABELS[group.key]}`)); const count = el('span', 'task-overview-count', String(group.items.length)); section.firstElementChild?.append(' · ', count); const list = el('div', 'task-overview-items'); list.append(...group.items.map((item) => taskOverviewCard(item, act))); section.append(group.items.length ? list : el('p', 'task-overview-empty', '这里暂时没有任务。')); return section; }));
     for (const { form, itemId } of answers) { const card = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === itemId); card?.append(form); }
-    if (active instanceof HTMLElement && active.closest('[data-card-answer]') && active.isConnected) active.focus({ preventScroll: true });
+    restoreInteraction();
     if (pendingFocus) { const target = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === pendingFocus); if (target) { target.focus(); pendingFocus = null; } }
-    if (focusId) { const card = [...host.querySelectorAll<HTMLElement>('[data-task-item]')].find((node) => node.dataset['taskItem'] === focusId); (action ? card?.querySelector<HTMLElement>(`[data-task-action="${action}"]`) : card)?.focus(); }
   }
-  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); paint(); } }, (error: unknown) => options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error')).finally(() => { inFlight = false; }); }
+  function refresh(): void { if (destroyed || inFlight) return; inFlight = true; void options.api.inspectTaskOverview().then((next) => { if (!destroyed) { projection = next; options.onProjection?.(next); if (!pollControlEngaged(options.root, false)) paint(); } }, (error: unknown) => options.setStatus(error instanceof Error ? error.message : '任务总览暂时无法读取。', 'error')).finally(() => { inFlight = false; }); }
   function keydown(event: KeyboardEvent): void {
     if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || (event.target instanceof HTMLElement && event.target.isContentEditable)) return;
     const cards = [...host.querySelectorAll<HTMLElement>('[data-task-item]')]; const index = cards.findIndex((node) => node === document.activeElement || node.contains(document.activeElement));

@@ -12,7 +12,7 @@ let restore: () => void;
 beforeEach(() => { restore = installMiniDom(); setTechnicalLayerVisible(false); });
 afterEach(() => { vi.unstubAllGlobals(); setTechnicalLayerVisible(true); restore(); });
 
-function mount() {
+function mount(timed = false) {
   // Public synthetic settings; all effects are stubbed and no provider is contacted.
   const settings = {
     channels: modelServiceChannels(), roles: [], routeChoice: { routes: [], unsupportedProviders: [] },
@@ -37,7 +37,7 @@ function mount() {
     }),
   };
   let follow: () => void = () => undefined;
-  vi.stubGlobal('window', { ai7: api, setInterval: (callback: () => void) => { follow = callback; return 0; }, clearInterval: vi.fn() });
+  vi.stubGlobal('window', { ai7: api, setInterval: (callback: () => void) => { follow = callback; return timed ? setInterval(callback, 2000) : 0; }, clearInterval: timed ? clearInterval : vi.fn() });
   const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] => {
     const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node;
   };
@@ -47,6 +47,33 @@ function mount() {
     rendererErrorMessage: (_error, fallback) => fallback, replaceScreen: (_state, content) => root.replaceChildren(content) });
   return { root: root as unknown as MiniElement, page, api, settings, poll: () => follow() };
 }
+
+it('retains details and summary focus on two changed polls and defers native select or proxy drafts (#1375)', async () => {
+  vi.useFakeTimers();
+  const { root, page, settings } = mount(true);
+  try {
+    setTechnicalLayerVisible(true);
+    await page.renderModelServiceSettings();
+    root.querySelector('.model-service-technical')!.open = true;
+    root.querySelector('.model-service-technical summary')!.focus();
+    for (let cycle = 0; cycle < 2; cycle++) {
+      const previous = root.querySelector('.model-service-settings');
+      const channel = settings.channels[0]!;
+      Object.assign(channel, { models: channel.models.map((model) => ({ ...model, modelLabel: `${model.modelLabel} changed` })) });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(root.querySelector('.model-service-settings')).not.toBe(previous);
+      expect(root.querySelector('.model-service-technical')!.open).toBe(true);
+      expect(document.activeElement).toBe(root.querySelector('.model-service-technical summary'));
+    }
+    const select = root.querySelector('select[aria-label="网络代理方式"]')!; select.focus();
+    const channel = settings.channels[0]!; Object.assign(channel, { models: [] });
+    await vi.advanceTimersByTimeAsync(4000); expect(root.querySelector('select[aria-label="网络代理方式"]')).toBe(select);
+    select.value = 'proxy'; select.dispatchEvent({ type: 'change', bubbles: true });
+    const address = root.querySelector('input[aria-label="代理 URL"]')!; address.value = 'http://127.0.0.1:7890'; address.setSelectionRange(7, 10, 'backward'); address.focus();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(address.value).toBe('http://127.0.0.1:7890'); expect(address.selectionStart).toBe(7); expect(document.activeElement).toBe(address);
+  } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+});
 
 it('lands the review search-settings route on the visible, focused search heading in ordinary mode (#1370)', async () => {
   const { root, page } = mount();

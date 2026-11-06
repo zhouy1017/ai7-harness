@@ -693,6 +693,14 @@ export function createImportReview(options: ImportReviewOptions) {
       content.append(actions);
     }
 
+    const steps = content.querySelector('.import-steps');
+    steps?.replaceWith(importSteps('choices', {
+      fidelity: content.querySelector('.fidelity-list, .import-structure') !== null,
+      go: (step) => {
+        const target = content.querySelector<HTMLElement>(step === 'target' ? '[data-import-target-choices]' : '.fidelity-list, .import-structure');
+        if (target) { target.tabIndex = -1; target.scrollIntoView({ block: 'start' }); target.focus({ preventScroll: true }); }
+      },
+    }));
     appendRecoveryReturnAction(content, recoveryReturn);
     replaceScreen(selectedChoiceId === null ? 'target' : relationshipSelection === null ? 'relationship' : 'title', content);
     queueMicrotask(() => {

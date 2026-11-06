@@ -30,7 +30,6 @@ import { EVALUATION_ADJUSTMENT_REASON_WORDS, evaluationBand, provisionalEvaluati
  */
 
 export const EVALUATION_TITLE = '评估';
-export const EVALUATION_LEDE = '按本社评估方案打分：总分 100，每一项只看满分与得分，可以给半分；风险项不计入总分，只影响结论。';
 /** Said of a version the editor began alone: AI7's 初评 took no part in it. */
 export const EVALUATION_AI7_PENDING = '这一版不是从 AI7 初评开始的：由你打分。';
 export const EVALUATION_START = { first: '开始评估', again: '重新评估' } as const;
@@ -75,7 +74,6 @@ export const EVALUATION_VERDICT = '总评';
 export const EVALUATION_CONCLUSION_LEGEND = '结论 · 由你选定';
 export const EVALUATION_RECOMMEND_BLOCKED = '有「高」风险还没有经人工复核，「推荐出版」暂不能选。';
 export const EVALUATION_VERSIONS_HEADING = '版本';
-export const EVALUATION_EMPTY = '这本书还没有评估。';
 export const EVALUATION_STATUS = {
   /** Leaving the manuscript for 评估 from its 工作 group (Issue #429 review): its edits are saved first. */
   leaving: '正在保存稿件并打开评估…',
@@ -240,10 +238,8 @@ export function evaluationProfileUse(profile: { records: number; books: number }
 // ---- AI7 初评 (Issue #429, plan slice S81b1; V2-UX-EVAL-001, EVAL-005 to EVAL-007) --------------------------------------
 
 export const EVALUATION_AI7_HEADING = 'AI7 初评';
-export const EVALUATION_AI7_LEDE = 'AI7 通读全书并提供初评分数和评语，评分与结论由你决定。';
 export const EVALUATION_AI7_NONE = 'AI7 还没有为这本书做初评。';
 export const EVALUATION_AI7_PREPARE: Readonly<Record<InitialEvaluationTaskMode, string>> = { 'evaluation-first': 'AI7 初评', 'evaluation-again': '重新初评' };
-export const EVALUATION_AI7_OPEN_PLAN = '查看计划并开始';
 export const EVALUATION_AI7_OPEN_TASK = '查看任务';
 export const EVALUATION_START_FROM_INITIAL = '从 AI7 初评开始';
 export const EVALUATION_AI7_SUFFICIENCY: Readonly<Record<InitialEvaluationSufficiency, string>> = { sufficient: '充分', fair: '一般', insufficient: '不足' };
@@ -465,7 +461,6 @@ export function evaluationPricingLines(pricing: EvaluationPricingProjection): st
 // ---- 按我的评分重写评语 (Issue #429, plan slice S81b2; V2-UX-EVAL-008) ---------------------------------------------------
 
 export const EVALUATION_REWRITE_HEADING = '按我的评分重写评语';
-export const EVALUATION_REWRITE_LEDE = 'AI7 可按你保存的分数和调分原因重写评语，分数不变，评语经你采用后才记入这一版。';
 export const EVALUATION_REWRITE_ACTIONS = {
   prepare: '按我的评分重写评语',
   openPlan: '查看计划并开始',

@@ -2,6 +2,38 @@ import { expect, it, vi } from 'vitest';
 import { mountFindingsCenter } from '../../src/renderer/findings-center.js';
 import type { BookFindingsProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
+import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
+
+it('filters the whole book beyond 500, resets position, and retains focus and scroll across two changed polls (#1375, #1383)', async () => {
+  const restore = installMiniDom(); vi.useFakeTimers(); setTechnicalLayerVisible(false);
+  vi.stubGlobal('window', { setInterval, clearInterval });
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  let tick = 0;
+  const items: BookFindingsProjection['items'] = Array.from({ length: 541 }, (_, index) => ({ id: String(index), category: index < 500 ? 'early' : 'late', categoryLabel: '合成类别', severity: index < 500 ? '提示' : '必须处理', status: '待处理', summary: '公开合成发现',
+    target: { kind: 'review', reviewRunId: 'run', findingId: String(index), blockId: 'block' }, suggestion: { manuscriptId: 'manuscript', branchId: 'branch', markId: `mark-${index}`, blockId: 'block', batchAllowed: true, quote: '合成', replacement: '修订' } }));
+  const read = vi.fn(async (offset: number): Promise<BookFindingsProjection> => ({ bookId: 'book', total: items.length, offset, next: offset + 40 < items.length ? offset + 40 : null, pageSize: 40,
+    items: items.slice(offset, offset + 40).map((item) => ({ ...item, summary: `${item.summary}${tick}` })), groups: ['early', 'late'].map((category) => ({ category, label: category, count: category === 'early' ? 500 : 41, bySeverity: { '提示': 500, '必须处理': 41 }, byStatus: { '待处理': 541 } })) }));
+  try {
+    mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), vi.fn()); await vi.advanceTimersByTimeAsync(0);
+    expect(root.textContent).toContain('接受并应用全部 541 条');
+    const rail = root.querySelector('[data-list-position]')!; rail.value = '10'; rail.dispatchEvent({ type: 'change' });
+    root.querySelector('[data-findings-filter="category"] [data-filter-value="late"]')!.click();
+    expect(root.querySelectorAll('[data-finding-id]')).toHaveLength(40);
+    expect(root.querySelector('[data-finding-id]')?.dataset['findingId']).toBe('500');
+    expect(root.querySelector('[data-list-position]')!.value).toBe('0');
+    expect(root.textContent).toContain('1–40 / 41');
+    root.querySelector('[data-findings-filter="category"] [data-filter-value="late"]')!.focus(); root.scrollTop = 75;
+    for (let cycle = 0; cycle < 2; cycle++) {
+      tick++; await vi.advanceTimersByTimeAsync(2000);
+      expect(document.activeElement).toBe(root.querySelector('[data-findings-filter="category"] [data-filter-value="late"]'));
+      expect(root.scrollTop).toBe(75); expect(root.textContent).toContain(`公开合成发现${tick}`);
+    }
+    const last = root.querySelector('[data-list-position]')!; last.value = '1'; last.dispatchEvent({ type: 'change' });
+    root.querySelector('[data-findings-filter="severity"] [data-filter-value="必须处理"]')!.click();
+    expect(root.querySelector('[data-list-position]')!.value).toBe('0');
+    expect(root.textContent).toContain('接受并应用全部 41 条');
+  } finally { root.remove(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); setTechnicalLayerVisible(true); restore(); }
+});
 
 it('renders each finding status with its actual tone, defaulting unknown statuses to neutral', async () => {
   const restore = installMiniDom();
@@ -74,8 +106,8 @@ it('confirms all eligible findings in the selected category across list windows'
     root.querySelector('[data-findings-filter="status"] [data-filter-value=""]')!.click();
     root.querySelector('[data-findings-filter="severity"] [data-filter-value=""]')!.click();
 
-    const rail = root.querySelector('[data-list-position]')!; rail.value = '1'; rail.dispatchEvent({ type: 'change' });
-    await vi.waitFor(() => expect(root.querySelector('.list-position-rail')?.value).toBe('1'));
+    expect(root.querySelector('.list-position-rail')?.disabled).toBe(true);
+    expect(root.querySelectorAll('[data-finding-id]').map((row) => row.dataset['findingId'])).toEqual(['0', '40']);
     expect(batch()?.textContent).toBe('接受并应用全部 2 条');
     batch()!.click();
     expect(apply).not.toHaveBeenCalled();

@@ -397,7 +397,7 @@ export function mountLibraryMaterials(options: MountLibraryMaterialsOptions): { 
     title.tabIndex = -1;
     heading.append(title, el('span', 'status-pill library-kind', LIBRARY_KIND_LABELS[material.kind]));
     node.append(heading);
-    node.append(el('p', 'knowledge-file-summary', libraryReferenceLine(material)));
+    node.append(el('p', 'knowledge-file-summary', `${libraryReferenceLine(material)} · 索引：${materialIndexStateLine(material.index)}`));
     const more = el('details', 'knowledge-file-more');
     more.append(el('summary', undefined, '查看资料'), el('p', 'library-source', librarySourceLine(material, localInstantLabel)));
     const facts = el('dl', 'library-facts');

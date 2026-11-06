@@ -1441,9 +1441,12 @@ async function main() {
       opened.versions.length === 0 && opened.record === null, 'evaluation-empty', opened);
 
     await assertRenderer(renderer, `(() => { const host=document.querySelector('.evaluation'); return host.querySelectorAll(':scope > section').length===1 && host.querySelectorAll('.evaluation-consequences dt').length===4 && !host.querySelector('table, select, [data-list-position], .evaluation-readers-report') && !host.textContent.includes('允许参考'); })()`, 'evaluation-empty-card');
+    // #1383: one stable page heading outside the empty card, one task status line, and no dangling drawer target.
+    await assertRenderer(renderer, `(() => { const host=document.querySelector('.evaluation'); return host.querySelector(':scope > h2')?.textContent==='评估' && !host.querySelector('.evaluation-initial .state-term, [aria-controls="task-drawer"]'); })()`, 'evaluation-empty-heading-and-status');
     at('evaluation-start');
     // 开始评估: version 1 on r1, AI7's 初评 not yet there, every item unscored and no conclusion chosen.
     await assertRenderer(renderer, `(() => { document.querySelector('.evaluation-more > summary')?.click(); return true; })()`, 'evaluation-more');
+    await assertRenderer(renderer, `(async () => { let more=document.querySelector('.evaluation-more'); more.querySelector('summary').focus(); const heading=document.querySelector('.evaluation > h2'); for(let cycle=0;cycle<2;cycle++){await new Promise(resolve=>setTimeout(resolve,2200));more=document.querySelector('.evaluation-more');if(!more?.open||document.activeElement!==more.querySelector('summary')||document.querySelector('.evaluation > h2')!==heading)return false;}return true;})()`, 'evaluation-more-poll-survival');
     await clickSelector(renderer, '[data-evaluation-action="start"]', 'evaluation-start');
     const started = await readEvaluation(renderer, (page) => page.record !== null && page.focus === 'heading', 'evaluation-started');
     requireJourney(started.record.heading === '第 1 版 · 编辑评分中' && started.record.revision === '评估的是修订版 r1' &&

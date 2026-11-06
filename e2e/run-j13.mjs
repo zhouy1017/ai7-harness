@@ -1307,6 +1307,12 @@ async function main() {
       UUID_PATTERN.test(exactScope.knowledge[0].revisionId) && /^[0-9a-f]{64}$/.test(exactScope.knowledge[0].digest) && exactScope.exclusions.length === 0 &&
       seriesPlan.scope.reference.includes(`允许参考 · 书系《${SERIES}》的知识条目`), 'series-scope-pins');
 
+    // #1383: findings list, category count and list position refer to the same whole-book selection.
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'consistency-findings-open');
+    await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'consistency-findings-ready');
+    await assertRenderer(renderer, `(() => { const filter=document.querySelector('[data-findings-filter="category"] [data-filter-value="review:series-consistency"]'); if(!filter)return false; filter.click(); return document.querySelectorAll('.findings-center [data-finding-id]').length===3 && document.querySelector('.findings-center [data-list-position]')?.value==='0'; })()`, 'consistency-findings-filter-count');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'consistency-findings-return');
+    await waitFor(renderer, `document.querySelector('article.review-finding')`, 'consistency-findings-return-ready');
     at('consistency-marks-on-manuscript');
     // A finding is the mark on the manuscript: 回到原文 opens the text at it, its card naming the category.
     await clickSelector(renderer, `article.review-finding[data-finding-id="${findings[0].findingId}"] [data-review-action="go-to-text"]`, 'consistency-go-to-text');

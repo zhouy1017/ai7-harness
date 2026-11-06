@@ -1716,6 +1716,14 @@ async function main() {
     const draftAttention = await renderer.evaluate(`window.ai7.inspectGlobalAttention().then((attention) => attention.groups.flatMap((group) => group.items).filter((item) => item.state === 'draft-unfinished').map((item) => [item.book.bookId, item.target.kind, item.target.draftId]))`);
     requireJourney(JSON.stringify(draftAttention) === JSON.stringify([[bookId, 'task-intent-draft', saved.draftId]]), 'composer-draft-attention', draftAttention);
 
+    // #1375: the global attention record retains its precise focus during two background reads.
+    await clickSelector(renderer, '#task-drawer [data-task-drawer-control="close"]', 'poll-attention-close-pane');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('attention')), 'poll-attention-open');
+    await waitFor(renderer, `document.querySelector('[data-screen="global-attention"] [data-attention-state="draft-unfinished"]')`, 'poll-attention-ready');
+    await assertRenderer(renderer, `(async () => { const card=document.querySelector('[data-attention-state="draft-unfinished"]'); const id=card.dataset.attentionItem; const more=card.querySelector('details'); if(more)more.open=true; const target=more?.querySelector('summary')??card.querySelector('[data-attention-open]'); target.focus(); for(let cycle=0;cycle<2;cycle++){await new Promise(resolve=>setTimeout(resolve,2200));const current=[...document.querySelectorAll('[data-attention-item]')].find(node=>node.dataset.attentionItem===id);if(!current||more&&!current.querySelector('details')?.open||document.activeElement!==(more?current.querySelector('summary'):current.querySelector('[data-attention-open]')))return false;}return true;})()`, 'attention-focus-poll-survival');
+    await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('manuscript')), 'poll-attention-return-book');
+    await waitFor(renderer, `document.querySelector('[data-screen="editor"]')`, 'poll-attention-book-ready');
+    await openPanel(renderer, 'poll-attention-return-pane');
     at('draft-promote-prepared-task');
     // 发起全书任务… opens the composer on the whole Book; 准备任务 saves the draft and 准备计划 makes it a prepared baseline Task through
     // the existing preparation — the plan opens in the slot leading with the draft's sentence, and 开始任务 is still the editor's.

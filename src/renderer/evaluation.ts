@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { filterChoices, stateTerm } from './components/controls.js';
 import { identityWords } from './technical-layer.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -318,6 +319,8 @@ export function evaluationPlanReferenceField(options: {
 export function mountEvaluation(options: MountEvaluationOptions): { load(): Promise<void>; refresh(): void } {
   const { root, api, setStatus, errorMessage, technicalDetails } = options;
   root.classList.add('evaluation');
+  const pageHeading = el('h2', 'evaluation-title', '评估'); pageHeading.tabIndex = -1;
+  root.append(pageHeading);
   let busy = false;
   let workspace: EvaluationWorkspaceProjection | null = null;
   let refusal: string | null = null;
@@ -394,7 +397,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const open = action(READERS_REPORT_ACTIONS.openPlan, 'primary', 'open-readers-report-plan', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-plan';
         open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
         row.append(open);
       } else if (entry.prepare.allowed) {
         const prepare = action(READERS_REPORT_ACTIONS.prepare, 'secondary', 'prepare-readers-report', () => void prepareReport(entry.template));
@@ -408,7 +410,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
         const open = action(READERS_REPORT_ACTIONS.openTask, 'quiet', 'open-readers-report-task', () => options.openReadersReportPlan(task.taskIntentId));
         open.dataset['readersReportAction'] = 'open-task';
         open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
         row.append(open);
       }
       if (row.childElementCount > 0) item.append(row);
@@ -500,7 +501,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     heading.tabIndex = -1;
     const latest = initial.latest;
     if (latest === null) {
-      section.append(el('h2', undefined, EVALUATION_AI7_HEADING), stateTerm(initial.task?.label ?? '尚未评估', initial.task?.state === 'settled' ? 'good' : initial.task?.state === 'failed' ? 'blocked' : initial.task?.state === 'executing' || initial.task?.state === 'queued' ? 'progress' : 'neutral'));
+      section.append(heading);
       section.append(el('p', 'lede evaluation-initial-none', EVALUATION_AI7_NONE));
       const consequences = el('dl', 'review-consequences evaluation-consequences');
       for (const [term, words] of [
@@ -719,7 +720,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (task !== null && task.state === 'prepared') {
       const open = action(EVALUATION_REWRITE_ACTIONS.openPlan, 'primary', 'open-rewrite-plan', () => options.openRewritePlan(task.taskIntentId));
       open.disabled = busy;
-      open.setAttribute('aria-controls', 'task-drawer');
       row.append(open);
     } else {
       if (rewrite.prepare.allowed) {
@@ -732,7 +732,6 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       if (task !== null) {
         const open = action(EVALUATION_REWRITE_ACTIONS.openTask, 'quiet', 'open-rewrite-task', () => options.openRewritePlan(task.taskIntentId));
         open.disabled = busy;
-        open.setAttribute('aria-controls', 'task-drawer');
         row.append(open);
       }
     }
@@ -829,7 +828,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       void api.inspectEvaluation({ recordId: workspace.record?.recordId ?? null, recordsBefore: workspace.recordsBefore }).then((page) => {
         if (!root.isConnected || workspace === null || busy) return;
         workspace = { ...page, record: workspace.record };
-        paint(null, true);
+        if (!pollControlEngaged(root, false)) paint(null, true);
       }).catch(() => undefined).finally(() => follow());
     }, INITIAL_POLL_MS);
   };
@@ -841,6 +840,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
 
   const paint = (focus: string | null, preserveForm = false): void => {
     if (workspace === null) return;
+    const restoreInteraction = retainPollInteraction(root, preserveForm);
     const keptForm = preserveForm ? root.querySelector<HTMLElement>('.evaluation-record') : null;
     root.dataset['evaluationRecords'] = String(workspace.recordCount);
     const parts: HTMLElement[] = [initialNode(workspace)];
@@ -935,14 +935,15 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
     if (keptForm !== null && workspace.record !== null && keptForm.parentElement === root) {
       // The form the editor is filling in never leaves the page — a 初评 read again while they type keeps their focus and
       // their place — and everything around it is drawn anew.
-      for (const child of Array.from(root.children)) if (child !== keptForm) child.remove();
+      for (const child of Array.from(root.children)) if (child !== keptForm && child !== pageHeading) child.remove();
       keptForm.before(...parts);
       keptForm.after(...after);
     } else {
       if (workspace.record !== null) parts.push(keptForm ?? recordNode(workspace.record));
-      root.replaceChildren(...parts, ...after);
+      root.replaceChildren(pageHeading, ...parts, ...after);
     }
     if (keptForm !== null && workspace.record !== null) refresh(keptForm, workspace.record);
+    restoreInteraction();
     if (focus !== null) root.querySelector<HTMLElement>(focus)?.focus();
     follow();
   };
@@ -1476,7 +1477,7 @@ export function mountEvaluation(options: MountEvaluationOptions): { load(): Prom
       void api.inspectEvaluation({ recordId: current.record?.recordId ?? null, recordsBefore: current.recordsBefore }).then((page) => {
         if (!root.isConnected || workspace === null || busy) return;
         workspace = { ...page, record: workspace.record };
-        paint(null, true);
+        if (!pollControlEngaged(root, false)) paint(null, true);
       }).catch(() => undefined);
     },
     async load(): Promise<void> {

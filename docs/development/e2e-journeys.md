@@ -2,6 +2,8 @@
 
 ## Wave 24 synchronized deltas (#1313 / #1303)
 
+Wave 24b #1375 / #1383 synchronizes J-09 task More, J-10 full-plan disclosures, J-11 evaluation More and its stable page heading, J-12 ordinary settings drafts, and J-16 attention focus with two polling-cycle residence checks. J-01 navigates the shared intake to fidelity/structure, J-04 retains findings-filter focus, and J-13 checks category list/count/position agreement through the real findings route. Renderer fake-timer tests additionally change projections twice on all seven audited surfaces and cover whole-book findings beyond 500 rows; these local checks do not claim a guest or hosted result. The existing Gate selection and provider-free boundaries are unchanged.
+
 Wave 24b #1370 synchronizes J-12 with ordinary-mode search/proxy visibility, technical-detail exclusion and saved source/proxy choices restored after leaving settings and returning. J-04 selects a search category in ordinary mode and follows `设置联网检索` to the directly visible search section with its heading in view and focused; candidate connection tests remain available according to credential readiness. Execution results remain in the slice and batch PR records.
 
 The rows below summarize the slice PRs' synchronized changes; each PR retains the exact tested head, selected guest ladder, hosted Gate and review evidence. The admitted Journey set and provider-free Gate are unchanged. A slice's selected Journeys or five-Journey Gate do not establish a full-wave pass; the closure PR records the final exact-head `check,test,service,build,e2e:all,e2e:gate` guest receipt.

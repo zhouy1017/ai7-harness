@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalDisclosure, technicalLayerVisible, modelLabelWords } from './technical-layer.js';
 import type { ModelServiceSettingsProjection, ModelServiceChannelId } from '../shared/protocol.js';
 import { modelServiceFlow } from './model-service-flow.js';
@@ -114,8 +115,10 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
     heading?.focus({ preventScroll: true });
   }
 
-  function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection): void {
+  function renderModelServiceSettingsProjection(projection: ModelServiceSettingsProjection, passive = false): void {
     const searchHadFocus = document.activeElement !== null && document.activeElement === document.querySelector('[data-search-backends="true"] h3');
+    const previous = document.querySelector<HTMLElement>('.model-service-settings');
+    const restoreInteraction = previous ? retainPollInteraction(previous, passive) : () => {};
     stopFollow?.();
     const content = panel();
     content.classList.add('model-service-settings');
@@ -204,8 +207,11 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
       renderModelServiceProxyBlock(projection));
     content.append(...(technicalLayerVisible ? [] : [policyIntegrity, authority, ...(projection.protectedSecretStore.availability === 'unavailable' ? [element('p', 'attention-note', '系统安全凭据库不可用，无法保存新凭据。')] : [])]), technicalDisclosure(technical), actions);
     replaceScreen('model-service', content);
+    restoreInteraction(content);
     if (searchHadFocus) focusSearchSettings();
-    let reading = false;
+    let reading = false, draftEdited = false;
+    content.addEventListener('input', (event) => { const target = event.target as HTMLElement; if (target.closest('.model-credential-form, .model-service-proxy-form') || target instanceof HTMLInputElement && target.type === 'password') draftEdited = true; });
+    content.addEventListener('change', (event) => { if ((event.target as HTMLElement).closest('.model-service-proxy-form')) draftEdited = true; });
     const catalogueKey = (page: ModelServiceSettingsProjection): string => JSON.stringify([page.channels, page.modelDiscovery?.status === 'failure' ? page.modelDiscovery : null]);
     const signature = catalogueKey(projection);
     const follow = async (discover = false): Promise<void> => {
@@ -221,7 +227,7 @@ export function createModelServiceSettings(options: ModelServiceSettingsOptions)
         const changed = catalogueKey(result) !== signature;
         // A requested discovery has its own outcome even when the catalogue/failure matches the last render.
         if (content.isConnected && (discover || changed) && result.modelDiscovery?.status === 'failure') setStatus(result.modelDiscovery.reason, 'error');
-        if (content.isConnected && changed && !(document.activeElement instanceof HTMLInputElement && content.contains(document.activeElement))) renderModelServiceSettingsProjection(result);
+        if (content.isConnected && changed && !draftEdited && !pollControlEngaged(content)) renderModelServiceSettingsProjection(result, true);
       } catch { /* Keep the visible fields; a failed discovery offers its own retry. */ }
       finally { reading = false; }
     };

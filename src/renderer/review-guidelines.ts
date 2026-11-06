@@ -1,5 +1,5 @@
 import { windowStep } from './components/controls.js';
-import { identityWords } from './technical-layer.js';
+import { identityWords, technicalLayerVisible } from './technical-layer.js';
 import type { RendererApi, ReviewGuidelineDocumentProjection, ReviewGuidelinePreviewProjection, ReviewGuidelinesProjection } from '../shared/protocol.js';
 import {
   GUIDELINE_CANCEL,
@@ -97,7 +97,9 @@ export function mountReviewGuidelines(options: MountReviewGuidelinesOptions): { 
     if (older !== null) {
       const note = el('p', 'attention-note guideline-older', older);
       note.dataset['guidelineOlder'] = String(document.olderVersionBookCount);
-      more.append(note);
+      note.textContent = technicalLayerVisible ? older : `旧版在用：${document.olderVersionBookCount} 本图书；新准备的审阅使用当前规范，已准备的审阅保留原规范。`;
+      note.title = note.textContent;
+      node.append(note);
     }
     // A document AI7 fixes says why it takes no house version, where the others offer 导入新版本.
     const fixed = guidelineFixedStatement(document);

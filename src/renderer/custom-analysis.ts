@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords } from './technical-layer.js';
 import type {
   BaselineAnalysisUpdateRequest,
@@ -165,6 +166,8 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
   };
 
   const render = (projection: CustomAnalysisDimensionsProjection): void => {
+    if (pollControlEngaged(panel, false)) return;
+    const restoreInteraction = retainPollInteraction(panel);
     panel.dataset['customAnalysis'] = 'ready';
     panel.dataset['dimensionCount'] = String(projection.dimensions.length);
     if (projection.dimensions.length === 0) {
@@ -217,6 +220,7 @@ export function mountCustomAnalysisTab(panel: HTMLElement, options: MountCustomA
       return card;
     });
     panel.replaceChildren(...cards);
+    restoreInteraction();
   };
 
   let refresh: ReturnType<typeof setTimeout> | null = null;

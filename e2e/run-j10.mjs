@@ -871,6 +871,10 @@ async function main() {
         getComputedStyle(elapsed).fontVariantNumeric.includes('tabular-nums');
     })()`, 'drawer-live-motion-state');
     await waitFor(renderer, `(() => { const cell=document.querySelector('#task-drawer [data-task-plan-activity-row="用时"]'); return cell===globalThis.b2Elapsed.node && cell.textContent!==globalThis.b2Elapsed.text; })()`, 'drawer-elapsed-stable', 10_000);
+    // #1375: full-plan disclosures stay open and focused beside the updating activity clock.
+    await clickSelector(renderer, '#task-drawer button[data-task-drawer-mode="full"]', 'poll-full-plan');
+    await assertRenderer(renderer, `(async () => { const selector='#task-drawer details.task-plan-technical'; let more=document.querySelector(selector); if(!more)return false; more.open=true; more.querySelector('summary').focus(); for(let cycle=0;cycle<2;cycle++){ await new Promise(resolve=>setTimeout(resolve,2200)); more=document.querySelector(selector); if(!more?.open||document.activeElement!==more.querySelector('summary'))return false; } return true; })()`, 'drawer-details-poll-survival');
+    await clickSelector(renderer, '#task-drawer button[data-task-drawer-mode="compact"]', 'poll-return-running');
     await renderer.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await assertRenderer(renderer, `(() => {
       const drawer=document.querySelector('#task-drawer'), fill=drawer.querySelector('.task-plan-progress-fill');

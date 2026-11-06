@@ -1740,6 +1740,8 @@ async function main() {
     const overviewPauseRecorded = async (id) => waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.flatMap(g=>g.items).some(i=>i.itemId===${JSON.stringify(id)} && ['analysis-pausing','analysis-paused'].includes(i.attention.state)))()`, 'overview-pause-recorded');
     await waitFor(renderer, `document.querySelector('.task-overview-card[data-task-item="${overviewIds[2]}"] .task-overview-card-line')?.textContent.startsWith('第 1 位')`, 'overview-first-position-visible');
     await waitFor(renderer, `(async () => (await window.ai7.inspectTaskOverview()).groups.find(g=>g.key==='running').items.filter(i=>${JSON.stringify(overviewBooks.slice(0,2))}.includes(i.bookId)).every(i=>i.progress?.done===1))()`, 'overview-two-held', 60000);
+    // #1375: the held running task changes elapsed time while More and its exact summary survive two polls.
+    await assertRenderer(renderer, `(async () => { const selector='.task-overview-card[data-task-item="${overviewIds[0]}"] .task-overview-more'; let more=document.querySelector(selector); more.open=true; more.querySelector('summary').focus(); for(let cycle=0;cycle<2;cycle++){ await new Promise(resolve=>setTimeout(resolve,2200)); more=document.querySelector(selector); if(!more?.open||document.activeElement!==more.querySelector('summary'))return false; } return true; })()`, 'overview-more-poll-survival');
     await overviewAction(overviewIds[0], 'pause');
     await overviewPauseRecorded(overviewIds[0]);
     await writeFile(holdPath, '2', 'utf8');

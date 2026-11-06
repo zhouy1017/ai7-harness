@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { reviewPlanReferenceField } from './task-material-selection.js';
 import { evaluationPlanReferenceField } from './evaluation.js';
 import { createButton } from './components/controls.js';
@@ -742,12 +743,14 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
   function paint(next: TaskPlanProjection, force: boolean): void {
     next = taskPlanWording(next);
     const key = JSON.stringify(next);
-    const sameVersion = plan !== null && plan.ref === next.ref && plan.planVersion === next.planVersion;
+    const sameItem = plan !== null && plan.ref === next.ref && plan.kind === next.kind;
+    const sameVersion = sameItem && plan!.planVersion === next.planVersion;
     if (!force && key === painted && plan !== null) {
       if (next.runControl !== null) activityBlock(next.runControl);
       schedulePoll(next);
       return;
     }
+    if (sameItem && !force && pollControlEngaged(root, false)) { schedulePoll(next); return; }
     if (!sameVersion) {
       diffShown = false;
       unconfirmedRecordShown = false;
@@ -773,7 +776,8 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       refusal = pendingNote;
       pendingNote = null;
     }
-    const technicalOpen = sameVersion && body.querySelector<HTMLDetailsElement>('details.task-plan-technical')?.open === true;
+    const restoreInteraction = sameItem ? retainPollInteraction(root, sameVersion) : () => {};
+    const technicalOpen = sameItem && body.querySelector<HTMLDetailsElement>('details.task-plan-technical')?.open === true;
     plan = next;
     painted = key;
     root.dataset['taskPlanKind'] = next.kind;
@@ -815,6 +819,7 @@ export function mountTaskDrawer(options: MountTaskDrawerOptions): TaskDrawerSurf
       if (details) details.open = true;
     }
     paintBar(next);
+    restoreInteraction();
     if (redoOnOpen) { redoOnOpen = false; bar.querySelector<HTMLButtonElement>('[data-task-drawer-control="redo"]')?.click(); }
     footer.textContent = TASK_DRAWER_FOOTER;
     if (next.state.key === 'queued') void api.inspectTaskOverview().then((overview) => {

@@ -3165,6 +3165,7 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('findings')), 'book-findings-reopen');
     await waitFor(renderer, `document.querySelector('.findings-center')?.dataset.findingsState==='ready'`, 'book-findings-reread');
     await assertRenderer(renderer, `!document.querySelector('.findings-center [data-finding-id="${ignorable.findingId}"]')`, 'book-findings-disposed-absent');
+    await assertRenderer(renderer, `(async () => { const selector='[data-findings-filter="category"] [data-filter-value=""]'; document.querySelector(selector)?.focus(); for(let cycle=0;cycle<2;cycle++){await new Promise(resolve=>setTimeout(resolve,2200));if(document.activeElement!==document.querySelector(selector))return false;}return true;})()`, 'findings-filter-poll-survival');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('review')), 'book-findings-return-review');
     await waitFor(renderer, `document.querySelector('section.review-run')`, 'book-findings-review-ready');
 
