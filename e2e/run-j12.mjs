@@ -764,7 +764,18 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-model-settings-ready');
     await click(primary, '模型服务', 'ordinary-model-entry');
     await waitFor(primary, `document.querySelector('[data-screen="model-service"] select[aria-label="渠道"]') && document.querySelector('select[aria-label="AI7 使用的模型"]') && document.querySelector('[data-action="select-main-role-model"]') && document.querySelector('[data-action="select-fast-role-model"]') && document.querySelector('[data-custom-model-id]') && document.querySelector('.model-service-current-roles')`, 'ordinary-model-single-view');
+    // #1372: exercise the hosted 1024×768 window's client area even on a larger guest desktop.
+    const nativeModelViewport = await primary.evaluate(`({width:innerWidth,height:innerHeight,outerWidth,outerHeight})`);
+    if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-native ${JSON.stringify(nativeModelViewport)}`);
+    await primary.send('Emulation.setDeviceMetricsOverride', { width: 1008, height: 681, deviceScaleFactor: 1, mobile: false });
+    await waitFor(primary, `innerWidth===1008 && innerHeight===681`, 'ordinary-model-hosted-viewport');
+    const ordinaryModelGeometry = await primary.evaluate(`(() => {
+      const rect=(selector)=>{const box=document.querySelector(selector).getBoundingClientRect();return {top:Math.round(box.top),bottom:Math.round(box.bottom),left:Math.round(box.left),right:Math.round(box.right),width:Math.round(box.width),height:Math.round(box.height)};};
+      return {width:innerWidth,height:innerHeight,scrollX,scrollY,flow:rect('[data-model-service-flow]'),test:rect('[data-action="test-flow-connection"]')};
+    })()`);
+    if (localDebugEnabled()) recordDebugDetail('J-12', `model-layout-hosted ${JSON.stringify(ordinaryModelGeometry)}`);
     await assertRenderer(primary, `(() => { const flow=document.querySelector('[data-model-service-flow]'); const test=flow?.querySelector('[data-action="test-flow-connection"]'); return flow instanceof HTMLElement && test instanceof HTMLButtonElement && flow.getBoundingClientRect().top>=0 && test.getBoundingClientRect().bottom<=innerHeight; })()`, 'ordinary-model-one-screen');
+    await primary.send('Emulation.clearDeviceMetricsOverride');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('knowledge')), 'ordinary-knowledge-entry');
     await waitFor(primary, `document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]').length===3 && Array.from(document.querySelectorAll('[data-screen="knowledge-base"] [data-knowledge-category]'), node=>node.getAttribute('aria-label')).join('、')==='审阅规范文件、范例、资料库'`, 'ordinary-knowledge-three-categories');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-quality-entry');
