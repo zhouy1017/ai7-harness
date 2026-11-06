@@ -378,6 +378,8 @@ Since #1058, J-10's existing cancellation stages remain unchanged compatibility 
 
 ## J-11 A Book's 作者, 责编 and 相关人
 
+Issue #1377 exercises the real Help mode switch into ordinary quality: proposed memory appears first, is accepted there and an enabled memory is stopped there; the mixed-action setup explicitly admits one feedback material and waits for the rebuild to finish before selecting its legacy preference; the same mount then stops that preference using its refreshed exact pin, and remount preserves readable source books and item change times. Private identifiers and engineering forms are absent. Returning to developer mode keeps the existing full signal composition, governance, admission and lineage scenarios.
+
 Issue #1287 (W23-S7) uses sidebar evaluation navigation and opens memory creation forms explicitly; signal rows initially contain no form, and the batch composer opens from its disclosure.
 
 Issue #1132 appends a separate Word provenance and exclusion section after C0 memory governance. A supported multi-paragraph named move is imported through the visible suggestions choice, and the Journey follows every bounded detail page and its retained Source Version link, then excludes the real sample through 学习准入 and still inspects its historical evidence. Word cards disclose pending consumers and offer no memory creation or inclusion control; only after that actual exclusion does the learning audit offer the existing explicit re-inclusion, which records one decision and keeps it, with no new capture or downstream use, across a restart. The section verifies the actual automatic eligibility, unchanged C0 memory versions and zero Word downstream memories or tasks; the existing C0 lifecycle assertions and zero-loopback check remain in force.
@@ -411,6 +413,8 @@ Since #1128 (F-05 C0) J-11 also walks editor-governed editorial memory after the
 Not proven here: a save refused because the Book's people moved since the form read them, a name past its 40 characters or holding a separator, a repeated name, a list past its bound, a role outside the house's list, the search following only a Book's newest version, `全部` over 书名, 作者 and 责编 together, a found list paged as the whole one is, words across a line break refused, and a version altered by hand refused wherever it is read — all proven over the real store in `tests/service/book-people.test.ts`, with the frames in `tests/unit/request-frames.test.ts`. 书系 on the card and in the search waits for S28's Series. The people as the attribution of feedback and learning records are S38's, S26's and S27's, which extend this Journey.
 
 ## J-16 The 任务 panel: a Book's Tasks beside the manuscript
+
+Issue #1377 opens an existing locally created preference in ordinary quality and verifies its readable text, status and direct stop action without technical identifiers or forms, then returns to the existing developer governance flow.
 
 Issue #1285 (Wave 23 · W23-S5) synchronizes the Book Agent workspace and dialogue drawer. `workspace-propose` clicks a paragraph longer than 500 characters, restores its reading position on reentry, captures a cross-paragraph range and generates a second round directly from a ready round. Structured candidates arrive as complete items during streaming; internal change-set JSON is excluded from the Task panel and dialogue projection, including retained legacy workspace bindings. `workspace-mark-decision` accepts the first promoted suggestion and rejects the second directly on their manuscript cards; independent paragraph edits have no atomic group. The existing selection-task composer still names its paragraph.
 
@@ -463,6 +467,8 @@ Not proven here: `继续回答`, whose new attempt carries what the stopped answ
 ## J-14 accessibility obligations
 
 ## J-13 书系: Series membership
+
+Issue #1377 explicitly switches to ordinary mode, opens default review preferences, visits feedback records with only book/source filters, returns to preferences, and reaches the same learning controls through the knowledge-base entrance before restoring developer mode.
 
 J-13 covers two slices of Issue #63: S28a, Series membership, and S28b, Series Knowledge, and Issue #64: S29a, 书系一致性 over that knowledge, and S29b, Series Retrieval Exclusions over what that review reads. Series-scope Tasks beyond 书系一致性 and any Cross-project source do not exist yet.
 

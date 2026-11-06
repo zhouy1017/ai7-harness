@@ -118,15 +118,19 @@ export function learningDecisionLine(material: Pick<LearningMaterialProjection, 
 // ---- 反馈历史 (Issue #61, plan slice S26c; V2-UX-FDBK-009, FDBK-010, FDBK-013) ----------------------------------------------
 
 /** 质量与学习's tabs: the passive history, the decisions waiting, and the audit of what was decided (Issue #62, S27a). */
-export type QualityLearningTab = 'feedback' | 'learning' | 'audit';
+export type QualityLearningTab = 'preferences' | 'feedback' | 'learning' | 'audit';
 export const QUALITY_LEARNING_TABS: ReadonlyArray<{ readonly tab: QualityLearningTab; readonly label: string; readonly developerOnly?: true }> = [
+  { tab: 'preferences', label: '审阅偏好' },
   { tab: 'feedback', label: '反馈历史' },
   { tab: 'learning', label: '学习准入', developerOnly: true },
   { tab: 'audit', label: '学习回溯', developerOnly: true },
 ];
 export function visibleQualityLearningTabs(developerMode: boolean): ReadonlyArray<(typeof QUALITY_LEARNING_TABS)[number]> {
-  return developerMode ? QUALITY_LEARNING_TABS : QUALITY_LEARNING_TABS.filter((entry) => entry.developerOnly !== true);
+  return developerMode ? QUALITY_LEARNING_TABS : QUALITY_LEARNING_TABS.filter((entry) => entry.developerOnly !== true)
+    .map((entry) => entry.tab === 'feedback' ? { ...entry, label: '反馈记录' } : entry);
 }
+export const REVIEW_PREFERENCES_NOTE = 'AI7 从你的审阅决定与改稿中归纳审阅偏好，经你确认后在后续审阅中参考。';
+export const REVIEW_PREFERENCES_STATUS = { loading: '正在读取审阅偏好…', opened: '审阅偏好已打开', unavailable: '无法读取审阅偏好。' } as const;
 export const QUALITY_LEARNING_TABS_LABEL = '质量与学习的内容';
 export const FEEDBACK_HISTORY_HEADING = '反馈历史';
 /** What the history is and is not (FDBK-007, FDBK-010), said once above it. */
@@ -174,6 +178,9 @@ export const FEEDBACK_ORIGIN_LABELS: Readonly<Record<'proposal-decision' | 'anal
   'analysis-feedback': '分析反馈',
   'review-disposition': '审阅',
 };
+export const FEEDBACK_RECORD_ORIGIN_LABELS = {
+  'proposal-decision': '修改建议决定', 'review-disposition': '审阅处理', 'analysis-feedback': '分析反馈',
+} as const;
 
 /** One entry's first line: where it came from, what it is about, and what the editor decided or judged. */
 export function feedbackEntryLine(entry: { readonly origin: keyof typeof FEEDBACK_ORIGIN_LABELS; readonly dimension: string | null; readonly signal: string }): string {
