@@ -10,6 +10,7 @@ import {
   type RendererApi,
 } from '../shared/protocol.js';
 import { MODEL_CONNECTION_TEST_NOTE, modelConnectionTestDisclosure, modelConnectionTestFeedback, modelConnectionTestLabel } from './model-service-roles.js';
+import type { ModelFavourites } from '../shared/preferences.js';
 
 /** Model settings chooses independent role bindings from the account catalogue or a custom model ID. */
 export type ModelServiceFlowApi = Pick<RendererApi, 'saveModelServiceCredential' | 'removeModelServiceCredential' | 'selectMainRoleModel' | 'selectFastRoleModel' | 'selectBothRoleModels' | 'refreshModelServiceModels' | 'testModelServiceConnection'>;
@@ -24,6 +25,10 @@ export interface ModelServiceFlowOptions {
   chooseChannel(channel: ModelServiceChannelId): void;
   readonly modelId?: string;
   chooseModel?(modelId: string): void;
+  readonly favourites?: ModelFavourites;
+  toggleFavourite?(channel: ModelServiceChannelId, modelId: string): Promise<ModelFavourites>;
+  readonly filter?: string;
+  chooseFilter?(filter: string): void;
 }
 
 /** One model both roles can take now: an eligible declaration on a channel whose credential is ready. */
@@ -153,7 +158,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
   })(); });
   const actions = el('div', 'button-row');
   const ready = credentialReady(projection, channel.route);
-  const refresh = el('button', 'secondary', '重试'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'retry-model-list';
+  const refresh = el('button', 'secondary', '刷新模型列表'); refresh.type = 'button'; refresh.disabled = !ready; refresh.dataset['action'] = 'retry-model-list';
   refresh.addEventListener('click', () => void (async () => {
     refresh.disabled = true;
     try {
@@ -172,7 +177,7 @@ function credentialStep(projection: ModelServiceSettingsProjection, channel: Mod
     try { options.render(await options.api.removeModelServiceCredential({ route: option.route })); options.setStatus('凭据已移除。', 'success'); }
     catch (error) { remove.disabled = !ready; options.setStatus(options.errorMessage(error, '无法移除模型服务凭据。'), 'error'); }
   })());
-  actions.append(save, ...(projection.modelDiscovery?.status === 'failure' ? [refresh] : []), remove);
+  actions.append(save, refresh, remove);
   form.append(...(technicalLayerVisible ? [nameLabel] : []), secretLabel, actions);
   const stored = el('span', undefined, ready ? '凭据已保存' : '需设置凭据');
   if (technicalLayerVisible) stored.append('；凭据只写入操作系统安全凭据库，保存后不再显示。');
@@ -191,20 +196,28 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
   const current = currentModelServiceChoice(projection);
   const preferred = options.modelId || (current?.route === channel.route ? current.modelId : null);
   const group = el('fieldset', 'model-service-flow-models');
+  let favourites = options.favourites ?? {};
+  let savingFavourite = false;
+  let repaintCatalogue = (): void => undefined;
+  const filterLabel = el('label', 'model-service-filter', '筛选模型');
+  const filter = el('input'); filter.type = 'search'; filter.setAttribute('aria-label', '筛选模型');
+  filter.value = options.filter ?? '';
+  filter.addEventListener('input', () => { options.chooseFilter?.(filter.value); repaintCatalogue(); });
+  filterLabel.append(filter);
   const legend = el('legend', undefined, '选择模型，再指定使用角色');
   if (offered.length === 0) legend.append(` · ${ready ? '正在获取模型列表' : '保存凭据后获取模型'}`);
   group.append(legend);
   let checked: ModelServiceChannelModelProjection | null = null;
+  let selectedRadioModel: ModelServiceChannelModelProjection | null = null;
   let testing = false;
   const feedback = el('div', 'model-service-flow-feedback');
   const test = el('button', 'secondary', '用公开消息测试连接');
   test.type = 'button';
   test.dataset['action'] = 'test-flow-connection';
-  const use = el('button', 'primary', technicalLayerVisible ? USE_FOR_BOTH_ROLES_LABEL : '使用此模型');
+  const use = el('button', 'primary', USE_FOR_BOTH_ROLES_LABEL);
   use.type = 'button';
   use.dataset['action'] = 'use-model-for-both-roles';
   const customLabel = el('label', undefined, '手动输入模型 ID');
-  customLabel.dataset['developerOnly'] = 'true';
   const custom = el('input');
   custom.type = 'text'; custom.maxLength = 128; custom.dataset['customModelId'] = 'true';
   custom.disabled = !ready;
@@ -219,10 +232,26 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     const note = el('p', 'field-note', checked === null ? '' : `${modelCapabilityLabel(checked).replace(/。$/u, '')}；${modelConnectionTestLabel(own).replace(/。$/u, '')}${own === null ? '。' : '；测试仅核验缓冲文本，不核验工具或流式。'}`);
     if (own !== null) note.dataset['connectionTestOutcome'] = own.outcome;
     feedback.replaceChildren(...(checked === null ? [] : [note, ...modelConnectionTestDisclosure(own)]));
+    repaintCatalogue();
   };
   const modelSelect = el('select');
   modelSelect.setAttribute('aria-label', 'AI7 使用的模型');
   modelSelect.disabled = !ready || offered.length === 0;
+  const rows = el('div', 'model-service-catalogue');
+  const entries: { model: ModelServiceChannelModelProjection; row: HTMLElement; radio: HTMLInputElement; favourite: HTMLButtonElement }[] = [];
+  const favouriteButton = (modelId: () => string | undefined): HTMLButtonElement => {
+    const button = el('button', 'quiet', '☆ 收藏'); button.type = 'button';
+    button.addEventListener('click', () => void (async () => {
+      const id = modelId();
+      if (id === undefined || savingFavourite || !options.toggleFavourite) return;
+      savingFavourite = true; repaintCatalogue();
+      try { favourites = await options.toggleFavourite(channel.channelId, id); }
+      catch (error) { options.setStatus(options.errorMessage(error, '无法保存模型收藏。'), 'error'); }
+      finally { savingFavourite = false; repaintCatalogue(); }
+    })());
+    return button;
+  };
+  const selectedFavourite = favouriteButton(() => checked?.modelId);
   for (const model of offered) {
     const label = el('label', 'model-service-flow-choice');
     const radio = el('input');
@@ -232,30 +261,62 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     radio.disabled = !ready;
     radio.dataset['modelChoice'] = model.modelId;
     const inUse = current?.route === channel.route && current.modelId === model.modelId;
-    if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; }
-    radio.addEventListener('change', () => { checked = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
+    if (ready && (checked === null || preferred === model.modelId)) { radio.checked = true; checked = model; selectedRadioModel = model; }
+    radio.addEventListener('change', () => { checked = model; selectedRadioModel = model; custom.value = ''; options.chooseModel?.(model.modelId); paint(); });
     label.append(radio, ` ${modelLabelWords(model)}${inUse ? ' · 当前使用中' : !ready ? ' · 需先保存凭据' : ''}`);
-    if (technicalLayerVisible) group.append(label);
-    else {
-      const option = el('option', undefined, modelLabelWords(model));
-      option.value = model.modelId;
-      modelSelect.append(option);
-    }
+    const row = el('div', 'model-service-catalogue-row');
+    const favourite = favouriteButton(() => model.modelId);
+    row.append(label, favourite);
+    entries.push({ model, row, radio, favourite });
+    if (technicalLayerVisible) rows.append(row);
   }
   if (!technicalLayerVisible) {
     modelSelect.value = checked?.modelId ?? '';
     modelSelect.addEventListener('change', () => {
       checked = offered.find((model) => model.modelId === modelSelect.value) ?? null;
+      selectedRadioModel = checked;
+      custom.value = '';
       options.chooseModel?.(modelSelect.value);
       paint();
     });
-    group.append(modelSelect);
+    group.append(modelSelect, selectedFavourite);
   }
+  if (technicalLayerVisible) group.append(rows);
+  const matchCount = el('p', 'field-note'); matchCount.setAttribute('aria-live', 'polite');
+  const paintFavourite = (button: HTMLButtonElement, modelId: string | undefined): void => {
+    const active = modelId !== undefined && (favourites[channel.channelId] ?? []).includes(modelId);
+    button.textContent = active ? '★ 已收藏' : '☆ 收藏';
+    button.setAttribute('aria-pressed', String(active));
+    button.setAttribute('aria-label', `${active ? '取消收藏' : '收藏'} ${modelId ?? '模型'}`);
+    button.dataset['favoriteModel'] = modelId ?? '';
+    button.disabled = savingFavourite || modelId === undefined;
+  };
+  repaintCatalogue = (): void => {
+    const query = filter.value.trim().toLocaleLowerCase();
+    const matches = (model: ModelServiceChannelModelProjection): boolean =>
+      `${model.modelId} ${model.modelLabel} ${modelLabelWords(model)}`.toLocaleLowerCase().includes(query);
+    const starred = favourites[channel.channelId] ?? [];
+    const sorted = [...entries].sort((a, b) => Number(starred.includes(b.model.modelId)) - Number(starred.includes(a.model.modelId)));
+    const choices: HTMLOptionElement[] = [];
+    for (const { model, row, favourite } of sorted) {
+      row.hidden = !matches(model);
+      paintFavourite(favourite, model.modelId);
+      if (technicalLayerVisible) rows.append(row);
+      else if (matches(model) || model.modelId === checked?.modelId) {
+        const option = el('option', undefined, `${starred.includes(model.modelId) ? '★ ' : ''}${modelLabelWords(model)}${!matches(model) ? ' · 已选（不匹配筛选）' : ''}`);
+        option.value = model.modelId; choices.push(option);
+      }
+    }
+    if (!technicalLayerVisible) { modelSelect.replaceChildren(...choices); modelSelect.value = checked?.modelId ?? ''; }
+    paintFavourite(selectedFavourite, checked?.modelId);
+    matchCount.textContent = `匹配 ${offered.filter(matches).length} / ${offered.length} 个模型${checked === null ? '' : `；已选：${modelLabelWords(checked)}`}`;
+  };
   const chooseCustom = (): void => {
     const modelId = custom.value.trim();
-    checked = modelId.length === 0 ? null : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
-    options.chooseModel?.(modelId);
-    for (const radio of Array.from(group.querySelectorAll('input'))) radio.checked = false;
+    checked = modelId.length === 0 ? selectedRadioModel : { modelId, modelLabel: modelId, family: '', main: 'eligible', fast: 'eligible', capabilities: { text: 'supported', stream: 'supported', functionTools: 'supported' } };
+    options.chooseModel?.(checked?.modelId ?? '');
+    for (const radio of Array.from(group.querySelectorAll<HTMLInputElement>('input[data-model-choice]'))) radio.checked = modelId.length === 0 && radio.value === selectedRadioModel?.modelId;
+    modelSelect.value = modelId.length === 0 ? selectedRadioModel?.modelId ?? '' : '';
     paint();
   };
   custom.addEventListener('input', chooseCustom);
@@ -267,7 +328,6 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     ['fast', '用于快速交互角色', options.api.selectFastRoleModel],
   ] as const) {
     const button = el('button', 'secondary', label); button.type = 'button'; button.dataset['action'] = `select-${role}-role-model`;
-    button.dataset['developerOnly'] = 'true';
     button.addEventListener('click', () => void (async () => {
       if (checked === null || channel.route === null) return;
       button.disabled = true;
@@ -301,9 +361,10 @@ function modelStep(projection: ModelServiceSettingsProjection, channel: ModelSer
     } catch (error) { use.disabled = false; options.setStatus(options.errorMessage(error, '无法保存模型选择。'), 'error'); }
   })());
   paint();
+  if (checked !== null) options.chooseModel?.(checked.modelId);
   const actions = el('div', 'button-row');
-  actions.append(...(technicalLayerVisible ? [test, ...roleButtons, use] : [use]));
-  step.append(group, ...(technicalLayerVisible ? [customLabel] : []), actions);
+  actions.append(...(technicalLayerVisible ? [test] : []), ...roleButtons, use);
+  step.append(filterLabel, group, matchCount, customLabel, actions);
   const testStep = el('div', 'model-service-flow-test');
   if (!technicalLayerVisible) testStep.append(el('h4', undefined, '4. 测试连接'), test);
   testStep.append(feedback, el('p', 'field-note', technicalLayerVisible ? MODEL_CONNECTION_TEST_NOTE : '只发送一条测试消息，不含图书文字。'));

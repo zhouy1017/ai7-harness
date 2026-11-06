@@ -58,7 +58,7 @@ describe('task overview', () => {
   });
   it('keeps context and controls in one header and repeats the selected original plan', async () => {
     const uninstall = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: () => {} });
-    vi.stubGlobal('localStorage', { getItem: () => 'all' });
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify({ book: 'all', type: 'all', time: 'all' }) });
     const original = { ...task('recent', 'analysis-completed', 'older'), at: new Date().toISOString() };
     const projection = composeTaskOverview({ groups: [{ key: 'recent', items: [original], total: 1 }], actionableCount: 0, running: false, processing: { state: 'local' } }, 2, () => null);
     const startQuickTasks = vi.fn(async () => ({}));

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { modelServiceChannels } from '../../src/service/launch-policy.js';
 import { searchBackendSettingsProjection } from '../../src/service/provider/search-backend-settings.js';
 import type { ModelServiceSettingsProjection, RendererApi } from '../../src/shared/protocol.js';
+import { preferenceDefaults } from '../../src/shared/preferences.js';
 import { createModelServiceSettings } from '../../src/renderer/model-service-settings.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { installMiniDom, type MiniElement } from '../support/mini-dom.js';
@@ -24,6 +25,7 @@ function mount() {
   } as unknown as ModelServiceSettingsProjection;
   const api = {
     getModelServiceSettings: vi.fn(async () => settings),
+    getPreferences: vi.fn(async () => ({ version: 1 as const, values: preferenceDefaults(), notice: null })),
     saveModelServiceProxy: vi.fn(async (proxy: Parameters<RendererApi['saveModelServiceProxy']>[0]) => { settings.proxy = proxy; return settings; }),
     selectSearchBackend: vi.fn(async (input: Parameters<RendererApi['selectSearchBackend']>[0]) => {
       if (input.role === 'fallback') settings.searchBackends.fallbackBackendId = input.backendId;
