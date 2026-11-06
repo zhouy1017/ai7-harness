@@ -928,13 +928,16 @@ async function main() {
     await waitFor(renderer, runningWith(FIRST_HOLD + 1), 'resumed-held-before-poll', 120_000);
     // #1375: keep the developer disclosure through two actual completed-unit projections, not an idle clock.
     await clickSelector(renderer, '#task-drawer button[data-task-drawer-mode="full"]', 'poll-full-plan');
-    await assertRenderer(renderer, `(() => {const more=document.querySelector('#task-drawer details.task-plan-technical');if(!more)return false;more.open=true;more.querySelector('summary').focus();return document.documentElement.dataset.technicalLayerVisible==='true';})()`, 'drawer-poll-developer-disclosure');
+    await assertRenderer(renderer, `(() => {const control=document.querySelector('[data-technical-collection]');const summary=control?.querySelector('summary');if(!control||!summary||summary.hidden)return false;globalThis.__j10TechnicalWasOpen=control.open;control.open=true;return document.documentElement.dataset.technicalLayerVisible==='true';})()`, 'drawer-poll-developer-disclosure');
+    await waitFor(renderer, `document.querySelector('#task-drawer details.task-plan-technical')?.hidden===false`, 'drawer-poll-visible-disclosure');
+    await assertRenderer(renderer, `(() => {const summary=document.querySelector('[data-technical-collection] > summary');summary?.focus();return summary && document.activeElement===summary;})()`, 'drawer-poll-visible-summary-focus');
     for(const done of [FIRST_HOLD+2,RESUMED_HOLD]) {
       await renderer.evaluate(`globalThis.__j10PollDetails=document.querySelector('#task-drawer details.task-plan-technical')`);
       await writeFile(holdPath,String(done),'utf8');
       await new Promise(resolve=>setTimeout(resolve,2200));
-      await waitFor(renderer, `(() => {const more=document.querySelector('#task-drawer details.task-plan-technical');return more!==globalThis.__j10PollDetails && more?.open && document.activeElement===more.querySelector('summary') && document.querySelector('#task-drawer .task-plan-activity')?.dataset.taskPlanActivityProgress===${JSON.stringify(`${done}/${SAMPLE1_UNITS}`)};})()`, 'drawer-details-changed-poll-survival');
+      await waitFor(renderer, `(() => {const more=document.querySelector('#task-drawer details.task-plan-technical');const control=document.querySelector('[data-technical-collection]');return more!==globalThis.__j10PollDetails && more?.open && !more.hidden && control?.open && document.activeElement===control.querySelector('summary') && document.querySelector('#task-drawer .task-plan-activity')?.dataset.taskPlanActivityProgress===${JSON.stringify(`${done}/${SAMPLE1_UNITS}`)};})()`, 'drawer-details-changed-poll-survival');
     }
+    await renderer.evaluate(`document.querySelector('[data-technical-collection]').open=globalThis.__j10TechnicalWasOpen`);
     await clickSelector(renderer, '#task-drawer button[data-task-drawer-mode="compact"]', 'poll-return-running');
     await waitFor(renderer, runningWith(RESUMED_HOLD), 'sixth-range-in-flight', 120_000);
     const resumed = await renderer.evaluate(`window.ai7.inspectBaselineAnalysis()`);

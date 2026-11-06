@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { mountFindingsCenter } from '../../src/renderer/findings-center.js';
-import type { BookFindingsProjection } from '../../src/shared/protocol.js';
+import type { BookFindingProjection, BookFindingsProjection } from '../../src/shared/protocol.js';
 import { installMiniDom, miniDocument, MiniElement } from '../support/mini-dom.js';
 import { setTechnicalLayerVisible } from '../../src/renderer/technical-layer.js';
 import { applyFindingBatches } from '../../src/renderer/manuscript-apply.js';
@@ -62,6 +62,71 @@ it('recovers the same unknown Effect without replaying a failed later chunk (#13
   const recovered = await result.recover!(); expect(recovered.message).toContain('已接受并应用 501 条');
   expect(api.getManuscriptApplyOutcome.mock.calls.at(-1)![0].clientEffectId).toBe(identity);
   expect(api.applyChangeSuggestion).toHaveBeenCalledTimes(1);
+});
+
+it('retries only the unreversed prefix after its unknown reversal is confirmed not committed (#1394 R1)', async () => {
+  const { api, apply } = batchConsumer(false); const result = await apply();
+  api.reverseAppliedChangeSuggestion.mockImplementation(async (input) => { if (input.markId === 'mark-0') throw new Error('lost acknowledgement'); return {} as never; });
+  api.getManuscriptApplyOutcome.mockRejectedValue(new Error('unavailable'));
+  const partial = await result.undo!(); expect(partial.message).toContain('已撤销 1 条');
+  const unknownId = api.getManuscriptApplyOutcome.mock.calls.at(-1)![0].clientEffectId;
+  await partial.undo!(); expect(api.reverseAppliedChangeSuggestion).toHaveBeenCalledTimes(2);
+  api.getManuscriptApplyOutcome.mockResolvedValue({ state: 'not-committed', application: null });
+  const settled = await partial.recover!(); expect(settled.recover).toBeUndefined();
+  expect(api.getManuscriptApplyOutcome.mock.calls.at(-1)![0].clientEffectId).toBe(unknownId);
+  api.reverseAppliedChangeSuggestion.mockResolvedValue({} as never);
+  const complete = await settled.undo!(); expect(complete.message).toContain('已撤销 501 条');
+  expect(api.reverseAppliedChangeSuggestion.mock.calls.map(([input]) => input.markId)).toEqual(['mark-500', 'mark-0', 'mark-0']);
+  expect(api.reverseAppliedChangeSuggestion.mock.calls.at(-1)![0].clientEffectId).not.toBe(unknownId);
+});
+
+function mountUncertainBatch(kind: 'apply' | 'reversal') {
+  const { api, suggestions } = batchConsumer(kind === 'apply', kind === 'apply');
+  if (kind === 'reversal') {
+    api.reverseAppliedChangeSuggestion.mockImplementation(async (input) => { if (input.markId === 'mark-0') throw new Error('lost reversal acknowledgement'); return {} as never; });
+    api.getManuscriptApplyOutcome.mockRejectedValue(new Error('outcome unavailable'));
+  }
+  const root = miniDocument.createElement('section'); miniDocument.body.append(root);
+  let operations = 0;
+  const all: BookFindingsProjection['items'] = suggestions.map((suggestion) => ({ id: suggestion.markId, category: 'review', categoryLabel: '审阅', severity: '提示', status: '待处理', summary: '合成发现', suggestion, target: { kind: 'review', reviewRunId: 'run', findingId: suggestion.markId, blockId: 'block' } }));
+  const read = async (offset: number): Promise<BookFindingsProjection> => {
+    const items = operations === 0 ? all : kind === 'apply' || api.reverseAppliedChangeSuggestion.mock.calls.length > 0 ? all.slice(-1) : [];
+    return { bookId: 'book', offset, total: items.length, pageSize: 40, next: offset + 40 < items.length ? offset + 40 : null, items: items.slice(offset, offset + 40), groups: items.length ? [{ category: 'review', label: '审阅', count: items.length, bySeverity: {}, byStatus: {} }] : [] };
+  };
+  const apply = vi.fn(async (items: BookFindingProjection[]) => { operations++; return applyFindingBatches(items.map((item) => item.suggestion!), api); });
+  mountFindingsCenter(root as unknown as HTMLElement, read, vi.fn(), apply);
+  return { root, api, apply };
+}
+
+it.each(['apply', 'reversal'] as const)('retains unknown %s recovery across attempted subsequent Apply and enables work only after settlement (#1394 R1)', async (kind) => {
+  const restore = installMiniDom(); vi.stubGlobal('window', { setInterval: () => 0, clearInterval: vi.fn() });
+  try {
+    const { root, api, apply } = mountUncertainBatch(kind);
+    const button = (label: string) => root.querySelectorAll('button').find((node) => node.textContent === label);
+    await vi.waitFor(() => expect(button('接受并应用全部 501 条')).toBeDefined()); button('接受并应用全部 501 条')!.click(); button('确认应用')!.click();
+    await vi.waitFor(() => expect(root.querySelector('.findings-apply-feedback')).not.toBeNull());
+    if (kind === 'reversal') { button('撤销已确认应用')!.click(); }
+    await vi.waitFor(() => expect(button('核对未知结果')).toBeDefined());
+    if (kind === 'reversal') expect(root.querySelector('.findings-apply-feedback')!.textContent).toContain('已撤销 1 条');
+    const effectId = api.getManuscriptApplyOutcome.mock.calls.at(-1)![0].clientEffectId;
+    const reverseCalls = api.reverseAppliedChangeSuggestion.mock.calls.length;
+    root.querySelector('[data-finding-apply]')!.click(); button('接受并应用全部 1 条')?.click(); button('确认应用')?.click(); await Promise.resolve();
+    expect(apply).toHaveBeenCalledTimes(1); expect(api.reverseAppliedChangeSuggestion).toHaveBeenCalledTimes(reverseCalls);
+    expect(button('核对未知结果')).toBeDefined(); expect(root.querySelector('.findings-apply-blocked')?.textContent).toContain('先核对未知结果');
+    expect(root.querySelector('[data-finding-apply]')!.disabled).toBe(true);
+    expect(button('接受并应用全部 1 条')!.disabled).toBe(true);
+    expect(button('撤销已确认应用')!.disabled).toBe(true);
+    button('撤销已确认应用')!.click(); await Promise.resolve(); expect(api.reverseAppliedChangeSuggestion).toHaveBeenCalledTimes(reverseCalls);
+    api.getManuscriptApplyOutcome.mockResolvedValue({ state: kind === 'apply' ? 'not-committed' : 'committed', application: null });
+    await vi.waitFor(() => expect(root.getAttribute('aria-busy')).toBeNull()); button('核对未知结果')!.click();
+    await vi.waitFor(() => expect(root.querySelector('[data-finding-apply]')?.disabled).toBe(false));
+    expect(api.getManuscriptApplyOutcome.mock.calls.at(-1)![0].clientEffectId).toBe(effectId);
+    if (kind === 'reversal') expect(root.querySelector('.findings-apply-feedback')!.textContent).toContain('已撤销 501 条');
+    api.applyChangeSuggestion.mockResolvedValue({} as never); root.querySelector('[data-finding-apply]')!.click();
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(root.querySelector('.findings-apply-feedback')?.textContent).toContain('已接受并应用 1 条'));
+    await vi.waitFor(() => expect(root.getAttribute('aria-busy')).toBeNull());
+  } finally { vi.unstubAllGlobals(); restore(); }
 });
 
 it('filters the whole book beyond 500, resets position, and retains focus and scroll across two changed polls (#1375, #1383)', async () => {

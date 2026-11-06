@@ -17,19 +17,23 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
   let category = '', severity = '', status = '';
   let signature = '', busy = false, loading = false;
   let feedback: FindingsBatchFeedback | void;
+  const recoveryReason = '仍有应用或撤销结果待确认，请先核对未知结果。';
   const paintFeedback = (): void => {
     root.querySelector('.findings-apply-feedback')?.remove();
     if (!feedback) return;
     const bar = document.createElement('section'); bar.className = 'findings-apply-feedback attention-note'; bar.setAttribute('role', feedback.attention ? 'alert' : 'status');
     const words = document.createElement('p'); words.textContent = feedback.message; bar.append(words);
+    if (feedback.recover) { const reason = document.createElement('p'); reason.className = 'findings-apply-blocked'; reason.textContent = recoveryReason; bar.append(reason); }
     for (const [label, action] of [['撤销已确认应用', feedback.undo], ['核对未知结果', feedback.recover]] as const) {
       if (!action) continue;
-      const button = createButton(); button.textContent = label; button.addEventListener('click', () => { if (busy) return; busy = true; button.disabled = true; void action().then((next) => { feedback = next; }).finally(() => { busy = false; signature = ''; void load(); }); }); bar.append(button);
+      const button = createButton(); button.textContent = label;
+      button.disabled = Boolean(feedback.recover && action !== feedback.recover); if (button.disabled) button.title = recoveryReason;
+      button.addEventListener('click', () => { if (busy || (feedback?.recover && action !== feedback.recover)) return; busy = true; button.disabled = true; void action().then((next) => { feedback = next; }).finally(() => { busy = false; signature = ''; void load(); }); }); bar.append(button);
     }
-    root.append(bar);
+    root.insertBefore(bar, root.querySelector('.findings-filters'));
   };
   const perform = async (items: BookFindingProjection[]): Promise<void> => {
-    if (busy || !apply) return; busy = true;
+    if (busy || !apply || feedback?.recover) return; busy = true;
     try { feedback = await apply(items); } finally { busy = false; signature = ''; void load(); }
   };
   const load = async (): Promise<void> => {
@@ -62,7 +66,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       const matches = (item: BookFindingProjection): boolean => (category === '' || item.category === category) && (severity === '' || item.severity === severity) && (status === '' || item.status === status);
       let batchButton: HTMLButtonElement | null = null;
       const available = (): BookFindingProjection[] => batchItems.filter((item) => item.suggestion?.batchAllowed && matches(item));
-      const syncBatch = (): void => { if (batchButton) { const count = available().length; batchButton.textContent = `接受并应用全部 ${count} 条`; batchButton.hidden = count === 0; } };
+      const syncBatch = (): void => { if (batchButton) { const count = available().length; batchButton.textContent = `接受并应用全部 ${count} 条`; batchButton.hidden = count === 0; batchButton.disabled = Boolean(feedback?.recover); batchButton.title = feedback?.recover ? recoveryReason : ''; } };
       const filter = filterChoices({ label: FINDINGS_CENTER_WORDS.filter,
         choices: [['', FINDINGS_CENTER_WORDS.allCategories], ...page.groups.map((group) => [group.category, `${group.label} · ${group.count}`] as const)],
         value: category, change: (value) => { category = value; offset = 0; paint(); syncBatch(); },
@@ -103,6 +107,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
             rowActions.append(link);
             row.append(pills, words, rowActions);
             if (item.suggestion && apply) { const accept = createButton(); accept.type = 'button'; accept.textContent = '接受并应用'; accept.dataset['findingApply'] = item.id;
+              accept.disabled = Boolean(feedback?.recover); accept.title = feedback?.recover ? recoveryReason : '';
               accept.addEventListener('click', () => { accept.disabled = true; void perform([item]); }); rowActions.append(accept); }
             section.append(row);
           }
@@ -118,6 +123,7 @@ export function mountFindingsCenter(root: HTMLElement, read: (offset: number) =>
       if (apply) {
         batchButton = createButton(); batchButton.type = 'button'; syncBatch();
         batchButton.addEventListener('click', () => {
+          if (busy || feedback?.recover) return;
           const items = available();
           const bar = document.createElement('div'); bar.className = 'attention-note findings-confirm'; bar.setAttribute('role', 'alert');
           const scope = document.createElement('p'); scope.textContent = `将把所列 ${items.length} 条修改建议写入稿件。`;
