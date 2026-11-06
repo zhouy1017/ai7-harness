@@ -31,7 +31,7 @@ function learning() {
     page = { ...page, items: page.items.map((item) => item.current.itemId === itemId
       ? { ...item, current: { ...item.current, state } as EditorialMemoryVersion, usable: state === 'active' } : item) }; return page;
   };
-  const global = { categories: [{ categoryId: 'typos-and-usage', label: '错别字与规范用语' }], books: [], items: [
+  let global = { categories: [{ categoryId: 'typos-and-usage', label: '错别字与规范用语' }], books: [], directives: [], items: [
     { kind: 'preference', itemId: 'legacy', revisionId: 'legacy-version', categoryId: 'typos-and-usage', bookId: null, text: '沿用本社用语', state: 'active', lineage: [] },
   ] };
   const api = {
@@ -40,7 +40,7 @@ function learning() {
     acceptEditorialMemory: vi.fn(async (input: Parameters<RendererApi['acceptEditorialMemory']>[0]) => change(input.itemId, 'active')),
     deactivateEditorialMemory: vi.fn(async (input: Parameters<RendererApi['deactivateEditorialMemory']>[0]) => change(input.itemId, 'inactive')),
     changeEditorialLearning: vi.fn(async (input: Parameters<RendererApi['changeEditorialLearning']>[0]) => { page = { ...page, enabled: input.kind === 'switch' ? input.enabled : page.enabled, controlEntries: 3 }; return page; }),
-    recordLearningSupervision: vi.fn(async () => ({ ...global, items: global.items.map((item) => ({ ...item, state: 'inactive' })) })),
+    recordLearningSupervision: vi.fn(async () => (global = { ...global, items: global.items.map((item) => ({ ...item, state: 'inactive' })) })),
   } satisfies Partial<Record<keyof RendererApi, unknown>>;
   return { api, renderer: api as unknown as RendererApi };
 }

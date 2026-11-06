@@ -3330,6 +3330,7 @@ async function main() {
       await waitFor(renderer, `document.documentElement.dataset.technicalLayerVisible==='${developer}'`, `${name}-applied`);
     };
     const createCandidate = async (title, name) => {
+      let ordinaryPreference = null;
       await assertRenderer(renderer, `(() => { for(const id of ${JSON.stringify(memorySources.ids)}) { const checkbox=document.querySelector('[data-memory-source="'+id+'"]'); if(!(checkbox instanceof HTMLInputElement)||checkbox.disabled)return false; if(!checkbox.checked)checkbox.click(); }return true; })()`, `${name}-select`);
       await assertRenderer(renderer, `(() => { const composer=document.querySelector('details.memory-composer'); const summary=composer?.querySelector(':scope > summary'); if(!(composer instanceof HTMLDetailsElement)||!(summary instanceof HTMLElement))return false; if(!composer.open)summary.click(); return composer.open; })()`, `${name}-open-composer`);
       await fill(renderer, '[data-memory-candidate-form] [name="candidate-title"]', title, `${name}-title`);
@@ -3337,6 +3338,9 @@ async function main() {
       await waitFor(renderer, `Array.from(document.querySelectorAll('[data-memory-item]')).some(item=>item.textContent.includes(${JSON.stringify(title)}) && item.textContent.includes('待接受')) && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-proposed`);
       const itemId = await renderer.evaluate(`window.ai7.inspectEditorialLearning({signalOffset:0,itemOffset:0}).then(page=>page.items.find(item=>item.current.schema==='ai7.global-editorial-memory/2' && item.current.title===${JSON.stringify(title)}).current.itemId)`);
       if (name === 'memory-governance-first') {
+        await click(renderer, '更新本社审阅偏好', 'ordinary-preference-refresh');
+        await waitFor(renderer, `window.ai7.inspectGlobalAgent().then(page=>page.items.some(item=>item.kind==='preference' && item.bookId===null && item.categoryId==='typos-and-usage'))`, 'ordinary-preference-derived-ready');
+        ordinaryPreference = await renderer.evaluate(`window.ai7.inspectGlobalAgent().then(page=>page.items.find(item=>item.kind==='preference' && item.bookId===null && item.categoryId==='typos-and-usage').itemId)`);
         await qualityMode(false, 'ordinary-memory');
         await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('quality')), 'ordinary-memory-quality');
         await waitFor(renderer, `document.querySelector('[data-memory-candidates] [data-memory-item="${itemId}"]') && !document.querySelector('[data-memory-candidate-form]')`, 'ordinary-memory-candidate-first');
@@ -3345,11 +3349,15 @@ async function main() {
       await assertRenderer(renderer, `(() => {const item=document.querySelector('[data-memory-item="${itemId}"]');const button=Array.from(item.querySelectorAll('button')).find(button=>button.textContent==='接受记忆');if(!button||button.disabled)return false;button.click();return true;})()`, `${name}-accept`);
       await waitFor(renderer, `document.querySelector('[data-memory-item="${itemId}"]')?.textContent.includes('已启用') && document.querySelector('[data-learning-enabled]')?.disabled === false`, `${name}-active`);
       if (name === 'memory-governance-first') {
+        await assertRenderer(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]'); const stop=Array.from(row?.querySelectorAll('button')??[]).find(button=>button.textContent==='停用'); if(!stop||stop.disabled)return false;stop.click();return true; })()`, 'ordinary-preference-stop-after-memory');
+        await waitFor(renderer, `document.querySelector('[data-review-preference="${ordinaryPreference}"]')?.textContent.includes('已停用') && document.querySelector('[data-learning-enabled]')?.disabled===false`, 'ordinary-preference-stopped-after-memory');
         await clickSelector(renderer, '#quality-tab-feedback', 'ordinary-history-open');
         await waitFor(renderer, `document.querySelectorAll('[data-feedback-filter]').length===2 && document.querySelectorAll('[data-entry-id]').length>0`, 'ordinary-history-populated');
         await assertRenderer(renderer, `(async () => { const page=await window.ai7.inspectFeedbackHistory(); const rows=Array.from(document.querySelectorAll('[data-entry-id]')); return JSON.stringify(rows.map(row=>row.dataset.entryId))===JSON.stringify(page.entries.map(entry=>entry.entryId)) && rows.every(row=>row.querySelectorAll(':scope > p').length===2 && row.querySelector('.feedback-entry-book') && (row.querySelector('[data-feedback-action="open"]')?.textContent==='查看原处' || row.querySelector('.feedback-entry-detached'))) && !document.querySelector('#feedback-filter-signal, #feedback-filter-author, #feedback-filter-editor, #feedback-filter-dimension, #feedback-filter-from, #feedback-filter-to, #feedback-group-by'); })()`, 'ordinary-history-newest-two-lines');
         await choose(renderer, '#feedback-filter-origin', 'analysis-feedback', 'ordinary-history-filter-source');
         await waitFor(renderer, `document.querySelector('#feedback-filter-origin')?.disabled===false && Array.from(document.querySelectorAll('[data-entry-id]')).every(row=>row.dataset.feedbackOrigin==='analysis-feedback')`, 'ordinary-history-filtered');
+        await clickSelector(renderer, '#quality-tab-preferences', 'ordinary-preference-remount');
+        await waitFor(renderer, `(() => { const row=document.querySelector('[data-review-preference="${ordinaryPreference}"]');const history=row?.querySelector('details');return row?.textContent.includes('已停用') && history?.textContent.includes('来自《') && /[0-9]{4}-[0-9]{2}-[0-9]{2}T/u.test(history.textContent); })()`, 'ordinary-preference-retained-source-history');
         await qualityMode(true, 'ordinary-memory-restore'); await openMemory('ordinary-memory-developer');
       }
       return itemId;

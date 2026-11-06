@@ -43,20 +43,25 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
   root.append(section);
   let page = await api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
   let global = technicalLayerVisible ? null : await api.inspectGlobalAgent();
-  const house = technicalLayerVisible ? null : await api.inspectHouseReviewPreference();
+  let house = technicalLayerVisible ? null : await api.inspectHouseReviewPreference();
   let signalOffset = 0; let itemOffset = 0; let exclusionOffset = 0;
-  let busy = false;
+  let busy = false; let refreshFailed = false;
   const selected = new Map<string, EditorialLearningProjection['signals'][number]>();
   const status = el('p', ''); status.setAttribute('role', 'status');
   const run = (operation: () => Promise<EditorialLearningProjection>): void => {
-    if (busy) return;
+    if (busy || refreshFailed) return;
     busy = true; paint();
-    void operation().then((next) => { page = next; selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = '学习记录已更新。'; })
-      .catch(() => { status.textContent = '无法更新学习记录，请重新查看。'; })
+    let changed = false;
+    void operation().then(async (next) => {
+      changed = true; page = next;
+      if (!technicalLayerVisible) [global, house] = await Promise.all([api.inspectGlobalAgent(), api.inspectHouseReviewPreference()]);
+      selected.clear(); signalOffset = 0; itemOffset = 0; exclusionOffset = 0; status.textContent = '学习记录已更新。';
+    })
+      .catch(() => { refreshFailed = changed && !technicalLayerVisible; status.textContent = refreshFailed ? '记录已更新，请重新打开此页以读取最新状态。' : '无法更新学习记录，请重新查看。'; })
       .finally(() => { busy = false; if (section.isConnected) paint(); });
   };
   const action = (label: string, operation: () => void): HTMLButtonElement => {
-    const button = el('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary'); button.disabled = busy;
+    const button = el('button', label); button.type = 'button'; button.className = 'btn ' + ('secondary'); button.disabled = busy || refreshFailed;
     button.addEventListener('click', operation); return button;
   };
   const paint = (): void => {
@@ -65,7 +70,7 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
     section.replaceChildren(heading);
     if (technicalLayerVisible) section.append(el('p', page.basis));
     const switchLabel = el('label', '本机学习');
-    const enabled = el('input', ''); enabled.type = 'checkbox'; enabled.checked = page.enabled; enabled.disabled = busy;
+    const enabled = el('input', ''); enabled.type = 'checkbox'; enabled.checked = page.enabled; enabled.disabled = busy || refreshFailed;
     enabled.dataset['learningEnabled'] = '';
     enabled.addEventListener('change', () => run(() => api.changeEditorialLearning({ kind: 'switch', enabled: enabled.checked, expectedEntries: page.controlEntries })));
     switchLabel.prepend(enabled);
@@ -114,17 +119,25 @@ export async function mountEditorialMemory(root: HTMLElement, api: RendererApi,
         item.append(el('p', preference.text), el('p', `${category(preference.categoryId)} · ${preference.bookId === null ? '本社' : `《${bookTitle(preference.bookId)}》`} · ${preference.state === 'active' ? '已启用' : preference.state === 'frozen' ? '已冻结' : '已停用'}`));
         const controls = el('div', ''); controls.className = 'preference-actions';
         if (preference.state === 'active') controls.append(action('停用', () => run(async () => {
-          global = await api.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
+          await api.recordLearningSupervision({ operation: 'deactivate', targets: [{ itemId: preference.itemId, revisionId: preference.revisionId }],
             scope: preference.bookId === null ? { kind: 'category', categoryId: preference.categoryId } : { kind: 'book', bookId: preference.bookId },
             categoryId: preference.categoryId, text: '', effect: 'guide' });
           return api.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 });
         })));
         const lineage = el('details', ''); lineage.append(el('summary', '来源与历史'));
-        const sourceLine = house?.current?.lines.find((line) => line.owner?.itemId === preference.itemId || line.text === preference.text && line.categoryId === preference.categoryId && line.bookId === preference.bookId);
-        const sourceTitles = new Set(sourceLine?.sources.map((source) => source.bookTitle));
+        const basis = house?.current?.legacyBasis?.lines ?? house?.current?.governance?.baseLines ?? house?.current?.lines ?? [];
+        const sourceBooks = (itemId: string, seen = new Set<string>()): string[] => {
+          if (seen.has(itemId)) return []; seen.add(itemId);
+          const line = basis.find((line) => (line.owner?.itemId ?? `preference:${line.bookId ?? 'house'}:${line.categoryId}`) === itemId);
+          const parents = global!.items.find((item) => item.itemId === itemId)?.lineage ?? [];
+          return [...(line?.sources.map((source) => source.bookTitle) ?? []), ...parents.flatMap((pin) => sourceBooks(pin.itemId, seen))];
+        };
+        const sourceTitles = new Set(sourceBooks(preference.itemId));
         if (preference.bookId !== null) sourceTitles.add(bookTitle(preference.bookId));
         for (const title of sourceTitles) lineage.append(el('p', `来自《${title}》`));
-        if (house?.current !== null && house?.current !== undefined) lineage.append(el('p', house.current.recordedAt));
+        const changes = global.directives.filter((entry) => entry.directiveId === preference.itemId || entry.targets.some((pin) => pin.itemId === preference.itemId));
+        for (const entry of changes) lineage.append(el('p', `${entry.recordedAt} · ${entry.operation === 'deactivate' ? '已停用' : entry.operation === 'supervise' ? entry.effect === 'freeze' ? '已冻结' : '学习方向已更新' : '已启用'}`));
+        if (changes.length === 0) lineage.append(el('p', '尚无单独的偏好变更记录。'));
         controls.append(lineage); item.append(controls); active.append(item);
       }
       if (candidates.querySelector('article') !== null) section.append(candidates);
