@@ -116,6 +116,7 @@ import type {
   AppendMaintenanceCaseRevisionInput,
   SaveMaintenanceErrataInput,
   CreateProductionDocumentInput,
+  RenameProductionDocumentInput,
   ProductionDocumentResultProjection,
   DecideProductionDocumentTypeInput,
   SaveProductionDocumentVersionInput,
@@ -738,6 +739,7 @@ export const IPC_CHANNELS = {
   saveMaintenanceErrata: 'ai7:j07:save-maintenance-errata',
   cancelBookDeliveryPackageExport: 'ai7:j07:cancel-book-delivery-package-export',
   createProductionDocument: 'ai7:j07:create-production-document',
+  renameProductionDocument: 'ai7:j07:rename-production-document',
   decideProductionDocumentType: 'ai7:j07:decide-production-document-type',
   saveProductionDocumentVersion: 'ai7:j07:save-production-document-version',
   recordProductionDocumentDelivery: 'ai7:j07:record-production-document-delivery',
@@ -6305,9 +6307,9 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
     input: { bookId: string; taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string };
     output: QuickStartWritingTaskResult;
   };
-  /** 打开草稿: one drafted result made the type's document, its 起草 phase started; once per type of a Book. */
+  /** 打开草稿: one drafted result made the type's document, its 起草 phase started; once per writing result. */
   createWritingDraft: {
-    input: { bookId: string; revisionId: string };
+    input: { bookId: string; revisionId: string; title?: string };
     output: WritingDraftCreatedProjection;
   };
   /** ②A 分析反馈 (Issue #94, S38): one Result Set Revision's items with their latest judgments, and the Book's metric. */
@@ -6627,6 +6629,7 @@ export interface ServiceOperationMap extends GlobalAgentOperations, HouseWordLis
   recordMaintenanceCase: { input: RecordMaintenanceCaseInput; output: MaintenanceCaseResultProjection };
   appendMaintenanceCaseRevision: { input: AppendMaintenanceCaseRevisionInput; output: MaintenanceCaseResultProjection };
   saveMaintenanceErrata: { input: SaveMaintenanceErrataInput; output: MaintenanceCaseResultProjection };
+  renameProductionDocument: { input: RenameProductionDocumentInput; output: ProductionDocumentResultProjection };
   createProductionDocument: { input: CreateProductionDocumentInput; output: ProductionDocumentResultProjection };
   decideProductionDocumentType: { input: DecideProductionDocumentTypeInput; output: ProductionDocumentResultProjection };
   saveProductionDocumentVersion: { input: SaveProductionDocumentVersionInput; output: ProductionDocumentResultProjection };
@@ -6805,7 +6808,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
     draftId: string;
     expectedDraftVersion: number;
   }): Promise<PickerReselectResult>;
-  abandonImportDraft(input: ServiceOperationMap['abandonImportDraft']['input']): Promise<ImportStartupProjection>;
+  abandonImportDraft(input: ServiceOperationMap['abandonImportDraft']['input'] & { preserveBookRoute?: true }): Promise<ImportStartupProjection>;
   prepareBookCreation(input: ServiceOperationMap['prepareBookCreation']['input']): Promise<BookCreationReviewProjection>;
   commitBookCreation(input: ServiceOperationMap['commitBookCreation']['input']): Promise<BookCreationCommitProjection>;
   getBookOverview(input: ServiceOperationMap['getBookOverview']['input']): Promise<BookWorkOverviewProjection>;
@@ -7003,7 +7006,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   authorizeWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string }): Promise<WritingTaskProjection>;
   quickStartWritingTask(input: { taskIntentId: string; planEnvelopeDigest: string; ruleVersionId: string }): Promise<QuickStartWritingTaskResult>;
   /** 打开草稿: the drafted result made the type's document in its 起草 phase; the renderer then opens it on the editing surface. */
-  createWritingDraft(input: { revisionId: string }): Promise<WritingDraftCreatedProjection>;
+  createWritingDraft(input: { revisionId: string; title?: string }): Promise<WritingDraftCreatedProjection>;
   /** ②A 分析反馈 of the Book the window is showing (Issue #94, S38); the renderer never names the Book. */
   inspectAnalysisFeedback(input: { revisionId: string }): Promise<AnalysisFeedbackProjection>;
   recordAnalysisFeedback(input: RecordAnalysisFeedbackInput): Promise<AnalysisFeedbackProjection>;
@@ -7186,6 +7189,7 @@ export interface RendererApi extends GlobalAgentRendererApi, HouseWordListApi {
   saveMaintenanceErrata(input: Omit<SaveMaintenanceErrataInput, 'bookId'>): Promise<MaintenanceCaseResultProjection>;
   cancelBookDeliveryPackageExport(input: Omit<ApproveBookDeliveryPackageExportInput, 'bookId'>): Promise<boolean>;
   /** 从来源材料创建 (Issue #415): a document of one house type of that Book, from one of its source-only materials. */
+  renameProductionDocument(input: Omit<RenameProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   createProductionDocument(input: Omit<CreateProductionDocumentInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;
   /** 本书不做 or 恢复 for one house type of that Book. */
   decideProductionDocumentType(input: Omit<DecideProductionDocumentTypeInput, 'bookId'>): Promise<ProductionDocumentResultProjection>;

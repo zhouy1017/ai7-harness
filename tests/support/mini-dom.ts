@@ -133,6 +133,13 @@ export class MiniElement {
     else this.children.splice(this.children.indexOf(reference), 0, node);
     return node;
   }
+  replaceWith(...nodes: Array<MiniElement | string>): void {
+    const parent = this.parentElement;
+    if (parent === null) return;
+    const fragment = new MiniElement('fragment'); fragment.append(...nodes);
+    for (const node of [...fragment.children]) parent.insertBefore(node, this);
+    this.remove();
+  }
   replaceChildren(...nodes: Array<MiniElement | string>): void {
     for (const child of this.children) child.parentElement = null;
     this.children.length = 0;

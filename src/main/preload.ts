@@ -220,7 +220,7 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<ServiceOperationMap['continueImportDraft']['output']>(IPC_CHANNELS.continueImportDraft, input),
   reselectImportDraft: (input: { draftId: string; expectedDraftVersion: number }) =>
     invoke<PickerReselectResult>(IPC_CHANNELS.reselectImportDraft, input),
-  abandonImportDraft: (input: ServiceOperationMap['abandonImportDraft']['input']) =>
+  abandonImportDraft: (input: Parameters<RendererApi['abandonImportDraft']>[0]) =>
     invoke<ServiceOperationMap['abandonImportDraft']['output']>(IPC_CHANNELS.abandonImportDraft, input),
   prepareBookCreation: (input: ServiceOperationMap['prepareBookCreation']['input']) =>
     invoke<ServiceOperationMap['prepareBookCreation']['output']>(IPC_CHANNELS.prepareBookCreation, input),
@@ -746,6 +746,8 @@ const api: RendererApi & PreferencesRendererApi & AppearanceRendererApi & Notifi
     invoke<Awaited<ReturnType<RendererApi['appendMaintenanceCaseRevision']>>>(IPC_CHANNELS.appendMaintenanceCaseRevision, input),
   saveMaintenanceErrata: (input: Parameters<RendererApi['saveMaintenanceErrata']>[0]) =>
     invoke<Awaited<ReturnType<RendererApi['saveMaintenanceErrata']>>>(IPC_CHANNELS.saveMaintenanceErrata, input),
+  renameProductionDocument: (input: Omit<ServiceOperationMap['renameProductionDocument']['input'], 'bookId'>) =>
+    invoke<ServiceOperationMap['renameProductionDocument']['output']>(IPC_CHANNELS.renameProductionDocument, input),
   createProductionDocument: (input: Omit<ServiceOperationMap['createProductionDocument']['input'], 'bookId'>) =>
     invoke<ServiceOperationMap['createProductionDocument']['output']>(IPC_CHANNELS.createProductionDocument, input),
   transitionProductionDocumentPhase: (input: Omit<ServiceOperationMap['transitionProductionDocumentPhase']['input'], 'bookId'>) =>

@@ -9,7 +9,7 @@ import { composeTaskOverview, estimateTaskStarts, controlOverviewTasks } from '.
 import type { BookTasksProjection, GlobalAttentionItemProjection, GlobalAttentionProjection, RendererApi } from '../../src/shared/protocol.js';
 
 function task(group: GlobalAttentionItemProjection['group'], state: GlobalAttentionItemProjection['state'], id: string): GlobalAttentionItemProjection {
-  return { itemId: id, group, state, blocked: false, at: '2026-11-05T01:00:00Z', book: { bookId: 'book', title: '任务总览' },
+  return { itemId: id, group, state, blocked: false, at: new Date().toISOString(), book: { bookId: 'book', title: '任务总览' },
     object: { kind: 'analysis', mode: 'first-baseline' }, facts: { progress: null, categories: [], revisionOrdinal: null }, nextStep: 'view-run',
     target: { kind: 'analysis', bookId: 'book', taskIntentId: id }, technical: [{ key: 'run-record', label: '运行', value: id }] };
 }

@@ -24,7 +24,7 @@ import { DEFAULT_EXECUTION_RULE_SCHEMA_SQL, DEFAULT_EXECUTION_RULE_TRIGGER_SQL }
 import { RUN_CHECKPOINT_SCHEMA_SQL, RUN_CHECKPOINT_TRIGGER_SQL } from '../analysis/run-checkpoints.js';
 import { CLARIFICATION_SCHEMA_SQL, CLARIFICATION_REVISION_72_SQL, CLARIFICATION_TRIGGER_SQL } from '../analysis/clarifications.js';
 import { REIMPORT_GROUP_SCHEMA_SQL } from '../reimport-group-ledger.js';
-import { MANUSCRIPTS_REVISION_37_SQL, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL, PRODUCTION_DOCUMENT_DELIVERY_TRIGGER_SQL, PRODUCTION_DOCUMENT_INDEX_SQL, PRODUCTION_DOCUMENT_SCHEMA_SQL, PRODUCTION_DOCUMENT_TRIGGER_SQL } from '../production-document-ledger.js';
+import { MULTI_DOCUMENT_INDEX_SQL, MANUSCRIPTS_REVISION_37_SQL, PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL, PRODUCTION_DOCUMENT_DELIVERY_TRIGGER_SQL, PRODUCTION_DOCUMENT_INDEX_SQL, PRODUCTION_DOCUMENT_SCHEMA_SQL, PRODUCTION_DOCUMENT_TRIGGER_SQL } from '../production-document-ledger.js';
 import { BOOK_DELIVERY_PACKAGE_SCHEMA_SQL, BOOK_DELIVERY_PACKAGE_TRIGGER_SQL } from '../book-delivery-packages.js';
 import { PRODUCTION_DOCUMENT_WORKFLOW_SCHEMA_SQL, PRODUCTION_DOCUMENT_WORKFLOW_TRIGGER_SQL } from '../production-document-workflow.js';
 import { BOOK_DELIVERY_PACKAGE_EXPORT_SCHEMA_SQL, BOOK_DELIVERY_PACKAGE_EXPORT_TRIGGER_SQL } from '../book-delivery-package-exports.js';
@@ -562,7 +562,7 @@ export function requireManuscriptReimportTargetSchema(
       // Revision 36 (Issue #412) the chapter-level Reimport Comparison's groups, verbs and mark outcomes.
       ...(includeReimportGroupTables ? REIMPORT_GROUP_SCHEMA_SQL : {}),
       // Revision 37 (Issue #415) rebuilt `manuscripts` for Production Documents beside the two ledgers it created.
-      ...(includeProductionDocumentTables ? { ...PRODUCTION_DOCUMENT_SCHEMA_SQL, manuscripts: MANUSCRIPTS_REVISION_37_SQL } : {}),
+      ...(includeProductionDocumentTables ? { ...PRODUCTION_DOCUMENT_SCHEMA_SQL, production_documents: Number(db.prepare('PRAGMA user_version').get()?.user_version) < 109 ? [PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents.replace('created_at TEXT NOT NULL\n', 'created_at TEXT NOT NULL,\n  UNIQUE(book_id, type_id)\n'), PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents] : PRODUCTION_DOCUMENT_SCHEMA_SQL.production_documents, manuscripts: MANUSCRIPTS_REVISION_37_SQL } : {}),
       // Revision 38 (Issue #415, S66b) adds the documents' Delivery Records.
       ...(includeProductionDocumentDeliveryTables ? PRODUCTION_DOCUMENT_DELIVERY_SCHEMA_SQL : {}),
       ...(includeBookDeliveryPackageTables ? BOOK_DELIVERY_PACKAGE_SCHEMA_SQL : {}),
@@ -630,7 +630,7 @@ export function requireManuscriptReimportTargetSchema(
       // Revision 64 (Issue #429, S81b2) adds which version and saved entry each 按我的评分重写评语 Task rewrites, and the decisions.
       ...(includeEvaluationRewriteTables ? EVALUATION_REWRITE_SCHEMA_SQL : {}),
       // Revision 65 (Issue #432, S84a) adds which type, words and reference set each writing Task drafts from, and its drafts.
-      ...(includeWritingTaskTables ? WRITING_TASK_SCHEMA_SQL : {}),
+      ...(includeWritingTaskTables ? { ...WRITING_TASK_SCHEMA_SQL, writing_drafts: Number(db.prepare('PRAGMA user_version').get()?.user_version) < 109 ? [WRITING_TASK_SCHEMA_SQL.writing_drafts.replace('sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64)\n', 'sha256 TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),\n  UNIQUE(book_id, type_id)\n'), WRITING_TASK_SCHEMA_SQL.writing_drafts] : WRITING_TASK_SCHEMA_SQL.writing_drafts } : {}),
       // Revision 66 (Issue #95, S39) adds each Book's Background Analysis Enrollment, its versions and its states.
       ...(includeBackgroundAnalysisEnrollmentTables ? Object.fromEntries(Object.entries(BACKGROUND_ANALYSIS_ENROLLMENT_SCHEMA_SQL).map(([table, sql]) => [table, [sql, BACKGROUND_PROCESSING_ENROLLMENT_SCHEMA_SQL[table]!]])) : {}),
       // Revision 67 (Issue #428, S80a) adds each 资料库 item's Material Index build and the segments of a complete one.
@@ -662,6 +662,7 @@ export function requireManuscriptReimportTargetSchema(
     // The partial index that keeps one primary Manuscript per Book stands with the rebuilt relation, whatever the version.
     {
       ...MANUSCRIPT_REIMPORT_INDEX_SQL,
+      ...(Number(db.prepare('PRAGMA user_version').get()?.user_version) >= 109 || schemaObjectSql(db, 'index', 'production_documents_book_type') !== undefined ? Object.fromEntries(Object.entries(MULTI_DOCUMENT_INDEX_SQL).filter(([name]) => name.startsWith('writing_') ? includeWritingTaskTables : includeProductionDocumentTables)) : {}),
       ...(includeProductionDocumentTables || schemaObjectSql(db, 'table', 'manuscripts')?.includes("'production-document'") === true
         ? PRODUCTION_DOCUMENT_INDEX_SQL
         : {}),

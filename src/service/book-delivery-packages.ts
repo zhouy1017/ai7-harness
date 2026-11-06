@@ -201,7 +201,8 @@ export interface PackageDocumentReading {
   typeId: string;
   typeLabel: string;
   notForThisBook: boolean;
-  document: null | { documentId: string; changedSinceDelivery: boolean; deliveries: ReadonlyArray<PackageDeliveryReading> };
+  multiple?: boolean;
+  document: null | { title?: string; documentId: string; changedSinceDelivery: boolean; deliveries: ReadonlyArray<PackageDeliveryReading> };
 }
 
 /** One Review Run of the Book, oldest first: its state and its newest report version. */
@@ -273,7 +274,7 @@ export interface PackageContent {
   bookId: string;
   publication: null | Omit<PackagePublicationReading, 'changedSince' | 'withdrawn'>;
   documents: ReadonlyArray<
-    | { typeId: string; disposition: 'included'; documentId: string; version: number; revisionId: string; revisionDigest: string; deliveryId: string; deliveryIds: ReadonlyArray<string> }
+    | { typeId: string; title?: string; exportKey?: string; disposition: 'included'; documentId: string; version: number; revisionId: string; revisionDigest: string; deliveryId: string; deliveryIds: ReadonlyArray<string> }
     | { typeId: string; disposition: 'not-for-this-book' }
   >;
   reviewReports: ReadonlyArray<{ reviewRunId: string; reportId: string; version: number; digest: string }>;
@@ -426,6 +427,7 @@ export class BookDeliveryPackages {
       const route = type.notForThisBook ? null : latest === undefined || notice !== null ? 'document' : null;
       conditions.push({
         key: 'document',
+        ...(type.document === null ? {} : { documentId: type.document.documentId }),
         typeId: type.typeId,
         label: type.typeLabel,
         met,
@@ -447,9 +449,13 @@ export class BookDeliveryPackages {
         excluded.push({ kind: 'not-for-this-book', label: type.typeLabel, detail: BOOK_DELIVERY_PACKAGE_WORDS.notForThisBook });
       } else if (latest !== undefined) {
         const deliveries = type.document!.deliveries;
+        const defaultTitle = BUILTIN_PRODUCTION_DOCUMENT_TYPES.types.find((entry) => entry.typeId === type.typeId)?.label;
+        const namedMember = type.multiple === true || (type.document!.title !== undefined && type.document!.title !== defaultTitle);
         documents.push({
           typeId: type.typeId,
           disposition: 'included',
+          ...(namedMember ? { exportKey: type.multiple === true ? `document:${type.document!.documentId}` : `document:${type.typeId}`,
+            ...(type.document!.title === undefined ? {} : { title: type.document!.title }) } : {}),
           documentId: type.document!.documentId,
           version: latest.version,
           revisionId: latest.revisionId,

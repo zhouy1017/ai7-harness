@@ -175,7 +175,7 @@ async function announceProductReadiness(): Promise<void> {
   });
 }
 
-function registerRendererHandlers(
+export function registerRendererHandlers(
   service: ServiceClient,
   getOwnedWindow: (event: IpcMainInvokeEvent | IpcMainEvent) => OwnedRendererWindow,
   authorityIsAvailable: () => boolean,
@@ -1161,18 +1161,25 @@ function registerRendererHandlers(
         });
       }),
   );
-  ipcMain.handle(IPC_CHANNELS.abandonImportDraft, (event, input: ServiceOperationMap['abandonImportDraft']['input']) =>
+  ipcMain.handle(IPC_CHANNELS.abandonImportDraft, (event, input: Parameters<RendererApi['abandonImportDraft']>[0]) =>
     envelope(async () => {
       const owned = requireSender(event);
       return serializeEffect(async () => {
         requireAuthority();
         requireImportDraft(owned, input.draftId);
+        requireDesktop(input.preserveBookRoute === undefined || input.preserveBookRoute === true, 'AI7_RENDERER_BOUNDARY_INVALID');
+        // Same-page document intake may discard an unreviewed file without leaving its already owned Book.
+        // Reviewed/recovered imports keep their existing exit and commit-recovery semantics.
+        if (input.preserveBookRoute) {
+          requireCurrentBookRoute(owned);
+          requireDesktop(!owned.importTargets.has(input.draftId) && !owned.commitBindings.has(input.draftId), 'AI7_RENDERER_BOUNDARY_INVALID');
+        }
         const priorBinding = owned.commitBindings.get(input.draftId);
         const commitWasClaimed = priorBinding !== undefined && owned.importCommitIds.has(priorBinding.commitId);
         if (priorBinding !== undefined) claims.claimCommit(owned, priorBinding.commitId);
         let result: ServiceOperationMap['abandonImportDraft']['output'];
         try {
-          result = await service.call('abandonImportDraft', input);
+          result = await service.call('abandonImportDraft', { draftId: input.draftId, expectedDraftVersion: input.expectedDraftVersion });
         } catch (error) {
           if (priorBinding !== undefined) {
             releaseNewCommitClaimAfterDeterministicFailure(owned, priorBinding.commitId, commitWasClaimed, error);
@@ -1189,7 +1196,7 @@ function registerRendererHandlers(
           }
         } else {
           if (priorBinding !== undefined) claims.releaseCommit(owned, priorBinding.commitId);
-          leaveBookWorkbench(owned);
+          if (!input.preserveBookRoute) leaveBookWorkbench(owned);
         }
         owned.commitBindings.delete(input.draftId);
         return result;
@@ -3739,7 +3746,7 @@ export async function runApplication(): Promise<void> {
     await requireSameCanonicalDataDirectory(shellRoot, app.getPath('userData'));
     // The Data Version (数据版本) and the store's schema revision (数据库修订) apart (Issue #967): the unit suite holds each to its owner.
     const crashFacts = () => ({
-      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 108, protocol: SERVICE_PROTOCOL_VERSION,
+      appVersion: softwareVersion, buildIdentity, dataVersion: buildIdentity.dataVersion, schemaRevision: 109, protocol: SERVICE_PROTOCOL_VERSION,
       platform: process.platform, arch: process.arch, electron: process.versions.electron ?? 'unknown',
       uptimeSeconds: process.uptime(),
     });

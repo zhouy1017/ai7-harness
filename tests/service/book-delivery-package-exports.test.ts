@@ -226,6 +226,28 @@ function prepareEvaluatedPackage(store: EditorialStore, bookId: string, purpose:
     .package.versions[0]!.packageVersionId;
 }
 
+it('lists same-type titles and exports only the selected document identity', async () => {
+  const store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    const book = await preparedPackage(store);
+    const first = store.inspectProductionDocuments(book.bookId).types[0]!.document!;
+    const single = await store.reviewBookDeliveryPackageExport({ bookId: book.bookId, packageVersionId: book.packageVersionId, options: NONE }, true);
+    expect(single.files.some((file) => file.key === 'document:news-release')).toBe(true);
+    const peer = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', sourceVersionId: first.origin.sourceVersionId, title: '媒体专用通稿' })).document!;
+    await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: peer.documentId, version: { kind: 'saved', revisionId: peer.versions[0]!.revisionId }, recipient: { kind: 'editorial', custom: null }, note: null });
+    const current = store.inspectBookDeliveryPackage(book.bookId);
+    expect(current.content.included.filter((entry) => entry.kind === 'document').map((entry) => entry.label)).toEqual(['新闻稿 · 《新闻稿》 · 版本 1', '新闻稿 · 《媒体专用通稿》 · 版本 1']);
+    const next = store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '按题目选择', expectedContentDigest: current.content.digest });
+    const packageVersionId = next.package.versions[0]!.packageVersionId;
+    const review = await store.reviewBookDeliveryPackageExport({ bookId: book.bookId, packageVersionId, options: NONE }, true);
+    expect(review.files.filter((file) => file.key.startsWith('document:')).map((file) => file.key)).toEqual([`document:${first.documentId}`, `document:${peer.documentId}`]);
+    const folder = join(roots.inputRoot, 'selected-peer'); await mkdir(folder);
+    const prepared = await store.prepareBookDeliveryPackageExport({ bookId: book.bookId, packageVersionId, options: NONE, reviewDigest: review.reviewDigest, folder, memberKeys: [`document:${peer.documentId}`] }, true);
+    const written = await store.approveBookDeliveryPackageExport({ bookId: book.bookId, exportId: prepared.exportId }, true);
+    expect(written.export.files.map((file) => [file.key, file.outcome])).toEqual([[`document:${peer.documentId}`, 'created']]);
+  } finally { store.close(); }
+});
+
 describe('图书交付包 · 导出 (S67b)', () => {
   it.each(['suggestions', 'accepted-baseline'] as const)('replays the real Word %s source and writer for a frozen package member after restart', async (mode) => {
     const path = join(roots.inputRoot, `package-word-${mode}.docx`);

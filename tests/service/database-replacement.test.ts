@@ -1,3 +1,5 @@
+import type { PackageVersionRecord } from '../../src/service/book-delivery-packages.js';
+import { asMultiDocumentRevision108, productionDocumentDigestBytes } from '../support/production-documents.js';
 import { execPre74Fixture } from '../support/pre74-schema.js';
 import { mkdir, rm, copyFile, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -110,6 +112,58 @@ afterEach(async () => {
   await roots.dispose();
 });
 
+/** Append a valid old-shape version; never rewrite a ledger row or disable its guards. */
+function appendLegacySingletonPackage(db: DatabaseSync, bookId: string): void {
+  const row = db.prepare('SELECT canonical_json FROM book_delivery_package_versions WHERE book_id = ? ORDER BY version DESC LIMIT 1').get(bookId)!;
+  const current = JSON.parse(String(row.canonical_json)) as PackageVersionRecord;
+  const content = { ...current.content, documents: current.content.documents.map((entry) => {
+    if (entry.disposition !== 'included') return entry;
+    const { title: _title, exportKey: _key, ...legacy } = entry; return legacy;
+  }) };
+  const legacy = { ...current, packageVersionId: randomUUID(), priorVersionId: current.packageVersionId, version: current.version + 1,
+    preparedAt: new Date().toISOString(), content, contentDigest: canonicalRecord(content).digest };
+  const record = canonicalRecord(legacy);
+  db.prepare(`INSERT INTO book_delivery_package_versions(package_version_id, package_id, book_id, version, prior_version_id, purpose,
+    publication_version_id, content_sha256, actor, prepared_at, canonical_json, sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      legacy.packageVersionId, legacy.packageId, bookId, legacy.version, legacy.priorVersionId, legacy.purpose,
+      legacy.content.publication!.publicationVersionId, legacy.contentDigest, legacy.actor, legacy.preparedAt, record.json, record.digest);
+}
+
+it('migrates revision 108 without changing ledger digests and restores peer documents through a backup', async () => {
+  let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  const book = await importSample1Book(store, roots.codeRoot, '多篇文档迁移');
+  let first = (await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release' })).document!;
+  first = (await store.recordProductionDocumentDelivery({ bookId: book.bookId, documentId: first.documentId, version: { kind: 'saved', revisionId: first.versions[0]!.revisionId }, recipient: { kind: 'publicity', custom: null }, note: null })).document!;
+  const milestone = await store.saveMilestone(book.manuscriptId, book.branchId, '迁移前发稿', 'stage-archive', null, '');
+  store.designatePublicationVersion({ bookId: book.bookId, milestoneId: milestone.milestoneId, scope: '测试', basis: '历史版本' });
+  const packageBefore = store.inspectBookDeliveryPackage(book.bookId);
+  store.prepareBookDeliveryPackage({ bookId: book.bookId, purpose: '旧版交付包', expectedContentDigest: packageBefore.content.digest });
+  store.close();
+  const databasePath = join(roots.dataRoot, 'store', 'ai7.sqlite');
+  const old = new DatabaseSync(databasePath);
+  appendLegacySingletonPackage(old, book.bookId);
+  asMultiDocumentRevision108(old);
+  const digests = productionDocumentDigestBytes(old);
+  old.close();
+  store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+  try {
+    expect(store.inspectDataVersion().schemaRevision).toBe(109);
+    expect(store.inspectBookDeliveryPackage(book.bookId).changedSinceLatest).toBe(false);
+    expect(store.inspectProductionDocuments(book.bookId).types[0]!.document).toEqual(first);
+    const check = new DatabaseSync(databasePath, { readOnly: true });
+    try { expect(productionDocumentDigestBytes(check) === digests).toBe(true); } finally { check.close(); }
+    await store.createProductionDocument({ bookId: book.bookId, typeId: 'news-release', title: '媒体稿' });
+    const before = store.inspectProductionDocuments(book.bookId);
+    const path = await exported(store, 'peer-backup.ai7db');
+    store.renameProductionDocument({ bookId: book.bookId, documentId: first.documentId, title: '本机临时题目' });
+    const preview = await store.inspectDatabaseImport(path);
+    await store.prepareDatabaseReplacement(preview.previewId, new Date());
+    store.close();
+    store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    expect(store.inspectProductionDocuments(book.bookId)).toEqual(before);
+  } finally { store.close(); }
+});
+
 it('upgrades revision 107 search selection with the native-search override off and preserves the chosen backend', async () => {
   let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
   store.selectSearchBackend('search-brave'); store.close();
@@ -191,7 +245,7 @@ describe('导入数据库 over the real store', () => {
       expect(kept.version).toEqual(draft.version);
       const path = await exported(store, 'revision105-drafts.ai7db');
       const preview = await store.inspectDatabaseImport(path);
-      expect(preview.schemaRevision).toBe(108);
+      expect(preview.schemaRevision).toBe(109);
       await store.prepareDatabaseReplacement(preview.previewId);
     } finally { store.close(); }
     store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
@@ -239,7 +293,7 @@ describe('导入数据库 over the real store', () => {
         basedOn: { procedureId: original.procedureId, version: original.version, digest: original.digest },
         title: '迁移后的写作', editorInstruction: '简明', stages: original.document.stages } });
       expect(created.procedures.find((entry) => entry.procedureId === original.procedureId)!.documents).toContainEqual(original.document);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -275,7 +329,7 @@ describe('导入数据库 over the real store', () => {
       expect(text() === target.text).toBe(true);
       store.redoManuscript(book.manuscriptId, book.branchId, digest());
       expect(text().startsWith('〔替换前〕')).toBe(true);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision99-migrated.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision99-migrated.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -303,7 +357,7 @@ describe('导入数据库 over the real store', () => {
       store.close(); store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
       expect(store.getManuscriptWindow(book.manuscriptId, book.branchId, null).blocks).toEqual(before);
       expect(store.saveModelServiceConnection('合成 Claude 连接', null, 'ready', 'anthropic-claude').binding.credentialSlot).toBe('anthropic-claude');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision102-migrated.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision102-migrated.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -338,7 +392,7 @@ describe('导入数据库 over the real store', () => {
       const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest!, commitId: randomUUID() });
       expect(store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null).blocks[position - 1]!.kind).toBe('heading');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision101-migrated.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision101-migrated.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -370,7 +424,7 @@ describe('导入数据库 over the real store', () => {
       store.saveSearchBackendCredential('search-brave', pending.credentialReference, 'ready');
       store.selectSearchBackend('search-brave', 'fallback');
       expect(store.getSearchBackendSettings().fallbackBackendId).toBe('search-brave');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision104.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.selectSearchBackend(null, 'fallback');
       expect(store.getSearchBackendSettings().fallbackBackendId).toBeNull();
       store.markCleanShutdown();
@@ -407,7 +461,7 @@ describe('导入数据库 over the real store', () => {
       const imported = await store.commitNewBookImport({ draftId: staged.draftId, expectedDraftVersion: review.draftVersion,
         reviewDigest: review.reviewDigest!, commitId: randomUUID() });
       expect(store.getManuscriptWindow(imported.manuscriptId, imported.branchId, null).blocks.map((block) => block.kind).at(-1)).toBe('note');
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision100-migrated.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision100-migrated.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -424,7 +478,7 @@ describe('导入数据库 over the real store', () => {
       const procedures = store.procedureLibrary({ action: 'inspect' }).procedures;
       expect([procedures.length, procedures.at(-1)!.procedureId, procedures.at(-1)!.version, procedures.at(-1)!.executorKind])
         .toEqual([17, 'ai7-procedure/full-review', 1, 'review-run']);
-      expect(await store.inspectDatabaseImport(await exported(store, 'revision98-migrated.ai7db'))).toMatchObject({ schemaRevision: 108 });
+      expect(await store.inspectDatabaseImport(await exported(store, 'revision98-migrated.ai7db'))).toMatchObject({ schemaRevision: 109 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -461,7 +515,7 @@ describe('导入数据库 over the real store', () => {
       expect(store.inspectEditorialLearning({ signalOffset: 0, itemOffset: 0 }))
         .toMatchObject({ enabled: false, signals: [], items: [], controlEntries: 1 });
       const preview = await store.inspectDatabaseImport(await exported(store, 'migrated-v96.ai7db'));
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 108, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 109, dataVersion: 1 });
       store.markCleanShutdown();
     } finally { store.close(); }
   });
@@ -483,7 +537,7 @@ describe('导入数据库 over the real store', () => {
       expect(original.localFixtureProfile).toBeUndefined();
       const packagePath = await exported(store, 'selected-v1.ai7db');
       const preview = await store.inspectDatabaseImport(packagePath);
-      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 108, dataVersion: 1 });
+      expect(preview).toMatchObject({ compatibility: 'compatible', schemaRevision: 109, dataVersion: 1 });
       await store.prepareDatabaseReplacement(preview.previewId, T); await store.close();
       store = await EditorialStore.open(roots.dataRoot, roots.codeRoot, control);
       expect(store.inspectFactualReview(book.bookId).providerResolutionPlan).toEqual(original);
