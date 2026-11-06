@@ -214,6 +214,28 @@ async function searchArrivalWithPendingWrite(jump = true) {
 }
 
 describe('the Manuscript screen lifecycle', () => {
+  it.each(['click', 'keydown'])('honors an immediate note return through %s while arrival frames settle', async (type) => {
+    vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+    const initial = windowOf('book-one');
+    const note = { ...initial, blocks: [{ ...initial.blocks[0]!, blockId: 'note' }], focusBlockId: 'note' };
+    const load = vi.fn(async ({ target }: { target: { blockId: string } }) => target.blockId === 'note' ? note : initial);
+    const app = shell(new Proxy(api, { get: (target, key) => key === 'getManuscriptWindowAt' ? load : Reflect.get(target, key) }));
+    app.open(initial);
+    const host = app.screen.querySelector('.editor-window')!.children[0]!;
+    const forward = document.createElement('sup'); forward.dataset['noteReference'] = 'note';
+    const back = document.createElement('span'); back.dataset['noteReference'] = initial.blocks[0]!.blockId;
+    host.append(forward, back);
+    forward.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(1);
+    // The destination is already visible, but the first navigation still owns its two arrival frames.
+    (back as unknown as MiniElement).dispatchEvent({ type, key: 'Enter', bubbles: true });
+    await vi.advanceTimersByTimeAsync(80);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(load.mock.calls[1]?.[0].target).toEqual({ kind: 'block', blockId: initial.blocks[0]!.blockId });
+    app.showing?.destroy();
+  });
+
   it('returns through a reading chip without taking focus from an active input', async () => {
     vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
     const initial = windowOf('book-one');

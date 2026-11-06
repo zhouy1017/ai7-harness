@@ -555,14 +555,22 @@ export function mountManuscriptScreen(options: ManuscriptScreenOptions): void {
   const editorHost = element('div');
   editorWindow.append(editorHost);
   // A note block's 「引自第 X 段」 goes to the paragraph that refers to it (Issue #1204).
+  const followNoteReference = async (blockId: string): Promise<void> => {
+    // The note is visible before its arrival frames settle; an immediate explicit return must wait for them.
+    while (edgeNavigation) {
+      await navigationIdle;
+      if (destroyed) return;
+    }
+    if (!destroyed) await navigate({ kind: 'block', blockId });
+  };
   editorHost.addEventListener('click', (event) => {
     const reference = (event.target as Element | null)?.closest<HTMLElement>('[data-note-reference]')?.dataset['noteReference'];
-    if (reference !== undefined) void navigate({ kind: 'block', blockId: reference });
+    if (reference !== undefined) void followNoteReference(reference);
   });
   editorHost.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     const reference = (event.target as Element | null)?.closest<HTMLElement>('[data-note-reference]')?.dataset['noteReference'];
-    if (reference !== undefined) { event.preventDefault(); void navigate({ kind: 'block', blockId: reference }); }
+    if (reference !== undefined) { event.preventDefault(); void followNoteReference(reference); }
   });
   const previousWindow = button('向前浏览', 'quiet', () => void navigateCursor('previous'));
   const nextWindow = button('向后浏览', 'quiet', () => void navigateCursor('next'));
