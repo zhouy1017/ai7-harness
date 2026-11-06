@@ -770,10 +770,11 @@ async function main() {
     await assertRenderer(primary, `(() => {
       const search=document.querySelector('[data-search-backends="true"]'); const proxy=document.querySelector('[data-model-service-proxy]');
       return search instanceof HTMLElement && proxy instanceof HTMLElement && search.parentElement===proxy.parentElement && !proxy.closest('details') &&
-        search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]') &&
-        !/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search|评测参考|p50|命中率/u.test(search.textContent) &&
-        search.querySelectorAll('[data-action="probe-search-candidate"]').length===3;
+        search.textContent.includes('当前生效来源：') && !search.querySelector('h3[data-developer-only]');
     })()`, 'ordinary-search-proxy-visible');
+    await assertRenderer(primary, `!/https?:[/][/]|配置摘要|deepseek-direct-search|openai-responses-web-search|anthropic-messages-web-search/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-technical-identifiers');
+    await assertRenderer(primary, `!/评测参考|p50|命中率/u.test(document.querySelector('[data-search-backends="true"]').textContent)`, 'ordinary-search-no-detailed-measurements');
+    await assertRenderer(primary, `document.querySelectorAll('[data-search-backends="true"] [data-action="probe-search-candidate"]').length===3`, 'ordinary-search-candidate-connection-controls');
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');
     await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); const address=document.querySelector('input[aria-label="代理 URL"]'); if(!(mode instanceof HTMLSelectElement)||!(address instanceof HTMLInputElement))return false; mode.value='proxy'; mode.dispatchEvent(new Event('change')); address.value='http://127.0.0.1:1'; return !address.disabled; })()`, 'ordinary-proxy-configure');
