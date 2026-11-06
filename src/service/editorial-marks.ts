@@ -1,5 +1,5 @@
 import { EditorialLearningLedger } from './learning/ledger.js';
-import { markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
+import { historicalMarkModelLabels, markModelLabels, readMarkEvidence, recordedMarkModel, type MarkModelBinding } from './editorial-mark-source.js';
 import { createHash, randomUUID } from 'node:crypto';
 import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { proposalReviewPosition } from './editorial-workspace-profile.js';
@@ -1335,9 +1335,7 @@ export class EditorialMarkStore {
     const editorName = row.source_kind === 'editor' ? this.#db.prepare(
       'SELECT editors_text FROM book_people_versions WHERE book_id = ? ORDER BY version DESC LIMIT 1',
     ).get(text(row.book_id))?.editors_text : null;
-    const modelLabels = evidence.source ?? (row.source_kind === 'ai7' ? markModelLabels(row.source_task_id === null
-      ? { route: 'ai7-local-deterministic', model: 'local-text-check' }
-      : recordedMarkModel(this.#db, text(row.source_task_id), text(row.created_at))) : {});
+    const modelLabels = row.source_kind === 'ai7' ? historicalMarkModelLabels(this.#db, markId) : {};
     return {
       markId,
       kind,
@@ -1593,7 +1591,7 @@ export class EditorialMarkStore {
         origin: nullableText(mark.source_origin) as EditorialMarkSourceProjection['origin'],
         label: nullableText(mark.source_label),
         taskId: nullableText(mark.source_task_id),
-        ...readMarkEvidence(text(mark.basis_json)).source,
+        ...historicalMarkModelLabels(this.#db, input.markId),
       };
     } else if (target === 'change-suggestion') {
       const content = this.#content(target, null, '', input.proposedText, input.rationale ?? (kind === 'annotation' ? text(mark.body) : null), pinnedText);

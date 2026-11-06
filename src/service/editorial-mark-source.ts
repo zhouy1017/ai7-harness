@@ -38,3 +38,18 @@ export function recordedMarkModel(db: DatabaseSync, taskId: string, at: string, 
   const route = JSON.parse(String(plan.canonical_json)).executionRoute;
   return route && typeof route.kind === 'string' && typeof route.model === 'string' ? { route: route.kind, model: route.model } : null;
 }
+
+/** A conversion is not a generation. Legacy arrays resolve through the original mark and exact dialogue conversion. */
+export function historicalMarkModelLabels(db: DatabaseSync, markId: string): ModelLabels {
+  const mark = db.prepare(`SELECT source_kind, source_task_id, created_at, basis_json, converted_from_mark_id
+    FROM editorial_marks WHERE mark_id = ?`).get(markId);
+  if (!mark || mark.source_kind !== 'ai7') return {};
+  const frozen = readMarkEvidence(String(mark.basis_json)).source;
+  if (frozen !== undefined) return frozen;
+  if (mark.converted_from_mark_id !== null) return historicalMarkModelLabels(db, String(mark.converted_from_mark_id));
+  const conversion = db.prepare(`SELECT b.route, b.model FROM dialogue_conversions c
+    JOIN dialogue_execution_bindings b USING(attempt_id) WHERE c.mark_id = ?`).get(markId);
+  if (conversion) return markModelLabels({ route: String(conversion.route), model: String(conversion.model) });
+  return markModelLabels(mark.source_task_id === null ? { route: 'ai7-local-deterministic', model: 'local-text-check' }
+    : recordedMarkModel(db, String(mark.source_task_id), String(mark.created_at)));
+}

@@ -2,7 +2,8 @@ import { execPre74Fixture } from '../support/pre74-schema.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DialogueLedger } from '../../src/service/dialogue/dialogue-ledger.js';
 import { EditorialStore, StoreError } from '../../src/service/store.js';
 import {
   MANUSCRIPT_ENTRY_POSITION_SCHEMA_VERSION,
@@ -173,6 +174,49 @@ function storeError(operation: () => unknown): string {
 }
 
 describe('Editorial Marks on a manuscript', () => {
+  it('keeps the original author through legacy bare-array conversions after a later dialogue binding (#1379)', async () => {
+    let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+    const database = new DatabaseSync(join(roots.dataRoot, 'store', 'ai7.sqlite'));
+    try {
+      const book = await importBook(store);
+      const window = store.getManuscriptWindow(book.manuscriptId, book.branchId, null);
+      const block = markableBlock(window);
+      const selection = markInput(book, window, block.blockId, 2, 6, 'annotation');
+      const at = (minute: number) => new Date(Date.UTC(2026, 10, 1, 0, minute));
+      const turn = store.askAboutSelection(window.bookId, { selection, question: '公开合成问题' }, at(0));
+      // Backfill the historical ledger after producing bare arrays: this builds the old reader's valid shape
+      // through the real owners, without mutating stored JSON, disabling triggers or sending any request.
+      vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(at(1));
+      const produce = () => store.createProducedEditorialMark({ ...book, blockId: block.blockId, fromGrapheme: 2, toGrapheme: 6,
+        pinnedText: selection.selectedText, kind: 'change-suggestion', body: '', proposedText: '公开合成改稿', rationale: '',
+        atomicGroupId: null, basis: [], source: { kind: 'ai7', origin: 'task', label: '对话回答', taskId: turn.dialogueId } });
+      const original = produce(); const alreadyConverted = produce();
+      vi.setSystemTime(at(3));
+      const legacyAnnotation = store.updateEditorialMark(change(book, window, alreadyConverted, 'convert', { targetKind: 'annotation' })).card!;
+      vi.useRealTimers();
+      const ledger = new DialogueLedger(database);
+      const bind = (attemptId: string, route: 'opencode-go' | 'deepseek-open-platform', model: string, minute: number) => {
+        const session = randomUUID();
+        ledger.bind(attemptId, { harnessSessionId: session, route, model, operationalScope: 'ordinary-production',
+          providerProcessingVersion: 'v13', policyRuleId: 'ordinary-production-editorial-dialogue',
+          behaviorCompositionSha256: 'a'.repeat(64), promptContractSha256: 'b'.repeat(64), boundAt: at(minute).toISOString() });
+        ledger.openSpan(attemptId, session, 0, at(minute)); ledger.settle(attemptId, 'completed', 1, null, at(minute));
+      };
+      bind(turn.attemptId, 'opencode-go', 'historical-model-a', 0);
+      ledger.convert(turn.attemptId, original, at(1)); ledger.convert(turn.attemptId, alreadyConverted, at(1));
+      const next = ledger.nextAttempt(turn.dialogueId, 'regenerate', () => 0, at(2));
+      bind(next, 'deepseek-open-platform', 'historical-model-b', 2);
+      const converted = store.updateEditorialMark(change(book, window, original, 'convert', { targetKind: 'annotation' })).card!;
+      expect(converted.source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
+      expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, legacyAnnotation.markId).source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
+      store.markCleanShutdown(); store.close(); database.close();
+      store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
+      for (const markId of [converted.markId, legacyAnnotation.markId]) {
+        expect(store.getEditorialMarkCard(book.manuscriptId, book.branchId, markId).source.modelTechnicalLabel).toBe('OpenCode Go · historical-model-a');
+      }
+    } finally { vi.useRealTimers(); store.close(); if (database.isOpen) database.close(); }
+  });
+
   it('projects registered editors and keeps a produced model author frozen across conversion and restart (#1379)', async () => {
     let store = await EditorialStore.open(roots.dataRoot, roots.codeRoot);
     try {
