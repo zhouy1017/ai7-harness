@@ -64,7 +64,7 @@ if (-not $Force -and (Test-Path $infoPath)) {
   $current = Get-Content $infoPath -Raw | ConvertFrom-Json
   if ($current.commit -eq $target) {
     Write-Host "HUMAN_TEST_BUILD/current ($Ref @ $($target.Substring(0,8)) already in $OutputRoot)"
-    return
+    exit 0
   }
 }
 
@@ -152,3 +152,5 @@ $info | ConvertTo-Json | Set-Content $infoPath -Encoding UTF8
 "@echo off`r`nstart `"`" `"%~dp0AI7\app\AI7.exe`"`r`n" | Set-Content (Join-Path $OutputRoot '启动 AI7.cmd') -Encoding OEM
 
 Write-Host "HUMAN_TEST_BUILD/complete $version @ $($target.Substring(0,8)) -> $OutputRoot"
+# The last native command (robocopy) leaves a non-zero success code; the script's own result is clean.
+exit 0
