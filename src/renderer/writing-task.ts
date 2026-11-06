@@ -193,6 +193,7 @@ export function mountWritingTask(options: MountWritingTaskOptions): WritingTaskS
         item.append(el('p', 'writing-drafted-line', writingDraftedLine(type.label, localInstantLabel(type.drafted.createdAt))));
         const title = el('input');
         title.setAttribute('aria-label', '草稿题目');
+        title.dataset['writingField'] = `draft-title-${type.drafted.revisionId}`;
         title.placeholder = '文档题目（可选）';
         title.maxLength = 80;
         title.value = draftTitles.get(type.drafted.revisionId) ?? '';
