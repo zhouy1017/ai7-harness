@@ -1054,6 +1054,31 @@ async function main() {
     // 续行 on the card: the same Run goes on, and runs to its end — 已完成 in 最近完成, with 查看结果.
     await cardAction(renderer, 'analysis-paused', 'resume', 'panel-resume');
     await waitForPanel(renderer, (panel) => statesOf(panel, 'running').join() === 'analysis-running', 'panel-resumed', 60_000);
+    // #1375: keep the original panel pause/resume checks, then advance its real held Run twice on ordinary attention.
+    const pollTaskId=await renderer.evaluate(`window.ai7.inspectBaselineAnalysis().then(page=>page.taskIntent.taskIntentId)`);
+    await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-attention-close-pane');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-ordinary-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-ordinary-settings-ready');
+    await click(renderer,'帮助','poll-attention-ordinary-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(!input?.checked)return false;input.click();return true;})()`,'poll-attention-ordinary-mode');
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.destination('attention')),'poll-attention-open');
+    const pollAttentionId=await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.target.kind==='analysis'&&item.target.taskIntentId===${JSON.stringify(pollTaskId)}).itemId)`);
+    const pollAttentionSelector=`[data-attention-item="${pollAttentionId}"]`;
+    await waitFor(renderer,`document.querySelector(${JSON.stringify(pollAttentionSelector)})?.dataset.attentionState==='analysis-running' && document.documentElement.dataset.technicalLayerVisible==='false'`,'poll-attention-running');
+    await renderer.evaluate(`document.querySelector(${JSON.stringify(pollAttentionSelector)}).querySelector('[data-attention-open]').focus()`);
+    for(const done of [FIRST_HOLD+2,FIRST_HOLD+3]) {
+      await renderer.evaluate(`globalThis.__j16PollAttention=document.querySelector(${JSON.stringify(pollAttentionSelector)});globalThis.__j16PollAttentionText=globalThis.__j16PollAttention.textContent`);
+      await writeHold(done);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer,`(() => {const current=document.querySelector(${JSON.stringify(pollAttentionSelector)});return current!==globalThis.__j16PollAttention&&current?.textContent!==globalThis.__j16PollAttentionText&&current?.dataset.attentionState==='analysis-running'&&document.activeElement===current.querySelector('[data-attention-open]');})()`,'attention-changed-unit-paint');
+      requireJourney(await renderer.evaluate(`window.ai7.inspectGlobalAttention().then(page=>page.groups.flatMap(group=>group.items).find(item=>item.itemId===${JSON.stringify(pollAttentionId)})?.facts.progress?.unitsSettled===${done})`),'attention-changed-unit-record');
+    }
+    await assertRenderer(renderer,sidebarNavigate(SIDEBAR.settings),'poll-attention-developer-settings');
+    await waitFor(renderer,`document.querySelector('[data-screen="settings"]')`,'poll-attention-developer-settings-ready');
+    await click(renderer,'帮助','poll-attention-developer-help');
+    await assertRenderer(renderer,`(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`,'poll-attention-developer-mode');
+    await openManuscriptOf(renderer,bookId,'poll-attention-return-book');
+    await openPanel(renderer,'poll-attention-return-pane');
     await writeHold(SAMPLE1_UNITS);
     const done = await waitForPanel(renderer, (panel) => statesOf(panel, 'recent').join() === 'analysis-completed' && statesOf(panel, 'running').length === 0, 'panel-completed', 180_000);
     const doneCard = cardsOf(done, 'recent')[0];

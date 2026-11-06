@@ -12,7 +12,7 @@ import { mountGlobalAgent } from './global-agent.js';
 import { createAppearance, initializeReducedMotion } from './appearance.js';
 import { mountFindingsCenter } from './findings-center.js';
 import { createCommandPalette } from './command-palette.js';
-import { applyOnce } from './manuscript-apply.js';
+import { applyOnce, applyFindingBatches } from './manuscript-apply.js';
 import { showToast } from './components/toast.js';
 import { mountAgentWorkspace } from './agent-workspace.js';
 import { AGENT_WORKSPACE_WORDS } from './agent-workspace-labels.js';
@@ -2676,22 +2676,9 @@ function renderBookFindings(bookId: string, bookTitle: string): void {
     else renderBookAnalysis(bookId, bookTitle, target.revisionId, { tab: 'chapters', gap: target.unitOrdinal });
   }, async (items) => {
     const suggestions = items.flatMap((item) => item.suggestion ? [item.suggestion] : []);
-    const first = suggestions[0]; if (!first) return;
-    try {
-      if (suggestions.some((item) => item.manuscriptId !== first.manuscriptId || item.branchId !== first.branchId)) throw new Error('请选择同一稿件版本的修改建议。');
-      const binding = { manuscriptId: first.manuscriptId, branchId: first.branchId, windowStartBlockId: first.blockId };
-      const applied = await applyOnce(binding, (clientEffectId) => suggestions.length === 1
-        ? window.ai7.applyChangeSuggestion({ ...binding, markId: first.markId, clientEffectId, interaction: 'accept-and-apply', editedText: null, reason: null })
-        : window.ai7.applyChangeSuggestionBatch({ ...binding, markIds: suggestions.map((item) => item.markId), clientEffectId }), (input) => window.ai7.getManuscriptApplyOutcome(input));
-      if (!applied.acknowledged && applied.outcome?.state !== 'committed') throw applied.failure ?? new Error('应用结果待确认，请查看历史记录。');
-      showToast(`已接受并应用 ${suggestions.length} 条。`, { action: { label: '撤销', run: () => {
-        void applyOnce(binding, (clientEffectId) => window.ai7.reverseAppliedChangeSuggestion({ ...binding, markId: first.markId, clientEffectId }),
-          (input) => window.ai7.getManuscriptApplyOutcome(input)).then((result) => {
-          if (!result.acknowledged && result.outcome?.state !== 'committed') throw result.failure ?? new Error('撤销结果待确认。');
-          setStatus('已撤销本次应用。', 'success'); renderBookFindings(bookId, bookTitle);
-        }).catch((error: unknown) => setStatus(rendererErrorMessage(error, '未能撤销应用。'), 'error'));
-      } } });
-    } catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
+    if (!suggestions.length) return;
+    try { return await applyFindingBatches(suggestions, window.ai7); }
+    catch (error) { setStatus(rendererErrorMessage(error, '未能应用修改建议。'), 'error'); }
   }, () => { renderBookReview(bookId, bookTitle); reviewWorkspace?.openNew(); });
   setStatus(FINDINGS_CENTER_WORDS.opened);
 }

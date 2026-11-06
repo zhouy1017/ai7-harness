@@ -1443,6 +1443,8 @@ async function main() {
       opened.versions.length === 0 && opened.record === null, 'evaluation-empty', opened);
 
     await assertRenderer(renderer, `(() => { const host=document.querySelector('.evaluation'); return host.querySelectorAll(':scope > section').length===1 && host.querySelectorAll('.evaluation-consequences dt').length===4 && !host.querySelector('table, select, [data-list-position], .evaluation-readers-report') && !host.textContent.includes('允许参考'); })()`, 'evaluation-empty-card');
+    // #1383: one stable page heading outside the empty card, one task status line, and no dangling drawer target.
+    await assertRenderer(renderer, `(() => { const host=document.querySelector('.evaluation'); return host.querySelector(':scope > h2')?.textContent==='评估' && !host.querySelector('.evaluation-initial .state-term, [aria-controls="task-drawer"]'); })()`, 'evaluation-empty-heading-and-status');
     at('evaluation-start');
     // 开始评估: version 1 on r1, AI7's 初评 not yet there, every item unscored and no conclusion chosen.
     await assertRenderer(renderer, `(() => { document.querySelector('.evaluation-more > summary')?.click(); return true; })()`, 'evaluation-more');
@@ -3131,9 +3133,39 @@ async function main() {
       await waitFor(renderer, `document.querySelector('[data-screen="landing"]')`, `${name}-landing`);
     };
     const runInitialEvaluation = async (name) => {
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-ordinary-settings');
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-ordinary-settings-ready');
+      await click(renderer, '帮助', 'poll-evaluation-ordinary-help');
+      await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input?.checked)return false; input.click();return true;})()`, 'poll-evaluation-ordinary-mode');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-return');
+      await waitFor(renderer, `document.querySelector('.evaluation-more') && document.documentElement.dataset.technicalLayerVisible==='false'`, 'poll-evaluation-empty-ready');
+      await writeFile(unitHoldPath, '0', 'utf8');
       await clickSelector(renderer, '[data-evaluation-action="start-initial"]', `${name}-start`);
+      await waitFor(renderer, `document.querySelector('.evaluation-initial')?.dataset.initialState==='executing'`, 'poll-evaluation-running', 120_000);
+      const taskId=await renderer.evaluate(`window.ai7.inspectEvaluation({recordId:null}).then(page=>page.initial.task.taskIntentId)`);
+      await assertRenderer(renderer, `(() => { const more=document.querySelector('.evaluation-more');more.open=true;more.querySelector('summary').focus();globalThis.__j11PollInitial=document.querySelector('.evaluation-initial');return true;})()`, 'poll-evaluation-more');
+      await renderer.evaluate(`window.ai7.controlTaskRun({kind:'initial-evaluation',ref:${JSON.stringify(taskId)},action:'pause'})`);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer, `(() => {const current=document.querySelector('.evaluation-initial'),more=document.querySelector('.evaluation-more');return current!==globalThis.__j11PollInitial && current?.dataset.initialState==='pausing' && more?.open && document.activeElement===more.querySelector('summary') && document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'poll-evaluation-first-changed-paint');
+      await renderer.evaluate(`globalThis.__j11PollInitial=document.querySelector('.evaluation-initial')`);
+      await writeFile(unitHoldPath, '1', 'utf8');
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(renderer, `(() => {const current=document.querySelector('.evaluation-initial'),more=document.querySelector('.evaluation-more');return current!==globalThis.__j11PollInitial && current?.dataset.initialState==='paused' && more?.open && document.activeElement===more.querySelector('summary');})()`, 'poll-evaluation-second-changed-paint');
+      // Resume through the real drawer action so its existing onRecorded consumer restarts the evaluation follower.
+      await clickSelector(renderer,'[data-evaluation-action="open-initial-task"]','poll-evaluation-resume-plan');
+      await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanState==='paused'`,'poll-evaluation-resume-plan-ready');
+      await clickSelector(renderer,'#task-drawer [data-task-drawer-control="resume"]','poll-evaluation-resume');
+      await rm(unitHoldPath,{force:true});
       const settled = await readEvaluation(renderer, (page) => ['settled', 'failed', 'interrupted'].includes(page.initial?.state), `${name}-ended`);
       requireJourney(settled.initial.state === 'settled' && settled.startFromInitial === '从 AI7 初评开始', `${name}-settled`, settled.initial);
+      await waitFor(renderer,`document.querySelector('#task-drawer')?.dataset.taskPlanState==='settled'`,'poll-evaluation-resume-settled');
+      await clickSelector(renderer,'#task-drawer [data-task-drawer-control="close"]','poll-evaluation-resume-close');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'poll-evaluation-developer-settings');
+      await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'poll-evaluation-developer-settings-ready');
+      await click(renderer,'帮助','poll-evaluation-developer-help');
+      await assertRenderer(renderer, `(() => {const input=document.querySelector('.help-developer-mode input');if(input?.checked!==false)return false;input.click();return true;})()`, 'poll-evaluation-developer-mode');
+      await assertRenderer(renderer, sidebarNavigate(SIDEBAR.section('evaluation')), 'poll-evaluation-developer-return');
+      await waitFor(renderer, `document.querySelector('.evaluation-initial')?.dataset.initialState==='settled' && document.documentElement.dataset.technicalLayerVisible==='true'`, 'poll-evaluation-developer-return-ready');
     };
     const RAW_SCORES = ['16.5', '15', '15.5', '14', '12'];
     const ai7Line = (index) => AI7_ITEM_LINES[index][2].slice(AI7_ITEM_LINES[index][2].indexOf('：') + 1);

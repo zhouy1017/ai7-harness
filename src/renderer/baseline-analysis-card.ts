@@ -1,3 +1,4 @@
+import { retainPollInteraction, pollControlEngaged } from './poll-interaction.js';
 import { technicalWords, identityWords, technicalDisclosure, technicalLayerVisible } from './technical-layer.js';
 import { analysisRunSummary, completedWithGapsLabel } from '../shared/analysis-run-summary.js';
 import { startPreparedTask } from './one-action-start.js';
@@ -1210,8 +1211,8 @@ export function createBaselineAnalysisCard(options: BaselineAnalysisCardOptions)
       unchanged: (next) => JSON.stringify(next) === JSON.stringify(projection),
       again: () => analysisFollowDelayMs(projection.state),
       // An open 分析反馈 card the editor is in stays as it is: the Run's progress is drawn once they leave it (Issue #94 review).
-      held: () => analysisFeedbackEngaged(host),
-      draw: (next) => renderBaselineAnalysis(host, next, bookTitle),
+      held: () => analysisFeedbackEngaged(host) || pollControlEngaged(host, false),
+      draw: (next) => { const restore = retainPollInteraction(host); renderBaselineAnalysis(host, next, bookTitle); restore(); },
       failed: (error) => setStatus(rendererErrorMessage(error, '无法刷新基线稿件分析状态。'), 'error'),
     });
 

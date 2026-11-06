@@ -147,6 +147,31 @@ describe('②A › 自定义', () => {
 });
 
 describe('②A › 自定义 while a Run is under way', () => {
+  it('flushes a terminal reading after the native control closes even when polling stopped (#1375 F1)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { panel, api } = mountTab(projection([dimension({ taskState: { taskIntentId: VERSION, state: 'executing', stateLabel: '正在运行' }, latest: null, unavailableReason: null })]));
+      await settle(); const select = miniDocument.createElement('select'); panel.append(select); select.focus();
+      api.inspectCustomAnalysisDimensions.mockResolvedValue(projection([dimension({ taskState: { taskIntentId: VERSION, state: 'settled', stateLabel: '已完成' }, latest: revision(), unavailableReason: null })]));
+      await vi.advanceTimersByTimeAsync(2000); expect(panel.querySelector('.custom-task-state')!.dataset['taskState']).toBe('executing'); expect(vi.getTimerCount()).toBe(0);
+      miniDocument.body.focus(); panel.dispatchEvent({ type: 'focusout' }); await vi.advanceTimersByTimeAsync(0);
+      expect(panel.querySelector('.custom-task-state')!.dataset['taskState']).toBe('settled'); expect(panel.querySelectorAll('.custom-row')).toHaveLength(2);
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
+  it('keeps the exact plan action focus and scroll through two changed poll cycles (#1375)', async () => {
+    vi.useFakeTimers(); setTechnicalLayerVisible(false);
+    try {
+      const running = projection([dimension({ taskState: { taskIntentId: VERSION, state: 'executing', stateLabel: '正在运行' }, latest: null, unavailableReason: null })]);
+      const { panel, api } = mountTab(running); await settle();
+      panel.querySelector('[data-custom-action="open-plan"]')!.focus(); panel.scrollTop = 80;
+      for (let cycle = 0; cycle < 2; cycle++) {
+        api.inspectCustomAnalysisDimensions.mockResolvedValue(projection([dimension({ taskState: { taskIntentId: VERSION, state: 'executing', stateLabel: `正在运行 ${cycle}` }, latest: null, unavailableReason: null })]));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(document.activeElement).toBe(panel.querySelector('[data-custom-action="open-plan"]'));
+        expect(panel.scrollTop).toBe(80); expect(panel.textContent).toContain(`正在运行 ${cycle}`);
+      }
+    } finally { vi.clearAllTimers(); vi.useRealTimers(); }
+  });
   it('cancels an armed poll when a tab-show read observes settlement', async () => {
     vi.useFakeTimers();
     try {

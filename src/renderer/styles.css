@@ -2604,6 +2604,7 @@ button.btn.rail-marker { height: 32px; min-height: 32px; margin-top: -16px; padd
 .guideline-card > .knowledge-file-more { margin-top: .35rem; }
 .library-material > .library-heading { display: flex; flex-wrap: nowrap; min-width: 0; }
 .library-material > .library-heading h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guideline-card > .guideline-older,
 .library-material > .knowledge-file-summary { margin: .25rem 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .exemplar-book > .field-note { margin: .25rem 0; }
 /* B2 / M1: state changes are immediate; spatial feedback never delays controls. */

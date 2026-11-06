@@ -1,3 +1,4 @@
+import { retainPollInteraction } from './poll-interaction.js';
 import { mountTaskOverview, type TaskOverviewSurface } from './tasks-overview.js';
 import { startPreparedTask } from './one-action-start.js';
 import { attentionSentence } from './global-attention-labels.js';
@@ -255,10 +256,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     const key = JSON.stringify([tasks, analysis, working, selected]);
     if (key === painted) return;
     painted = key;
-    const active = document.activeElement;
-    const restore = active instanceof HTMLElement && element.contains(active)
-      ? { action: active.dataset['taskAction'] ?? active.dataset['taskComposeAction'] ?? null, item: active.closest<HTMLElement>('[data-task-item-id]')?.dataset['taskItemId'] ?? null, mode: active instanceof HTMLInputElement ? active.value : null }
-      : null;
+    const restoreInteraction = retainPollInteraction(element);
     element.dataset['taskPanel'] = 'ready';
     element.dataset['taskPanelRunning'] = String(tasks.running);
     const total = tasks.groups.reduce((sum, group) => sum + group.total, 0);
@@ -266,13 +264,7 @@ export function mountTaskPanel(options: TaskPanelOptions): TaskPanelSurface {
     paintParked();
     paintCompose();
     overview?.refresh();
-    if (restore !== null) {
-      const target = restore.item !== null && restore.action !== null
-        ? element.querySelector<HTMLElement>(`[data-task-item-id="${CSS.escape(restore.item)}"] [data-task-action="${restore.action}"]`)
-        : restore.action !== null ? element.querySelector<HTMLElement>(`[data-task-compose-action="${restore.action}"]`)
-          : restore.mode !== null ? element.querySelector<HTMLElement>(`input[name="task-panel-mode"][value="${CSS.escape(restore.mode)}"]`) : null;
-      if (target !== null && !(target instanceof HTMLButtonElement && target.disabled)) target.focus();
-    }
+    restoreInteraction();
     // Every group's order and every control's state follow a read; so does whether the whole panel is disabled.
     if (working) for (const control of element.querySelectorAll<HTMLButtonElement>('button')) control.disabled = true;
   }

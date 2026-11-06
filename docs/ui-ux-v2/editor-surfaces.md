@@ -42,6 +42,12 @@ Ctrl+K 搜索命令、按图书与工序发起任务、切换图书与最近完�
 
 固定成员工序不可拆分提交：暂不可用成员保持勾选并显示原因，在所有成员可用前禁用「先看计划 / 开始审阅」，恢复后仍按工序的完整顺序提交。已选用的本社词表更新读取期间保留原版本并暂停提交，读取成功后改用最新版本。评估的临时勾选记忆以一次表单为界；显式「保存评估」成功后以服务端已存的有效内容重建表单，暂不适用的复核或推荐不会被保存，之后需要时由编辑重新选择；保存失败则保留原表单。
 
+## 后台刷新保持交互 — Owner #1375 / #1383
+
+任务总览、图书任务面板、待我处理、评估、模型服务设置、发现中心及基线/自定义分析与任务抽屉的被动刷新，保留同一条目的展开态、精确控件焦点、未发送输入、光标选择和滚动位置。原条目离开列表时不把这些状态转移给其他条目。原生选择器或已打开浮层使用期间暂缓替换其 DOM；轮询周期不变，普通模式与开发者模式都遵守此规则。
+
+发现中心先对全书发现筛选，再分页；类别、严重度或状态切换回到匹配结果首页，位置轨与批量应用数同属当前筛选集合，不以 40 条窗口或 500 条读取上限代替全书。应用仍需明确确认并沿用现有稿件权限与每请求 500 条的边界；跨请求时分别说明已确认应用、未应用、结果未知与尚未尝试的数量，后续请求失败也保留已确认部分的撤销及未知结果核对入口。应用或撤销结果待确认时，在发现列表前说明原因，暂停新的应用和撤销；只读取原操作结果，核对完成后恢复后续操作。评估的页面标题在空态卡片外，不重复任务行状态；导入同页步骤可导航到「保真与结构」，知识库折叠卡外保留旧版在用/索引警示，普通模式不显示内部版本号。
+
 ## Wave 23 direct workflows — Owner #1279 / #1284
 
 The Owner's #1284 outcome supersedes the profile-install, four-step Task Draft promotion and mandatory plan-review passages in §§1, 6, 7, 8 and 9. Every Book immediately has analysis, review, evaluation, writing and Agent capabilities. Starting a task prepares and authorizes the exact plan in one action; plan details remain optional. A production document can be the target of a same-type writing task, pinned to its saved manuscript, branch and version; edits require repinning before execution.

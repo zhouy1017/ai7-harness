@@ -817,6 +817,7 @@ async function main() {
     await assertRenderer(primary, `(() => { const choice=document.querySelector('[data-action="always-use-selected-search-backend"]'); if(!(choice instanceof HTMLInputElement)||choice.checked)return false; choice.click(); return true; })()`, 'ordinary-search-source-change');
     await waitFor(primary, `document.querySelector('[data-action="always-use-selected-search-backend"]')?.checked===true && document.querySelector('#persistence-status')?.textContent==='联网检索来源偏好已保存。'`, 'ordinary-search-source-saved');
     await assertRenderer(primary, `(() => { const mode=document.querySelector('select[aria-label="网络代理方式"]'); const address=document.querySelector('input[aria-label="代理 URL"]'); if(!(mode instanceof HTMLSelectElement)||!(address instanceof HTMLInputElement))return false; mode.value='proxy'; mode.dispatchEvent(new Event('change')); address.value='http://127.0.0.1:1'; return !address.disabled; })()`, 'ordinary-proxy-configure');
+    // #1375: ordinary native controls and an unsent proxy draft survive the settings follow clock.
     await click(primary, '保存网络代理', 'ordinary-proxy-save');
     await waitFor(primary, `document.querySelector('[data-model-service-proxy="proxy"]') && !document.querySelector('.model-service-proxy-form button')?.disabled`, 'ordinary-proxy-saved');
     await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-search-roundtrip-settings');
@@ -1620,6 +1621,27 @@ async function main() {
     await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-catalogue-return-ready');
     await click(primary, '模型服务', 'ordinary-catalogue-entry');
     await waitFor(primary, `document.querySelector('[data-model-service-mode="ordinary"]') && document.querySelectorAll('[data-model-role]').length===2`, 'ordinary-catalogue-roles');
+    await primary.evaluate(`globalThis.__j12PollOriginalRole=document.querySelector('[data-model-role="main-editorial"]').textContent`);
+    for (let cycle=0;cycle<2;cycle++) {
+      await assertRenderer(primary, `(() => {const heading=document.querySelector('[data-search-backends] h3');heading.focus();globalThis.__j12PollSettings=document.querySelector('.model-service-settings');globalThis.__j12PollRole=document.querySelector('[data-model-role="main-editorial"]').textContent;return document.documentElement.dataset.technicalLayerVisible==='false';})()`, 'ordinary-poll-catalogue-focus');
+      await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-poll-main-'+cycle)}})`);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await waitFor(primary, `document.querySelector('.model-service-settings')!==globalThis.__j12PollSettings && document.querySelector('[data-model-role="main-editorial"]')?.textContent!==globalThis.__j12PollRole && document.activeElement===document.querySelector('[data-search-backends] h3')`, 'ordinary-poll-catalogue-changed-paint');
+    }
+    await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    await waitFor(primary, `document.querySelector('[data-model-role="main-editorial"]')?.textContent===globalThis.__j12PollOriginalRole`, 'ordinary-poll-catalogue-restored');
+    await assertRenderer(primary, `(() => {const mode=document.querySelector('select[aria-label="网络代理方式"]');mode.value='proxy';mode.dispatchEvent(new Event('change',{bubbles:true}));const input=document.querySelector('input[aria-label="代理 URL"]');input.value='http://127.0.0.1:1';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();input.setSelectionRange(7,12,'backward');globalThis.__j12PollDraft=input;return true;})()`, 'ordinary-poll-draft-focus');
+    for (let cycle=0;cycle<2;cycle++) {
+      await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:${JSON.stringify('j12-poll-draft-'+cycle)}})`);
+      await new Promise(resolve=>setTimeout(resolve,2200));
+      await assertRenderer(primary, `(() => {const input=document.querySelector('input[aria-label="代理 URL"]');return input===globalThis.__j12PollDraft && document.activeElement===input && input.value==='http://127.0.0.1:1' && input.selectionStart===7 && input.selectionEnd===12;})()`, 'ordinary-draft-during-changed-catalogue');
+    }
+    await primary.evaluate(`window.ai7.selectMainRoleModel({route:'deepseek-open-platform',modelId:'deepseek-flash'})`);
+    // Changing channels only repaints the model controls. Leave settings to discard the unsaved proxy draft.
+    await assertRenderer(primary, sidebarNavigate(SIDEBAR.settings), 'ordinary-poll-discard-proxy-draft');
+    await waitFor(primary, `document.querySelector('[data-screen="settings"]')`, 'ordinary-poll-draft-settings-ready');
+    await click(primary, '模型服务', 'ordinary-poll-draft-reopen');
+    await waitFor(primary, `document.querySelector('select[aria-label="网络代理方式"]')?.value==='direct' && document.querySelector('select[aria-label="AI7 使用的模型"]')?.value==='deepseek-flash'`, 'ordinary-poll-draft-cleared');
     await assertOrdinaryModelReachability(primary);
     await assertRenderer(primary, `(() => {
       const select=document.querySelector('select[aria-label="AI7 使用的模型"]');

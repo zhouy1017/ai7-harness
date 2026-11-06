@@ -49,6 +49,14 @@ export class MiniElement {
   rows = 0;
   maxLength = -1;
   tabIndex = 0;
+  scrollTop = 0;
+  scrollLeft = 0;
+  selectionStart: number | null = null;
+  selectionEnd: number | null = null;
+  selectionDirection: 'forward' | 'backward' | 'none' = 'none';
+  setSelectionRange(start: number, end: number, direction: 'forward' | 'backward' | 'none' = 'none'): void {
+    this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction;
+  }
   readonly dataset: Record<string, string>;
 
   constructor(tag: string) {
@@ -72,6 +80,7 @@ export class MiniElement {
   }
 
   get className(): string { return this.attributes.get('class') ?? ''; }
+  get childElementCount(): number { return this.children.filter((child) => child.tagName !== '#TEXT').length; }
   set className(value: string) { this.attributes.set('class', value); }
   get classList(): { contains(name: string): boolean; add(...names: string[]): void; remove(...names: string[]): void } {
     return {
@@ -266,6 +275,7 @@ function splitList(selector: string): string[] {
 }
 
 function compound(element: MiniElement, part: string): boolean {
+  if (part === "*") return element.tagName !== "#TEXT";
   const pattern = /([a-zA-Z][\w-]*)|\.([\w-]+)|\[([\w-]+)(?:="((?:[^"\\]|\\.)*)")?\]|(:[\w-]+(?:\([^)]*\))?)/gu;
   let match: RegExpExecArray | null;
   let consumed = 0;
