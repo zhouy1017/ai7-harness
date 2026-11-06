@@ -1034,7 +1034,8 @@ async function main() {
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-ordinary-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-ordinary-settings-ready');
     await click(renderer, '帮助', 'exemplar-ordinary-help');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input?.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'exemplar-ordinary-mode');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'exemplar-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'earlier-exemplar-knowledge');
     await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'exemplar-category-copy');
     await click(renderer, '范例', 'earlier-exemplar-tab');
@@ -1066,13 +1067,14 @@ async function main() {
     await waitFor(renderer, `document.querySelector('.exemplar-items li')?.textContent.includes('学习准入：明确排除')`, 'earlier-exemplar-excluded');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'exemplar-type-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'exemplar-book-filter');
-    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='工作文档 · 新闻稿'`, 'exemplar-combined-filters');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="kind"]').dataset.value==='news-release' && document.querySelector('.exemplar-kind-badge').textContent==='工作文档 · 新闻稿'`, 'exemplar-combined-filters');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value=""]', 'exemplar-type-return');
     await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('[data-exemplar-filter="book"]').dataset.value!==''`, 'exemplar-book-selection-survives');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'exemplar-restore-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'exemplar-restore-settings-ready');
     await click(renderer, '帮助', 'exemplar-restore-help');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!input?.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='true'; })()`, 'exemplar-restore-developer');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'exemplar-restore-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(!input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='true' && localStorage.getItem('ai7.technicalLayerVisible')==='true'; })()`, 'exemplar-restore-developer');
 
     // ---- 外部 Skill 的更新 (Issue #89, S33; ADR 0090 §3, ADR 0045 § Update and rollback; REUSE-032 to REUSE-035) ----
     // Synthetic Skill packages only: tests/fixtures/skills/plain (and its v2/v3 variants). The picker answers one choice per

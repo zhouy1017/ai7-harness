@@ -2251,11 +2251,13 @@ async function main() {
     await writeFile(exemplarPath, '书系范例目录验证使用的虚构新闻稿。', 'utf8');
     manager = await launch(REVIEW_FIXTURE_IDENTITY, [], exemplarPath);
     renderer = await waitForRenderer(manager, 'exemplar-catalogue-window');
-    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true'`, 'exemplar-catalogue-ready');
+    // Preload readiness precedes renderer startup; wait for its completed landing paint before navigating or switching mode.
+    await waitFor(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && document.querySelector('[data-screen="landing"]')`, 'exemplar-catalogue-ready');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.settings), 'catalogue-settings');
     await waitFor(renderer, `document.querySelector('[data-screen="settings"]')`, 'catalogue-settings-ready');
     await click(renderer, '帮助', 'catalogue-help');
-    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(input?.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false'; })()`, 'catalogue-ordinary-mode');
+    await waitFor(renderer, `document.querySelector('.help-developer-mode input')?.disabled===false`, 'catalogue-mode-ready');
+    await assertRenderer(renderer, `(() => { const input=document.querySelector('.help-developer-mode input'); if(!(input instanceof HTMLInputElement)||input.disabled) return false; if(input.checked) input.click(); return document.documentElement.dataset.technicalLayerVisible==='false' && localStorage.getItem('ai7.technicalLayerVisible')==='false'; })()`, 'catalogue-ordinary-mode');
     await assertRenderer(renderer, sidebarNavigate(SIDEBAR.destination('knowledge')), 'catalogue-knowledge');
     await waitFor(renderer, `document.querySelector('.knowledge-category[data-knowledge-category="exemplars"]')?.textContent.includes('不含图书原稿')`, 'catalogue-category-copy');
     await click(renderer, '范例', 'catalogue-open');
@@ -2266,65 +2268,10 @@ async function main() {
     // Sidebar navigation settles asynchronously; the previous page still has an already-selected 范例 tab meanwhile.
     await waitFor(renderer, `document.querySelector('.knowledge-base[data-knowledge-tab="home"] .knowledge-category[data-knowledge-category="exemplars"]')`, 'catalogue-refresh-home-ready');
     await clickSelector(renderer, '.knowledge-category[data-knowledge-category="exemplars"]', 'catalogue-refresh');
-    try {
-      await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
-    } catch (error) {
-      // Temporary #1381 diagnosis: closed categories/counts/booleans only, never renderer text, ids or exceptions.
-      if (localDebugEnabled()) {
-        let probe = { probe: 'renderer-unavailable' };
-        try {
-          probe = await renderer.evaluate(`(async () => {
-            const screen = document.querySelector('[data-screen]')?.dataset.screen;
-            const root = document.querySelector('.knowledge-base');
-            const tab = root?.dataset.knowledgeTab;
-            const status = document.querySelector('#persistence-status')?.textContent;
-            const titles = Array.from(root?.querySelectorAll('.exemplar-title') ?? []);
-            const entries = Array.from(root?.querySelectorAll('.exemplar-entry') ?? []);
-            const visible = (node) => Boolean(node && node.getClientRects().length && !node.closest('[hidden]') && getComputedStyle(node).visibility !== 'hidden');
-            const expectedTitle = '《书系工作文档来源》新闻稿';
-            const result = {
-              probe: 'catalogue', ordinary: document.documentElement.dataset.technicalLayerVisible === 'false',
-              screen: ['knowledge-base', 'landing', 'settings', 'help', 'model-service'].includes(screen) ? screen : 'other-or-absent',
-              tab: ['home', 'exemplars', 'guidelines', 'library'].includes(tab) ? tab : 'other-or-absent',
-              status: status === '范例已打开' ? 'opened' : status === '正在读取范例…' ? 'loading' : status === '无法读取范例。' ? 'unavailable' : 'other-or-absent',
-              knowledgeSelected: document.querySelector('#app-sidebar [data-nav-destination="knowledge"]')?.getAttribute('aria-current') === 'page',
-              exemplarTabSelected: document.querySelector('#knowledge-tab-exemplars')?.getAttribute('aria-selected') === 'true',
-              bookCards: root?.querySelectorAll('.exemplar-book').length ?? 0, entries: entries.length, titles: titles.length,
-              firstTitleExpected: titles[0]?.textContent === expectedTitle,
-              anyTitleExpected: titles.some((node) => node.textContent === expectedTitle),
-              anyTitleVisible: titles.some(visible), allBooksSelected: root?.querySelector('[data-exemplar-filter="book"]')?.dataset.value === '',
-              allKindsSelected: root?.querySelector('[data-exemplar-filter="kind"]')?.dataset.value === '',
-              projection: 'not-read',
-            };
-            try {
-              const projection = await window.ai7.inspectExemplars({ after: null });
-              const book = projection.books.find((entry) => entry.bookTitle === '书系工作文档来源');
-              const document = book?.exemplars.find((entry) => entry.typeId === 'news-release');
-              const projectedTitle = document && book ? document.title && document.title !== document.typeLabel ? document.title : '《' + book.bookTitle + '》' + document.typeLabel : null;
-              const rendered = entries.find((node) => node.dataset.exemplarDocument === document?.documentId);
-              Object.assign(result, {
-                projection: 'read', projectionBooks: projection.books.length, projectionMore: projection.nextCursor !== null,
-                expectedBook: Boolean(book), expectedDocument: Boolean(document), expectedDocumentCount: book?.exemplars.length ?? 0,
-                expectedTypeLabel: document?.typeLabel === '新闻稿', titleAbsent: document?.title === undefined,
-                titleTypeEqual: Boolean(document && document.title === document.typeLabel),
-                titleCustom: Boolean(document?.title && document.title !== document.typeLabel), projectedTitleExpected: projectedTitle === expectedTitle,
-                syntheticFile: document?.imported?.sourceName === 'catalogue-exemplar.txt',
-                expectedBookRendered: Boolean(book && root?.querySelector('[data-book-id="' + book.bookId + '"]')),
-                expectedDocumentRendered: Boolean(rendered), renderedExpected: rendered?.querySelector('.exemplar-title')?.textContent === expectedTitle,
-                renderedMatchesProjection: Boolean(rendered && rendered.querySelector('.exemplar-title')?.textContent === projectedTitle),
-                expectedDocumentVisible: visible(rendered),
-              });
-            } catch { result.projection = 'read-failed'; }
-            return result;
-          })()`);
-        } catch { /* Keep a fixed category and the original failure. */ }
-        recordDebugDetail('J-13', 'catalogue-probe ' + JSON.stringify(probe));
-      }
-      throw error;
-    }
+    await waitFor(renderer, `document.querySelector('.exemplar-title')?.textContent==='《书系工作文档来源》新闻稿'`, 'catalogue-title');
     await clickSelector(renderer, '[data-exemplar-filter="kind"] [data-filter-value="news-release"]', 'catalogue-kind-filter');
     await clickSelector(renderer, '[data-exemplar-filter="book"] button:nth-child(2)', 'catalogue-book-filter');
-    await assertRenderer(renderer, `document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
+    await assertRenderer(renderer, `document.documentElement.dataset.technicalLayerVisible==='false' && document.querySelectorAll('.exemplar-entry').length===1 && document.querySelector('.exemplar-kind-badge')?.textContent==='工作文档 · 新闻稿' && document.querySelector('.exemplar-context')?.textContent.startsWith('来自《书系工作文档来源》') && !document.querySelector('.exemplar-book .knowledge-file-more')`, 'catalogue-flat-typed-entry');
 
     at('zero-activity');
     await assertRenderer(renderer, `document.documentElement.dataset.ai7ProductReady==='true' && !Object.keys(window.ai7).some((key)=>/provider|session/i.test(key))`, 'exact-service-readiness-remained-zero');
